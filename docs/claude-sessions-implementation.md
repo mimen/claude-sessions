@@ -121,12 +121,55 @@ Next steps:
 
 **Completion Notes**:
 ```
-Date:
-Status:
+Date: 2026-05-29
+Status: COMPLETED (pending user verification)
+
 Notes:
+- MAJOR FINDING mid-milestone: Claude Code 2.1.156 already writes native `ai-title` lines
+  (59/172 sessions). Surfaced to user; decided Native-first, Codex fills gaps. Amended
+  ADR-0001 and CONTEXT.md (Title + new Native Title term). Title resolution priority:
+  native ai-title → codex_title → cleaned-first-message.
+- src/parse.ts: single streaming pass (node:readline), bounded memory (first-8 + rolling
+  last-4 skeleton turns, first-4 user texts) so 66 MB files never load whole. Captures cwd,
+  gitBranch, version, first/last ts, msgCount, nativeTitle (last ai-title wins), userTexts,
+  skeleton. Tolerates corrupt lines. Message content handled as string OR block array;
+  tool_use→"[tool: name]", tool_result→"[tool result]", thinking omitted.
+- src/label.ts: cleanLabel(userTexts) — strips <command-*>/<local-command-*>/stray tags,
+  surfaces bare/stubbed slash-commands as their name, walks/strips leading pasted file-path
+  lines (spaces allowed; blank-line/path-line heuristic), truncates 80 chars, "(untitled)".
+- src/project.ts: deriveProject(cwd) — nearest-.git walk, cwd fallback (non-repo or missing
+  path), per-cwd cache. clearProjectCache() for tests.
+- src/index/schema.ts: bun:sqlite, WAL, user_version=1 (drop+recreate on mismatch — pure
+  cache). sessions table + native_title/codex_title/fallback_label/title_msg_count/
+  title_attempts + skeleton; FTS5 sessions_fts(title, skeleton); indexes on last_ts, project.
+- src/index/index.ts: reindexStore() incremental (skip unchanged mtime+size; preserve
+  titler-owned cols on re-parse; delete vanished rows; sync FTS). listByRecency(), search()
+  (COALESCE title resolution + titleSource). search() builds prefix-OR FTS query.
+- cli.ts: reindex now populates Index + prints parsed/unchanged/removed; added `ccs ls`
+  debug table (★ native, ✎ codex, blank fallback). formatAge() added to store.ts.
+
 Test Results:
+- typecheck clean; bun test 18 pass / 0 fail (parse, label, project, config, store).
+- Cold reindex: 172 sessions / 299.4 MB in 1.7s. Warm: 0.08s, 1 parsed / 171 unchanged.
+- Repo collapse verified: milad-vault = 34 sessions across 5 cwds → 1 Project.
+- Title sources: 59 native / 113 fallback (need Codex in M3).
+- FTS "ynab" returns the YNAB session + body-mentions. Full rebuild from deleted db: OK.
+
 Issues encountered:
+- Zod-4-style nothing here; the label path-stripper first regex required no-spaces and
+  missed "Artworks June 13" (spaces in path). Rewrote to walk leading path-like lines
+  (start with / or ~, single line, no sentence punctuation). Fixed.
+- KNOWN REFINEMENT for M4: search() outer query re-sorts FTS hits by last_ts, so a
+  title match isn't ranked above a body-only mention. The proper fuzzy-title + FTS-skeleton
+  merge with relevance ranking is M4 (search UI) scope — table + query plumbing is done here.
+- Cosmetic: `ls` prints msgCount as "461m" (m=messages) which reads like minutes; `ls` is a
+  throwaway debug view, real columns come in M4.
+
 Next steps:
+- Milestone 3: src/titler/{codex.ts,schema.json,queue.ts}. Generate codex_title ONLY for
+  the 113 sessions where native_title IS NULL; persist title + title_msg_count; retry/backoff
+  via title_attempts; update FTS title on generation; `ccs reindex --titles` headless drain;
+  staleness re-title when msg_count > 1.5× title_msg_count.
 ```
 
 ---
@@ -246,11 +289,11 @@ Next steps:
 
 ## Progress Tracking
 
-**Overall Completion**: 1/6 milestones (17%)
+**Overall Completion**: 2/6 milestones (33%)
 
 - [x] Planning & Research (grill: CONTEXT.md + ADR-0001 written)
 - [x] Milestone 1: Scaffold, config, Store discovery
-- [ ] Milestone 2: Session parser and SQLite Index
+- [x] Milestone 2: Session parser and SQLite Index
 - [ ] Milestone 3: Codex titler + background backfill
 - [ ] Milestone 4: TUI — browse, search, preview
 - [ ] Milestone 5: Resume — inline, fork, cmux target

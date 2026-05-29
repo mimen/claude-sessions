@@ -1,10 +1,18 @@
-# Use the Codex CLI (OpenAI) to generate Session titles
+# Use the Codex CLI (OpenAI) to generate Session titles (gap-fill only)
 
-This is a tool for Claude Code sessions, so the obvious titler is `claude -p`. We
+**Amended 2026-05-29 during Milestone 2:** Claude Code 2.1.156 already writes native
+`ai-title` lines into Session files (~59/172 Sessions on this Host). Native titles are
+therefore the *primary* source and cost nothing. Title resolution is:
+`native ai-title → Codex-generated → cleaned-first-message`. Codex only fills the gap for
+Sessions that have no native title, which cuts generation by roughly two-thirds and keeps
+shrinking as Claude Code titles more Sessions. The rest of this decision stands for that
+gap-fill case.
+
+This is a tool for Claude Code sessions, so the obvious gap-fill titler is `claude -p`. We
 deliberately use the `codex exec` CLI instead, because Claude Code's `-p` print mode is
 expected to start costing Anthropic API credits, whereas Codex titling rides existing
-ChatGPT/OpenAI auth at no marginal cost. Titling is a high-volume background job (one call
-per Session, 163+ on first backfill), so marginal cost matters.
+ChatGPT/OpenAI auth at no marginal cost. Even gap-fill titling is a background batch, so
+marginal cost matters.
 
 Titling runs hermetically and non-agentically: `codex exec --ephemeral --skip-git-repo-check
 --sandbox read-only --ignore-rules --ignore-user-config`, with `--output-schema` forcing a

@@ -1,7 +1,9 @@
 import pkg from "../package.json" with { type: "json" };
-import { loadConfig } from "./config.ts";
-import { scanStore, formatBytes } from "./store.ts";
-import { ensureDataDir } from "./paths.ts";
+import { loadConfig, type Config } from "./config.ts";
+import { scanStore, formatBytes, formatAge } from "./store.ts";
+import { ensureDataDir, DB_PATH } from "./paths.ts";
+import { openIndex } from "./index/schema.ts";
+import { reindexStore, listByRecency } from "./index/index.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -9,6 +11,7 @@ Usage:
   ccs                 Launch the session browser (TUI)
   ccs reindex         Refresh the session index from the store
   ccs reindex --titles   Also (re)generate titles, headless (cron-friendly)
+  ccs ls              Print indexed sessions (debug)
   ccs --version       Print version
   ccs --help          Show this help
 `;
@@ -27,14 +30,14 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const command = args[0];
-
   switch (command) {
     case "reindex":
-      return reindex({ titles: args.includes("--titles") });
+      return await reindex({ titles: args.includes("--titles") });
+    case "ls":
+      return ls();
     case undefined:
-      // Bare `ccs` → TUI. Stubbed until Milestone 4.
       console.log("The session browser (TUI) arrives in Milestone 4.");
-      console.log("For now, try `ccs reindex`.");
+      console.log("For now, try `ccs reindex` then `ccs ls`.");
       return 0;
     default:
       console.error(`Unknown command: ${command}\n`);
@@ -43,36 +46,70 @@ export async function main(argv: string[]): Promise<number> {
   }
 }
 
-/**
- * Milestone 1 reindex: discover Session files and report what's there.
- * Index population (SQLite) and title backfill land in Milestones 2-3.
- */
-function reindex(opts: { titles: boolean }): number {
+/** Load config or print the error and signal failure. */
+function getConfig(): Config | null {
+  const result = loadConfig();
+  if (!result.ok) {
+    console.error(result.error.message);
+    return null;
+  }
+  return result.value;
+}
+
+/** Refresh the Index from the Store and report what changed. */
+async function reindex(opts: { titles: boolean }): Promise<number> {
   ensureDataDir();
+  const config = getConfig();
+  if (!config) return 1;
 
-  const configResult = loadConfig();
-  if (!configResult.ok) {
-    console.error(configResult.error.message);
+  const scan = scanStore(config.store.path);
+  if (!scan.ok) {
+    console.error(scan.error.message);
     return 1;
   }
-  const config = configResult.value;
 
-  const scanResult = scanStore(config.store.path);
-  if (!scanResult.ok) {
-    console.error(scanResult.error.message);
-    return 1;
-  }
-  const files = scanResult.value;
-
-  const totalBytes = files.reduce((sum, f) => sum + f.sizeBytes, 0);
-  console.log(
-    `Found ${files.length} session${files.length === 1 ? "" : "s"} ` +
-      `(${formatBytes(totalBytes)}) in ${config.store.path} ` +
-      `[host: ${config.host.label}]`,
-  );
-
-  if (opts.titles) {
-    console.log("Title generation arrives in Milestone 3.");
+  const db = openIndex(DB_PATH);
+  try {
+    const totalBytes = scan.value.reduce((sum, f) => sum + f.sizeBytes, 0);
+    const stats = await reindexStore(db, scan.value, config.host.label);
+    console.log(
+      `Indexed ${stats.scanned} session${stats.scanned === 1 ? "" : "s"} ` +
+        `(${formatBytes(totalBytes)}) from ${config.store.path} [host: ${config.host.label}]`,
+    );
+    console.log(`  ${stats.parsed} parsed, ${stats.skipped} unchanged, ${stats.removed} removed`);
+    if (opts.titles) console.log("Title generation arrives in Milestone 3.");
+  } finally {
+    db.close();
   }
   return 0;
+}
+
+/** Debug table of indexed sessions (the TUI replaces this in Milestone 4). */
+function ls(): number {
+  const db = openIndex(DB_PATH);
+  try {
+    const rows = listByRecency(db);
+    if (rows.length === 0) {
+      console.log("No sessions indexed. Run `ccs reindex` first.");
+      return 0;
+    }
+    const mark = { native: "★", codex: "✎", fallback: " " } as const;
+    for (const r of rows) {
+      const title = pad(r.title, 46);
+      const project = pad(r.projectName, 18);
+      const branch = pad(r.branch ?? "-", 12);
+      const age = pad(formatAge(r.lastTs), 5);
+      console.log(`${mark[r.titleSource]} ${title} ${project} ${branch} ${age} ${r.msgCount}m`);
+    }
+    console.log(`\n${rows.length} sessions  (★ native title, ✎ codex)`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/** Pad/truncate a string to an exact display width. */
+function pad(text: string, width: number): string {
+  const t = text.length > width ? text.slice(0, width - 1) + "…" : text;
+  return t.padEnd(width);
 }
