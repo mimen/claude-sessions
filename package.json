@@ -1,0 +1,23 @@
+{
+  "name": "claude-sessions",
+  "version": "0.1.0",
+  "description": "A global TUI to find and resume any Claude Code session (ccs).",
+  "type": "module",
+  "bin": {
+    "ccs": "bin/ccs"
+  },
+  "scripts": {
+    "ccs": "bun run bin/ccs",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "setup": "bun run scripts/setup.ts"
+  },
+  "dependencies": {
+    "smol-toml": "^1.6.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}

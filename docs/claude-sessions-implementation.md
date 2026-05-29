@@ -57,12 +57,45 @@ read-only foundation for a later Session-cataloguing/tagging layer (out of scope
 
 **Completion Notes**:
 ```
-Date:
-Status:
+Date: 2026-05-29
+Status: COMPLETED (pending user verification)
+
 Notes:
+- Bun project scaffolded: package.json (type:module, bin ccs -> bin/ccs),
+  strict tsconfig (noUncheckedIndexedAccess, verbatimModuleSyntax, etc.), .gitignore.
+- Deps installed: only what M1 uses — zod@4.4.3, smol-toml@1.6.1 (+@types/bun, typescript).
+  Ink/React/fuzzysort deliberately deferred to their milestones (M4) to keep installs lean.
+- src/result.ts: Result<T,E> + ok/err for boundary error handling.
+- src/paths.ts: DATA_DIR ~/.claude-sessions, CONFIG_PATH, DB_PATH, DEFAULT_STORE_PATH
+  (~/.claude/projects), ensureDataDir(), expandHome().
+- src/config.ts: TOML load + zod validation + defaults. Keys: store.path, host.label,
+  resume.target (auto|cmux|inline), titler.model, titler.concurrency. ~-expansion on store.path.
+- src/store.ts: scanStore() — Bun.Glob recursive **/*.jsonl, stat-only (no content reads);
+  formatBytes().
+- src/cli.ts: arg routing — --version, --help, reindex [--titles], bare (TUI stub), unknown->exit 1.
+- bin/ccs: #!/usr/bin/env bun shim, chmod +x.
+
 Test Results:
+- bun run typecheck: clean.
+- bun test: 5 pass / 0 fail (formatBytes scaling; config defaults/override/~-expand/invalid-enum).
+- ./bin/ccs --version -> 0.1.0
+- ./bin/ccs reindex -> "Found 172 sessions (298.3 MB) in /Users/mimen/.claude/projects
+  [host: Milads-M3-2.local]"  (172 not 163 — new sessions created since the design scan;
+  recursive glob also catches the few nested session dirs)
+- ./bin/ccs reindex --titles -> same + M3 stub line
+- bare ./bin/ccs -> TUI stub line; ./bin/ccs bogus -> exit 1
+
 Issues encountered:
+- Zod 4 behavior change: .default({}) on a nested object stores the literal {} WITHOUT
+  re-parsing, so inner field defaults didn't apply (store.path came back undefined) and the
+  input type demanded all fields (TS overload errors). Fixed by switching the four nested
+  objects to .prefault({}), which feeds {} as input and parses it, applying inner defaults.
+  Both the type errors and the runtime undefined resolved in one change.
+
 Next steps:
+- Milestone 2: src/parse.ts (head/tail extraction), label.ts, skeleton.ts, project.ts
+  (git-root walk), src/index/{schema,index}.ts (bun:sqlite + FTS5, incremental upsert),
+  wire reindex to populate the Index, add hidden `ccs ls` debug table.
 ```
 
 ---
@@ -213,10 +246,10 @@ Next steps:
 
 ## Progress Tracking
 
-**Overall Completion**: 0/6 milestones (0%)
+**Overall Completion**: 1/6 milestones (17%)
 
 - [x] Planning & Research (grill: CONTEXT.md + ADR-0001 written)
-- [ ] Milestone 1: Scaffold, config, Store discovery
+- [x] Milestone 1: Scaffold, config, Store discovery
 - [ ] Milestone 2: Session parser and SQLite Index
 - [ ] Milestone 3: Codex titler + background backfill
 - [ ] Milestone 4: TUI — browse, search, preview
