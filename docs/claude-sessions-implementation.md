@@ -192,12 +192,52 @@ Next steps:
 
 **Completion Notes**:
 ```
-Date:
-Status:
+Date: 2026-05-29
+Status: COMPLETED (pending user verification)
+
 Notes:
+- src/titler/codex.ts: Titler interface + createCodexTitler(). Bun.spawn of `codex exec`
+  (no shell, so the user's `codex` alias and its --dangerously-bypass flag DON'T apply —
+  we pass explicit --sandbox read-only). Flags: --ephemeral --skip-git-repo-check
+  --sandbox read-only --ignore-rules --ignore-user-config -c model_reasoning_effort="low"
+  --output-schema schema.json --output-last-message <tmp>. Skeleton piped via stdin;
+  prompt passed as arg. 60s timeout (proc.kill). Returns null on any failure.
+- src/titler/schema.json: {title:string} structured-output schema.
+- src/titler/queue.ts: backfillTitles() — async worker pool at config concurrency; success
+  -> saveCodexTitle, failure -> recordTitleFailure; never throws out of the drain.
+- src/index/index.ts: titleCandidates() (native_title IS NULL, attempts<cap, stale-or-untitled),
+  saveCodexTitle() (sets codex_title + title_msg_count, resets attempts, refreshes FTS),
+  recordTitleFailure() (++attempts).
+- cli.ts: `reindex --titles` builds the Codex titler from config and drains with a live
+  N/total progress line. Plain reindex leaves titling to M4's TUI background drain.
+- config.ts titler block: binary("codex"), model("" = inherit Codex default — account-safe),
+  reasoningEffort("low"), concurrency(3), maxAttempts(3).
+
+KEY DECISIONS proven against reality:
+- Do NOT hard-code a model. gpt-5-mini is rejected on a ChatGPT-account Codex
+  ("model not supported"). Empty model inherits the user's configured default (gpt-5.5
+  here), which is guaranteed valid for their plan. reasoningEffort=low avoids the default
+  xhigh (saves time/tokens). Titles ~5-8s each; ~14k tokens each (no marginal $ on ChatGPT).
+- Staleness re-title: msg_count > 1.5 × title_msg_count.
+
 Test Results:
+- typecheck clean; bun test 22 pass / 0 fail (4 new queue tests: native-skip, concurrency
+  cap, failure/attempt-cap, staleness — all with a mock Titler, no real codex).
+- REAL end-to-end: `ccs reindex --titles` generated 113/113 titles, 0 failed, in 4:07
+  (concurrency 3). Re-run: 0 generated / 0 failed (idempotent).
+- Title quality (samples): "Audit Gabss planning team logins", "Map Event Permission Model",
+  "Verify Tanya Venmo Payment", "Audit Convex codebase hardening opportunities". Good.
+
 Issues encountered:
+- gpt-5-mini unsupported on ChatGPT-account Codex (caught in smoke test). Resolved by the
+  inherit-default approach above; amended config default away from gpt-5-mini.
+- Codex's default xhigh reasoning is overkill/slow for titling -> forced low via -c.
+
 Next steps:
+- Milestone 4: Ink TUI. Add deps ink/react/fuzzysort. src/tui/{App,SessionList,Preview}.tsx,
+  search.ts, groupByProject.ts. Flat recency default, `g` group-by-Project, `/` search
+  (fuzzy title/project + FTS skeleton WITH relevance ranking — the M2 ranking refinement
+  lands here), `p` preview, `t` manual re-title, background title drain while open.
 ```
 
 ---
@@ -289,12 +329,12 @@ Next steps:
 
 ## Progress Tracking
 
-**Overall Completion**: 2/6 milestones (33%)
+**Overall Completion**: 3/6 milestones (50%)
 
 - [x] Planning & Research (grill: CONTEXT.md + ADR-0001 written)
 - [x] Milestone 1: Scaffold, config, Store discovery
 - [x] Milestone 2: Session parser and SQLite Index
-- [ ] Milestone 3: Codex titler + background backfill
+- [x] Milestone 3: Codex titler + background backfill
 - [ ] Milestone 4: TUI — browse, search, preview
 - [ ] Milestone 5: Resume — inline, fork, cmux target
 - [ ] Milestone 6: Distribution, polish, docs

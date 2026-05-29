@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "A concise session title, max 60 characters, imperative mood, no surrounding quotes, no trailing period."
+    }
+  },
+  "required": ["title"],
+  "additionalProperties": false
+}

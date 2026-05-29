@@ -146,6 +146,55 @@ export async function reindexStore(
   return stats;
 }
 
+/** A Session needing a generated Title, with the skeleton to feed the Titler. */
+export interface TitleCandidate {
+  readonly sessionId: string;
+  readonly skeleton: string;
+}
+
+/**
+ * Sessions that need a Codex Title: no native title, attempts under the cap, and either
+ * never titled or grown substantially since the last titling (staleness: >1.5× messages).
+ */
+export function titleCandidates(db: Database, maxAttempts: number): TitleCandidate[] {
+  return db
+    .query(
+      `SELECT session_id AS sessionId, skeleton FROM sessions
+       WHERE native_title IS NULL
+         AND title_attempts < $max
+         AND skeleton <> ''
+         AND (
+           codex_title IS NULL
+           OR (title_msg_count IS NOT NULL AND msg_count > title_msg_count * 1.5)
+         )
+       ORDER BY last_ts DESC NULLS LAST`,
+    )
+    .all({ $max: maxAttempts }) as TitleCandidate[];
+}
+
+/** Persist a generated Title, stamp the message count at titling, and refresh the FTS row. */
+export function saveCodexTitle(db: Database, sessionId: string, title: string): void {
+  db.query(
+    `UPDATE sessions
+     SET codex_title = $title, title_msg_count = msg_count, title_attempts = 0
+     WHERE session_id = $id`,
+  ).run({ $id: sessionId, $title: title });
+
+  // Resolved FTS title = native (none here, by definition) → codex title.
+  db.query("DELETE FROM sessions_fts WHERE session_id = $id").run({ $id: sessionId });
+  db.query(
+    `INSERT INTO sessions_fts (session_id, title, skeleton)
+     SELECT session_id, $title, skeleton FROM sessions WHERE session_id = $id`,
+  ).run({ $id: sessionId, $title: title });
+}
+
+/** Record a failed titling attempt so a stuck Session eventually stops being retried. */
+export function recordTitleFailure(db: Database, sessionId: string): void {
+  db.query(
+    "UPDATE sessions SET title_attempts = title_attempts + 1 WHERE session_id = $id",
+  ).run({ $id: sessionId });
+}
+
 /** All Sessions, most-recently-active first. */
 export function listByRecency(db: Database): SessionRow[] {
   return db

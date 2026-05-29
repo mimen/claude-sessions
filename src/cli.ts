@@ -4,6 +4,8 @@ import { scanStore, formatBytes, formatAge } from "./store.ts";
 import { ensureDataDir, DB_PATH } from "./paths.ts";
 import { openIndex } from "./index/schema.ts";
 import { reindexStore, listByRecency } from "./index/index.ts";
+import { backfillTitles } from "./titler/queue.ts";
+import { createCodexTitler } from "./titler/codex.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -77,7 +79,24 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
         `(${formatBytes(totalBytes)}) from ${config.store.path} [host: ${config.host.label}]`,
     );
     console.log(`  ${stats.parsed} parsed, ${stats.skipped} unchanged, ${stats.removed} removed`);
-    if (opts.titles) console.log("Title generation arrives in Milestone 3.");
+
+    if (opts.titles) {
+      const titler = createCodexTitler({
+        binary: config.titler.binary,
+        model: config.titler.model,
+        reasoningEffort: config.titler.reasoningEffort,
+      });
+      process.stdout.write("Generating titles… ");
+      const title = await backfillTitles(db, titler, {
+        concurrency: config.titler.concurrency,
+        maxAttempts: config.titler.maxAttempts,
+        onProgress: (done, total) => {
+          process.stdout.write(`\rGenerating titles… ${done}/${total}   `);
+        },
+      });
+      process.stdout.write("\n");
+      console.log(`  ${title.generated} generated, ${title.failed} failed`);
+    }
   } finally {
     db.close();
   }

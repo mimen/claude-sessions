@@ -27,8 +27,15 @@ const ConfigSchema = z.object({
     .prefault({}),
   titler: z
     .object({
-      model: z.string().default("gpt-5-mini"),
+      /** Codex executable; resolved on PATH. Bun.spawn ignores shell aliases. */
+      binary: z.string().default("codex"),
+      /** Empty = inherit the user's configured Codex default model (account-safe). */
+      model: z.string().default(""),
+      /** Codex reasoning effort for titling; low is plenty and keeps it fast/cheap. */
+      reasoningEffort: z.string().default("low"),
       concurrency: z.number().int().positive().max(16).default(3),
+      /** Give up titling a Session after this many failed attempts (across runs). */
+      maxAttempts: z.number().int().positive().max(10).default(3),
     })
     .prefault({}),
 });
