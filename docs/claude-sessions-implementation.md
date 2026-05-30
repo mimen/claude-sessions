@@ -6,7 +6,7 @@
 # claude-sessions (`ccs`) - Project Tracker
 
 **Project**: claude-sessions — a global TUI to find and resume any Claude Code session
-**Owner**: Milad
+**Owner**: —
 **Started**: 2026-05-29
 **Status**: Planning Complete
 
@@ -79,8 +79,8 @@ Test Results:
 - bun run typecheck: clean.
 - bun test: 5 pass / 0 fail (formatBytes scaling; config defaults/override/~-expand/invalid-enum).
 - ./bin/ccs --version -> 0.1.0
-- ./bin/ccs reindex -> "Found 172 sessions (298.3 MB) in /Users/mimen/.claude/projects
-  [host: Milads-M3-2.local]"  (172 not 163 — new sessions created since the design scan;
+- ./bin/ccs reindex -> "Found 172 sessions (298.3 MB) in /Users/you/.claude/projects
+  [host: your-host]"  (172 not 163 — new sessions created since the design scan;
   recursive glob also catches the few nested session dirs)
 - ./bin/ccs reindex --titles -> same + M3 stub line
 - bare ./bin/ccs -> TUI stub line; ./bin/ccs bogus -> exit 1
@@ -151,7 +151,7 @@ Notes:
 Test Results:
 - typecheck clean; bun test 18 pass / 0 fail (parse, label, project, config, store).
 - Cold reindex: 172 sessions / 299.4 MB in 1.7s. Warm: 0.08s, 1 parsed / 171 unchanged.
-- Repo collapse verified: milad-vault = 34 sessions across 5 cwds → 1 Project.
+- Repo collapse verified: my-vault = 34 sessions across 5 cwds → 1 Project.
 - Title sources: 59 native / 113 fallback (need Codex in M3).
 - FTS "ynab" returns the YNAB session + body-mentions. Full rebuild from deleted db: OK.
 
@@ -514,7 +514,7 @@ Verified on 2026-05-29 (claude 2.1.156, codex-cli 0.130.0, cmux 0.64.3):
 ```
 
 ### Future Enhancements (catalog phase — out of scope)
-- [ ] Tag/categorize Sessions against the Obsidian mindmap entity taxonomy.
+- [ ] Tag/categorize Sessions against a personal knowledge-base entity taxonomy.
 - [ ] Use Sessions as retrievable context for new Sessions.
 - [ ] Full raw-body FTS (extend the existing FTS table).
 - [ ] Archive-on-index: copy transcripts into a ccs-owned archive before Claude Code prunes

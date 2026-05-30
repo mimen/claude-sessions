@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { encodePath, storageFolderOf, decodeStorageFolder, locateLaunchDir } from "./locate.ts";
 
 test("encodePath maps every non-alphanumeric to '-' without lowercasing", () => {
-  expect(encodePath("/Users/mimen/Obsidian/Milad's vault")).toBe("-Users-mimen-Obsidian-Milad-s-vault");
+  expect(encodePath("/Users/you/Obsidian/My Vault")).toBe("-Users-you-Obsidian-My-Vault");
   expect(encodePath("/a/b-c/d")).toBe("-a-b-c-d");
 });
 

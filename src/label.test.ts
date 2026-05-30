@@ -18,7 +18,7 @@ test("command stub wrapper surfaces the command name", () => {
 });
 
 test("leading pasted file path is stripped", () => {
-  expect(cleanLabel(["/Users/mimen/Downloads/Artworks June 13\n\nAdd this event to the calendar"])).toBe(
+  expect(cleanLabel(["/Users/you/Downloads/Artworks June 13\n\nAdd this event to the calendar"])).toBe(
     "Add this event to the calendar",
   );
 });
