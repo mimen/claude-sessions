@@ -21,6 +21,9 @@ export interface ParsedSession {
   /** For a subagent run, the parent Session's id (subagent files carry the parent's
    *  sessionId internally); null for normal sessions. */
   readonly parentSessionId: string | null;
+  /** The id `claude --resume` expects: the session's INTERNAL sessionId, which differs from
+   *  the filename for resumed/forked sessions. Falls back to the filename id if absent. */
+  readonly resumeId: string;
 }
 
 const FIRST_TURNS = 8;
@@ -148,6 +151,9 @@ export async function parseSessionFile(
     }
   }
 
+  // A run is a subagent only if it has messages and all of them are sidechain.
+  const isSubagent = msgCount > 0 && sidechainCount === msgCount;
+
   return {
     sessionId,
     cwd,
@@ -159,12 +165,13 @@ export async function parseSessionFile(
     nativeTitle,
     userTexts,
     skeleton: buildSkeletonText(firstTurns, lastTurns),
-    // A run is a subagent only if it has messages and all of them are sidechain.
-    isSubagent: msgCount > 0 && sidechainCount === msgCount,
-    // Subagent files carry the parent's sessionId internally; it differs from their own
-    // filename-derived id. Normal sessions match, so parentSessionId is null for them.
-    parentSessionId:
-      internalSessionId && internalSessionId !== sessionId ? internalSessionId : null,
+    isSubagent,
+    // Only subagent files carry a *parent's* sessionId internally. (Resumed/forked NORMAL
+    // sessions also have internal != filename, so we key on isSubagent, not on the mismatch.)
+    parentSessionId: isSubagent && internalSessionId ? internalSessionId : null,
+    // claude --resume matches the internal sessionId; the filename id fails for resumed/forked
+    // sessions. Subagents aren't resumable, so their resumeId (= parent id) is never used.
+    resumeId: (!isSubagent && internalSessionId) || sessionId,
   };
 }
 

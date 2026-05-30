@@ -18,7 +18,7 @@ export interface ResumeCommand {
  * sidesteps the cwd-scoped picker and the unreliable end-of-session hint (failure modes A/B/D).
  */
 export function buildResumeCommand(row: SessionRow, opts: { fork: boolean; cwd: string }): ResumeCommand {
-  const argv = ["claude", "--resume", row.sessionId];
+  const argv = ["claude", "--resume", row.resumeId];
   if (opts.fork) argv.push("--fork-session");
   return {
     argv,

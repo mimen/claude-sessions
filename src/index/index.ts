@@ -25,6 +25,8 @@ export interface SessionRow {
   readonly isSubagent: boolean;
   /** Parent Session id for a subagent run; null for normal sessions. */
   readonly parentSessionId: string | null;
+  /** The id to pass to `claude --resume` (internal sessionId, not the filename). */
+  readonly resumeId: string;
 }
 
 export interface ReindexStats {
@@ -52,7 +54,8 @@ const SELECT_COLS = `
     ELSE 'fallback'
   END AS titleSource,
   is_subagent AS isSubagent,
-  parent_session_id AS parentSessionId
+  parent_session_id AS parentSessionId,
+  resume_id AS resumeId
 `;
 
 /**
@@ -78,11 +81,11 @@ export async function reindexStore(
     INSERT INTO sessions (
       session_id, host, path, cwd, project_root, project_name, branch, version,
       first_ts, last_ts, msg_count, file_mtime, file_size,
-      native_title, fallback_label, skeleton, is_subagent, parent_session_id
+      native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id
     ) VALUES (
       $session_id, $host, $path, $cwd, $project_root, $project_name, $branch, $version,
       $first_ts, $last_ts, $msg_count, $file_mtime, $file_size,
-      $native_title, $fallback_label, $skeleton, $is_subagent, $parent_session_id
+      $native_title, $fallback_label, $skeleton, $is_subagent, $parent_session_id, $resume_id
     )
     ON CONFLICT(session_id) DO UPDATE SET
       host = $host, path = $path, cwd = $cwd,
@@ -91,7 +94,7 @@ export async function reindexStore(
       first_ts = $first_ts, last_ts = $last_ts, msg_count = $msg_count,
       file_mtime = $file_mtime, file_size = $file_size,
       native_title = $native_title, fallback_label = $fallback_label, skeleton = $skeleton,
-      is_subagent = $is_subagent, parent_session_id = $parent_session_id
+      is_subagent = $is_subagent, parent_session_id = $parent_session_id, resume_id = $resume_id
   `);
   const ftsDelete = db.query("DELETE FROM sessions_fts WHERE session_id = $id");
   const ftsInsert = db.query(
@@ -132,6 +135,7 @@ export async function reindexStore(
       $skeleton: parsed.skeleton,
       $is_subagent: parsed.isSubagent ? 1 : 0,
       $parent_session_id: parsed.parentSessionId,
+      $resume_id: parsed.resumeId,
     });
 
     // Keep FTS in step with the resolved title (native if present, else fallback for now;

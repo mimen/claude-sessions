@@ -12,10 +12,10 @@ function seed(db: Database): void {
     `INSERT INTO sessions (
       session_id, host, path, cwd, project_root, project_name, branch, version,
       first_ts, last_ts, msg_count, file_mtime, file_size,
-      native_title, fallback_label, skeleton, is_subagent, parent_session_id
+      native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id
     ) VALUES ($id,'h','/p','/c','/c','myproj',$br,'1',
       '2026-01-01T00:00:00Z','2026-01-02T00:00:00Z',5,1,1,
-      $nat,$fb,'user: hello there',$sub,$parent)`,
+      $nat,$fb,'user: hello there',$sub,$parent,$id)`,
   );
   ins.run({ $id: "real1", $br: "main", $nat: "Real Session One", $fb: "fallback", $sub: 0, $parent: null });
   ins.run({ $id: "agent-1", $br: null, $nat: null, $fb: "SUBAGENTONLY", $sub: 1, $parent: "real1" });

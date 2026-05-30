@@ -39,6 +39,27 @@ test("extracts metadata, native title, msg count, and skeleton", async () => {
   expect(parsed.isSubagent).toBe(false); // no sidechain messages
 });
 
+test("resumeId is the internal sessionId, which can differ from the filename", async () => {
+  // Resumed/forked sessions: filename UUID != the internal sessionId claude --resume needs.
+  const { path, cleanup } = writeJsonl([
+    { type: "user", cwd: "/repo", sessionId: "internal-abc", message: { role: "user", content: "hi" } },
+    { type: "assistant", sessionId: "internal-abc", message: { content: [{ type: "text", text: "yo" }] } },
+  ]);
+  const parsed = await parseSessionFile(path, "filename-xyz");
+  cleanup();
+  expect(parsed.resumeId).toBe("internal-abc");
+  expect(parsed.parentSessionId).toBeNull(); // not a subagent → no parent despite the mismatch
+});
+
+test("resumeId falls back to the filename id when no internal sessionId is present", async () => {
+  const { path, cleanup } = writeJsonl([
+    { type: "user", cwd: "/repo", message: { role: "user", content: "hi" } },
+  ]);
+  const parsed = await parseSessionFile(path, "filename-only");
+  cleanup();
+  expect(parsed.resumeId).toBe("filename-only");
+});
+
 test("detects a subagent run (all messages sidechain)", async () => {
   const { path, cleanup } = writeJsonl([
     { type: "user", isSidechain: true, cwd: "/repo", message: { role: "user", content: "You are a research sub-agent. Do X." } },

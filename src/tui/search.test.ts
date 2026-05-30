@@ -20,6 +20,7 @@ function row(id: string, title: string, project = "proj"): SessionRow {
     titleSource: "codex",
     isSubagent: false,
     parentSessionId: null,
+    resumeId: id,
   };
 }
 

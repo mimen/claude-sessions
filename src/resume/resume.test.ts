@@ -11,18 +11,21 @@ function row(over: Partial<SessionRow> = {}): SessionRow {
     sessionId: "abc-123", host: "h", path: "/p", cwd: "/c", projectRoot: "/c",
     projectName: "c", branch: null, version: null, firstTs: null, lastTs: null,
     msgCount: 0, fileSize: 0, title: "t", titleSource: "fallback",
-    isSubagent: false, parentSessionId: null, ...over,
+    isSubagent: false, parentSessionId: null, resumeId: "resume-xyz", ...over,
   };
 }
 
-test("buildResumeCommand: in-place vs fork", () => {
-  const plain = buildResumeCommand(row(), { fork: false, cwd: "/x" });
-  expect(plain.argv).toEqual(["claude", "--resume", "abc-123"]);
+test("buildResumeCommand uses resumeId (internal id), NOT the filename sessionId", () => {
+  // Regression guard: resuming by filename id fails for resumed/forked sessions
+  // ("No conversation found"). claude --resume needs the internal sessionId.
+  const r = row({ sessionId: "filename-id", resumeId: "internal-id" });
+  const plain = buildResumeCommand(r, { fork: false, cwd: "/x" });
+  expect(plain.argv).toEqual(["claude", "--resume", "internal-id"]);
   expect(plain.cwd).toBe("/x");
 
-  const forked = buildResumeCommand(row(), { fork: true, cwd: "/x" });
-  expect(forked.argv).toEqual(["claude", "--resume", "abc-123", "--fork-session"]);
-  expect(forked.shell).toBe("claude --resume abc-123 --fork-session");
+  const forked = buildResumeCommand(r, { fork: true, cwd: "/x" });
+  expect(forked.argv).toEqual(["claude", "--resume", "internal-id", "--fork-session"]);
+  expect(forked.shell).toBe("claude --resume internal-id --fork-session");
 });
 
 test("shellQuote leaves safe tokens, quotes spaces", () => {
