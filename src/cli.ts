@@ -38,9 +38,7 @@ export async function main(argv: string[]): Promise<number> {
     case "ls":
       return ls();
     case undefined:
-      console.log("The session browser (TUI) arrives in Milestone 4.");
-      console.log("For now, try `ccs reindex` then `ccs ls`.");
-      return 0;
+      return await launchTui();
     default:
       console.error(`Unknown command: ${command}\n`);
       console.error(HELP);
@@ -97,6 +95,33 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
       process.stdout.write("\n");
       console.log(`  ${title.generated} generated, ${title.failed} failed`);
     }
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/** Launch the interactive browser: refresh the Index, then render the Ink app. */
+async function launchTui(): Promise<number> {
+  const config = getConfig();
+  if (!config) return 1;
+  ensureDataDir();
+
+  const db = openIndex(DB_PATH);
+  try {
+    const scan = scanStore(config.store.path);
+    if (scan.ok) await reindexStore(db, scan.value, config.host.label);
+
+    const { render } = await import("ink");
+    const { createElement } = await import("react");
+    const { App } = await import("./tui/App.tsx");
+    const titler = createCodexTitler({
+      binary: config.titler.binary,
+      model: config.titler.model,
+      reasoningEffort: config.titler.reasoningEffort,
+    });
+    const app = render(createElement(App, { db, config, titler }));
+    await app.waitUntilExit();
   } finally {
     db.close();
   }

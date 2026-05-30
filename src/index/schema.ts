@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 
 /** Bump when the schema changes; the Index is a pure cache, so we just rebuild on mismatch. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 3;
 
 /**
  * Open (creating if needed) the Index and ensure its schema is current. If the on-disk
@@ -48,10 +48,14 @@ function createSchema(db: Database): void {
       fallback_label  TEXT NOT NULL,
       title_msg_count INTEGER,
       title_attempts  INTEGER NOT NULL DEFAULT 0,
-      skeleton        TEXT NOT NULL DEFAULT ''
+      skeleton        TEXT NOT NULL DEFAULT '',
+      is_subagent     INTEGER NOT NULL DEFAULT 0,
+      parent_session_id TEXT
     );
   `);
   db.exec("CREATE INDEX idx_sessions_last_ts ON sessions(last_ts DESC);");
+  db.exec("CREATE INDEX idx_sessions_subagent ON sessions(is_subagent);");
+  db.exec("CREATE INDEX idx_sessions_parent ON sessions(parent_session_id);");
   db.exec("CREATE INDEX idx_sessions_project ON sessions(project_root);");
   // Standalone FTS over the resolved title + skeleton; kept in sync on upsert.
   db.exec(`

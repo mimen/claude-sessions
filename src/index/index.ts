@@ -21,6 +21,10 @@ export interface SessionRow {
   /** Resolved: native title → codex title → cleaned-first-message fallback. */
   readonly title: string;
   readonly titleSource: "native" | "codex" | "fallback";
+  /** True when this file is a subagent task run (every message is a sidechain). */
+  readonly isSubagent: boolean;
+  /** Parent Session id for a subagent run; null for normal sessions. */
+  readonly parentSessionId: string | null;
 }
 
 export interface ReindexStats {
@@ -46,7 +50,9 @@ const SELECT_COLS = `
     WHEN native_title IS NOT NULL THEN 'native'
     WHEN codex_title  IS NOT NULL THEN 'codex'
     ELSE 'fallback'
-  END AS titleSource
+  END AS titleSource,
+  is_subagent AS isSubagent,
+  parent_session_id AS parentSessionId
 `;
 
 /**
@@ -72,11 +78,11 @@ export async function reindexStore(
     INSERT INTO sessions (
       session_id, host, path, cwd, project_root, project_name, branch, version,
       first_ts, last_ts, msg_count, file_mtime, file_size,
-      native_title, fallback_label, skeleton
+      native_title, fallback_label, skeleton, is_subagent, parent_session_id
     ) VALUES (
       $session_id, $host, $path, $cwd, $project_root, $project_name, $branch, $version,
       $first_ts, $last_ts, $msg_count, $file_mtime, $file_size,
-      $native_title, $fallback_label, $skeleton
+      $native_title, $fallback_label, $skeleton, $is_subagent, $parent_session_id
     )
     ON CONFLICT(session_id) DO UPDATE SET
       host = $host, path = $path, cwd = $cwd,
@@ -84,7 +90,8 @@ export async function reindexStore(
       branch = $branch, version = $version,
       first_ts = $first_ts, last_ts = $last_ts, msg_count = $msg_count,
       file_mtime = $file_mtime, file_size = $file_size,
-      native_title = $native_title, fallback_label = $fallback_label, skeleton = $skeleton
+      native_title = $native_title, fallback_label = $fallback_label, skeleton = $skeleton,
+      is_subagent = $is_subagent, parent_session_id = $parent_session_id
   `);
   const ftsDelete = db.query("DELETE FROM sessions_fts WHERE session_id = $id");
   const ftsInsert = db.query(
@@ -123,6 +130,8 @@ export async function reindexStore(
       $native_title: parsed.nativeTitle,
       $fallback_label: fallback,
       $skeleton: parsed.skeleton,
+      $is_subagent: parsed.isSubagent ? 1 : 0,
+      $parent_session_id: parsed.parentSessionId,
     });
 
     // Keep FTS in step with the resolved title (native if present, else fallback for now;
@@ -161,6 +170,7 @@ export function titleCandidates(db: Database, maxAttempts: number): TitleCandida
     .query(
       `SELECT session_id AS sessionId, skeleton FROM sessions
        WHERE native_title IS NULL
+         AND is_subagent = 0
          AND title_attempts < $max
          AND skeleton <> ''
          AND (
@@ -195,26 +205,66 @@ export function recordTitleFailure(db: Database, sessionId: string): void {
   ).run({ $id: sessionId });
 }
 
-/** All Sessions, most-recently-active first. */
-export function listByRecency(db: Database): SessionRow[] {
-  return db
-    .query(`SELECT ${SELECT_COLS} FROM sessions ORDER BY last_ts DESC NULLS LAST`)
-    .all() as SessionRow[];
+type RawRow = Omit<SessionRow, "isSubagent"> & { isSubagent: number };
+
+/** Coerce SQLite's 0/1 is_subagent into a real boolean. */
+function mapRows(raw: unknown[]): SessionRow[] {
+  return (raw as RawRow[]).map((r) => ({ ...r, isSubagent: Boolean(r.isSubagent) }));
+}
+
+/** Map of parent Session id → number of subagent runs it spawned. */
+export function subagentCounts(db: Database): Map<string, number> {
+  const rows = db
+    .query(
+      `SELECT parent_session_id AS pid, COUNT(*) AS n FROM sessions
+       WHERE is_subagent = 1 AND parent_session_id IS NOT NULL GROUP BY parent_session_id`,
+    )
+    .all() as Array<{ pid: string; n: number }>;
+  return new Map(rows.map((r) => [r.pid, r.n]));
+}
+
+/** All Sessions, most-recently-active first. Subagent runs are excluded by default. */
+export function listByRecency(db: Database, includeSubagents = false): SessionRow[] {
+  const where = includeSubagents ? "" : "WHERE is_subagent = 0";
+  return mapRows(
+    db.query(`SELECT ${SELECT_COLS} FROM sessions ${where} ORDER BY last_ts DESC NULLS LAST`).all(),
+  );
+}
+
+/** Session IDs whose title or skeleton match an FTS query (for content search in the TUI). */
+export function ftsMatchIds(db: Database, query: string): Set<string> {
+  const trimmed = query.trim();
+  if (!trimmed) return new Set();
+  const rows = db
+    .query("SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH $q")
+    .all({ $q: ftsQuery(trimmed) }) as Array<{ session_id: string }>;
+  return new Set(rows.map((r) => r.session_id));
+}
+
+/** The stored skeleton for a Session (first/last turns) — the preview-pane content peek. */
+export function getSkeleton(db: Database, sessionId: string): string {
+  const row = db
+    .query("SELECT skeleton FROM sessions WHERE session_id = $id")
+    .get({ $id: sessionId }) as { skeleton: string } | null;
+  return row?.skeleton ?? "";
 }
 
 /** FTS search over title + skeleton, ranked, returning full rows. */
-export function search(db: Database, query: string): SessionRow[] {
+export function search(db: Database, query: string, includeSubagents = false): SessionRow[] {
   const trimmed = query.trim();
-  if (!trimmed) return listByRecency(db);
-  return db
-    .query(
-      `SELECT ${SELECT_COLS} FROM sessions
-       WHERE session_id IN (
-         SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH $q ORDER BY rank
-       )
-       ORDER BY last_ts DESC NULLS LAST`,
-    )
-    .all({ $q: ftsQuery(trimmed) }) as SessionRow[];
+  if (!trimmed) return listByRecency(db, includeSubagents);
+  const subagentFilter = includeSubagents ? "" : "AND is_subagent = 0";
+  return mapRows(
+    db
+      .query(
+        `SELECT ${SELECT_COLS} FROM sessions
+         WHERE session_id IN (
+           SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH $q ORDER BY rank
+         ) ${subagentFilter}
+         ORDER BY last_ts DESC NULLS LAST`,
+      )
+      .all({ $q: ftsQuery(trimmed) }),
+  );
 }
 
 /** Turn free text into a prefix-OR FTS5 query, escaping each token as a quoted string. */

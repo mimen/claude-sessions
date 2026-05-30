@@ -36,6 +36,27 @@ test("extracts metadata, native title, msg count, and skeleton", async () => {
   expect(parsed.skeleton).toContain("user: First question");
   expect(parsed.skeleton).toContain("[tool: Bash]");
   expect(parsed.skeleton).not.toContain("hmm"); // thinking omitted
+  expect(parsed.isSubagent).toBe(false); // no sidechain messages
+});
+
+test("detects a subagent run (all messages sidechain)", async () => {
+  const { path, cleanup } = writeJsonl([
+    { type: "user", isSidechain: true, cwd: "/repo", message: { role: "user", content: "You are a research sub-agent. Do X." } },
+    { type: "assistant", isSidechain: true, message: { content: [{ type: "text", text: "On it" }] } },
+  ]);
+  const parsed = await parseSessionFile(path, "sub");
+  cleanup();
+  expect(parsed.isSubagent).toBe(true);
+});
+
+test("a mix of normal and sidechain messages is NOT a subagent run", async () => {
+  const { path, cleanup } = writeJsonl([
+    { type: "user", cwd: "/repo", message: { role: "user", content: "Do a thing" } },
+    { type: "assistant", isSidechain: true, message: { content: [{ type: "text", text: "spawned" }] } },
+  ]);
+  const parsed = await parseSessionFile(path, "mix");
+  cleanup();
+  expect(parsed.isSubagent).toBe(false);
 });
 
 test("tolerates corrupt lines without throwing", async () => {

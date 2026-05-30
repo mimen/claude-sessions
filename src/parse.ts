@@ -16,6 +16,11 @@ export interface ParsedSession {
   readonly userTexts: readonly string[];
   /** Bounded skeleton (first + last turns, tool I/O stubbed) for titling and search. */
   readonly skeleton: string;
+  /** True when every message is a sidechain — i.e. this file is a subagent task run. */
+  readonly isSubagent: boolean;
+  /** For a subagent run, the parent Session's id (subagent files carry the parent's
+   *  sessionId internally); null for normal sessions. */
+  readonly parentSessionId: string | null;
 }
 
 const FIRST_TURNS = 8;
@@ -30,6 +35,8 @@ interface AnyLine {
   version?: string;
   timestamp?: string;
   aiTitle?: string;
+  isSidechain?: boolean;
+  sessionId?: string;
   message?: { role?: string; content?: unknown };
 }
 
@@ -90,7 +97,9 @@ export async function parseSessionFile(
   let firstTs: string | null = null;
   let lastTs: string | null = null;
   let nativeTitle: string | null = null;
+  let internalSessionId: string | null = null;
   let msgCount = 0;
+  let sidechainCount = 0;
 
   const userTexts: string[] = [];
   const firstTurns: string[] = [];
@@ -105,6 +114,9 @@ export async function parseSessionFile(
       continue; // tolerate partial/corrupt lines
     }
 
+    if (internalSessionId === null && typeof obj.sessionId === "string") {
+      internalSessionId = obj.sessionId;
+    }
     if (cwd === null && typeof obj.cwd === "string") cwd = obj.cwd;
     if (gitBranch === null && typeof obj.gitBranch === "string") gitBranch = obj.gitBranch;
     if (version === null && typeof obj.version === "string") version = obj.version;
@@ -119,6 +131,7 @@ export async function parseSessionFile(
 
     if (obj.type === "user" || obj.type === "assistant") {
       msgCount++;
+      if (obj.isSidechain) sidechainCount++;
       const content = obj.message?.content;
 
       if (obj.type === "user" && userTexts.length < USER_TEXTS) {
@@ -146,6 +159,12 @@ export async function parseSessionFile(
     nativeTitle,
     userTexts,
     skeleton: buildSkeletonText(firstTurns, lastTurns),
+    // A run is a subagent only if it has messages and all of them are sidechain.
+    isSubagent: msgCount > 0 && sidechainCount === msgCount,
+    // Subagent files carry the parent's sessionId internally; it differs from their own
+    // filename-derived id. Normal sessions match, so parentSessionId is null for them.
+    parentSessionId:
+      internalSessionId && internalSessionId !== sessionId ? internalSessionId : null,
   };
 }
 

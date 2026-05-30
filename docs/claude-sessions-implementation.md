@@ -261,12 +261,47 @@ Next steps:
 
 **Completion Notes**:
 ```
-Date:
-Status:
+Date: 2026-05-29
+Status: COMPLETED (pending user verification)
+
 Notes:
+- Ink TUI (deps ink@7, react@19, fuzzysort@3). src/tui/App.tsx (shell/state/keys/background
+  drain), SessionList.tsx (scrolling list, source marks ★/✎/·, subagent ↳ + dim),
+  Preview.tsx (full detail + skeleton peek + parent/subagent info), search.ts (fuzzy
+  name + FTS content, relevance-ranked — the M2 ranking fix), groupByProject.ts
+  (groups + buildDisplayItems flat/grouped). cli bare `ccs` → launchTui (incremental
+  reindex on launch, then render; dynamic import of ink/react/App).
+- Keys: ↑↓/j/k move, ↵ expand(header)/resume(session, placeholder until M5), / search,
+  g flat/grouped, p preview, a show/hide subagents, t retitle, q/esc quit.
+- BIG mid-milestone additions (per user, both surfaced from real-data findings):
+  1. SUBAGENT FILTERING. 98/172 store entries are pure subagent runs (every msg isSidechain).
+     parse.ts flags isSubagent; schema v2 added is_subagent; queries hide them by default,
+     `a` toggles. listByRecency/search take includeSubagents.
+  2. PARENT LINKAGE. Subagent files live at <cwd>/<PARENT_ID>/subagents/agent-*.jsonl and
+     carry the parent's sessionId internally (NOT via parentUuid — verified). parse.ts
+     captures parentSessionId; schema v3 added parent_session_id; subagentCounts() query;
+     Preview shows "spawned by <parent>" / "N subagent runs". Interactive drill-down UX
+     deferred to new milestone (see M7 / task #2).
+- Schema went v1→v2→v3 this milestone; each bump drops+rebuilds (pure cache). Re-titled
+  after: only 15 real non-native sessions need Codex now (subagents excluded), ~1 min.
+
 Test Results:
+- typecheck clean; bun test 31 pass / 1 skip / 0 fail.
+- search.test (rank: name-match > content-only, fuzzy typos), groupByProject.test
+  (order, flat vs grouped/expanded), parse.test (subagent detection + mixed = not subagent).
+- REAL BINARY PTY-verified: `script(1)` → ccs → `q` exits 0, ~47KB rendered frame.
+- Real index: 172 indexed, 74 real shown by default, 98 subagent runs hidden.
+
 Issues encountered:
+- ink-testing-library + Bun renders the full App blank (bare <Box>/<Text> render fine; App
+  with useInput does not). Test-harness interaction, not a product bug — confirmed via the
+  PTY smoke. That one mount test is test.skip with a pointer to the PTY verification.
+- Tooling note: shell output channel was intermittently dropping/echoing phantom lines during
+  this milestone; verified results via exit codes + file reads to stay honest.
+
 Next steps:
+- Milestone 5: real resume. src/resume/{command,target,cmux,inline}.ts; wire ↵/f in App to
+  actually hand off (inline) or open a cmux workspace; missing-cwd guard.
 ```
 
 ---
@@ -329,15 +364,16 @@ Next steps:
 
 ## Progress Tracking
 
-**Overall Completion**: 3/6 milestones (50%)
+**Overall Completion**: 4/7 milestones (57%)
 
 - [x] Planning & Research (grill: CONTEXT.md + ADR-0001 written)
 - [x] Milestone 1: Scaffold, config, Store discovery
 - [x] Milestone 2: Session parser and SQLite Index
 - [x] Milestone 3: Codex titler + background backfill
-- [ ] Milestone 4: TUI — browse, search, preview
+- [x] Milestone 4: TUI — browse, search, preview (+ subagent filtering + parent linkage data)
 - [ ] Milestone 5: Resume — inline, fork, cmux target
 - [ ] Milestone 6: Distribution, polish, docs
+- [ ] Milestone 7: Subagent drill-down UX (expand a session into its agent tree)
 
 ---
 

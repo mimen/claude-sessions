@@ -1,0 +1,51 @@
+import { test, expect } from "bun:test";
+import { render } from "ink-testing-library";
+import { createElement } from "react";
+import { Database } from "bun:sqlite";
+import { openIndex } from "../index/schema.ts";
+import { loadConfig } from "../config.ts";
+import { App } from "./App.tsx";
+import type { Titler } from "../titler/codex.ts";
+
+function seed(db: Database): void {
+  const ins = db.query(
+    `INSERT INTO sessions (
+      session_id, host, path, cwd, project_root, project_name, branch, version,
+      first_ts, last_ts, msg_count, file_mtime, file_size,
+      native_title, fallback_label, skeleton, is_subagent, parent_session_id
+    ) VALUES ($id,'h','/p','/c','/c','myproj',$br,'1',
+      '2026-01-01T00:00:00Z','2026-01-02T00:00:00Z',5,1,1,
+      $nat,$fb,'user: hello there',$sub,$parent)`,
+  );
+  ins.run({ $id: "real1", $br: "main", $nat: "Real Session One", $fb: "fallback", $sub: 0, $parent: null });
+  ins.run({ $id: "agent-1", $br: null, $nat: null, $fb: "SUBAGENTONLY", $sub: 1, $parent: "real1" });
+}
+
+const noopTitler: Titler = { async generate() { return null; } };
+
+function makeConfig() {
+  const r = loadConfig("/nonexistent-ccs-test.toml");
+  if (!r.ok) throw r.error;
+  return r.value;
+}
+
+// The real binary is also verified end-to-end via a PTY smoke (script(1) → `q`): full
+// rendered frame, exits 0. This mount test covers the default filtering + render wiring.
+test("App mounts, lists real sessions, hides subagents by default", async () => {
+  const real = openIndex(":memory:");
+  seed(real);
+
+  const { lastFrame, unmount } = render(
+    createElement(App, { db: real, config: makeConfig(), titler: noopTitler }),
+  );
+  await new Promise((r) => setTimeout(r, 80));
+
+  const frame = lastFrame() ?? "";
+  expect(frame).toContain("ccs");
+  expect(frame).toContain("Real Session One"); // visible real session
+  expect(frame).not.toContain("SUBAGENTONLY"); // subagent hidden by default
+  expect(frame).toContain("subagent runs hidden"); // count indicator
+
+  unmount();
+  real.close();
+});
