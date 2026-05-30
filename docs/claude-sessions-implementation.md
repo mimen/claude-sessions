@@ -325,12 +325,38 @@ Next steps:
 
 **Completion Notes**:
 ```
-Date:
-Status:
+Date: 2026-05-29
+Status: COMPLETED (pending user verification)
+
 Notes:
+- src/resume/command.ts: buildResumeCommand (claude --resume <id> [--fork-session]) from
+  metadata, never a printed hint; shellQuote; resolveResumeCwd (cwd → projectRoot → home,
+  with a note when substituted).
+- src/resume/target.ts: cmuxReachable() (`cmux ping`); resolveTarget(pin, reachable,
+  forceOther) — pin wins, auto picks cmux-if-reachable else inline, forceOther flips.
+- src/resume/cmux.ts: openInCmux → `cmux new-workspace --name <title> --cwd --command
+  --focus true` (fire-and-forget; doesn't disturb the TUI).
+- src/resume/inline.ts: handoffInline → Bun.spawnSync(claude, {cwd, stdio:inherit}); called
+  by the launcher AFTER Ink unmounts so claude owns the TTY; returns claude's exit code.
+- App: ↵ resumes selected (header still toggles), f forks, o forces the other target.
+  Missing-cwd note surfaced in the status line. reachable computed once via useMemo.
+- cli launchTui: passes a resumeRequest ref; on inline resume the App sets it + exits, then
+  after waitUntilExit the launcher closes the db and hands off to claude.
+
 Test Results:
+- typecheck clean; bun test 37 pass / 0 fail (4 new: command in-place/fork, shellQuote,
+  resolveResumeCwd fallbacks, resolveTarget pin/auto/override).
+- PTY smoke: footer shows "fork · o inline" (cmux reachable here → cmux default, o=inline),
+  "74 shown", clean exit. Live resume NOT triggered in smoke (would launch claude) — the
+  cmux-open and inline-handoff are wired + unit-tested at the command/target layer.
+
 Issues encountered:
+- None. Note: end-to-end cmux-open and inline-handoff have visible side effects (open a
+  workspace / take over the terminal), so they're left for interactive user verification.
+
 Next steps:
+- Milestone 6: scripts/setup.ts (bun link), README, first-run UX, optional `v` transcript
+  view. Then Milestone 7 (subagent drill-down).
 ```
 
 ---
@@ -371,7 +397,7 @@ Next steps:
 - [x] Milestone 2: Session parser and SQLite Index
 - [x] Milestone 3: Codex titler + background backfill
 - [x] Milestone 4: TUI — browse, search, preview (+ subagent filtering + parent linkage data)
-- [ ] Milestone 5: Resume — inline, fork, cmux target
+- [x] Milestone 5: Resume — inline, fork, cmux target
 - [ ] Milestone 6: Distribution, polish, docs
 - [ ] Milestone 7: Subagent drill-down UX (expand a session into its agent tree)
 
@@ -471,6 +497,11 @@ Verified on 2026-05-29 (claude 2.1.156, codex-cli 0.130.0, cmux 0.64.3):
 - [ ] Tag/categorize Sessions against the Obsidian mindmap entity taxonomy.
 - [ ] Use Sessions as retrievable context for new Sessions.
 - [ ] Full raw-body FTS (extend the existing FTS table).
+- [ ] Archive-on-index: copy transcripts into a ccs-owned archive before Claude Code prunes
+      them, and index from there — true permanent history independent of CC's cleanup.
+      (Context: CC auto-deletes transcripts older than `cleanupPeriodDays`, default 30. On
+      2026-05-29 we set it to 3650 on this Host to stop pruning, but other Hosts default to
+      30 and already-pruned sessions are unrecoverable — hence the archive idea.)
 - [ ] Cross-Host browse (merge synced per-Host indexes; resume Mini sessions over `ssh macmini`).
 - [ ] Resume de-dup (focus an existing Workspace already running a Session).
 - [ ] Lineage grouping (collapse fork/continuation chains).

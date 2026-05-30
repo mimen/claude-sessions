@@ -36,7 +36,12 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
   seed(real);
 
   const { lastFrame, unmount } = render(
-    createElement(App, { db: real, config: makeConfig(), titler: noopTitler }),
+    createElement(App, {
+      db: real,
+      config: makeConfig(),
+      titler: noopTitler,
+      resumeRequest: { current: null },
+    }),
   );
   await new Promise((r) => setTimeout(r, 80));
 

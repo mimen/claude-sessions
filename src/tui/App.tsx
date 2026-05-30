@@ -12,6 +12,9 @@ import {
   type SessionRow,
 } from "../index/index.ts";
 import { backfillTitles } from "../titler/queue.ts";
+import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "../resume/command.ts";
+import { resolveTarget, cmuxReachable } from "../resume/target.ts";
+import { openInCmux } from "../resume/cmux.ts";
 import { searchRows } from "./search.ts";
 import { buildDisplayItems } from "./groupByProject.ts";
 import { SessionList } from "./SessionList.tsx";
@@ -21,9 +24,11 @@ interface AppProps {
   db: Database;
   config: Config;
   titler: Titler;
+  /** Inline resume is handed back to the launcher here, after the app exits. */
+  resumeRequest: { current: ResumeCommand | null };
 }
 
-export function App({ db, config, titler }: AppProps): React.ReactElement {
+export function App({ db, config, titler, resumeRequest }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
 
@@ -39,6 +44,7 @@ export function App({ db, config, titler }: AppProps): React.ReactElement {
   const [status, setStatus] = useState<string | null>(null);
 
   const reload = () => setRefreshTick((t) => t + 1);
+  const reachable = useMemo(() => cmuxReachable(), []);
 
   const baseRows = useMemo(
     () => listByRecency(db, includeSubagents),
@@ -93,6 +99,24 @@ export function App({ db, config, titler }: AppProps): React.ReactElement {
   const move = (delta: number) =>
     setSelected((s) => Math.max(0, Math.min(s + delta, items.length - 1)));
 
+  const doResume = (fork: boolean, forceOther: boolean) => {
+    const item = items[clampedSelected];
+    if (!item || item.kind !== "session") return;
+    const r = item.row;
+    const { cwd, note } = resolveResumeCwd(r);
+    const cmd = buildResumeCommand(r, { fork, cwd });
+    const target = resolveTarget(config.resume.target, reachable, forceOther);
+    const prefix = note ? `${note} · ` : "";
+    if (target === "cmux") {
+      const ok = openInCmux(cmd, r.title);
+      setStatus(prefix + (ok ? `opened in cmux → ${r.title}${fork ? " (fork)" : ""}` : "cmux failed — press o to resume inline"));
+    } else {
+      // Inline: hand back to the launcher and exit so claude can take the terminal.
+      resumeRequest.current = cmd;
+      exit();
+    }
+  };
+
   const activate = () => {
     const item = items[clampedSelected];
     if (!item) return;
@@ -104,8 +128,7 @@ export function App({ db, config, titler }: AppProps): React.ReactElement {
         return next;
       });
     } else {
-      const r = item.row;
-      setStatus(`↵ would resume → claude --resume ${r.sessionId}  (cwd: ${r.cwd ?? "?"})  [real hand-off lands in M5]`);
+      doResume(false, false);
     }
   };
 
@@ -157,6 +180,8 @@ export function App({ db, config, titler }: AppProps): React.ReactElement {
       setIncludeSubagents((v) => !v);
       setSelected(0);
     } else if (input === "t") retitle();
+    else if (input === "f") doResume(true, false);
+    else if (input === "o") doResume(false, true);
     else if (key.return) activate();
   });
 
@@ -213,8 +238,9 @@ export function App({ db, config, titler }: AppProps): React.ReactElement {
       ) : null}
 
       <Text color="gray">
-        ↑↓ move · ↵ {grouped ? "expand/" : ""}resume · / search · g {grouped ? "flat" : "group"} ·
-        p preview · a {includeSubagents ? "hide" : "show"} subagents · t retitle · q quit
+        ↑↓ move · ↵ {grouped ? "expand/" : ""}resume · f fork · o {reachable ? "inline" : "cmux"} ·
+        / search · g {grouped ? "flat" : "group"} · p preview · a{" "}
+        {includeSubagents ? "hide" : "show"} subagents · t retitle · q quit
       </Text>
     </Box>
   );

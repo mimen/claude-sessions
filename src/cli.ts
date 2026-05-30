@@ -6,6 +6,8 @@ import { openIndex } from "./index/schema.ts";
 import { reindexStore, listByRecency } from "./index/index.ts";
 import { backfillTitles } from "./titler/queue.ts";
 import { createCodexTitler } from "./titler/codex.ts";
+import { handoffInline } from "./resume/inline.ts";
+import type { ResumeCommand } from "./resume/command.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -108,6 +110,7 @@ async function launchTui(): Promise<number> {
   ensureDataDir();
 
   const db = openIndex(DB_PATH);
+  const resumeRequest: { current: ResumeCommand | null } = { current: null };
   try {
     const scan = scanStore(config.store.path);
     if (scan.ok) await reindexStore(db, scan.value, config.host.label);
@@ -120,10 +123,15 @@ async function launchTui(): Promise<number> {
       model: config.titler.model,
       reasoningEffort: config.titler.reasoningEffort,
     });
-    const app = render(createElement(App, { db, config, titler }));
+    const app = render(createElement(App, { db, config, titler, resumeRequest }));
     await app.waitUntilExit();
   } finally {
     db.close();
+  }
+
+  // The TUI has fully unmounted (terminal restored) — now hand off to claude inline.
+  if (resumeRequest.current) {
+    return handoffInline(resumeRequest.current);
   }
   return 0;
 }
