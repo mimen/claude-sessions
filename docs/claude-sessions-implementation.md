@@ -406,7 +406,7 @@ Next steps:
 
 ## Progress Tracking
 
-**Overall Completion**: 6/7 milestones (86%)
+**Overall Completion**: 7/7 milestones (100%)
 
 - [x] Planning & Research (grill: CONTEXT.md + ADR-0001 written)
 - [x] Milestone 1: Scaffold, config, Store discovery
@@ -415,7 +415,11 @@ Next steps:
 - [x] Milestone 4: TUI — browse, search, preview (+ subagent filtering + parent linkage data)
 - [x] Milestone 5: Resume — inline, fork, cmux target
 - [x] Milestone 6: Distribution, polish, docs
-- [ ] Milestone 7: Subagent drill-down UX (expand a session into its agent tree)
+- [x] Milestone 7: Subagent drill-down UX (expand a session into its agent tree)
+
+Completed M7 (commit 4786240): childrenOf() query; ExpansionState in buildDisplayItems inlines
+a session's subagent runs at depth+1; SessionList ⤷N affordance + ▸/▾ caret; App keys →/l
+expand, ←/h collapse; subagent rows guarded as non-resumable. typecheck clean, 36 tests pass.
 
 ---
 

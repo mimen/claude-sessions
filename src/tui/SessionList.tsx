@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
+import { theme, isRecentAge } from "./theme.ts";
 
 interface SessionListProps {
   items: DisplayItem[];
@@ -10,49 +11,75 @@ interface SessionListProps {
 }
 
 const SOURCE_MARK = { native: "★", codex: "✎", fallback: "·" } as const;
+const SOURCE_COLOR = {
+  native: theme.sourceNative,
+  codex: theme.sourceCodex,
+  fallback: theme.sourceFallback,
+} as const;
 
-function pad(text: string, width: number): string {
-  if (text.length > width) return text.slice(0, width - 1) + "…";
-  return text.padEnd(width);
-}
-
-/** Scrolling list of Project headers and Sessions with a selection cursor. */
+/** Box-based row layout — column widths are enforced by flexbox, so glyph width never drifts. */
 export function SessionList({ items, selected, height }: SessionListProps): React.ReactElement {
-  // Keep the selection within a scrolling window of `height` rows.
   const start = Math.max(0, Math.min(selected - Math.floor(height / 2), items.length - height));
-  const window = items.slice(Math.max(0, start), Math.max(0, start) + height);
   const offset = Math.max(0, start);
+  const window = items.slice(offset, offset + height);
 
   return (
     <Box flexDirection="column">
       {window.map((item, i) => {
         const index = offset + i;
-        const isSel = index === selected;
-        const cursor = isSel ? "❯ " : "  ";
+        const sel = index === selected;
+        const bg = sel ? theme.selBg : undefined;
 
         if (item.kind === "header") {
-          const caret = item.expanded ? "▾" : "▸";
           return (
-            <Text key={index} bold color={isSel ? "cyan" : "blue"}>
-              {cursor}
-              {caret} {item.group.name}{" "}
-              <Text color="gray">({item.group.sessions.length})</Text>
-            </Text>
+            <Box key={index} backgroundColor={bg}>
+              <Text color={sel ? theme.selFg : theme.accent}>{sel ? "❯ " : "  "}</Text>
+              <Text bold color={sel ? theme.selFg : theme.header}>
+                {item.expanded ? "▾ " : "▸ "}
+                {item.group.name}
+              </Text>
+              <Text color={sel ? theme.selFg : theme.muted}> ({item.group.sessions.length})</Text>
+            </Box>
           );
         }
 
         const r = item.row;
-        const mark = SOURCE_MARK[r.titleSource];
-        const indent = "  ".repeat(item.depth);
+        const age = formatAge(r.lastTs);
+        const ageColor = sel ? theme.selFg : isRecentAge(age) ? theme.ageRecent : theme.ageOld;
+        const titleColor = sel ? theme.selFg : r.isSubagent ? theme.muted : theme.title;
         const caret = item.childCount > 0 ? (item.expanded ? "▾ " : "▸ ") : "";
-        const agents = item.childCount > 0 ? ` ⤷${item.childCount}` : "";
-        const sub = r.isSubagent ? "↳ " : "";
-        const line = `${indent}${caret}${mark} ${sub}${pad(r.title, 46)} ${pad(r.projectName, 16)} ${pad(r.branch ?? "-", 9)} ${formatAge(r.lastTs)}${agents}`;
+
         return (
-          <Text key={index} color={isSel ? "cyan" : undefined} dimColor={r.isSubagent && !isSel}>
-            {cursor}
-            {line}
-          </Text>
+          <Box key={index} backgroundColor={bg}>
+            <Text color={sel ? theme.selFg : theme.accent}>{sel ? "❯" : " "}</Text>
+            {item.depth > 0 ? <Text>{" ".repeat(item.depth * 2)}</Text> : null}
+            <Box width={2} flexShrink={0}>
+              <Text color={sel ? theme.selFg : SOURCE_COLOR[r.titleSource]}>{SOURCE_MARK[r.titleSource]}</Text>
+            </Box>
+            <Box flexGrow={1} flexShrink={1} marginRight={1} overflow="hidden">
+              <Text wrap="truncate-end" color={titleColor} bold={sel}>
+                {caret}
+                {r.isSubagent ? "↳ " : ""}
+                {r.title}
+              </Text>
+            </Box>
+            <Box width={16} flexShrink={0} marginRight={1}>
+              <Text wrap="truncate-end" color={sel ? theme.selFg : theme.project}>
+                {r.projectName}
+              </Text>
+            </Box>
+            <Box width={9} flexShrink={0} marginRight={1}>
+              <Text wrap="truncate-end" color={sel ? theme.selFg : theme.branch}>
+                {r.branch ?? "-"}
+              </Text>
+            </Box>
+            <Box width={5} flexShrink={0} justifyContent="flex-end">
+              <Text color={ageColor}>{age}</Text>
+            </Box>
+            <Box width={5} flexShrink={0} justifyContent="flex-end">
+              <Text color={sel ? theme.selFg : theme.accent}>{item.childCount > 0 ? `⤷${item.childCount}` : ""}</Text>
+            </Box>
+          </Box>
         );
       })}
     </Box>
