@@ -1,9 +1,10 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { buildResumeCommand, shellQuote, resolveResumeCwd } from "./command.ts";
 import { resolveTarget } from "./target.ts";
+import { encodePath } from "./locate.ts";
 import type { SessionRow } from "../index/index.ts";
 
 function row(over: Partial<SessionRow> = {}): SessionRow {
@@ -35,7 +36,7 @@ test("shellQuote leaves safe tokens, quotes spaces", () => {
 });
 
 test("resolveResumeCwd: existing cwd kept; missing falls back", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ccs-resume-"));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "ccs-resume-")));
   const repo = join(dir, "repo");
   mkdirSync(repo, { recursive: true });
 
@@ -50,6 +51,23 @@ test("resolveResumeCwd: existing cwd kept; missing falls back", () => {
   expect(allGone.note).toContain("home");
 
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("resolveResumeCwd locates the launch dir from the storage folder, not the recorded cwd (Figma bug)", () => {
+  // The authoritative pointer is the file's storage folder, not the recorded cwd (which drifts
+  // when a symlinked cwd is later changed). Build a real dir, name a storage folder after it,
+  // and give the row an orphaned cwd — resume must still find the real dir.
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "ccs-loc-")));
+  const vault = join(base, "My Vault"); // space exercises the lossy encoding
+  mkdirSync(vault, { recursive: true });
+  const folder = encodePath(vault);
+  const path = join(base, ".projects", folder, "session.jsonl");
+
+  const out = resolveResumeCwd(row({ path, cwd: "/orphaned/old/path", projectRoot: "/orphaned/old" }));
+  expect(out.cwd).toBe(vault); // located via the folder, not the orphaned cwd
+  expect(out.note).toContain("no longer maps");
+
+  rmSync(base, { recursive: true, force: true });
 });
 
 test("resolveTarget: pin, auto, and forceOther flip", () => {

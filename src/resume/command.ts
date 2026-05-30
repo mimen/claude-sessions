@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import type { SessionRow } from "../index/index.ts";
+import { locateLaunchDir } from "./locate.ts";
 
 /** A resume invocation built from Session metadata (never from a printed CLI hint). */
 export interface ResumeCommand {
@@ -39,6 +40,15 @@ export function shellQuote(arg: string): string {
  * the substitution so the UI can warn instead of silently launching in the wrong place.
  */
 export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string | null } {
+  // Primary: the dir whose encoded realpath matches the file's storage folder — the only dir
+  // claude will actually find the session from (authoritative; survives symlink drift).
+  const located = locateLaunchDir(row.path);
+  if (located) {
+    const note =
+      row.cwd && located !== row.cwd ? `launching from ${located} (recorded cwd ${row.cwd} no longer maps to this session's files)` : null;
+    return { cwd: located, note };
+  }
+  // Fallbacks when the directory can't be located on disk.
   if (row.cwd && existsSync(row.cwd)) return { cwd: row.cwd, note: null };
   if (existsSync(row.projectRoot)) {
     return { cwd: row.projectRoot, note: `original cwd is gone — resuming in project root ${row.projectRoot}` };
