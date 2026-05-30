@@ -22,6 +22,8 @@ import { buildDisplayItems } from "./groupByProject.ts";
 import { SessionList } from "./SessionList.tsx";
 import { Preview } from "./Preview.tsx";
 import { Help } from "./Help.tsx";
+import { Transcript } from "./Transcript.tsx";
+import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
 
 interface AppProps {
@@ -51,6 +53,9 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
   const [titling, setTitling] = useState<{ done: number; total: number } | null>(null);
   const [frame, setFrame] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState<
+    { title: string; lines: TranscriptLine[]; truncated: boolean; scroll: number } | null
+  >(null);
 
   const reload = () => setRefreshTick((t) => t + 1);
   const reachable = useMemo(() => cmuxReachable(), []);
@@ -166,6 +171,20 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
     }
   };
 
+  const openTranscript = () => {
+    const item = items[clampedSelected];
+    if (!item || item.kind !== "session") return;
+    const r = item.row;
+    setStatus(`Loading transcript for "${r.title}"…`);
+    void readTranscript(r.path).then(({ lines, truncated }) => {
+      setTranscript({ title: r.title, lines, truncated, scroll: 0 });
+      setStatus(null);
+    });
+  };
+
+  const scrollTranscript = (delta: number) =>
+    setTranscript((t) => (t ? { ...t, scroll: Math.max(0, t.scroll + delta) } : t));
+
   const retitle = () => {
     const item = items[clampedSelected];
     if (!item || item.kind !== "session") return;
@@ -183,6 +202,19 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
   };
 
   useInput((input, key) => {
+    // Transcript viewer owns input while open.
+    if (transcript) {
+      const page = Math.max(1, termRows - 6);
+      if (key.escape || input === "q" || input === "v") setTranscript(null);
+      else if (key.upArrow || input === "k") scrollTranscript(-1);
+      else if (key.downArrow || input === "j") scrollTranscript(1);
+      else if (key.pageUp) scrollTranscript(-page);
+      else if (key.pageDown || input === " ") scrollTranscript(page);
+      else if (input === "g") scrollTranscript(-1_000_000);
+      else if (input === "G") scrollTranscript(1_000_000);
+      return;
+    }
+
     if (searching) {
       if (key.escape) {
         setSearching(false);
@@ -206,11 +238,21 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
       return;
     }
     if (showHelp) {
-      if (key.escape || input === "q") setShowHelp(false);
+      if (key.escape || input === "q" || input === "?") setShowHelp(false);
       return;
     }
 
-    if (input === "q" || key.escape) exit();
+    // esc backs out one level: clear an active search filter first; only then quit.
+    if (key.escape) {
+      if (query) {
+        setQuery("");
+        setSelected(0);
+      } else {
+        exit();
+      }
+      return;
+    }
+    if (input === "q") exit();
     else if (key.upArrow || input === "k") move(-1);
     else if (key.downArrow || input === "j") move(1);
     else if (key.rightArrow || input === "l") toggleSessionExpand(true);
@@ -222,6 +264,7 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
       setGrouped((g) => !g);
       setSelected(0);
     } else if (input === "p") setPreviewVisible((v) => !v);
+    else if (input === "v") openTranscript();
     else if (input === "a") {
       setIncludeSubagents((v) => !v);
       setSelected(0);
@@ -267,6 +310,7 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
       <Box justifyContent="space-between">
         <Text bold color={theme.accent}>
           ccs <Text color={theme.muted}>· {rows.length} shown</Text>
+          {query && !searching ? <Text color="yellow"> · filter: {query}</Text> : null}
         </Text>
         <Text color={theme.muted}>
           {includeSubagents ? "subagents shown" : `${countSubagentRuns(subCounts)} subagent runs hidden`}
@@ -282,7 +326,16 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
         </Box>
       ) : null}
 
-      {showHelp ? (
+      {transcript ? (
+        <Transcript
+          title={transcript.title}
+          lines={transcript.lines}
+          truncated={transcript.truncated}
+          scroll={transcript.scroll}
+          width={cols}
+          height={body}
+        />
+      ) : showHelp ? (
         <Help />
       ) : items.length === 0 ? (
         <Box height={body} alignItems="center" justifyContent="center">
@@ -308,16 +361,19 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
         </Box>
       )}
 
-      {status ? (
+      {status && !transcript ? (
         <Text color="magenta" wrap="truncate-end">
           {status}
         </Text>
       ) : null}
 
-      <Text color={theme.muted} wrap="truncate-end">
-        ↵ resume · →← agents · / search · g {grouped ? "flat" : "group"} · p preview · a{" "}
-        {includeSubagents ? "hide" : "show"} subs · ? help · q quit
-      </Text>
+      {transcript ? null : (
+        <Text color={theme.muted} wrap="truncate-end">
+          ↵ resume · v transcript · →← agents · / search · {query ? "esc clear · " : ""}g{" "}
+          {grouped ? "flat" : "group"} · p preview · a {includeSubagents ? "hide" : "show"} subs · ?
+          help · q quit
+        </Text>
+      )}
     </Box>
   );
 }
