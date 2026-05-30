@@ -36,7 +36,12 @@ Update later with `git pull`.
 
 - **claude** (required) — resume runs `claude --resume`.
 - **codex** (optional) — fills in titles for sessions Claude Code didn't title. Uses your
-  existing Codex auth; no model is hard-coded (inherits your Codex default).
+  existing Codex auth; no model is hard-coded (inherits your Codex default). Codex is used
+  here (rather than `claude -p`) deliberately: title generation is a non-interactive,
+  high-volume background job, and running Claude commands non-interactively is expected to
+  start incurring API charges — so titling rides your existing Codex/ChatGPT auth instead to
+  avoid that cost. The titler sits behind one interface, so swapping back to `claude -p` is a
+  one-file change if that calculus ever flips.
 - **cmux** (optional) — when reachable, resume opens a named cmux workspace.
 
 ## Usage
