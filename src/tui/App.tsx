@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
+import { useTerminalSize } from "./useTerminalSize.ts";
 import type { Database } from "bun:sqlite";
 import type { Config } from "../config.ts";
 import type { Titler } from "../titler/codex.ts";
@@ -35,7 +36,7 @@ const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
 export function App({ db, config, titler, resumeRequest }: AppProps): React.ReactElement {
   const { exit } = useApp();
-  const { stdout } = useStdout();
+  const { columns: cols, rows: termRows } = useTerminalSize();
 
   const [includeSubagents, setIncludeSubagents] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -230,9 +231,7 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
     else if (key.return) activate();
   });
 
-  // ---- Layout ----
-  const cols = stdout?.columns ?? 80;
-  const termRows = stdout?.rows ?? 24;
+  // ---- Layout (recomputed on every resize via useTerminalSize) ----
   const chrome = 2 + (searching ? 1 : 0) + (status ? 1 : 0);
   const body = Math.max(3, termRows - chrome);
 
