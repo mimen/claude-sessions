@@ -44,6 +44,7 @@ function seed(db: Database, rows: SeedRow[]): void {
 function trackingTitler(): { titler: Titler; maxInFlight: number } {
   const state = { maxInFlight: 0, inFlight: 0 };
   const titler: Titler = {
+    available: () => true,
     async generate() {
       state.inFlight++;
       state.maxInFlight = Math.max(state.maxInFlight, state.inFlight);
@@ -88,7 +89,7 @@ test("respects the concurrency cap", async () => {
 test("failures increment attempts and stop at the cap", async () => {
   const db = tmpDb();
   seed(db, [{ id: "flaky", attempts: 0 }]);
-  const failing: Titler = { async generate() { return null; } };
+  const failing: Titler = { available: () => true, async generate() { return null; } };
 
   await backfillTitles(db, failing, { concurrency: 1, maxAttempts: 3 });
   let attempts = (db.query("SELECT title_attempts a FROM sessions WHERE session_id='flaky'").get() as { a: number }).a;

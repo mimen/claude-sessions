@@ -10,6 +10,8 @@ import {
 export interface BackfillStats {
   generated: number;
   failed: number;
+  /** True when titling was skipped because the titler tool isn't available. */
+  skippedUnavailable?: boolean;
 }
 
 export interface BackfillOptions {
@@ -32,6 +34,10 @@ export async function backfillTitles(
   titler: Titler,
   opts: BackfillOptions,
 ): Promise<BackfillStats> {
+  // If the titler tool isn't installed, skip entirely — don't burn an attempt on every
+  // Session (which would permanently mark them failed once the cap is hit).
+  if (!titler.available()) return { generated: 0, failed: 0, skippedUnavailable: true };
+
   const candidates = titleCandidates(db, opts.maxAttempts);
   const stats: BackfillStats = { generated: 0, failed: 0 };
   const total = candidates.length;

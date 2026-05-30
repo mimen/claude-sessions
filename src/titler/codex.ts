@@ -6,6 +6,18 @@ import { readFileSync, rmSync } from "node:fs";
 /** Generates a Session Title from its skeleton. Returns null on any failure. */
 export interface Titler {
   generate(skeleton: string): Promise<string | null>;
+  /** Whether the backing tool is usable right now. When false, the backfill skips entirely
+   *  instead of recording a failed attempt against every Session. */
+  available(): boolean;
+}
+
+/** Whether an executable is resolvable on PATH (used to skip titling when codex is absent). */
+export function binaryExists(binary: string): boolean {
+  try {
+    return Bun.spawnSync(["which", binary], { stdout: "ignore", stderr: "ignore" }).exitCode === 0;
+  } catch {
+    return false;
+  }
 }
 
 export interface CodexTitlerOptions {
@@ -31,8 +43,14 @@ const PROMPT =
  */
 export function createCodexTitler(opts: CodexTitlerOptions): Titler {
   const timeoutMs = opts.timeoutMs ?? 60_000;
+  // Probe the binary once and cache it — avoids a `which` per Session.
+  let available: boolean | null = null;
 
   return {
+    available(): boolean {
+      if (available === null) available = binaryExists(opts.binary);
+      return available;
+    },
     async generate(skeleton: string): Promise<string | null> {
       if (!skeleton.trim()) return null;
       const outPath = join(tmpdir(), `ccs-title-${randomUUID()}.json`);

@@ -21,7 +21,7 @@ function seed(db: Database): void {
   ins.run({ $id: "agent-1", $br: null, $nat: null, $fb: "SUBAGENTONLY", $sub: 1, $parent: "real1" });
 }
 
-const noopTitler: Titler = { async generate() { return null; } };
+const noopTitler: Titler = { available: () => true, async generate() { return null; } };
 
 function makeConfig() {
   const r = loadConfig("/nonexistent-ccs-test.toml");

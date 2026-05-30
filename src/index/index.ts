@@ -255,10 +255,15 @@ export function listByRecency(db: Database, includeSubagents = false): SessionRo
 export function ftsMatchIds(db: Database, query: string): Set<string> {
   const trimmed = query.trim();
   if (!trimmed) return new Set();
-  const rows = db
-    .query("SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH $q")
-    .all({ $q: ftsQuery(trimmed) }) as Array<{ session_id: string }>;
-  return new Set(rows.map((r) => r.session_id));
+  // FTS5 can throw on syntactically odd queries; a search keystroke must never crash the TUI.
+  try {
+    const rows = db
+      .query("SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH $q")
+      .all({ $q: ftsQuery(trimmed) }) as Array<{ session_id: string }>;
+    return new Set(rows.map((r) => r.session_id));
+  } catch {
+    return new Set();
+  }
 }
 
 /** The stored skeleton for a Session (first/last turns) — the preview-pane content peek. */
@@ -274,17 +279,22 @@ export function search(db: Database, query: string, includeSubagents = false): S
   const trimmed = query.trim();
   if (!trimmed) return listByRecency(db, includeSubagents);
   const subagentFilter = includeSubagents ? "" : "AND is_subagent = 0";
-  return mapRows(
-    db
-      .query(
-        `SELECT ${SELECT_COLS} FROM sessions
-         WHERE session_id IN (
-           SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH $q ORDER BY rank
-         ) ${subagentFilter}
-         ORDER BY last_ts DESC NULLS LAST`,
-      )
-      .all({ $q: ftsQuery(trimmed) }),
-  );
+  // A malformed FTS query must degrade to "no matches", never crash the caller.
+  try {
+    return mapRows(
+      db
+        .query(
+          `SELECT ${SELECT_COLS} FROM sessions
+           WHERE session_id IN (
+             SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH $q ORDER BY rank
+           ) ${subagentFilter}
+           ORDER BY last_ts DESC NULLS LAST`,
+        )
+        .all({ $q: ftsQuery(trimmed) }),
+    );
+  } catch {
+    return [];
+  }
 }
 
 /** Turn free text into a prefix-OR FTS5 query, escaping each token as a quoted string. */

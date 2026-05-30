@@ -96,7 +96,11 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
         },
       });
       process.stdout.write("\n");
-      console.log(`  ${title.generated} generated, ${title.failed} failed`);
+      if (title.skippedUnavailable) {
+        console.log(`  titling skipped — \`${config.titler.binary}\` not found on PATH`);
+      } else {
+        console.log(`  ${title.generated} generated, ${title.failed} failed`);
+      }
     }
   } finally {
     db.close();
