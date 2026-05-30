@@ -102,6 +102,7 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
     void backfillTitles(db, titler, {
       concurrency: config.titler.concurrency,
       maxAttempts: config.titler.maxAttempts,
+      isCancelled: () => !alive, // stop persisting once the app unmounts (DB is about to close)
       onProgress: (done, total) => {
         if (!alive) return;
         setTitling(done < total ? { done, total } : null);

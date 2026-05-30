@@ -12,6 +12,8 @@ export function openIndex(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
+  // Don't throw SQLITE_BUSY when a concurrent reindex (or scheduled job) is writing; wait.
+  db.exec("PRAGMA busy_timeout = 5000;");
 
   const current = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
   if (current !== SCHEMA_VERSION) {

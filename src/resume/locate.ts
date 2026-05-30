@@ -29,11 +29,18 @@ export function decodeStorageFolder(folder: string): string | null {
   // Real Claude Code storage folders encode an absolute path, so they always start with `-`
   // (the leading `/`). Anything else is not a decodable folder.
   if (!folder.startsWith("-")) return null;
-  return walk("/", folder.slice(1));
+  return walk("/", folder.slice(1), 0, { n: MAX_NODES });
 }
 
-function walk(base: string, remaining: string): string | null {
+// Bounds so the fallback walk can never freeze the resume path (see review C2). The encoded
+// folder has one segment per path component, so depth is naturally small; the node budget
+// guards against pathological fan-out (many same-encoding siblings on a huge/slow tree).
+const MAX_DEPTH = 24;
+const MAX_NODES = 5000;
+
+function walk(base: string, remaining: string, depth: number, budget: { n: number }): string | null {
   if (remaining === "") return base;
+  if (depth > MAX_DEPTH || budget.n <= 0) return null;
   let names: string[];
   try {
     names = readdirSync(base, { withFileTypes: true })
@@ -43,11 +50,13 @@ function walk(base: string, remaining: string): string | null {
     return null;
   }
   for (const name of names) {
+    if (budget.n <= 0) return null;
+    budget.n--;
     const enc = encodePath(name);
     const full = join(base, name);
     if (enc === remaining) return full;
     if (remaining.startsWith(enc + "-")) {
-      const found = walk(full, remaining.slice(enc.length + 1));
+      const found = walk(full, remaining.slice(enc.length + 1), depth + 1, budget);
       if (found) return found;
     }
   }

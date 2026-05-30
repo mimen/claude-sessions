@@ -112,7 +112,14 @@ export async function reindexStore(
       continue;
     }
 
-    const parsed = await parseSessionFile(file.path, file.sessionId);
+    // One unreadable/locked/deleted-mid-scan file must not abort the whole reindex.
+    let parsed;
+    try {
+      parsed = await parseSessionFile(file.path, file.sessionId);
+    } catch {
+      stats.skipped++;
+      continue;
+    }
     const project = deriveProject(parsed.cwd);
     const fallback = cleanLabel(parsed.userTexts);
 

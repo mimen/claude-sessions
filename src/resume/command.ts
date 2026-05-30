@@ -1,7 +1,16 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import type { SessionRow } from "../index/index.ts";
-import { locateLaunchDir } from "./locate.ts";
+import { locateLaunchDir, storageFolderOf, encodePath } from "./locate.ts";
+
+/** Encoded realpath of a dir, matching how Claude Code derives the storage folder. */
+function encodePathRealpath(dir: string): string {
+  try {
+    return encodePath(realpathSync(dir));
+  } catch {
+    return encodePath(dir);
+  }
+}
 
 /** A resume invocation built from Session metadata (never from a printed CLI hint). */
 export interface ResumeCommand {
@@ -40,16 +49,31 @@ export function shellQuote(arg: string): string {
  * the substitution so the UI can warn instead of silently launching in the wrong place.
  */
 export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string | null } {
-  // Primary: the dir whose encoded realpath matches the file's storage folder — the only dir
-  // claude will actually find the session from (authoritative; survives symlink drift).
+  const folder = storageFolderOf(row.path);
+
+  // Best case: the recorded cwd still exists AND its encoded realpath matches the file's
+  // storage folder. Then it's authoritative and we avoid the filesystem walk entirely. This
+  // also sidesteps lossy-encoding collisions, since we're confirming the real recorded path.
+  if (row.cwd && existsSync(row.cwd) && encodePathRealpath(row.cwd) === folder) {
+    return { cwd: row.cwd, note: null };
+  }
+
+  // Otherwise the recorded cwd has drifted (symlink changed, dir moved). Walk the filesystem
+  // to find the dir whose encoded realpath matches the storage folder — the only dir claude
+  // will actually find the session from. Bounded so it can never hang the resume path.
   const located = locateLaunchDir(row.path);
   if (located) {
     const note =
-      row.cwd && located !== row.cwd ? `launching from ${located} (recorded cwd ${row.cwd} no longer maps to this session's files)` : null;
+      row.cwd && located !== row.cwd
+        ? `launching from ${located} (recorded cwd ${row.cwd} no longer maps to this session's files)`
+        : null;
     return { cwd: located, note };
   }
-  // Fallbacks when the directory can't be located on disk.
-  if (row.cwd && existsSync(row.cwd)) return { cwd: row.cwd, note: null };
+
+  // Last resort when nothing on disk matches: recorded cwd → project root → home.
+  if (row.cwd && existsSync(row.cwd)) {
+    return { cwd: row.cwd, note: `could not confirm storage dir — resuming in recorded cwd ${row.cwd}` };
+  }
   if (existsSync(row.projectRoot)) {
     return { cwd: row.projectRoot, note: `original cwd is gone — resuming in project root ${row.projectRoot}` };
   }

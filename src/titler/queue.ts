@@ -17,6 +17,9 @@ export interface BackfillOptions {
   maxAttempts: number;
   /** Called after each Session resolves, for live progress. */
   onProgress?: (done: number, total: number) => void;
+  /** When this returns true, stop persisting/scheduling work (e.g. the TUI is exiting and
+   *  about to close the DB). Prevents writes to a torn-down database. */
+  isCancelled?: () => boolean;
 }
 
 /**
@@ -37,8 +40,12 @@ export async function backfillTitles(
 
   async function worker(): Promise<void> {
     while (next < candidates.length) {
+      if (opts.isCancelled?.()) return;
       const candidate: TitleCandidate = candidates[next++]!;
       const title = await titler.generate(candidate.skeleton);
+      // The generate() call can take seconds; re-check before any DB write in case the app
+      // exited and closed the database while we were waiting.
+      if (opts.isCancelled?.()) return;
       if (title) {
         saveCodexTitle(db, candidate.sessionId, title);
         stats.generated++;
