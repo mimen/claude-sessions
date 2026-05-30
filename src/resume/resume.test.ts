@@ -39,14 +39,15 @@ test("resolveResumeCwd: existing cwd kept; missing falls back", () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "ccs-resume-")));
   const repo = join(dir, "repo");
   mkdirSync(repo, { recursive: true });
+  const repoPath = join(dir, ".projects", encodePath(repo), "s.jsonl");
 
-  expect(resolveResumeCwd(row({ cwd: repo, projectRoot: repo })).note).toBeNull();
+  expect(resolveResumeCwd(row({ path: repoPath, cwd: repo, projectRoot: repo })).note).toBeNull();
 
-  const gone = resolveResumeCwd(row({ cwd: "/no/such/dir", projectRoot: repo }));
+  const gone = resolveResumeCwd(row({ path: "/p", cwd: "/no/such/dir", projectRoot: repo }));
   expect(gone.cwd).toBe(repo);
   expect(gone.note).toContain("project root");
 
-  const allGone = resolveResumeCwd(row({ cwd: "/no/such/dir", projectRoot: "/also/gone" }));
+  const allGone = resolveResumeCwd(row({ path: "/p", cwd: "/no/such/dir", projectRoot: "/also/gone" }));
   expect(allGone.cwd).toBe(homedir());
   expect(allGone.note).toContain("home");
 
