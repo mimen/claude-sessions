@@ -8,6 +8,7 @@ import {
   ftsMatchIds,
   getSkeleton,
   subagentCounts,
+  childrenOf,
   saveCodexTitle,
   type SessionRow,
 } from "../index/index.ts";
@@ -38,6 +39,7 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
   const [searching, setSearching] = useState(false);
   const [grouped, setGrouped] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [expandedSessions, setExpandedSessions] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState(0);
   const [previewVisible, setPreviewVisible] = useState(true);
   const [titling, setTitling] = useState<{ done: number; total: number } | null>(null);
@@ -63,9 +65,20 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
     () => searchRows(baseRows, query, contentIds),
     [baseRows, query, contentIds],
   );
+  const childrenByParent = useMemo(() => {
+    const map = new Map<string, SessionRow[]>();
+    for (const id of expandedSessions) map.set(id, childrenOf(db, id));
+    return map;
+  }, [db, expandedSessions, refreshTick]);
   const items = useMemo(
-    () => buildDisplayItems(rows, grouped, expanded),
-    [rows, grouped, expanded],
+    () =>
+      buildDisplayItems(rows, grouped, {
+        expandedGroups: expanded,
+        expandedSessions,
+        childCounts: subCounts,
+        childrenByParent,
+      }),
+    [rows, grouped, expanded, expandedSessions, subCounts, childrenByParent],
   );
 
   // Keep selection in range as the list changes.
@@ -103,6 +116,10 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
     const item = items[clampedSelected];
     if (!item || item.kind !== "session") return;
     const r = item.row;
+    if (r.isSubagent) {
+      setStatus("subagent runs aren't resumable — they're task runs spawned by a parent session");
+      return;
+    }
     const { cwd, note } = resolveResumeCwd(r);
     const cmd = buildResumeCommand(r, { fork, cwd });
     const target = resolveTarget(config.resume.target, reachable, forceOther);
@@ -115,6 +132,19 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
       resumeRequest.current = cmd;
       exit();
     }
+  };
+
+  // Drill into / out of a Session's subagent runs (only if it spawned any).
+  const toggleSessionExpand = (open: boolean) => {
+    const item = items[clampedSelected];
+    if (!item || item.kind !== "session") return;
+    if ((subCounts.get(item.row.sessionId) ?? 0) === 0) return;
+    setExpandedSessions((prev) => {
+      const next = new Set(prev);
+      if (open) next.add(item.row.sessionId);
+      else next.delete(item.row.sessionId);
+      return next;
+    });
   };
 
   const activate = () => {
@@ -169,6 +199,8 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
     if (input === "q" || key.escape) exit();
     else if (key.upArrow || input === "k") move(-1);
     else if (key.downArrow || input === "j") move(1);
+    else if (key.rightArrow || input === "l") toggleSessionExpand(true);
+    else if (key.leftArrow || input === "h") toggleSessionExpand(false);
     else if (input === "/") {
       setStatus(null);
       setSearching(true);
@@ -238,9 +270,9 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
       ) : null}
 
       <Text color="gray">
-        ↑↓ move · ↵ {grouped ? "expand/" : ""}resume · f fork · o {reachable ? "inline" : "cmux"} ·
-        / search · g {grouped ? "flat" : "group"} · p preview · a{" "}
-        {includeSubagents ? "hide" : "show"} subagents · t retitle · q quit
+        ↑↓ move · ↵ {grouped ? "expand/" : ""}resume · →← agents · f fork · o{" "}
+        {reachable ? "inline" : "cmux"} · / search · g {grouped ? "flat" : "group"} · p preview ·
+        a {includeSubagents ? "hide" : "show"} subagents · t retitle · q quit
       </Text>
     </Box>
   );

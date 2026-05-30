@@ -43,9 +43,11 @@ export function SessionList({ items, selected, height }: SessionListProps): Reac
 
         const r = item.row;
         const mark = SOURCE_MARK[r.titleSource];
-        const indent = item.depth > 0 ? "  " : "";
+        const indent = "  ".repeat(item.depth);
+        const caret = item.childCount > 0 ? (item.expanded ? "▾ " : "▸ ") : "";
+        const agents = item.childCount > 0 ? ` ⤷${item.childCount}` : "";
         const sub = r.isSubagent ? "↳ " : "";
-        const line = `${indent}${mark} ${sub}${pad(r.title, 50)} ${pad(r.projectName, 18)} ${pad(r.branch ?? "-", 10)} ${formatAge(r.lastTs)}`;
+        const line = `${indent}${caret}${mark} ${sub}${pad(r.title, 46)} ${pad(r.projectName, 16)} ${pad(r.branch ?? "-", 9)} ${formatAge(r.lastTs)}${agents}`;
         return (
           <Text key={index} color={isSel ? "cyan" : undefined} dimColor={r.isSubagent && !isSel}>
             {cursor}

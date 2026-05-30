@@ -212,6 +212,15 @@ function mapRows(raw: unknown[]): SessionRow[] {
   return (raw as RawRow[]).map((r) => ({ ...r, isSubagent: Boolean(r.isSubagent) }));
 }
 
+/** The subagent runs spawned by a given parent Session, most-recent first. */
+export function childrenOf(db: Database, parentSessionId: string): SessionRow[] {
+  return mapRows(
+    db
+      .query(`SELECT ${SELECT_COLS} FROM sessions WHERE parent_session_id = $pid ORDER BY last_ts DESC NULLS LAST`)
+      .all({ $pid: parentSessionId }),
+  );
+}
+
 /** Map of parent Session id → number of subagent runs it spawned. */
 export function subagentCounts(db: Database): Map<string, number> {
   const rows = db
