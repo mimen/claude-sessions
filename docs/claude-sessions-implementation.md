@@ -378,19 +378,35 @@ Next steps:
 
 **Completion Notes**:
 ```
-Date:
-Status:
+Date: 2026-05-29
+Status: COMPLETED (pending user verification)
+
 Notes:
+- scripts/setup.ts: `bun link` (→ ccs on PATH) + dependency report (claude/codex/cmux).
+- README.md: what/install/usage/keys/config/how-it-works + retention warning.
+- cli launchTui: first-run "indexing your sessions…" note when no index exists yet.
+- Transcript view (`v`) intentionally NOT built — it's the plan's stretch goal; the preview
+  pane's skeleton peek covers recognition. Logged as a future enhancement.
+
 Test Results:
+- typecheck clean; bun test 37 pass / 0 fail.
+- `bun run setup`: linked ccs onto PATH; deps detected claude ✓ codex ✓ cmux ✓.
+- Global end-to-end: ran `ccs` from /tmp (outside the repo) → "74 shown · subagent runs
+  hidden", clean exit. The core promise (resume any session from anywhere) verified.
+
 Issues encountered:
+- None.
+
 Next steps:
+- Milestone 7 (subagent drill-down UX) remains. Core tool (M1-M6) is complete and installed.
+- User-only live checks: press ↵ (cmux workspace opens) and `o` (inline hand-off to claude).
 ```
 
 ---
 
 ## Progress Tracking
 
-**Overall Completion**: 4/7 milestones (57%)
+**Overall Completion**: 6/7 milestones (86%)
 
 - [x] Planning & Research (grill: CONTEXT.md + ADR-0001 written)
 - [x] Milestone 1: Scaffold, config, Store discovery
@@ -398,7 +414,7 @@ Next steps:
 - [x] Milestone 3: Codex titler + background backfill
 - [x] Milestone 4: TUI — browse, search, preview (+ subagent filtering + parent linkage data)
 - [x] Milestone 5: Resume — inline, fork, cmux target
-- [ ] Milestone 6: Distribution, polish, docs
+- [x] Milestone 6: Distribution, polish, docs
 - [ ] Milestone 7: Subagent drill-down UX (expand a session into its agent tree)
 
 ---

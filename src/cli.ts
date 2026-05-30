@@ -1,6 +1,7 @@
 import pkg from "../package.json" with { type: "json" };
 import { loadConfig, type Config } from "./config.ts";
 import { scanStore, formatBytes, formatAge } from "./store.ts";
+import { existsSync } from "node:fs";
 import { ensureDataDir, DB_PATH } from "./paths.ts";
 import { openIndex } from "./index/schema.ts";
 import { reindexStore, listByRecency } from "./index/index.ts";
@@ -108,6 +109,9 @@ async function launchTui(): Promise<number> {
   const config = getConfig();
   if (!config) return 1;
   ensureDataDir();
+
+  const firstRun = !existsSync(DB_PATH);
+  if (firstRun) console.log("First run — indexing your sessions…");
 
   const db = openIndex(DB_PATH);
   const resumeRequest: { current: ResumeCommand | null } = { current: null };
