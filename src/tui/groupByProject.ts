@@ -25,9 +25,22 @@ export function groupByProject(rows: readonly SessionRow[]): ProjectGroup[] {
   return order.map((root) => groups.get(root)!);
 }
 
-/** A navigable row in the list: either a Project header or a Session. */
+/** A state-grouping section header (Active / Loops / Parked / …). */
+export interface SectionMeta {
+  readonly key: string;
+  readonly name: string;
+  readonly glyph: string;
+}
+
+/** A navigable row in the list: a Project header, a state Section header, or a Session. */
 export type DisplayItem =
   | { readonly kind: "header"; readonly group: ProjectGroup; readonly expanded: boolean }
+  | {
+      readonly kind: "section";
+      readonly section: SectionMeta;
+      readonly count: number;
+      readonly collapsed: boolean;
+    }
   | {
       readonly kind: "session";
       readonly row: SessionRow;

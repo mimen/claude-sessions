@@ -19,7 +19,8 @@ export function useTerminalSize(): TerminalSize {
 
   useEffect(() => {
     if (!stdout) return;
-    const onResize = () => setSize({ columns: stdout.columns, rows: stdout.rows });
+    // Fall back when a non-TTY stdout reports undefined dimensions (avoids NaN heights).
+    const onResize = () => setSize({ columns: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
     onResize(); // sync once in case it changed before subscription
     stdout.on("resize", onResize);
     return () => {

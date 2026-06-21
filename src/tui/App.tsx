@@ -27,11 +27,14 @@ import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
 import { getAll, lifecycleOf, setKind, setCompleted, setArchived } from "../catalogue/db.ts";
 import { openSessionIds } from "../catalogue/open-state.ts";
-import { describe as describeDisposition } from "../catalogue/disposition.ts";
+import { buildStateItems, DEFAULT_COLLAPSED } from "./stateGroups.ts";
 
+const STALE_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** Per-row visual style derived from catalogue lifecycle × live open-state. */
 export interface SessionBadge {
-  loop: boolean;
-  label: string;
+  glyph: string;
+  color: string;
   nudge: boolean;
 }
 
@@ -56,8 +59,8 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
   const [refreshTick, setRefreshTick] = useState(0);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [grouped, setGrouped] = useState(false);
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [view, setView] = useState<"state" | "flat">("state");
+  const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(DEFAULT_COLLAPSED);
   const [expandedSessions, setExpandedSessions] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState(0);
   const [previewVisible, setPreviewVisible] = useState(true);
@@ -93,10 +96,35 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
   }, [db, includeSubagents, refreshTick, catMap, showArchived]);
   const deco = useMemo(() => {
     const m = new Map<string, SessionBadge>();
+    const nowMs = Date.now();
     for (const r of baseRows) {
       const c = catMap.get(r.sessionId) ?? null;
-      const d = describeDisposition(lifecycleOf(c), openSet.has(r.sessionId));
-      m.set(r.sessionId, { loop: c?.kind === "loop", label: d.label, nudge: d.nudge });
+      const open = openSet.has(r.sessionId);
+      const lc = lifecycleOf(c);
+      const nudge = open && (lc === "parked" || lc === "completed");
+      let glyph = " ";
+      let color: string = theme.title;
+      if (c?.kind === "loop") {
+        glyph = "◆";
+        color = theme.accent;
+      } else if (lc === "archived") {
+        glyph = "·";
+        color = theme.faint;
+      } else if (lc === "completed") {
+        glyph = "✓";
+        color = theme.muted;
+      } else if (lc === "parked") {
+        glyph = "⏸";
+        color = "yellow";
+      } else if (open) {
+        glyph = "●";
+        color = theme.title;
+      } else {
+        const ts = r.lastTs ? Date.parse(r.lastTs) : NaN;
+        color = Number.isNaN(ts) || nowMs - ts > STALE_MS ? theme.faint : theme.muted;
+      }
+      if (nudge) color = "yellowBright";
+      m.set(r.sessionId, { glyph, color, nudge });
     }
     return m;
   }, [baseRows, catMap, openSet]);
@@ -114,13 +142,22 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
   }, [db, expandedSessions, refreshTick]);
   const items = useMemo(
     () =>
-      buildDisplayItems(rows, grouped, {
-        expandedGroups: expanded,
-        expandedSessions,
-        childCounts: subCounts,
-        childrenByParent,
-      }),
-    [rows, grouped, expanded, expandedSessions, subCounts, childrenByParent],
+      view === "state"
+        ? buildStateItems(rows, {
+            catMap,
+            openSet,
+            nowMs: Date.now(),
+            collapsedSections,
+            expandedSessions,
+            childCounts: subCounts,
+            childrenByParent,
+          })
+        : buildDisplayItems(rows, false, {
+            expandedSessions,
+            childCounts: subCounts,
+            childrenByParent,
+          }),
+    [view, rows, catMap, openSet, collapsedSections, expandedSessions, subCounts, childrenByParent],
   );
 
   const clampedSelected = Math.min(selected, Math.max(0, items.length - 1));
@@ -160,8 +197,21 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
   const move = (delta: number) =>
     setSelected((s) => Math.max(0, Math.min(s + delta, items.length - 1)));
 
+  const toggleSection = (key: string, collapse?: boolean) =>
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      const shouldCollapse = collapse ?? !next.has(key);
+      if (shouldCollapse) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+
   const toggleSessionExpand = (open: boolean) => {
     const item = items[clampedSelected];
+    if (item?.kind === "section") {
+      toggleSection(item.section.key, !open);
+      return;
+    }
     if (!item || item.kind !== "session") return;
     if ((subCounts.get(item.row.sessionId) ?? 0) === 0) return;
     setExpandedSessions((prev) => {
@@ -196,16 +246,11 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
   const activate = () => {
     const item = items[clampedSelected];
     if (!item) return;
-    if (item.kind === "header") {
-      setExpanded((prev) => {
-        const next = new Set(prev);
-        if (next.has(item.group.root)) next.delete(item.group.root);
-        else next.add(item.group.root);
-        return next;
-      });
-    } else {
-      doResume(false, false);
+    if (item.kind === "section") {
+      toggleSection(item.section.key);
+      return;
     }
+    if (item.kind === "session") doResume(false, false);
   };
 
   const openTranscript = () => {
@@ -308,7 +353,7 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
       setStatus(null);
       setSearching(true);
     } else if (input === "g") {
-      setGrouped((g) => !g);
+      setView((v) => (v === "state" ? "flat" : "state"));
       setSelected(0);
     } else if (input === "p") setPreviewVisible((v) => !v);
     else if (input === "v") openTranscript();
@@ -428,9 +473,9 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
 
       {transcript ? null : (
         <Text color={theme.muted} wrap="truncate-end">
-          ↵ resume · v transcript · / search · L loop · C done · X archive
+          ↵ resume/expand · v transcript · / search · L loop · C done · X archive
           {showArchived ? " · A hide-arch" : " · A show-arch"} · t retitle · g{" "}
-          {grouped ? "flat" : "group"} · ? help · q quit
+          {view === "state" ? "flat" : "by-state"} · ? help · q quit
         </Text>
       )}
     </Box>
