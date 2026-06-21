@@ -121,7 +121,9 @@ export function pushCmuxRename(sessionId: string, title: string, cmuxBin = "cmux
   const ref = cmuxWorkspaceForSession(sessionId, cmuxBin);
   if (!ref) return false;
   try {
-    execFileSync(cmuxBin, ["rename-workspace", "--workspace", ref, "--title", title], {
+    // rename-workspace takes the title positionally: `rename-workspace --workspace <ref> -- <title>`.
+    // The `--` guards titles that start with a dash from being parsed as flags.
+    execFileSync(cmuxBin, ["rename-workspace", "--workspace", ref, "--", title], {
       timeout: 4000,
       stdio: "ignore",
     });
