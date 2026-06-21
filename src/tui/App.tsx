@@ -25,22 +25,34 @@ import { Help } from "./Help.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
+import { getAll, lifecycleOf, setKind, setCompleted, setArchived } from "../catalogue/db.ts";
+import { openSessionIds } from "../catalogue/open-state.ts";
+import { describe as describeDisposition } from "../catalogue/disposition.ts";
+
+export interface SessionBadge {
+  loop: boolean;
+  label: string;
+  nudge: boolean;
+}
 
 interface AppProps {
   db: Database;
   config: Config;
   titler: Titler;
+  /** Durable user metadata. Optional so tests can mount without a catalogue (no cmux probe). */
+  catalogue?: Database;
   /** Inline resume is handed back to the launcher here, after the app exits. */
   resumeRequest: { current: ResumeCommand | null };
 }
 
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
-export function App({ db, config, titler, resumeRequest }: AppProps): React.ReactElement {
+export function App({ db, catalogue, config, titler, resumeRequest }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { columns: cols, rows: termRows } = useTerminalSize();
 
   const [includeSubagents, setIncludeSubagents] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
@@ -60,10 +72,34 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
   const reload = () => setRefreshTick((t) => t + 1);
   const reachable = useMemo(() => cmuxReachable(), []);
 
-  const baseRows = useMemo(
-    () => listByRecency(db, includeSubagents),
-    [db, includeSubagents, refreshTick],
+  // Catalogue join: custom-title override + lifecycle; live open-state from cmux. Only when a
+  // catalogue is present (tests mount without one, so no cmux probe runs there).
+  const catMap = useMemo(
+    () => (catalogue ? getAll(catalogue) : new Map()),
+    [catalogue, refreshTick],
   );
+  const openSet = useMemo(
+    () => (catalogue ? openSessionIds() : new Set<string>()),
+    [catalogue, refreshTick],
+  );
+  const baseRows = useMemo(() => {
+    const raw = listByRecency(db, includeSubagents);
+    return raw
+      .filter((r) => showArchived || lifecycleOf(catMap.get(r.sessionId) ?? null) !== "archived")
+      .map((r) => {
+        const c = catMap.get(r.sessionId);
+        return c?.customTitle ? { ...r, title: c.customTitle } : r;
+      });
+  }, [db, includeSubagents, refreshTick, catMap, showArchived]);
+  const deco = useMemo(() => {
+    const m = new Map<string, SessionBadge>();
+    for (const r of baseRows) {
+      const c = catMap.get(r.sessionId) ?? null;
+      const d = describeDisposition(lifecycleOf(c), openSet.has(r.sessionId));
+      m.set(r.sessionId, { loop: c?.kind === "loop", label: d.label, nudge: d.nudge });
+    }
+    return m;
+  }, [baseRows, catMap, openSet]);
   const subCounts = useMemo(() => subagentCounts(db), [db, refreshTick]);
   const titleById = useMemo(() => new Map(baseRows.map((r) => [r.sessionId, r.title])), [baseRows]);
   const contentIds = useMemo(
@@ -202,6 +238,16 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
     });
   };
 
+  // Apply a catalogue mutation to the selected session, then refresh. No-op on
+  // headers/subagents or when no catalogue is mounted.
+  const applyMark = (mut: (cat: Database, id: string, now: string) => void, msg: string) => {
+    const item = items[clampedSelected];
+    if (!item || item.kind !== "session" || item.row.isSubagent || !catalogue) return;
+    mut(catalogue, item.row.sessionId, new Date().toISOString());
+    setStatus(msg);
+    reload();
+  };
+
   useInput((input, key) => {
     // Transcript viewer owns input while open.
     if (transcript) {
@@ -270,7 +316,19 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
       setIncludeSubagents((v) => !v);
       setSelected(0);
     } else if (input === "t") retitle();
-    else if (input === "f") doResume(true, false);
+    else if (input === "L")
+      applyMark(
+        (c, id, now) => setKind(c, id, catMap.get(id)?.kind === "loop" ? "session" : "loop", now),
+        "toggled loop",
+      );
+    else if (input === "C")
+      applyMark((c, id, now) => setCompleted(c, id, !catMap.get(id)?.completed, now), "toggled completed");
+    else if (input === "X")
+      applyMark((c, id, now) => setArchived(c, id, !catMap.get(id)?.archived, now), "toggled archived");
+    else if (input === "A") {
+      setShowArchived((v) => !v);
+      setSelected(0);
+    } else if (input === "f") doResume(true, false);
     else if (input === "o") doResume(false, true);
     else if (key.return) activate();
   });
@@ -347,7 +405,7 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
       ) : sideBySide ? (
         <Box flexDirection="row" height={body}>
           <Box width={listWidth} flexShrink={0} marginRight={1}>
-            <SessionList items={items} selected={clampedSelected} height={listHeight} />
+            <SessionList items={items} selected={clampedSelected} height={listHeight} deco={deco} />
           </Box>
           <Box width={previewWidth} flexShrink={0}>
             {previewEl}
@@ -356,7 +414,7 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
       ) : (
         <Box flexDirection="column">
           <Box height={listHeight} flexDirection="column">
-            <SessionList items={items} selected={clampedSelected} height={listHeight} />
+            <SessionList items={items} selected={clampedSelected} height={listHeight} deco={deco} />
           </Box>
           {showPreviewPane ? previewEl : null}
         </Box>
@@ -370,9 +428,9 @@ export function App({ db, config, titler, resumeRequest }: AppProps): React.Reac
 
       {transcript ? null : (
         <Text color={theme.muted} wrap="truncate-end">
-          ↵ resume · v transcript · →← agents · / search · {query ? "esc clear · " : ""}g{" "}
-          {grouped ? "flat" : "group"} · p preview · a {includeSubagents ? "hide" : "show"} subs · ?
-          help · q quit
+          ↵ resume · v transcript · / search · L loop · C done · X archive
+          {showArchived ? " · A hide-arch" : " · A show-arch"} · t retitle · g{" "}
+          {grouped ? "flat" : "group"} · ? help · q quit
         </Text>
       )}
     </Box>

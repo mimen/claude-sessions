@@ -9,6 +9,12 @@ import { mkdirSync } from "node:fs";
 export const DATA_DIR = join(homedir(), ".claude-sessions");
 export const CONFIG_PATH = join(DATA_DIR, "config.toml");
 export const DB_PATH = join(DATA_DIR, "index.db");
+/**
+ * Catalogue: durable user-authored session metadata (rename, loop, lifecycle, tags).
+ * A SEPARATE file from the Index on purpose — the Index is a pure cache that gets dropped
+ * and rebuilt on schema bumps; the catalogue must survive that, so it never shares the file.
+ */
+export const CATALOGUE_PATH = join(DATA_DIR, "catalogue.db");
 
 /** Default Store: the single directory Claude Code centralises all Sessions into. */
 export const DEFAULT_STORE_PATH = join(homedir(), ".claude", "projects");

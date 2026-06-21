@@ -4,10 +4,18 @@ import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
 import { theme, isRecentAge } from "./theme.ts";
 
+interface SessionBadge {
+  loop: boolean;
+  label: string;
+  nudge: boolean;
+}
+
 interface SessionListProps {
   items: DisplayItem[];
   selected: number;
   height: number;
+  /** sessionId -> catalogue badge (loop flag + disposition label). */
+  deco?: Map<string, SessionBadge>;
 }
 
 const SOURCE_MARK = { native: "★", codex: "✎", fallback: "·" } as const;
@@ -18,7 +26,7 @@ const SOURCE_COLOR = {
 } as const;
 
 /** Box-based row layout — column widths are enforced by flexbox, so glyph width never drifts. */
-export function SessionList({ items, selected, height }: SessionListProps): React.ReactElement {
+export function SessionList({ items, selected, height, deco }: SessionListProps): React.ReactElement {
   const start = Math.max(0, Math.min(selected - Math.floor(height / 2), items.length - height));
   const offset = Math.max(0, start);
   const window = items.slice(offset, offset + height);
@@ -49,6 +57,16 @@ export function SessionList({ items, selected, height }: SessionListProps): Reac
         const titleColor = sel ? theme.selFg : r.isSubagent ? theme.muted : theme.title;
         const caret = item.childCount > 0 ? (item.expanded ? "▾ " : "▸ ") : "";
 
+        const badge = deco?.get(r.sessionId);
+        const badgeText = badge ? (badge.loop ? "◆ " : "") + badge.label + (badge.nudge ? "!" : "") : "";
+        const badgeColor = sel
+          ? theme.selFg
+          : badge?.nudge
+            ? "yellow"
+            : badge?.loop
+              ? theme.accent
+              : theme.muted;
+
         return (
           <Box key={index} backgroundColor={bg}>
             <Text color={sel ? theme.selFg : theme.accent}>{sel ? "❯" : " "}</Text>
@@ -63,7 +81,12 @@ export function SessionList({ items, selected, height }: SessionListProps): Reac
                 {r.title}
               </Text>
             </Box>
-            <Box width={16} flexShrink={0} marginRight={1}>
+            <Box width={15} flexShrink={0} marginRight={1}>
+              <Text wrap="truncate-end" color={badgeColor}>
+                {badgeText}
+              </Text>
+            </Box>
+            <Box width={14} flexShrink={0} marginRight={1}>
               <Text wrap="truncate-end" color={sel ? theme.selFg : theme.project}>
                 {r.projectName}
               </Text>
