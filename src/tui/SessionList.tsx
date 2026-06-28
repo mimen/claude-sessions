@@ -9,6 +9,8 @@ interface SessionBadge {
   glyph: string;
   color: string;
   nudge: boolean;
+  /** Event slug this session is assigned to (catalogue.event), if any. */
+  event?: string | null;
 }
 
 interface SessionListProps {
@@ -89,6 +91,11 @@ export function SessionList({ items, selected, height, deco }: SessionListProps)
                 {r.title}
               </Text>
             </Box>
+            {badge?.event ? (
+              <Box flexShrink={0} marginRight={1}>
+                <Text color={sel ? theme.selFg : theme.project}>⊞{badge.event}</Text>
+              </Box>
+            ) : null}
             <Box width={5} flexShrink={0} justifyContent="flex-end">
               <Text color={ageColor}>{age}</Text>
             </Box>

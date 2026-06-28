@@ -9,6 +9,8 @@ interface PreviewProps {
   skeleton: string;
   parentTitle: string | null;
   subagentCount: number;
+  /** Event slug this session is assigned to (catalogue.event), if any. */
+  event?: string | null;
   /** Total height available to the pane (border included). */
   height: number;
 }
@@ -38,8 +40,8 @@ function Field({ label, value, color }: { label: string; value: string; color?: 
 }
 
 /** Detail pane for the selected Session — styled label/value rows + a content peek. */
-export function Preview({ row, skeleton, parentTitle, subagentCount, height }: PreviewProps): React.ReactElement {
-  const fixedRows = 8 + (row.isSubagent && parentTitle ? 1 : 0) + (subagentCount > 0 ? 1 : 0);
+export function Preview({ row, skeleton, parentTitle, subagentCount, event, height }: PreviewProps): React.ReactElement {
+  const fixedRows = 8 + (row.isSubagent && parentTitle ? 1 : 0) + (subagentCount > 0 ? 1 : 0) + (event ? 1 : 0);
   const peekLines = Math.max(0, height - fixedRows);
   const peek = peekLines > 0 ? skeleton.split("\n").slice(0, peekLines) : [];
 
@@ -58,6 +60,7 @@ export function Preview({ row, skeleton, parentTitle, subagentCount, height }: P
         <Field label="started" value={fmtTs(row.firstTs)} />
         <Field label="active" value={`${fmtTs(row.lastTs)}  (${formatAge(row.lastTs)})`} />
         <Field label="id" value={row.sessionId} />
+        {event ? <Field label="event" value={event} color={theme.project} /> : null}
         {row.isSubagent && parentTitle ? (
           <Field label="parent" value={parentTitle} color="yellow" />
         ) : null}

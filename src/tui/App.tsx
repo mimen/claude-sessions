@@ -36,6 +36,8 @@ export interface SessionBadge {
   glyph: string;
   color: string;
   nudge: boolean;
+  /** Event slug this session is assigned to (catalogue.event), if any. */
+  event?: string | null;
 }
 
 interface AppProps {
@@ -124,7 +126,7 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
         color = Number.isNaN(ts) || nowMs - ts > STALE_MS ? theme.faint : theme.muted;
       }
       if (nudge) color = "yellowBright";
-      m.set(r.sessionId, { glyph, color, nudge });
+      m.set(r.sessionId, { glyph, color, nudge, event: c?.event ?? null });
     }
     return m;
   }, [baseRows, catMap, openSet]);
@@ -405,6 +407,7 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
           : null
       }
       subagentCount={subCounts.get(selectedRow.sessionId) ?? 0}
+      event={catMap.get(selectedRow.sessionId)?.event ?? null}
       height={previewHeight}
     />
   ) : null;

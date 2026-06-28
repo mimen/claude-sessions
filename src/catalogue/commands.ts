@@ -5,6 +5,7 @@ import {
   setKind,
   setCompleted,
   setArchived,
+  setEvent,
   addTag,
   removeTag,
   getRow,
@@ -111,6 +112,26 @@ export function tag(sessionArg: string | undefined, entity: string | undefined, 
   return 0;
 }
 
+/** Set (or clear, with --off) the event slug a session belongs to. */
+export function event(sessionArg: string | undefined, slug: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!off && (!slug || !slug.trim())) {
+    console.error('usage: ccs event [<session-id>|.] <slug> [--off]');
+    return 1;
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH);
+  try {
+    setEvent(db, id, off ? null : slug!.trim(), now());
+    console.log(off ? `cleared event on ${id.slice(0, 8)}…` : `event ${slug!.trim()} → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
 /** Print the current session's catalogue row (self-awareness). */
 export function meta(sessionArg: string | undefined): number {
   const id = resolveSessionId(sessionArg);
@@ -129,6 +150,7 @@ export function meta(sessionArg: string | undefined): number {
     console.log(
       `  lifecycle: ${row?.archived ? "archived" : row?.completed ? "completed" : row?.parkedTaskId ? "parked" : "idle"}`,
     );
+    if (row?.event) console.log(`  event: ${row.event}`);
     if (tags.length) console.log(`  tags: ${tags.join(", ")}`);
   } finally {
     db.close();

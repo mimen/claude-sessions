@@ -9,8 +9,10 @@ import {
   setArchived,
   setCompleted,
   setCustomTitle,
+  setEvent,
   setKind,
   setParked,
+  sessionsForEvent,
 } from "./db.ts";
 import { describe as dispo } from "./disposition.ts";
 
@@ -50,6 +52,19 @@ test("tags: add, list, reverse lookup", () => {
   addTag(db, "s2", "Glizzy Galaxy");
   expect(getTags(db, "s1")).toEqual(["Glizzy Galaxy"]);
   expect(sessionsForEntity(db, "Glizzy Galaxy").sort()).toEqual(["s1", "s2"]);
+});
+
+test("event: set, round-trip, clear, reverse lookup", () => {
+  const db = openCatalogue(":memory:");
+  expect(getRow(db, "s1")?.event ?? null).toBeNull();
+  setEvent(db, "s1", "glizzy-galaxy", NOW);
+  setEvent(db, "s2", "glizzy-galaxy", NOW);
+  setEvent(db, "s3", "kiki-factory", NOW);
+  expect(getRow(db, "s1")!.event).toBe("glizzy-galaxy");
+  expect(sessionsForEvent(db, "glizzy-galaxy").sort()).toEqual(["s1", "s2"]);
+  setEvent(db, "s1", null, NOW); // clear
+  expect(getRow(db, "s1")!.event).toBeNull();
+  expect(sessionsForEvent(db, "glizzy-galaxy")).toEqual(["s2"]);
 });
 
 test("disposition combines lifecycle × liveness", () => {

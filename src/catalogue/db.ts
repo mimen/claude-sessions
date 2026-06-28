@@ -19,11 +19,13 @@ export interface CatalogueRow {
   completed: boolean;
   archived: boolean;
   parkedTaskId: string | null;
+  /** Event slug this session belongs to (set by the event-watch scout, or manually). */
+  event: string | null;
   notes: string | null;
   updatedAt: string | null;
 }
 
-const CATALOGUE_VERSION = 1;
+const CATALOGUE_VERSION = 2;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -57,7 +59,22 @@ function migrate(db: Database): void {
       CREATE INDEX IF NOT EXISTS idx_tags_entity ON session_tags(entity);
     `);
   }
+  if (v < 2) {
+    // Additive: a first-class event slug on the session record. Nullable; no backfill.
+    // Guard the ALTER on actual column presence — a still-deployed v1 binary can reset
+    // user_version to 1 after we bump it, so this block can re-run; ADD COLUMN twice throws.
+    if (!hasColumn(db, "catalogue", "event")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN event TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_event ON catalogue(event);");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
+}
+
+/** Whether a table already has a given column (PRAGMA table_info), for idempotent ALTERs. */
+function hasColumn(db: Database, table: string, column: string): boolean {
+  const cols = db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  return cols.some((c) => c.name === column);
 }
 
 function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
@@ -70,6 +87,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     completed: !!r.completed,
     archived: !!r.archived,
     parkedTaskId: (r.parked_task_id as string) ?? null,
+    event: (r.event as string) ?? null,
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
   };
@@ -139,6 +157,18 @@ export function setParked(db: Database, sessionId: string, taskId: string | null
 }
 export function setResumeId(db: Database, sessionId: string, resumeId: string, now: string): void {
   set(db, sessionId, "resume_id", resumeId, now);
+}
+export function setEvent(db: Database, sessionId: string, event: string | null, now: string): void {
+  set(db, sessionId, "event", event, now);
+}
+
+/** Reverse lookup: which sessions are assigned to this event slug. */
+export function sessionsForEvent(db: Database, event: string): string[] {
+  return (
+    db.query("SELECT session_id FROM catalogue WHERE event = $e").all({ $e: event }) as {
+      session_id: string;
+    }[]
+  ).map((r) => r.session_id);
 }
 
 // ---- tags ----

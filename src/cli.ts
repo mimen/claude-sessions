@@ -8,7 +8,7 @@ import { reindexStore, listByRecency } from "./index/index.ts";
 import { openCatalogue, getAll, lifecycleOf } from "./catalogue/db.ts";
 import { openSessionIds } from "./catalogue/open-state.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, event, meta } from "./catalogue/commands.ts";
 import { backfillTitles } from "./titler/queue.ts";
 import { createCodexTitler } from "./titler/codex.ts";
 import { handoffInline } from "./resume/inline.ts";
@@ -21,11 +21,13 @@ Usage:
   ccs reindex         Refresh the session index from the store
   ccs reindex --titles   Also (re)generate titles, headless (cron-friendly)
   ccs ls              Print indexed sessions (with catalogue badges)
+  ccs ls --event <slug>   Only sessions assigned to that event
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
   ccs meta [<id>|.]   Show a session's catalogue metadata (. = current session)
   ccs rename [<id>|.] "<name>"   Set a custom title (+ sync cmux workspace name)
   ccs mark [<id>|.] --loop|--completed|--archived [--off]   Set lifecycle/kind flags
   ccs tag [<id>|.] "<Entity>" [--remove]   Add/remove an entity tag
+  ccs event [<id>|.] <slug> [--off]   Assign/clear the session's event slug
   ccs --version       Print version
   ccs --help          Show this help
 `;
@@ -48,7 +50,11 @@ export async function main(argv: string[]): Promise<number> {
     case "reindex":
       return await reindex({ titles: args.includes("--titles") });
     case "ls":
-      return ls({ all: args.includes("--all"), loops: args.includes("--loops") });
+      return ls({
+        all: args.includes("--all"),
+        loops: args.includes("--loops"),
+        event: flagValue(args, "--event"),
+      });
     case "whoami":
       return whoami();
     case "meta":
@@ -59,6 +65,8 @@ export async function main(argv: string[]): Promise<number> {
       return mark(args[1], args.slice(2).filter((a) => a.startsWith("--")));
     case "tag":
       return tag(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "event":
+      return event(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case undefined:
       return await launchTui();
     default:
@@ -166,7 +174,7 @@ async function launchTui(): Promise<number> {
 }
 
 /** Table of indexed sessions, joined with catalogue metadata + live open-state. */
-function ls(opts: { all: boolean; loops: boolean }): number {
+function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
   const db = openIndex(DB_PATH);
   const cat = openCatalogue(CATALOGUE_PATH);
   try {
@@ -182,26 +190,38 @@ function ls(opts: { all: boolean; loops: boolean }): number {
     for (const r of rows) {
       const c = catalogue.get(r.sessionId) ?? null;
       const lifecycle = lifecycleOf(c);
+      if (opts.event && c?.event !== opts.event) continue;
       if (!opts.all && lifecycle === "archived") continue;
       if (opts.loops && c?.kind !== "loop") continue;
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
       const title = pad(c?.customTitle ?? r.title, 42);
       const badge = pad((c?.kind === "loop" ? "LOOP " : "") + d.label + (d.nudge ? "!" : ""), 16);
+      // Only print the event column when not already filtering to a single event.
+      const evt = opts.event ? "" : pad(c?.event ? `⊞${c.event}` : "", 18);
       const project = pad(r.projectName, 16);
       const age = pad(formatAge(r.lastTs), 5);
-      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${project} ${age} ${r.msgCount}m`);
+      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${evt}${project} ${age} ${r.msgCount}m`);
       shown++;
     }
     const hidden = rows.length - shown;
     console.log(
-      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · !=open+parked/completed)` +
-        (hidden > 0 && !opts.all ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
+      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⊞=event · !=open+parked/completed)` +
+        (opts.event ? ` · event=${opts.event}` : "") +
+        (hidden > 0 && !opts.all && !opts.event ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
     );
   } finally {
     db.close();
     cat.close();
   }
   return 0;
+}
+
+/** Read the value after a `--flag` in argv, or undefined if absent/last. */
+function flagValue(args: string[], flag: string): string | undefined {
+  const i = args.indexOf(flag);
+  if (i === -1) return undefined;
+  const v = args[i + 1];
+  return v && !v.startsWith("--") ? v : undefined;
 }
 
 /** Pad/truncate a string to an exact display width. */
