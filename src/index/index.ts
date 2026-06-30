@@ -266,6 +266,16 @@ export function ftsMatchIds(db: Database, query: string): Set<string> {
   }
 }
 
+/** The resolved Title for a single Session id, or null if it isn't indexed (e.g. a forward ref). */
+export function titleOf(db: Database, sessionId: string): string | null {
+  const row = db
+    .query(
+      "SELECT COALESCE(native_title, codex_title, fallback_label) AS title FROM sessions WHERE session_id = $id",
+    )
+    .get({ $id: sessionId }) as { title: string } | null;
+  return row?.title ?? null;
+}
+
 /** The stored skeleton for a Session (first/last turns) — the preview-pane content peek. */
 export function getSkeleton(db: Database, sessionId: string): string {
   const row = db

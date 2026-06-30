@@ -1,4 +1,5 @@
-import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
+import { existsSync } from "node:fs";
+import { ensureDataDir, CATALOGUE_PATH, DB_PATH } from "../paths.ts";
 import {
   openCatalogue,
   setCustomTitle,
@@ -6,12 +7,17 @@ import {
   setCompleted,
   setArchived,
   setEvent,
+  setParent,
+  setSkill,
   addTag,
   removeTag,
+  childrenOf,
   getRow,
   getTags,
   type Kind,
 } from "./db.ts";
+import { openIndex } from "../index/schema.ts";
+import { titleOf } from "../index/index.ts";
 import { pushCmuxRename } from "./open-state.ts";
 
 /**
@@ -22,10 +28,30 @@ import { pushCmuxRename } from "./open-state.ts";
 
 const now = (): string => new Date().toISOString();
 
+/** A Claude Code session id is a UUID; used to validate a `parent` edge before storing it. */
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Resolve the target session id: explicit arg, or "." / "self" / omitted → current session. */
 function resolveSessionId(arg: string | undefined): string | null {
   if (!arg || arg === "." || arg === "self") return process.env.CLAUDE_CODE_SESSION_ID ?? null;
   return arg;
+}
+
+/**
+ * Resolve a session id to a short, human-skimmable label: `1a2b3c4d… <title>`. Opens the Index
+ * read-only when present; degrades to the bare short id when the session isn't indexed (a forward
+ * reference to a parent that hasn't been seen yet is allowed, so this must never throw).
+ */
+function labelFor(id: string): string {
+  const short = `${id.slice(0, 8)}…`;
+  if (!existsSync(DB_PATH)) return short;
+  const db = openIndex(DB_PATH);
+  try {
+    const title = titleOf(db, id);
+    return title ? `${short} ${title}` : short;
+  } finally {
+    db.close();
+  }
 }
 
 export function whoami(): number {
@@ -132,6 +158,78 @@ export function event(sessionArg: string | undefined, slug: string | undefined, 
   return 0;
 }
 
+/** Set (or clear, with --off) the parent session that spawned/owns this one. */
+export function parent(
+  sessionArg: string | undefined,
+  parentArg: string | undefined,
+  flags: string[],
+): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH);
+  try {
+    if (off) {
+      setParent(db, id, null, now());
+      console.log(`cleared parent on ${id.slice(0, 8)}…`);
+      return 0;
+    }
+    const parentId = resolveSessionId(parentArg);
+    if (!parentId) {
+      console.error("usage: ccs parent [<session-id>|.] <parent-id|.> | --off");
+      return 1;
+    }
+    if (parentId === id) {
+      console.error("A session can't be its own parent.");
+      return 1;
+    }
+    // Validate shape; a non-UUID is almost certainly a mistake (wrong arg order, a title, …).
+    if (!SESSION_ID_RE.test(parentId)) {
+      console.error(`Not a session id: ${parentId} (expected a UUID). Nothing set.`);
+      return 1;
+    }
+    setParent(db, id, parentId, now());
+    console.log(`parent ${parentId.slice(0, 8)}… → ${id.slice(0, 8)}…`);
+    // Warn (don't fail) on a parent we've never indexed — forward references are allowed.
+    if (existsSync(DB_PATH)) {
+      const ix = openIndex(DB_PATH);
+      try {
+        if (titleOf(ix, parentId) === null) {
+          console.warn(`  note: parent ${parentId.slice(0, 8)}… isn't in the index (forward reference — ok).`);
+        }
+      } finally {
+        ix.close();
+      }
+    }
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/** Set (or clear, with --off) the skill / slash-command backing this session. */
+export function skill(sessionArg: string | undefined, name: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!off && (!name || !name.trim())) {
+    console.error("usage: ccs skill [<session-id>|.] <name> | --off");
+    return 1;
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH);
+  try {
+    // Normalise a leading slash so `/event-watch` and `event-watch` land on the same value.
+    const value = off ? null : name!.trim().replace(/^\//, "");
+    setSkill(db, id, value, now());
+    console.log(off ? `cleared skill on ${id.slice(0, 8)}…` : `skill ${value} → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
 /** Print the current session's catalogue row (self-awareness). */
 export function meta(sessionArg: string | undefined): number {
   const id = resolveSessionId(sessionArg);
@@ -140,7 +238,8 @@ export function meta(sessionArg: string | undefined): number {
   try {
     const row = getRow(db, id);
     const tags = getTags(db, id);
-    if (!row && tags.length === 0) {
+    const children = childrenOf(db, id);
+    if (!row && tags.length === 0 && children.length === 0) {
       console.log(`${id}\n  (no catalogue metadata yet)`);
       return 0;
     }
@@ -150,6 +249,12 @@ export function meta(sessionArg: string | undefined): number {
     console.log(
       `  lifecycle: ${row?.archived ? "archived" : row?.completed ? "completed" : row?.parkedTaskId ? "parked" : "idle"}`,
     );
+    if (row?.skill) console.log(`  skill: ${row.skill}`);
+    if (row?.parentSessionId) console.log(`  parent: ${labelFor(row.parentSessionId)}`);
+    if (children.length) {
+      console.log(`  children: ${children.length}`);
+      for (const c of children) console.log(`    ↳ ${labelFor(c)}`);
+    }
     if (row?.event) console.log(`  event: ${row.event}`);
     if (tags.length) console.log(`  tags: ${tags.join(", ")}`);
   } finally {

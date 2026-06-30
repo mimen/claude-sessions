@@ -4,11 +4,12 @@ import { scanStore, formatBytes, formatAge } from "./store.ts";
 import { existsSync } from "node:fs";
 import { ensureDataDir, DB_PATH, CATALOGUE_PATH } from "./paths.ts";
 import { openIndex } from "./index/schema.ts";
-import { reindexStore, listByRecency } from "./index/index.ts";
-import { openCatalogue, getAll, lifecycleOf } from "./catalogue/db.ts";
+import type { Database } from "bun:sqlite";
+import { reindexStore, listByRecency, titleOf } from "./index/index.ts";
+import { openCatalogue, getAll, lifecycleOf, parentEdges } from "./catalogue/db.ts";
 import { openSessionIds } from "./catalogue/open-state.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, event, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, event, parent, skill, meta } from "./catalogue/commands.ts";
 import { backfillTitles } from "./titler/queue.ts";
 import { createCodexTitler } from "./titler/codex.ts";
 import { handoffInline } from "./resume/inline.ts";
@@ -22,12 +23,15 @@ Usage:
   ccs reindex --titles   Also (re)generate titles, headless (cron-friendly)
   ccs ls              Print indexed sessions (with catalogue badges)
   ccs ls --event <slug>   Only sessions assigned to that event
+  ccs tree            Constellation view: children grouped under their parent
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
   ccs meta [<id>|.]   Show a session's catalogue metadata (. = current session)
   ccs rename [<id>|.] "<name>"   Set a custom title (+ sync cmux workspace name)
   ccs mark [<id>|.] --loop|--completed|--archived [--off]   Set lifecycle/kind flags
   ccs tag [<id>|.] "<Entity>" [--remove]   Add/remove an entity tag
   ccs event [<id>|.] <slug> [--off]   Assign/clear the session's event slug
+  ccs parent [<id>|.] <parent-id|.> [--off]   Set/clear the spawning parent session
+  ccs skill [<id>|.] <name> [--off]   Set/clear the backing skill or slash-command
   ccs --version       Print version
   ccs --help          Show this help
 `;
@@ -55,6 +59,8 @@ export async function main(argv: string[]): Promise<number> {
         loops: args.includes("--loops"),
         event: flagValue(args, "--event"),
       });
+    case "tree":
+      return tree({ all: args.includes("--all") });
     case "whoami":
       return whoami();
     case "meta":
@@ -67,6 +73,10 @@ export async function main(argv: string[]): Promise<number> {
       return tag(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "event":
       return event(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "parent":
+      return parent(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "skill":
+      return skill(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case undefined:
       return await launchTui();
     default:
@@ -194,18 +204,21 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
       if (!opts.all && lifecycle === "archived") continue;
       if (opts.loops && c?.kind !== "loop") continue;
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
-      const title = pad(c?.customTitle ?? r.title, 42);
+      // A child in the constellation gets a ↳ marker inside the (padded) title cell, keeping columns aligned.
+      const childMark = c?.parentSessionId ? "↳ " : "";
+      const title = pad(childMark + (c?.customTitle ?? r.title), 42);
       const badge = pad((c?.kind === "loop" ? "LOOP " : "") + d.label + (d.nudge ? "!" : ""), 16);
+      const sk = pad(c?.skill ? `⚙${c.skill}` : "", 14);
       // Only print the event column when not already filtering to a single event.
       const evt = opts.event ? "" : pad(c?.event ? `⊞${c.event}` : "", 18);
       const project = pad(r.projectName, 16);
       const age = pad(formatAge(r.lastTs), 5);
-      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${evt}${project} ${age} ${r.msgCount}m`);
+      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${evt}${project} ${age} ${r.msgCount}m`);
       shown++;
     }
     const hidden = rows.length - shown;
     console.log(
-      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⊞=event · !=open+parked/completed)` +
+      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⚙=skill · ↳=child · ⊞=event · !=open+parked/completed)` +
         (opts.event ? ` · event=${opts.event}` : "") +
         (hidden > 0 && !opts.all && !opts.event ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
     );
@@ -214,6 +227,62 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
     cat.close();
   }
   return 0;
+}
+
+/**
+ * Constellation view: the parent→child edges from the catalogue, with children nested under their
+ * parent. A "root" is any parent that isn't itself someone's child; on a pure cycle we fall back to
+ * every parent as a root, and a seen-set guards the recursion so a cycle prints once, not forever.
+ */
+function tree(_opts: { all: boolean }): number {
+  const db = openIndex(DB_PATH);
+  const cat = openCatalogue(CATALOGUE_PATH);
+  try {
+    const edges = parentEdges(cat);
+    if (edges.length === 0) {
+      console.log("No constellation edges yet. Link one with `ccs parent <id|.> <parent-id|.>`.");
+      return 0;
+    }
+    const childMap = new Map<string, string[]>();
+    const isChild = new Set<string>();
+    for (const e of edges) {
+      const kids = childMap.get(e.parentId) ?? [];
+      kids.push(e.sessionId);
+      childMap.set(e.parentId, kids);
+      isChild.add(e.sessionId);
+    }
+    for (const kids of childMap.values()) kids.sort();
+    const catMap = getAll(cat);
+    const skillOf = (id: string): string => {
+      const s = catMap.get(id)?.skill;
+      return s ? `  ⚙${s}` : "";
+    };
+    let roots = [...childMap.keys()].filter((p) => !isChild.has(p)).sort();
+    if (roots.length === 0) roots = [...childMap.keys()].sort();
+    const seen = new Set<string>();
+    const print = (id: string, depth: number): void => {
+      const indent = depth === 0 ? "" : "  ".repeat(depth - 1) + "↳ ";
+      if (seen.has(id)) {
+        console.log(`${indent}${labelForId(db, id)}  ↻ (cycle)`);
+        return;
+      }
+      seen.add(id);
+      console.log(`${indent}${labelForId(db, id)}${skillOf(id)}`);
+      for (const kid of childMap.get(id) ?? []) print(kid, depth + 1);
+    };
+    for (const r of roots) print(r, 0);
+  } finally {
+    db.close();
+    cat.close();
+  }
+  return 0;
+}
+
+/** Short, skimmable label for a session id: `1a2b3c4d… <title>`, degrading to the bare id when unindexed. */
+function labelForId(db: Database, id: string): string {
+  const short = `${id.slice(0, 8)}…`;
+  const title = titleOf(db, id);
+  return title ? `${short} ${title}` : short;
 }
 
 /** Read the value after a `--flag` in argv, or undefined if absent/last. */

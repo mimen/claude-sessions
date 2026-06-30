@@ -1,17 +1,21 @@
 import { expect, test } from "bun:test";
 import {
   addTag,
+  childrenOf,
   getRow,
   getTags,
   lifecycleOf,
   openCatalogue,
+  parentEdges,
   sessionsForEntity,
   setArchived,
   setCompleted,
   setCustomTitle,
   setEvent,
   setKind,
+  setParent,
   setParked,
+  setSkill,
   sessionsForEvent,
 } from "./db.ts";
 import { describe as dispo } from "./disposition.ts";
@@ -65,6 +69,42 @@ test("event: set, round-trip, clear, reverse lookup", () => {
   setEvent(db, "s1", null, NOW); // clear
   expect(getRow(db, "s1")!.event).toBeNull();
   expect(sessionsForEvent(db, "glizzy-galaxy")).toEqual(["s2"]);
+});
+
+test("parent: set, round-trip, children reverse lookup, clear", () => {
+  const db = openCatalogue(":memory:");
+  expect(getRow(db, "child1")?.parentSessionId ?? null).toBeNull();
+  setParent(db, "child1", "mom", NOW);
+  setParent(db, "child2", "mom", NOW);
+  setParent(db, "child3", "dad", NOW);
+  expect(getRow(db, "child1")!.parentSessionId).toBe("mom");
+  expect(childrenOf(db, "mom").sort()).toEqual(["child1", "child2"]);
+  expect(childrenOf(db, "dad")).toEqual(["child3"]);
+  expect(childrenOf(db, "ghost")).toEqual([]); // unknown parent → no children, no throw
+  setParent(db, "child1", null, NOW); // clear
+  expect(getRow(db, "child1")!.parentSessionId).toBeNull();
+  expect(childrenOf(db, "mom")).toEqual(["child2"]);
+});
+
+test("parentEdges: only rows with a parent, as (sessionId, parentId) pairs", () => {
+  const db = openCatalogue(":memory:");
+  setParent(db, "a", "root", NOW);
+  setParent(db, "b", "root", NOW);
+  setSkill(db, "root", "loop-manager", NOW); // a row without a parent must not appear as an edge
+  const edges = parentEdges(db).sort((x, y) => x.sessionId.localeCompare(y.sessionId));
+  expect(edges).toEqual([
+    { sessionId: "a", parentId: "root" },
+    { sessionId: "b", parentId: "root" },
+  ]);
+});
+
+test("skill: set, round-trip, clear", () => {
+  const db = openCatalogue(":memory:");
+  expect(getRow(db, "s1")?.skill ?? null).toBeNull();
+  setSkill(db, "s1", "loop-manager", NOW);
+  expect(getRow(db, "s1")!.skill).toBe("loop-manager");
+  setSkill(db, "s1", null, NOW); // clear
+  expect(getRow(db, "s1")!.skill).toBeNull();
 });
 
 test("disposition combines lifecycle × liveness", () => {

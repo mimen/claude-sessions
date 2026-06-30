@@ -21,11 +21,15 @@ export interface CatalogueRow {
   parkedTaskId: string | null;
   /** Event slug this session belongs to (set by the event-watch scout, or manually). */
   event: string | null;
+  /** The session that spawned/owns this one (a sessionId). Children are a reverse lookup. */
+  parentSessionId: string | null;
+  /** The skill or slash-command backing this session (e.g. `loop-manager`, `event-watch`). */
+  skill: string | null;
   notes: string | null;
   updatedAt: string | null;
 }
 
-const CATALOGUE_VERSION = 2;
+const CATALOGUE_VERSION = 3;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -68,6 +72,18 @@ function migrate(db: Database): void {
     }
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_event ON catalogue(event);");
   }
+  if (v < 3) {
+    // Additive: the constellation edges — a user-set parent session, and the backing skill.
+    // Both nullable; no backfill. Guard each ALTER on column presence (a still-deployed older
+    // binary can reset user_version, letting this block re-run; ADD COLUMN twice throws).
+    if (!hasColumn(db, "catalogue", "parent_session_id")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN parent_session_id TEXT;");
+    }
+    if (!hasColumn(db, "catalogue", "skill")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN skill TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_parent ON catalogue(parent_session_id);");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -88,6 +104,8 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     archived: !!r.archived,
     parkedTaskId: (r.parked_task_id as string) ?? null,
     event: (r.event as string) ?? null,
+    parentSessionId: (r.parent_session_id as string) ?? null,
+    skill: (r.skill as string) ?? null,
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
   };
@@ -161,6 +179,12 @@ export function setResumeId(db: Database, sessionId: string, resumeId: string, n
 export function setEvent(db: Database, sessionId: string, event: string | null, now: string): void {
   set(db, sessionId, "event", event, now);
 }
+export function setParent(db: Database, sessionId: string, parentId: string | null, now: string): void {
+  set(db, sessionId, "parent_session_id", parentId, now);
+}
+export function setSkill(db: Database, sessionId: string, skill: string | null, now: string): void {
+  set(db, sessionId, "skill", skill, now);
+}
 
 /** Reverse lookup: which sessions are assigned to this event slug. */
 export function sessionsForEvent(db: Database, event: string): string[] {
@@ -169,6 +193,26 @@ export function sessionsForEvent(db: Database, event: string): string[] {
       session_id: string;
     }[]
   ).map((r) => r.session_id);
+}
+
+/** Reverse lookup: the sessions whose parent is this one (its children in the constellation). */
+export function childrenOf(db: Database, parentId: string): string[] {
+  return (
+    db
+      .query("SELECT session_id FROM catalogue WHERE parent_session_id = $p ORDER BY session_id")
+      .all({ $p: parentId }) as { session_id: string }[]
+  ).map((r) => r.session_id);
+}
+
+/** Every (childId, parentId) edge in the catalogue, for building the constellation in one pass. */
+export function parentEdges(db: Database): Array<{ sessionId: string; parentId: string }> {
+  return (
+    db
+      .query(
+        "SELECT session_id AS sessionId, parent_session_id AS parentId FROM catalogue WHERE parent_session_id IS NOT NULL",
+      )
+      .all() as Array<{ sessionId: string; parentId: string }>
+  );
 }
 
 // ---- tags ----
