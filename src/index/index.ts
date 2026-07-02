@@ -27,6 +27,8 @@ export interface SessionRow {
   readonly parentSessionId: string | null;
   /** The id to pass to `claude --resume` (internal sessionId, not the filename). */
   readonly resumeId: string;
+  /** API-equivalent USD cost of this file's own usage (subagent runs are separate rows). */
+  readonly costUSD: number;
 }
 
 export interface ReindexStats {
@@ -55,7 +57,8 @@ const SELECT_COLS = `
   END AS titleSource,
   is_subagent AS isSubagent,
   parent_session_id AS parentSessionId,
-  resume_id AS resumeId
+  resume_id AS resumeId,
+  cost_usd AS costUSD
 `;
 
 /**
@@ -81,11 +84,13 @@ export async function reindexStore(
     INSERT INTO sessions (
       session_id, host, path, cwd, project_root, project_name, branch, version,
       first_ts, last_ts, msg_count, file_mtime, file_size,
-      native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id
+      native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id,
+      cost_usd, tok_input, tok_output, tok_cache_read, tok_cache_write, cost_by_model
     ) VALUES (
       $session_id, $host, $path, $cwd, $project_root, $project_name, $branch, $version,
       $first_ts, $last_ts, $msg_count, $file_mtime, $file_size,
-      $native_title, $fallback_label, $skeleton, $is_subagent, $parent_session_id, $resume_id
+      $native_title, $fallback_label, $skeleton, $is_subagent, $parent_session_id, $resume_id,
+      $cost_usd, $tok_input, $tok_output, $tok_cache_read, $tok_cache_write, $cost_by_model
     )
     ON CONFLICT(session_id) DO UPDATE SET
       host = $host, path = $path, cwd = $cwd,
@@ -94,7 +99,10 @@ export async function reindexStore(
       first_ts = $first_ts, last_ts = $last_ts, msg_count = $msg_count,
       file_mtime = $file_mtime, file_size = $file_size,
       native_title = $native_title, fallback_label = $fallback_label, skeleton = $skeleton,
-      is_subagent = $is_subagent, parent_session_id = $parent_session_id, resume_id = $resume_id
+      is_subagent = $is_subagent, parent_session_id = $parent_session_id, resume_id = $resume_id,
+      cost_usd = $cost_usd, tok_input = $tok_input, tok_output = $tok_output,
+      tok_cache_read = $tok_cache_read, tok_cache_write = $tok_cache_write,
+      cost_by_model = $cost_by_model
   `);
   const ftsDelete = db.query("DELETE FROM sessions_fts WHERE session_id = $id");
   const ftsInsert = db.query(
@@ -143,6 +151,12 @@ export async function reindexStore(
       $is_subagent: parsed.isSubagent ? 1 : 0,
       $parent_session_id: parsed.parentSessionId,
       $resume_id: parsed.resumeId,
+      $cost_usd: parsed.usage.costUSD,
+      $tok_input: parsed.usage.input,
+      $tok_output: parsed.usage.output,
+      $tok_cache_read: parsed.usage.cacheRead,
+      $tok_cache_write: parsed.usage.cacheWrite5m + parsed.usage.cacheWrite1h,
+      $cost_by_model: JSON.stringify(parsed.usage.costByModel),
     });
 
     // Keep FTS in step with the resolved title (native if present, else fallback for now;
@@ -230,6 +244,76 @@ export function childrenOf(db: Database, parentSessionId: string): SessionRow[] 
       .query(`SELECT ${SELECT_COLS} FROM sessions WHERE parent_session_id = $pid ORDER BY last_ts DESC NULLS LAST`)
       .all({ $pid: parentSessionId }),
   );
+}
+
+/** Full token/cost detail for one Session (drives `ccs meta`). */
+export interface SessionUsage {
+  readonly costUSD: number;
+  readonly tokInput: number;
+  readonly tokOutput: number;
+  readonly tokCacheRead: number;
+  readonly tokCacheWrite: number;
+  readonly costByModel: Readonly<Record<string, number>>;
+}
+
+/** Token/cost detail for a Session id, or null if it isn't indexed. */
+export function usageOf(db: Database, sessionId: string): SessionUsage | null {
+  const row = db
+    .query(
+      `SELECT cost_usd AS costUSD, tok_input AS tokInput, tok_output AS tokOutput,
+              tok_cache_read AS tokCacheRead, tok_cache_write AS tokCacheWrite,
+              cost_by_model AS costByModelJson
+       FROM sessions WHERE session_id = $id`,
+    )
+    .get({ $id: sessionId }) as
+    | (Omit<SessionUsage, "costByModel"> & { costByModelJson: string })
+    | null;
+  if (!row) return null;
+  let costByModel: Record<string, number> = {};
+  try {
+    costByModel = JSON.parse(row.costByModelJson) as Record<string, number>;
+  } catch {
+    // tolerate a corrupt cell; the totals are still right
+  }
+  const { costByModelJson: _, ...rest } = row;
+  return { ...rest, costByModel };
+}
+
+/** The cost column alone for a Session id (0 when unindexed) — cheap per-node lookup for `tree`. */
+export function costOf(db: Database, sessionId: string): number {
+  const row = db
+    .query("SELECT cost_usd AS costUSD FROM sessions WHERE session_id = $id")
+    .get({ $id: sessionId }) as { costUSD: number } | null;
+  return row?.costUSD ?? 0;
+}
+
+/**
+ * Summed cost of one Session's subagent runs. Subagent rows key their parent by the parent's
+ * INTERNAL sessionId, so we match on both the given id and its resume_id (they differ for
+ * resumed/forked sessions).
+ */
+export function subagentCostOf(db: Database, sessionId: string): number {
+  const row = db
+    .query(
+      `SELECT SUM(cost_usd) AS usd FROM sessions
+       WHERE is_subagent = 1 AND parent_session_id IN (
+         SELECT resume_id FROM sessions WHERE session_id = $id
+         UNION SELECT $id
+       )`,
+    )
+    .get({ $id: sessionId }) as { usd: number | null };
+  return row.usd ?? 0;
+}
+
+/** Map of parent Session id → summed cost of its subagent runs (agent-*.jsonl files). */
+export function subagentCosts(db: Database): Map<string, number> {
+  const rows = db
+    .query(
+      `SELECT parent_session_id AS pid, SUM(cost_usd) AS usd FROM sessions
+       WHERE is_subagent = 1 AND parent_session_id IS NOT NULL GROUP BY parent_session_id`,
+    )
+    .all() as Array<{ pid: string; usd: number }>;
+  return new Map(rows.map((r) => [r.pid, r.usd]));
 }
 
 /** Map of parent Session id → number of subagent runs it spawned. */

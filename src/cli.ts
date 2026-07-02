@@ -5,7 +5,8 @@ import { existsSync } from "node:fs";
 import { ensureDataDir, DB_PATH, CATALOGUE_PATH } from "./paths.ts";
 import { openIndex } from "./index/schema.ts";
 import type { Database } from "bun:sqlite";
-import { reindexStore, listByRecency, titleOf } from "./index/index.ts";
+import { reindexStore, listByRecency, titleOf, costOf, subagentCosts } from "./index/index.ts";
+import { formatCost } from "./cost.ts";
 import { openCatalogue, getAll, lifecycleOf, parentEdges } from "./catalogue/db.ts";
 import { openSessionIds } from "./catalogue/open-state.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
@@ -117,6 +118,8 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
         `(${formatBytes(totalBytes)}) from ${config.store.path} [host: ${config.host.label}]`,
     );
     console.log(`  ${stats.parsed} parsed, ${stats.skipped} unchanged, ${stats.removed} removed`);
+    const spend = db.query("SELECT SUM(cost_usd) AS usd FROM sessions").get() as { usd: number | null };
+    if (spend.usd) console.log(`  ${formatCost(spend.usd)} total API-equivalent spend across the store`);
 
     if (opts.titles) {
       const titler = createCodexTitler({
@@ -195,6 +198,8 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
     }
     const catalogue = getAll(cat);
     const open = openSessionIds();
+    // Subagent runs are separate index rows keyed to the parent's INTERNAL id (= resumeId).
+    const subCosts = subagentCosts(db);
     const srcMark = { native: "★", codex: "✎", fallback: " " } as const;
     let shown = 0;
     for (const r of rows) {
@@ -213,12 +218,14 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
       const evt = opts.event ? "" : pad(c?.event ? `⊞${c.event}` : "", 18);
       const project = pad(r.projectName, 16);
       const age = pad(formatAge(r.lastTs), 5);
-      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${evt}${project} ${age} ${r.msgCount}m`);
+      const subCost = subCosts.get(r.sessionId) ?? subCosts.get(r.resumeId) ?? 0;
+      const cost = pad(formatCost(r.costUSD + subCost), 7);
+      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${evt}${project} ${age} ${cost} ${r.msgCount}m`);
       shown++;
     }
     const hidden = rows.length - shown;
     console.log(
-      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⚙=skill · ↳=child · ⊞=event · !=open+parked/completed)` +
+      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⚙=skill · ↳=child · ⊞=event · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
         (opts.event ? ` · event=${opts.event}` : "") +
         (hidden > 0 && !opts.all && !opts.event ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
     );
@@ -257,6 +264,26 @@ function tree(_opts: { all: boolean }): number {
       const s = catMap.get(id)?.skill;
       return s ? `  ⚙${s}` : "";
     };
+    // A node's own cost includes its index-level subagent runs (agent-*.jsonl files).
+    const subCosts = subagentCosts(db);
+    const ownCost = (id: string): number => costOf(db, id) + (subCosts.get(id) ?? 0);
+    const subtreeCost = (id: string, visiting = new Set<string>()): number => {
+      if (visiting.has(id)) return 0; // cycle guard
+      visiting.add(id);
+      let sum = ownCost(id);
+      for (const kid of childMap.get(id) ?? []) sum += subtreeCost(kid, visiting);
+      return sum;
+    };
+    const costLabel = (id: string): string => {
+      const own = ownCost(id);
+      const kids = childMap.get(id) ?? [];
+      const total = kids.length ? subtreeCost(id) : own;
+      const ownStr = formatCost(own);
+      const parts: string[] = [];
+      if (ownStr) parts.push(ownStr);
+      if (kids.length && total > own) parts.push(`Σ${formatCost(total)}`);
+      return parts.length ? `  ${parts.join(" ")}` : "";
+    };
     let roots = [...childMap.keys()].filter((p) => !isChild.has(p)).sort();
     if (roots.length === 0) roots = [...childMap.keys()].sort();
     const seen = new Set<string>();
@@ -267,7 +294,7 @@ function tree(_opts: { all: boolean }): number {
         return;
       }
       seen.add(id);
-      console.log(`${indent}${labelForId(db, id)}${skillOf(id)}`);
+      console.log(`${indent}${labelForId(db, id)}${skillOf(id)}${costLabel(id)}`);
       for (const kid of childMap.get(id) ?? []) print(kid, depth + 1);
     };
     for (const r of roots) print(r, 0);

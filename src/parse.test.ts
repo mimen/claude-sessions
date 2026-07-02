@@ -98,3 +98,40 @@ test("tolerates corrupt lines without throwing", async () => {
   expect(parsed.cwd).toBe("/x");
   expect(parsed.msgCount).toBe(2);
 });
+
+test("sums billed usage from assistant lines into ParsedSession.usage", async () => {
+  const usage = {
+    input_tokens: 1000,
+    output_tokens: 500,
+    cache_read_input_tokens: 2000,
+    cache_creation: { ephemeral_5m_input_tokens: 300, ephemeral_1h_input_tokens: 700 },
+    cache_creation_input_tokens: 1000,
+  };
+  const { path, cleanup } = writeJsonl([
+    { type: "user", cwd: "/repo", message: { role: "user", content: "hi" } },
+    {
+      type: "assistant",
+      requestId: "req1",
+      timestamp: "2026-07-01T00:00:00Z",
+      message: { id: "msg1", model: "claude-opus-4-8", usage, content: [{ type: "text", text: "a" }] },
+    },
+    // Streaming duplicate of the same API response — must not double-count.
+    {
+      type: "assistant",
+      requestId: "req1",
+      timestamp: "2026-07-01T00:00:01Z",
+      message: { id: "msg1", model: "claude-opus-4-8", usage, content: [{ type: "tool_use", name: "Bash" }] },
+    },
+  ]);
+  const parsed = await parseSessionFile(path, "cost");
+  cleanup();
+
+  expect(parsed.usage.input).toBe(1000);
+  expect(parsed.usage.output).toBe(500);
+  expect(parsed.usage.cacheRead).toBe(2000);
+  expect(parsed.usage.cacheWrite5m).toBe(300);
+  expect(parsed.usage.cacheWrite1h).toBe(700);
+  // Opus 4.8 $5/$25: in 0.005 + out 0.0125 + read 0.001 + 5m 0.001875 + 1h 0.007 = 0.027375
+  expect(parsed.usage.costUSD).toBeCloseTo(0.027375, 9);
+  expect(parsed.usage.costByModel["claude-opus-4-8"]).toBeCloseTo(0.027375, 9);
+});

@@ -6,7 +6,7 @@ function row(id: string, root: string, name: string): SessionRow {
   return {
     sessionId: id, host: "h", path: "/p", cwd: root, projectRoot: root, projectName: name,
     branch: null, version: null, firstTs: null, lastTs: null, msgCount: 0, fileSize: 0,
-    title: id, titleSource: "fallback", isSubagent: false, parentSessionId: null, resumeId: id,
+    title: id, titleSource: "fallback", isSubagent: false, parentSessionId: null, resumeId: id, costUSD: 0,
   };
 }
 

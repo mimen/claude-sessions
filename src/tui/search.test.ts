@@ -21,6 +21,7 @@ function row(id: string, title: string, project = "proj"): SessionRow {
     isSubagent: false,
     parentSessionId: null,
     resumeId: id,
+    costUSD: 0,
   };
 }
 

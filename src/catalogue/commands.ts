@@ -17,7 +17,8 @@ import {
   type Kind,
 } from "./db.ts";
 import { openIndex } from "../index/schema.ts";
-import { titleOf } from "../index/index.ts";
+import { titleOf, usageOf, subagentCostOf, type SessionUsage } from "../index/index.ts";
+import { formatCost, formatTokens } from "../cost.ts";
 import { pushCmuxRename } from "./open-state.ts";
 
 /**
@@ -230,16 +231,30 @@ export function skill(sessionArg: string | undefined, name: string | undefined, 
   return 0;
 }
 
+/** Token/cost detail from the Index for one session, or null when unindexed. */
+function usageFor(id: string): { usage: SessionUsage; subagentUSD: number } | null {
+  if (!existsSync(DB_PATH)) return null;
+  const db = openIndex(DB_PATH);
+  try {
+    const usage = usageOf(db, id);
+    if (!usage) return null;
+    return { usage, subagentUSD: subagentCostOf(db, id) };
+  } finally {
+    db.close();
+  }
+}
+
 /** Print the current session's catalogue row (self-awareness). */
 export function meta(sessionArg: string | undefined): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
+  const cost = usageFor(id);
   const db = openCatalogue(CATALOGUE_PATH);
   try {
     const row = getRow(db, id);
     const tags = getTags(db, id);
     const children = childrenOf(db, id);
-    if (!row && tags.length === 0 && children.length === 0) {
+    if (!row && tags.length === 0 && children.length === 0 && !cost) {
       console.log(`${id}\n  (no catalogue metadata yet)`);
       return 0;
     }
@@ -257,6 +272,21 @@ export function meta(sessionArg: string | undefined): number {
     }
     if (row?.event) console.log(`  event: ${row.event}`);
     if (tags.length) console.log(`  tags: ${tags.join(", ")}`);
+    if (cost && (cost.usage.costUSD > 0 || cost.subagentUSD > 0)) {
+      const u = cost.usage;
+      const sub = cost.subagentUSD > 0 ? ` (+ ${formatCost(cost.subagentUSD)} subagents)` : "";
+      console.log(`  cost: ${formatCost(u.costUSD) || "$0.00"}${sub}`);
+      console.log(
+        `  tokens: in ${formatTokens(u.tokInput)} · out ${formatTokens(u.tokOutput)}` +
+          ` · cache read ${formatTokens(u.tokCacheRead)} · cache write ${formatTokens(u.tokCacheWrite)}`,
+      );
+      const models = Object.entries(u.costByModel).sort((a, b) => b[1] - a[1]);
+      if (models.length > 1) {
+        for (const [model, usd] of models) {
+          console.log(`    ${model}: ${formatCost(usd) || "$0.00"}`);
+        }
+      }
+    }
   } finally {
     db.close();
   }

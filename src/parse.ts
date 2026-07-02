@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
+import { createUsageAccumulator, type CostLine, type UsageTotals } from "./cost.ts";
 
 /** Metadata extracted from a Session transcript by a single streaming pass. */
 export interface ParsedSession {
@@ -24,6 +25,8 @@ export interface ParsedSession {
   /** The id `claude --resume` expects: the session's INTERNAL sessionId, which differs from
    *  the filename for resumed/forked sessions. Falls back to the filename id if absent. */
   readonly resumeId: string;
+  /** Billed token totals + API-equivalent cost, summed from the transcript's usage fields. */
+  readonly usage: UsageTotals;
 }
 
 const FIRST_TURNS = 8;
@@ -31,7 +34,7 @@ const LAST_TURNS = 4;
 const USER_TEXTS = 4;
 const SKELETON_MAX_CHARS = 14_000; // ~3.5k tokens
 
-interface AnyLine {
+interface AnyLine extends CostLine {
   type?: string;
   cwd?: string;
   gitBranch?: string;
@@ -40,7 +43,7 @@ interface AnyLine {
   aiTitle?: string;
   isSidechain?: boolean;
   sessionId?: string;
-  message?: { role?: string; content?: unknown };
+  message?: CostLine["message"] & { role?: string; content?: unknown };
 }
 
 type Block = { type?: string; text?: string; name?: string };
@@ -103,6 +106,7 @@ export async function parseSessionFile(
   let internalSessionId: string | null = null;
   let msgCount = 0;
   let sidechainCount = 0;
+  const usage = createUsageAccumulator();
 
   const userTexts: string[] = [];
   const firstTurns: string[] = [];
@@ -135,6 +139,7 @@ export async function parseSessionFile(
     if (obj.type === "user" || obj.type === "assistant") {
       msgCount++;
       if (obj.isSidechain) sidechainCount++;
+      if (obj.type === "assistant") usage.add(obj);
       const content = obj.message?.content;
 
       if (obj.type === "user" && userTexts.length < USER_TEXTS) {
@@ -172,6 +177,7 @@ export async function parseSessionFile(
     // claude --resume matches the internal sessionId; the filename id fails for resumed/forked
     // sessions. Subagents aren't resumable, so their resumeId (= parent id) is never used.
     resumeId: (!isSubagent && internalSessionId) || sessionId,
+    usage: usage.totals(),
   };
 }
 

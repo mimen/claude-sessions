@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 
 /** Bump when the schema changes; the Index is a pure cache, so we just rebuild on mismatch. */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * Open (creating if needed) the Index and ensure its schema is current. If the on-disk
@@ -53,7 +53,13 @@ function createSchema(db: Database): void {
       skeleton        TEXT NOT NULL DEFAULT '',
       is_subagent     INTEGER NOT NULL DEFAULT 0,
       parent_session_id TEXT,
-      resume_id       TEXT NOT NULL DEFAULT ''
+      resume_id       TEXT NOT NULL DEFAULT '',
+      cost_usd        REAL NOT NULL DEFAULT 0,
+      tok_input       INTEGER NOT NULL DEFAULT 0,
+      tok_output      INTEGER NOT NULL DEFAULT 0,
+      tok_cache_read  INTEGER NOT NULL DEFAULT 0,
+      tok_cache_write INTEGER NOT NULL DEFAULT 0,
+      cost_by_model   TEXT NOT NULL DEFAULT '{}'
     );
   `);
   db.exec("CREATE INDEX idx_sessions_last_ts ON sessions(last_ts DESC);");

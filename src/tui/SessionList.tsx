@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
+import { formatCost } from "../cost.ts";
 import { theme, isRecentAge } from "./theme.ts";
 
 /** Per-row visual style: state glyph + title color + nudge flag (computed in App). */
@@ -98,6 +99,9 @@ export function SessionList({ items, selected, height, deco }: SessionListProps)
             ) : null}
             <Box width={5} flexShrink={0} justifyContent="flex-end">
               <Text color={ageColor}>{age}</Text>
+            </Box>
+            <Box width={8} flexShrink={0} justifyContent="flex-end">
+              <Text color={sel ? theme.selFg : theme.muted}>{formatCost(r.costUSD)}</Text>
             </Box>
             <Box width={5} flexShrink={0} justifyContent="flex-end">
               <Text color={sel ? theme.selFg : theme.accent}>

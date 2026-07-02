@@ -62,3 +62,13 @@ chosen automatically based on whether cmux is reachable, and can be overridden.
 A cmux workspace — the named, focusable terminal surface cmux opens for a Resume. Belongs
 to cmux's domain, not this tool's; the tool only creates and names them.
 _Avoid_: using "workspace" to mean a Project, a tab, or a window.
+
+**Cost**:
+A Session's API-equivalent USD spend, summed from the exact billed `usage` fields on the
+transcript's assistant lines × per-model list pricing (input/output, cache read at 0.1×,
+5-minute cache writes at 1.25×, 1-hour cache writes at 2×, web searches at $10/1k).
+Derived data: computed during reindex, stored in the Index (never the catalogue), and
+recomputed whenever the file changes. On a subscription it is notional, not an invoice —
+the metric for comparing Sessions and loops. Subagent runs are separate Index rows; the
+`ls` column and `tree` Σ roll them up into their parent.
+_Avoid_: price, bill, spend (when referring to the stored per-Session number).

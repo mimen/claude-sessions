@@ -12,7 +12,7 @@ function row(over: Partial<SessionRow> = {}): SessionRow {
     sessionId: "id", host: "h", path: "/p", cwd: "/c", projectRoot: "/c",
     projectName: "c", branch: null, version: null, firstTs: null, lastTs: null,
     msgCount: 0, fileSize: 0, title: "t", titleSource: "fallback",
-    isSubagent: false, parentSessionId: null, resumeId: "id", ...over,
+    isSubagent: false, parentSessionId: null, resumeId: "id", costUSD: 0, ...over,
   };
 }
 
