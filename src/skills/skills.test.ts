@@ -34,6 +34,10 @@ describe("classifyPath", () => {
     expect(classifyPath(`${HOME}/.codex/.tmp/plugins/plugins/hubspot/skills/hubspot`, HOME)).toBe("marketplace");
     expect(classifyPath(`${HOME}/.codex/vendor_imports/skills/skills/.curated/figma`, HOME)).toBe("marketplace");
   });
+  test("hermes optional-skills library is marketplace; installed set stays hermes", () => {
+    expect(classifyPath(`${HOME}/.hermes/hermes-agent/optional-skills/blockchain/evm`, HOME)).toBe("marketplace");
+    expect(classifyPath(`${HOME}/.hermes/skills/apple/imessage`, HOME)).toBe("hermes");
+  });
   test("archives and downloads", () => {
     expect(classifyPath(`${HOME}/Documents/milad-vault/_archive/Sol/skills/heartbeat`, HOME)).toBe("archive");
     expect(classifyPath(`${HOME}/Downloads/skills-main/pdf`, HOME)).toBe("download");

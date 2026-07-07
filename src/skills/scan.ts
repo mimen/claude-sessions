@@ -49,6 +49,8 @@ export function classifyPath(path: string, home: string = homedir()): Ecosystem 
   if (p.startsWith("~/.codex/.tmp/") || p.startsWith("~/.codex/vendor_imports/")) return "marketplace";
   if (p.startsWith("~/.codex/")) return "codex";
   if (p.startsWith("~/.cursor/")) return "cursor";
+  // Hermes ships an opt-in library inside its repo; entries are a catalog until enabled in config.
+  if (p.startsWith("~/.hermes/hermes-agent/optional-skills/")) return "marketplace";
   if (p.startsWith("~/.hermes/")) return "hermes";
   // The vault's ClaudeConfig is the canonical source behind ~/.claude/skills.
   if (p.includes("/ClaudeConfig/skills/")) return "claude-user";
