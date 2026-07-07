@@ -1,6 +1,7 @@
 import { loadConfig } from "../config.ts";
 import { ensureDataDir, SKILLS_DB_PATH } from "../paths.ts";
 import { discoverSkills, isInLinkedWorktree, type SkillRecord } from "./scan.ts";
+import { shadowDuplicatePaths } from "./view.ts";
 import { openSkillsDb, saveSkills, loadSkills, usageTotals, tagsFor, addTag, removeTag, setCategory, categoriesFor } from "./db.ts";
 import { mineUsage } from "./usage.ts";
 
@@ -115,12 +116,13 @@ async function list(opts: ListOpts): Promise<number> {
     const categories = categoriesFor(db);
 
     let rows = skills;
-    let worktreesHidden = 0;
+    let dupesHidden = 0;
     if (!opts.worktrees) {
       const cache = new Map<string, boolean>();
+      const shadows = shadowDuplicatePaths(rows);
       const before = rows.length;
-      rows = rows.filter((s) => !isInLinkedWorktree(s.realPath, cache));
-      worktreesHidden = before - rows.length;
+      rows = rows.filter((s) => !shadows.has(s.path) && !isInLinkedWorktree(s.realPath, cache));
+      dupesHidden = before - rows.length;
     }
     if (opts.eco) rows = rows.filter((s) => s.ecosystem === opts.eco);
     else if (!opts.all) rows = rows.filter((s) => DEFAULT_ECOSYSTEMS.has(s.ecosystem));
@@ -191,7 +193,7 @@ async function list(opts: ListOpts): Promise<number> {
       `\n${display.length} skills, ${unobserved} never observed in use.` +
         `\nINVOKED = Claude ran it · SLASH = fired as a /command (you or a loop) · READS = opened as reference docs.` +
         `\nCounts are from this Mac's Claude transcripts only — zero here doesn't prove a skill is dead.` +
-        (worktreesHidden > 0 ? `\n${worktreesHidden} git-worktree copies hidden (--worktrees to include).` : "") +
+        (dupesHidden > 0 ? `\n${dupesHidden} duplicate copies hidden — worktree checkouts + identical shadow copies (--worktrees to include).` : "") +
         (opts.all || opts.eco ? "" : `\nHidden by default: codex/cursor/hermes/archive skills (use --all). Glossary: ccs skills --help`),
     );
     return 0;

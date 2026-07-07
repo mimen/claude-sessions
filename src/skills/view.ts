@@ -62,6 +62,27 @@ export function activityOf(usage: UsageTotals | null, nowMs: number): Activity {
   return nowMs - ts <= ACTIVE_MS ? "active" : "dormant";
 }
 
+/**
+ * Exact-content shadow copies: same (name, ecosystem, SKILL.md hash) appearing at multiple
+ * paths — e.g. a tool's repo clone AND its installed copy (Hermes ships both). Keeps the
+ * shortest path as canonical and returns the rest for hiding.
+ */
+export function shadowDuplicatePaths(records: readonly SkillRecord[]): Set<string> {
+  const groups = new Map<string, SkillRecord[]>();
+  for (const r of records) {
+    if (!r.contentHash) continue;
+    const key = `${r.name}\x00${r.ecosystem}\x00${r.contentHash}`;
+    (groups.get(key) ?? groups.set(key, []).get(key)!).push(r);
+  }
+  const hidden = new Set<string>();
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort((a, b) => a.path.length - b.path.length || a.path.localeCompare(b.path));
+    for (const r of sorted.slice(1)) hidden.add(r.path);
+  }
+  return hidden;
+}
+
 /** Names whose copies have diverged: >1 distinct non-empty SKILL.md hash. */
 export function driftedNames(records: readonly SkillRecord[]): Set<string> {
   const hashes = new Map<string, Set<string>>();

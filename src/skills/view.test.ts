@@ -157,3 +157,19 @@ describe("isInLinkedWorktree", () => {
     expect(isInLinkedWorktree(join(root, "nowhere-special"))).toBe(false);
   });
 });
+
+describe("shadowDuplicatePaths", () => {
+  const { shadowDuplicatePaths } = require("./view.ts") as typeof import("./view.ts");
+  test("identical same-eco copies hide all but shortest path; different hashes stay", () => {
+    const records = [
+      rec({ name: "imessage", path: "/h/.hermes/skills/apple/imessage", realPath: "/1", ecosystem: "hermes", contentHash: "h1" }),
+      rec({ name: "imessage", path: "/h/.hermes/hermes-agent/skills/apple/imessage", realPath: "/2", ecosystem: "hermes", contentHash: "h1" }),
+      rec({ name: "grill-me", path: "/a", realPath: "/3", ecosystem: "agents", contentHash: "g1" }),
+      rec({ name: "grill-me", path: "/b", realPath: "/4", ecosystem: "claude-user", contentHash: "g2" }),
+    ];
+    const hidden = shadowDuplicatePaths(records);
+    expect(hidden.has("/h/.hermes/hermes-agent/skills/apple/imessage")).toBe(true);
+    expect(hidden.has("/h/.hermes/skills/apple/imessage")).toBe(false);
+    expect(hidden.size).toBe(1);
+  });
+});
