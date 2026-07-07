@@ -6,7 +6,7 @@ import { join, basename } from "node:path";
 import type { Config } from "../../config.ts";
 import { useTerminalSize } from "../useTerminalSize.ts";
 import { theme } from "../theme.ts";
-import { KeyHelp } from "../Help.tsx";
+import { KeyHelp, KeyBar } from "../Help.tsx";
 import {
   loadSkills,
   saveSkills,
@@ -680,14 +680,26 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
       ) : null}
 
       {reader ? (
-        <Text color={theme.muted} wrap="truncate-end">
-          Tab/←→ next file · j/k scroll · g/G top/bottom · q close
-        </Text>
+        <KeyBar
+          items={[
+            ["Tab/←→", "next file"],
+            ["j k", "scroll"],
+            ["g G", "top/bottom"],
+            ["q", "close"],
+          ]}
+        />
       ) : (
-        <Text color={theme.muted} wrap="truncate-end">
-          ↵ read · x context:{context.kind === "all" ? "all" : contextLabel(context)} · g group:{view} · / search · c
-          category · Tab sessions · ? all keys
-        </Text>
+        <KeyBar
+          items={[
+            ["↵", "read"],
+            ["x", `context:${context.kind === "all" ? "all" : contextLabel(context)}`],
+            ["g", `group:${view}`],
+            ["/", "search"],
+            ["c", "category"],
+            ["Tab", "sessions"],
+            ["?", "all keys"],
+          ]}
+        />
       )}
     </Box>
   );

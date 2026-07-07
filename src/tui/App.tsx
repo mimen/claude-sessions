@@ -22,7 +22,7 @@ import { searchRows } from "./search.ts";
 import { buildDisplayItems, type SortMode } from "./groupByProject.ts";
 import { SessionList } from "./SessionList.tsx";
 import { Preview } from "./Preview.tsx";
-import { Help } from "./Help.tsx";
+import { Help, KeyBar } from "./Help.tsx";
 import { Header, type DashStats } from "./Header.tsx";
 import { ListHeader } from "./ListHeader.tsx";
 import { SectionCard } from "./SectionCard.tsx";
@@ -691,9 +691,16 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       ) : null}
 
       {transcript ? null : (
-        <Text color={theme.muted} wrap="truncate-end">
-          ↵ resume · / search · v transcript · g view:{view} · Tab skills · ? all keys
-        </Text>
+        <KeyBar
+          items={[
+            ["↵", "resume"],
+            ["/", "search"],
+            ["v", "transcript"],
+            ["g", `view:${view}`],
+            ["Tab", "skills"],
+            ["?", "all keys"],
+          ]}
+        />
       )}
     </Box>
   );

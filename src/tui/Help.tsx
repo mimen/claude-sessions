@@ -25,7 +25,7 @@ export function KeyHelp({ title, groups }: { title: string; groups: KeyGroup[] }
           {group.keys.map(([k, desc], i) => (
             <Box key={i}>
               <Box width={14} flexShrink={0}>
-                <Text color="white" bold>
+                <Text color={theme.accent} bold>
                   {"  "}
                   {k}
                 </Text>
@@ -41,6 +41,26 @@ export function KeyHelp({ title, groups }: { title: string; groups: KeyGroup[] }
         <Text color={theme.faint}>press ? or esc to close</Text>
       </Box>
     </Box>
+  );
+}
+
+/**
+ * One-line footer keymap: keys pop in accent+bold, labels stay muted, separators faint —
+ * scannable instead of a uniform grey wall. Labels may carry live values ("view:groups").
+ */
+export function KeyBar({ items }: { items: Array<[string, string]> }): React.ReactElement {
+  return (
+    <Text wrap="truncate-end">
+      {items.map(([k, label], i) => (
+        <Text key={i}>
+          {i > 0 ? <Text color={theme.faint}> · </Text> : null}
+          <Text color={theme.accent} bold>
+            {k}
+          </Text>
+          {label ? <Text color={theme.muted}> {label}</Text> : null}
+        </Text>
+      ))}
+    </Text>
   );
 }
 
