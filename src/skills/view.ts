@@ -7,8 +7,37 @@ import type { UsageTotals } from "./db.ts";
  * search filtering, and the section/item builder for every view mode.
  */
 
-export type SkillsView = "home" | "name" | "category" | "activity" | "flat";
+export type SkillsView = "home" | "name" | "category" | "activity" | "flat" | "access";
 export const SKILLS_VIEW_CYCLE: SkillsView[] = ["home", "name", "category", "activity", "flat"];
+/** Inside a context lens the extra "access" view (grouped by HOW a skill loads) leads the cycle. */
+export const CONTEXT_VIEW_CYCLE: SkillsView[] = ["access", "home", "name", "category", "activity", "flat"];
+
+/**
+ * Stable color per category so the CATEGORY column scans at a glance. Fixed map for the
+ * curated taxonomy; unknown categories hash into the palette so new ones stay colored.
+ */
+const CATEGORY_COLORS: Record<string, string> = {
+  events: "#e0876a", // coral — AUF event ops
+  label: "#d9a0e8", // lilac — AUF Records
+  music: "#86b3ff", // blue
+  comms: "greenBright",
+  finance: "#cbb079", // gold
+  pkm: "cyan",
+  loops: "magenta",
+  dev: "yellow",
+  infra: "#9aa3b2", // grey — plumbing
+  services: "green",
+};
+const CATEGORY_FALLBACK = ["blueBright", "magentaBright", "cyanBright", "yellowBright", "redBright"];
+
+export function categoryColor(category: string | null): string | undefined {
+  if (!category) return undefined;
+  const fixed = CATEGORY_COLORS[category];
+  if (fixed) return fixed;
+  let h = 0;
+  for (const ch of category) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return CATEGORY_FALLBACK[h % CATEGORY_FALLBACK.length];
+}
 
 export type SkillsSort = "recent" | "usage" | "name";
 export const SKILLS_SORT_CYCLE: SkillsSort[] = ["recent", "usage", "name"];
@@ -239,8 +268,9 @@ export interface BuildCtx {
 export function buildSkillItems(rows: SkillRow[], ctx: BuildCtx): SkillItem[] {
   if (ctx.view === "flat") return sortSkillRows(rows, ctx.sort).map((row) => ({ kind: "skill", row }));
 
+  // "access" only exists inside a context lens (buildContextItems); treat as home if it leaks here.
   const keyOf = (r: SkillRow): string =>
-    ctx.view === "home"
+    ctx.view === "home" || ctx.view === "access"
       ? r.home
       : ctx.view === "name"
         ? r.rec.name

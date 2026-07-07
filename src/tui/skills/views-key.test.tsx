@@ -33,3 +33,28 @@ test("g cycles grouping views", async () => {
   expect(lastFrame()).toContain("view flat");
   unmount();
 });
+
+test("g inside a context lens cycles access -> home -> ... -> category", async () => {
+  const skillsDb = openSkillsDb(":memory:");
+  const indexDb = openIndex(":memory:");
+  saveSkills(skillsDb, [{ name: "beeper", path: "/Users/mimen/.claude/skills/beeper", realPath: "/Users/mimen/.claude/skills/beeper", ecosystem: "claude-user", description: "", aliases: [], mtimeMs: 1, contentHash: "h" }]);
+  const cr = loadConfig("/nonexistent.toml");
+  if (!cr.ok) throw new Error("cfg");
+  const config = { ...cr.value, store: { path: mkdtempSync(join(tmpdir(), "ccs-gx-")) } };
+  const { lastFrame, stdin, unmount } = render(createElement(SkillsPanel, { skillsDb, indexDb, config, onSwitchMode: () => {}, onShowSessions: () => {} }));
+  await new Promise((r) => setTimeout(r, 60));
+  stdin.write("x"); // -> claude @ ~
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame()).toContain("view access");
+  expect(lastFrame()).toContain("GLOBAL");
+  stdin.write("g");
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame()).toContain("view home");
+  stdin.write("g"); stdin.write("g");
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame()).toContain("view category");
+  stdin.write("x"); // next context resets to access
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame()).toContain("view access");
+  unmount();
+});

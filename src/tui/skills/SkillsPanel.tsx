@@ -31,6 +31,7 @@ import {
   matchesQuery,
   shadowDuplicatePaths,
   type SkillContext,
+  CONTEXT_VIEW_CYCLE,
   SKILLS_SORT_CYCLE,
   SKILLS_VIEW_CYCLE,
   type SkillItem,
@@ -216,12 +217,15 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
 
   const items = useMemo<SkillItem[]>(() => {
     if (context.kind !== "all") {
+      // Context lens filters to accessible skills; grouping still follows the view —
+      // "access" groups by how each loads, the other views work on the filtered set.
       const accessible: Array<{ row: (typeof rows)[number]; access: string }> = [];
       for (const row of rows) {
         const access = accessIn(row.rec, context);
         if (access) accessible.push({ row, access });
       }
-      return buildContextItems(accessible, sort, collapsed);
+      if (view === "access") return buildContextItems(accessible, sort, collapsed);
+      return buildSkillItems(accessible.map((a) => a.row), { view, sort, collapsed, nowMs: Date.now() });
     }
     return buildSkillItems(rows, { view, sort, collapsed, nowMs: Date.now() });
   }, [rows, view, sort, collapsed, context]);
@@ -425,7 +429,8 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
     else if (key.downArrow || input === "j") move(1);
     else if (input === "/") setMode({ kind: "search" });
     else if (input === "g") {
-      setView((v) => SKILLS_VIEW_CYCLE[(SKILLS_VIEW_CYCLE.indexOf(v) + 1) % SKILLS_VIEW_CYCLE.length]!);
+      const cycle = context.kind === "all" ? SKILLS_VIEW_CYCLE : CONTEXT_VIEW_CYCLE;
+      setView((v) => cycle[(cycle.indexOf(v) + 1) % cycle.length] ?? cycle[0]!);
       setSelected(0);
     } else if (input === "S") {
       setSort((s) => SKILLS_SORT_CYCLE[(SKILLS_SORT_CYCLE.indexOf(s) + 1) % SKILLS_SORT_CYCLE.length]!);
@@ -437,7 +442,12 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
       setShowWorktrees((v) => !v);
       setSelected(0);
     } else if (input === "x") {
-      setContextIdx((i) => (i + 1) % contexts.length);
+      setContextIdx((i) => {
+        const next = (i + 1) % contexts.length;
+        // Entering a lens defaults to the access grouping; leaving one drops back to home.
+        setView(contexts[next]!.kind === "all" ? "home" : "access");
+        return next;
+      });
       setSelected(0);
     } else if (input === "v") openReader();
     else if (key.return) {
@@ -527,7 +537,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
           {"AGE".padStart(5)}
         </Text>
       </Box>
-      <SkillsList items={items} selected={clampedSelected} height={listHeight} width={w} />
+      <SkillsList items={items} selected={clampedSelected} height={listHeight} width={w} sectionsAreCategories={view === "category"} />
     </Box>
   );
 
@@ -545,7 +555,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
             </Text>
           ) : null}
           · {context.kind === "all" ? `${rows.length} skills` : `${items.filter((i) => i.kind === "skill").length} accessible`} ·{" "}
-          {unobserved} unobserved · view {context.kind === "all" ? view : "access"} · sort {sort}
+          {unobserved} unobserved · view {view} · sort {sort}
           {unusedOnly ? " · UNUSED ONLY" : ""}
           {context.kind === "all" && !showWorktrees && dupePaths.size > 0 ? ` · ${dupePaths.size} duplicate copies hidden (w)` : ""}
           {context.kind === "all" && showWorktrees ? " · +dupes" : ""}

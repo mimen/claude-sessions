@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { SkillItem } from "../../skills/view.ts";
+import { categoryColor, type SkillItem } from "../../skills/view.ts";
 import { formatAge } from "../../store.ts";
 import { theme, isRecentAge } from "../theme.ts";
 
@@ -14,10 +14,12 @@ interface SkillsListProps {
   selected: number;
   height: number;
   width: number;
+  /** In the category view, section headers ARE categories — color them to match the column. */
+  sectionsAreCategories?: boolean;
 }
 
 /** Windowed list of section dividers + skill rows, mirroring SessionList's layout rules. */
-export function SkillsList({ items, selected, height, width }: SkillsListProps): React.ReactElement {
+export function SkillsList({ items, selected, height, width, sectionsAreCategories }: SkillsListProps): React.ReactElement {
   const start = Math.max(0, Math.min(selected - Math.floor(height / 2), items.length - height));
   const offset = Math.max(0, start);
   const window = items.slice(offset, offset + height);
@@ -32,10 +34,13 @@ export function SkillsList({ items, selected, height, width }: SkillsListProps):
         if (item.kind === "section") {
           const label = `${item.collapsed ? "▸" : "▾"} ${item.name} · ${item.count}${item.collapsed ? " ⋯" : ""}`;
           const ruleLen = Math.max(0, width - 1 - label.length - 2);
+          const headerColor = sectionsAreCategories
+            ? categoryColor(item.key === "uncategorized" ? null : item.key) ?? theme.muted
+            : theme.header;
           return (
             <Box key={index} backgroundColor={bg}>
               <Text color={sel ? theme.selFg : theme.accent}>{sel ? "❯" : " "}</Text>
-              <Text bold color={sel ? theme.selFg : theme.header}>
+              <Text bold color={sel ? theme.selFg : headerColor}>
                 {label}
               </Text>
               <Text color={sel ? theme.selFg : theme.faint}> {"─".repeat(ruleLen)}</Text>
@@ -66,7 +71,7 @@ export function SkillsList({ items, selected, height, width }: SkillsListProps):
               </Text>
             </Box>
             <Box width={CAT_W} flexShrink={0}>
-              <Text color={sel ? theme.selFg : theme.branch} wrap="truncate-end">
+              <Text color={sel ? theme.selFg : categoryColor(r.category) ?? theme.faint} wrap="truncate-end">
                 {r.category ?? ""}
               </Text>
             </Box>
