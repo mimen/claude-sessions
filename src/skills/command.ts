@@ -4,13 +4,12 @@ import { discoverSkills, type SkillRecord } from "./scan.ts";
 import { openSkillsDb, saveSkills, loadSkills, usageTotals, tagsFor, addTag, removeTag } from "./db.ts";
 import { mineUsage } from "./usage.ts";
 
-const HELP = `ccs skills — machine-wide skill registry with real usage data
+const HELP = `ccs skills — every skill on this machine, with real usage numbers
 
 Usage:
   ccs skills                 List skills (Claude ecosystems by default) with usage
   ccs skills --all           Include every ecosystem (codex, cursor, hermes, archives…)
-  ccs skills --eco <name>    Filter to one ecosystem (claude-user, claude-project, agents,
-                             plugin, codex, cursor, hermes, archive, download, other)
+  ccs skills --eco <name>    Filter to one ecosystem (see glossary below)
   ccs skills --tag <tag>     Filter to skills carrying a tag
   ccs skills --unused        Only skills with zero observed usage (candidates for pruning)
   ccs skills --paths         Show each skill's primary path
@@ -18,8 +17,23 @@ Usage:
   ccs skills --json          Full records as JSON (paths, aliases, descriptions, usage, tags)
   ccs skills tag <name> <tag…> [--remove]   Add/remove organization tags
 
-Usage columns: inv = Skill-tool invocations · cmd = slash commands · read = SKILL.md/doc reads.
-Counts come from this machine's transcript Store only — "0" means unobserved here, not dead.
+Columns — three different ways a skill gets used:
+  INVOKED   Claude ran the skill (Skill tool call mid-conversation)
+  SLASH     fired as a /command — by you, or by a loop re-prompting itself
+  READS     a session opened the skill's files as reference docs without running it
+            (loops do this constantly; a skill can be load-bearing with zero INVOKED)
+  LAST-USED most recent of any of the three signals
+
+Ecosystem — which agent's skill folder the skill lives in:
+  claude-user      your global Claude Code skills (~/.claude/skills, i.e. ClaudeConfig)
+  claude-project   a repo or workspace's local .claude/skills
+  plugin           installed Claude Code plugins/marketplaces
+  agents           ~/.agents/skills (the cross-tool Agent Skills standard dir)
+  codex / cursor / hermes   the other agent tools' own skill folders
+  archive / download        dead copies (vault _archive, ~/Downloads)
+
+All counts come from this machine's Claude transcripts only — zero means "not observed
+here", not "dead". Codex/Cursor/Hermes usage and the Mac Mini aren't mined (yet).
 `;
 
 const DEFAULT_ECOSYSTEMS = new Set(["claude-user", "claude-project", "agents", "plugin"]);
@@ -128,9 +142,9 @@ async function list(opts: ListOpts): Promise<number> {
       pad("SKILL", 30),
       pad("ECOSYSTEM", 15),
       pad("TAGS", 18),
-      padLeft("INV", 5),
-      padLeft("CMD", 5),
-      padLeft("READ", 5),
+      padLeft("INVOKED", 8),
+      padLeft("SLASH", 6),
+      padLeft("READS", 6),
       pad("LAST-USED", 11),
     ];
     if (opts.paths) header.push("PATH");
@@ -143,9 +157,9 @@ async function list(opts: ListOpts): Promise<number> {
         pad(s.name + (s.copies > 1 ? ` ×${s.copies}` : ""), 30),
         pad(s.ecosystem, 15),
         pad(t.join(","), 18),
-        padLeft(u ? String(u.invocations) : "·", 5),
-        padLeft(u ? String(u.commands) : "·", 5),
-        padLeft(u ? String(u.reads) : "·", 5),
+        padLeft(u ? String(u.invocations) : "·", 8),
+        padLeft(u ? String(u.commands) : "·", 6),
+        padLeft(u ? String(u.reads) : "·", 6),
         pad(u?.lastUsed ? u.lastUsed.slice(0, 10) : "unobserved", 11),
       ];
       if (opts.paths) cols.push(s.path);
@@ -154,9 +168,10 @@ async function list(opts: ListOpts): Promise<number> {
 
     const unobserved = display.filter((s) => !usage.has(s.name)).length;
     console.log(
-      `\n${display.length} skills (${unobserved} unobserved) · INV=Skill invocations CMD=slash commands READ=doc reads` +
-        ` · this machine's Store only` +
-        (opts.all || opts.eco ? "" : " · default view hides codex/cursor/hermes/archive (--all)"),
+      `\n${display.length} skills, ${unobserved} never observed in use.` +
+        `\nINVOKED = Claude ran it · SLASH = fired as a /command (you or a loop) · READS = opened as reference docs.` +
+        `\nCounts are from this Mac's Claude transcripts only — zero here doesn't prove a skill is dead.` +
+        (opts.all || opts.eco ? "" : `\nHidden by default: codex/cursor/hermes/archive skills (use --all). Glossary: ccs skills --help`),
     );
     return 0;
   } finally {
