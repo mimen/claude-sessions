@@ -18,12 +18,8 @@ test("g cycles grouping views", async () => {
   const config = { ...cr.value, store: { path: mkdtempSync(join(tmpdir(), "ccs-g-")) } };
   const { lastFrame, stdin, unmount } = render(createElement(SkillsPanel, { skillsDb, indexDb, config, onSwitchMode: () => {}, onShowSessions: () => {} }));
   await new Promise((r) => setTimeout(r, 60));
-  expect(lastFrame()).toContain("view home");
-  stdin.write("g");
-  await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("view name");
-  stdin.write("g");
-  await new Promise((r) => setTimeout(r, 30));
+  // Default landing: the claude @ ~ lens grouped by category.
+  expect(lastFrame()).toContain("⌖ claude");
   expect(lastFrame()).toContain("view category");
   stdin.write("g");
   await new Promise((r) => setTimeout(r, 30));
@@ -31,6 +27,12 @@ test("g cycles grouping views", async () => {
   stdin.write("g");
   await new Promise((r) => setTimeout(r, 30));
   expect(lastFrame()).toContain("view flat");
+  stdin.write("g");
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame()).toContain("view access");
+  stdin.write("g");
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame()).toContain("view home");
   unmount();
 });
 

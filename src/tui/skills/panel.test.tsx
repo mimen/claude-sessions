@@ -52,10 +52,11 @@ test("skills panel renders seeded registry without discovery", async () => {
   await new Promise((r) => setTimeout(r, 80));
   const frame = lastFrame() ?? "";
   expect(frame).toContain("SKILLS");
+  // Default landing is the claude @ ~ lens grouped by category: beeper (global, comms) is
+  // accessible; the event-watch record (bare skills/ dir, no alias here) correctly is not.
+  expect(frame).toContain("⌖ claude");
   expect(frame).toContain("beeper");
-  // Narrow test terminal truncates long names — the section header proves the row is there.
-  expect(frame).toContain("EVENT-WATCH · 1");
-  expect(frame).toContain("comms");
+  expect(frame).toContain("COMMS");
   unmount();
   skillsDb.close();
   indexDb.close();

@@ -110,7 +110,9 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
 
   const [refreshTick, setRefreshTick] = useState(0);
   const [records, setRecords] = useState<SkillRecord[]>(() => loadSkills(skillsDb));
-  const [view, setView] = useState<SkillsView>("home");
+  // Default landing: the claude @ ~ lens grouped by category — "what can my usual root
+  // session use, organized by domain". x/g from there reach every other context/view.
+  const [view, setView] = useState<SkillsView>("category");
   const [sort, setSort] = useState<SkillsSort>("recent");
   const [selected, setSelected] = useState(0);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -118,7 +120,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
   const [mode, setMode] = useState<InputMode | null>(null);
   const [unusedOnly, setUnusedOnly] = useState(false);
   const [showWorktrees, setShowWorktrees] = useState(false);
-  const [contextIdx, setContextIdx] = useState(0);
+  const [contextIdx, setContextIdx] = useState(1); // contexts[1] = claude @ ~
   const [previewVisible, setPreviewVisible] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
