@@ -53,7 +53,8 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
   expect(frame).toContain("Real Session One"); // visible real session
   expect(frame).not.toContain("SUBAGENTONLY"); // subagent hidden by default
   expect(frame).toContain("sessions"); // dashboard header stat
-  expect(frame).toContain("show-agents"); // footer toggle for hidden subagent runs
+  // Footer truncates at test width; assert its head (mode toggle) rather than the far tail.
+  expect(frame).toContain("Tab skills");
 
   unmount();
   real.close();
