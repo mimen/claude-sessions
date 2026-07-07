@@ -692,7 +692,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
 
       {transcript ? null : (
         <Text color={theme.muted} wrap="truncate-end">
-          ↵ resume · v transcript · / search · : codex · e edit · g {view} · s sort:{sort} · a{" "}
+          ↵ resume · Tab skills · v transcript · / search · : codex · e edit · g {view} · s sort:{sort} · a{" "}
           {includeSubagents ? "hide-agents" : "show-agents"} · L loop · C done · X archive · ? help · q quit
         </Text>
       )}

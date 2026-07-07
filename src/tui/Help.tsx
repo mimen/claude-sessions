@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { theme } from "./theme.ts";
 
 const KEYS: Array<[string, string]> = [
+  ["Tab", "switch to SKILLS mode (machine-wide skill registry; Tab there returns)"],
   ["↑ ↓ / j k", "move selection"],
   ["↵", "resume session (or expand a project group)"],
   ["→ / l", "drill into a session's subagent runs"],
