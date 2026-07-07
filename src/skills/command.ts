@@ -172,7 +172,13 @@ async function list(opts: ListOpts): Promise<number> {
     if (opts.json) {
       console.log(
         JSON.stringify(
-          rows.map((s) => ({ ...s, tags: tags.get(s.name) ?? [], usage: usage.get(s.name) ?? null })),
+          rows.map((s) => ({
+          ...s,
+          category: categories.get(s.name) ?? null,
+          tags: tags.get(s.name) ?? [],
+          usage: usage.get(s.name) ?? null,
+          ...(opts.context ? { access: accessByPath.get(s.path) ?? null } : {}),
+        })),
           null,
           2,
         ),
