@@ -693,7 +693,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       {transcript ? null : (
         <KeyBar
           items={[
-            ["↵", "resume"],
+            ["enter", "resume"],
             ["/", "search"],
             ["v", "transcript"],
             ["g", `view:${view}`],

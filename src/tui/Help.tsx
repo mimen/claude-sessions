@@ -75,7 +75,7 @@ const SESSION_GROUPS: KeyGroup[] = [
   {
     name: "Resume",
     keys: [
-      ["↵", "resume the session (on a section header: expand/collapse)"],
+      ["enter", "resume the session (on a section header: expand/collapse)"],
       ["f", "fork-resume (new session id, same history)"],
       ["o", "resume via the other target (inline ↔ cmux)"],
     ],

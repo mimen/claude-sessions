@@ -602,7 +602,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
               name: "Move & read",
               keys: [
                 ["↑↓ / j k", "move selection"],
-                ["↵ / v", "read the skill's files full-screen (Tab/←→ cycle files, j/k scroll)"],
+                ["enter / v", "read the skill's files full-screen (Tab/←→ cycle files, j/k scroll)"],
                 ["p", "show / hide the preview pane"],
               ],
             },
@@ -691,7 +691,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
       ) : (
         <KeyBar
           items={[
-            ["↵", "read"],
+            ["enter", "read"],
             ["x", `context:${context.kind === "all" ? "all" : contextLabel(context)}`],
             ["g", `group:${view}`],
             ["/", "search"],
