@@ -30,6 +30,10 @@ describe("classifyPath", () => {
     expect(classifyPath(`${HOME}/.cursor/skills-cursor/loop`, HOME)).toBe("cursor");
     expect(classifyPath(`${HOME}/.hermes/skills/apple/imessage`, HOME)).toBe("hermes");
   });
+  test("codex catalog caches are marketplace, not installs", () => {
+    expect(classifyPath(`${HOME}/.codex/.tmp/plugins/plugins/hubspot/skills/hubspot`, HOME)).toBe("marketplace");
+    expect(classifyPath(`${HOME}/.codex/vendor_imports/skills/skills/.curated/figma`, HOME)).toBe("marketplace");
+  });
   test("archives and downloads", () => {
     expect(classifyPath(`${HOME}/Documents/milad-vault/_archive/Sol/skills/heartbeat`, HOME)).toBe("archive");
     expect(classifyPath(`${HOME}/Downloads/skills-main/pdf`, HOME)).toBe("download");

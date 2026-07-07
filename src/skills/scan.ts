@@ -44,6 +44,9 @@ export function classifyPath(path: string, home: string = homedir()): Ecosystem 
   if (p.startsWith("~/.claude/plugins/")) return "plugin";
   if (p.startsWith("~/.claude/skills/")) return "claude-user";
   if (p.startsWith("~/.agents/")) return "agents";
+  // Codex's synced remote-plugin catalog (.tmp) and curated vendor imports are
+  // OpenAI-published listings, not installs — same class as marketplace clones.
+  if (p.startsWith("~/.codex/.tmp/") || p.startsWith("~/.codex/vendor_imports/")) return "marketplace";
   if (p.startsWith("~/.codex/")) return "codex";
   if (p.startsWith("~/.cursor/")) return "cursor";
   if (p.startsWith("~/.hermes/")) return "hermes";
