@@ -568,8 +568,8 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
         </Text>
       ) : (
         <Text color={theme.muted} wrap="truncate-end">
-          ↵ read · Tab sessions · / search · o editor · f finder · e edit · t tag · c category · s used-by · g {view} · S
-          sort:{sort} · u unused · y path · X archive · R rescan · ? help · q quit
+          ↵ read · Tab sessions · g group-by:{view} · S sort:{sort} · / search · o editor · f finder · e edit · t tag · c
+          category · s used-by · u unused · y path · X archive · R rescan · ? help · q quit
         </Text>
       )}
     </Box>

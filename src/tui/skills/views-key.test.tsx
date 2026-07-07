@@ -1,0 +1,35 @@
+import { test, expect } from "bun:test";
+import { render } from "ink-testing-library";
+import { createElement } from "react";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openIndex } from "../../index/schema.ts";
+import { openSkillsDb, saveSkills } from "../../skills/db.ts";
+import { loadConfig } from "../../config.ts";
+import { SkillsPanel } from "./SkillsPanel.tsx";
+
+test("g cycles grouping views", async () => {
+  const skillsDb = openSkillsDb(":memory:");
+  const indexDb = openIndex(":memory:");
+  saveSkills(skillsDb, [{ name: "beeper", path: "/x/.claude/skills/beeper", realPath: "/x/.claude/skills/beeper", ecosystem: "claude-user", description: "", aliases: [], mtimeMs: 1, contentHash: "h" }]);
+  const cr = loadConfig("/nonexistent.toml");
+  if (!cr.ok) throw new Error("cfg");
+  const config = { ...cr.value, store: { path: mkdtempSync(join(tmpdir(), "ccs-g-")) } };
+  const { lastFrame, stdin, unmount } = render(createElement(SkillsPanel, { skillsDb, indexDb, config, onSwitchMode: () => {}, onShowSessions: () => {} }));
+  await new Promise((r) => setTimeout(r, 60));
+  expect(lastFrame()).toContain("view home");
+  stdin.write("g");
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame()).toContain("view name");
+  stdin.write("g");
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame()).toContain("view category");
+  stdin.write("g");
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame()).toContain("view activity");
+  stdin.write("g");
+  await new Promise((r) => setTimeout(r, 30));
+  expect(lastFrame()).toContain("view flat");
+  unmount();
+});
