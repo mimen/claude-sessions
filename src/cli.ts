@@ -33,6 +33,7 @@ Usage:
   ccs event [<id>|.] <slug> [--off]   Assign/clear the session's event slug
   ccs parent [<id>|.] <parent-id|.> [--off]   Set/clear the spawning parent session
   ccs skill [<id>|.] <name> [--off]   Set/clear the backing skill or slash-command
+  ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
   ccs --version       Print version
   ccs --help          Show this help
 `;
@@ -78,6 +79,10 @@ export async function main(argv: string[]): Promise<number> {
       return parent(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "skill":
       return skill(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "skills": {
+      const { skillsCommand } = await import("./skills/command.ts");
+      return await skillsCommand(args.slice(1));
+    }
     case undefined:
       return await launchTui();
     default:

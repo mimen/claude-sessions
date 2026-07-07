@@ -15,6 +15,11 @@ export const DB_PATH = join(DATA_DIR, "index.db");
  * and rebuilt on schema bumps; the catalogue must survive that, so it never shares the file.
  */
 export const CATALOGUE_PATH = join(DATA_DIR, "catalogue.db");
+/**
+ * Skills DB: machine-wide skill registry + transcript usage cache (rebuildable),
+ * plus durable user-authored tags. Separate file so Index schema bumps never touch it.
+ */
+export const SKILLS_DB_PATH = join(DATA_DIR, "skills.db");
 
 /** Default Store: the single directory Claude Code centralises all Sessions into. */
 export const DEFAULT_STORE_PATH = join(homedir(), ".claude", "projects");
