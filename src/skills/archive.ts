@@ -7,7 +7,7 @@ import { type Result, ok, err } from "../result.ts";
 /** Where archived skills go: a dated graveyard in the vault with an origin note for undo. */
 export const ARCHIVE_ROOT = join(homedir(), "Documents", "milad-vault", "_archive", "skills");
 
-const PROTECTED: ReadonlySet<Ecosystem> = new Set(["plugin", "codex", "cursor", "hermes"]);
+const PROTECTED: ReadonlySet<Ecosystem> = new Set(["plugin", "marketplace", "codex", "cursor", "hermes"]);
 
 /**
  * Why a record must not be archived from ccs, or null if it's fair game.

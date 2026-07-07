@@ -8,7 +8,8 @@ export type Ecosystem =
   | "claude-user" // ~/.claude/skills or its canonical source (the vault ClaudeConfig)
   | "claude-project" // a repo's .claude/skills (workspace/project-local)
   | "agents" // ~/.agents/skills (Agent Skills standard harnesses)
-  | "plugin" // ~/.claude/plugins marketplaces
+  | "plugin" // installed plugin copies (~/.claude/plugins/cache)
+  | "marketplace" // marketplace catalog clones (~/.claude/plugins/marketplaces) — listings, not installs
   | "codex"
   | "cursor"
   | "hermes"
@@ -39,6 +40,7 @@ export function classifyPath(path: string, home: string = homedir()): Ecosystem 
   const p = path.startsWith(home) ? "~" + path.slice(home.length) : path;
   if (p.includes("/_archive/") || p.includes("/deprecated/")) return "archive";
   if (p.startsWith("~/Downloads/")) return "download";
+  if (p.startsWith("~/.claude/plugins/marketplaces/")) return "marketplace";
   if (p.startsWith("~/.claude/plugins/")) return "plugin";
   if (p.startsWith("~/.claude/skills/")) return "claude-user";
   if (p.startsWith("~/.agents/")) return "agents";

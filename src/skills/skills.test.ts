@@ -16,8 +16,13 @@ describe("classifyPath", () => {
       "claude-project",
     );
   });
-  test("plugin marketplaces", () => {
-    expect(classifyPath(`${HOME}/.claude/plugins/marketplaces/anthropic-agent-skills/skills/pdf`, HOME)).toBe("plugin");
+  test("marketplace catalogs vs installed plugin copies", () => {
+    expect(classifyPath(`${HOME}/.claude/plugins/marketplaces/anthropic-agent-skills/skills/pdf`, HOME)).toBe(
+      "marketplace",
+    );
+    expect(classifyPath(`${HOME}/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/brainstorming`, HOME)).toBe(
+      "plugin",
+    );
   });
   test("other-harness ecosystems", () => {
     expect(classifyPath(`${HOME}/.agents/skills/grill-me`, HOME)).toBe("agents");

@@ -121,7 +121,7 @@ async function list(opts: ListOpts): Promise<number> {
       const cache = new Map<string, boolean>();
       const shadows = shadowDuplicatePaths(rows);
       const before = rows.length;
-      rows = rows.filter((s) => !shadows.has(s.path) && !isInLinkedWorktree(s.realPath, cache));
+      rows = rows.filter((s) => s.ecosystem !== "marketplace" && !shadows.has(s.path) && !isInLinkedWorktree(s.realPath, cache));
       dupesHidden = before - rows.length;
     }
     if (opts.eco) rows = rows.filter((s) => s.ecosystem === opts.eco);

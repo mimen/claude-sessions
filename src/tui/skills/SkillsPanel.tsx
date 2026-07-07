@@ -178,7 +178,11 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
   const dupePaths = useMemo(() => {
     const cache = new Map<string, boolean>();
     const hidden = shadowDuplicatePaths(records);
-    for (const r of records) if (isInLinkedWorktree(r.realPath, cache)) hidden.add(r.path);
+    for (const r of records) {
+      // Marketplace catalog clones are browseable listings, not installs — noise like dupes.
+      if (r.ecosystem === "marketplace") hidden.add(r.path);
+      else if (isInLinkedWorktree(r.realPath, cache)) hidden.add(r.path);
+    }
     return hidden;
   }, [records]);
 
