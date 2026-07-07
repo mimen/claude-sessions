@@ -68,6 +68,19 @@ export function openSkillsDb(dbPath: string): Database {
   return db;
 }
 
+/**
+ * Serialize writers on the skills DB. The TUI panel remounts on every Tab back into skills
+ * mode and its mount effect starts a usage-mine; overlapping runs on one connection interleave
+ * transactions and throw (crashing Ink via unhandled rejection). All async write flows go
+ * through this promise-chain mutex instead.
+ */
+let writeChain: Promise<unknown> = Promise.resolve();
+export function serializeSkillsWrite<T>(fn: () => Promise<T> | T): Promise<T> {
+  const next = writeChain.then(fn);
+  writeChain = next.catch(() => {});
+  return next;
+}
+
 /** Replace the whole cached registry with a fresh scan result. */
 export function saveSkills(db: Database, records: SkillRecord[]): void {
   const insert = db.prepare(

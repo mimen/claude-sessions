@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 
 export type ResumeTarget = "cmux" | "inline";
 export type TargetPin = "auto" | "cmux" | "inline";
@@ -16,6 +16,21 @@ export function cmuxReachable(binary = "cmux"): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Async variant for the TUI. Even inside a useEffect, a SYNC spawn blocks the event loop and
+ * re-enters React's work loop ("Should not already be working." crash on mode toggles) — the
+ * probe must be genuinely non-blocking there.
+ */
+export function cmuxReachableAsync(binary = "cmux"): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      execFile(binary, ["ping"], { timeout: 1500 }, (err) => resolve(!err));
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 /**

@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -99,6 +99,10 @@ function liveWorkspacesUncached(cmuxBin: string): Map<string, LiveWorkspace> | n
   } catch {
     return null; // cmux not running / not reachable
   }
+  return parseTree(out);
+}
+
+function parseTree(out: string): Map<string, LiveWorkspace> | null {
   try {
     const tree = JSON.parse(out) as { windows?: { workspaces?: { title?: string; ref?: string }[] }[] };
     const map = new Map<string, LiveWorkspace>();
@@ -112,6 +116,36 @@ function liveWorkspacesUncached(cmuxBin: string): Map<string, LiveWorkspace> | n
   } catch {
     return null;
   }
+}
+
+/** Async probe for the TUI: same TTL cache, but never blocks the event loop (see target.ts). */
+function liveWorkspacesAsync(cmuxBin: string): Promise<Map<string, LiveWorkspace> | null> {
+  if (probeCache && Date.now() - probeCache.at < PROBE_TTL_MS) return Promise.resolve(probeCache.value);
+  return new Promise((resolve) => {
+    const done = (value: Map<string, LiveWorkspace> | null): void => {
+      probeCache = { at: Date.now(), value };
+      resolve(value);
+    };
+    try {
+      execFile(cmuxBin, ["tree", "--all", "--json"], { timeout: 2000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+        done(err ? null : parseTree(String(stdout)));
+      });
+    } catch {
+      done(null);
+    }
+  });
+}
+
+/** Async variant of openSessionTitles for the TUI's effects. */
+export async function openSessionTitlesAsync(cmuxBin = "cmux"): Promise<Map<string, string>> {
+  const live = await liveWorkspacesAsync(cmuxBin);
+  const out = new Map<string, string>();
+  if (!live) return out;
+  for (const [title, sid] of titleToSessionId()) {
+    const ws = live.get(title);
+    if (ws && ws.display) out.set(sid, ws.display);
+  }
+  return out;
 }
 
 /**

@@ -10,6 +10,7 @@ import { KeyHelp, KeyBar } from "../Help.tsx";
 import {
   loadSkills,
   saveSkills,
+  serializeSkillsWrite,
   usageTotals,
   tagsFor,
   categoriesFor,
@@ -131,6 +132,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
   const reload = () => setRefreshTick((t) => t + 1);
 
   // First mount: discover if the registry is empty, then mine incrementally (fast after first run).
+  // Serialized: Tab-toggling remounts this panel, and overlapping mines on one DB connection throw.
   useEffect(() => {
     let alive = true;
     const run = async () => {
@@ -140,7 +142,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
         const found = await discoverSkills();
         if (!alive) return;
         if (found.ok) {
-          saveSkills(skillsDb, found.value);
+          await serializeSkillsWrite(() => saveSkills(skillsDb, found.value));
           recs = found.value;
           setRecords(recs);
         }
@@ -152,12 +154,17 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
         dirs.set(s.realPath, s.name);
         for (const a of s.aliases) dirs.set(a, s.name);
       }
-      await mineUsage(skillsDb, config.store.path, dirs);
+      await serializeSkillsWrite(() => mineUsage(skillsDb, config.store.path, dirs));
       if (!alive) return;
       setBusy(null);
       reload();
     };
-    void run();
+    run().catch((e: unknown) => {
+      // Never let a mount-effect rejection escape — it kills the whole Ink app.
+      if (!alive) return;
+      setBusy(null);
+      setStatus(`usage refresh failed: ${(e as Error).message}`);
+    });
     return () => {
       alive = false;
     };
@@ -298,17 +305,22 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
 
   const doRescan = () => {
     setBusy("rescanning the machine…");
-    void discoverSkills().then((found) => {
-      if (found.ok) {
-        saveSkills(skillsDb, found.value);
-        setRecords(found.value);
-        setStatus(`rescan: ${found.value.length} skills`);
-      } else {
-        setStatus(found.error.message);
-      }
-      setBusy(null);
-      reload();
-    });
+    discoverSkills()
+      .then(async (found) => {
+        if (found.ok) {
+          await serializeSkillsWrite(() => saveSkills(skillsDb, found.value));
+          setRecords(found.value);
+          setStatus(`rescan: ${found.value.length} skills`);
+        } else {
+          setStatus(found.error.message);
+        }
+        setBusy(null);
+        reload();
+      })
+      .catch((e: unknown) => {
+        setBusy(null);
+        setStatus(`rescan failed: ${(e as Error).message}`);
+      });
   };
 
   const doArchive = (rec: SkillRecord) => {

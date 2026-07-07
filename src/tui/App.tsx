@@ -16,7 +16,7 @@ import {
 } from "../index/index.ts";
 import { backfillTitles } from "../titler/queue.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "../resume/command.ts";
-import { resolveTarget, cmuxReachable } from "../resume/target.ts";
+import { resolveTarget, cmuxReachableAsync } from "../resume/target.ts";
 import { openInCmux } from "../resume/cmux.ts";
 import { searchRows } from "./search.ts";
 import { buildDisplayItems, type SortMode } from "./groupByProject.ts";
@@ -30,7 +30,7 @@ import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
 import { getAll, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle } from "../catalogue/db.ts";
-import { openSessionTitles } from "../catalogue/open-state.ts";
+import { openSessionTitlesAsync } from "../catalogue/open-state.ts";
 import { runMetadataCommand, applyMutations, type SessionMeta } from "../catalogue/command.ts";
 import { buildStateItems, DEFAULT_COLLAPSED } from "./stateGroups.ts";
 import { buildTreeItems } from "./treeGroups.ts";
@@ -95,7 +95,17 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   >(null);
 
   const reload = () => setRefreshTick((t) => t + 1);
-  const reachable = useMemo(() => cmuxReachable(), []);
+  // cmux probes must be ASYNC in the TUI. In render they block React mid-frame; even in an
+  // effect a sync spawn blocks the event loop and re-enters the work loop ("Should not
+  // already be working." — the Tab-between-modes crash, since every toggle remounts App).
+  const [reachable, setReachable] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void cmuxReachableAsync().then((v) => alive && setReachable(v));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Catalogue join: custom-title override + lifecycle; live open-state from cmux. Only when a
   // catalogue is present (tests mount without one, so no cmux probe runs there).
@@ -105,10 +115,15 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   );
   // Live cmux workspace titles (source of truth for open sessions) — override the ccs Title while
   // open. Also gives us the open-set (its keys) so we probe cmux once, not twice.
-  const openTitles = useMemo(
-    () => (catalogue ? openSessionTitles() : new Map<string, string>()),
-    [catalogue, refreshTick],
-  );
+  const [openTitles, setOpenTitles] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (!catalogue) return;
+    let alive = true;
+    void openSessionTitlesAsync().then((titles) => alive && setOpenTitles(titles));
+    return () => {
+      alive = false;
+    };
+  }, [catalogue, refreshTick]);
   const openSet = useMemo(() => new Set(openTitles.keys()), [openTitles]);
   const baseRows = useMemo(() => {
     const raw = listByRecency(db, includeSubagents);
