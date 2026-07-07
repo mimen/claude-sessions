@@ -124,6 +124,18 @@ async function list(opts: ListOpts): Promise<number> {
       return a.name.localeCompare(b.name);
     });
 
+    const header = [
+      pad("SKILL", 30),
+      pad("ECOSYSTEM", 15),
+      pad("TAGS", 18),
+      padLeft("INV", 5),
+      padLeft("CMD", 5),
+      padLeft("READ", 5),
+      pad("LAST-USED", 11),
+    ];
+    if (opts.paths) header.push("PATH");
+    console.log(header.join(" "));
+
     for (const s of display) {
       const u = usage.get(s.name);
       const t = tags.get(s.name) ?? [];
@@ -142,8 +154,8 @@ async function list(opts: ListOpts): Promise<number> {
 
     const unobserved = display.filter((s) => !usage.has(s.name)).length;
     console.log(
-      `\n${display.length} skills (${unobserved} unobserved) · columns: name eco tags inv cmd read last-used` +
-        ` · inv=Skill invocations cmd=slash commands read=doc reads · this machine's Store only` +
+      `\n${display.length} skills (${unobserved} unobserved) · INV=Skill invocations CMD=slash commands READ=doc reads` +
+        ` · this machine's Store only` +
         (opts.all || opts.eco ? "" : " · default view hides codex/cursor/hermes/archive (--all)"),
     );
     return 0;
