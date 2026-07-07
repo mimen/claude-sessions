@@ -173,3 +173,43 @@ describe("shadowDuplicatePaths", () => {
     expect(hidden.size).toBe(1);
   });
 });
+
+describe("accessIn", () => {
+  const { accessIn } = require("./view.ts") as typeof import("./view.ts");
+  const H = "/Users/mimen";
+
+  test("claude @ ~: global + plugin + project-below-as-nested", () => {
+    const ctx = { kind: "claude", cwd: H } as const;
+    expect(accessIn(rec({ path: `${H}/.claude/skills/beeper` }), ctx, H)).toBe("global");
+    expect(accessIn(rec({ path: `${H}/.claude/plugins/cache/x/y/1/skills/z`, ecosystem: "plugin" }), ctx, H)).toBe("plugin");
+    expect(accessIn(rec({ path: `${H}/Documents/milad-vault/Workspaces/Events/.claude/skills/event-prep`, ecosystem: "claude-project" }), ctx, H)).toBe(
+      "nested (on file-touch)",
+    );
+    expect(accessIn(rec({ path: `${H}/.codex/skills/.system/imagegen`, ecosystem: "codex" }), ctx, H)).toBeNull();
+  });
+
+  test("claude @ workspace: its own .claude/skills loads at launch", () => {
+    const ctx = { kind: "claude", cwd: `${H}/Documents/milad-vault/Workspaces/Events/events/glizzy` } as const;
+    expect(accessIn(rec({ path: `${H}/Documents/milad-vault/Workspaces/Events/.claude/skills/event-prep`, ecosystem: "claude-project" }), ctx, H)).toBe(
+      "project (at launch)",
+    );
+  });
+
+  test("codex: system vs bridged symlink alias", () => {
+    const ctx = { kind: "codex" } as const;
+    expect(accessIn(rec({ path: `${H}/.codex/skills/.system/imagegen`, ecosystem: "codex" }), ctx, H)).toBe("system");
+    // A ClaudeConfig skill whose alias is the codex bridge symlink IS codex-accessible.
+    expect(
+      accessIn(rec({ path: `${H}/.claude/skills/beeper`, aliases: [`${H}/.codex/skills/beeper`] }), ctx, H),
+    ).toBe("bridged symlink");
+    expect(accessIn(rec({ path: `${H}/.claude/skills/loop-manager` }), ctx, H)).toBeNull();
+  });
+
+  test("hermes: installed vs optional", () => {
+    const ctx = { kind: "hermes" } as const;
+    expect(accessIn(rec({ path: `${H}/.hermes/skills/apple/imessage`, ecosystem: "hermes" }), ctx, H)).toBe("installed");
+    expect(accessIn(rec({ path: `${H}/.hermes/hermes-agent/optional-skills/blockchain/evm`, ecosystem: "hermes" }), ctx, H)).toBe(
+      "optional (not enabled)",
+    );
+  });
+});

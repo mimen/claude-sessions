@@ -22,11 +22,15 @@ import { discoverSkills, isInLinkedWorktree, type SkillRecord } from "../../skil
 import { mineUsage } from "../../skills/usage.ts";
 import { archiveSkill, archiveGuard } from "../../skills/archive.ts";
 import {
+  accessIn,
+  buildContextItems,
   buildSkillItems,
+  contextLabel,
   driftedNames,
   homeOf,
   matchesQuery,
   shadowDuplicatePaths,
+  type SkillContext,
   SKILLS_SORT_CYCLE,
   SKILLS_VIEW_CYCLE,
   type SkillItem,
@@ -113,6 +117,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
   const [mode, setMode] = useState<InputMode | null>(null);
   const [unusedOnly, setUnusedOnly] = useState(false);
   const [showWorktrees, setShowWorktrees] = useState(false);
+  const [contextIdx, setContextIdx] = useState(0);
   const [previewVisible, setPreviewVisible] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -186,18 +191,40 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
     return hidden;
   }, [records]);
 
+  // Context lens: what a session launched in a given harness/directory can actually see.
+  const contexts = useMemo<SkillContext[]>(() => {
+    const home = process.env["HOME"] ?? "~";
+    return [
+      { kind: "all" },
+      { kind: "claude", cwd: home },
+      { kind: "claude", cwd: process.cwd() },
+      { kind: "codex" },
+      { kind: "hermes" },
+      { kind: "cursor" },
+      { kind: "agents" },
+    ];
+  }, []);
+  const context = contexts[contextIdx % contexts.length]!;
+
   const rows = useMemo(() => {
     let r = allRows;
-    if (!showWorktrees) r = r.filter((x) => !dupePaths.has(x.rec.path));
+    if (!showWorktrees && context.kind === "all") r = r.filter((x) => !dupePaths.has(x.rec.path));
     if (unusedOnly) r = r.filter((x) => !x.usage);
     if (query.trim()) r = r.filter((x) => matchesQuery(x, query));
     return r;
-  }, [allRows, unusedOnly, query, showWorktrees, dupePaths]);
+  }, [allRows, unusedOnly, query, showWorktrees, dupePaths, context.kind]);
 
-  const items = useMemo<SkillItem[]>(
-    () => buildSkillItems(rows, { view, sort, collapsed, nowMs: Date.now() }),
-    [rows, view, sort, collapsed],
-  );
+  const items = useMemo<SkillItem[]>(() => {
+    if (context.kind !== "all") {
+      const accessible: Array<{ row: (typeof rows)[number]; access: string }> = [];
+      for (const row of rows) {
+        const access = accessIn(row.rec, context);
+        if (access) accessible.push({ row, access });
+      }
+      return buildContextItems(accessible, sort, collapsed);
+    }
+    return buildSkillItems(rows, { view, sort, collapsed, nowMs: Date.now() });
+  }, [rows, view, sort, collapsed, context]);
 
   const clampedSelected = Math.min(selected, Math.max(0, items.length - 1));
   const current = items[clampedSelected];
@@ -409,6 +436,9 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
     } else if (input === "w") {
       setShowWorktrees((v) => !v);
       setSelected(0);
+    } else if (input === "x") {
+      setContextIdx((i) => (i + 1) % contexts.length);
+      setSelected(0);
     } else if (input === "v") openReader();
     else if (key.return) {
       if (current?.kind === "section") toggleSection(current.key);
@@ -509,10 +539,16 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
         </Text>
         <Text color={theme.muted}>
           {" "}
-          · {rows.length} skills · {unobserved} unobserved · view {view} · sort {sort}
+          {context.kind !== "all" ? (
+            <Text color={theme.accent} bold>
+              · ⌖ {contextLabel(context)}{" "}
+            </Text>
+          ) : null}
+          · {context.kind === "all" ? `${rows.length} skills` : `${items.filter((i) => i.kind === "skill").length} accessible`} ·{" "}
+          {unobserved} unobserved · view {context.kind === "all" ? view : "access"} · sort {sort}
           {unusedOnly ? " · UNUSED ONLY" : ""}
-          {!showWorktrees && dupePaths.size > 0 ? ` · ${dupePaths.size} duplicate copies hidden (w)` : ""}
-          {showWorktrees ? " · +dupes" : ""}
+          {context.kind === "all" && !showWorktrees && dupePaths.size > 0 ? ` · ${dupePaths.size} duplicate copies hidden (w)` : ""}
+          {context.kind === "all" && showWorktrees ? " · +dupes" : ""}
           {query && !searching ? ` · filter: ${query}` : ""}
         </Text>
         <Box flexGrow={1} />
@@ -555,6 +591,8 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
           <Text color={theme.muted}>o open dir in editor · f reveal in Finder · e edit SKILL.md · y copy path</Text>
           <Text color={theme.muted}>t tag (toggles) · c set category (empty clears) · u unused-only · R rescan machine</Text>
           <Text color={theme.muted}>w show/hide duplicate copies (hidden by default: git-worktree checkouts + identical repo-clone/install shadow copies)</Text>
+          <Text color={theme.muted}>x context lens — cycle what a session can actually see: all → claude @ ~ → claude @ cwd → codex → hermes → cursor → agents;</Text>
+          <Text color={theme.muted}>  grouped by HOW it loads (global / plugin / project-at-launch / nested-on-file-touch / bridged symlink / system / optional)</Text>
           <Text color={theme.muted}>s show sessions that used this skill · X archive copy to vault (y/N confirm)</Text>
           <Text color={theme.muted}>≠ = same-name copies have drifted apart · INV/SLA/RD = invoked / slash / doc-reads</Text>
         </Box>
@@ -590,8 +628,9 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
         </Text>
       ) : (
         <Text color={theme.muted} wrap="truncate-end">
-          ↵ read · Tab sessions · g group-by:{view} · S sort:{sort} · / search · o editor · f finder · e edit · t tag · c
-          category · s used-by · u unused · w dupes · y path · X archive · R rescan · ? help · q quit
+          ↵ read · Tab sessions · x context:{context.kind === "all" ? "all" : contextLabel(context)} · g group-by:{view} · S
+          sort:{sort} · / search · o editor · f finder · e edit · t tag · c category · s used-by · u unused · w dupes · y
+          path · X archive · R rescan · ? help · q quit
         </Text>
       )}
     </Box>

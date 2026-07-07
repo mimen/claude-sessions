@@ -1,7 +1,8 @@
 import { loadConfig } from "../config.ts";
 import { ensureDataDir, SKILLS_DB_PATH } from "../paths.ts";
 import { discoverSkills, isInLinkedWorktree, type SkillRecord } from "./scan.ts";
-import { shadowDuplicatePaths } from "./view.ts";
+import { shadowDuplicatePaths, accessIn, contextLabel, type SkillContext } from "./view.ts";
+import { homedir } from "node:os";
 import { openSkillsDb, saveSkills, loadSkills, usageTotals, tagsFor, addTag, removeTag, setCategory, categoriesFor } from "./db.ts";
 import { mineUsage } from "./usage.ts";
 
@@ -15,6 +16,10 @@ Usage:
   ccs skills --unused        Only skills with zero observed usage (candidates for pruning)
   ccs skills --worktrees     Include git-worktree copies (hidden by default — each worktree
                              checkout duplicates its repo's skills)
+  ccs skills --context <c>   Only skills a session in that context can actually load, with an
+                             ACCESS column saying how. Contexts: claude (Claude Code @ ~),
+                             claude:<path> (Claude Code started in <path>), codex, hermes,
+                             cursor, agents
   ccs skills --paths         Show each skill's primary path
   ccs skills --rescan        Re-run full-machine discovery (otherwise cached registry)
   ccs skills --json          Full records as JSON (paths, aliases, descriptions, usage, tags)
@@ -62,7 +67,21 @@ export async function skillsCommand(args: string[]): Promise<number> {
     rescan: args.includes("--rescan"),
     json: args.includes("--json"),
     worktrees: args.includes("--worktrees"),
+    context: parseContext(flagValue(args, "--context")),
   });
+}
+
+/** Parse a --context value into a SkillContext; unknown values fall back to null (no lens). */
+function parseContext(raw: string | undefined): SkillContext | null {
+  if (!raw) return null;
+  if (raw === "claude") return { kind: "claude", cwd: homedir() };
+  if (raw.startsWith("claude:")) {
+    const p = raw.slice("claude:".length);
+    return { kind: "claude", cwd: p.startsWith("~") ? homedir() + p.slice(1) : p };
+  }
+  if (raw === "codex" || raw === "hermes" || raw === "cursor" || raw === "agents") return { kind: raw };
+  console.error(`Unknown context "${raw}" — use claude, claude:<path>, codex, hermes, cursor, or agents.`);
+  return null;
 }
 
 interface ListOpts {
@@ -74,6 +93,7 @@ interface ListOpts {
   rescan: boolean;
   json: boolean;
   worktrees: boolean;
+  context: SkillContext | null;
 }
 
 async function list(opts: ListOpts): Promise<number> {
@@ -116,8 +136,17 @@ async function list(opts: ListOpts): Promise<number> {
     const categories = categoriesFor(db);
 
     let rows = skills;
+    // Context lens: keep only skills a session in that context can load; remember how.
+    const accessByPath = new Map<string, string>();
+    if (opts.context) {
+      rows = rows.filter((s) => {
+        const access = accessIn(s, opts.context!);
+        if (access) accessByPath.set(s.path, access);
+        return !!access;
+      });
+    }
     let dupesHidden = 0;
-    if (!opts.worktrees) {
+    if (!opts.worktrees && !opts.context) {
       const cache = new Map<string, boolean>();
       const shadows = shadowDuplicatePaths(rows);
       const before = rows.length;
@@ -125,7 +154,7 @@ async function list(opts: ListOpts): Promise<number> {
       dupesHidden = before - rows.length;
     }
     if (opts.eco) rows = rows.filter((s) => s.ecosystem === opts.eco);
-    else if (!opts.all) rows = rows.filter((s) => DEFAULT_ECOSYSTEMS.has(s.ecosystem));
+    else if (!opts.all && !opts.context) rows = rows.filter((s) => DEFAULT_ECOSYSTEMS.has(s.ecosystem));
     if (opts.tag) rows = rows.filter((s) => (tags.get(s.name) ?? []).includes(opts.tag!));
     if (opts.unused) rows = rows.filter((s) => !usage.has(s.name));
 
@@ -160,7 +189,7 @@ async function list(opts: ListOpts): Promise<number> {
 
     const header = [
       pad("SKILL", 30),
-      pad("ECOSYSTEM", 15),
+      pad(opts.context ? "ACCESS" : "ECOSYSTEM", opts.context ? 24 : 15),
       pad("CATEGORY", 13),
       pad("TAGS", 14),
       padLeft("INVOKED", 8),
@@ -176,7 +205,7 @@ async function list(opts: ListOpts): Promise<number> {
       const t = tags.get(s.name) ?? [];
       const cols = [
         pad(s.name + (s.copies > 1 ? ` ×${s.copies}` : ""), 30),
-        pad(s.ecosystem, 15),
+        opts.context ? pad(accessByPath.get(s.path) ?? "", 24) : pad(s.ecosystem, 15),
         pad(categories.get(s.name) ?? "", 13),
         pad(t.join(","), 14),
         padLeft(u ? String(u.invocations) : "·", 8),
@@ -190,7 +219,7 @@ async function list(opts: ListOpts): Promise<number> {
 
     const unobserved = display.filter((s) => !usage.has(s.name)).length;
     console.log(
-      `\n${display.length} skills, ${unobserved} never observed in use.` +
+      `\n${display.length} skills${opts.context ? ` accessible in context ${contextLabel(opts.context)}` : ""}, ${unobserved} never observed in use.` +
         `\nINVOKED = Claude ran it · SLASH = fired as a /command (you or a loop) · READS = opened as reference docs.` +
         `\nCounts are from this Mac's Claude transcripts only — zero here doesn't prove a skill is dead.` +
         (dupesHidden > 0 ? `\n${dupesHidden} duplicate copies hidden — worktree checkouts + identical shadow copies (--worktrees to include).` : "") +

@@ -63,6 +63,68 @@ export function activityOf(usage: UsageTotals | null, nowMs: number): Activity {
 }
 
 /**
+ * A context = the harness (and for Claude Code, the starting directory) a session runs in.
+ * Access rules differ per harness:
+ * - claude: ~/.claude/skills always; installed plugins always; project .claude/skills from the
+ *   cwd and every ancestor at launch; nested .claude/skills below cwd lazily on file-touch.
+ * - codex: ~/.codex/skills (its .system set + the symlink bridge into Claude skills).
+ * - hermes: ~/.hermes/skills installed set; optional-skills exist but are not enabled.
+ * - cursor/agents: their own flat dirs.
+ */
+export type SkillContext =
+  | { kind: "all" }
+  | { kind: "claude"; cwd: string }
+  | { kind: "codex" }
+  | { kind: "hermes" }
+  | { kind: "cursor" }
+  | { kind: "agents" };
+
+export function contextLabel(ctx: SkillContext, home: string = homedir()): string {
+  if (ctx.kind === "claude") {
+    const cwd = ctx.cwd === home ? "~" : ctx.cwd.startsWith(home) ? "~" + ctx.cwd.slice(home.length) : ctx.cwd;
+    return `claude @ ${cwd}`;
+  }
+  return ctx.kind;
+}
+
+/**
+ * How this skill is accessible in the given context, or null if it isn't.
+ * Checks every address of the record (primary path + symlink aliases) — the codex bridge
+ * symlinks make Claude skills codex-accessible, and that's only visible via aliases.
+ */
+export function accessIn(rec: SkillRecord, ctx: SkillContext, home: string = homedir()): string | null {
+  if (ctx.kind === "all") return "—";
+  const addrs = [rec.path, ...rec.aliases];
+  const under = (prefix: string): string | undefined => addrs.find((a) => a.startsWith(prefix));
+
+  if (ctx.kind === "claude") {
+    if (under(`${home}/.claude/skills/`)) return "global";
+    if (rec.ecosystem === "plugin") return "plugin";
+    for (const a of addrs) {
+      const m = a.match(/^(.*)\/\.claude\/skills\//);
+      if (!m) continue;
+      const owner = m[1]!;
+      const cwd = ctx.cwd.endsWith("/") ? ctx.cwd.slice(0, -1) : ctx.cwd;
+      if (cwd === owner || cwd.startsWith(owner + "/")) return "project (at launch)";
+      if (owner.startsWith(cwd + "/")) return "nested (on file-touch)";
+    }
+    return null;
+  }
+  if (ctx.kind === "codex") {
+    const hit = under(`${home}/.codex/skills/`);
+    if (!hit) return null;
+    return hit.includes("/.system/") ? "system" : "bridged symlink";
+  }
+  if (ctx.kind === "hermes") {
+    if (under(`${home}/.hermes/skills/`)) return "installed";
+    if (under(`${home}/.hermes/hermes-agent/optional-skills/`)) return "optional (not enabled)";
+    return null;
+  }
+  if (ctx.kind === "cursor") return under(`${home}/.cursor/`) ? "installed" : null;
+  return under(`${home}/.agents/skills/`) ? "standard dir" : null;
+}
+
+/**
  * Exact-content shadow copies: same (name, ecosystem, SKILL.md hash) appearing at multiple
  * paths — e.g. a tool's repo clone AND its installed copy (Hermes ships both). Keeps the
  * shortest path as canonical and returns the rest for hiding.
@@ -126,6 +188,44 @@ export function sortSkillRows(rows: SkillRow[], sort: SkillsSort): SkillRow[] {
       (a, b) => (b.usage?.lastUsed ?? "").localeCompare(a.usage?.lastUsed ?? "") || a.rec.name.localeCompare(b.rec.name),
     );
   return sorted;
+}
+
+/** Fixed section order inside a context lens — launch-time access first, lazier access after. */
+const ACCESS_ORDER = [
+  "global",
+  "plugin",
+  "project (at launch)",
+  "nested (on file-touch)",
+  "system",
+  "bridged symlink",
+  "installed",
+  "optional (not enabled)",
+  "standard dir",
+];
+
+/** Group rows by HOW they're accessible in the active context (rows must be pre-filtered). */
+export function buildContextItems(
+  rows: Array<{ row: SkillRow; access: string }>,
+  sort: SkillsSort,
+  collapsed: ReadonlySet<string>,
+): SkillItem[] {
+  const buckets = new Map<string, SkillRow[]>();
+  for (const { row, access } of rows) {
+    (buckets.get(access) ?? buckets.set(access, []).get(access)!).push(row);
+  }
+  const keys = [...buckets.keys()].sort((a, b) => {
+    const ia = ACCESS_ORDER.indexOf(a);
+    const ib = ACCESS_ORDER.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b);
+  });
+  const items: SkillItem[] = [];
+  for (const key of keys) {
+    const group = buckets.get(key)!;
+    const isCollapsed = collapsed.has(key);
+    items.push({ kind: "section", key, name: key.toUpperCase(), count: group.length, collapsed: isCollapsed });
+    if (!isCollapsed) for (const row of sortSkillRows(group, sort)) items.push({ kind: "skill", row });
+  }
+  return items;
 }
 
 export interface BuildCtx {

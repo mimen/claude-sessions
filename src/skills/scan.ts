@@ -1,4 +1,4 @@
-import { realpathSync, statSync, readFileSync } from "node:fs";
+import { realpathSync, statSync, readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, basename, join } from "node:path";
 import { homedir } from "node:os";
 import { type Result, ok, err } from "../result.ts";
@@ -171,9 +171,37 @@ export async function discoverSkills(root: string = homedir()): Promise<Result<S
     });
   }
 
+  // `find` doesn't follow symlinks, so symlink-farm entries (the ~/.claude/skills runtime dir,
+  // the ~/.codex/skills bridge, ~/.agents/skills) never appear in the walk. Probe those farms
+  // shallowly and attach each link as an alias of the record its realpath resolves to.
+  const home = homedir();
+  for (const farm of [`${home}/.claude/skills`, `${home}/.codex/skills`, `${home}/.agents/skills`]) {
+    let entries: string[];
+    try {
+      entries = readdirSync(farm);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.startsWith(".")) continue;
+      const link = join(farm, entry);
+      let real: string;
+      try {
+        real = realpathSync(link);
+      } catch {
+        continue; // dangling symlink
+      }
+      if (link === real) continue; // regular dir, already walked
+      if (!existsSync(join(real, "SKILL.md"))) continue;
+      const rec = byReal.get(real);
+      if (rec) {
+        if (rec.path !== link && !rec.aliases.includes(link)) rec.aliases.push(link);
+      }
+    }
+  }
+
   // Prefer the runtime path (~/.claude/skills/...) as primary when it's among the aliases,
   // since that's the name/location Claude Code actually discovers.
-  const home = homedir();
   const runtimePrefix = `${home}/.claude/skills/`;
   for (const rec of byReal.values()) {
     const runtime = [rec.path, ...rec.aliases].find((p) => p.startsWith(runtimePrefix));
