@@ -80,6 +80,9 @@ export async function main(argv: string[]): Promise<number> {
     case "skill":
       return skill(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "skills": {
+      // Bare `ccs skills` on a terminal opens the TUI in skills mode; flags/subcommands
+      // (or piped output) use the plain-table command path.
+      if (args.length === 1 && process.stdout.isTTY) return await launchTui("skills");
       const { skillsCommand } = await import("./skills/command.ts");
       return await skillsCommand(args.slice(1));
     }
@@ -154,7 +157,7 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
 }
 
 /** Launch the interactive browser: refresh the Index, then render the Ink app. */
-async function launchTui(): Promise<number> {
+async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promise<number> {
   const config = getConfig();
   if (!config) return 1;
   ensureDataDir();
@@ -164,6 +167,9 @@ async function launchTui(): Promise<number> {
 
   const db = openIndex(DB_PATH);
   const catalogue = openCatalogue(CATALOGUE_PATH);
+  const { openSkillsDb } = await import("./skills/db.ts");
+  const { SKILLS_DB_PATH } = await import("./paths.ts");
+  const skillsDb = openSkillsDb(SKILLS_DB_PATH);
   const resumeRequest: { current: ResumeCommand | null } = { current: null };
   try {
     const scan = scanStore(config.store.path);
@@ -171,17 +177,18 @@ async function launchTui(): Promise<number> {
 
     const { render } = await import("ink");
     const { createElement } = await import("react");
-    const { App } = await import("./tui/App.tsx");
+    const { Root } = await import("./tui/Root.tsx");
     const titler = createCodexTitler({
       binary: config.titler.binary,
       model: config.titler.model,
       reasoningEffort: config.titler.reasoningEffort,
     });
-    const app = render(createElement(App, { db, catalogue, config, titler, resumeRequest }));
+    const app = render(createElement(Root, { db, catalogue, skillsDb, config, titler, resumeRequest, initialMode }));
     await app.waitUntilExit();
   } finally {
     db.close();
     catalogue.close();
+    skillsDb.close();
   }
 
   // The TUI has fully unmounted (terminal restored) — now hand off to claude inline.

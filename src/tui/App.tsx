@@ -59,11 +59,16 @@ interface AppProps {
   catalogue?: Database;
   /** Inline resume is handed back to the launcher here, after the app exits. */
   resumeRequest: { current: ResumeCommand | null };
+  /** Tab-toggle to the skills panel (provided by Root; absent in tests). */
+  onSwitchMode?: () => void;
+  /** Cross-jump pin from skills mode: only sessions whose transcript path is in the set. */
+  pinned?: { paths: ReadonlySet<string>; label: string } | null;
+  onClearPinned?: () => void;
 }
 
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
-export function App({ db, catalogue, config, titler, resumeRequest }: AppProps): React.ReactElement {
+export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode, pinned, onClearPinned }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { columns: cols, rows: termRows } = useTerminalSize();
 
@@ -108,6 +113,7 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
   const baseRows = useMemo(() => {
     const raw = listByRecency(db, includeSubagents);
     return raw
+      .filter((r) => !pinned || pinned.paths.has(r.path))
       .filter((r) => showArchived || lifecycleOf(catMap.get(r.sessionId) ?? null) !== "archived")
       .map((r) => {
         // Precedence: live cmux title (open) → user's custom title → resolved Title.
@@ -489,14 +495,21 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
       return;
     }
 
-    // esc backs out one level: clear an active search filter first; only then quit.
+    // esc backs out one level: search filter → skills-mode pin → quit.
     if (key.escape) {
       if (query) {
         setQuery("");
         setSelected(0);
+      } else if (pinned && onClearPinned) {
+        onClearPinned();
+        setSelected(0);
       } else {
         exit();
       }
+      return;
+    }
+    if (key.tab && onSwitchMode) {
+      onSwitchMode();
       return;
     }
     if (input === "q") exit();
@@ -608,7 +621,7 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
       <Header
         stats={stats}
         sort={sort}
-        filter={query && !searching ? query : null}
+        filter={query && !searching ? query : pinned ? `⚙${pinned.label} sessions — esc to clear` : null}
         titling={titling ? `${spin} titling ${titling.done}/${titling.total}` : null}
       />
       {listMode ? <Text color={theme.headerBorder}>{"─".repeat(Math.max(0, contentWidth))}</Text> : null}

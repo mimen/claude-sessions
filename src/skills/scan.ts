@@ -28,6 +28,8 @@ export interface SkillRecord {
   /** Other paths that resolve to the same skill (symlink farms, copies are NOT aliases). */
   aliases: string[];
   mtimeMs: number;
+  /** Hash of SKILL.md content — same-name records with different hashes have drifted. */
+  contentHash: string;
 }
 
 const EXCLUDES = ["*/node_modules/*", "*/Library/*", "*/.Trash/*", "*/.git/*", "*/.archive/*"];
@@ -114,8 +116,11 @@ export async function discoverSkills(root: string = homedir()): Promise<Result<S
       continue;
     }
     let fm: { name?: string; description?: string } = {};
+    let contentHash = "";
     try {
-      fm = parseFrontmatter(readFileSync(line, "utf8"));
+      const text = readFileSync(line, "utf8");
+      fm = parseFrontmatter(text);
+      contentHash = Bun.hash(text).toString(36);
     } catch {
       // unreadable SKILL.md — keep the record with defaults
     }
@@ -127,6 +132,7 @@ export async function discoverSkills(root: string = homedir()): Promise<Result<S
       description: fm.description ?? "",
       aliases: [],
       mtimeMs,
+      contentHash,
     });
   }
 

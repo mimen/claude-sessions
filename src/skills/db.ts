@@ -6,7 +6,7 @@ import type { SkillRecord, Ecosystem } from "./scan.ts";
  * - Cache tables (skills, usage_files, usage_counts) are rebuildable — dropped on version bump.
  * - The tags table is durable user-authored organization (like the Catalogue) and is NEVER dropped.
  */
-export const SKILLS_CACHE_VERSION = 1;
+export const SKILLS_CACHE_VERSION = 2;
 
 export function openSkillsDb(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -18,6 +18,13 @@ export function openSkillsDb(dbPath: string): Database {
       skill_name TEXT NOT NULL,
       tag        TEXT NOT NULL,
       PRIMARY KEY (skill_name, tag)
+    );
+  `);
+  // Category: single curated bucket per logical skill (all copies share it). Durable like tags.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS categories (
+      skill_name TEXT NOT NULL PRIMARY KEY,
+      category   TEXT NOT NULL
     );
   `);
 
@@ -36,7 +43,8 @@ export function openSkillsDb(dbPath: string): Database {
       ecosystem   TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       aliases     TEXT NOT NULL DEFAULT '[]',
-      mtime_ms    REAL NOT NULL DEFAULT 0
+      mtime_ms    REAL NOT NULL DEFAULT 0,
+      content_hash TEXT NOT NULL DEFAULT ''
     );
   `);
   db.exec(`
@@ -63,15 +71,20 @@ export function openSkillsDb(dbPath: string): Database {
 /** Replace the whole cached registry with a fresh scan result. */
 export function saveSkills(db: Database, records: SkillRecord[]): void {
   const insert = db.prepare(
-    "INSERT OR REPLACE INTO skills (name, path, real_path, ecosystem, description, aliases, mtime_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT OR REPLACE INTO skills (name, path, real_path, ecosystem, description, aliases, mtime_ms, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const tx = db.transaction((rows: SkillRecord[]) => {
     db.exec("DELETE FROM skills;");
     for (const r of rows) {
-      insert.run(r.name, r.path, r.realPath, r.ecosystem, r.description, JSON.stringify(r.aliases), r.mtimeMs);
+      insert.run(r.name, r.path, r.realPath, r.ecosystem, r.description, JSON.stringify(r.aliases), r.mtimeMs, r.contentHash);
     }
   });
   tx(records);
+}
+
+/** Remove one physical record (after an archive/move); usage + tags stay (name-keyed). */
+export function removeSkillPath(db: Database, path: string): void {
+  db.prepare("DELETE FROM skills WHERE path = ?").run(path);
 }
 
 export function loadSkills(db: Database): SkillRecord[] {
@@ -83,6 +96,7 @@ export function loadSkills(db: Database): SkillRecord[] {
     description: string;
     aliases: string;
     mtime_ms: number;
+    content_hash: string;
   }>;
   return rows.map((r) => ({
     name: r.name,
@@ -92,6 +106,7 @@ export function loadSkills(db: Database): SkillRecord[] {
     description: r.description,
     aliases: JSON.parse(r.aliases) as string[],
     mtimeMs: r.mtime_ms,
+    contentHash: r.content_hash,
   }));
 }
 
@@ -139,4 +154,30 @@ export function addTag(db: Database, skillName: string, tag: string): void {
 
 export function removeTag(db: Database, skillName: string, tag: string): void {
   db.prepare("DELETE FROM tags WHERE skill_name = ? AND tag = ?").run(skillName, tag);
+}
+
+export function categoriesFor(db: Database): Map<string, string> {
+  const rows = db.query("SELECT skill_name, category FROM categories").all() as Array<{
+    skill_name: string;
+    category: string;
+  }>;
+  return new Map(rows.map((r) => [r.skill_name, r.category]));
+}
+
+/** Set (or clear with null) the single curated category for a logical skill name. */
+export function setCategory(db: Database, skillName: string, category: string | null): void {
+  if (category === null || category === "") {
+    db.prepare("DELETE FROM categories WHERE skill_name = ?").run(skillName);
+  } else {
+    db.prepare("INSERT OR REPLACE INTO categories (skill_name, category) VALUES (?, ?)").run(skillName, category);
+  }
+}
+
+/** Per-transcript-file usage for one skill — the raw material for a used-by-project breakdown. */
+export function usageFilesFor(db: Database, skillName: string): Array<{ file: string; count: number; lastTs: string }> {
+  return (
+    db
+      .query("SELECT file, SUM(count) AS count, MAX(last_ts) AS lastTs FROM usage_counts WHERE skill = ? GROUP BY file")
+      .all(skillName) as Array<{ file: string; count: number; lastTs: string }>
+  );
 }

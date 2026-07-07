@@ -1,7 +1,7 @@
 import { loadConfig } from "../config.ts";
 import { ensureDataDir, SKILLS_DB_PATH } from "../paths.ts";
 import { discoverSkills, type SkillRecord } from "./scan.ts";
-import { openSkillsDb, saveSkills, loadSkills, usageTotals, tagsFor, addTag, removeTag } from "./db.ts";
+import { openSkillsDb, saveSkills, loadSkills, usageTotals, tagsFor, addTag, removeTag, setCategory, categoriesFor } from "./db.ts";
 import { mineUsage } from "./usage.ts";
 
 const HELP = `ccs skills — every skill on this machine, with real usage numbers
@@ -16,6 +16,11 @@ Usage:
   ccs skills --rescan        Re-run full-machine discovery (otherwise cached registry)
   ccs skills --json          Full records as JSON (paths, aliases, descriptions, usage, tags)
   ccs skills tag <name> <tag…> [--remove]   Add/remove organization tags
+  ccs skills category <name> <category>     Set the skill's single curated category
+  ccs skills category <name> --clear        Clear it
+
+Bare \`ccs skills\` on a terminal opens the interactive TUI (skills mode); piped output
+or any flag/subcommand gives this plain table instead.
 
 Columns — three different ways a skill gets used:
   INVOKED   Claude ran the skill (Skill tool call mid-conversation)
@@ -44,6 +49,7 @@ export async function skillsCommand(args: string[]): Promise<number> {
     return 0;
   }
   if (args[0] === "tag") return tagCommand(args.slice(1));
+  if (args[0] === "category") return categoryCommand(args.slice(1));
   return list({
     all: args.includes("--all"),
     eco: flagValue(args, "--eco"),
@@ -102,6 +108,7 @@ async function list(opts: ListOpts): Promise<number> {
 
     const usage = usageTotals(db);
     const tags = tagsFor(db);
+    const categories = categoriesFor(db);
 
     let rows = skills;
     if (opts.eco) rows = rows.filter((s) => s.ecosystem === opts.eco);
@@ -141,7 +148,8 @@ async function list(opts: ListOpts): Promise<number> {
     const header = [
       pad("SKILL", 30),
       pad("ECOSYSTEM", 15),
-      pad("TAGS", 18),
+      pad("CATEGORY", 13),
+      pad("TAGS", 14),
       padLeft("INVOKED", 8),
       padLeft("SLASH", 6),
       padLeft("READS", 6),
@@ -156,7 +164,8 @@ async function list(opts: ListOpts): Promise<number> {
       const cols = [
         pad(s.name + (s.copies > 1 ? ` ×${s.copies}` : ""), 30),
         pad(s.ecosystem, 15),
-        pad(t.join(","), 18),
+        pad(categories.get(s.name) ?? "", 13),
+        pad(t.join(","), 14),
         padLeft(u ? String(u.invocations) : "·", 8),
         padLeft(u ? String(u.commands) : "·", 6),
         padLeft(u ? String(u.reads) : "·", 6),
@@ -173,6 +182,30 @@ async function list(opts: ListOpts): Promise<number> {
         `\nCounts are from this Mac's Claude transcripts only — zero here doesn't prove a skill is dead.` +
         (opts.all || opts.eco ? "" : `\nHidden by default: codex/cursor/hermes/archive skills (use --all). Glossary: ccs skills --help`),
     );
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
+function categoryCommand(args: string[]): number {
+  const clear = args.includes("--clear");
+  const positional = args.filter((a) => !a.startsWith("--"));
+  const [name, category] = positional;
+  if (!name || (!category && !clear)) {
+    console.error("Usage: ccs skills category <name> <category> | ccs skills category <name> --clear");
+    return 1;
+  }
+  ensureDataDir();
+  const db = openSkillsDb(SKILLS_DB_PATH);
+  try {
+    const known = new Set(loadSkills(db).map((s) => s.name));
+    if (!known.has(name)) {
+      console.error(`Unknown skill "${name}" — not in the registry (run \`ccs skills --rescan\` if it's new).`);
+      return 1;
+    }
+    setCategory(db, name, clear ? null : category!);
+    console.log(clear ? `Cleared category on ${name}` : `category(${name}) = ${category}`);
     return 0;
   } finally {
     db.close();
