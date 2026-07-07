@@ -1,10 +1,18 @@
+import { execFileSync } from "node:child_process";
+
 export type ResumeTarget = "cmux" | "inline";
 export type TargetPin = "auto" | "cmux" | "inline";
 
-/** Whether a cmux instance is reachable (its control socket answers `cmux ping`). */
+/**
+ * Whether a cmux instance is reachable (its control socket answers `cmux ping`).
+ * MUST be time-bounded: a wedged cmux socket accepts but never answers, and an unbounded
+ * sync wait here blocks the Ink render thread with raw mode on — the TUI hard-freezes and
+ * even ctrl-c is dead (SIGINT is handled in the blocked JS).
+ */
 export function cmuxReachable(binary = "cmux"): boolean {
   try {
-    return Bun.spawnSync([binary, "ping"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0;
+    execFileSync(binary, ["ping"], { timeout: 1500, stdio: "ignore" });
+    return true;
   } catch {
     return false;
   }

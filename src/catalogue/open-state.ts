@@ -71,13 +71,29 @@ interface LiveWorkspace {
   ref: string;
 }
 
+/**
+ * Short TTL cache over the `cmux tree` probe. The TUI re-derives open-state on every refresh
+ * tick (title backfill fires many in a row); each probe is a SYNCHRONOUS block on the render
+ * thread, and against a wedged cmux socket every one runs to its timeout — serial multi-second
+ * freezes that read as a dead TUI. One probe per TTL window bounds the worst case.
+ */
+const PROBE_TTL_MS = 5000;
+let probeCache: { at: number; value: Map<string, LiveWorkspace> | null } | null = null;
+
 /** Live cmux workspaces keyed by normalized title. Null when cmux isn't reachable. */
 function liveWorkspaces(cmuxBin: string): Map<string, LiveWorkspace> | null {
+  if (probeCache && Date.now() - probeCache.at < PROBE_TTL_MS) return probeCache.value;
+  const value = liveWorkspacesUncached(cmuxBin);
+  probeCache = { at: Date.now(), value };
+  return value;
+}
+
+function liveWorkspacesUncached(cmuxBin: string): Map<string, LiveWorkspace> | null {
   let out: string;
   try {
     out = execFileSync(cmuxBin, ["tree", "--all", "--json"], {
       encoding: "utf8",
-      timeout: 4000,
+      timeout: 2000,
       stdio: ["ignore", "pipe", "ignore"],
     });
   } catch {
