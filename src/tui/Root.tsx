@@ -50,7 +50,11 @@ export function Root({ db, catalogue, skillsDb, config, titler, resumeRequest, i
       resumeRequest={resumeRequest}
       onSwitchMode={() => setMode("skills")}
       pinned={pinned}
-      onClearPinned={() => setPinned(null)}
+      onClearPinned={() => {
+        // The pin came from a skills cross-jump — esc is "go back", not just "unfilter".
+        setPinned(null);
+        setMode("skills");
+      }}
     />
   );
 }

@@ -621,7 +621,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       <Header
         stats={stats}
         sort={sort}
-        filter={query && !searching ? query : pinned ? `⚙${pinned.label} sessions — esc to clear` : null}
+        filter={query && !searching ? query : pinned ? `⚙${pinned.label} sessions — esc back to skills` : null}
         titling={titling ? `${spin} titling ${titling.done}/${titling.total}` : null}
       />
       {listMode ? <Text color={theme.headerBorder}>{"─".repeat(Math.max(0, contentWidth))}</Text> : null}
@@ -692,8 +692,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
 
       {transcript ? null : (
         <Text color={theme.muted} wrap="truncate-end">
-          ↵ resume · Tab skills · v transcript · / search · : codex · e edit · g {view} · s sort:{sort} · a{" "}
-          {includeSubagents ? "hide-agents" : "show-agents"} · L loop · C done · X archive · ? help · q quit
+          ↵ resume · / search · v transcript · g view:{view} · Tab skills · ? all keys
         </Text>
       )}
     </Box>

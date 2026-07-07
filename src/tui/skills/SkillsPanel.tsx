@@ -6,6 +6,7 @@ import { join, basename } from "node:path";
 import type { Config } from "../../config.ts";
 import { useTerminalSize } from "../useTerminalSize.ts";
 import { theme } from "../theme.ts";
+import { KeyHelp } from "../Help.tsx";
 import {
   loadSkills,
   saveSkills,
@@ -594,20 +595,64 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
       {reader ? (
         <SkillReader reader={reader} width={contentWidth} height={body} />
       ) : showHelp ? (
-        <Box flexDirection="column" height={body} paddingX={2}>
-          <Text bold color={theme.header}>
-            Skills mode keys
-          </Text>
-          <Text color={theme.muted}>Tab switch to sessions · g cycle view (home/name/category/activity/flat) · S cycle sort</Text>
-          <Text color={theme.muted}>enter/v read skill files (Tab cycles files) · p preview · / search (#term = category/tag)</Text>
-          <Text color={theme.muted}>o open dir in editor · f reveal in Finder · e edit SKILL.md · y copy path</Text>
-          <Text color={theme.muted}>t tag (toggles) · c set category (empty clears) · u unused-only · R rescan machine</Text>
-          <Text color={theme.muted}>w show/hide duplicate copies (hidden by default: git-worktree checkouts + identical repo-clone/install shadow copies)</Text>
-          <Text color={theme.muted}>x context lens — cycle what a session can actually see: all → claude @ ~ → claude @ cwd → codex → hermes → cursor → agents;</Text>
-          <Text color={theme.muted}>  grouped by HOW it loads (global / plugin / project-at-launch / nested-on-file-touch / bridged symlink / system / optional)</Text>
-          <Text color={theme.muted}>s show sessions that used this skill · X archive copy to vault (y/N confirm)</Text>
-          <Text color={theme.muted}>≠ = same-name copies have drifted apart · INV/SLA/RD = invoked / slash / doc-reads</Text>
-        </Box>
+        <KeyHelp
+          title="Skills — keys"
+          groups={[
+            {
+              name: "Move & read",
+              keys: [
+                ["↑↓ / j k", "move selection"],
+                ["↵ / v", "read the skill's files full-screen (Tab/←→ cycle files, j/k scroll)"],
+                ["p", "show / hide the preview pane"],
+              ],
+            },
+            {
+              name: "Lens & views",
+              keys: [
+                ["x", "context lens: all → claude @ ~ → claude @ cwd → codex → hermes → cursor → agents"],
+                ["g", "grouping: access (in a lens) → home → name → category → activity → flat"],
+                ["S", "sort: recent → usage → a-z"],
+                ["/", "search names/descriptions/paths; #term matches a category or tag"],
+                ["u", "only never-used skills"],
+                ["w", "show hidden duplicates (worktree checkouts, identical shadow copies, catalogs)"],
+              ],
+            },
+            {
+              name: "Open & edit",
+              keys: [
+                ["o", "open the skill folder in your editor"],
+                ["f", "reveal in Finder"],
+                ["e", "edit SKILL.md"],
+                ["y", "copy the skill's path"],
+              ],
+            },
+            {
+              name: "Organize",
+              keys: [
+                ["c", "set category (empty clears) — colors the row"],
+                ["t", "toggle a tag"],
+                ["X", "archive this copy to the vault (y/N confirm; other tools' installs refused)"],
+                ["R", "rescan the whole machine"],
+              ],
+            },
+            {
+              name: "Cross & modes",
+              keys: [
+                ["s", "show the sessions that used this skill (esc returns here)"],
+                ["Tab", "switch to SESSIONS mode"],
+                ["?", "this help"],
+                ["q", "quit"],
+              ],
+            },
+            {
+              name: "Reading the list",
+              keys: [
+                ["≠", "same-name copies have drifted apart"],
+                ["·/·/·", "usage columns: invoked / slash-command / doc-reads"],
+              ],
+            },
+          ]}
+        />
       ) : items.length === 0 ? (
         <Box height={body} alignItems="center" justifyContent="center">
           <Text color={theme.muted}>{query ? "No skills match — esc to clear" : busy ?? "No skills found — R to rescan"}</Text>
@@ -640,9 +685,8 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
         </Text>
       ) : (
         <Text color={theme.muted} wrap="truncate-end">
-          ↵ read · Tab sessions · x context:{context.kind === "all" ? "all" : contextLabel(context)} · g group-by:{view} · S
-          sort:{sort} · / search · o editor · f finder · e edit · t tag · c category · s used-by · u unused · w dupes · y
-          path · X archive · R rescan · ? help · q quit
+          ↵ read · x context:{context.kind === "all" ? "all" : contextLabel(context)} · g group:{view} · / search · c
+          category · Tab sessions · ? all keys
         </Text>
       )}
     </Box>
