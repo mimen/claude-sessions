@@ -29,6 +29,17 @@ export interface SessionRow {
   readonly resumeId: string;
   /** API-equivalent USD cost of this file's own usage (subagent runs are separate rows). */
   readonly costUSD: number;
+  /** Billed token totals for this file's own usage. */
+  readonly tokInput: number;
+  readonly tokOutput: number;
+  readonly tokCacheRead: number;
+  readonly tokCacheWrite: number;
+  /** USD per model id for this file — drives the model indicator + per-model breakdown. */
+  readonly costByModel: Readonly<Record<string, number>>;
+  /** Real prompts / ticks (human/loop turns, excluding tool-result lines). */
+  readonly userTurns: number;
+  /** Median seconds between ticks — a loop's cadence (0 if fewer than two ticks). */
+  readonly tickIntervalSec: number;
 }
 
 export interface ReindexStats {
@@ -58,7 +69,14 @@ const SELECT_COLS = `
   is_subagent AS isSubagent,
   parent_session_id AS parentSessionId,
   resume_id AS resumeId,
-  cost_usd AS costUSD
+  cost_usd AS costUSD,
+  tok_input AS tokInput,
+  tok_output AS tokOutput,
+  tok_cache_read AS tokCacheRead,
+  tok_cache_write AS tokCacheWrite,
+  cost_by_model AS costByModelJson,
+  user_turns AS userTurns,
+  tick_interval_sec AS tickIntervalSec
 `;
 
 /**
@@ -85,12 +103,14 @@ export async function reindexStore(
       session_id, host, path, cwd, project_root, project_name, branch, version,
       first_ts, last_ts, msg_count, file_mtime, file_size,
       native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id,
-      cost_usd, tok_input, tok_output, tok_cache_read, tok_cache_write, cost_by_model
+      cost_usd, tok_input, tok_output, tok_cache_read, tok_cache_write, cost_by_model,
+      user_turns, tick_interval_sec
     ) VALUES (
       $session_id, $host, $path, $cwd, $project_root, $project_name, $branch, $version,
       $first_ts, $last_ts, $msg_count, $file_mtime, $file_size,
       $native_title, $fallback_label, $skeleton, $is_subagent, $parent_session_id, $resume_id,
-      $cost_usd, $tok_input, $tok_output, $tok_cache_read, $tok_cache_write, $cost_by_model
+      $cost_usd, $tok_input, $tok_output, $tok_cache_read, $tok_cache_write, $cost_by_model,
+      $user_turns, $tick_interval_sec
     )
     ON CONFLICT(session_id) DO UPDATE SET
       host = $host, path = $path, cwd = $cwd,
@@ -102,7 +122,8 @@ export async function reindexStore(
       is_subagent = $is_subagent, parent_session_id = $parent_session_id, resume_id = $resume_id,
       cost_usd = $cost_usd, tok_input = $tok_input, tok_output = $tok_output,
       tok_cache_read = $tok_cache_read, tok_cache_write = $tok_cache_write,
-      cost_by_model = $cost_by_model
+      cost_by_model = $cost_by_model,
+      user_turns = $user_turns, tick_interval_sec = $tick_interval_sec
   `);
   const ftsDelete = db.query("DELETE FROM sessions_fts WHERE session_id = $id");
   const ftsInsert = db.query(
@@ -157,6 +178,8 @@ export async function reindexStore(
       $tok_cache_read: parsed.usage.cacheRead,
       $tok_cache_write: parsed.usage.cacheWrite5m + parsed.usage.cacheWrite1h,
       $cost_by_model: JSON.stringify(parsed.usage.costByModel),
+      $user_turns: parsed.userTurns,
+      $tick_interval_sec: parsed.tickIntervalSec,
     });
 
     // Keep FTS in step with the resolved title (native if present, else fallback for now;
@@ -230,11 +253,23 @@ export function recordTitleFailure(db: Database, sessionId: string): void {
   ).run({ $id: sessionId });
 }
 
-type RawRow = Omit<SessionRow, "isSubagent"> & { isSubagent: number };
+type RawRow = Omit<SessionRow, "isSubagent" | "costByModel"> & {
+  isSubagent: number;
+  costByModelJson: string;
+};
 
-/** Coerce SQLite's 0/1 is_subagent into a real boolean. */
+/** Coerce SQLite's 0/1 is_subagent into a boolean and parse the per-model cost JSON. */
 function mapRows(raw: unknown[]): SessionRow[] {
-  return (raw as RawRow[]).map((r) => ({ ...r, isSubagent: Boolean(r.isSubagent) }));
+  return (raw as RawRow[]).map((r) => {
+    const { costByModelJson, ...rest } = r;
+    let costByModel: Record<string, number> = {};
+    try {
+      costByModel = JSON.parse(costByModelJson) as Record<string, number>;
+    } catch {
+      // tolerate a corrupt cell; the scalar totals are still correct
+    }
+    return { ...rest, isSubagent: Boolean(r.isSubagent), costByModel };
+  });
 }
 
 /** The subagent runs spawned by a given parent Session, most-recent first. */

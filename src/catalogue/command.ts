@@ -1,0 +1,228 @@
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { readFileSync, rmSync } from "node:fs";
+import type { Database } from "bun:sqlite";
+import {
+  setKind,
+  setEvent,
+  setSkill,
+  setParent,
+  setProject,
+  setCompleted,
+  setArchived,
+  setCustomTitle,
+  addTag,
+  removeTag,
+  type Kind,
+} from "./db.ts";
+
+/**
+ * Natural-language editor for session ORGANIZATION METADATA, backed by Codex. The user types an
+ * instruction ("mark all glizzy sessions done", "this is a loop backed by ops-watch"); Codex maps
+ * it to a set of metadata mutations against a numbered session list; we apply them to the
+ * catalogue. It only ever touches metadata (kind/event/skill/parent/lifecycle/title/tags) — never
+ * the sessions themselves or the TUI. Runs `codex exec` hermetically, riding the user's Codex auth.
+ */
+export interface SessionMeta {
+  readonly sessionId: string;
+  readonly title: string;
+  readonly kind: Kind;
+  readonly skill: string | null;
+  readonly event: string | null;
+  readonly parentSessionId: string | null;
+  readonly completed: boolean;
+  readonly archived: boolean;
+  /** User-assigned project label (catalogue), if any. */
+  readonly project: string | null;
+  /** Git repo the session ran in (for context / disambiguation). */
+  readonly repo: string;
+}
+
+export interface Mutation {
+  readonly sessionId: string;
+  readonly op: "kind" | "event" | "skill" | "parent" | "project" | "completed" | "archived" | "title" | "tag" | "untag";
+  /** Resolved value: for `parent`, a target sessionId or null; booleans as "true"/"false". */
+  readonly value: string | null;
+}
+
+export interface CodexConfig {
+  binary: string;
+  model: string;
+  reasoningEffort: string;
+  timeoutMs?: number;
+}
+
+const SCHEMA_PATH = join(import.meta.dir, "command-schema.json");
+
+const PROMPT =
+  "You edit ORGANIZATION METADATA for Claude Code sessions in a catalogue. You are given a " +
+  "numbered list of sessions with their current metadata, then an INSTRUCTION. Output the minimal " +
+  "set of mutations that satisfies the instruction, referencing sessions by their NUMBER from the " +
+  "list. Never invent numbers; never change anything not asked for. If a FOCUS number is given, " +
+  "the instruction is primarily about that session (but you may reference others by number, e.g. " +
+  "for a parent). Ops and their value: kind→'loop'|'session'; event→a slug or 'none'; skill→a " +
+  "name or 'none'; project→a project/initiative name (lowercase slug) or 'none'; parent→the " +
+  "target session NUMBER or 'none'; completed/archived→'true'|'false'; title→a short custom " +
+  "title; tag/untag→an entity name. Respond using the provided JSON schema.";
+
+interface RawMutation {
+  n?: number;
+  op?: string;
+  value?: string | null;
+}
+
+/** Build the numbered session context Codex reasons over. */
+function renderSessions(sessions: readonly SessionMeta[]): string {
+  const titleById = new Map(sessions.map((s, i) => [s.sessionId, i + 1]));
+  return sessions
+    .map((s, i) => {
+      const parent = s.parentSessionId ? `#${titleById.get(s.parentSessionId) ?? "?"}` : "none";
+      const flags = [
+        `kind=${s.kind}`,
+        `skill=${s.skill ?? "none"}`,
+        `event=${s.event ?? "none"}`,
+        `project=${s.project ?? "none"}`,
+        `parent=${parent}`,
+        s.completed ? "done" : "",
+        s.archived ? "archived" : "",
+        `repo=${s.repo}`,
+      ].filter(Boolean);
+      return `${i + 1}. ${s.title}  [${flags.join(" ")}]`;
+    })
+    .join("\n");
+}
+
+/** Run the instruction through Codex and return resolved mutations (or an error message). */
+export async function runMetadataCommand(
+  instruction: string,
+  sessions: readonly SessionMeta[],
+  focusSessionId: string | null,
+  codex: CodexConfig,
+): Promise<{ mutations: Mutation[] } | { error: string }> {
+  if (!instruction.trim()) return { mutations: [] };
+  const focusN = focusSessionId ? sessions.findIndex((s) => s.sessionId === focusSessionId) + 1 : 0;
+  const stdin =
+    `INSTRUCTION: ${instruction.trim()}\n` +
+    (focusN > 0 ? `FOCUS: #${focusN}\n` : "") +
+    `\nSESSIONS:\n${renderSessions(sessions)}\n`;
+
+  const outPath = join(tmpdir(), `ccs-cmd-${randomUUID()}.json`);
+  const args = [
+    "exec",
+    "--ephemeral",
+    "--skip-git-repo-check",
+    "--sandbox",
+    "read-only",
+    "--ignore-rules",
+    "--ignore-user-config",
+    "-c",
+    `model_reasoning_effort="${codex.reasoningEffort}"`,
+    "--output-schema",
+    SCHEMA_PATH,
+    "--output-last-message",
+    outPath,
+  ];
+  if (codex.model) args.push("-m", codex.model);
+  args.push(PROMPT);
+
+  try {
+    const proc = Bun.spawn([codex.binary, ...args], {
+      stdin: new TextEncoder().encode(stdin),
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    const timer = setTimeout(() => proc.kill(), codex.timeoutMs ?? 90_000);
+    const code = await proc.exited;
+    clearTimeout(timer);
+    if (code !== 0) return { error: "codex failed" };
+
+    const parsed = JSON.parse(readFileSync(outPath, "utf8")) as { mutations?: RawMutation[] };
+    const raw = Array.isArray(parsed.mutations) ? parsed.mutations : [];
+    const mutations: Mutation[] = [];
+    for (const m of raw) {
+      const idx = typeof m.n === "number" ? m.n - 1 : -1;
+      const subject = sessions[idx];
+      if (!subject || !m.op) continue;
+      const v = m.value == null ? null : String(m.value).trim();
+      const cleared = v === null || /^(none|null|clear|)$/i.test(v);
+      let value: string | null;
+      switch (m.op) {
+        case "parent": {
+          // value is a target NUMBER referencing another session.
+          const t = v && /^#?\d+$/.test(v) ? sessions[Number(v.replace("#", "")) - 1] : null;
+          value = cleared ? null : t?.sessionId ?? null;
+          break;
+        }
+        case "event":
+        case "skill":
+        case "title":
+        case "project":
+          value = cleared ? null : v;
+          break;
+        case "completed":
+        case "archived":
+          value = /^(true|yes|1|done)$/i.test(v ?? "") ? "true" : "false";
+          break;
+        case "kind":
+          value = /loop/i.test(v ?? "") ? "loop" : "session";
+          break;
+        case "tag":
+        case "untag":
+          if (cleared) continue;
+          value = v;
+          break;
+        default:
+          continue;
+      }
+      mutations.push({ sessionId: subject.sessionId, op: m.op as Mutation["op"], value });
+    }
+    return { mutations };
+  } catch {
+    return { error: "codex error" };
+  } finally {
+    rmSync(outPath, { force: true });
+  }
+}
+
+/** Apply resolved mutations to the catalogue. Returns a short human summary of what changed. */
+export function applyMutations(catalogue: Database, mutations: readonly Mutation[], now: string): string {
+  const counts = new Map<string, number>();
+  for (const m of mutations) {
+    switch (m.op) {
+      case "kind":
+        setKind(catalogue, m.sessionId, m.value === "loop" ? "loop" : "session", now);
+        break;
+      case "event":
+        setEvent(catalogue, m.sessionId, m.value, now);
+        break;
+      case "skill":
+        setSkill(catalogue, m.sessionId, m.value, now);
+        break;
+      case "project":
+        setProject(catalogue, m.sessionId, m.value, now);
+        break;
+      case "parent":
+        setParent(catalogue, m.sessionId, m.value, now);
+        break;
+      case "completed":
+        setCompleted(catalogue, m.sessionId, m.value === "true", now);
+        break;
+      case "archived":
+        setArchived(catalogue, m.sessionId, m.value === "true", now);
+        break;
+      case "title":
+        setCustomTitle(catalogue, m.sessionId, m.value, now);
+        break;
+      case "tag":
+        if (m.value) addTag(catalogue, m.sessionId, m.value);
+        break;
+      case "untag":
+        if (m.value) removeTag(catalogue, m.sessionId, m.value);
+        break;
+    }
+    counts.set(m.op, (counts.get(m.op) ?? 0) + 1);
+  }
+  const parts = [...counts.entries()].map(([op, n]) => `${n} ${op}`);
+  return parts.length ? `${mutations.length} change${mutations.length === 1 ? "" : "s"}: ${parts.join(", ")}` : "no changes";
+}

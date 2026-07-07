@@ -32,6 +32,25 @@ export interface SectionMeta {
   readonly glyph: string;
 }
 
+/** List ordering within a section (and in the flat view). */
+export type SortMode = "recent" | "cost" | "msgs";
+
+/**
+ * Order rows for display. Rows arrive recency-first from the Index, so "recent" is a no-op.
+ * `costOf` returns a row's total spend (own + subagent rollup) so cost-sort matches the column.
+ */
+export function sortRows(
+  rows: readonly SessionRow[],
+  mode: SortMode,
+  costOf: (r: SessionRow) => number,
+): SessionRow[] {
+  if (mode === "recent") return rows.slice();
+  const arr = rows.slice();
+  if (mode === "cost") arr.sort((a, b) => costOf(b) - costOf(a));
+  else arr.sort((a, b) => b.msgCount - a.msgCount);
+  return arr;
+}
+
 /** A navigable row in the list: a Project header, a state Section header, or a Session. */
 export type DisplayItem =
   | { readonly kind: "header"; readonly group: ProjectGroup; readonly expanded: boolean }
@@ -40,6 +59,8 @@ export type DisplayItem =
       readonly section: SectionMeta;
       readonly count: number;
       readonly collapsed: boolean;
+      /** Total spend of the sessions in this section (own + subagent rollup). */
+      readonly cost: number;
     }
   | {
       readonly kind: "session";
@@ -49,6 +70,10 @@ export type DisplayItem =
       readonly childCount: number;
       /** Whether this Session's subagents are currently expanded inline. */
       readonly expanded: boolean;
+      /** Constellation subtree cost (own + all descendants) — only set in the tree view. */
+      readonly subtreeCost?: number;
+      /** Live open-state, shown as an active/idle dot — only set in the groups view. */
+      readonly openState?: "open" | "idle";
     };
 
 /** State controlling what is expanded, and the children to inline when a Session is open. */
@@ -59,6 +84,10 @@ export interface ExpansionState {
   childCounts?: ReadonlyMap<string, number>;
   /** parentSessionId → its subagent rows (only needs entries for expanded Sessions). */
   childrenByParent?: ReadonlyMap<string, SessionRow[]>;
+  /** Ordering of the flat list (default: recency). */
+  sort?: SortMode;
+  /** A row's total spend (own + subagent rollup) — drives cost-sort. */
+  costOf?: (row: SessionRow) => number;
 }
 
 /** Flatten rows/groups into the linear list the UI navigates, per view mode. */
@@ -84,7 +113,8 @@ export function buildDisplayItems(
   };
 
   if (!grouped) {
-    for (const row of rows) pushSession(row, 0);
+    const ordered = exp.sort ? sortRows(rows, exp.sort, exp.costOf ?? (() => 0)) : rows;
+    for (const row of ordered) pushSession(row, 0);
     return items;
   }
   for (const group of groupByProject(rows)) {

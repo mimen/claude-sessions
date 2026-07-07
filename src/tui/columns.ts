@@ -1,0 +1,13 @@
+/**
+ * Shared column widths for the list + its header row, so the two never drift. Numeric columns
+ * are right-aligned; the model column is left-aligned text. Left gutter = caret(1) + glyph(2).
+ */
+export const CARET_W = 1;
+export const GLYPH_W = 2;
+export const MODEL_W = 7;
+export const COST_W = 7;
+export const AGE_W = 5;
+/** Last column: subagent count (⤷N) in list views, or subtree cost (Σ$1.9k) in the tree view. */
+export const SUB_W = 6;
+/** Right margin between the flexible title/event region and the fixed right cluster. */
+export const TITLE_MR = 1;

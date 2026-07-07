@@ -1,7 +1,7 @@
 import type { SessionRow } from "../index/index.ts";
 import type { CatalogueRow } from "../catalogue/db.ts";
 import { lifecycleOf } from "../catalogue/db.ts";
-import type { DisplayItem, SectionMeta } from "./groupByProject.ts";
+import { sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./groupByProject.ts";
 
 /**
  * Group sessions by lifecycle state for triage (the default view). Sections in a fixed
@@ -20,8 +20,8 @@ export const SECTIONS: { key: SectionKey; name: string; glyph: string }[] = [
   { key: "archived", name: "ARCHIVED", glyph: "·" },
 ];
 
-/** Sections collapsed by default — the long tail. */
-export const DEFAULT_COLLAPSED: ReadonlySet<string> = new Set(["stale", "done", "archived"]);
+/** Sections collapsed by default — the long tail (incl. the groups view's SOLO bucket). */
+export const DEFAULT_COLLAPSED: ReadonlySet<string> = new Set(["stale", "done", "archived", "solo"]);
 
 const STALE_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -50,6 +50,10 @@ export interface StateGroupCtx {
   expandedSessions?: ReadonlySet<string>;
   childCounts?: ReadonlyMap<string, number>;
   childrenByParent?: ReadonlyMap<string, SessionRow[]>;
+  /** Ordering within each section (default: recency, as rows arrive). */
+  sort?: SortMode;
+  /** A row's total spend (own + subagent rollup) — drives cost-sort + section totals. */
+  costOf?: (row: SessionRow) => number;
 }
 
 /** Flatten rows into section headers + sessions, honoring collapse + subagent expansion. */
@@ -57,6 +61,8 @@ export function buildStateItems(rows: readonly SessionRow[], ctx: StateGroupCtx)
   const expandedSessions = ctx.expandedSessions ?? new Set<string>();
   const childCounts = ctx.childCounts ?? new Map<string, number>();
   const childrenByParent = ctx.childrenByParent ?? new Map<string, SessionRow[]>();
+  const sort = ctx.sort ?? "recent";
+  const costOf = ctx.costOf ?? (() => 0);
 
   const buckets = new Map<SectionKey, SessionRow[]>();
   for (const row of rows) {
@@ -80,8 +86,9 @@ export function buildStateItems(rows: readonly SessionRow[], ctx: StateGroupCtx)
     if (!rowsIn || rowsIn.length === 0) continue;
     const collapsed = ctx.collapsedSections.has(meta.key);
     const section: SectionMeta = { key: meta.key, name: meta.name, glyph: meta.glyph };
-    items.push({ kind: "section", section, count: rowsIn.length, collapsed });
-    if (!collapsed) for (const row of rowsIn) pushSession(row, 0);
+    const cost = rowsIn.reduce((sum, row) => sum + costOf(row), 0);
+    items.push({ kind: "section", section, count: rowsIn.length, collapsed, cost });
+    if (!collapsed) for (const row of sortRows(rowsIn, sort, costOf)) pushSession(row, 0);
   }
   return items;
 }

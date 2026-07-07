@@ -2,8 +2,9 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
-import { formatCost } from "../cost.ts";
-import { theme, isRecentAge } from "./theme.ts";
+import { theme, isRecentAge, costColor } from "./theme.ts";
+import { dominantModel, formatCostList, formatCompactUSD } from "./format.ts";
+import { CARET_W, GLYPH_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
 
 /** Per-row visual style: state glyph + title color + nudge flag (computed in App). */
 interface SessionBadge {
@@ -18,12 +19,16 @@ interface SessionListProps {
   items: DisplayItem[];
   selected: number;
   height: number;
+  /** Content width — lets section dividers rule out to the full width. */
+  width: number;
   /** sessionId -> visual style derived from catalogue lifecycle × live open-state. */
   deco?: Map<string, SessionBadge>;
+  /** sessionId -> total spend (own + subagent rollup). Falls back to the row's own cost. */
+  totalCost?: Map<string, number>;
 }
 
 /** Box-based row layout — column widths are enforced by flexbox, so glyph width never drifts. */
-export function SessionList({ items, selected, height, deco }: SessionListProps): React.ReactElement {
+export function SessionList({ items, selected, height, width, deco, totalCost }: SessionListProps): React.ReactElement {
   const start = Math.max(0, Math.min(selected - Math.floor(height / 2), items.length - height));
   const offset = Math.max(0, start);
   const window = items.slice(offset, offset + height);
@@ -35,22 +40,19 @@ export function SessionList({ items, selected, height, deco }: SessionListProps)
         const sel = index === selected;
         const bg = sel ? theme.selBg : undefined;
 
-        // State-grouping section header (Active / Loops / Parked / …).
+        // State-grouping section header — rendered as a titled divider rule (no per-group cost).
         if (item.kind === "section") {
           const s = item.section;
+          const glyph = s.glyph !== " " ? `${s.glyph} ` : "";
+          const label = `${item.collapsed ? "▸" : "▾"} ${glyph}${s.name} · ${item.count}${item.collapsed ? " ⋯" : ""}`;
+          const ruleLen = Math.max(0, width - CARET_W - label.length - 2);
           return (
             <Box key={index} backgroundColor={bg}>
-              <Text color={sel ? theme.selFg : theme.accent}>{sel ? "❯ " : "  "}</Text>
+              <Text color={sel ? theme.selFg : theme.accent}>{sel ? "❯" : " "}</Text>
               <Text bold color={sel ? theme.selFg : theme.header}>
-                {item.collapsed ? "▸ " : "▾ "}
-                {s.glyph !== " " ? s.glyph + " " : ""}
-                {s.name}
+                {label}
               </Text>
-              <Text color={sel ? theme.selFg : theme.muted}>
-                {" · "}
-                {item.count}
-                {item.collapsed ? "  [expand]" : ""}
-              </Text>
+              <Text color={sel ? theme.selFg : theme.faint}> {"─".repeat(ruleLen)}</Text>
             </Box>
           );
         }
@@ -73,22 +75,38 @@ export function SessionList({ items, selected, height, deco }: SessionListProps)
         const age = formatAge(r.lastTs);
         const ageColor = sel ? theme.selFg : isRecentAge(age) ? theme.ageRecent : theme.ageOld;
         const badge = deco?.get(r.sessionId);
-        const glyph = badge?.glyph ?? " ";
-        const glyphColor = sel ? theme.selFg : badge?.color ?? theme.muted;
-        const titleColor = sel ? theme.selFg : r.isSubagent ? theme.muted : badge?.color ?? theme.title;
-        const caret = item.childCount > 0 ? (item.expanded ? "▾ " : "▸ ") : "";
+        // Hierarchy reads from indentation, not connector glyphs. The collapse triangle sits inline
+        // at each node's indent (where a child marker would go); an active/idle dot leads the row
+        // in the groups view (with a trailing space from the gutter width).
+        const dot = item.openState === "open" ? "●" : item.openState === "idle" ? "○" : "";
+        const dotColor = sel ? theme.selFg : item.openState === "open" ? theme.ageRecent : theme.faint;
+        // Reserve a 2-cell triangle slot for anything in a hierarchy, so leaves align with their
+        // collapsible siblings; flat rows (loops/solo, plain lists) get no slot and sit flush.
+        const hasSlot = item.depth > 0 || item.childCount > 0;
+        const triangle = item.childCount > 0 ? (item.expanded ? "▾ " : "▸ ") : "  ";
+        const titleColor = sel
+          ? theme.selFg
+          : r.isSubagent || item.openState === "idle"
+            ? theme.muted
+            : badge?.nudge
+              ? "yellowBright"
+              : theme.title;
+
+        const cost = totalCost?.get(r.sessionId) ?? r.costUSD;
+        const model = dominantModel(r.costByModel);
 
         return (
           <Box key={index} backgroundColor={bg}>
             <Text color={sel ? theme.selFg : theme.accent}>{sel ? "❯" : " "}</Text>
-            {item.depth > 0 ? <Text>{" ".repeat(item.depth * 2)}</Text> : null}
-            <Box width={2} flexShrink={0}>
-              <Text color={glyphColor}>{glyph}</Text>
-            </Box>
-            <Box flexGrow={1} flexShrink={1} marginRight={1} overflow="hidden">
+            {dot ? (
+              <Box width={GLYPH_W} flexShrink={0}>
+                <Text color={dotColor}>{dot}</Text>
+              </Box>
+            ) : null}
+            <Box flexGrow={1} flexShrink={1} marginRight={TITLE_MR} overflow="hidden">
               <Text wrap="truncate-end" color={titleColor} bold={sel}>
-                {caret}
-                {r.isSubagent ? "↳ " : ""}
+                {"  ".repeat(item.depth)}
+                {hasSlot ? <Text color={sel ? theme.selFg : theme.faint}>{triangle}</Text> : null}
                 {r.title}
               </Text>
             </Box>
@@ -97,16 +115,27 @@ export function SessionList({ items, selected, height, deco }: SessionListProps)
                 <Text color={sel ? theme.selFg : theme.project}>⊞{badge.event}</Text>
               </Box>
             ) : null}
-            <Box width={5} flexShrink={0} justifyContent="flex-end">
+            <Box width={MODEL_W} flexShrink={0}>
+              <Text color={sel ? theme.selFg : model?.color ?? theme.faint} wrap="truncate-end">
+                {model?.label ?? ""}
+              </Text>
+            </Box>
+            <Box width={COST_W} flexShrink={0} justifyContent="flex-end">
+              <Text color={sel ? theme.selFg : costColor(cost)}>{formatCostList(cost)}</Text>
+            </Box>
+            <Box width={AGE_W} flexShrink={0} justifyContent="flex-end">
               <Text color={ageColor}>{age}</Text>
             </Box>
-            <Box width={8} flexShrink={0} justifyContent="flex-end">
-              <Text color={sel ? theme.selFg : theme.muted}>{formatCost(r.costUSD)}</Text>
-            </Box>
-            <Box width={5} flexShrink={0} justifyContent="flex-end">
-              <Text color={sel ? theme.selFg : theme.accent}>
-                {item.childCount > 0 ? `⤷${item.childCount}` : ""}
-              </Text>
+            <Box width={SUB_W} flexShrink={0} justifyContent="flex-end">
+              {item.subtreeCost != null ? (
+                <Text color={sel ? theme.selFg : costColor(item.subtreeCost)}>
+                  Σ{formatCompactUSD(item.subtreeCost)}
+                </Text>
+              ) : (
+                <Text color={sel ? theme.selFg : theme.faint}>
+                  {item.childCount > 0 ? `⤷${item.childCount}` : ""}
+                </Text>
+              )}
             </Box>
           </Box>
         );

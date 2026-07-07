@@ -6,11 +6,14 @@ import { join } from "node:path";
 /**
  * Which sessions are currently OPEN in cmux. Derived live (never stored — it'd rot).
  *
- * cmux's live `tree` knows surfaces by tty but not by Claude session_id; cmux's persisted
- * session JSON maps `agent.sessionId -> ttyName`. Bridge them: a session is open iff its
- * tty (from the persisted JSON) is present as a live surface in `cmux tree`.
+ * The join is by WORKSPACE TITLE, not tty: cmux's persisted `ttyName` is null for most panels
+ * and stale for the rest (panes reattach to new ttys), so a tty bridge finds almost nothing.
+ * But cmux's persisted JSON reliably maps each workspace's Claude `agent.sessionId` to that
+ * workspace's title, and `cmux tree` lists the titles of the workspaces that are live right now
+ * — and ccs keeps those titles in sync via rename-workspace. So: a session is open iff its
+ * persisted workspace title matches a live workspace title.
  *
- * macOS-specific path; returns an empty set when cmux isn't running or anything is missing
+ * macOS-specific path; returns empty / null when cmux isn't running or anything is missing
  * (caller treats "unknown" as "not open" — safe for a snapshot indicator).
  */
 const PERSISTED = join(
@@ -21,19 +24,38 @@ const PERSISTED = join(
   "session-com.cmuxterm.app.json",
 );
 
-function sessionIdToTty(): Map<string, string> {
+/** Normalize a workspace title for matching: drop cmux's leading status glyph and trailing [tag]. */
+function normTitle(t: string | null | undefined): string {
+  return (t ?? "")
+    .replace(/^[^A-Za-z0-9]+/, "")
+    .replace(/\s*\[[^\]]*\]\s*$/, "")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Clean a cmux title for DISPLAY: strip only cmux's transient leading status glyph (a run of
+ * non-ASCII symbols like ✳/●/spinner + space) while preserving case and any `[tag]` suffix the
+ * user set. ASCII-leading titles (e.g. `/loop`) are left untouched.
+ */
+function cleanCmuxTitle(t: string): string {
+  return t.replace(/^[^\x00-\x7F]+\s*/, "").trim();
+}
+
+/** Persisted map: normalized workspace title -> the Claude sessionId running in it. */
+function titleToSessionId(): Map<string, string> {
   const map = new Map<string, string>();
   try {
     const data = JSON.parse(readFileSync(PERSISTED, "utf8")) as {
-      windows?: { tabManager?: { workspaces?: { panels?: unknown[] }[] } }[];
+      windows?: { tabManager?: { workspaces?: Record<string, any>[] } }[];
     };
     for (const win of data.windows ?? []) {
       for (const w of win.tabManager?.workspaces ?? []) {
-        for (const p of (w.panels ?? []) as Record<string, any>[]) {
-          const sid = p?.terminal?.agent?.sessionId;
-          const tty = p?.ttyName;
-          if (sid && tty) map.set(sid, tty);
-        }
+        const sid = ((w.panels ?? []) as Record<string, any>[])
+          .map((p) => p?.terminal?.agent?.sessionId)
+          .find(Boolean) as string | undefined;
+        const title = normTitle(w.customTitle || w.processTitle);
+        if (sid && title) map.set(title, sid);
       }
     }
   } catch {
@@ -42,7 +64,15 @@ function sessionIdToTty(): Map<string, string> {
   return map;
 }
 
-function liveTtys(cmuxBin: string): Set<string> | null {
+/** A live cmux workspace: its normalized title (for matching), display title, and ref. */
+interface LiveWorkspace {
+  norm: string;
+  display: string;
+  ref: string;
+}
+
+/** Live cmux workspaces keyed by normalized title. Null when cmux isn't reachable. */
+function liveWorkspaces(cmuxBin: string): Map<string, LiveWorkspace> | null {
   let out: string;
   try {
     out = execFileSync(cmuxBin, ["tree", "--all", "--json"], {
@@ -53,65 +83,50 @@ function liveTtys(cmuxBin: string): Set<string> | null {
   } catch {
     return null; // cmux not running / not reachable
   }
-  const ttys = new Set<string>();
   try {
-    const tree = JSON.parse(out) as { windows?: { workspaces?: { panes?: { surfaces?: { tty?: string }[] }[] }[] }[] };
+    const tree = JSON.parse(out) as { windows?: { workspaces?: { title?: string; ref?: string }[] }[] };
+    const map = new Map<string, LiveWorkspace>();
     for (const win of tree.windows ?? []) {
       for (const w of win.workspaces ?? []) {
-        for (const pane of w.panes ?? []) {
-          for (const s of pane.surfaces ?? []) {
-            if (s.tty) ttys.add(s.tty);
-          }
-        }
+        const norm = normTitle(w.title);
+        if (norm && w.ref) map.set(norm, { norm, display: cleanCmuxTitle(w.title ?? ""), ref: w.ref });
       }
     }
+    return map;
   } catch {
     return null;
   }
-  return ttys;
-}
-
-export function openSessionIds(cmuxBin = "cmux"): Set<string> {
-  const live = liveTtys(cmuxBin);
-  if (!live) return new Set();
-  const map = sessionIdToTty();
-  const open = new Set<string>();
-  for (const [sid, tty] of map) if (live.has(tty)) open.add(sid);
-  return open;
 }
 
 /**
- * Resolve a session's live cmux workspace ref (for `rename-workspace` push), via
- * sessionId → tty (persisted JSON) → workspace ref (live tree). Null if not open.
+ * sessionId -> the live cmux workspace title it's running in. cmux is the source of truth for
+ * an open session's name (it's what the user sees + manages), so callers use this to override
+ * the resolved ccs Title while a session is open. Empty when cmux isn't reachable.
+ */
+export function openSessionTitles(cmuxBin = "cmux"): Map<string, string> {
+  const live = liveWorkspaces(cmuxBin);
+  const out = new Map<string, string>();
+  if (!live) return out;
+  for (const [title, sid] of titleToSessionId()) {
+    const ws = live.get(title);
+    if (ws && ws.display) out.set(sid, ws.display);
+  }
+  return out;
+}
+
+export function openSessionIds(cmuxBin = "cmux"): Set<string> {
+  return new Set(openSessionTitles(cmuxBin).keys());
+}
+
+/**
+ * Resolve a session's live cmux workspace ref (for `rename-workspace` push): sessionId → its
+ * persisted workspace title → the live workspace with that title. Null if not currently open.
  */
 export function cmuxWorkspaceForSession(sessionId: string, cmuxBin = "cmux"): string | null {
-  const tty = sessionIdToTty().get(sessionId);
-  if (!tty) return null;
-  let out: string;
-  try {
-    out = execFileSync(cmuxBin, ["tree", "--all", "--json"], {
-      encoding: "utf8",
-      timeout: 4000,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch {
-    return null;
-  }
-  try {
-    const tree = JSON.parse(out) as {
-      windows?: { workspaces?: { ref?: string; panes?: { surfaces?: { tty?: string }[] }[] }[] }[];
-    };
-    for (const win of tree.windows ?? []) {
-      for (const w of win.workspaces ?? []) {
-        for (const pane of w.panes ?? []) {
-          for (const s of pane.surfaces ?? []) {
-            if (s.tty === tty && w.ref) return w.ref;
-          }
-        }
-      }
-    }
-  } catch {
-    return null;
+  const live = liveWorkspaces(cmuxBin);
+  if (!live) return null;
+  for (const [title, sid] of titleToSessionId()) {
+    if (sid === sessionId) return live.get(title)?.ref ?? null;
   }
   return null;
 }

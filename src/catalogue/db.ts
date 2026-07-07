@@ -25,11 +25,13 @@ export interface CatalogueRow {
   parentSessionId: string | null;
   /** The skill or slash-command backing this session (e.g. `loop-manager`, `event-watch`). */
   skill: string | null;
+  /** User-assigned project/initiative label — groups otherwise-solo sessions (e.g. `ccs`). */
+  project: string | null;
   notes: string | null;
   updatedAt: string | null;
 }
 
-const CATALOGUE_VERSION = 3;
+const CATALOGUE_VERSION = 4;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -84,6 +86,14 @@ function migrate(db: Database): void {
     }
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_parent ON catalogue(parent_session_id);");
   }
+  if (v < 4) {
+    // Additive: a user-assigned project/initiative label — groups otherwise-solo sessions that
+    // share a repo but not a purpose (distinct from the git-derived Project). Nullable; no backfill.
+    if (!hasColumn(db, "catalogue", "project")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN project TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_project ON catalogue(project);");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -106,6 +116,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     event: (r.event as string) ?? null,
     parentSessionId: (r.parent_session_id as string) ?? null,
     skill: (r.skill as string) ?? null,
+    project: (r.project as string) ?? null,
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
   };
@@ -184,6 +195,9 @@ export function setParent(db: Database, sessionId: string, parentId: string | nu
 }
 export function setSkill(db: Database, sessionId: string, skill: string | null, now: string): void {
   set(db, sessionId, "skill", skill, now);
+}
+export function setProject(db: Database, sessionId: string, project: string | null, now: string): void {
+  set(db, sessionId, "project", project, now);
 }
 
 /** Reverse lookup: which sessions are assigned to this event slug. */

@@ -12,7 +12,7 @@ function row(over: Partial<SessionRow> = {}): SessionRow {
     sessionId: "abc-123", host: "h", path: "/p", cwd: "/c", projectRoot: "/c",
     projectName: "c", branch: null, version: null, firstTs: null, lastTs: null,
     msgCount: 0, fileSize: 0, title: "t", titleSource: "fallback",
-    isSubagent: false, parentSessionId: null, resumeId: "resume-xyz", costUSD: 0, ...over,
+    isSubagent: false, parentSessionId: null, resumeId: "resume-xyz", costUSD: 0, tokInput: 0, tokOutput: 0, tokCacheRead: 0, tokCacheWrite: 0, costByModel: {}, userTurns: 0, tickIntervalSec: 0, ...over,
   };
 }
 

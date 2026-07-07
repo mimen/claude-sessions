@@ -52,7 +52,8 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
   expect(frame).toContain("ccs");
   expect(frame).toContain("Real Session One"); // visible real session
   expect(frame).not.toContain("SUBAGENTONLY"); // subagent hidden by default
-  expect(frame).toContain("subagent runs hidden"); // count indicator
+  expect(frame).toContain("sessions"); // dashboard header stat
+  expect(frame).toContain("show-agents"); // footer toggle for hidden subagent runs
 
   unmount();
   real.close();

@@ -9,6 +9,7 @@ import {
   ftsMatchIds,
   getSkeleton,
   subagentCounts,
+  subagentCosts,
   childrenOf,
   saveCodexTitle,
   type SessionRow,
@@ -18,16 +19,26 @@ import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "../res
 import { resolveTarget, cmuxReachable } from "../resume/target.ts";
 import { openInCmux } from "../resume/cmux.ts";
 import { searchRows } from "./search.ts";
-import { buildDisplayItems } from "./groupByProject.ts";
+import { buildDisplayItems, type SortMode } from "./groupByProject.ts";
 import { SessionList } from "./SessionList.tsx";
 import { Preview } from "./Preview.tsx";
 import { Help } from "./Help.tsx";
+import { Header, type DashStats } from "./Header.tsx";
+import { ListHeader } from "./ListHeader.tsx";
+import { SectionCard } from "./SectionCard.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
-import { getAll, lifecycleOf, setKind, setCompleted, setArchived } from "../catalogue/db.ts";
-import { openSessionIds } from "../catalogue/open-state.ts";
+import { getAll, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle } from "../catalogue/db.ts";
+import { openSessionTitles } from "../catalogue/open-state.ts";
+import { runMetadataCommand, applyMutations, type SessionMeta } from "../catalogue/command.ts";
 import { buildStateItems, DEFAULT_COLLAPSED } from "./stateGroups.ts";
+import { buildTreeItems } from "./treeGroups.ts";
+import { buildGroupsView } from "./groupsView.ts";
+
+const SORT_CYCLE: SortMode[] = ["recent", "cost", "msgs"];
+type View = "groups" | "state" | "flat" | "tree";
+const VIEW_CYCLE: View[] = ["groups", "state", "flat", "tree"];
 
 const STALE_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -61,7 +72,11 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
   const [refreshTick, setRefreshTick] = useState(0);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [view, setView] = useState<"state" | "flat">("state");
+  // Natural-language metadata command (Codex-backed). scope "all" = whole catalogue; "session" =
+  // the selected row. busy = a Codex call is in flight.
+  const [command, setCommand] = useState<{ scope: "all" | "session"; buffer: string; busy: boolean } | null>(null);
+  const [view, setView] = useState<View>("groups");
+  const [sort, setSort] = useState<SortMode>("recent");
   const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(DEFAULT_COLLAPSED);
   const [expandedSessions, setExpandedSessions] = useState<ReadonlySet<string>>(new Set());
   const [selected, setSelected] = useState(0);
@@ -83,19 +98,38 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
     () => (catalogue ? getAll(catalogue) : new Map()),
     [catalogue, refreshTick],
   );
-  const openSet = useMemo(
-    () => (catalogue ? openSessionIds() : new Set<string>()),
+  // Live cmux workspace titles (source of truth for open sessions) — override the ccs Title while
+  // open. Also gives us the open-set (its keys) so we probe cmux once, not twice.
+  const openTitles = useMemo(
+    () => (catalogue ? openSessionTitles() : new Map<string, string>()),
     [catalogue, refreshTick],
   );
+  const openSet = useMemo(() => new Set(openTitles.keys()), [openTitles]);
   const baseRows = useMemo(() => {
     const raw = listByRecency(db, includeSubagents);
     return raw
       .filter((r) => showArchived || lifecycleOf(catMap.get(r.sessionId) ?? null) !== "archived")
       .map((r) => {
-        const c = catMap.get(r.sessionId);
-        return c?.customTitle ? { ...r, title: c.customTitle } : r;
+        // Precedence: live cmux title (open) → user's custom title → resolved Title.
+        const title = openTitles.get(r.sessionId) ?? catMap.get(r.sessionId)?.customTitle ?? r.title;
+        return title === r.title ? r : { ...r, title };
       });
-  }, [db, includeSubagents, refreshTick, catMap, showArchived]);
+  }, [db, includeSubagents, refreshTick, catMap, showArchived, openTitles]);
+
+  // Write-through: persist an open session's cmux title into the catalogue so the name stays put
+  // after the tab closes (cmux is the source of truth, tightly linked). Only writes on a change.
+  useEffect(() => {
+    if (!catalogue) return;
+    const now = new Date().toISOString();
+    let changed = false;
+    for (const [sid, title] of openTitles) {
+      if ((catMap.get(sid)?.customTitle ?? null) !== title) {
+        setCustomTitle(catalogue, sid, title, now);
+        changed = true;
+      }
+    }
+    if (changed) reload();
+  }, [catalogue, openTitles, catMap]);
   const deco = useMemo(() => {
     const m = new Map<string, SessionBadge>();
     const nowMs = Date.now();
@@ -131,6 +165,60 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
     return m;
   }, [baseRows, catMap, openSet]);
   const subCounts = useMemo(() => subagentCounts(db), [db, refreshTick]);
+  // A parent's subagent runs key on its INTERNAL id (= resumeId); match both to be safe.
+  const subCostMap = useMemo(() => subagentCosts(db), [db, refreshTick]);
+  const totalCostFor = React.useCallback(
+    (r: SessionRow): number =>
+      r.costUSD + (subCostMap.get(r.sessionId) ?? subCostMap.get(r.resumeId) ?? 0),
+    [subCostMap],
+  );
+  const totalCostById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of baseRows) m.set(r.sessionId, totalCostFor(r));
+    return m;
+  }, [baseRows, totalCostFor]);
+  const stats = useMemo<DashStats>(() => {
+    let spend = 0,
+      active = 0,
+      parked = 0,
+      loops = 0,
+      loopSpend = 0;
+    let topTitle: string | null = null;
+    let topCost = 0;
+    for (const r of baseRows) {
+      const c = catMap.get(r.sessionId) ?? null;
+      const total = totalCostFor(r);
+      spend += total;
+      const lc = lifecycleOf(c);
+      // Mirror stateGroups.classify precedence: loop → archived/done → parked → open.
+      if (c?.kind === "loop") {
+        loops++;
+        loopSpend += total;
+      } else if (lc === "parked") {
+        parked++;
+      } else if (lc !== "completed" && lc !== "archived" && openSet.has(r.sessionId)) {
+        active++;
+      }
+      if (total > topCost) {
+        topCost = total;
+        topTitle = r.title;
+      }
+    }
+    let agentSpend = 0;
+    for (const usd of subCostMap.values()) agentSpend += usd;
+    return {
+      host: config.host.label,
+      sessions: baseRows.length,
+      spend,
+      active,
+      parked,
+      loops,
+      loopSpend,
+      agentSpend,
+      topTitle,
+      topCost,
+    };
+  }, [baseRows, catMap, openSet, subCostMap, totalCostFor, config.host.label]);
   const titleById = useMemo(() => new Map(baseRows.map((r) => [r.sessionId, r.title])), [baseRows]);
   const contentIds = useMemo(
     () => (query.trim() ? ftsMatchIds(db, query) : new Set<string>()),
@@ -144,22 +232,30 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
   }, [db, expandedSessions, refreshTick]);
   const items = useMemo(
     () =>
-      view === "state"
-        ? buildStateItems(rows, {
-            catMap,
-            openSet,
-            nowMs: Date.now(),
-            collapsedSections,
-            expandedSessions,
-            childCounts: subCounts,
-            childrenByParent,
-          })
-        : buildDisplayItems(rows, false, {
-            expandedSessions,
-            childCounts: subCounts,
-            childrenByParent,
-          }),
-    [view, rows, catMap, openSet, collapsedSections, expandedSessions, subCounts, childrenByParent],
+      view === "groups"
+        ? buildGroupsView(rows, { catMap, openSet, collapsedSections, expandedSessions })
+        : view === "tree"
+        ? buildTreeItems(rows, { catMap, costOf: totalCostFor })
+        : view === "state"
+          ? buildStateItems(rows, {
+              catMap,
+              openSet,
+              nowMs: Date.now(),
+              collapsedSections,
+              expandedSessions,
+              childCounts: subCounts,
+              childrenByParent,
+              sort,
+              costOf: totalCostFor,
+            })
+          : buildDisplayItems(rows, false, {
+              expandedSessions,
+              childCounts: subCounts,
+              childrenByParent,
+              sort,
+              costOf: totalCostFor,
+            }),
+    [view, rows, catMap, openSet, collapsedSections, expandedSessions, subCounts, childrenByParent, sort, totalCostFor],
   );
 
   const clampedSelected = Math.min(selected, Math.max(0, items.length - 1));
@@ -189,12 +285,13 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
     };
   }, [db, titler]);
 
-  // Spinner animation, only while titling.
+  // Spinner animation — while titling or while a Codex command is in flight.
+  const spinning = !!titling || !!command?.busy;
   useEffect(() => {
-    if (!titling) return;
+    if (!spinning) return;
     const id = setInterval(() => setFrame((f) => f + 1), 110);
     return () => clearInterval(id);
-  }, [titling]);
+  }, [spinning]);
 
   const move = (delta: number) =>
     setSelected((s) => Math.max(0, Math.min(s + delta, items.length - 1)));
@@ -215,7 +312,9 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
       return;
     }
     if (!item || item.kind !== "session") return;
-    if ((subCounts.get(item.row.sessionId) ?? 0) === 0) return;
+    // Expandable if the row has children in the current view (subagent runs, or constellation
+    // children in the groups/tree views). item.childCount reflects whichever the view provides.
+    if (item.childCount === 0) return;
     setExpandedSessions((prev) => {
       const next = new Set(prev);
       if (open) next.add(item.row.sessionId);
@@ -285,6 +384,50 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
     });
   };
 
+  // Run a natural-language metadata command through Codex and apply the result live.
+  const submitCommand = (scope: "all" | "session", buffer: string) => {
+    if (!catalogue || !buffer.trim()) {
+      setCommand(null);
+      return;
+    }
+    const focus = scope === "session" ? selectedRow?.sessionId ?? null : null;
+    const sessions: SessionMeta[] = baseRows.map((r) => {
+      const c = catMap.get(r.sessionId);
+      return {
+        sessionId: r.sessionId,
+        title: r.title,
+        kind: c?.kind ?? "session",
+        skill: c?.skill ?? null,
+        event: c?.event ?? null,
+        parentSessionId: c?.parentSessionId ?? null,
+        completed: !!c?.completed,
+        archived: !!c?.archived,
+        project: c?.project ?? null,
+        repo: r.projectName,
+      };
+    });
+    setCommand({ scope, buffer, busy: true });
+    setStatus(`${scope === "session" ? "editing session" : "reorganizing"} — asking codex…`);
+    void runMetadataCommand(buffer, sessions, focus, {
+      binary: config.titler.binary,
+      model: config.titler.model,
+      reasoningEffort: config.titler.reasoningEffort,
+    }).then((res) => {
+      setCommand(null);
+      if ("error" in res) {
+        setStatus(`command failed (${res.error})`);
+        return;
+      }
+      if (res.mutations.length === 0) {
+        setStatus("codex proposed no changes");
+        return;
+      }
+      const summary = applyMutations(catalogue, res.mutations, new Date().toISOString());
+      setStatus(`✓ ${summary}`);
+      reload();
+    });
+  };
+
   // Apply a catalogue mutation to the selected session, then refresh. No-op on
   // headers/subagents or when no catalogue is mounted.
   const applyMark = (mut: (cat: Database, id: string, now: string) => void, msg: string) => {
@@ -327,6 +470,16 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
       return;
     }
 
+    // Natural-language command input owns the keyboard while composing (ignored while Codex runs).
+    if (command) {
+      if (command.busy) return;
+      if (key.escape) setCommand(null);
+      else if (key.return) submitCommand(command.scope, command.buffer);
+      else if (key.backspace || key.delete) setCommand({ ...command, buffer: command.buffer.slice(0, -1) });
+      else if (input && !key.ctrl && !key.meta) setCommand({ ...command, buffer: command.buffer + input });
+      return;
+    }
+
     if (input === "?") {
       setShowHelp((v) => !v);
       return;
@@ -354,8 +507,21 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
     else if (input === "/") {
       setStatus(null);
       setSearching(true);
+    } else if (input === ":") {
+      if (catalogue) {
+        setStatus(null);
+        setCommand({ scope: "all", buffer: "", busy: false });
+      }
+    } else if (input === "e") {
+      if (catalogue && selectedRow) {
+        setStatus(null);
+        setCommand({ scope: "session", buffer: "", busy: false });
+      }
     } else if (input === "g") {
-      setView((v) => (v === "state" ? "flat" : "state"));
+      setView((v) => VIEW_CYCLE[(VIEW_CYCLE.indexOf(v) + 1) % VIEW_CYCLE.length]!);
+      setSelected(0);
+    } else if (input === "s") {
+      setSort((s) => SORT_CYCLE[(SORT_CYCLE.indexOf(s) + 1) % SORT_CYCLE.length]!);
       setSelected(0);
     } else if (input === "p") setPreviewVisible((v) => !v);
     else if (input === "v") openTranscript();
@@ -381,22 +547,25 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
   });
 
   // ---- Layout (recomputed on every resize via useTerminalSize) ----
-  const chrome = 2 + (searching ? 1 : 0) + (status ? 1 : 0);
+  const listMode = !transcript && !showHelp;
+  // Chrome = header (2) + footer (1) + rule under header (list mode only) + optional search/status.
+  const chrome = 3 + (listMode ? 1 : 0) + (searching ? 1 : 0) + (command ? 1 : 0) + (status ? 1 : 0);
   const body = Math.max(3, termRows - chrome);
+  const contentWidth = cols - 2; // outer paddingX={1}
 
-  const showPreviewPane = previewVisible && !showHelp && selectedRow !== null;
+  // The preview pane is ALWAYS reserved when visible — it never collapses on section focus, so the
+  // list width (and thus every column) stays put regardless of what row the cursor is on.
+  const showPreviewPane = previewVisible && listMode && items.length > 0;
   const sideBySide = cols >= 100 && showPreviewPane;
   const previewWidth = sideBySide ? Math.min(58, Math.max(40, Math.floor(cols * 0.42))) : 0;
-  const listWidth = sideBySide ? Math.max(20, cols - previewWidth - 4) : cols - 2;
+  const listWidth = sideBySide ? Math.max(20, contentWidth - previewWidth - 1) : contentWidth;
   const previewHeightStacked = Math.min(Math.max(8, Math.floor(body * 0.4)), 16);
-  const listHeight = sideBySide
-    ? body
-    : showPreviewPane
-      ? Math.max(3, body - previewHeightStacked)
-      : body;
+  const stackedListRows = sideBySide ? body : showPreviewPane ? Math.max(3, body - previewHeightStacked) : body;
+  const listHeight = Math.max(1, stackedListRows - 1); // 1 row for the column header inside the list column
   const previewHeight = sideBySide ? body : previewHeightStacked;
   const spin = SPINNER[frame % SPINNER.length];
 
+  const selSection = current?.kind === "section" ? current : null;
   const previewEl = selectedRow ? (
     <Preview
       row={selectedRow}
@@ -407,29 +576,61 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
           : null
       }
       subagentCount={subCounts.get(selectedRow.sessionId) ?? 0}
+      subagentCost={
+        subCostMap.get(selectedRow.sessionId) ?? subCostMap.get(selectedRow.resumeId) ?? 0
+      }
       event={catMap.get(selectedRow.sessionId)?.event ?? null}
+      skill={catMap.get(selectedRow.sessionId)?.skill ?? null}
+      project={catMap.get(selectedRow.sessionId)?.project ?? null}
+      kind={catMap.get(selectedRow.sessionId)?.kind}
+      height={previewHeight}
+    />
+  ) : selSection ? (
+    <SectionCard
+      name={selSection.section.name}
+      glyph={selSection.section.glyph}
+      count={selSection.count}
+      cost={selSection.cost}
+      sectionKey={selSection.section.key}
       height={previewHeight}
     />
   ) : null;
 
+  const listCol = (w: number) => (
+    <Box flexDirection="column">
+      <ListHeader sort={sort} view={view} />
+      <SessionList items={items} selected={clampedSelected} height={listHeight} width={w} deco={deco} totalCost={totalCostById} />
+    </Box>
+  );
+
   return (
     <Box flexDirection="column" width={cols} paddingX={1}>
-      <Box justifyContent="space-between">
-        <Text bold color={theme.accent}>
-          ccs <Text color={theme.muted}>· {rows.length} shown</Text>
-          {query && !searching ? <Text color="yellow"> · filter: {query}</Text> : null}
-        </Text>
-        <Text color={theme.muted}>
-          {includeSubagents ? "subagents shown" : `${countSubagentRuns(subCounts)} subagent runs hidden`}
-          {titling ? `  ${spin} titling ${titling.done}/${titling.total}` : ""}
-        </Text>
-      </Box>
+      <Header
+        stats={stats}
+        sort={sort}
+        filter={query && !searching ? query : null}
+        titling={titling ? `${spin} titling ${titling.done}/${titling.total}` : null}
+      />
+      {listMode ? <Text color={theme.headerBorder}>{"─".repeat(Math.max(0, contentWidth))}</Text> : null}
 
       {searching ? (
         <Box>
           <Text color="yellow">/ </Text>
           <Text>{query}</Text>
           <Text color={theme.accent}>▏</Text>
+        </Box>
+      ) : null}
+
+      {command ? (
+        <Box>
+          <Text color={theme.accent} bold>
+            {command.busy ? `${spin} ` : command.scope === "session" ? "edit› " : "codex› "}
+          </Text>
+          <Text color={command.scope === "session" ? theme.project : theme.title}>
+            {command.scope === "session" && selectedRow ? `«${selectedRow.title}» ` : ""}
+          </Text>
+          <Text>{command.buffer}</Text>
+          {command.busy ? null : <Text color={theme.accent}>▏</Text>}
         </Box>
       ) : null}
 
@@ -447,13 +648,17 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
       ) : items.length === 0 ? (
         <Box height={body} alignItems="center" justifyContent="center">
           <Text color={theme.muted}>
-            {query ? "No sessions match — esc to clear search" : "No sessions indexed yet."}
+            {query
+              ? "No sessions match — esc to clear search"
+              : view === "tree"
+                ? "No parent/child constellation among these sessions — g to switch view"
+                : "No sessions indexed yet."}
           </Text>
         </Box>
       ) : sideBySide ? (
         <Box flexDirection="row" height={body}>
           <Box width={listWidth} flexShrink={0} marginRight={1}>
-            <SessionList items={items} selected={clampedSelected} height={listHeight} deco={deco} />
+            {listCol(listWidth)}
           </Box>
           <Box width={previewWidth} flexShrink={0}>
             {previewEl}
@@ -461,9 +666,7 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
         </Box>
       ) : (
         <Box flexDirection="column">
-          <Box height={listHeight} flexDirection="column">
-            <SessionList items={items} selected={clampedSelected} height={listHeight} deco={deco} />
-          </Box>
+          {listCol(contentWidth)}
           {showPreviewPane ? previewEl : null}
         </Box>
       )}
@@ -476,17 +679,10 @@ export function App({ db, catalogue, config, titler, resumeRequest }: AppProps):
 
       {transcript ? null : (
         <Text color={theme.muted} wrap="truncate-end">
-          ↵ resume/expand · v transcript · / search · L loop · C done · X archive
-          {showArchived ? " · A hide-arch" : " · A show-arch"} · t retitle · g{" "}
-          {view === "state" ? "flat" : "by-state"} · ? help · q quit
+          ↵ resume · v transcript · / search · : codex · e edit · g {view} · s sort:{sort} · a{" "}
+          {includeSubagents ? "hide-agents" : "show-agents"} · L loop · C done · X archive · ? help · q quit
         </Text>
       )}
     </Box>
   );
-}
-
-function countSubagentRuns(counts: Map<string, number>): number {
-  let total = 0;
-  for (const n of counts.values()) total += n;
-  return total;
 }

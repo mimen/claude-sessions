@@ -27,6 +27,10 @@ export interface ParsedSession {
   readonly resumeId: string;
   /** Billed token totals + API-equivalent cost, summed from the transcript's usage fields. */
   readonly usage: UsageTotals;
+  /** Count of real prompts (ticks) — human/loop turns, excluding tool-result lines. */
+  readonly userTurns: number;
+  /** Median seconds between ticks (0 if fewer than two) — a loop's cadence / "how often it runs". */
+  readonly tickIntervalSec: number;
 }
 
 const FIRST_TURNS = 8;
@@ -108,6 +112,12 @@ export async function parseSessionFile(
   let sidechainCount = 0;
   const usage = createUsageAccumulator();
 
+  // Tick cadence: real user turns (a human/loop prompt, NOT a tool-result "user" line) and the
+  // gaps between them. For a loop each self-prompt is a tick, so the median gap ≈ how often it runs.
+  let userTurns = 0;
+  let lastTurnMs: number | null = null;
+  const gaps: number[] = [];
+
   const userTexts: string[] = [];
   const firstTurns: string[] = [];
   const lastTurns: string[] = []; // rolling buffer, capped to LAST_TURNS
@@ -142,9 +152,18 @@ export async function parseSessionFile(
       if (obj.type === "assistant") usage.add(obj);
       const content = obj.message?.content;
 
-      if (obj.type === "user" && userTexts.length < USER_TEXTS) {
+      if (obj.type === "user" && !obj.isSidechain) {
         const text = humanText(content);
-        if (text) userTexts.push(text);
+        if (text) {
+          if (userTexts.length < USER_TEXTS) userTexts.push(text);
+          // A real prompt = one tick. Record the gap since the previous tick.
+          userTurns++;
+          const ms = typeof obj.timestamp === "string" ? Date.parse(obj.timestamp) : NaN;
+          if (!Number.isNaN(ms)) {
+            if (lastTurnMs !== null && ms >= lastTurnMs) gaps.push(ms - lastTurnMs);
+            lastTurnMs = ms;
+          }
+        }
       }
 
       const skel = skeletonLine(obj.type, content);
@@ -158,6 +177,15 @@ export async function parseSessionFile(
 
   // A run is a subagent only if it has messages and all of them are sidechain.
   const isSubagent = msgCount > 0 && sidechainCount === msgCount;
+
+  // Median inter-tick gap (seconds); 0 when there aren't two ticks to measure.
+  let tickIntervalSec = 0;
+  if (gaps.length > 0) {
+    const sorted = gaps.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const medianMs = sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+    tickIntervalSec = Math.round(medianMs / 1000);
+  }
 
   return {
     sessionId,
@@ -178,6 +206,8 @@ export async function parseSessionFile(
     // sessions. Subagents aren't resumable, so their resumeId (= parent id) is never used.
     resumeId: (!isSubagent && internalSessionId) || sessionId,
     usage: usage.totals(),
+    userTurns,
+    tickIntervalSec,
   };
 }
 

@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mutations"],
+  "properties": {
+    "mutations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["n", "op", "value"],
+        "properties": {
+          "n": { "type": "integer", "description": "1-based number of the target session from the list" },
+          "op": {
+            "type": "string",
+            "enum": ["kind", "event", "skill", "parent", "project", "completed", "archived", "title", "tag", "untag"]
+          },
+          "value": {
+            "type": ["string", "null"],
+            "description": "kind: loop|session; event/skill/title: text or none; parent: target session number or none; completed/archived: true|false; tag/untag: entity name"
+          }
+        }
+      }
+    }
+  }
+}
