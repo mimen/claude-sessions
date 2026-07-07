@@ -561,6 +561,17 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
           {status}
         </Text>
       ) : null}
+
+      {reader ? (
+        <Text color={theme.muted} wrap="truncate-end">
+          Tab/←→ next file · j/k scroll · g/G top/bottom · q close
+        </Text>
+      ) : (
+        <Text color={theme.muted} wrap="truncate-end">
+          ↵ read · Tab sessions · / search · o editor · f finder · e edit · t tag · c category · s used-by · g {view} · S
+          sort:{sort} · u unused · y path · X archive · R rescan · ? help · q quit
+        </Text>
+      )}
     </Box>
   );
 }
