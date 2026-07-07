@@ -1,5 +1,5 @@
 import { realpathSync, statSync, readFileSync } from "node:fs";
-import { dirname, basename } from "node:path";
+import { dirname, basename, join } from "node:path";
 import { homedir } from "node:os";
 import { type Result, ok, err } from "../result.ts";
 
@@ -81,6 +81,36 @@ export function parseFrontmatter(text: string): { name?: string; description?: s
     out[key] = value.replace(/^["']|["']$/g, "");
   }
   return { name: out["name"], description: out["description"] };
+}
+
+/**
+ * Whether a directory sits inside a LINKED git worktree (not the main checkout):
+ * a linked worktree's `.git` is a file (`gitdir:` pointer), the main repo's is a directory.
+ * Worktree copies of repo-local skills are pure duplication noise in a skill census.
+ */
+export function isInLinkedWorktree(dir: string, cache?: Map<string, boolean>): boolean {
+  let d = dir;
+  for (let depth = 0; depth < 12; depth++) {
+    const cached = cache?.get(d);
+    if (cached !== undefined) return cached;
+    let result: boolean | null = null;
+    try {
+      const st = statSync(join(d, ".git"));
+      result = st.isFile();
+    } catch {
+      // no .git here — keep walking up
+    }
+    if (result !== null) {
+      cache?.set(dir, result);
+      cache?.set(d, result);
+      return result;
+    }
+    const parent = dirname(d);
+    if (parent === d) break;
+    d = parent;
+  }
+  cache?.set(dir, false);
+  return false;
 }
 
 /**

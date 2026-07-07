@@ -18,7 +18,7 @@ import {
   usageFilesFor,
   removeSkillPath,
 } from "../../skills/db.ts";
-import { discoverSkills, type SkillRecord } from "../../skills/scan.ts";
+import { discoverSkills, isInLinkedWorktree, type SkillRecord } from "../../skills/scan.ts";
 import { mineUsage } from "../../skills/usage.ts";
 import { archiveSkill, archiveGuard } from "../../skills/archive.ts";
 import {
@@ -111,6 +111,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<InputMode | null>(null);
   const [unusedOnly, setUnusedOnly] = useState(false);
+  const [showWorktrees, setShowWorktrees] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -171,12 +172,19 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
     [records, categories, tags, usage, drifted],
   );
 
+  // Linked-worktree copies of repo-local skills are duplication noise — hidden unless toggled.
+  const worktreePaths = useMemo(() => {
+    const cache = new Map<string, boolean>();
+    return new Set(records.filter((r) => isInLinkedWorktree(r.realPath, cache)).map((r) => r.path));
+  }, [records]);
+
   const rows = useMemo(() => {
     let r = allRows;
+    if (!showWorktrees) r = r.filter((x) => !worktreePaths.has(x.rec.path));
     if (unusedOnly) r = r.filter((x) => !x.usage);
     if (query.trim()) r = r.filter((x) => matchesQuery(x, query));
     return r;
-  }, [allRows, unusedOnly, query]);
+  }, [allRows, unusedOnly, query, showWorktrees, worktreePaths]);
 
   const items = useMemo<SkillItem[]>(
     () => buildSkillItems(rows, { view, sort, collapsed, nowMs: Date.now() }),
@@ -390,6 +398,9 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
     else if (input === "u") {
       setUnusedOnly((v) => !v);
       setSelected(0);
+    } else if (input === "w") {
+      setShowWorktrees((v) => !v);
+      setSelected(0);
     } else if (input === "v") openReader();
     else if (key.return) {
       if (current?.kind === "section") toggleSection(current.key);
@@ -492,6 +503,8 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
           {" "}
           · {rows.length} skills · {unobserved} unobserved · view {view} · sort {sort}
           {unusedOnly ? " · UNUSED ONLY" : ""}
+          {!showWorktrees && worktreePaths.size > 0 ? ` · ${worktreePaths.size} worktree copies hidden (w)` : ""}
+          {showWorktrees ? " · +worktrees" : ""}
           {query && !searching ? ` · filter: ${query}` : ""}
         </Text>
         <Box flexGrow={1} />
@@ -533,6 +546,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
           <Text color={theme.muted}>enter/v read skill files (Tab cycles files) · p preview · / search (#term = category/tag)</Text>
           <Text color={theme.muted}>o open dir in editor · f reveal in Finder · e edit SKILL.md · y copy path</Text>
           <Text color={theme.muted}>t tag (toggles) · c set category (empty clears) · u unused-only · R rescan machine</Text>
+          <Text color={theme.muted}>w show/hide git-worktree copies (hidden by default — each worktree checkout duplicates its repo's skills)</Text>
           <Text color={theme.muted}>s show sessions that used this skill · X archive copy to vault (y/N confirm)</Text>
           <Text color={theme.muted}>≠ = same-name copies have drifted apart · INV/SLA/RD = invoked / slash / doc-reads</Text>
         </Box>
@@ -569,7 +583,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
       ) : (
         <Text color={theme.muted} wrap="truncate-end">
           ↵ read · Tab sessions · g group-by:{view} · S sort:{sort} · / search · o editor · f finder · e edit · t tag · c
-          category · s used-by · u unused · y path · X archive · R rescan · ? help · q quit
+          category · s used-by · u unused · w worktrees · y path · X archive · R rescan · ? help · q quit
         </Text>
       )}
     </Box>

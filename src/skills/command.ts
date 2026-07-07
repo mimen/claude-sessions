@@ -1,6 +1,6 @@
 import { loadConfig } from "../config.ts";
 import { ensureDataDir, SKILLS_DB_PATH } from "../paths.ts";
-import { discoverSkills, type SkillRecord } from "./scan.ts";
+import { discoverSkills, isInLinkedWorktree, type SkillRecord } from "./scan.ts";
 import { openSkillsDb, saveSkills, loadSkills, usageTotals, tagsFor, addTag, removeTag, setCategory, categoriesFor } from "./db.ts";
 import { mineUsage } from "./usage.ts";
 
@@ -12,6 +12,8 @@ Usage:
   ccs skills --eco <name>    Filter to one ecosystem (see glossary below)
   ccs skills --tag <tag>     Filter to skills carrying a tag
   ccs skills --unused        Only skills with zero observed usage (candidates for pruning)
+  ccs skills --worktrees     Include git-worktree copies (hidden by default — each worktree
+                             checkout duplicates its repo's skills)
   ccs skills --paths         Show each skill's primary path
   ccs skills --rescan        Re-run full-machine discovery (otherwise cached registry)
   ccs skills --json          Full records as JSON (paths, aliases, descriptions, usage, tags)
@@ -58,6 +60,7 @@ export async function skillsCommand(args: string[]): Promise<number> {
     paths: args.includes("--paths"),
     rescan: args.includes("--rescan"),
     json: args.includes("--json"),
+    worktrees: args.includes("--worktrees"),
   });
 }
 
@@ -69,6 +72,7 @@ interface ListOpts {
   paths: boolean;
   rescan: boolean;
   json: boolean;
+  worktrees: boolean;
 }
 
 async function list(opts: ListOpts): Promise<number> {
@@ -111,6 +115,13 @@ async function list(opts: ListOpts): Promise<number> {
     const categories = categoriesFor(db);
 
     let rows = skills;
+    let worktreesHidden = 0;
+    if (!opts.worktrees) {
+      const cache = new Map<string, boolean>();
+      const before = rows.length;
+      rows = rows.filter((s) => !isInLinkedWorktree(s.realPath, cache));
+      worktreesHidden = before - rows.length;
+    }
     if (opts.eco) rows = rows.filter((s) => s.ecosystem === opts.eco);
     else if (!opts.all) rows = rows.filter((s) => DEFAULT_ECOSYSTEMS.has(s.ecosystem));
     if (opts.tag) rows = rows.filter((s) => (tags.get(s.name) ?? []).includes(opts.tag!));
@@ -180,6 +191,7 @@ async function list(opts: ListOpts): Promise<number> {
       `\n${display.length} skills, ${unobserved} never observed in use.` +
         `\nINVOKED = Claude ran it · SLASH = fired as a /command (you or a loop) · READS = opened as reference docs.` +
         `\nCounts are from this Mac's Claude transcripts only — zero here doesn't prove a skill is dead.` +
+        (worktreesHidden > 0 ? `\n${worktreesHidden} git-worktree copies hidden (--worktrees to include).` : "") +
         (opts.all || opts.eco ? "" : `\nHidden by default: codex/cursor/hermes/archive skills (use --all). Glossary: ccs skills --help`),
     );
     return 0;

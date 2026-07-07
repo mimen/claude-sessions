@@ -137,3 +137,23 @@ describe("archiveGuard", () => {
     expect(archiveGuard(rec({ path: "/v/_archive/skills/x" }))).toBe("already archived");
   });
 });
+
+describe("isInLinkedWorktree", () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+  const { tmpdir } = require("node:os") as typeof import("node:os");
+  const { join } = require("node:path") as typeof import("node:path");
+  const { isInLinkedWorktree } = require("./scan.ts") as typeof import("./scan.ts");
+
+  test("main checkout (.git dir) is not a worktree; linked worktree (.git file) is", () => {
+    const root = mkdtempSync(join(tmpdir(), "ccs-wt-"));
+    const main = join(root, "main", ".claude", "skills", "x");
+    mkdirSync(main, { recursive: true });
+    mkdirSync(join(root, "main", ".git"), { recursive: true });
+    const linked = join(root, "wt", ".claude", "skills", "x");
+    mkdirSync(linked, { recursive: true });
+    writeFileSync(join(root, "wt", ".git"), "gitdir: /elsewhere\n");
+    expect(isInLinkedWorktree(main)).toBe(false);
+    expect(isInLinkedWorktree(linked)).toBe(true);
+    expect(isInLinkedWorktree(join(root, "nowhere-special"))).toBe(false);
+  });
+});
