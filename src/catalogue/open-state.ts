@@ -64,6 +64,41 @@ function titleToSessionId(): Map<string, string> {
   return map;
 }
 
+/** What the persisted file knows about a session: its cwd + normalized title. The
+ * persisted workspace record has NO stable id/ref, so we identify a session's live
+ * workspace by joining these two facts against `list-workspaces` (below). */
+interface PersistedSession {
+  cwd: string | null;
+  title: string | null;
+}
+
+/** sessionId -> {cwd, title} from the persisted file. This is the ONLY reliable link
+ * from a Claude sessionId to its cmux workspace, since the persisted record carries the
+ * agent.sessionId in its panels. */
+function persistedBySession(): Map<string, PersistedSession> {
+  const map = new Map<string, PersistedSession>();
+  try {
+    const data = JSON.parse(readFileSync(PERSISTED, "utf8")) as {
+      windows?: { tabManager?: { workspaces?: Record<string, any>[] } }[];
+    };
+    for (const win of data.windows ?? []) {
+      for (const w of win.tabManager?.workspaces ?? []) {
+        const sid = ((w.panels ?? []) as Record<string, any>[])
+          .map((p) => p?.terminal?.agent?.sessionId)
+          .find(Boolean) as string | undefined;
+        if (!sid) continue;
+        map.set(sid, {
+          cwd: (w.currentDirectory as string) ?? null,
+          title: normTitle(w.customTitle || w.processTitle) || null,
+        });
+      }
+    }
+  } catch {
+    // missing/unreadable -> empty
+  }
+  return map;
+}
+
 /** A live cmux workspace: its normalized title (for matching), display title, and ref. */
 interface LiveWorkspace {
   norm: string;
@@ -154,12 +189,30 @@ export async function openSessionTitlesAsync(cmuxBin = "cmux"): Promise<Map<stri
  * the resolved ccs Title while a session is open. Empty when cmux isn't reachable.
  */
 export function openSessionTitles(cmuxBin = "cmux"): Map<string, string> {
-  const live = liveWorkspaces(cmuxBin);
+  // Resolve each session's live title by the persisted (sessionId -> cwd+title) link,
+  // matched against list-workspaces on cwd+title with an ambiguity guard — NOT by title
+  // alone (which mis-attributed a title to the wrong session when two tabs collided;
+  // the same leak fixed in cmuxWorkspaceForSession).
   const out = new Map<string, string>();
-  if (!live) return out;
-  for (const [title, sid] of titleToSessionId()) {
-    const ws = live.get(title);
-    if (ws && ws.display) out.set(sid, ws.display);
+  let list: { current_directory?: string; title?: string }[];
+  try {
+    const raw = execFileSync(cmuxBin, ["list-workspaces", "--json"], {
+      encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const parsed = JSON.parse(raw) as
+      | { workspaces?: { current_directory?: string; title?: string }[] }
+      | { current_directory?: string; title?: string }[];
+    list = Array.isArray(parsed) ? parsed : parsed.workspaces ?? [];
+  } catch {
+    return out;
+  }
+  for (const [sid, p] of persistedBySession()) {
+    const matches = list.filter(
+      (w) =>
+        (p.cwd == null || w.current_directory === p.cwd) &&
+        (p.title == null || normTitle(w.title) === p.title),
+    );
+    if (matches.length === 1) out.set(sid, cleanCmuxTitle(matches[0]!.title ?? ""));
   }
   return out;
 }
@@ -172,13 +225,43 @@ export function openSessionIds(cmuxBin = "cmux"): Set<string> {
  * Resolve a session's live cmux workspace ref (for `rename-workspace` push): sessionId → its
  * persisted workspace title → the live workspace with that title. Null if not currently open.
  */
+/**
+ * The live cmux workspace ref for a session — resolved by joining the persisted
+ * (sessionId -> cwd+title) link against `list-workspaces` on BOTH cwd AND title, with
+ * a strict AMBIGUITY GUARD: if the join doesn't land on EXACTLY ONE live workspace, we
+ * return null and DO NOT guess. This is the leak fix — the old code matched by title
+ * alone, so two workspaces sharing a title (e.g. two "LOOP DESIGNER" tabs in different
+ * windows) could route a rename to the WRONG one. Never rename on an ambiguous match.
+ */
 export function cmuxWorkspaceForSession(sessionId: string, cmuxBin = "cmux"): string | null {
-  const live = liveWorkspaces(cmuxBin);
-  if (!live) return null;
-  for (const [title, sid] of titleToSessionId()) {
-    if (sid === sessionId) return live.get(title)?.ref ?? null;
+  const persisted = persistedBySession().get(sessionId);
+  if (!persisted) return null;
+  let out: string;
+  try {
+    out = execFileSync(cmuxBin, ["list-workspaces", "--json"], {
+      encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
   }
-  return null;
+  let list: { current_directory?: string; title?: string; ref?: string }[];
+  try {
+    const parsed = JSON.parse(out) as
+      | { workspaces?: { current_directory?: string; title?: string; ref?: string }[] }
+      | { current_directory?: string; title?: string; ref?: string }[];
+    list = Array.isArray(parsed) ? parsed : parsed.workspaces ?? [];
+  } catch {
+    return null;
+  }
+  // Match on cwd AND normalized title together (uniquely identifies even sessions that
+  // share a cwd, like the home-dir core sessions). Require EXACTLY one match.
+  const matches = list.filter(
+    (w) =>
+      w.ref &&
+      (persisted.cwd == null || w.current_directory === persisted.cwd) &&
+      (persisted.title == null || normTitle(w.title) === persisted.title),
+  );
+  return matches.length === 1 ? matches[0]!.ref ?? null : null;
 }
 
 /**
