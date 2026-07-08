@@ -1,9 +1,24 @@
 import { existsSync } from "node:fs";
-import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
+import { ensureDataDir, CATALOGUE_PATH, DB_PATH } from "../paths.ts";
 import { openCatalogue, getRow, getAll } from "./db.ts";
-import { cmuxWorkspaceForSession } from "./open-state.ts";
+import { cmuxWorkspaceForSession, cmuxWorkspaceForCwd } from "./open-state.ts";
+import { openIndex } from "../index/schema.ts";
 import { renderTab } from "./render-tab.ts";
 import { execFileSync } from "node:child_process";
+
+/** A session's cwd from the Index (the stable key for resolving its live cmux tab). */
+function cwdForSession(sessionId: string): string | null {
+  if (!existsSync(DB_PATH)) return null;
+  const db = openIndex(DB_PATH);
+  try {
+    const r = db.query("SELECT cwd FROM sessions WHERE session_id = $id").get({ $id: sessionId }) as
+      | { cwd: string | null }
+      | null;
+    return r?.cwd ?? null;
+  } finally {
+    db.close();
+  }
+}
 
 /**
  * Sync a catalogue row's metadata to its live cmux workspace tab (title/description/color/pill).
@@ -26,7 +41,11 @@ function notInSession(): number {
  * All ops are best-effort; a failed push doesn't throw (cmux might be unreachable).
  */
 function pushRenderOps(sessionId: string, cmuxBin: string): boolean {
-  const ref = cmuxWorkspaceForSession(sessionId, cmuxBin);
+  // Resolve the live workspace by CWD first (stable across `claude --resume`, which
+  // mints a fresh session id that breaks title-matching); fall back to the title path.
+  const cwd = cwdForSession(sessionId);
+  const ref =
+    (cwd ? cmuxWorkspaceForCwd(cwd, cmuxBin) : null) ?? cmuxWorkspaceForSession(sessionId, cmuxBin);
   if (!ref) return false;
 
   if (!existsSync(CATALOGUE_PATH)) return false;

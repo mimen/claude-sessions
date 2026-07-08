@@ -181,6 +181,39 @@ export function cmuxWorkspaceForSession(sessionId: string, cmuxBin = "cmux"): st
   return null;
 }
 
+/**
+ * The live cmux workspace ref for a given cwd (worktree path) — the STABLE resolver.
+ * Reads `list-workspaces --json` (which carries current_directory; `tree --json` does
+ * not). Preferred over title-matching: after `claude --resume` mints a fresh session
+ * id, cmux's persisted agent.sessionId no longer matches the catalogue id, so the
+ * title path resolves nothing — but the cwd is unchanged. Returns null if not open.
+ */
+export function cmuxWorkspaceForCwd(cwd: string, cmuxBin = "cmux"): string | null {
+  if (!cwd) return null;
+  let out: string;
+  try {
+    out = execFileSync(cmuxBin, ["list-workspaces", "--json"], {
+      encoding: "utf8",
+      timeout: 2000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(out) as
+      | { workspaces?: { current_directory?: string; ref?: string }[] }
+      | { current_directory?: string; ref?: string }[];
+    const list = Array.isArray(parsed) ? parsed : parsed.workspaces ?? [];
+    for (const w of list) {
+      if (w.current_directory === cwd && w.ref) return w.ref;
+    }
+  } catch {
+    // parse failure -> not resolvable
+  }
+  return null;
+}
+
 /** Push a workspace rename to cmux if the session is currently open there. Returns success. */
 export function pushCmuxRename(sessionId: string, title: string, cmuxBin = "cmux"): boolean {
   const ref = cmuxWorkspaceForSession(sessionId, cmuxBin);
