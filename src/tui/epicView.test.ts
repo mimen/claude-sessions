@@ -19,7 +19,7 @@ test("buildEpicView: groups system members by epic, strips team prefix, no-epic 
     ["x", cat({ sessionId: "x" })], // no system -> excluded
   ]);
   const epicMap = new Map<string, EpicRow>([
-    ["E1", { epicId: "E1", name: "[Front End] FY27 Metered Pricing", url: "http://gus/E1", updatedAt: null }],
+    ["E1", { epicId: "E1", name: "[Front End] FY27 Metered Pricing", shortName: "Metered", url: "http://gus/E1", updatedAt: null }],
   ]);
   const items = buildEpicView([row("a"), row("b"), row("c"), row("x")], {
     catMap, epicMap, collapsedSections: new Set(),

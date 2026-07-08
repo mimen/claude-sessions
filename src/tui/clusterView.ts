@@ -1,6 +1,5 @@
 import type { SessionRow } from "../index/index.ts";
-import type { CatalogueRow } from "../catalogue/db.ts";
-import { lifecycleOf } from "../catalogue/db.ts";
+import type { CatalogueRow, EpicRow } from "../catalogue/db.ts";
 import { sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./groupByProject.ts";
 
 /**
@@ -20,6 +19,7 @@ const CORE_ORDER = ["pr-watch-control", "pr-watch-2", "pr-watch-eval", "loop-des
 
 export interface ClusterViewCtx {
   catMap: ReadonlyMap<string, CatalogueRow>;
+  epicMap: ReadonlyMap<string, EpicRow>;
   openSet: ReadonlySet<string>;
   collapsedSections: ReadonlySet<string>;
   expandedSessions?: ReadonlySet<string>;
@@ -29,11 +29,12 @@ export interface ClusterViewCtx {
   costOf?: (row: SessionRow) => number;
 }
 
-/** Section key encodes system + tier + role so collapse state is stable + unique. */
-function sectionKey(system: string, tier: "core" | "fleet", role: string): string {
-  return `cluster:${system}:${tier}:${role}`;
-}
-
+/**
+ * Cluster view structure (Milad's ask): for each system, TWO tiers —
+ *   CORE   : the star/support sessions, one section per core role (★)
+ *   WORKERS: the fleet, grouped BY EPIC (using each epic's short name)
+ * Sessions with no system fall into a trailing "(no system)" tier.
+ */
 export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCtx): DisplayItem[] {
   const expandedSessions = ctx.expandedSessions ?? new Set<string>();
   const childCounts = ctx.childCounts ?? new Map<string, number>();
@@ -41,14 +42,20 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
   const sort = ctx.sort ?? "recent";
   const costOf = ctx.costOf ?? (() => 0);
 
-  // Bucket rows by system -> role. A session with no system goes to the "" (none) system.
-  const bySystem = new Map<string, Map<string, SessionRow[]>>();
+  // system -> { core: role->rows, workers: epicKey->rows }
+  interface SysBuckets { core: Map<string, SessionRow[]>; workers: Map<string, SessionRow[]> }
+  const bySystem = new Map<string, SysBuckets>();
   for (const row of rows) {
     const cat = ctx.catMap.get(row.sessionId) ?? null;
     const system = cat?.system ?? "";
     const role = cat?.skill ?? "(unroled)";
-    const roles = bySystem.get(system) ?? bySystem.set(system, new Map()).get(system)!;
-    (roles.get(role) ?? roles.set(role, []).get(role)!).push(row);
+    const b = bySystem.get(system) ?? bySystem.set(system, { core: new Map(), workers: new Map() }).get(system)!;
+    if (CORE_ROLES.has(role)) {
+      (b.core.get(role) ?? b.core.set(role, []).get(role)!).push(row);
+    } else {
+      const epicKey = cat?.epicId ?? ""; // "" = no epic
+      (b.workers.get(epicKey) ?? b.workers.set(epicKey, []).get(epicKey)!).push(row);
+    }
   }
 
   const items: DisplayItem[] = [];
@@ -62,36 +69,45 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
     }
   };
 
-  const emitRole = (system: string, tier: "core" | "fleet", role: string, rowsIn: SessionRow[]): void => {
+  const emit = (key: string, name: string, glyph: string, rowsIn: SessionRow[]): void => {
     if (rowsIn.length === 0) return;
-    const key = sectionKey(system, tier, role);
     const collapsed = ctx.collapsedSections.has(key);
-    const label = tier === "core" ? `${role}  ★` : role;
-    const section: SectionMeta = { key, name: `${system || "(no system)"} · ${label}`, glyph: tier === "core" ? "★" : "●" };
     const cost = rowsIn.reduce((sum, r) => sum + costOf(r), 0);
-    items.push({ kind: "section", section, count: rowsIn.length, collapsed, cost });
+    items.push({ kind: "section", section: { key, name, glyph }, count: rowsIn.length, collapsed, cost });
     if (!collapsed) for (const r of sortRows(rowsIn, sort, costOf)) pushSession(r, 0);
   };
 
-  // Real systems first (alphabetical, but the primary "pr-watch" naturally sorts among them),
-  // then the "(no system)" bucket last.
+  const epicLabel = (epicKey: string): string => {
+    if (!epicKey) return "(no epic)";
+    const e = ctx.epicMap.get(epicKey);
+    return e?.shortName || e?.name?.replace(/^\[[^\]]+\]\s*/, "") || epicKey;
+  };
+
   const systems = [...bySystem.keys()].filter((s) => s !== "").sort();
   for (const system of systems) {
-    const roles = bySystem.get(system)!;
-    // Core roles first, in a fixed order.
+    const b = bySystem.get(system)!;
+    // CORE tier — one section per core role, fixed order, ★.
     for (const role of CORE_ORDER) {
-      if (roles.has(role)) { emitRole(system, "core", role, roles.get(role)!); roles.delete(role); }
+      if (b.core.has(role)) emit(`cluster:${system}:core:${role}`, `${system} ▸ core ▸ ${role}  ★`, "★", b.core.get(role)!);
     }
-    // Then fleet roles alphabetically.
-    for (const role of [...roles.keys()].sort()) {
-      const tier = CORE_ROLES.has(role) ? "core" : "fleet";
-      emitRole(system, tier, role, roles.get(role)!);
+    for (const role of [...b.core.keys()].filter((r) => !CORE_ORDER.includes(r)).sort()) {
+      emit(`cluster:${system}:core:${role}`, `${system} ▸ core ▸ ${role}  ★`, "★", b.core.get(role)!);
+    }
+    // WORKERS tier — grouped by epic (short name), biggest epic first, "(no epic)" last.
+    const epicKeys = [...b.workers.keys()].sort((a, z) => {
+      if ((a === "") !== (z === "")) return a === "" ? 1 : -1;
+      const d = b.workers.get(z)!.length - b.workers.get(a)!.length;
+      return d !== 0 ? d : epicLabel(a).localeCompare(epicLabel(z));
+    });
+    for (const ek of epicKeys) {
+      emit(`cluster:${system}:workers:${ek || "(none)"}`, `${system} ▸ workers ▸ ${epicLabel(ek)}`, "◈", b.workers.get(ek)!);
     }
   }
-  // Sessions with no system (everything not in a cluster) — trailing bucket.
+  // No-system sessions — trailing.
   const none = bySystem.get("");
   if (none) {
-    for (const role of [...none.keys()].sort()) emitRole("", "fleet", role, none.get(role)!);
+    for (const [ek, rowsIn] of none.workers) emit(`cluster::none:${ek || "(none)"}`, `(no system)`, "·", rowsIn);
+    for (const [role, rowsIn] of none.core) emit(`cluster::none:${role}`, `(no system) ▸ ${role}`, "·", rowsIn);
   }
   return items;
 }

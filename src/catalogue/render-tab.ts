@@ -47,12 +47,20 @@ function renderLoop(row: CatalogueRow): TabRenderOps {
   return { title, description, color, statusPill };
 }
 
+/** Strip any leading "#<num> " groups so the PR# is never baked into the name — the
+ * renderer composes it once from prNumber. Guards against dirty stored titles that
+ * already carry the prefix (which would otherwise double/triple: "#12133 #12133 …"). */
+function stripPrPrefix(title: string): string {
+  return title.replace(/^(#\d+\s+)+/, "");
+}
+
 function buildSessionTitle(row: CatalogueRow): string {
-  if (row.prNumber && row.customTitle) {
-    return `#${row.prNumber} ${row.customTitle}`;
+  const clean = row.customTitle ? stripPrPrefix(row.customTitle) : null;
+  if (row.prNumber && clean) {
+    return `#${row.prNumber} ${clean}`;
   }
-  if (row.customTitle) {
-    return row.customTitle;
+  if (clean) {
+    return clean;
   }
   const key = identityKeyOf(row);
   if (key) return key;
