@@ -30,9 +30,9 @@ export interface ClusterMap {
   readonly system: string;
   readonly counts: { total: number; core: number; fleet: number; live: number; retired: number };
   /** Members grouped: "core" (the star/support roles) then per-role fleet groups. Each
-   * group shows one primary per work-unit; `folded` maps a primary's sessionId to how
-   * many older same-PR siblings it stands in for. */
-  readonly groups: { role: string; kind: "core" | "fleet"; members: ClusterMember[]; folded: Map<string, number> }[];
+   * group shows one primary per work-unit; `folded` maps a primary's sessionId to the
+   * older same-PR sibling sessions it stands in for (shown under it with --expand). */
+  readonly groups: { role: string; kind: "core" | "fleet"; members: ClusterMember[]; folded: Map<string, ClusterMember[]> }[];
 }
 
 /** Roles that are CORE (the star/support that runs the cluster) vs FLEET (per-PR workers). */
@@ -123,27 +123,28 @@ function unitKey(m: ClusterMember): string {
   return `sid:${m.sessionId}`;
 }
 
-function foldByUnit(members: ClusterMember[]): { primaries: ClusterMember[]; folded: Map<string, number> } {
+function foldByUnit(members: ClusterMember[]): { primaries: ClusterMember[]; folded: Map<string, ClusterMember[]> } {
   const byUnit = new Map<string, ClusterMember[]>();
   for (const m of members) {
     const k = unitKey(m);
     (byUnit.get(k) ?? byUnit.set(k, []).get(k)!).push(m);
   }
   const primaries: ClusterMember[] = [];
-  const folded = new Map<string, number>();
+  const folded = new Map<string, ClusterMember[]>(); // primary sessionId -> the folded siblings
   for (const group of byUnit.values()) {
     // primary: a live one if any, else the first (already sorted live-first).
     const sorted = sortMembers(group);
     const primary = sorted[0];
     if (!primary) continue; // unit with no members can't happen, but satisfies strict null
     primaries.push(primary);
-    if (sorted.length > 1) folded.set(primary.sessionId, sorted.length - 1);
+    if (sorted.length > 1) folded.set(primary.sessionId, sorted.slice(1));
   }
   return { primaries: sortMembers(primaries), folded };
 }
 
-/** Render the cluster map as skimmable text (the thin presenter). */
-export function renderClusterMap(map: ClusterMap): string {
+/** Render the cluster map as skimmable text. With `expand`, folded older sibling
+ * sessions are listed indented under their primary instead of a "(+N)" note. */
+export function renderClusterMap(map: ClusterMap, expand = false): string {
   const dot = (m: ClusterMember): string =>
     m.lifecycle === "completed" ? "✔" : m.lifecycle === "archived" ? "▪" : m.live ? "●" : "○";
   const lines: string[] = [];
@@ -162,10 +163,17 @@ export function renderClusterMap(map: ClusterMap): string {
       let label = m.title ?? m.sessionId.slice(0, 8);
       if (pr && label.startsWith(pr + " ")) label = label.slice(pr.length + 1);
       const reach = m.cwd ? m.cwd.replace(process.env.HOME ?? "~", "~") : m.sessionId.slice(0, 8);
-      const nFolded = g.folded.get(m.sessionId) ?? 0;
-      const foldNote = nFolded > 0 ? `  (+${nFolded} older session${nFolded > 1 ? "s" : ""})` : "";
+      const sibs = g.folded.get(m.sessionId) ?? [];
+      const foldNote = sibs.length > 0 && !expand
+        ? `  (+${sibs.length} older session${sibs.length > 1 ? "s" : ""}; --expand)` : "";
       lines.push(`    ${dot(m)} ${pr ? pr + " " : ""}${label}${foldNote}`);
       lines.push(`        ${m.sessionId.slice(0, 8)} · ${reach}`);
+      if (expand) {
+        for (const s of sibs) {
+          const sreach = s.cwd ? s.cwd.replace(process.env.HOME ?? "~", "~") : s.sessionId.slice(0, 8);
+          lines.push(`        ↳ ${dot(s)} ${s.sessionId.slice(0, 8)} · ${sreach}  (older ${s.lifecycle})`);
+        }
+      }
     }
   }
   return lines.join("\n");

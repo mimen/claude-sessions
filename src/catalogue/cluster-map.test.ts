@@ -24,9 +24,11 @@ test("buildClusterMap: core group first, fleet folds multi-session PRs to one pr
   const map = buildClusterMap("pr-watch", members);
   expect(map.counts.core).toBe(1);
   expect(map.counts.fleet).toBe(2);
-  expect(map.groups[0].kind).toBe("core"); // core first
+  expect(map.groups[0]?.kind).toBe("core"); // core first
   const fleet = map.groups.find((g) => g.role === "pr-agent")!;
   expect(fleet.members).toHaveLength(1);           // 2 sessions -> 1 primary
   expect(fleet.members[0]!.sessionId).toBe("w-new"); // live/fresher wins
-  expect(fleet.folded.get("w-new")).toBe(1);         // 1 older folded
+  const foldedSibs = fleet.folded.get("w-new");
+  expect(foldedSibs).toHaveLength(1);              // 1 older folded
+  expect(foldedSibs?.[0]?.sessionId).toBe("w-old");
 });

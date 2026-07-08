@@ -98,7 +98,7 @@ export async function main(argv: string[]): Promise<number> {
     case "sync-tabs":
       return syncTabs(args.slice(1));
     case "cluster":
-      return clusterView(args[1]);
+      return clusterView(args[1], args.includes("--expand") || args.includes("--all"));
     case "resume":
       return resumeSystem(args[1]);
     case "skills": {
@@ -341,7 +341,7 @@ function tree(_opts: { all: boolean }): number {
 }
 
 /** Render the cluster map for a system: members grouped by role, liveness, how to reach each. */
-function clusterView(systemSlug: string | undefined): number {
+function clusterView(systemSlug: string | undefined, expand = false): number {
   if (!systemSlug) {
     console.error("ccs: missing system slug. Usage: ccs cluster <system>");
     return 1;
@@ -362,7 +362,7 @@ function clusterView(systemSlug: string | undefined): number {
       console.log(`cluster ${systemSlug}: no members (nothing tagged system=${systemSlug}).`);
       return 0;
     }
-    console.log(renderClusterMap(buildClusterMap(systemSlug, members)));
+    console.log(renderClusterMap(buildClusterMap(systemSlug, members), expand));
     return 0;
   } finally {
     db.close();
