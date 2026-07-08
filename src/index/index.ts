@@ -362,6 +362,12 @@ export function subagentCounts(db: Database): Map<string, number> {
   return new Map(rows.map((r) => [r.pid, r.n]));
 }
 
+/** One Session's full row by id (resolved Title included), or null if it isn't indexed. */
+export function sessionById(db: Database, sessionId: string): SessionRow | null {
+  const raw = db.query(`SELECT ${SELECT_COLS} FROM sessions WHERE session_id = $id`).get({ $id: sessionId });
+  return raw ? mapRows([raw])[0]! : null;
+}
+
 /** All Sessions, most-recently-active first. Subagent runs are excluded by default. */
 export function listByRecency(db: Database, includeSubagents = false): SessionRow[] {
   const where = includeSubagents ? "" : "WHERE is_subagent = 0";

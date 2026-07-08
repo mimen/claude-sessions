@@ -52,8 +52,10 @@ interface AnyLine extends CostLine {
 
 type Block = { type?: string; text?: string; name?: string };
 
-/** Concatenated human-authored text of a message (text blocks / string content only). */
-function humanText(content: unknown): string {
+/** Concatenated human-authored text of a message (text blocks / string content only).
+ *  The ONE prose extractor for transcript content — lineage search reuses it, so a change
+ *  to block shapes here changes what search sees too. */
+export function humanText(content: unknown): string {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
   return content
