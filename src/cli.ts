@@ -7,10 +7,10 @@ import { openIndex } from "./index/schema.ts";
 import type { Database } from "bun:sqlite";
 import { reindexStore, listByRecency, titleOf, costOf, subagentCosts } from "./index/index.ts";
 import { formatCost } from "./cost.ts";
-import { openCatalogue, getAll, lifecycleOf, parentEdges } from "./catalogue/db.ts";
+import { openCatalogue, getAll, lifecycleOf, parentEdges, identityKeyOf } from "./catalogue/db.ts";
 import { openSessionIds } from "./catalogue/open-state.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, event, parent, skill, project, system, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, key, event, parent, skill, project, system, meta } from "./catalogue/commands.ts";
 import { backfillTitles } from "./titler/queue.ts";
 import { createCodexTitler } from "./titler/codex.ts";
 import { handoffInline } from "./resume/inline.ts";
@@ -30,7 +30,8 @@ Usage:
   ccs rename [<id>|.] "<name>"   Set a custom title (+ sync cmux workspace name)
   ccs mark [<id>|.] --loop|--completed|--archived [--off]   Set lifecycle/kind flags
   ccs tag [<id>|.] "<Entity>" [--remove]   Add/remove an entity tag
-  ccs event [<id>|.] <slug> [--off]   Assign/clear the session's event slug
+  ccs key [<id>|.] <slug> [--off]   Assign/clear the session's identity key (canonical)
+  ccs event [<id>|.] <slug> [--off]   (deprecated alias for key)
   ccs parent [<id>|.] <parent-id|.> [--off]   Set/clear the spawning parent session
   ccs skill [<id>|.] <name> [--off]   Set/clear the backing skill or slash-command
   ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
@@ -75,6 +76,8 @@ export async function main(argv: string[]): Promise<number> {
       return mark(args[1], args.slice(2).filter((a) => a.startsWith("--")));
     case "tag":
       return tag(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "key":
+      return key(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "event":
       return event(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "parent":
@@ -223,7 +226,8 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
     for (const r of rows) {
       const c = catalogue.get(r.sessionId) ?? null;
       const lifecycle = lifecycleOf(c);
-      if (opts.event && c?.event !== opts.event) continue;
+      const keyValue = identityKeyOf(c);
+      if (opts.event && keyValue !== opts.event) continue;
       if (!opts.all && lifecycle === "archived") continue;
       if (opts.loops && c?.kind !== "loop") continue;
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
@@ -233,7 +237,7 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
       const badge = pad((c?.kind === "loop" ? "LOOP " : "") + d.label + (d.nudge ? "!" : ""), 16);
       const sk = pad(c?.skill ? `⚙${c.skill}` : "", 14);
       // Only print the event column when not already filtering to a single event.
-      const evt = opts.event ? "" : pad(c?.event ? `⊞${c.event}` : "", 18);
+      const evt = opts.event ? "" : pad(keyValue ? `⊞${keyValue}` : "", 18);
       const project = pad(r.projectName, 16);
       const age = pad(formatAge(r.lastTs), 5);
       const subCost = subCosts.get(r.sessionId) ?? subCosts.get(r.resumeId) ?? 0;

@@ -29,7 +29,7 @@ import { SectionCard } from "./SectionCard.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
-import { getAll, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle } from "../catalogue/db.ts";
+import { getAll, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle, identityKeyOf } from "../catalogue/db.ts";
 import { openSessionTitlesAsync } from "../catalogue/open-state.ts";
 import { runMetadataCommand, applyMutations, type SessionMeta } from "../catalogue/command.ts";
 import { buildStateItems, DEFAULT_COLLAPSED } from "./stateGroups.ts";
@@ -181,7 +181,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         color = Number.isNaN(ts) || nowMs - ts > STALE_MS ? theme.faint : theme.muted;
       }
       if (nudge) color = "yellowBright";
-      m.set(r.sessionId, { glyph, color, nudge, event: c?.event ?? null });
+      m.set(r.sessionId, { glyph, color, nudge, event: identityKeyOf(c) });
     }
     return m;
   }, [baseRows, catMap, openSet]);
@@ -419,7 +419,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         title: r.title,
         kind: c?.kind ?? "session",
         skill: c?.skill ?? null,
-        event: c?.event ?? null,
+        event: identityKeyOf(c),
         parentSessionId: c?.parentSessionId ?? null,
         completed: !!c?.completed,
         archived: !!c?.archived,
@@ -607,7 +607,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       subagentCost={
         subCostMap.get(selectedRow.sessionId) ?? subCostMap.get(selectedRow.resumeId) ?? 0
       }
-      event={catMap.get(selectedRow.sessionId)?.event ?? null}
+      event={identityKeyOf(catMap.get(selectedRow.sessionId) ?? null)}
       skill={catMap.get(selectedRow.sessionId)?.skill ?? null}
       project={catMap.get(selectedRow.sessionId)?.project ?? null}
       kind={catMap.get(selectedRow.sessionId)?.kind}

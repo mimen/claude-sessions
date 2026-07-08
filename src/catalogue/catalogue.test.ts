@@ -63,16 +63,19 @@ test("tags: add, list, reverse lookup", () => {
   expect(sessionsForEntity(db, "Glizzy Galaxy").sort()).toEqual(["s1", "s2"]);
 });
 
-test("event: set, round-trip, clear, reverse lookup", () => {
+test("event: set, round-trip, clear, reverse lookup (deprecated alias writes to key)", () => {
   const db = openCatalogue(":memory:");
-  expect(getRow(db, "s1")?.event ?? null).toBeNull();
+  expect(getRow(db, "s1")?.key ?? null).toBeNull();
   setEvent(db, "s1", "glizzy-galaxy", NOW);
   setEvent(db, "s2", "glizzy-galaxy", NOW);
   setEvent(db, "s3", "kiki-factory", NOW);
-  expect(getRow(db, "s1")!.event).toBe("glizzy-galaxy");
+  // setEvent now writes to key, not event
+  expect(getRow(db, "s1")!.key).toBe("glizzy-galaxy");
+  expect(getRow(db, "s1")!.event).toBeNull();
+  // sessionsForEvent is an alias for sessionsForKey
   expect(sessionsForEvent(db, "glizzy-galaxy").sort()).toEqual(["s1", "s2"]);
   setEvent(db, "s1", null, NOW); // clear
-  expect(getRow(db, "s1")!.event).toBeNull();
+  expect(getRow(db, "s1")!.key).toBeNull();
   expect(sessionsForEvent(db, "glizzy-galaxy")).toEqual(["s2"]);
 });
 
@@ -239,7 +242,12 @@ test("identityKeyOf: prefers key over event, falls back to event", () => {
   const db = openCatalogue(":memory:");
   const { setKey, identityKeyOf } = require("./db.ts");
   // legacy row: only event set (key is null) → identityKeyOf returns event
-  setEvent(db, "legacy", "galaxy-summit", NOW);
+  // Simulate legacy by directly writing to event column (setEvent now writes to key)
+  db.query("INSERT INTO catalogue (session_id, event, updated_at) VALUES ($id, $event, $now)").run({
+    $id: "legacy",
+    $event: "galaxy-summit",
+    $now: NOW,
+  });
   const legacyRow = getRow(db, "legacy")!;
   expect(legacyRow.key).toBeNull();
   expect(legacyRow.event).toBe("galaxy-summit");
@@ -251,8 +259,12 @@ test("identityKeyOf: prefers key over event, falls back to event", () => {
   expect(newRow.event).toBeNull();
   expect(identityKeyOf(newRow)).toBe("heroku/dashboard#999");
   // both set: key wins
-  setEvent(db, "both", "old-event-slug", NOW);
-  setKey(db, "both", "modern-key", NOW);
+  db.query("INSERT INTO catalogue (session_id, event, key, updated_at) VALUES ($id, $event, $key, $now)").run({
+    $id: "both",
+    $event: "old-event-slug",
+    $key: "modern-key",
+    $now: NOW,
+  });
   const bothRow = getRow(db, "both")!;
   expect(identityKeyOf(bothRow)).toBe("modern-key");
   // neither set: null

@@ -13,7 +13,7 @@
           "n": { "type": "integer", "description": "1-based number of the target session from the list" },
           "op": {
             "type": "string",
-            "enum": ["kind", "event", "skill", "parent", "project", "completed", "archived", "title", "tag", "untag"]
+            "enum": ["kind", "key", "event", "skill", "parent", "project", "completed", "archived", "title", "tag", "untag"]
           },
           "value": {
             "type": ["string", "null"],

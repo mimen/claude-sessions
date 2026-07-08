@@ -5,7 +5,7 @@ import { readFileSync, rmSync } from "node:fs";
 import type { Database } from "bun:sqlite";
 import {
   setKind,
-  setEvent,
+  setKey,
   setSkill,
   setParent,
   setProject,
@@ -41,7 +41,7 @@ export interface SessionMeta {
 
 export interface Mutation {
   readonly sessionId: string;
-  readonly op: "kind" | "event" | "skill" | "parent" | "project" | "completed" | "archived" | "title" | "tag" | "untag";
+  readonly op: "kind" | "key" | "event" | "skill" | "parent" | "project" | "completed" | "archived" | "title" | "tag" | "untag";
   /** Resolved value: for `parent`, a target sessionId or null; booleans as "true"/"false". */
   readonly value: string | null;
 }
@@ -154,6 +154,7 @@ export async function runMetadataCommand(
           value = cleared ? null : t?.sessionId ?? null;
           break;
         }
+        case "key":
         case "event":
         case "skill":
         case "title":
@@ -193,8 +194,9 @@ export function applyMutations(catalogue: Database, mutations: readonly Mutation
       case "kind":
         setKind(catalogue, m.sessionId, m.value === "loop" ? "loop" : "session", now);
         break;
+      case "key":
       case "event":
-        setEvent(catalogue, m.sessionId, m.value, now);
+        setKey(catalogue, m.sessionId, m.value, now);
         break;
       case "skill":
         setSkill(catalogue, m.sessionId, m.value, now);

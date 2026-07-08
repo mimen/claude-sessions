@@ -260,11 +260,14 @@ export function setParked(db: Database, sessionId: string, taskId: string | null
 export function setResumeId(db: Database, sessionId: string, resumeId: string, now: string): void {
   set(db, sessionId, "resume_id", resumeId, now);
 }
-export function setEvent(db: Database, sessionId: string, event: string | null, now: string): void {
-  set(db, sessionId, "event", event, now);
-}
 export function setKey(db: Database, sessionId: string, key: string | null, now: string): void {
   set(db, sessionId, "key", key, now);
+}
+/**
+ * @deprecated Use `setKey` instead. This alias writes to `key` for backward compatibility.
+ */
+export function setEvent(db: Database, sessionId: string, event: string | null, now: string): void {
+  setKey(db, sessionId, event, now);
 }
 export function setParent(db: Database, sessionId: string, parentId: string | null, now: string): void {
   set(db, sessionId, "parent_session_id", parentId, now);
@@ -312,15 +315,6 @@ export function stampPrFacts(
   }
 }
 
-/** Reverse lookup: which sessions are assigned to this event slug. */
-export function sessionsForEvent(db: Database, event: string): string[] {
-  return (
-    db.query("SELECT session_id FROM catalogue WHERE event = $e").all({ $e: event }) as {
-      session_id: string;
-    }[]
-  ).map((r) => r.session_id);
-}
-
 /** Reverse lookup: which sessions are assigned to this key. */
 export function sessionsForKey(db: Database, key: string): string[] {
   return (
@@ -328,6 +322,13 @@ export function sessionsForKey(db: Database, key: string): string[] {
       session_id: string;
     }[]
   ).map((r) => r.session_id);
+}
+
+/**
+ * @deprecated Use `sessionsForKey` instead. This alias reads from `key` for backward compatibility.
+ */
+export function sessionsForEvent(db: Database, event: string): string[] {
+  return sessionsForKey(db, event);
 }
 
 /** Reverse lookup: which sessions are assigned to this project label. */

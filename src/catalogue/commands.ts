@@ -6,7 +6,7 @@ import {
   setKind,
   setCompleted,
   setArchived,
-  setEvent,
+  setKey,
   setParent,
   setSkill,
   setProject,
@@ -16,6 +16,7 @@ import {
   childrenOf,
   getRow,
   getTags,
+  identityKeyOf,
   type Kind,
 } from "./db.ts";
 import { openIndex } from "../index/schema.ts";
@@ -141,24 +142,31 @@ export function tag(sessionArg: string | undefined, entity: string | undefined, 
   return 0;
 }
 
-/** Set (or clear, with --off) the event slug a session belongs to. */
-export function event(sessionArg: string | undefined, slug: string | undefined, flags: string[]): number {
+/** Set (or clear, with --off) the key (identity grouping slug) a session belongs to. */
+export function key(sessionArg: string | undefined, slug: string | undefined, flags: string[]): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
   const off = flags.includes("--off");
   if (!off && (!slug || !slug.trim())) {
-    console.error('usage: ccs event [<session-id>|.] <slug> [--off]');
+    console.error('usage: ccs key [<session-id>|.] <slug> [--off]');
     return 1;
   }
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH);
   try {
-    setEvent(db, id, off ? null : slug!.trim(), now());
-    console.log(off ? `cleared event on ${id.slice(0, 8)}…` : `event ${slug!.trim()} → ${id.slice(0, 8)}…`);
+    setKey(db, id, off ? null : slug!.trim(), now());
+    console.log(off ? `cleared key on ${id.slice(0, 8)}…` : `key ${slug!.trim()} → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
   }
   return 0;
+}
+
+/**
+ * @deprecated Use `key()` instead. This alias writes to `key` for backward compatibility.
+ */
+export function event(sessionArg: string | undefined, slug: string | undefined, flags: string[]): number {
+  return key(sessionArg, slug, flags);
 }
 
 /** Set (or clear, with --off) the parent session that spawned/owns this one. */
@@ -312,7 +320,8 @@ export function meta(sessionArg: string | undefined): number {
       console.log(`  children: ${children.length}`);
       for (const c of children) console.log(`    ↳ ${labelFor(c)}`);
     }
-    if (row?.event) console.log(`  event: ${row.event}`);
+    const keyValue = identityKeyOf(row);
+    if (keyValue) console.log(`  key: ${keyValue}`);
     if (tags.length) console.log(`  tags: ${tags.join(", ")}`);
     if (cost && (cost.usage.costUSD > 0 || cost.subagentUSD > 0)) {
       const u = cost.usage;
