@@ -11,10 +11,12 @@ import { openCatalogue, getAll, lifecycleOf, parentEdges, identityKeyOf } from "
 import { openSessionIds } from "./catalogue/open-state.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, event, parent, skill, project, system, meta } from "./catalogue/commands.ts";
+import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { backfillTitles } from "./titler/queue.ts";
 import { createCodexTitler } from "./titler/codex.ts";
 import { handoffInline } from "./resume/inline.ts";
 import type { ResumeCommand } from "./resume/command.ts";
+import { executeSystemResume } from "./resume/execute-system.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -36,6 +38,8 @@ Usage:
   ccs skill [<id>|.] <name> [--off]   Set/clear the backing skill or slash-command
   ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
   ccs system [<id>|.] <slug> [--off]   Set/clear the system grouping
+  ccs sync-tabs [<id>|.|--all]   Sync catalogue metadata to live cmux tabs (title/description/color/pill)
+  ccs resume <system>   Resume all sessions in a system (idempotent)
   ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
   ccs --version       Print version
   ccs --help          Show this help
@@ -88,6 +92,10 @@ export async function main(argv: string[]): Promise<number> {
       return project(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "system":
       return system(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "sync-tabs":
+      return syncTabs(args.slice(1));
+    case "resume":
+      return resumeSystem(args[1]);
     case "skills": {
       // Bare `ccs skills` on a terminal opens the TUI in skills mode; flags/subcommands
       // (or piped output) use the plain-table command path.
@@ -325,6 +333,30 @@ function tree(_opts: { all: boolean }): number {
     cat.close();
   }
   return 0;
+}
+
+/** Resume all sessions in a system (idempotent reconcile). */
+function resumeSystem(systemSlug: string | undefined): number {
+  if (!systemSlug) {
+    console.error("ccs: missing system slug. Usage: ccs resume <system>");
+    return 1;
+  }
+
+  const config = getConfig();
+  if (!config) return 1;
+
+  const db = openIndex(DB_PATH);
+  const cat = openCatalogue(CATALOGUE_PATH);
+  try {
+    const result = executeSystemResume(db, cat, systemSlug);
+    console.log(
+      `\nccs: system resume complete — ${result.resumed} resumed, ${result.reanchored} already live, ${result.skipped} retired`,
+    );
+    return 0;
+  } finally {
+    db.close();
+    cat.close();
+  }
 }
 
 /** Short, skimmable label for a session id: `1a2b3c4d… <title>`, degrading to the bare id when unindexed. */
