@@ -29,17 +29,18 @@ import { SectionCard } from "./SectionCard.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
-import { getAll, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle, identityKeyOf } from "../catalogue/db.ts";
+import { getAll, allEpics, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle, identityKeyOf } from "../catalogue/db.ts";
 import { openSessionTitlesAsync } from "../catalogue/open-state.ts";
 import { runMetadataCommand, applyMutations, type SessionMeta } from "../catalogue/command.ts";
 import { buildStateItems, DEFAULT_COLLAPSED } from "./stateGroups.ts";
 import { buildTreeItems } from "./treeGroups.ts";
 import { buildGroupsView } from "./groupsView.ts";
 import { buildClusterView } from "./clusterView.ts";
+import { buildEpicView } from "./epicView.ts";
 
 const SORT_CYCLE: SortMode[] = ["recent", "cost", "msgs"];
-type View = "groups" | "state" | "flat" | "tree" | "cluster";
-const VIEW_CYCLE: View[] = ["groups", "state", "flat", "tree", "cluster"];
+type View = "groups" | "state" | "flat" | "tree" | "cluster" | "epic";
+const VIEW_CYCLE: View[] = ["groups", "state", "flat", "tree", "cluster", "epic"];
 
 const STALE_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -115,6 +116,10 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   // catalogue is present (tests mount without one, so no cmux probe runs there).
   const catMap = useMemo(
     () => (catalogue ? getAll(catalogue) : new Map()),
+    [catalogue, refreshTick],
+  );
+  const epicMap = useMemo(
+    () => (catalogue ? allEpics(catalogue) : new Map()),
     [catalogue, refreshTick],
   );
   // Live cmux workspace titles (source of truth for open sessions) — override the ccs Title while
@@ -262,7 +267,18 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   }, [db, expandedSessions, refreshTick]);
   const items = useMemo(
     () =>
-      view === "cluster"
+      view === "epic"
+        ? buildEpicView(rows, {
+            catMap,
+            epicMap,
+            collapsedSections,
+            expandedSessions,
+            childCounts: subCounts,
+            childrenByParent,
+            sort,
+            costOf: totalCostFor,
+          })
+        : view === "cluster"
         ? buildClusterView(rows, {
             catMap,
             openSet,
@@ -296,7 +312,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
               sort,
               costOf: totalCostFor,
             }),
-    [view, rows, catMap, openSet, collapsedSections, expandedSessions, subCounts, childrenByParent, sort, totalCostFor],
+    [view, rows, catMap, epicMap, openSet, collapsedSections, expandedSessions, subCounts, childrenByParent, sort, totalCostFor],
   );
 
   const clampedSelected = Math.min(selected, Math.max(0, items.length - 1));
@@ -636,6 +652,8 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       prNumber={catMap.get(selectedRow.sessionId)?.prNumber ?? null}
       prRepo={catMap.get(selectedRow.sessionId)?.prRepo ?? null}
       prState={catMap.get(selectedRow.sessionId)?.prState ?? null}
+      epicName={epicMap.get(catMap.get(selectedRow.sessionId)?.epicId ?? "")?.name ?? null}
+      epicUrl={epicMap.get(catMap.get(selectedRow.sessionId)?.epicId ?? "")?.url ?? null}
       height={previewHeight}
     />
   ) : selSection ? (

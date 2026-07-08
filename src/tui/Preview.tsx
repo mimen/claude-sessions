@@ -24,6 +24,9 @@ interface PreviewProps {
   prNumber?: number | null;
   prRepo?: string | null;
   prState?: string | null;
+  /** Epic (resolved from the epics entity) — name + deep link. */
+  epicName?: string | null;
+  epicUrl?: string | null;
   /** Total height available to the pane (border included). */
   height: number;
 }
@@ -83,6 +86,8 @@ export function Preview({
   prNumber,
   prRepo,
   prState,
+  epicName,
+  epicUrl,
   height,
 }: PreviewProps): React.ReactElement {
   const models = modelBreakdown(row.costByModel);
@@ -130,6 +135,13 @@ export function Preview({
             label="work"
             value={osc8(gusUrl(gusWork), gusWork)}
             color={theme.header}
+          />
+        ) : null}
+        {epicName ? (
+          <Field
+            label="epic"
+            value={epicUrl ? osc8(epicUrl, epicName.replace(/^\[[^\]]+\]\s*/, "")) : epicName.replace(/^\[[^\]]+\]\s*/, "")}
+            color={theme.project}
           />
         ) : null}
         {project ? <Field label="project" value={`▢ ${project}`} color={theme.header} /> : null}

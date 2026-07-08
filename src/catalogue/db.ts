@@ -38,6 +38,11 @@ export interface CatalogueRow {
    * `key` for pr-watch). The FLEET ORCHESTRATOR owns what it means / membership; ccs
    * just stores it. Nullable (orphan PR = no ticket). */
   gusWork: string | null;
+  /** Reference to the epic ENTITY this session's work belongs to (a FK into the
+   * `epics` table, which holds the epic's name + url). A session points at one epic;
+   * the name/url live once on the entity, not copied per session. Set by the fleet
+   * orchestrator from its W->epic resolution. Nullable. */
+  epicId: string | null;
   notes: string | null;
   updatedAt: string | null;
   /** PR facts sensed from the session's cwd git worktree (VCS-intrinsic only). */
@@ -56,7 +61,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 8;
+const CATALOGUE_VERSION = 9;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -166,6 +171,23 @@ function migrate(db: Database): void {
     }
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_gus_work ON catalogue(gus_work);");
   }
+  if (v < 9) {
+    // Additive: epic as a first-class ENTITY. `epics` holds the epic's name + url ONCE;
+    // a session references it by epic_id (FK). The fleet orchestrator upserts epics +
+    // sets each session's epic_id from its W->epic resolution; ccs just stores it.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS epics (
+        epic_id    TEXT PRIMARY KEY,
+        name       TEXT,
+        url        TEXT,
+        updated_at TEXT
+      );
+    `);
+    if (!hasColumn(db, "catalogue", "epic_id")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN epic_id TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_epic ON catalogue(epic_id);");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -192,6 +214,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     project: (r.project as string) ?? null,
     system: (r.system as string) ?? null,
     gusWork: (r.gus_work as string) ?? null,
+    epicId: (r.epic_id as string) ?? null,
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
     prNumber: (r.pr_number as number) ?? null,
@@ -306,6 +329,51 @@ export function setGusWork(db: Database, sessionId: string, gusWork: string | nu
 export function sessionsForGusWork(db: Database, gusWork: string): string[] {
   return (
     db.query("SELECT session_id FROM catalogue WHERE gus_work = $g").all({ $g: gusWork }) as {
+      session_id: string;
+    }[]
+  ).map((r) => r.session_id);
+}
+
+// ---- Epic entity (first-class: name + url stored once, sessions reference by id) ----
+
+export interface EpicRow {
+  epicId: string;
+  name: string | null;
+  url: string | null;
+  updatedAt: string | null;
+}
+
+/** Upsert an epic entity (id + name + url). Called by the fleet orchestrator. */
+export function upsertEpic(db: Database, epicId: string, name: string | null, url: string | null, now: string): void {
+  db.query(
+    `INSERT INTO epics (epic_id, name, url, updated_at) VALUES ($id, $name, $url, $now)
+     ON CONFLICT(epic_id) DO UPDATE SET name=excluded.name, url=excluded.url, updated_at=excluded.updated_at`,
+  ).run({ $id: epicId, $name: name, $url: url, $now: now });
+}
+
+/** Point a session at its epic entity (FK). null clears it. */
+export function setSessionEpic(db: Database, sessionId: string, epicId: string | null, now: string): void {
+  set(db, sessionId, "epic_id", epicId, now);
+}
+
+export function getEpic(db: Database, epicId: string): EpicRow | null {
+  const r = db.query("SELECT epic_id, name, url, updated_at FROM epics WHERE epic_id = $id").get({ $id: epicId }) as
+    | { epic_id: string; name: string | null; url: string | null; updated_at: string | null }
+    | null;
+  return r ? { epicId: r.epic_id, name: r.name, url: r.url, updatedAt: r.updated_at } : null;
+}
+
+export function allEpics(db: Database): Map<string, EpicRow> {
+  const rows = db.query("SELECT epic_id, name, url, updated_at FROM epics").all() as {
+    epic_id: string; name: string | null; url: string | null; updated_at: string | null;
+  }[];
+  return new Map(rows.map((r) => [r.epic_id, { epicId: r.epic_id, name: r.name, url: r.url, updatedAt: r.updated_at }]));
+}
+
+/** Reverse lookup: sessions belonging to an epic. */
+export function sessionsForEpic(db: Database, epicId: string): string[] {
+  return (
+    db.query("SELECT session_id FROM catalogue WHERE epic_id = $e").all({ $e: epicId }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);

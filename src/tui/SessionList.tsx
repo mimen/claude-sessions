@@ -110,7 +110,9 @@ export function SessionList({ items, selected, height, width, deco, totalCost }:
               <Text wrap="truncate-end" color={titleColor} bold={sel}>
                 {"  ".repeat(item.depth)}
                 {hasSlot ? <Text color={sel ? theme.selFg : theme.faint}>{triangle}</Text> : null}
-                {r.title}
+                {/* The PR# is shown by the badge; strip any leading #<num> from the
+                    title so it never doubles (e.g. "#12137 #12137 …"). */}
+                {badge?.pr ? r.title.replace(/^(#\d+\s+)+/, "") : r.title}
               </Text>
             </Box>
             {badge?.pr ? (

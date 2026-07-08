@@ -27,7 +27,7 @@ function Head({
 }
 
 /** Column-header row for the session list. Widths mirror SessionList exactly (see columns.ts). */
-export function ListHeader({ sort, view }: { sort: SortMode; view: "groups" | "state" | "flat" | "tree" | "cluster" }): React.ReactElement {
+export function ListHeader({ sort, view }: { sort: SortMode; view: "groups" | "state" | "flat" | "tree" | "cluster" | "epic" }): React.ReactElement {
   const tree = view === "tree";
   return (
     <Box>

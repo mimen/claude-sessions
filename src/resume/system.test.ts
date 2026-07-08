@@ -18,6 +18,7 @@ const cat = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   project: null,
   system: null,
   gusWork: null,
+  epicId: null,
   notes: null,
   updatedAt: null,
   prNumber: null,
