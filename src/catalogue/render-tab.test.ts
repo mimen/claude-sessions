@@ -17,6 +17,7 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   skill: null,
   project: null,
   system: null,
+  gusWork: null,
   notes: null,
   updatedAt: null,
   prNumber: null,
@@ -47,6 +48,7 @@ test("renderTab: session with key in description", () => {
   const r = row({
     key: "Q1-planning",
     system: "pr-watch",
+    gusWork: null,
   });
   const ops = renderTab(r, "session");
   expect(ops.description).toContain("pr-watch");

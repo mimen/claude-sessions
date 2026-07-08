@@ -32,6 +32,12 @@ export interface CatalogueRow {
   project: string | null;
   /** Operation-level grouping (e.g. `pr-watch`) — sits between constellation and session. */
   system: string | null;
+  /** Work-tracker id (e.g. a GUS W-number) this session is working — a structured,
+   * stable identification layer (ADR-0013). Set when work starts, survives the whole
+   * lifecycle, never renamed; an extra axis alongside pr_* (and better than the opaque
+   * `key` for pr-watch). The FLEET ORCHESTRATOR owns what it means / membership; ccs
+   * just stores it. Nullable (orphan PR = no ticket). */
+  gusWork: string | null;
   notes: string | null;
   updatedAt: string | null;
   /** PR facts sensed from the session's cwd git worktree (VCS-intrinsic only). */
@@ -50,7 +56,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 7;
+const CATALOGUE_VERSION = 8;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -150,6 +156,16 @@ function migrate(db: Database): void {
     }
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_key ON catalogue(key);");
   }
+  if (v < 8) {
+    // Additive: gus_work — a work-tracker id (GUS W-number) the session is working.
+    // A structured, stable identification layer (ADR-0013): set pre-PR, survives the
+    // lifecycle, never renamed. Pairs with pr_* as an extra axis; the fleet orchestrator
+    // owns membership/meaning, ccs just stores it. Nullable; no backfill.
+    if (!hasColumn(db, "catalogue", "gus_work")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN gus_work TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_gus_work ON catalogue(gus_work);");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -175,6 +191,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     skill: (r.skill as string) ?? null,
     project: (r.project as string) ?? null,
     system: (r.system as string) ?? null,
+    gusWork: (r.gus_work as string) ?? null,
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
     prNumber: (r.pr_number as number) ?? null,
@@ -281,7 +298,18 @@ export function setProject(db: Database, sessionId: string, project: string | nu
 export function setSystem(db: Database, sessionId: string, system: string | null, now: string): void {
   set(db, sessionId, "system", system, now);
 }
+export function setGusWork(db: Database, sessionId: string, gusWork: string | null, now: string): void {
+  set(db, sessionId, "gus_work", gusWork, now);
+}
 
+/** Reverse lookup: which sessions are working this GUS work item (a work-unit may span sessions). */
+export function sessionsForGusWork(db: Database, gusWork: string): string[] {
+  return (
+    db.query("SELECT session_id FROM catalogue WHERE gus_work = $g").all({ $g: gusWork }) as {
+      session_id: string;
+    }[]
+  ).map((r) => r.session_id);
+}
 /** Stamp PR facts sensed from the session's cwd git worktree (VCS-intrinsic only). */
 export function stampPrFacts(
   db: Database,

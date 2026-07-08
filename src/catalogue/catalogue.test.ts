@@ -21,6 +21,8 @@ import {
   sessionsForEvent,
   sessionsForProject,
   sessionsForSystem,
+  setGusWork,
+  sessionsForGusWork,
   stampPrFacts,
 } from "./db.ts";
 import { describe as dispo } from "./disposition.ts";
@@ -150,6 +152,19 @@ test("system: set, round-trip, clear, reverse lookup", () => {
   setSystem(db, "s1", null, NOW); // clear
   expect(getRow(db, "s1")!.system).toBeNull();
   expect(sessionsForSystem(db, "pr-watch")).toEqual(["s2"]);
+});
+
+test("gusWork: set, round-trip, clear, reverse lookup (a work item may span sessions)", () => {
+  const db = openCatalogue(":memory:");
+  expect(getRow(db, "s1")?.gusWork ?? null).toBeNull();
+  setGusWork(db, "s1", "W-23143806", NOW);
+  setGusWork(db, "s2", "W-23143806", NOW); // same work item, second session
+  setGusWork(db, "s3", "W-23143807", NOW);
+  expect(getRow(db, "s1")!.gusWork).toBe("W-23143806");
+  expect(sessionsForGusWork(db, "W-23143806").sort()).toEqual(["s1", "s2"]);
+  setGusWork(db, "s1", null, NOW); // clear
+  expect(getRow(db, "s1")!.gusWork).toBeNull();
+  expect(sessionsForGusWork(db, "W-23143806")).toEqual(["s2"]);
 });
 
 test("catalogue survives reopen (durable file semantics)", () => {
