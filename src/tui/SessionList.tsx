@@ -4,16 +4,7 @@ import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
 import { theme, isRecentAge, costColor } from "./theme.ts";
 import { dominantModel, formatCostList, formatCompactUSD } from "./format.ts";
-import { CARET_W, GLYPH_W, STATUS_W, ROLE_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
-
-/** Color a status label (from disposition): active=green, parked/nudge=amber, done/archived=faint. */
-function statusColor(status: string | null | undefined): string {
-  if (!status) return theme.faint;
-  if (status === "active") return theme.ageRecent;
-  if (status.startsWith("parked")) return "yellow";
-  if (status === "completed" || status.startsWith("completed") || status === "archived") return theme.faint;
-  return theme.muted;
-}
+import { CARET_W, GLYPH_W, ROLE_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
 
 /** Abbreviate a catalogue role (skill) for the narrow role column. */
 function roleLabel(role: string | null | undefined): string {
@@ -115,11 +106,21 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
         const age = formatAge(r.lastTs);
         const ageColor = sel ? theme.selFg : isRecentAge(age) ? theme.ageRecent : theme.ageOld;
         const badge = deco?.get(r.sessionId);
-        // Hierarchy reads from indentation, not connector glyphs. The collapse triangle sits inline
-        // at each node's indent (where a child marker would go); an active/idle dot leads the row
-        // in the groups view (with a trailing space from the gutter width).
-        const dot = item.openState === "open" ? "●" : item.openState === "idle" ? "○" : "";
-        const dotColor = sel ? theme.selFg : item.openState === "open" ? theme.ageRecent : theme.faint;
+        // The leading dot encodes STATUS (so we don't need a whole status column that just
+        // repeats "active" on every open row): ● open/active, ○ idle, ✓ completed, · archived,
+        // ⏸ parked. Status comes from the badge (lifecycle × live open-state); fall back to the
+        // display item's openState when there's no badge.
+        const st = badge?.status ?? (item.openState === "open" ? "active" : item.openState === "idle" ? "idle" : "");
+        const dotFor = (s: string): { g: string; c: string } => {
+          if (s === "active") return { g: "●", c: theme.ageRecent };
+          if (s.startsWith("parked")) return { g: "⏸", c: "yellow" };
+          if (s === "completed" || s.startsWith("completed")) return { g: "✓", c: theme.faint };
+          if (s === "archived") return { g: "·", c: theme.faint };
+          if (s === "idle") return { g: "○", c: theme.faint };
+          return { g: item.openState ? "○" : "", c: theme.faint };
+        };
+        const { g: dot, c: dotColor0 } = dotFor(st);
+        const dotColor = sel ? theme.selFg : dotColor0;
         // Reserve a 2-cell triangle slot for anything in a hierarchy, so leaves align with their
         // collapsible siblings; flat rows (loops/solo, plain lists) get no slot and sit flush.
         const hasSlot = item.depth > 0 || item.childCount > 0;
@@ -174,18 +175,13 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
               </Box>
             ) : null}
             {showRoleStatus ? (
-              <>
-                <Box width={STATUS_W} flexShrink={0}>
-                  <Text color={sel ? theme.selFg : statusColor(badge?.status)} wrap="truncate-end">
-                    {badge?.status ?? ""}
-                  </Text>
-                </Box>
-                <Box width={ROLE_W} flexShrink={0}>
-                  <Text color={sel ? theme.selFg : theme.faint} wrap="truncate-end">
-                    {roleLabel(badge?.role)}
-                  </Text>
-                </Box>
-              </>
+              <Box width={ROLE_W} flexShrink={0}>
+                <Text color={sel ? theme.selFg : theme.faint} wrap="truncate-end">
+                  {/* Only non-worker roles carry signal — "worker" is the default 20x over, so
+                      blank it. eval/designer/control/concierge stand out. */}
+                  {roleLabel(badge?.role) === "worker" ? "" : roleLabel(badge?.role)}
+                </Text>
+              </Box>
             ) : null}
             <Box width={MODEL_W} flexShrink={0}>
               <Text color={sel ? theme.selFg : model?.color ?? theme.faint} wrap="truncate-end">

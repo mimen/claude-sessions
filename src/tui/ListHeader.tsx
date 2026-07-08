@@ -2,7 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { theme } from "./theme.ts";
 import type { SortMode } from "./groupByProject.ts";
-import { CARET_W, GLYPH_W, STATUS_W, ROLE_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
+import { CARET_W, GLYPH_W, ROLE_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
 
 const ARROW = "▾";
 
@@ -36,7 +36,6 @@ export function ListHeader({ sort, view }: { sort: SortMode; view: "groups" | "s
       <Box flexGrow={1} flexShrink={1} marginRight={TITLE_MR} overflow="hidden">
         <Text color={theme.faint}>{tree ? "CONSTELLATION" : "SESSION"}</Text>
       </Box>
-      {roleStatus ? <Head label="STATUS" width={STATUS_W} /> : null}
       {roleStatus ? <Head label="ROLE" width={ROLE_W} /> : null}
       <Head label="MODEL" width={MODEL_W} />
       <Head label="COST" width={COST_W} align="flex-end" active={sort === "cost"} />
