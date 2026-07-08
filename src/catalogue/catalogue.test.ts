@@ -220,3 +220,42 @@ test("PR facts: update existing session", () => {
   expect(row.prNumber).toBe(789);
   expect(row.prBranch).toBe("fix/bug");
 });
+
+test("key: set, round-trip, clear, reverse lookup", () => {
+  const db = openCatalogue(":memory:");
+  const { setKey, sessionsForKey } = require("./db.ts");
+  expect(getRow(db, "s1")?.key ?? null).toBeNull();
+  setKey(db, "s1", "heroku/dashboard#12345", NOW);
+  setKey(db, "s2", "heroku/dashboard#12345", NOW);
+  setKey(db, "s3", "owner/repo#678", NOW);
+  expect(getRow(db, "s1")!.key).toBe("heroku/dashboard#12345");
+  expect(sessionsForKey(db, "heroku/dashboard#12345").sort()).toEqual(["s1", "s2"]);
+  setKey(db, "s1", null, NOW); // clear
+  expect(getRow(db, "s1")!.key).toBeNull();
+  expect(sessionsForKey(db, "heroku/dashboard#12345")).toEqual(["s2"]);
+});
+
+test("identityKeyOf: prefers key over event, falls back to event", () => {
+  const db = openCatalogue(":memory:");
+  const { setKey, identityKeyOf } = require("./db.ts");
+  // legacy row: only event set (key is null) → identityKeyOf returns event
+  setEvent(db, "legacy", "galaxy-summit", NOW);
+  const legacyRow = getRow(db, "legacy")!;
+  expect(legacyRow.key).toBeNull();
+  expect(legacyRow.event).toBe("galaxy-summit");
+  expect(identityKeyOf(legacyRow)).toBe("galaxy-summit");
+  // new row: key set → identityKeyOf prefers key
+  setKey(db, "new", "heroku/dashboard#999", NOW);
+  const newRow = getRow(db, "new")!;
+  expect(newRow.key).toBe("heroku/dashboard#999");
+  expect(newRow.event).toBeNull();
+  expect(identityKeyOf(newRow)).toBe("heroku/dashboard#999");
+  // both set: key wins
+  setEvent(db, "both", "old-event-slug", NOW);
+  setKey(db, "both", "modern-key", NOW);
+  const bothRow = getRow(db, "both")!;
+  expect(identityKeyOf(bothRow)).toBe("modern-key");
+  // neither set: null
+  const emptyRow = getRow(db, "neither") ?? { key: null, event: null } as any;
+  expect(identityKeyOf(emptyRow)).toBeNull();
+});

@@ -22,6 +22,8 @@ export interface CatalogueRow {
   parkedTaskId: string | null;
   /** Event slug this session belongs to (set by the event-watch scout, or manually). */
   event: string | null;
+  /** Neutral, opaque identity key for system-level grouping (replaces event; both exist during migration). */
+  key: string | null;
   /** The session that spawned/owns this one (a sessionId). Children are a reverse lookup. */
   parentSessionId: string | null;
   /** The skill or slash-command backing this session (e.g. `loop-manager`, `event-watch`). */
@@ -48,7 +50,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 6;
+const CATALOGUE_VERSION = 7;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -140,6 +142,14 @@ function migrate(db: Database): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_pr_number ON catalogue(pr_number);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_pr_repo ON catalogue(pr_repo);");
   }
+  if (v < 7) {
+    // Additive: a neutral, opaque identity key for system-level grouping (eventually replaces event).
+    // Nullable; no backfill. Guard on column presence (older binary can reset version, re-run block).
+    if (!hasColumn(db, "catalogue", "key")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN key TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_key ON catalogue(key);");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -160,6 +170,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     archived: !!r.archived,
     parkedTaskId: (r.parked_task_id as string) ?? null,
     event: (r.event as string) ?? null,
+    key: (r.key as string) ?? null,
     parentSessionId: (r.parent_session_id as string) ?? null,
     skill: (r.skill as string) ?? null,
     project: (r.project as string) ?? null,
@@ -210,6 +221,16 @@ export function lifecycleOf(row: CatalogueRow | null): Lifecycle {
   return "idle";
 }
 
+/**
+ * Pure: the canonical identity key (prefers `key` over `event` for expand→migrate→contract).
+ * During the transition, `key` is the modern canonical field; `event` is legacy.
+ * Returns `key` if set, else falls back to `event`.
+ */
+export function identityKeyOf(row: CatalogueRow | null): string | null {
+  if (!row) return null;
+  return row.key ?? row.event;
+}
+
 // ---- mutations (all stamp updated_at; all upsert the row) ----
 
 function set(db: Database, sessionId: string, col: string, value: unknown, now: string): void {
@@ -241,6 +262,9 @@ export function setResumeId(db: Database, sessionId: string, resumeId: string, n
 }
 export function setEvent(db: Database, sessionId: string, event: string | null, now: string): void {
   set(db, sessionId, "event", event, now);
+}
+export function setKey(db: Database, sessionId: string, key: string | null, now: string): void {
+  set(db, sessionId, "key", key, now);
 }
 export function setParent(db: Database, sessionId: string, parentId: string | null, now: string): void {
   set(db, sessionId, "parent_session_id", parentId, now);
@@ -292,6 +316,15 @@ export function stampPrFacts(
 export function sessionsForEvent(db: Database, event: string): string[] {
   return (
     db.query("SELECT session_id FROM catalogue WHERE event = $e").all({ $e: event }) as {
+      session_id: string;
+    }[]
+  ).map((r) => r.session_id);
+}
+
+/** Reverse lookup: which sessions are assigned to this key. */
+export function sessionsForKey(db: Database, key: string): string[] {
+  return (
+    db.query("SELECT session_id FROM catalogue WHERE key = $k").all({ $k: key }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);
