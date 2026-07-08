@@ -420,6 +420,8 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         kind: c?.kind ?? "session",
         skill: c?.skill ?? null,
         event: c?.event ?? null,
+        role: c?.role ?? null,
+        substrate: c?.substrate ?? null,
         parentSessionId: c?.parentSessionId ?? null,
         completed: !!c?.completed,
         archived: !!c?.archived,
@@ -610,6 +612,9 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       event={catMap.get(selectedRow.sessionId)?.event ?? null}
       skill={catMap.get(selectedRow.sessionId)?.skill ?? null}
       project={catMap.get(selectedRow.sessionId)?.project ?? null}
+      role={catMap.get(selectedRow.sessionId)?.role ?? null}
+      substrate={catMap.get(selectedRow.sessionId)?.substrate ?? null}
+      identity={catMap.get(selectedRow.sessionId)?.identity ?? null}
       kind={catMap.get(selectedRow.sessionId)?.kind}
       height={previewHeight}
     />

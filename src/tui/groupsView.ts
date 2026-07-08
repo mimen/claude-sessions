@@ -3,13 +3,18 @@ import type { CatalogueRow } from "../catalogue/db.ts";
 import type { DisplayItem, SectionMeta } from "./groupByProject.ts";
 
 /**
- * The groups view: named constellations as sibling top-level groups, then LOOPS (standalone
- * loops not in any constellation), then SOLO (everything else). A session that belongs to a
- * constellation appears ONLY under that constellation — never in loops/solo. Within a group,
- * sessions are age-ordered and carry an active/idle dot (open in cmux or not).
+ * The groups view: roles (the constellation's durable grouping nodes) as top-level groups first,
+ * then named constellations, then LOOPS (standalone loops not in any constellation), then SOLO
+ * (everything else). A session that belongs to a role or constellation appears ONLY under that
+ * group — never in loops/solo. Within a group, sessions are age-ordered and carry an active/idle
+ * dot (open in cmux or not).
  *
  * A constellation is a connected component of the catalogue parent→child graph; its NAME is the
- * root session's backing skill (e.g. `event-watch`), falling back to the root's title.
+ * root session's backing skill (e.g. `event-watch`), falling back to the root's title. Role
+ * membership follows the NEAREST role-carrying ancestor (self included): a role body brings its
+ * role-less subtree with it, while a deeper role child (e.g. an event-worker under the
+ * event-watch coordinator) splits off into its own role group — matching `ccs ls --role`, which
+ * honors the session's own role edge.
  */
 export interface GroupsCtx {
   catMap: ReadonlyMap<string, CatalogueRow>;
@@ -19,6 +24,7 @@ export interface GroupsCtx {
   expandedSessions?: ReadonlySet<string>;
 }
 
+const ROLE_GLYPH = "◈";
 const CONSTELLATION_GLYPH = "◇";
 const PROJECT_GLYPH = "▢";
 // Constellation depth shown by default (0 = root, 1 = its direct children); deeper is collapsed.
@@ -60,7 +66,20 @@ export function buildGroupsView(rows: readonly SessionRow[], ctx: GroupsCtx): Di
     return inConstellation ? cur : null;
   };
 
-  // Bucket rows: constellation-root-id, or the pseudo-groups "loops" / "solo".
+  // Nearest ancestor (self included) carrying a role — the node this session's role group
+  // anchors on; null when no role exists anywhere up the chain.
+  const roleAnchorOf = (id: string): string | null => {
+    let cur: string | null = id;
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      seen.add(cur);
+      if (ctx.catMap.get(cur)?.role) return cur;
+      cur = parentOf(cur);
+    }
+    return null;
+  };
+
+  // Bucket rows: role-name, constellation-root-id, or the pseudo-groups "loops" / "solo".
   const buckets = new Map<string, SessionRow[]>();
   const order: string[] = [];
   const push = (key: string, row: SessionRow) => {
@@ -72,10 +91,14 @@ export function buildGroupsView(rows: readonly SessionRow[], ctx: GroupsCtx): Di
     }
     b.push(row);
   };
+  const anchorById = new Map<string, string>(); // sessionId → its role anchor (r: members only)
   for (const r of rows) {
-    const root = rootOf(r.sessionId);
+    const anchor = roleAnchorOf(r.sessionId);
     const project = ctx.catMap.get(r.sessionId)?.project ?? null;
-    if (root) push(`c:${root}`, r);
+    if (anchor) {
+      anchorById.set(r.sessionId, anchor);
+      push(`r:${ctx.catMap.get(anchor)!.role!}`, r);
+    } else if (rootOf(r.sessionId)) push(`c:${rootOf(r.sessionId)!}`, r);
     else if (project) push(`p:${project}`, r);
     else if (ctx.catMap.get(r.sessionId)?.kind === "loop") push("loops", r);
     else push("solo", r);
@@ -84,10 +107,13 @@ export function buildGroupsView(rows: readonly SessionRow[], ctx: GroupsCtx): Di
   const ageOf = (r: SessionRow): number => (r.lastTs ? Date.parse(r.lastTs) : 0);
   const recency = (key: string): number => Math.max(0, ...(buckets.get(key)?.map(ageOf) ?? [0]));
 
-  // Section order: constellations, then projects (each most-recently-active first), then loops, solo.
+  // Section order: roles, then constellations, then projects (each most-recently-active first),
+  // then loops, solo.
+  const roleKeys = order.filter((k) => k.startsWith("r:")).sort((a, b) => recency(b) - recency(a));
   const constKeys = order.filter((k) => k.startsWith("c:")).sort((a, b) => recency(b) - recency(a));
   const projKeys = order.filter((k) => k.startsWith("p:")).sort((a, b) => recency(b) - recency(a));
   const sectionKeys = [
+    ...roleKeys,
     ...constKeys,
     ...projKeys,
     ...(buckets.has("loops") ? ["loops"] : []),
@@ -97,6 +123,7 @@ export function buildGroupsView(rows: readonly SessionRow[], ctx: GroupsCtx): Di
   const metaFor = (key: string): SectionMeta => {
     if (key === "loops") return { key: "loops", name: "LOOPS", glyph: "◆" };
     if (key === "solo") return { key: "solo", name: "SOLO", glyph: "·" };
+    if (key.startsWith("r:")) return { key, name: key.slice(2).toUpperCase(), glyph: ROLE_GLYPH };
     if (key.startsWith("p:")) return { key, name: key.slice(2).toUpperCase(), glyph: PROJECT_GLYPH };
     const rootId = key.slice(2);
     const root = rowById.get(rootId);
@@ -109,14 +136,17 @@ export function buildGroupsView(rows: readonly SessionRow[], ctx: GroupsCtx): Di
 
   const expanded = ctx.expandedSessions ?? new Set<string>();
 
-  // Depth-first walk of a constellation. A node's children show if it's within AUTO_DEPTH or the
-  // user expanded it; otherwise the node is collapsed (▸) with its subtree hidden.
-  const walk = (items: DisplayItem[], id: string, depth: number, seen: Set<string>): void => {
+  // Depth-first walk of a constellation, confined to one section's members (`within`) so a role
+  // child rendered in its own role group is never duplicated under its parent. A node's children
+  // show if it's within AUTO_DEPTH or the user expanded it; otherwise collapsed (▸), subtree hidden.
+  const walk = (items: DisplayItem[], id: string, depth: number, seen: Set<string>, within: ReadonlySet<string>): void => {
     if (seen.has(id)) return;
     seen.add(id);
     const row = rowById.get(id);
     if (!row) return;
-    const kids = (childIds.get(id) ?? []).slice().sort((a, b) => ageOf(rowById.get(b)!) - ageOf(rowById.get(a)!));
+    const kids = (childIds.get(id) ?? [])
+      .filter((k) => within.has(k))
+      .sort((a, b) => ageOf(rowById.get(b)!) - ageOf(rowById.get(a)!));
     const showKids = kids.length > 0 && (depth < AUTO_DEPTH || expanded.has(id));
     items.push({
       kind: "session",
@@ -126,7 +156,7 @@ export function buildGroupsView(rows: readonly SessionRow[], ctx: GroupsCtx): Di
       expanded: showKids,
       openState: ctx.openSet.has(row.sessionId) ? "open" : "idle",
     });
-    if (showKids) for (const kid of kids) walk(items, kid, depth + 1, seen);
+    if (showKids) for (const kid of kids) walk(items, kid, depth + 1, seen, within);
   };
 
   const items: DisplayItem[] = [];
@@ -135,9 +165,21 @@ export function buildGroupsView(rows: readonly SessionRow[], ctx: GroupsCtx): Di
     const collapsed = !soloOnly && ctx.collapsedSections.has(key);
     items.push({ kind: "section", section: metaFor(key), count: rowsIn.length, collapsed, cost: 0 });
     if (collapsed) continue;
+    const memberSet = new Set(rowsIn.map((r) => r.sessionId));
     if (key.startsWith("c:")) {
       // Constellation: render the hierarchy (root → descendants), not a flat list.
-      walk(items, key.slice(2), 0, new Set());
+      walk(items, key.slice(2), 0, new Set(), memberSet);
+    } else if (key.startsWith("r:")) {
+      // Role: each anchor (role body) brings its role-less subtree along; anchors are ordered
+      // by their SUBTREE's recency, matching how the section itself is placed.
+      const subtreeAge = new Map<string, number>();
+      for (const r of rowsIn) {
+        const a = anchorById.get(r.sessionId)!;
+        subtreeAge.set(a, Math.max(subtreeAge.get(a) ?? 0, ageOf(r)));
+      }
+      const anchors = [...subtreeAge.keys()].sort((a, b) => subtreeAge.get(b)! - subtreeAge.get(a)!);
+      const seen = new Set<string>();
+      for (const a of anchors) walk(items, a, 0, seen, memberSet);
     } else {
       // loops / solo: flat, age-ordered.
       for (const row of rowsIn.slice().sort((a, b) => ageOf(b) - ageOf(a))) {

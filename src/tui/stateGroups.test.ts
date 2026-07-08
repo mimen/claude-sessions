@@ -1,27 +1,9 @@
 import { expect, test } from "bun:test";
-import type { SessionRow } from "../index/index.ts";
 import type { CatalogueRow } from "../catalogue/db.ts";
 import { buildStateItems, classify } from "./stateGroups.ts";
+import { cat, row } from "./testFixtures.ts";
 
 const NOW = Date.parse("2026-06-20T00:00:00Z");
-const cat = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
-  sessionId: "s",
-  resumeId: null,
-  customTitle: null,
-  kind: "session",
-  completed: false,
-  archived: false,
-  parkedTaskId: null,
-  event: null,
-  parentSessionId: null,
-  skill: null,
-  project: null,
-  notes: null,
-  updatedAt: null,
-  ...over,
-});
-const row = (id: string, lastTs: string): SessionRow =>
-  ({ sessionId: id, lastTs, isSubagent: false } as unknown as SessionRow);
 
 test("classify: loop wins over everything", () => {
   expect(classify(row("s", "2026-06-19T00:00:00Z"), cat({ kind: "loop", archived: true }), true, NOW)).toBe("loops");

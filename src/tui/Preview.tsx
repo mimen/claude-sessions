@@ -17,6 +17,12 @@ interface PreviewProps {
   event?: string | null;
   skill?: string | null;
   project?: string | null;
+  /** Fleet role this session is a body of (vault-defined, referenced by name). */
+  role?: string | null;
+  /** Agent runtime, only when it isn't the claude-code default. */
+  substrate?: string | null;
+  /** Launching identity (CLAUDE_IDENTITY at launch). */
+  identity?: string | null;
   kind?: "session" | "loop";
   /** Total height available to the pane (border included). */
   height: number;
@@ -60,6 +66,9 @@ export function Preview({
   event,
   skill,
   project,
+  role,
+  substrate,
+  identity,
   kind,
   height,
 }: PreviewProps): React.ReactElement {
@@ -94,6 +103,9 @@ export function Preview({
         <Field label="version" value={row.version ?? "?"} />
         <Field label="id" value={row.sessionId} />
         {kind === "loop" ? <Field label="kind" value="loop ◆" color={theme.accent} /> : null}
+        {role ? <Field label="role" value={`◈ ${role}`} color={theme.accent} /> : null}
+        {substrate ? <Field label="substrate" value={substrate} color={theme.muted} /> : null}
+        {identity ? <Field label="identity" value={identity} color={theme.muted} /> : null}
         {skill ? <Field label="skill" value={`⚙ ${skill}`} color={theme.accent} /> : null}
         {project ? <Field label="project" value={`▢ ${project}`} color={theme.header} /> : null}
         {event ? <Field label="event" value={`⊞ ${event}`} color={theme.project} /> : null}
