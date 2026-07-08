@@ -43,6 +43,45 @@ test("planSystemResume: idle + not live → resume", () => {
   });
 });
 
+test("planSystemResume: one PR with 2 sessions → freshest resumes, older superseded (no dup pane)", () => {
+  // Both sessions belong to PR heroku/dashboard#12120; only ONE should resume.
+  const members: SystemMember[] = [
+    {
+      sessionId: "older", resumeId: "ro", cwd: "/wt/a",
+      catalogueRow: cat({ sessionId: "older", resumeId: "ro", prRepo: "heroku/dashboard", prNumber: 12120, updatedAt: "2026-07-01T00:00:00Z" }),
+    },
+    {
+      sessionId: "fresher", resumeId: "rf", cwd: "/wt/a",
+      catalogueRow: cat({ sessionId: "fresher", resumeId: "rf", prRepo: "heroku/dashboard", prNumber: 12120, updatedAt: "2026-07-08T00:00:00Z" }),
+    },
+  ];
+  const actions = planSystemResume(members, new Set<string>());
+  const resumed = actions.filter((a) => a.action === "resume");
+  const superseded = actions.filter((a) => a.action === "superseded");
+  expect(resumed).toHaveLength(1);
+  expect(resumed[0]?.sessionId).toBe("fresher"); // freshest by updatedAt wins
+  expect(superseded).toHaveLength(1);
+  expect(superseded[0]?.sessionId).toBe("older");
+});
+
+test("planSystemResume: if one session of a PR is already live, the other is superseded not resumed", () => {
+  const members: SystemMember[] = [
+    {
+      sessionId: "live", resumeId: "rl", cwd: "/wt/live",
+      catalogueRow: cat({ sessionId: "live", resumeId: "rl", prRepo: "heroku/dashboard", prNumber: 12121, updatedAt: "2026-07-02T00:00:00Z" }),
+    },
+    {
+      sessionId: "dead", resumeId: "rd", cwd: "/wt/dead",
+      catalogueRow: cat({ sessionId: "dead", resumeId: "rd", prRepo: "heroku/dashboard", prNumber: 12121, updatedAt: "2026-07-08T00:00:00Z" }),
+    },
+  ];
+  const actions = planSystemResume(members, new Set<string>(["/wt/live"]));
+  const liveAction = actions.find((a) => a.sessionId === "live");
+  const deadAction = actions.find((a) => a.sessionId === "dead");
+  expect(liveAction?.action).toBe("reanchor");
+  expect(deadAction?.action).toBe("superseded");
+});
+
 test("planSystemResume: parked + not live → resume", () => {
   const members: SystemMember[] = [
     {
@@ -173,11 +212,14 @@ test("planSystemResume: mixed states", () => {
   const liveByCwd = new Set(["/tmp/b", "/tmp/d"]);
   const actions = planSystemResume(members, liveByCwd);
   expect(actions).toHaveLength(5);
-  expect(actions[0]).toEqual({ action: "resume", sessionId: "s1", resumeId: "r1", cwd: "/tmp/a" });
-  expect(actions[1]).toEqual({ action: "reanchor", sessionId: "s2" });
-  expect(actions[2]).toEqual({ action: "skip-retired", sessionId: "s3" });
-  expect(actions[3]).toEqual({ action: "reanchor", sessionId: "s4" });
-  expect(actions[4]).toEqual({ action: "skip-retired", sessionId: "s5" });
+  // Assert by session (order is not meaningful — live-claims are emitted first, then
+  // the rest freshest-first; each of these 5 is a distinct unit so nothing is superseded).
+  const bySid = Object.fromEntries(actions.map((a) => [a.sessionId, a]));
+  expect(bySid.s1).toEqual({ action: "resume", sessionId: "s1", resumeId: "r1", cwd: "/tmp/a" });
+  expect(bySid.s2).toEqual({ action: "reanchor", sessionId: "s2" });
+  expect(bySid.s3).toEqual({ action: "skip-retired", sessionId: "s3" });
+  expect(bySid.s4).toEqual({ action: "reanchor", sessionId: "s4" });
+  expect(bySid.s5).toEqual({ action: "skip-retired", sessionId: "s5" });
 });
 
 test("planSystemResume: no catalogue row → treats as idle + not live → resume", () => {

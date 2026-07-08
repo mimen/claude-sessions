@@ -17,12 +17,12 @@ export function executeSystemResume(
   catalogueDb: Database,
   systemSlug: string,
   cmuxBin = "cmux",
-): { resumed: number; reanchored: number; skipped: number } {
+): { resumed: number; reanchored: number; skipped: number; superseded: number } {
   // Resolve system members: session ids from catalogue, then join with Index for cwd + resumeId
   const sessionIds = sessionsForSystem(catalogueDb, systemSlug);
   if (sessionIds.length === 0) {
     console.error(`ccs: no sessions found for system "${systemSlug}"`);
-    return { resumed: 0, reanchored: 0, skipped: 0 };
+    return { resumed: 0, reanchored: 0, skipped: 0, superseded: 0 };
   }
 
   const members: SystemMember[] = [];
@@ -48,7 +48,7 @@ export function executeSystemResume(
 
   if (members.length === 0) {
     console.error(`ccs: no indexed sessions with cwd for system "${systemSlug}"`);
-    return { resumed: 0, reanchored: 0, skipped: 0 };
+    return { resumed: 0, reanchored: 0, skipped: 0, superseded: 0 };
   }
 
   // Derive live-by-cwd and plan
@@ -59,6 +59,7 @@ export function executeSystemResume(
   let resumed = 0;
   let reanchored = 0;
   let skipped = 0;
+  let superseded = 0;
 
   for (const action of actions) {
     switch (action.action) {
@@ -85,8 +86,14 @@ export function executeSystemResume(
         console.log(`ccs: skipping ${action.sessionId} (retired: completed or archived)`);
         skipped++;
         break;
+      case "superseded":
+        // Another (fresher) session already owns this work unit — don't spawn a
+        // duplicate pane for one PR. Not resumed, not an error.
+        console.log(`ccs: superseding ${action.sessionId} (unit ${action.unit} owned by ${action.by.slice(0, 8)})`);
+        superseded++;
+        break;
     }
   }
 
-  return { resumed, reanchored, skipped };
+  return { resumed, reanchored, skipped, superseded };
 }

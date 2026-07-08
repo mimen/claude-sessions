@@ -350,7 +350,7 @@ function resumeSystem(systemSlug: string | undefined): number {
   try {
     const result = executeSystemResume(db, cat, systemSlug);
     console.log(
-      `\nccs: system resume complete — ${result.resumed} resumed, ${result.reanchored} already live, ${result.skipped} retired`,
+      `\nccs: system resume complete — ${result.resumed} resumed, ${result.reanchored} already live, ${result.skipped} retired, ${result.superseded} superseded`,
     );
     return 0;
   } finally {
