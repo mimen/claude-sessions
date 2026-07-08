@@ -100,16 +100,12 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
     header(`cluster:${system}`, system, "◇", 0, total);
     if (ctx.collapsedSections.has(`cluster:${system}`)) continue;
 
-    // LEVEL 1 — CORE tier header, then one LEVEL-2 group per core role (★).
+    // LEVEL 1 — CORE tier: a FLAT list under one header (role shown in the role column,
+    // not as subgroups). Ordered by the fixed core-role order, then any extras.
     const coreRoles = [...CORE_ORDER.filter((r) => b.core.has(r)),
       ...[...b.core.keys()].filter((r) => !CORE_ORDER.includes(r)).sort()];
-    const coreCount = coreRoles.reduce((n, r) => n + b.core.get(r)!.length, 0);
-    if (coreCount > 0) {
-      header(`cluster:${system}:core`, "core ★", "★", 1, coreCount);
-      if (!ctx.collapsedSections.has(`cluster:${system}:core`)) {
-        for (const role of coreRoles) group(`cluster:${system}:core:${role}`, role, "★", 2, b.core.get(role)!);
-      }
-    }
+    const coreRows = coreRoles.flatMap((r) => b.core.get(r)!);
+    if (coreRows.length > 0) group(`cluster:${system}:core`, "core ★", "★", 1, coreRows);
 
     // LEVEL 1 — WORKERS tier header, then one LEVEL-2 group per epic (short name).
     const epicKeys = [...b.workers.keys()].sort((a, z) => {

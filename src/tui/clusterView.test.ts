@@ -35,10 +35,9 @@ test("buildClusterView: core tier first (★), then WORKERS grouped by epic shor
   expect(core).toBeGreaterThan(-1);
   expect(sections[core].section.level).toBe(1);
   expect(sections[workers].section.level).toBe(1);
-  // core role subheader is level 2, under core.
-  const evalRole = named("pr-watch-eval");
-  expect(sections[evalRole].section.level).toBe(2);
-  expect(evalRole).toBeGreaterThan(core);
+  // core is FLAT (no per-role subgroups) — role shows in the role column, not headers.
+  expect(sections[core].count).toBe(1); // the one eval core session
+  expect(named("pr-watch-eval")).toBe(-1); // no per-role subheader
   // epic subgroups: Team Tokens (2) before (no epic) (1), both level 2, under workers.
   const tt = named("Team Tokens");
   const noEpic = named("(no epic)");

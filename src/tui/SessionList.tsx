@@ -4,7 +4,28 @@ import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
 import { theme, isRecentAge, costColor } from "./theme.ts";
 import { dominantModel, formatCostList, formatCompactUSD } from "./format.ts";
-import { CARET_W, GLYPH_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
+import { CARET_W, GLYPH_W, STATUS_W, ROLE_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
+
+/** Color a status label (from disposition): active=green, parked/nudge=amber, done/archived=faint. */
+function statusColor(status: string | null | undefined): string {
+  if (!status) return theme.faint;
+  if (status === "active") return theme.ageRecent;
+  if (status.startsWith("parked")) return "yellow";
+  if (status === "completed" || status.startsWith("completed") || status === "archived") return theme.faint;
+  return theme.muted;
+}
+
+/** Abbreviate a catalogue role (skill) for the narrow role column. */
+function roleLabel(role: string | null | undefined): string {
+  if (!role) return "";
+  return role
+    .replace(/^pr-watch-2$/, "concierge")
+    .replace(/^pr-watch-/, "")   // pr-watch-control -> control, pr-watch-eval -> eval
+    .replace(/^pr-agent$/, "worker")
+    .replace(/^review-agent$/, "reviewer")
+    .replace(/^loop-designer$/, "designer")
+    .slice(0, ROLE_W);
+}
 
 /** Per-row visual style: state glyph + title color + nudge flag (computed in App). */
 interface SessionBadge {
@@ -16,6 +37,10 @@ interface SessionBadge {
   /** PR number (catalogue.pr_number), shown as a #-badge colored by pr state. */
   pr?: number | null;
   prState?: string | null;
+  /** Role (catalogue.skill), shown in the role column. */
+  role?: string | null;
+  /** Status label (lifecycle × live open-state), shown in the status column. */
+  status?: string | null;
 }
 
 interface SessionListProps {
@@ -28,10 +53,12 @@ interface SessionListProps {
   deco?: Map<string, SessionBadge>;
   /** sessionId -> total spend (own + subagent rollup). Falls back to the row's own cost. */
   totalCost?: Map<string, number>;
+  /** Show the STATUS + ROLE columns (cluster view only — they'd steal title width elsewhere). */
+  showRoleStatus?: boolean;
 }
 
 /** Box-based row layout — column widths are enforced by flexbox, so glyph width never drifts. */
-export function SessionList({ items, selected, height, width, deco, totalCost }: SessionListProps): React.ReactElement {
+export function SessionList({ items, selected, height, width, deco, totalCost, showRoleStatus }: SessionListProps): React.ReactElement {
   const start = Math.max(0, Math.min(selected - Math.floor(height / 2), items.length - height));
   const offset = Math.max(0, start);
   const window = items.slice(offset, offset + height);
@@ -145,6 +172,20 @@ export function SessionList({ items, selected, height, width, deco, totalCost }:
               <Box flexShrink={0} marginRight={1}>
                 <Text color={sel ? theme.selFg : theme.project}>⊞{badge.event}</Text>
               </Box>
+            ) : null}
+            {showRoleStatus ? (
+              <>
+                <Box width={STATUS_W} flexShrink={0}>
+                  <Text color={sel ? theme.selFg : statusColor(badge?.status)} wrap="truncate-end">
+                    {badge?.status ?? ""}
+                  </Text>
+                </Box>
+                <Box width={ROLE_W} flexShrink={0}>
+                  <Text color={sel ? theme.selFg : theme.faint} wrap="truncate-end">
+                    {roleLabel(badge?.role)}
+                  </Text>
+                </Box>
+              </>
             ) : null}
             <Box width={MODEL_W} flexShrink={0}>
               <Text color={sel ? theme.selFg : model?.color ?? theme.faint} wrap="truncate-end">

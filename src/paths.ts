@@ -20,6 +20,8 @@ export const CATALOGUE_PATH = join(DATA_DIR, "catalogue.db");
  * plus durable user-authored tags. Separate file so Index schema bumps never touch it.
  */
 export const SKILLS_DB_PATH = join(DATA_DIR, "skills.db");
+/** Small JSON of remembered UI prefs (e.g. last TUI view), so the browser reopens as left. */
+export const PREFS_PATH = join(DATA_DIR, "prefs.json");
 
 /** Default Store: the single directory Claude Code centralises all Sessions into. */
 export const DEFAULT_STORE_PATH = join(homedir(), ".claude", "projects");

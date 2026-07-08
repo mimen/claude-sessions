@@ -30,6 +30,8 @@ import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
 import { getAll, allEpics, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle, identityKeyOf } from "../catalogue/db.ts";
+import { describe as describeDisposition } from "../catalogue/disposition.ts";
+import { loadPrefs, savePrefs } from "./prefs.ts";
 import { openSessionTitlesAsync } from "../catalogue/open-state.ts";
 import { runMetadataCommand, applyMutations, type SessionMeta } from "../catalogue/command.ts";
 import { buildStateItems, DEFAULT_COLLAPSED } from "./stateGroups.ts";
@@ -54,6 +56,10 @@ export interface SessionBadge {
   /** PR number + state (catalogue pr_number/pr_state), shown as a #-badge. */
   pr?: number | null;
   prState?: string | null;
+  /** Role (catalogue.skill), shown in the role column. */
+  role?: string | null;
+  /** Status label (lifecycle × live open-state), shown in the status column. */
+  status?: string | null;
 }
 
 interface AppProps {
@@ -85,7 +91,14 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   // Natural-language metadata command (Codex-backed). scope "all" = whole catalogue; "session" =
   // the selected row. busy = a Codex call is in flight.
   const [command, setCommand] = useState<{ scope: "all" | "session"; buffer: string; busy: boolean } | null>(null);
-  const [view, setView] = useState<View>("groups");
+  // Remembered view: reopen on the last view used (default "cluster"). Persisted on change.
+  const [view, setView] = useState<View>(() => {
+    const saved = loadPrefs().view;
+    return saved && (VIEW_CYCLE as string[]).includes(saved) ? (saved as View) : "cluster";
+  });
+  useEffect(() => {
+    savePrefs({ view });
+  }, [view]);
   const [sort, setSort] = useState<SortMode>("recent");
   const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(DEFAULT_COLLAPSED);
   const [expandedSessions, setExpandedSessions] = useState<ReadonlySet<string>>(new Set());
@@ -195,6 +208,8 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         event: identityKeyOf(c),
         pr: c?.prNumber ?? null,
         prState: c?.prState ?? null,
+        role: c?.skill ?? null,
+        status: describeDisposition(lc, open).label,
       });
     }
     return m;
@@ -281,6 +296,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         : view === "cluster"
         ? buildClusterView(rows, {
             catMap,
+            epicMap,
             openSet,
             collapsedSections,
             expandedSessions,
@@ -670,7 +686,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   const listCol = (w: number) => (
     <Box flexDirection="column">
       <ListHeader sort={sort} view={view} />
-      <SessionList items={items} selected={clampedSelected} height={listHeight} width={w} deco={deco} totalCost={totalCostById} />
+      <SessionList items={items} selected={clampedSelected} height={listHeight} width={w} deco={deco} totalCost={totalCostById} showRoleStatus={view === "cluster"} />
     </Box>
   );
 
