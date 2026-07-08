@@ -35,10 +35,11 @@ import { runMetadataCommand, applyMutations, type SessionMeta } from "../catalog
 import { buildStateItems, DEFAULT_COLLAPSED } from "./stateGroups.ts";
 import { buildTreeItems } from "./treeGroups.ts";
 import { buildGroupsView } from "./groupsView.ts";
+import { buildClusterView } from "./clusterView.ts";
 
 const SORT_CYCLE: SortMode[] = ["recent", "cost", "msgs"];
-type View = "groups" | "state" | "flat" | "tree";
-const VIEW_CYCLE: View[] = ["groups", "state", "flat", "tree"];
+type View = "groups" | "state" | "flat" | "tree" | "cluster";
+const VIEW_CYCLE: View[] = ["groups", "state", "flat", "tree", "cluster"];
 
 const STALE_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -49,6 +50,9 @@ export interface SessionBadge {
   nudge: boolean;
   /** Event slug this session is assigned to (catalogue.event), if any. */
   event?: string | null;
+  /** PR number + state (catalogue pr_number/pr_state), shown as a #-badge. */
+  pr?: number | null;
+  prState?: string | null;
 }
 
 interface AppProps {
@@ -181,7 +185,12 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         color = Number.isNaN(ts) || nowMs - ts > STALE_MS ? theme.faint : theme.muted;
       }
       if (nudge) color = "yellowBright";
-      m.set(r.sessionId, { glyph, color, nudge, event: identityKeyOf(c) });
+      m.set(r.sessionId, {
+        glyph, color, nudge,
+        event: identityKeyOf(c),
+        pr: c?.prNumber ?? null,
+        prState: c?.prState ?? null,
+      });
     }
     return m;
   }, [baseRows, catMap, openSet]);
@@ -253,7 +262,18 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   }, [db, expandedSessions, refreshTick]);
   const items = useMemo(
     () =>
-      view === "groups"
+      view === "cluster"
+        ? buildClusterView(rows, {
+            catMap,
+            openSet,
+            collapsedSections,
+            expandedSessions,
+            childCounts: subCounts,
+            childrenByParent,
+            sort,
+            costOf: totalCostFor,
+          })
+        : view === "groups"
         ? buildGroupsView(rows, { catMap, openSet, collapsedSections, expandedSessions })
         : view === "tree"
         ? buildTreeItems(rows, { catMap, costOf: totalCostFor })
@@ -611,6 +631,11 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       skill={catMap.get(selectedRow.sessionId)?.skill ?? null}
       project={catMap.get(selectedRow.sessionId)?.project ?? null}
       kind={catMap.get(selectedRow.sessionId)?.kind}
+      system={catMap.get(selectedRow.sessionId)?.system ?? null}
+      gusWork={catMap.get(selectedRow.sessionId)?.gusWork ?? null}
+      prNumber={catMap.get(selectedRow.sessionId)?.prNumber ?? null}
+      prRepo={catMap.get(selectedRow.sessionId)?.prRepo ?? null}
+      prState={catMap.get(selectedRow.sessionId)?.prState ?? null}
       height={previewHeight}
     />
   ) : selSection ? (

@@ -13,6 +13,9 @@ interface SessionBadge {
   nudge: boolean;
   /** Event slug this session is assigned to (catalogue.event), if any. */
   event?: string | null;
+  /** PR number (catalogue.pr_number), shown as a #-badge colored by pr state. */
+  pr?: number | null;
+  prState?: string | null;
 }
 
 interface SessionListProps {
@@ -110,7 +113,23 @@ export function SessionList({ items, selected, height, width, deco, totalCost }:
                 {r.title}
               </Text>
             </Box>
-            {badge?.event ? (
+            {badge?.pr ? (
+              <Box flexShrink={0} marginRight={1}>
+                <Text
+                  color={
+                    sel
+                      ? theme.selFg
+                      : badge.prState === "merged"
+                        ? theme.sourceNative
+                        : badge.prState === "closed"
+                          ? theme.faint
+                          : theme.accent
+                  }
+                >
+                  #{badge.pr}
+                </Text>
+              </Box>
+            ) : badge?.event ? (
               <Box flexShrink={0} marginRight={1}>
                 <Text color={sel ? theme.selFg : theme.project}>⊞{badge.event}</Text>
               </Box>

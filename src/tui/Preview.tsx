@@ -18,6 +18,12 @@ interface PreviewProps {
   skill?: string | null;
   project?: string | null;
   kind?: "session" | "loop";
+  /** Cluster membership + PR/work-item identity (catalogue). */
+  system?: string | null;
+  gusWork?: string | null;
+  prNumber?: number | null;
+  prRepo?: string | null;
+  prState?: string | null;
   /** Total height available to the pane (border included). */
   height: number;
 }
@@ -31,6 +37,17 @@ const SOURCE_COLOR = {
 function fmtTs(iso: string | null): string {
   if (!iso) return "?";
   return iso.replace("T", " ").replace(/\.\d+Z$/, "Z");
+}
+
+/** OSC-8 terminal hyperlink: clickable `text` that opens `url` in supporting terminals. */
+function osc8(url: string, text: string): string {
+  return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
+}
+
+/** GUS deep link for a W-number. Without the 18-char sfId we can't build the record
+ * URL, so link to the object search that resolves the W-number by name. */
+function gusUrl(w: string): string {
+  return `https://gus.lightning.force.com/lightning/o/ADM_Work__c/list?filterName=Recent&search=${encodeURIComponent(w)}`;
 }
 
 function Field({ label, value, color }: { label: string; value: string; color?: string }): React.ReactElement {
@@ -61,6 +78,11 @@ export function Preview({
   skill,
   project,
   kind,
+  system,
+  gusWork,
+  prNumber,
+  prRepo,
+  prState,
   height,
 }: PreviewProps): React.ReactElement {
   const models = modelBreakdown(row.costByModel);
@@ -95,6 +117,21 @@ export function Preview({
         <Field label="id" value={row.sessionId} />
         {kind === "loop" ? <Field label="kind" value="loop ◆" color={theme.accent} /> : null}
         {skill ? <Field label="skill" value={`⚙ ${skill}`} color={theme.accent} /> : null}
+        {system ? <Field label="cluster" value={`◇ ${system}`} color={theme.accent} /> : null}
+        {prNumber && prRepo ? (
+          <Field
+            label="PR"
+            value={osc8(`https://github.com/${prRepo}/pull/${prNumber}`, `#${prNumber}`) + `  (${prState ?? "?"})`}
+            color={prState === "merged" ? theme.sourceNative : prState === "closed" ? theme.faint : theme.accent}
+          />
+        ) : null}
+        {gusWork ? (
+          <Field
+            label="work"
+            value={osc8(gusUrl(gusWork), gusWork)}
+            color={theme.header}
+          />
+        ) : null}
         {project ? <Field label="project" value={`▢ ${project}`} color={theme.header} /> : null}
         {event ? <Field label="event" value={`⊞ ${event}`} color={theme.project} /> : null}
         {row.isSubagent && parentTitle ? <Field label="parent" value={parentTitle} color="yellow" /> : null}

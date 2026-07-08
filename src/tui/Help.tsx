@@ -91,7 +91,7 @@ const SESSION_GROUPS: KeyGroup[] = [
     name: "Find & arrange",
     keys: [
       ["/", "search — fuzzy title/project + full-text content"],
-      ["g", "change grouping: groups → by-state → flat → tree"],
+      ["g", "change grouping: groups → by-state → flat → tree → cluster"],
       ["s", "change sort: recency → cost → messages"],
       ["a", "show / hide subagent runs"],
       ["A", "show / hide archived sessions"],
