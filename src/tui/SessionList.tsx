@@ -6,6 +6,12 @@ import { theme, isRecentAge, costColor } from "./theme.ts";
 import { dominantModel, formatCostList, formatCompactUSD } from "./format.ts";
 import { CARET_W, GLYPH_W, ROLE_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
 
+/** List cost color: dimmed by default so cost doesn't shout over status/title; only a
+ * genuine outlier (≥ the high tier) keeps its warning color. */
+function listCostColor(usd: number): string {
+  return usd >= 500 ? costColor(usd) : theme.faint;
+}
+
 /** Abbreviate a catalogue role (skill) for the narrow role column. */
 function roleLabel(role: string | null | undefined): string {
   if (!role) return "";
@@ -189,7 +195,7 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
               </Text>
             </Box>
             <Box width={COST_W} flexShrink={0} justifyContent="flex-end">
-              <Text color={sel ? theme.selFg : costColor(cost)}>{formatCostList(cost)}</Text>
+              <Text color={sel ? theme.selFg : listCostColor(cost)}>{formatCostList(cost)}</Text>
             </Box>
             <Box width={AGE_W} flexShrink={0} justifyContent="flex-end">
               <Text color={ageColor}>{age}</Text>

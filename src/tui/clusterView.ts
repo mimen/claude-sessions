@@ -1,5 +1,6 @@
 import type { SessionRow } from "../index/index.ts";
 import type { CatalogueRow, EpicRow } from "../catalogue/db.ts";
+import { lifecycleOf } from "../catalogue/db.ts";
 import { sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./groupByProject.ts";
 
 /**
@@ -73,17 +74,44 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
     }
   };
 
+  // Collapse semantics: presence in collapsedSections = collapsed. EXCEPTION: `:done`
+  // folds default to COLLAPSED (finished work stays hidden until opened), so for them
+  // "open" is the explicit signal — we store an `open:<key>` marker when expanded.
+  const isCollapsed = (key: string): boolean =>
+    key.endsWith(":done")
+      ? !ctx.collapsedSections.has(`open:${key}`)
+      : ctx.collapsedSections.has(key);
+
   /** Emit a nested header at `level` (0 cluster, 1 core/workers tier, 2 epic/role). */
   const header = (key: string, name: string, glyph: string, level: number, count: number): void => {
-    const collapsed = ctx.collapsedSections.has(key);
-    items.push({ kind: "section", section: { key, name, glyph, level }, count, collapsed, cost: 0 });
+    items.push({ kind: "section", section: { key, name, glyph, level }, count, collapsed: isCollapsed(key), cost: 0 });
   };
 
-  /** A leaf group (epic or role) at `level`: its sub-header + the sessions under it. */
+  const isRetired = (r: SessionRow): boolean => {
+    const lc = lifecycleOf(ctx.catMap.get(r.sessionId) ?? null);
+    return lc === "completed" || lc === "archived";
+  };
+
+  /** A leaf group (epic or role) at `level`: its sub-header, then LIVE sessions directly,
+   * with retired (completed/archived) ones folded into a collapsible "✓ done · N" sub-line
+   * (collapsed by default) so finished work doesn't crowd the active fleet. */
   const group = (key: string, name: string, glyph: string, level: number, rowsIn: SessionRow[]): void => {
     if (rowsIn.length === 0) return;
     header(key, name, glyph, level, rowsIn.length);
-    if (!ctx.collapsedSections.has(key)) for (const r of sortRows(rowsIn, sort, costOf)) pushSession(r, level);
+    if (isCollapsed(key)) return;
+    const live = rowsIn.filter((r) => !isRetired(r));
+    const retired = rowsIn.filter(isRetired);
+    for (const r of sortRows(live, sort, costOf)) pushSession(r, level);
+    if (retired.length > 0) {
+      // Nested "done" fold at level+1. Collapsed by DEFAULT (its key is seeded into the
+      // default-collapsed set) so finished work is hidden until expanded; shown when the
+      // user opens it.
+      const doneKey = `${key}:done`;
+      header(doneKey, "done", "✓", level + 1, retired.length);
+      if (!isCollapsed(doneKey)) {
+        for (const r of sortRows(retired, sort, costOf)) pushSession(r, level + 1);
+      }
+    }
   };
 
   const epicLabel = (epicKey: string): string => {
@@ -98,7 +126,7 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
     const total = [...b.core.values(), ...b.workers.values()].reduce((n, a) => n + a.length, 0);
     // LEVEL 0 — one cluster header for the whole system.
     header(`cluster:${system}`, system, "◇", 0, total);
-    if (ctx.collapsedSections.has(`cluster:${system}`)) continue;
+    if (isCollapsed(`cluster:${system}`)) continue;
 
     // LEVEL 1 — CORE tier: a FLAT list under one header (role shown in the role column,
     // not as subgroups). Ordered by the fixed core-role order, then any extras.
@@ -116,7 +144,7 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
     const workerCount = epicKeys.reduce((n, k) => n + b.workers.get(k)!.length, 0);
     if (workerCount > 0) {
       header(`cluster:${system}:workers`, "workers", "●", 1, workerCount);
-      if (!ctx.collapsedSections.has(`cluster:${system}:workers`)) {
+      if (!isCollapsed(`cluster:${system}:workers`)) {
         for (const ek of epicKeys) group(`cluster:${system}:workers:${ek || "(none)"}`, epicLabel(ek), "◈", 2, b.workers.get(ek)!);
       }
     }

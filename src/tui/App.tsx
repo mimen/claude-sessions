@@ -372,6 +372,16 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   const toggleSection = (key: string, collapse?: boolean) =>
     setCollapsedSections((prev) => {
       const next = new Set(prev);
+      // `:done` folds invert the default (collapsed unless an `open:` marker is present),
+      // so toggling them flips the marker instead of the key. Everything else: presence = collapsed.
+      if (key.endsWith(":done")) {
+        const marker = `open:${key}`;
+        const isOpen = next.has(marker);
+        const shouldCollapse = collapse ?? isOpen;
+        if (shouldCollapse) next.delete(marker);
+        else next.add(marker);
+        return next;
+      }
       const shouldCollapse = collapse ?? !next.has(key);
       if (shouldCollapse) next.add(key);
       else next.delete(key);
