@@ -9,6 +9,8 @@ import {
   setEvent,
   setParent,
   setSkill,
+  setProject,
+  setSystem,
   addTag,
   removeTag,
   childrenOf,
@@ -225,6 +227,46 @@ export function skill(sessionArg: string | undefined, name: string | undefined, 
     const value = off ? null : name!.trim().replace(/^\//, "");
     setSkill(db, id, value, now());
     console.log(off ? `cleared skill on ${id.slice(0, 8)}…` : `skill ${value} → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/** Set (or clear, with --off) the project/initiative label for this session. */
+export function project(sessionArg: string | undefined, label: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!off && (!label || !label.trim())) {
+    console.error('usage: ccs project [<session-id>|.] <label> [--off]');
+    return 1;
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH);
+  try {
+    setProject(db, id, off ? null : label!.trim(), now());
+    console.log(off ? `cleared project on ${id.slice(0, 8)}…` : `project ${label!.trim()} → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/** Set (or clear, with --off) the system grouping for this session. */
+export function system(sessionArg: string | undefined, slug: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!off && (!slug || !slug.trim())) {
+    console.error('usage: ccs system [<session-id>|.] <slug> [--off]');
+    return 1;
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH);
+  try {
+    setSystem(db, id, off ? null : slug!.trim(), now());
+    console.log(off ? `cleared system on ${id.slice(0, 8)}…` : `system ${slug!.trim()} → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
   }

@@ -10,7 +10,7 @@ import { formatCost } from "./cost.ts";
 import { openCatalogue, getAll, lifecycleOf, parentEdges } from "./catalogue/db.ts";
 import { openSessionIds } from "./catalogue/open-state.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, event, parent, skill, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, event, parent, skill, project, system, meta } from "./catalogue/commands.ts";
 import { backfillTitles } from "./titler/queue.ts";
 import { createCodexTitler } from "./titler/codex.ts";
 import { handoffInline } from "./resume/inline.ts";
@@ -33,6 +33,8 @@ Usage:
   ccs event [<id>|.] <slug> [--off]   Assign/clear the session's event slug
   ccs parent [<id>|.] <parent-id|.> [--off]   Set/clear the spawning parent session
   ccs skill [<id>|.] <name> [--off]   Set/clear the backing skill or slash-command
+  ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
+  ccs system [<id>|.] <slug> [--off]   Set/clear the system grouping
   ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
   ccs --version       Print version
   ccs --help          Show this help
@@ -79,6 +81,10 @@ export async function main(argv: string[]): Promise<number> {
       return parent(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "skill":
       return skill(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "project":
+      return project(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "system":
+      return system(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "skills": {
       // Bare `ccs skills` on a terminal opens the TUI in skills mode; flags/subcommands
       // (or piped output) use the plain-table command path.

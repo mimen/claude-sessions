@@ -10,6 +10,7 @@ import { Database } from "bun:sqlite";
 
 export type Kind = "session" | "loop";
 export type Lifecycle = "idle" | "parked" | "completed" | "archived";
+export type PrState = "open" | "merged" | "closed";
 
 export interface CatalogueRow {
   sessionId: string;
@@ -27,11 +28,27 @@ export interface CatalogueRow {
   skill: string | null;
   /** User-assigned project/initiative label — groups otherwise-solo sessions (e.g. `ccs`). */
   project: string | null;
+  /** Operation-level grouping (e.g. `pr-watch`) — sits between constellation and session. */
+  system: string | null;
   notes: string | null;
   updatedAt: string | null;
+  /** PR facts sensed from the session's cwd git worktree (VCS-intrinsic only). */
+  prNumber: number | null;
+  prRepo: string | null;
+  prBranch: string | null;
+  prState: PrState | null;
+  prHeadSha: string | null;
 }
 
-const CATALOGUE_VERSION = 4;
+export interface PrFacts {
+  prNumber: number;
+  prRepo: string;
+  prBranch: string;
+  prState: PrState;
+  prHeadSha: string;
+}
+
+const CATALOGUE_VERSION = 6;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -94,6 +111,35 @@ function migrate(db: Database): void {
     }
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_project ON catalogue(project);");
   }
+  if (v < 5) {
+    // Additive: operation-level grouping (e.g. `pr-watch`) — sits between constellation and session.
+    // Nullable; no backfill.
+    if (!hasColumn(db, "catalogue", "system")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN system TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_system ON catalogue(system);");
+  }
+  if (v < 6) {
+    // Additive: PR facts sensed from the session's cwd git worktree (VCS-intrinsic only).
+    // All nullable; no backfill. Guard each ALTER on column presence (older binary can reset version).
+    if (!hasColumn(db, "catalogue", "pr_number")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN pr_number INTEGER;");
+    }
+    if (!hasColumn(db, "catalogue", "pr_repo")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN pr_repo TEXT;");
+    }
+    if (!hasColumn(db, "catalogue", "pr_branch")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN pr_branch TEXT;");
+    }
+    if (!hasColumn(db, "catalogue", "pr_state")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN pr_state TEXT;");
+    }
+    if (!hasColumn(db, "catalogue", "pr_head_sha")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN pr_head_sha TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_pr_number ON catalogue(pr_number);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_pr_repo ON catalogue(pr_repo);");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -117,8 +163,14 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     parentSessionId: (r.parent_session_id as string) ?? null,
     skill: (r.skill as string) ?? null,
     project: (r.project as string) ?? null,
+    system: (r.system as string) ?? null,
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
+    prNumber: (r.pr_number as number) ?? null,
+    prRepo: (r.pr_repo as string) ?? null,
+    prBranch: (r.pr_branch as string) ?? null,
+    prState: (r.pr_state as PrState) ?? null,
+    prHeadSha: (r.pr_head_sha as string) ?? null,
   };
 }
 
@@ -199,11 +251,65 @@ export function setSkill(db: Database, sessionId: string, skill: string | null, 
 export function setProject(db: Database, sessionId: string, project: string | null, now: string): void {
   set(db, sessionId, "project", project, now);
 }
+export function setSystem(db: Database, sessionId: string, system: string | null, now: string): void {
+  set(db, sessionId, "system", system, now);
+}
+
+/** Stamp PR facts sensed from the session's cwd git worktree (VCS-intrinsic only). */
+export function stampPrFacts(
+  db: Database,
+  sessionId: string,
+  facts: PrFacts | null,
+  now: string,
+): void {
+  ensureRow(db, sessionId, now);
+  if (facts === null) {
+    db.query(
+      `UPDATE catalogue
+       SET pr_number = NULL, pr_repo = NULL, pr_branch = NULL, pr_state = NULL, pr_head_sha = NULL,
+           updated_at = $now
+       WHERE session_id = $id`,
+    ).run({ $now: now, $id: sessionId });
+  } else {
+    db.query(
+      `UPDATE catalogue
+       SET pr_number = $num, pr_repo = $repo, pr_branch = $branch, pr_state = $state,
+           pr_head_sha = $sha, updated_at = $now
+       WHERE session_id = $id`,
+    ).run({
+      $num: facts.prNumber,
+      $repo: facts.prRepo,
+      $branch: facts.prBranch,
+      $state: facts.prState,
+      $sha: facts.prHeadSha,
+      $now: now,
+      $id: sessionId,
+    });
+  }
+}
 
 /** Reverse lookup: which sessions are assigned to this event slug. */
 export function sessionsForEvent(db: Database, event: string): string[] {
   return (
     db.query("SELECT session_id FROM catalogue WHERE event = $e").all({ $e: event }) as {
+      session_id: string;
+    }[]
+  ).map((r) => r.session_id);
+}
+
+/** Reverse lookup: which sessions are assigned to this project label. */
+export function sessionsForProject(db: Database, project: string): string[] {
+  return (
+    db.query("SELECT session_id FROM catalogue WHERE project = $p").all({ $p: project }) as {
+      session_id: string;
+    }[]
+  ).map((r) => r.session_id);
+}
+
+/** Reverse lookup: which sessions are assigned to this system grouping. */
+export function sessionsForSystem(db: Database, system: string): string[] {
+  return (
+    db.query("SELECT session_id FROM catalogue WHERE system = $s").all({ $s: system }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);

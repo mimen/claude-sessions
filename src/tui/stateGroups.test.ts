@@ -16,8 +16,14 @@ const cat = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   parentSessionId: null,
   skill: null,
   project: null,
+  system: null,
   notes: null,
   updatedAt: null,
+  prNumber: null,
+  prRepo: null,
+  prBranch: null,
+  prState: null,
+  prHeadSha: null,
   ...over,
 });
 const row = (id: string, lastTs: string): SessionRow =>
