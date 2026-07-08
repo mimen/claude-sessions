@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import type { Database } from "bun:sqlite";
 import { ensureDataDir, CATALOGUE_PATH, DB_PATH } from "../paths.ts";
 import {
   openCatalogue,
@@ -9,11 +10,16 @@ import {
   setEvent,
   setParent,
   setSkill,
+  setRole,
+  setSubstrate,
+  setIdentity,
   addTag,
   removeTag,
   childrenOf,
   getRow,
   getTags,
+  substrateOf,
+  DEFAULT_SUBSTRATE,
   type Kind,
 } from "./db.ts";
 import { openIndex } from "../index/schema.ts";
@@ -29,8 +35,8 @@ import { pushCmuxRename } from "./open-state.ts";
 
 const now = (): string => new Date().toISOString();
 
-/** A Claude Code session id is a UUID; used to validate a `parent` edge before storing it. */
-const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** A Claude Code session id is a UUID; used to tell explicit session args from values. */
+export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Resolve the target session id: explicit arg, or "." / "self" / omitted → current session. */
 function resolveSessionId(arg: string | undefined): string | null {
@@ -139,25 +145,56 @@ export function tag(sessionArg: string | undefined, entity: string | undefined, 
   return 0;
 }
 
-/** Set (or clear, with --off) the event slug a session belongs to. */
-export function event(sessionArg: string | undefined, slug: string | undefined, flags: string[]): number {
-  const id = resolveSessionId(sessionArg);
-  if (!id) return notInSession();
-  const off = flags.includes("--off");
-  if (!off && (!slug || !slug.trim())) {
-    console.error('usage: ccs event [<session-id>|.] <slug> [--off]');
-    return 1;
-  }
-  ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
-  try {
-    setEvent(db, id, off ? null : slug!.trim(), now());
-    console.log(off ? `cleared event on ${id.slice(0, 8)}…` : `event ${slug!.trim()} → ${id.slice(0, 8)}…`);
-  } finally {
-    db.close();
-  }
-  return 0;
+/**
+ * The set-or-clear string-edge verbs (event/skill/role/substrate/identity) share one shape:
+ * resolve the session, validate the value, write the column, report. One factory keeps the
+ * five verbs from drifting (they already differed in clear-messages before this existed).
+ */
+type EdgeVerb = (sessionArg: string | undefined, value: string | undefined, flags: string[]) => number;
+
+function edgeVerb(spec: {
+  label: string;
+  usage: string;
+  set: (db: Database, id: string, value: string | null, now: string) => void;
+  /** Value cleanup before storing (e.g. skill strips a leading slash). */
+  normalize?: (v: string) => string;
+  /** Appended to the cleared message (e.g. substrate's "back to claude-code"). */
+  clearNote?: string;
+  /** Fallback when no value is given (identity reads $CLAUDE_IDENTITY). */
+  fallback?: () => string | undefined;
+}): EdgeVerb {
+  return (sessionArg, value, flags) => {
+    const id = resolveSessionId(sessionArg);
+    if (!id) return notInSession();
+    const off = flags.includes("--off");
+    const raw = (value ?? spec.fallback?.())?.trim();
+    if (!off && !raw) {
+      console.error(`usage: ${spec.usage}`);
+      return 1;
+    }
+    ensureDataDir();
+    const db = openCatalogue(CATALOGUE_PATH);
+    try {
+      const v = off ? null : spec.normalize?.(raw!) ?? raw!;
+      spec.set(db, id, v, now());
+      console.log(
+        off
+          ? `cleared ${spec.label} on ${id.slice(0, 8)}…${spec.clearNote ?? ""}`
+          : `${spec.label} ${v} → ${id.slice(0, 8)}…`,
+      );
+    } finally {
+      db.close();
+    }
+    return 0;
+  };
 }
+
+/** Set (or clear, with --off) the event slug a session belongs to. */
+export const event: EdgeVerb = edgeVerb({
+  label: "event",
+  usage: "ccs event [<session-id>|.] <slug> [--off]",
+  set: setEvent,
+});
 
 /** Set (or clear, with --off) the parent session that spawned/owns this one. */
 export function parent(
@@ -210,26 +247,40 @@ export function parent(
 }
 
 /** Set (or clear, with --off) the skill / slash-command backing this session. */
-export function skill(sessionArg: string | undefined, name: string | undefined, flags: string[]): number {
-  const id = resolveSessionId(sessionArg);
-  if (!id) return notInSession();
-  const off = flags.includes("--off");
-  if (!off && (!name || !name.trim())) {
-    console.error("usage: ccs skill [<session-id>|.] <name> | --off");
-    return 1;
-  }
-  ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
-  try {
-    // Normalise a leading slash so `/event-watch` and `event-watch` land on the same value.
-    const value = off ? null : name!.trim().replace(/^\//, "");
-    setSkill(db, id, value, now());
-    console.log(off ? `cleared skill on ${id.slice(0, 8)}…` : `skill ${value} → ${id.slice(0, 8)}…`);
-  } finally {
-    db.close();
-  }
-  return 0;
-}
+export const skill: EdgeVerb = edgeVerb({
+  label: "skill",
+  usage: "ccs skill [<session-id>|.] <name> | --off",
+  set: setSkill,
+  // Normalise a leading slash so `/event-watch` and `event-watch` land on the same value.
+  normalize: (v) => v.replace(/^\//, ""),
+});
+
+/** Set (or clear, with --off) the fleet role this session is a body of (vault-defined, by name). */
+export const role: EdgeVerb = edgeVerb({
+  label: "role",
+  usage: "ccs role [<session-id>|.] <name> | --off",
+  set: setRole,
+});
+
+/** Set (or clear, with --off) the agent runtime this body runs on (unset = claude-code). */
+export const substrate: EdgeVerb = edgeVerb({
+  label: "substrate",
+  usage: "ccs substrate [<session-id>|.] <value> | --off   (unset = claude-code)",
+  set: setSubstrate,
+  clearNote: ` (back to ${DEFAULT_SUBSTRATE})`,
+});
+
+/**
+ * Record the launching identity (issue 64: every launcher exports CLAUDE_IDENTITY). With no name
+ * argument, reads $CLAUDE_IDENTITY — so a bare `ccs identity` inside a launched session (or a
+ * session-start hook) self-stamps the session into the catalogue.
+ */
+export const identity: EdgeVerb = edgeVerb({
+  label: "identity",
+  usage: "ccs identity [<session-id>|.] [<name>] [--off]   (name defaults to $CLAUDE_IDENTITY)",
+  set: setIdentity,
+  fallback: () => process.env.CLAUDE_IDENTITY,
+});
 
 /** Token/cost detail from the Index for one session, or null when unindexed. */
 function usageFor(id: string): { usage: SessionUsage; subagentUSD: number } | null {
@@ -264,6 +315,9 @@ export function meta(sessionArg: string | undefined): number {
     console.log(
       `  lifecycle: ${row?.archived ? "archived" : row?.completed ? "completed" : row?.parkedTaskId ? "parked" : "idle"}`,
     );
+    if (row?.role) console.log(`  role: ${row.role}`);
+    console.log(`  substrate: ${substrateOf(row)}`);
+    if (row?.identity) console.log(`  identity: ${row.identity}`);
     if (row?.skill) console.log(`  skill: ${row.skill}`);
     if (row?.parentSessionId) console.log(`  parent: ${labelFor(row.parentSessionId)}`);
     if (children.length) {

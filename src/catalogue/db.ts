@@ -27,11 +27,28 @@ export interface CatalogueRow {
   skill: string | null;
   /** User-assigned project/initiative label — groups otherwise-solo sessions (e.g. `ccs`). */
   project: string | null;
+  /** The fleet role this session is a body of. Role definitions live in the vault
+   *  (`ClaudeConfig/roles/`); the catalogue references them by name only. */
+  role: string | null;
+  /** The agent runtime this body runs on. Stored raw (null = unset); read the effective
+   *  value through substrateOf(), which defaults to claude-code. */
+  substrate: string | null;
+  /** The launching identity (`CLAUDE_IDENTITY` exported by the launcher, issue 64) —
+   *  which `claude-<name>` alias started this session. */
+  identity: string | null;
   notes: string | null;
   updatedAt: string | null;
 }
 
-const CATALOGUE_VERSION = 4;
+/** Effective substrate when a row doesn't say otherwise — sessions are Claude Code by default. */
+export const DEFAULT_SUBSTRATE = "claude-code";
+
+/** The effective substrate of a row (defaults unset/missing rows to claude-code). */
+export function substrateOf(row: CatalogueRow | null): string {
+  return row?.substrate ?? DEFAULT_SUBSTRATE;
+}
+
+const CATALOGUE_VERSION = 5;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -94,6 +111,22 @@ function migrate(db: Database): void {
     }
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_project ON catalogue(project);");
   }
+  if (v < 5) {
+    // Additive: the kernel's ontology (PRD 02, issue 13). `role` = which fleet role this session
+    // is a body of (definitions in the vault, referenced by name); `substrate` = the agent runtime
+    // (null reads as claude-code); `identity` = the CLAUDE_IDENTITY the launcher exported (issue
+    // 64). All nullable; no backfill. Guard each ALTER on column presence as in v2-v4.
+    if (!hasColumn(db, "catalogue", "role")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN role TEXT;");
+    }
+    if (!hasColumn(db, "catalogue", "substrate")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN substrate TEXT;");
+    }
+    if (!hasColumn(db, "catalogue", "identity")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN identity TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_role ON catalogue(role);");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -117,6 +150,9 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     parentSessionId: (r.parent_session_id as string) ?? null,
     skill: (r.skill as string) ?? null,
     project: (r.project as string) ?? null,
+    role: (r.role as string) ?? null,
+    substrate: (r.substrate as string) ?? null,
+    identity: (r.identity as string) ?? null,
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
   };
@@ -199,11 +235,31 @@ export function setSkill(db: Database, sessionId: string, skill: string | null, 
 export function setProject(db: Database, sessionId: string, project: string | null, now: string): void {
   set(db, sessionId, "project", project, now);
 }
+export function setRole(db: Database, sessionId: string, role: string | null, now: string): void {
+  set(db, sessionId, "role", role, now);
+}
+export function setSubstrate(db: Database, sessionId: string, substrate: string | null, now: string): void {
+  // The default is STORED AS UNSET — normalize here so `claude-code` and NULL never coexist
+  // as two representations of the same substrate.
+  set(db, sessionId, "substrate", substrate === DEFAULT_SUBSTRATE ? null : substrate, now);
+}
+export function setIdentity(db: Database, sessionId: string, identity: string | null, now: string): void {
+  set(db, sessionId, "identity", identity, now);
+}
 
 /** Reverse lookup: which sessions are assigned to this event slug. */
 export function sessionsForEvent(db: Database, event: string): string[] {
   return (
     db.query("SELECT session_id FROM catalogue WHERE event = $e").all({ $e: event }) as {
+      session_id: string;
+    }[]
+  ).map((r) => r.session_id);
+}
+
+/** Reverse lookup: the bodies of a role (unordered — lineage ordering joins the Index). */
+export function sessionsForRole(db: Database, role: string): string[] {
+  return (
+    db.query("SELECT session_id FROM catalogue WHERE role = $r").all({ $r: role }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);

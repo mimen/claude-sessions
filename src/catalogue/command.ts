@@ -9,6 +9,8 @@ import {
   setSkill,
   setParent,
   setProject,
+  setRole,
+  setSubstrate,
   setCompleted,
   setArchived,
   setCustomTitle,
@@ -30,6 +32,10 @@ export interface SessionMeta {
   readonly kind: Kind;
   readonly skill: string | null;
   readonly event: string | null;
+  /** Fleet role this session is a body of (catalogue), if any. */
+  readonly role: string | null;
+  /** Agent runtime, when it isn't the claude-code default (catalogue stores default as unset). */
+  readonly substrate: string | null;
   readonly parentSessionId: string | null;
   readonly completed: boolean;
   readonly archived: boolean;
@@ -41,7 +47,7 @@ export interface SessionMeta {
 
 export interface Mutation {
   readonly sessionId: string;
-  readonly op: "kind" | "event" | "skill" | "parent" | "project" | "completed" | "archived" | "title" | "tag" | "untag";
+  readonly op: "kind" | "event" | "skill" | "parent" | "project" | "role" | "substrate" | "completed" | "archived" | "title" | "tag" | "untag";
   /** Resolved value: for `parent`, a target sessionId or null; booleans as "true"/"false". */
   readonly value: string | null;
 }
@@ -62,9 +68,10 @@ const PROMPT =
   "list. Never invent numbers; never change anything not asked for. If a FOCUS number is given, " +
   "the instruction is primarily about that session (but you may reference others by number, e.g. " +
   "for a parent). Ops and their value: kind→'loop'|'session'; event→a slug or 'none'; skill→a " +
-  "name or 'none'; project→a project/initiative name (lowercase slug) or 'none'; parent→the " +
-  "target session NUMBER or 'none'; completed/archived→'true'|'false'; title→a short custom " +
-  "title; tag/untag→an entity name. Respond using the provided JSON schema.";
+  "name or 'none'; project→a project/initiative name (lowercase slug) or 'none'; role→a fleet " +
+  "role name (lowercase slug) or 'none'; substrate→an agent runtime (claude-code, codex, engine) " +
+  "or 'none'; parent→the target session NUMBER or 'none'; completed/archived→'true'|'false'; " +
+  "title→a short custom title; tag/untag→an entity name. Respond using the provided JSON schema.";
 
 interface RawMutation {
   n?: number;
@@ -83,6 +90,9 @@ function renderSessions(sessions: readonly SessionMeta[]): string {
         `skill=${s.skill ?? "none"}`,
         `event=${s.event ?? "none"}`,
         `project=${s.project ?? "none"}`,
+        `role=${s.role ?? "none"}`,
+        // Default substrate is universal; only a non-default value is worth the model's tokens.
+        s.substrate ? `substrate=${s.substrate}` : "",
         `parent=${parent}`,
         s.completed ? "done" : "",
         s.archived ? "archived" : "",
@@ -158,6 +168,8 @@ export async function runMetadataCommand(
         case "skill":
         case "title":
         case "project":
+        case "role":
+        case "substrate":
           value = cleared ? null : v;
           break;
         case "completed":
@@ -201,6 +213,12 @@ export function applyMutations(catalogue: Database, mutations: readonly Mutation
         break;
       case "project":
         setProject(catalogue, m.sessionId, m.value, now);
+        break;
+      case "role":
+        setRole(catalogue, m.sessionId, m.value, now);
+        break;
+      case "substrate":
+        setSubstrate(catalogue, m.sessionId, m.value, now);
         break;
       case "parent":
         setParent(catalogue, m.sessionId, m.value, now);

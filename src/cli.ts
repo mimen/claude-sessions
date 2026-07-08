@@ -10,7 +10,8 @@ import { formatCost } from "./cost.ts";
 import { openCatalogue, getAll, lifecycleOf, parentEdges } from "./catalogue/db.ts";
 import { openSessionIds } from "./catalogue/open-state.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, event, parent, skill, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, event, parent, skill, role, substrate, identity, meta, SESSION_ID_RE } from "./catalogue/commands.ts";
+import { lineage } from "./catalogue/lineage.ts";
 import { backfillTitles } from "./titler/queue.ts";
 import { createCodexTitler } from "./titler/codex.ts";
 import { handoffInline } from "./resume/inline.ts";
@@ -24,7 +25,9 @@ Usage:
   ccs reindex --titles   Also (re)generate titles, headless (cron-friendly)
   ccs ls              Print indexed sessions (with catalogue badges)
   ccs ls --event <slug>   Only sessions assigned to that event
+  ccs ls --role <name>    Only bodies of that role
   ccs tree            Constellation view: children grouped under their parent
+  ccs lineage <role> [--search "<q>"]   A role's bodies in succession order (+ transcript search)
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
   ccs meta [<id>|.]   Show a session's catalogue metadata (. = current session)
   ccs rename [<id>|.] "<name>"   Set a custom title (+ sync cmux workspace name)
@@ -33,6 +36,9 @@ Usage:
   ccs event [<id>|.] <slug> [--off]   Assign/clear the session's event slug
   ccs parent [<id>|.] <parent-id|.> [--off]   Set/clear the spawning parent session
   ccs skill [<id>|.] <name> [--off]   Set/clear the backing skill or slash-command
+  ccs role [<id>|.] <name> [--off]    Set/clear the fleet role this session is a body of
+  ccs substrate [<id>|.] <value> [--off]   Set/clear the agent runtime (unset = claude-code)
+  ccs identity [<id>|.] [<name>] [--off]   Record the launching identity (default: $CLAUDE_IDENTITY)
   ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
   ccs --version       Print version
   ccs --help          Show this help
@@ -60,9 +66,29 @@ export async function main(argv: string[]): Promise<number> {
         all: args.includes("--all"),
         loops: args.includes("--loops"),
         event: flagValue(args, "--event"),
+        role: flagValue(args, "--role"),
       });
     case "tree":
       return tree({ all: args.includes("--all") });
+    case "lineage": {
+      // `--search` owns its next token, so the role is the first token no flag consumed.
+      const rest = args.slice(1);
+      let roleArg: string | undefined;
+      let search: string | undefined;
+      for (let i = 0; i < rest.length; i++) {
+        const t = rest[i]!;
+        if (t === "--search") {
+          search = rest[++i];
+        } else if (!t.startsWith("--") && roleArg === undefined) {
+          roleArg = t;
+        }
+      }
+      if (args.includes("--search") && !search?.trim()) {
+        console.error('usage: ccs lineage <role> --search "<query>"');
+        return 1;
+      }
+      return await lineage(roleArg, search?.trim());
+    }
     case "whoami":
       return whoami();
     case "meta":
@@ -72,13 +98,19 @@ export async function main(argv: string[]): Promise<number> {
     case "mark":
       return mark(args[1], args.slice(2).filter((a) => a.startsWith("--")));
     case "tag":
-      return tag(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+      return tag(...edgeArgs(args));
     case "event":
-      return event(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+      return event(...edgeArgs(args));
     case "parent":
       return parent(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "skill":
-      return skill(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+      return skill(...edgeArgs(args));
+    case "role":
+      return role(...edgeArgs(args));
+    case "substrate":
+      return substrate(...edgeArgs(args));
+    case "identity":
+      return identity(...edgeArgs(args));
     case "skills": {
       // Bare `ccs skills` on a terminal opens the TUI in skills mode; flags/subcommands
       // (or piped output) use the plain-table command path.
@@ -199,7 +231,7 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
 }
 
 /** Table of indexed sessions, joined with catalogue metadata + live open-state. */
-function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
+function ls(opts: { all: boolean; loops: boolean; event?: string; role?: string }): number {
   const db = openIndex(DB_PATH);
   const cat = openCatalogue(CATALOGUE_PATH);
   try {
@@ -218,6 +250,7 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
       const c = catalogue.get(r.sessionId) ?? null;
       const lifecycle = lifecycleOf(c);
       if (opts.event && c?.event !== opts.event) continue;
+      if (opts.role && c?.role !== opts.role) continue;
       if (!opts.all && lifecycle === "archived") continue;
       if (opts.loops && c?.kind !== "loop") continue;
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
@@ -226,20 +259,22 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
       const title = pad(childMark + (c?.customTitle ?? r.title), 42);
       const badge = pad((c?.kind === "loop" ? "LOOP " : "") + d.label + (d.nudge ? "!" : ""), 16);
       const sk = pad(c?.skill ? `⚙${c.skill}` : "", 14);
-      // Only print the event column when not already filtering to a single event.
+      // Filtered-on columns are redundant — only print role/event when not filtering to one.
+      const rl = opts.role ? "" : pad(c?.role ? `◈${c.role}` : "", 14);
       const evt = opts.event ? "" : pad(c?.event ? `⊞${c.event}` : "", 18);
       const project = pad(r.projectName, 16);
       const age = pad(formatAge(r.lastTs), 5);
       const subCost = subCosts.get(r.sessionId) ?? subCosts.get(r.resumeId) ?? 0;
       const cost = pad(formatCost(r.costUSD + subCost), 7);
-      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${evt}${project} ${age} ${cost} ${r.msgCount}m`);
+      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${rl}${evt}${project} ${age} ${cost} ${r.msgCount}m`);
       shown++;
     }
     const hidden = rows.length - shown;
     console.log(
-      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⚙=skill · ↳=child · ⊞=event · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
+      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⚙=skill · ◈=role · ↳=child · ⊞=event · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
         (opts.event ? ` · event=${opts.event}` : "") +
-        (hidden > 0 && !opts.all && !opts.event ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
+        (opts.role ? ` · role=${opts.role}` : "") +
+        (hidden > 0 && !opts.all && !opts.event && !opts.role ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
     );
   } finally {
     db.close();
@@ -322,6 +357,20 @@ function labelForId(db: Database, id: string): string {
   const short = `${id.slice(0, 8)}…`;
   const title = titleOf(db, id);
   return title ? `${short} ${title}` : short;
+}
+
+/**
+ * Args for the `<verb> [<id>|.] [<value>] [--flags]` verbs. An explicit session id must LOOK
+ * like one (a UUID, "." or "self"); any other first positional is the VALUE with the session
+ * defaulting to the current one — so `ccs role <name>` and `ccs identity --off` do what they
+ * say instead of upserting a catalogue row keyed by the name or the flag.
+ */
+function edgeArgs(args: string[]): [string | undefined, string | undefined, string[]] {
+  const rest = args.slice(1);
+  const flags = rest.filter((a) => a.startsWith("--"));
+  const pos = rest.filter((a) => !a.startsWith("--"));
+  const explicit = pos[0] === "." || pos[0] === "self" || (pos[0] !== undefined && SESSION_ID_RE.test(pos[0]));
+  return explicit ? [pos[0], pos[1], flags] : [undefined, pos[0], flags];
 }
 
 /** Read the value after a `--flag` in argv, or undefined if absent/last. */

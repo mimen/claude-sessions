@@ -63,6 +63,31 @@ A cmux workspace — the named, focusable terminal surface cmux opens for a Resu
 to cmux's domain, not this tool's; the tool only creates and names them.
 _Avoid_: using "workspace" to mean a Project, a tab, or a window.
 
+**Role**:
+The durable fleet grouping node a Session can be a body of. Role definitions live in the vault
+(`ClaudeConfig/roles/`); the catalogue stores only the name (the role edge, v5). A role's
+Sessions are its bodies in succession — the role persists while bodies come and go.
+_Avoid_: loop, agent, identity (different edge).
+
+**Substrate**:
+The agent runtime a Session ran on. Defaults to `claude-code` (stored as unset); arbitrary
+values accepted (`codex`, `engine`, …) so the catalogue stays substrate-neutral as the fleet
+grows beyond Claude Code.
+_Avoid_: platform, engine (that's one substrate's name).
+
+**Identity**:
+The launching identity — the `CLAUDE_IDENTITY` value the launcher alias exported into the
+Session's environment (issue 64's registry). Records *which `claude-<name>` started this
+Session*; distinct from Role (a workspace identity like `auf` is not a fleet role). A session
+can self-stamp with `ccs identity`.
+_Avoid_: launcher (the alias), role.
+
+**Lineage**:
+A Role's bodies in succession order (first activity ascending). `ccs lineage <role>` lists
+them; `--search` full-text-searches the actual transcript files of the whole set, so any body
+can search everything its predecessors said and did.
+_Avoid_: history, ancestry.
+
 **Cost**:
 A Session's API-equivalent USD spend, summed from the exact billed `usage` fields on the
 transcript's assistant lines × per-model list pricing (input/output, cache read at 0.1×,
