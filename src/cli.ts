@@ -7,8 +7,10 @@ import { openIndex } from "./index/schema.ts";
 import type { Database } from "bun:sqlite";
 import { reindexStore, listByRecency, titleOf, costOf, subagentCosts } from "./index/index.ts";
 import { formatCost } from "./cost.ts";
-import { openCatalogue, getAll, lifecycleOf, parentEdges, identityKeyOf } from "./catalogue/db.ts";
+import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForSystem } from "./catalogue/db.ts";
 import { openSessionIds } from "./catalogue/open-state.ts";
+import { liveByCwd } from "./catalogue/live-by-cwd.ts";
+import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, event, parent, skill, project, system, meta } from "./catalogue/commands.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
@@ -39,6 +41,7 @@ Usage:
   ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
   ccs system [<id>|.] <slug> [--off]   Set/clear the system grouping
   ccs sync-tabs [<id>|.|--all]   Sync catalogue metadata to live cmux tabs (title/description/color/pill)
+  ccs cluster <system>  Show the cluster map: members by role, liveness, how to reach each
   ccs resume <system>   Resume all sessions in a system (idempotent)
   ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
   ccs --version       Print version
@@ -94,6 +97,8 @@ export async function main(argv: string[]): Promise<number> {
       return system(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "sync-tabs":
       return syncTabs(args.slice(1));
+    case "cluster":
+      return clusterView(args[1]);
     case "resume":
       return resumeSystem(args[1]);
     case "skills": {
@@ -333,6 +338,36 @@ function tree(_opts: { all: boolean }): number {
     cat.close();
   }
   return 0;
+}
+
+/** Render the cluster map for a system: members grouped by role, liveness, how to reach each. */
+function clusterView(systemSlug: string | undefined): number {
+  if (!systemSlug) {
+    console.error("ccs: missing system slug. Usage: ccs cluster <system>");
+    return 1;
+  }
+  const db = openIndex(DB_PATH);
+  const cat = openCatalogue(CATALOGUE_PATH);
+  try {
+    const live = liveByCwd();
+    const members = sessionsForSystem(cat, systemSlug).map((sid) => {
+      const row = getRow(cat, sid)!;
+      const ir = db
+        .query("SELECT cwd, resume_id FROM sessions WHERE session_id = $id")
+        .get({ $id: sid }) as { cwd: string | null; resume_id: string | null } | null;
+      const cwd = ir?.cwd ?? null;
+      return toMember(row, cwd, ir?.resume_id ?? null, !!cwd && live.has(cwd));
+    });
+    if (members.length === 0) {
+      console.log(`cluster ${systemSlug}: no members (nothing tagged system=${systemSlug}).`);
+      return 0;
+    }
+    console.log(renderClusterMap(buildClusterMap(systemSlug, members)));
+    return 0;
+  } finally {
+    db.close();
+    cat.close();
+  }
 }
 
 /** Resume all sessions in a system (idempotent reconcile). */
