@@ -61,7 +61,11 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
   const items: DisplayItem[] = [];
   const pushSession = (row: SessionRow, depth: number): void => {
     const expanded = expandedSessions.has(row.sessionId);
-    items.push({ kind: "session", row, depth, childCount: childCounts.get(row.sessionId) ?? 0, expanded });
+    items.push({
+      kind: "session", row, depth, childCount: childCounts.get(row.sessionId) ?? 0, expanded,
+      // Carry the live open-state so the list shows the active/idle dot (as groups mode does).
+      openState: ctx.openSet.has(row.sessionId) ? "open" : "idle",
+    });
     if (expanded) {
       for (const child of childrenByParent.get(row.sessionId) ?? []) {
         items.push({ kind: "session", row: child, depth: depth + 1, childCount: 0, expanded: false });
@@ -69,12 +73,17 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
     }
   };
 
-  const emit = (key: string, name: string, glyph: string, rowsIn: SessionRow[]): void => {
-    if (rowsIn.length === 0) return;
+  /** Emit a nested header at `level` (0 cluster, 1 core/workers tier, 2 epic/role). */
+  const header = (key: string, name: string, glyph: string, level: number, count: number): void => {
     const collapsed = ctx.collapsedSections.has(key);
-    const cost = rowsIn.reduce((sum, r) => sum + costOf(r), 0);
-    items.push({ kind: "section", section: { key, name, glyph }, count: rowsIn.length, collapsed, cost });
-    if (!collapsed) for (const r of sortRows(rowsIn, sort, costOf)) pushSession(r, 0);
+    items.push({ kind: "section", section: { key, name, glyph, level }, count, collapsed, cost: 0 });
+  };
+
+  /** A leaf group (epic or role) at `level`: its sub-header + the sessions under it. */
+  const group = (key: string, name: string, glyph: string, level: number, rowsIn: SessionRow[]): void => {
+    if (rowsIn.length === 0) return;
+    header(key, name, glyph, level, rowsIn.length);
+    if (!ctx.collapsedSections.has(key)) for (const r of sortRows(rowsIn, sort, costOf)) pushSession(r, level);
   };
 
   const epicLabel = (epicKey: string): string => {
@@ -86,28 +95,41 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
   const systems = [...bySystem.keys()].filter((s) => s !== "").sort();
   for (const system of systems) {
     const b = bySystem.get(system)!;
-    // CORE tier — one section per core role, fixed order, ★.
-    for (const role of CORE_ORDER) {
-      if (b.core.has(role)) emit(`cluster:${system}:core:${role}`, `${system} ▸ core ▸ ${role}  ★`, "★", b.core.get(role)!);
+    const total = [...b.core.values(), ...b.workers.values()].reduce((n, a) => n + a.length, 0);
+    // LEVEL 0 — one cluster header for the whole system.
+    header(`cluster:${system}`, system, "◇", 0, total);
+    if (ctx.collapsedSections.has(`cluster:${system}`)) continue;
+
+    // LEVEL 1 — CORE tier header, then one LEVEL-2 group per core role (★).
+    const coreRoles = [...CORE_ORDER.filter((r) => b.core.has(r)),
+      ...[...b.core.keys()].filter((r) => !CORE_ORDER.includes(r)).sort()];
+    const coreCount = coreRoles.reduce((n, r) => n + b.core.get(r)!.length, 0);
+    if (coreCount > 0) {
+      header(`cluster:${system}:core`, "core ★", "★", 1, coreCount);
+      if (!ctx.collapsedSections.has(`cluster:${system}:core`)) {
+        for (const role of coreRoles) group(`cluster:${system}:core:${role}`, role, "★", 2, b.core.get(role)!);
+      }
     }
-    for (const role of [...b.core.keys()].filter((r) => !CORE_ORDER.includes(r)).sort()) {
-      emit(`cluster:${system}:core:${role}`, `${system} ▸ core ▸ ${role}  ★`, "★", b.core.get(role)!);
-    }
-    // WORKERS tier — grouped by epic (short name), biggest epic first, "(no epic)" last.
+
+    // LEVEL 1 — WORKERS tier header, then one LEVEL-2 group per epic (short name).
     const epicKeys = [...b.workers.keys()].sort((a, z) => {
       if ((a === "") !== (z === "")) return a === "" ? 1 : -1;
       const d = b.workers.get(z)!.length - b.workers.get(a)!.length;
       return d !== 0 ? d : epicLabel(a).localeCompare(epicLabel(z));
     });
-    for (const ek of epicKeys) {
-      emit(`cluster:${system}:workers:${ek || "(none)"}`, `${system} ▸ workers ▸ ${epicLabel(ek)}`, "◈", b.workers.get(ek)!);
+    const workerCount = epicKeys.reduce((n, k) => n + b.workers.get(k)!.length, 0);
+    if (workerCount > 0) {
+      header(`cluster:${system}:workers`, "workers", "●", 1, workerCount);
+      if (!ctx.collapsedSections.has(`cluster:${system}:workers`)) {
+        for (const ek of epicKeys) group(`cluster:${system}:workers:${ek || "(none)"}`, epicLabel(ek), "◈", 2, b.workers.get(ek)!);
+      }
     }
   }
-  // No-system sessions — trailing.
+  // No-system sessions — one trailing top-level group (flat, no epic/role split).
   const none = bySystem.get("");
   if (none) {
-    for (const [ek, rowsIn] of none.workers) emit(`cluster::none:${ek || "(none)"}`, `(no system)`, "·", rowsIn);
-    for (const [role, rowsIn] of none.core) emit(`cluster::none:${role}`, `(no system) ▸ ${role}`, "·", rowsIn);
+    const rowsIn = [...none.workers.values(), ...none.core.values()].flat();
+    group("cluster::none", "(no system)", "·", 0, rowsIn);
   }
   return items;
 }

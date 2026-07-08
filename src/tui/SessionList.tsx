@@ -43,19 +43,29 @@ export function SessionList({ items, selected, height, width, deco, totalCost }:
         const sel = index === selected;
         const bg = sel ? theme.selBg : undefined;
 
-        // State-grouping section header — rendered as a titled divider rule (no per-group cost).
+        // Section header — a titled divider. `level` nests it (indent + lighter rule for
+        // sub-headers), so a hierarchy like cluster ▸ core/workers ▸ epic reads as nested
+        // groups instead of a repeated full-path prefix on every line.
         if (item.kind === "section") {
           const s = item.section;
+          const level = s.level ?? 0;
+          const indent = "  ".repeat(level);
           const glyph = s.glyph !== " " ? `${s.glyph} ` : "";
-          const label = `${item.collapsed ? "▸" : "▾"} ${glyph}${s.name} · ${item.count}${item.collapsed ? " ⋯" : ""}`;
+          const label = `${indent}${item.collapsed ? "▸" : "▾"} ${glyph}${s.name} · ${item.count}${item.collapsed ? " ⋯" : ""}`;
           const ruleLen = Math.max(0, width - CARET_W - label.length - 2);
+          // Top-level headers rule out full-width + bold header color; sub-headers are
+          // shorter/dimmer so the top of a cluster stands out from its subgroups.
+          const nameColor = sel ? theme.selFg : level === 0 ? theme.header : theme.accent;
+          const rule = level === 0 ? "─" : "·";
           return (
             <Box key={index} backgroundColor={bg}>
               <Text color={sel ? theme.selFg : theme.accent}>{sel ? "❯" : " "}</Text>
-              <Text bold color={sel ? theme.selFg : theme.header}>
+              <Text bold={level === 0} color={nameColor}>
                 {label}
               </Text>
-              <Text color={sel ? theme.selFg : theme.faint}> {"─".repeat(ruleLen)}</Text>
+              {level === 0 ? (
+                <Text color={sel ? theme.selFg : theme.faint}> {rule.repeat(ruleLen)}</Text>
+              ) : null}
             </Box>
           );
         }

@@ -25,15 +25,26 @@ test("buildClusterView: core tier first (★), then WORKERS grouped by epic shor
   const items = buildClusterView([row("eval"), row("w1"), row("w2"), row("w3"), row("stray")], {
     catMap, epicMap, openSet: new Set(), collapsedSections: new Set(),
   });
-  const sections = items.filter((i) => i.kind === "section").map((i) => (i as any).section.name);
-  // core tier first (the star role), before any workers tier.
-  expect(sections[0]).toContain("core");
-  expect(sections[0]).toContain("pr-watch-eval");
-  // workers grouped by epic SHORT name; the 2-session epic before the no-epic single.
-  const teamTokens = sections.findIndex((s) => s.includes("workers") && s.includes("Team Tokens"));
-  const noEpic = sections.findIndex((s) => s.includes("workers") && s.includes("(no epic)"));
-  expect(teamTokens).toBeGreaterThan(-1);
-  expect(noEpic).toBeGreaterThan(teamTokens); // bigger epic before no-epic
-  // (no system) trailing.
-  expect(sections[sections.length - 1]).toContain("(no system)");
+  const sections = items.filter((i) => i.kind === "section") as any[];
+  const named = (n: string) => sections.findIndex((s) => s.section.name === n && s.kind === "section");
+  // Nested headers: level-0 cluster, level-1 core/workers tiers, level-2 epic/role groups.
+  expect(sections[0].section.name).toBe("pr-watch");
+  expect(sections[0].section.level).toBe(0);
+  const core = named("core ★");
+  const workers = named("workers");
+  expect(core).toBeGreaterThan(-1);
+  expect(sections[core].section.level).toBe(1);
+  expect(sections[workers].section.level).toBe(1);
+  // core role subheader is level 2, under core.
+  const evalRole = named("pr-watch-eval");
+  expect(sections[evalRole].section.level).toBe(2);
+  expect(evalRole).toBeGreaterThan(core);
+  // epic subgroups: Team Tokens (2) before (no epic) (1), both level 2, under workers.
+  const tt = named("Team Tokens");
+  const noEpic = named("(no epic)");
+  expect(sections[tt].section.level).toBe(2);
+  expect(tt).toBeGreaterThan(workers);
+  expect(noEpic).toBeGreaterThan(tt);
+  // (no system) trailing, level 0.
+  expect(sections[sections.length - 1].section.name).toBe("(no system)");
 });
