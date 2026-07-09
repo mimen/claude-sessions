@@ -20,6 +20,12 @@ export const CATALOGUE_PATH = join(DATA_DIR, "catalogue.db");
  * plus durable user-authored tags. Separate file so Index schema bumps never touch it.
  */
 export const SKILLS_DB_PATH = join(DATA_DIR, "skills.db");
+/**
+ * The Merged View (issue 33): the fleet-wide catalogue, BUILT on the always-on Host from every
+ * Host's data dir, PULLED here on the others. Purely derived and rebuildable — deletable
+ * without loss, like the Index; never synced, never in the vault.
+ */
+export const MERGE_PATH = join(DATA_DIR, "merge.db");
 
 /** Default Store: the single directory Claude Code centralises all Sessions into. */
 export const DEFAULT_STORE_PATH = join(homedir(), ".claude", "projects");

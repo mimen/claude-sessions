@@ -26,6 +26,7 @@ import { openIndex } from "../index/schema.ts";
 import { titleOf, usageOf, subagentCostOf, type SessionUsage } from "../index/index.ts";
 import { formatCost, formatTokens } from "../cost.ts";
 import { pushCmuxRename } from "./open-state.ts";
+import { foreignOwner, foreignWriteError } from "./ownership.ts";
 
 /**
  * CLI surface for the catalogue. These are the primitives the in-session slash commands
@@ -42,6 +43,14 @@ export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[
 function resolveSessionId(arg: string | undefined): string | null {
   if (!arg || arg === "." || arg === "self") return process.env.CLAUDE_CODE_SESSION_ID ?? null;
   return arg;
+}
+
+/** Host-owned rows: refuse a local write to another Host's row (per the Merged View). */
+function refuseForeign(id: string): boolean {
+  const owner = foreignOwner(id);
+  if (!owner) return false;
+  console.error(foreignWriteError(id, owner));
+  return true;
 }
 
 /**
@@ -74,6 +83,7 @@ export function whoami(): number {
 export function rename(sessionArg: string | undefined, name: string | undefined): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
+  if (refuseForeign(id)) return 1;
   if (!name || !name.trim()) {
     console.error('usage: ccs rename [<session-id>|.] "<name>"');
     return 1;
@@ -93,6 +103,7 @@ export function rename(sessionArg: string | undefined, name: string | undefined)
 export function mark(sessionArg: string | undefined, flags: string[]): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
+  if (refuseForeign(id)) return 1;
   const off = flags.includes("--off");
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH);
@@ -125,6 +136,7 @@ export function mark(sessionArg: string | undefined, flags: string[]): number {
 export function tag(sessionArg: string | undefined, entity: string | undefined, flags: string[]): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
+  if (refuseForeign(id)) return 1;
   if (!entity) {
     console.error('usage: ccs tag [<session-id>|.] "<Entity>" [--remove]');
     return 1;
@@ -166,6 +178,7 @@ function edgeVerb(spec: {
   return (sessionArg, value, flags) => {
     const id = resolveSessionId(sessionArg);
     if (!id) return notInSession();
+    if (refuseForeign(id)) return 1;
     const off = flags.includes("--off");
     const raw = (value ?? spec.fallback?.())?.trim();
     if (!off && !raw) {
@@ -204,6 +217,7 @@ export function parent(
 ): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
+  if (refuseForeign(id)) return 1;
   const off = flags.includes("--off");
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH);

@@ -54,13 +54,17 @@ interface ExistingMeta {
   file_size: number;
 }
 
+/** THE Title priority, as SQL — every reader of a sessions table (including the merge reading
+ *  a replica's index) must resolve titles through this one expression. */
+export const TITLE_SQL = "COALESCE(native_title, codex_title, fallback_label)";
+
 // COALESCE order encodes Title priority; titleSource reports which one won.
 const SELECT_COLS = `
   session_id AS sessionId, host, path, cwd,
   project_root AS projectRoot, project_name AS projectName,
   branch, version, first_ts AS firstTs, last_ts AS lastTs,
   msg_count AS msgCount, file_size AS fileSize,
-  COALESCE(native_title, codex_title, fallback_label) AS title,
+  ${TITLE_SQL} AS title,
   CASE
     WHEN native_title IS NOT NULL THEN 'native'
     WHEN codex_title  IS NOT NULL THEN 'codex'
@@ -394,9 +398,7 @@ export function ftsMatchIds(db: Database, query: string): Set<string> {
 /** The resolved Title for a single Session id, or null if it isn't indexed (e.g. a forward ref). */
 export function titleOf(db: Database, sessionId: string): string | null {
   const row = db
-    .query(
-      "SELECT COALESCE(native_title, codex_title, fallback_label) AS title FROM sessions WHERE session_id = $id",
-    )
+    .query(`SELECT ${TITLE_SQL} AS title FROM sessions WHERE session_id = $id`)
     .get({ $id: sessionId }) as { title: string } | null;
   return row?.title ?? null;
 }

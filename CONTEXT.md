@@ -88,6 +88,27 @@ them; `--search` full-text-searches the actual transcript files of the whole set
 can search everything its predecessors said and did.
 _Avoid_: history, ancestry.
 
+**Merged View**:
+The fleet-wide catalogue: one derived SQLite file unioning every Host's catalogue + an Index
+snapshot per session, with an authoritative owning Host per row (owner = whose Index holds the
+transcript; the owner's catalogue row wins conflicts). BUILT only on the Merge Host
+(`ccs merge`, from the replicas replicate.py delivers), PULLED elsewhere (`ccs merge --pull`),
+read via `ccs ls --fleet`. Purely derived and rebuildable, like the Index — never synced,
+never a source of record.
+_Avoid_: fleet db, global index, merged catalogue (it also carries Index snapshots).
+
+**Merge Host**:
+The always-on Host that receives every other Host's replica and builds the Merged View (the
+mini). Everything else is a spoke: it pulls, never builds.
+
+**Edit Intent**:
+A catalogue edit for a row another Host owns, sent as an `edit-intent` fleet envelope
+(machine-adapter/PROTOCOL.md) instead of written locally — `ccs intent` emits, the owning
+Host's `ccs apply-intents` pass applies, the next merge makes it visible. Local write verbs
+refuse foreign rows and point here. Consumption is selective: each Host takes only envelopes
+addressed to it (body.host), leaving the rest in the shared inbox.
+_Avoid_: catalogue-edit (the issue's early name; the protocol reserved `edit-intent`), remote write.
+
 **Cost**:
 A Session's API-equivalent USD spend, summed from the exact billed `usage` fields on the
 transcript's assistant lines × per-model list pricing (input/output, cache read at 0.1×,

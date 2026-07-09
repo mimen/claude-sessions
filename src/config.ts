@@ -25,6 +25,24 @@ const ConfigSchema = z.object({
       target: z.enum(["auto", "cmux", "inline"]).default("auto"),
     })
     .prefault({}),
+  /** The fleet protocol seam (issue 33): edit intents ride `fleet.py send` (PROTOCOL.md). */
+  fleet: z
+    .object({
+      /** Path to the fleet CLI (the one implementation of envelope mechanics). */
+      cli: z.string().default("~/Documents/milad-vault/ClaudeConfig/machine-adapter/scripts/fleet.py"),
+      /** Role whose inbox receives this fleet's catalogue edit intents. */
+      intentRole: z.string().default("fleet-manager"),
+    })
+    .prefault({}),
+  /** The merged fleet-wide catalogue view (issue 33): built on the always-on host. */
+  merge: z
+    .object({
+      /** Where Host replicas live on the merge Host (replicate.py's destination). */
+      replicasRoot: z.string().default("~/Archives/claude-sessions-replica"),
+      /** ssh alias of the merge Host, for `ccs merge --pull` (per the machine manifest). */
+      remote: z.string().default("macmini"),
+    })
+    .prefault({}),
   titler: z
     .object({
       /** Codex executable; resolved on PATH. Bun.spawn ignores shell aliases. */
@@ -62,5 +80,7 @@ export function loadConfig(path: string = CONFIG_PATH): Result<Config> {
 
   const config = parsed.data;
   config.store.path = expandHome(config.store.path);
+  config.fleet.cli = expandHome(config.fleet.cli);
+  config.merge.replicasRoot = expandHome(config.merge.replicasRoot);
   return ok(config);
 }

@@ -45,11 +45,45 @@ export interface SessionMeta {
   readonly repo: string;
 }
 
+/** The one mutation-op vocabulary — the NL editor, `ccs intent`, and `ccs apply-intents` all
+ *  share it (an op added here reaches every mutation surface at once). */
+export const MUTATION_OPS = [
+  "kind", "event", "skill", "parent", "project", "role", "substrate",
+  "completed", "archived", "title", "tag", "untag",
+] as const;
+
 export interface Mutation {
   readonly sessionId: string;
-  readonly op: "kind" | "event" | "skill" | "parent" | "project" | "role" | "substrate" | "completed" | "archived" | "title" | "tag" | "untag";
+  readonly op: (typeof MUTATION_OPS)[number];
   /** Resolved value: for `parent`, a target sessionId or null; booleans as "true"/"false". */
   readonly value: string | null;
+}
+
+/**
+ * Normalize a raw op value into Mutation form — the one place value spellings resolve
+ * ("yes"/"1"/"done" → "true"; "none"/"clear" → null; kind coerced to loop|session). `skip`
+ * marks combinations that must not become mutations (tag/untag with nothing to tag).
+ */
+export function normalizeMutationValue(
+  op: Mutation["op"],
+  raw: string | null,
+): { value: string | null } | { skip: true } {
+  const v = raw === null ? null : String(raw).trim();
+  const cleared = v === null || /^(none|null|clear|)$/i.test(v);
+  switch (op) {
+    case "completed":
+    case "archived":
+      return { value: /^(true|yes|1|done)$/i.test(v ?? "") ? "true" : "false" };
+    case "kind":
+      return { value: /loop/i.test(v ?? "") ? "loop" : "session" };
+    case "tag":
+    case "untag":
+      return cleared ? { skip: true } : { value: v };
+    default:
+      // event / skill / title / project / role / substrate / parent (parent's NUMBER→id
+      // resolution happens before this, at each producer's boundary).
+      return { value: cleared ? null : v };
+  }
 }
 
 export interface CodexConfig {
@@ -153,41 +187,19 @@ export async function runMetadataCommand(
     for (const m of raw) {
       const idx = typeof m.n === "number" ? m.n - 1 : -1;
       const subject = sessions[idx];
-      if (!subject || !m.op) continue;
+      if (!subject || !m.op || !MUTATION_OPS.includes(m.op as Mutation["op"])) continue;
+      const op = m.op as Mutation["op"];
       const v = m.value == null ? null : String(m.value).trim();
-      const cleared = v === null || /^(none|null|clear|)$/i.test(v);
-      let value: string | null;
-      switch (m.op) {
-        case "parent": {
-          // value is a target NUMBER referencing another session.
-          const t = v && /^#?\d+$/.test(v) ? sessions[Number(v.replace("#", "")) - 1] : null;
-          value = cleared ? null : t?.sessionId ?? null;
-          break;
-        }
-        case "event":
-        case "skill":
-        case "title":
-        case "project":
-        case "role":
-        case "substrate":
-          value = cleared ? null : v;
-          break;
-        case "completed":
-        case "archived":
-          value = /^(true|yes|1|done)$/i.test(v ?? "") ? "true" : "false";
-          break;
-        case "kind":
-          value = /loop/i.test(v ?? "") ? "loop" : "session";
-          break;
-        case "tag":
-        case "untag":
-          if (cleared) continue;
-          value = v;
-          break;
-        default:
-          continue;
+      if (op === "parent") {
+        // value is a target NUMBER referencing another session (this producer's convention).
+        const cleared = v === null || /^(none|null|clear|)$/i.test(v);
+        const t = v && /^#?\d+$/.test(v) ? sessions[Number(v.replace("#", "")) - 1] : null;
+        mutations.push({ sessionId: subject.sessionId, op, value: cleared ? null : t?.sessionId ?? null });
+        continue;
       }
-      mutations.push({ sessionId: subject.sessionId, op: m.op as Mutation["op"], value });
+      const norm = normalizeMutationValue(op, v);
+      if ("skip" in norm) continue;
+      mutations.push({ sessionId: subject.sessionId, op, value: norm.value });
     }
     return { mutations };
   } catch {

@@ -12,6 +12,7 @@ import { openSessionIds } from "./catalogue/open-state.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, event, parent, skill, role, substrate, identity, meta, SESSION_ID_RE } from "./catalogue/commands.ts";
 import { lineage } from "./catalogue/lineage.ts";
+import { merge, mergePull, lsFleet, intent, applyIntentsCommand } from "./catalogue/fleet-commands.ts";
 import { backfillTitles } from "./titler/queue.ts";
 import { createCodexTitler } from "./titler/codex.ts";
 import { handoffInline } from "./resume/inline.ts";
@@ -26,8 +27,14 @@ Usage:
   ccs ls              Print indexed sessions (with catalogue badges)
   ccs ls --event <slug>   Only sessions assigned to that event
   ccs ls --role <name>    Only bodies of that role
+  ccs ls --fleet [--host <h>] [--all]   Fleet-wide sessions from the merged view (every host)
   ccs tree            Constellation view: children grouped under their parent
   ccs lineage <role> [--search "<q>"]   A role's bodies in succession order (+ transcript search)
+  ccs merge           Build the merged fleet view from local + replica data (merge host only)
+  ccs merge --pull    Fetch the merge host's merged view here (other hosts)
+  ccs intent <id> <op> [<value>] [--off]   Send a catalogue edit for a foreign row (fleet envelope)
+  ccs apply-intents [<state-dir>]   Apply this host's edit intents from the applier role's inbox
+                                    (or from stdin JSON lines when no state dir is given)
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
   ccs meta [<id>|.]   Show a session's catalogue metadata (. = current session)
   ccs rename [<id>|.] "<name>"   Set a custom title (+ sync cmux workspace name)
@@ -62,12 +69,25 @@ export async function main(argv: string[]): Promise<number> {
     case "reindex":
       return await reindex({ titles: args.includes("--titles") });
     case "ls":
+      if (args.includes("--fleet")) {
+        return lsFleet({
+          host: flagValue(args, "--host"),
+          role: flagValue(args, "--role"),
+          all: args.includes("--all"),
+        });
+      }
       return ls({
         all: args.includes("--all"),
         loops: args.includes("--loops"),
         event: flagValue(args, "--event"),
         role: flagValue(args, "--role"),
       });
+    case "merge":
+      return args.includes("--pull") ? mergePull() : merge();
+    case "intent":
+      return intent(args.slice(1));
+    case "apply-intents":
+      return await applyIntentsCommand(args.slice(1).find((a) => !a.startsWith("--")));
     case "tree":
       return tree({ all: args.includes("--all") });
     case "lineage": {

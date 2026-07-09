@@ -136,7 +136,9 @@ function hasColumn(db: Database, table: string, column: string): boolean {
   return cols.some((c) => c.name === column);
 }
 
-function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
+/** Map a raw catalogue row to CatalogueRow — the ONE place column decode rules live (missing
+ *  columns from an older-schema source read as null, so merge can consume lagging replicas). */
+export function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
   if (!r) return null;
   return {
     sessionId: r.session_id as string,

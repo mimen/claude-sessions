@@ -30,6 +30,7 @@ import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
 import { getAll, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle } from "../catalogue/db.ts";
+import { foreignOwner } from "../catalogue/ownership.ts";
 import { openSessionTitlesAsync } from "../catalogue/open-state.ts";
 import { runMetadataCommand, applyMutations, type SessionMeta } from "../catalogue/command.ts";
 import { buildStateItems, DEFAULT_COLLAPSED } from "./stateGroups.ts";
@@ -461,8 +462,12 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         setStatus("codex proposed no changes");
         return;
       }
-      const summary = applyMutations(catalogue, res.mutations, new Date().toISOString());
-      setStatus(`✓ ${summary}`);
+      // Host-owned rows (issue 33): the TUI writes through the same catalogue as the CLI, so
+      // it honors the same guard — a dual-indexed session can be listed here yet owned elsewhere.
+      const local = res.mutations.filter((m) => !foreignOwner(m.sessionId));
+      const foreign = res.mutations.length - local.length;
+      const summary = local.length ? applyMutations(catalogue, local, new Date().toISOString()) : "no changes";
+      setStatus(`✓ ${summary}${foreign ? ` · ${foreign} skipped (other host's rows — use ccs intent)` : ""}`);
       reload();
     });
   };
@@ -472,6 +477,11 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   const applyMark = (mut: (cat: Database, id: string, now: string) => void, msg: string) => {
     const item = items[clampedSelected];
     if (!item || item.kind !== "session" || item.row.isSubagent || !catalogue) return;
+    const owner = foreignOwner(item.row.sessionId);
+    if (owner) {
+      setStatus(`${owner}'s row — use ccs intent ${item.row.sessionId.slice(0, 8)}… <op> <value>`);
+      return;
+    }
     mut(catalogue, item.row.sessionId, new Date().toISOString());
     setStatus(msg);
     reload();
