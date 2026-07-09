@@ -1,16 +1,7 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import type { SessionRow } from "../index/index.ts";
-import { locateLaunchDirs, storageFolderOf, encodePath } from "./locate.ts";
-
-/** Encoded realpath of a dir, matching how Claude Code derives the storage folder. */
-function encodePathRealpath(dir: string): string {
-  try {
-    return encodePath(realpathSync(dir));
-  } catch {
-    return encodePath(dir);
-  }
-}
+import { locateLaunchDir, storageFolderOf, encodesTo } from "./locate.ts";
 
 /** A resume invocation built from Session metadata (never from a printed CLI hint). */
 export interface ResumeCommand {
@@ -20,6 +11,8 @@ export interface ResumeCommand {
   readonly cwd: string;
   /** Single-string form, for cmux --command and for display. */
   readonly shell: string;
+  /** cwd-resolution warning to show the user (ambiguity/drift) — must survive TUI teardown. */
+  readonly note?: string | null;
 }
 
 /**
@@ -54,26 +47,28 @@ export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string |
   // Best case: the recorded cwd still exists AND its encoded realpath matches the file's
   // storage folder. Then it's authoritative and we avoid the filesystem walk entirely. This
   // also sidesteps lossy-encoding collisions, since we're confirming the real recorded path.
-  if (row.cwd && existsSync(row.cwd) && encodePathRealpath(row.cwd) === folder) {
+  if (row.cwd && existsSync(row.cwd) && encodesTo(row.cwd, folder)) {
     return { cwd: row.cwd, note: null };
   }
 
   // Otherwise the recorded cwd has drifted (symlink changed, dir moved). Walk the filesystem
   // to find the dir whose encoded realpath matches the storage folder — the only dir claude
   // will actually find the session from. Bounded so it can never hang the resume path.
-  const candidates = locateLaunchDirs(row.path);
-  const located = candidates[0];
+  const located = locateLaunchDir(row.path);
   if (located) {
     const notes: string[] = [];
-    // Two verified matches means the lossy encoding is genuinely ambiguous (/a-b vs /a/b):
+    // A second verified match means the lossy encoding is genuinely ambiguous (/a-b vs /a/b):
     // resume still works from either, but say so — the WORKING DIRECTORY might be the wrong repo.
-    if (candidates.length > 1) {
-      notes.push(`encoding is ambiguous — ${candidates[1]} also matches; verify the directory`);
+    if (located.ambiguousWith) {
+      notes.push(`encoding is ambiguous — ${located.ambiguousWith} also matches; verify the directory`);
+    } else if (located.exhausted) {
+      // The bounded search gave up with work left: one match, but ambiguity wasn't ruled out.
+      notes.push("bounded search — another same-encoding dir may exist; verify the directory");
     }
-    if (row.cwd && located !== row.cwd) {
-      notes.push(`launching from ${located} (recorded cwd ${row.cwd} no longer maps to this session's files)`);
+    if (row.cwd && located.dir !== row.cwd) {
+      notes.push(`launching from ${located.dir} (recorded cwd ${row.cwd} no longer maps to this session's files)`);
     }
-    return { cwd: located, note: notes.length ? notes.join(" · ") : null };
+    return { cwd: located.dir, note: notes.length ? notes.join(" · ") : null };
   }
 
   // Last resort when nothing on disk matches: recorded cwd → project root → home.

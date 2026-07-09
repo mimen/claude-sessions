@@ -8,6 +8,11 @@ import { dirname, basename, join } from "node:path";
  * resumable only from the directory whose encoded realpath equals its storage folder — which
  * is NOT always the recorded `cwd` (it drifts when a symlinked cwd is later changed/removed,
  * the "No conversation found" bug). The storage folder is therefore authoritative.
+ *
+ * Symlinks never surface here: claude's getcwd is already symlink-resolved when the folder is
+ * derived, and the walk's dirent filter skips symlinks (a Dirent for a symlink-to-dir reports
+ * isDirectory() = false). encodesTo() is the single statement of the mapping rule and doubles
+ * as the backstop should either of those facts ever change.
  */
 
 /** Mirror Claude Code's path → folder encoding. */
@@ -21,28 +26,26 @@ export function storageFolderOf(filePath: string): string {
 }
 
 /**
- * Resolve a storage folder back to the real directory that encodes to it, by walking the
- * filesystem. Every candidate is round-trip verified — `encode(realpath(candidate))` must equal
- * the folder — because claude only finds the session from a dir whose encoded REALPATH matches:
- * a symlink whose target encodes differently is a false match the lossy encoding can't see.
- * Returns the first verified match, or null if none exists (the dir was deleted/moved).
+ * Whether launching claude in `dir` surfaces sessions stored under `folder`: claude derives
+ * the folder from encode(realpath(cwd)). If realpath errors (transient fs hiccup), fall back
+ * to the literal path — walk candidates are joined from real dirent names, so their literal
+ * encoding matches by construction.
  */
-export function decodeStorageFolder(folder: string): string | null {
-  return decodeStorageFolderAll(folder)[0] ?? null;
+export function encodesTo(dir: string, folder: string): boolean {
+  try {
+    return encodePath(realpathSync(dir)) === folder;
+  } catch {
+    return encodePath(dir) === folder;
+  }
 }
 
-/**
- * All round-trip-verified matches for a storage folder, capped at MAX_MATCHES — two is enough
- * to know the encoding is ambiguous (`/a-b` vs `/a/b`), which the caller should surface rather
- * than silently resuming in whichever the walk met first.
- */
-export function decodeStorageFolderAll(folder: string): string[] {
-  // Real Claude Code storage folders encode an absolute path, so they always start with `-`
-  // (the leading `/`). Anything else is not a decodable folder.
-  if (!folder.startsWith("-")) return [];
-  const matches: string[] = [];
-  walk("/", folder.slice(1), 0, { n: MAX_NODES }, folder, matches);
-  return matches;
+/** A resolved launch dir, with everything the caller needs to be honest about it. */
+export interface Located {
+  readonly dir: string;
+  /** A second verified match — the lossy encoding is genuinely ambiguous (/a-b vs /a/b). */
+  readonly ambiguousWith: string | null;
+  /** The bounded search gave up somewhere: a further match can't be ruled out. */
+  readonly exhausted: boolean;
 }
 
 // Bounds so the fallback walk can never freeze the resume path (see review C2). The encoded
@@ -50,47 +53,62 @@ export function decodeStorageFolderAll(folder: string): string[] {
 // guards against pathological fan-out (many same-encoding siblings on a huge/slow tree).
 const MAX_DEPTH = 24;
 const MAX_NODES = 5000;
-const MAX_MATCHES = 2;
+const MAX_MATCHES = 2; // two is enough to know the encoding is ambiguous
 
-/** Whether launching claude in this dir would actually surface the session (realpath check). */
-function roundTrips(dir: string, folder: string): boolean {
-  try {
-    return encodePath(realpathSync(dir)) === folder;
-  } catch {
-    return false;
+/**
+ * Resolve a storage folder back to the real directory that encodes to it, by walking the
+ * filesystem. Every candidate is verified through encodesTo(); the search continues past a
+ * failed candidate and keeps going after the first hit so ambiguity is DETECTED, not silently
+ * resolved by readdir order. Null when no existing directory matches (deleted/moved).
+ */
+export function decodeStorageFolder(folder: string): Located | null {
+  // Real Claude Code storage folders encode an absolute path, so they always start with `-`
+  // (the leading `/`). Anything else is not a decodable folder.
+  if (!folder.startsWith("-")) return null;
+  // The root dir itself ("/" → "-") has no parent to walk from; answer it directly.
+  if (folder === "-") {
+    return encodesTo("/", folder) ? { dir: "/", ambiguousWith: null, exhausted: false } : null;
   }
-}
 
-function walk(
-  base: string,
-  remaining: string,
-  depth: number,
-  budget: { n: number },
-  folder: string,
-  matches: string[],
-): void {
-  if (depth > MAX_DEPTH || budget.n <= 0 || matches.length >= MAX_MATCHES) return;
-  let names: string[];
-  try {
-    names = readdirSync(base, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => String(e.name));
-  } catch {
-    return;
-  }
-  for (const name of names) {
-    if (budget.n <= 0 || matches.length >= MAX_MATCHES) return;
-    budget.n--;
-    const enc = encodePath(name);
-    const full = join(base, name);
-    if (enc === remaining) {
-      // A false match (symlink to elsewhere) is rejected and the search CONTINUES — the real
-      // dir may be a later sibling or live down a different prefix split.
-      if (roundTrips(full, folder)) matches.push(full);
-    } else if (remaining.startsWith(enc + "-")) {
-      walk(full, remaining.slice(enc.length + 1), depth + 1, budget, folder, matches);
+  const matches: string[] = [];
+  const budget = { nodes: MAX_NODES, exhausted: false };
+
+  const walk = (base: string, remaining: string, depth: number): void => {
+    if (matches.length >= MAX_MATCHES) return;
+    if (depth > MAX_DEPTH || budget.nodes <= 0) {
+      budget.exhausted = true; // gave up with work left — a further match can't be ruled out
+      return;
     }
-  }
+    let names: string[];
+    try {
+      names = readdirSync(base, { withFileTypes: true })
+        .filter((e) => e.isDirectory()) // symlinks report false here — see header
+        .map((e) => String(e.name));
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (matches.length >= MAX_MATCHES) return;
+      if (budget.nodes <= 0) {
+        budget.exhausted = true;
+        return;
+      }
+      budget.nodes--;
+      const enc = encodePath(name);
+      const full = join(base, name);
+      if (enc === remaining) {
+        if (encodesTo(full, folder)) matches.push(full);
+        // A failed backstop check is not the end — keep scanning siblings/prefix splits.
+      } else if (remaining.startsWith(enc + "-")) {
+        walk(full, remaining.slice(enc.length + 1), depth + 1);
+      }
+    }
+  };
+
+  walk("/", folder.slice(1), 0);
+  const dir = matches[0];
+  if (!dir) return null;
+  return { dir, ambiguousWith: matches[1] ?? null, exhausted: budget.exhausted };
 }
 
 /**
@@ -98,11 +116,6 @@ function walk(
  * dir whose encoded realpath matches the file's storage folder. Returns null if it can't be
  * located on disk (caller should fall back to recorded cwd / project root / home).
  */
-export function locateLaunchDir(filePath: string): string | null {
-  return locateLaunchDirs(filePath)[0] ?? null;
-}
-
-/** All verified launch dirs for a session file (≥2 means the lossy encoding is ambiguous). */
-export function locateLaunchDirs(filePath: string): string[] {
-  return decodeStorageFolderAll(storageFolderOf(filePath));
+export function locateLaunchDir(filePath: string): Located | null {
+  return decodeStorageFolder(storageFolderOf(filePath));
 }

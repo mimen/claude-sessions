@@ -409,8 +409,9 @@ export function getSkeleton(db: Database, sessionId: string): string {
   return row?.skeleton ?? "";
 }
 
-/** FTS search over title + skeleton. FTS rank only SELECTS the matches — the returned rows are
- *  ordered by recency, matching the browse list (the TUI re-ranks fuzzily on top). */
+/** FTS search over title + skeleton. FTS only SELECTS the matches — the returned rows are
+ *  ordered by recency. (The TUI's search path doesn't come through here: it uses ftsMatchIds
+ *  plus its own fuzzy ranking; this is the plain API/CLI form.) */
 export function search(db: Database, query: string, includeSubagents = false): SessionRow[] {
   const trimmed = query.trim();
   if (!trimmed) return listByRecency(db, includeSubagents);
@@ -422,7 +423,7 @@ export function search(db: Database, query: string, includeSubagents = false): S
         .query(
           `SELECT ${SELECT_COLS} FROM sessions
            WHERE session_id IN (
-             SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH $q ORDER BY rank
+             SELECT session_id FROM sessions_fts WHERE sessions_fts MATCH $q
            ) ${subagentFilter}
            ORDER BY last_ts DESC NULLS LAST`,
         )

@@ -1,9 +1,9 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, realpathSync, writeFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveResumeCwd } from "./command.ts";
-import { encodePath, decodeStorageFolder, decodeStorageFolderAll, locateLaunchDirs } from "./locate.ts";
+import { encodePath, decodeStorageFolder } from "./locate.ts";
 import { handoffInline } from "./inline.ts";
 import type { SessionRow } from "../index/index.ts";
 
@@ -53,72 +53,33 @@ test("decodeStorageFolder returns null (bounded) for an unmatched folder", () =>
   expect(decodeStorageFolder("-nonexistent-" + "x".repeat(50))).toBeNull();
 });
 
-// C2 cont.: the DEPTH bound holds against a real tree deeper than the walk allows — the walk
-// gives up (null) instead of descending forever; the caller's recorded-cwd path still works.
-test("decodeStorageFolder stays depth-bounded on a real deep fixture tree", () => {
+// C2 cont.: a session whose real dir lies beyond the walk's depth bound still resumes
+// correctly through the recorded-cwd fast path (the walk itself is covered in locate.test.ts).
+test("a deep session resumes via the recorded-cwd fast path, no walk needed", () => {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "ccs-deep-")));
   let deep = base;
   for (let i = 0; i < 30; i++) deep = join(deep, `d${i}`); // 30 levels under tmp > MAX_DEPTH total
   mkdirSync(deep, { recursive: true });
+  expect(decodeStorageFolder(encodePath(deep))).toBeNull(); // the walk can't reach it…
 
-  const started = Date.now();
-  expect(decodeStorageFolder(encodePath(deep))).toBeNull(); // bound hit, not found
-  expect(Date.now() - started).toBeLessThan(2000); // and it gave up fast
-
-  // The recorded-cwd fast path is how such a session still resumes correctly.
   const path = join(base, ".projects", encodePath(deep), "s.jsonl");
   const out = resolveResumeCwd(row({ path, cwd: deep, projectRoot: deep }));
-  expect(out.cwd).toBe(deep);
+  expect(out.cwd).toBe(deep); // …but the fast path resumes it fine
   expect(out.note).toBeNull();
 
   rmSync(base, { recursive: true, force: true });
 });
 
-// H1 residue: a same-encoding SYMLINK is a false match — claude computes encode(realpath(cwd)),
-// so resuming from it would not find the session. The old round-trip "guard" returned it anyway
-// (`? decoded : decoded`); the walk must reject it.
-test("decodeStorageFolder rejects a symlink whose realpath encodes differently", () => {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), "ccs-sym-")));
-  const elsewhere = join(base, "elsewhere");
-  mkdirSync(elsewhere, { recursive: true });
-  const decoy = join(base, "a b"); // encodes like `a.b` / `a-b` would
-  symlinkSync(elsewhere, decoy);
-
-  const folder = encodePath(decoy); // what claude WOULD have stored had `a b` been real
-  expect(decodeStorageFolder(folder)).toBeNull(); // decoy rejected, nothing else matches
-
-  rmSync(base, { recursive: true, force: true });
-});
-
-// H1 residue cont.: with the decoy rejected, the walk keeps searching and finds the REAL dir.
-test("decodeStorageFolder finds the real dir past a same-encoding symlink decoy", () => {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), "ccs-sym2-")));
-  const elsewhere = join(base, "zzz");
-  mkdirSync(elsewhere, { recursive: true });
-  const real = join(base, "a.b");
-  mkdirSync(real, { recursive: true });
-  symlinkSync(elsewhere, join(base, "a b")); // same encoding as a.b, wrong realpath
-
-  expect(decodeStorageFolder(encodePath(real))).toBe(real);
-
-  rmSync(base, { recursive: true, force: true });
-});
-
-// H1 residue cont.: TWO real dirs with the same encoding = genuine ambiguity; both are
-// reported and resolveResumeCwd says so instead of silently picking one.
-test("ambiguous encodings are surfaced, not silently resolved", () => {
+// H1 residue: TWO real dirs with the same encoding = genuine ambiguity; resolveResumeCwd
+// says so instead of silently picking whichever the walk met first.
+test("ambiguous encodings are surfaced in the resume note, not silently resolved", () => {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "ccs-amb-")));
   const flat = join(base, "x-y");
   const nested = join(base, "x", "y");
   mkdirSync(flat, { recursive: true });
   mkdirSync(nested, { recursive: true });
 
-  const folder = encodePath(flat); // === encodePath(nested)
-  const path = join(base, ".projects", folder, "s.jsonl");
-  const all = decodeStorageFolderAll(folder);
-  expect(all.sort()).toEqual([flat, nested].sort());
-  expect(locateLaunchDirs(path).length).toBe(2);
-
+  const path = join(base, ".projects", encodePath(flat), "s.jsonl");
   const out = resolveResumeCwd(row({ path, cwd: "/gone/old", projectRoot: "/gone" }));
   expect([flat, nested]).toContain(out.cwd); // resume still works from either
   expect(out.note).toContain("ambiguous");

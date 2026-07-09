@@ -16,6 +16,8 @@ interface RootProps {
   titler: Titler;
   resumeRequest: { current: ResumeCommand | null };
   initialMode?: TuiMode;
+  /** Shown in the status line on first render (e.g. "store scan failed — data may be stale"). */
+  initialStatus?: string | null;
 }
 
 /**
@@ -23,7 +25,7 @@ interface RootProps {
  * useInput is the sole key handler. Tab toggles; a skills cross-jump lands in sessions
  * pre-pinned to the sessions that used the chosen skill.
  */
-export function Root({ db, catalogue, skillsDb, config, titler, resumeRequest, initialMode }: RootProps): React.ReactElement {
+export function Root({ db, catalogue, skillsDb, config, titler, resumeRequest, initialMode, initialStatus }: RootProps): React.ReactElement {
   const [mode, setMode] = useState<TuiMode>(initialMode ?? "sessions");
   const [pinned, setPinned] = useState<{ paths: ReadonlySet<string>; label: string } | null>(null);
 
@@ -48,6 +50,7 @@ export function Root({ db, catalogue, skillsDb, config, titler, resumeRequest, i
       config={config}
       titler={titler}
       resumeRequest={resumeRequest}
+      initialStatus={initialStatus}
       onSwitchMode={() => setMode("skills")}
       pinned={pinned}
       onClearPinned={() => {

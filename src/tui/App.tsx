@@ -64,11 +64,14 @@ interface AppProps {
   /** Cross-jump pin from skills mode: only sessions whose transcript path is in the set. */
   pinned?: { paths: ReadonlySet<string>; label: string } | null;
   onClearPinned?: () => void;
+  /** Status line preset at mount — a warning (failed store scan) must render INSIDE the TUI;
+   *  a pre-render console line is wiped by Ink's first fullscreen frame. */
+  initialStatus?: string | null;
 }
 
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
-export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode, pinned, onClearPinned }: AppProps): React.ReactElement {
+export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode, pinned, onClearPinned, initialStatus }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { columns: cols, rows: termRows } = useTerminalSize();
 
@@ -89,7 +92,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   const [showHelp, setShowHelp] = useState(false);
   const [titling, setTitling] = useState<{ done: number; total: number } | null>(null);
   const [frame, setFrame] = useState(0);
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(initialStatus ?? null);
   const [transcript, setTranscript] = useState<
     { title: string; lines: TranscriptLine[]; truncated: boolean; scroll: number } | null
   >(null);
@@ -360,7 +363,9 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       const ok = openInCmux(cmd, r.title);
       setStatus(prefix + (ok ? `opened in cmux → ${r.title}${fork ? " (fork)" : ""}` : "cmux failed — press o to resume inline"));
     } else {
-      resumeRequest.current = cmd;
+      // The note must survive TUI teardown — the launcher prints it before handing off
+      // (an ambiguity warning shown only in a frame that's about to unmount warns nobody).
+      resumeRequest.current = note ? { ...cmd, note } : cmd;
       exit();
     }
   };
@@ -396,18 +401,24 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
     setStatus(`Re-titling "${r.title}"…`);
     void titler
       .generate(getSkeleton(db, r.sessionId))
+      // The Titler interface doesn't promise resolution — a rejecting titler (test mock,
+      // future backend) means generation failed, same as a null result.
+      .catch(() => null)
       .then((t) => {
-        if (t) {
+        if (!t) {
+          setStatus("Re-title failed.");
+          return;
+        }
+        try {
           saveCodexTitle(db, r.sessionId, t);
           setStatus(`Re-titled → ${t}`);
           reload();
-        } else {
-          setStatus("Re-title failed.");
+        } catch {
+          // Distinct message: generation succeeded but persisting/refreshing didn't —
+          // relabeling this "Re-title failed." would hide a possibly-saved title.
+          setStatus(`Re-title generated but not applied (db error) — ${t}`);
         }
-      })
-      // The Titler interface doesn't promise resolution — a rejecting titler (test mock,
-      // future backend) must set status, not blow up as an unhandled rejection.
-      .catch(() => setStatus("Re-title failed."));
+      });
   };
 
   // Run a natural-language metadata command through Codex and apply the result live.

@@ -6,11 +6,15 @@ pass) and `d1dee30` (2026-07-08, round-trip guard + ambiguity + trivial Lows).
 
 ## Findings
 
-- **[High] FIXED** — recorded-cwd fast path in `2fa50d0`; the guard residue in `d1dee30`:
-  the walk now round-trip-verifies every candidate (rejecting same-encoding symlinks whose
-  realpath encodes differently), keeps searching past false matches, and reports ambiguity
-  (two verified matches) via the resume note instead of silently picking one. Regression
-  fixtures in `src/resume/review-fixes.test.ts`.
+- **[High] FIXED** — recorded-cwd fast path in `2fa50d0`; the residue in `d1dee30` + its
+  follow-up: the walk keeps searching after the first hit and reports ambiguity (a second
+  verified match, or a bound hit that couldn't rule one out) via the resume note — on BOTH
+  resume paths, cmux and inline — instead of silently trusting readdir order. Honest
+  mechanism note: symlink false-matches never reach the verifier (the walk's dirent filter
+  skips symlinks, and claude's getcwd is symlink-resolved, so no session is stored under a
+  symlink path); `encodesTo()` states the mapping rule once (shared with the fast path) and
+  backstops if either fact changes. Walk fixtures in `src/resume/locate.test.ts`,
+  resume-note fixtures in `src/resume/review-fixes.test.ts`.
   Original finding: `locateLaunchDir` can choose the wrong working directory for colliding encoded paths. Claude's storage-folder encoding is lossy (`/a-b` and `/a/b` both encode the same), but `resolveResumeCwd` always trusts `locateLaunchDir(row.path)` before considering the recorded `row.cwd` (`src/resume/command.ts:42`). The decoder walks from `/` and returns the first matching directory it happens to encounter (`src/resume/locate.ts:35`), and the advertised round-trip guard is a no-op because both branches return `decoded` (`src/resume/locate.ts:66`). If the recorded cwd still exists and encodes to the storage folder, prefer it; only then fall back to filesystem decoding. If decoding is kept, reject non-round-tripping candidates and surface ambiguity.
 
 - **[High] FIXED** in `2fa50d0` (depth + node budget; recorded-cwd fast path skips the walk

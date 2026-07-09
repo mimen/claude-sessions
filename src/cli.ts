@@ -206,8 +206,12 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
   try {
     const scan = scanStore(config.store.path);
     if (scan.ok) await reindexStore(db, scan.value, config.host.label);
-    // A failed scan must not masquerade as "no sessions" — say so (stale Index still browsable).
-    else console.error(`ccs: store scan failed — showing the last-indexed state. ${scan.error.message}`);
+    // A failed scan must not masquerade as "no sessions". Ink's first fullscreen frame wipes
+    // anything printed here, so the warning rides INTO the TUI as its opening status line
+    // (and is re-printed after exit for scrollback).
+    const scanWarning = scan.ok
+      ? null
+      : `store scan failed — showing the last-indexed state. ${scan.error.message}`;
 
     const { render } = await import("ink");
     const { createElement } = await import("react");
@@ -217,8 +221,11 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
       model: config.titler.model,
       reasoningEffort: config.titler.reasoningEffort,
     });
-    const app = render(createElement(Root, { db, catalogue, skillsDb, config, titler, resumeRequest, initialMode }));
+    const app = render(
+      createElement(Root, { db, catalogue, skillsDb, config, titler, resumeRequest, initialMode, initialStatus: scanWarning }),
+    );
     await app.waitUntilExit();
+    if (scanWarning) console.error(`ccs: ${scanWarning}`);
   } finally {
     db.close();
     catalogue.close();
@@ -227,6 +234,9 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
 
   // The TUI has fully unmounted (terminal restored) — now hand off to claude inline.
   if (resumeRequest.current) {
+    // The cwd-resolution warning (ambiguity/drift) must outlive the TUI: print it here,
+    // right above claude's own output, where it can actually be read.
+    if (resumeRequest.current.note) console.error(`ccs: ${resumeRequest.current.note}`);
     return handoffInline(resumeRequest.current);
   }
   return 0;
