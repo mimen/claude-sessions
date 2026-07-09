@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import type { SessionRow } from "../index/index.ts";
-import { locateLaunchDir, storageFolderOf, encodePath } from "./locate.ts";
+import { locateLaunchDirs, storageFolderOf, encodePath } from "./locate.ts";
 
 /** Encoded realpath of a dir, matching how Claude Code derives the storage folder. */
 function encodePathRealpath(dir: string): string {
@@ -61,13 +61,19 @@ export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string |
   // Otherwise the recorded cwd has drifted (symlink changed, dir moved). Walk the filesystem
   // to find the dir whose encoded realpath matches the storage folder — the only dir claude
   // will actually find the session from. Bounded so it can never hang the resume path.
-  const located = locateLaunchDir(row.path);
+  const candidates = locateLaunchDirs(row.path);
+  const located = candidates[0];
   if (located) {
-    const note =
-      row.cwd && located !== row.cwd
-        ? `launching from ${located} (recorded cwd ${row.cwd} no longer maps to this session's files)`
-        : null;
-    return { cwd: located, note };
+    const notes: string[] = [];
+    // Two verified matches means the lossy encoding is genuinely ambiguous (/a-b vs /a/b):
+    // resume still works from either, but say so — the WORKING DIRECTORY might be the wrong repo.
+    if (candidates.length > 1) {
+      notes.push(`encoding is ambiguous — ${candidates[1]} also matches; verify the directory`);
+    }
+    if (row.cwd && located !== row.cwd) {
+      notes.push(`launching from ${located} (recorded cwd ${row.cwd} no longer maps to this session's files)`);
+    }
+    return { cwd: located, note: notes.length ? notes.join(" · ") : null };
   }
 
   // Last resort when nothing on disk matches: recorded cwd → project root → home.

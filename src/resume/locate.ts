@@ -22,14 +22,27 @@ export function storageFolderOf(filePath: string): string {
 
 /**
  * Resolve a storage folder back to the real directory that encodes to it, by walking the
- * filesystem (the encoding is lossy, but real directory names disambiguate). Returns the
- * absolute path, or null if no existing directory matches (the dir was deleted/moved).
+ * filesystem. Every candidate is round-trip verified — `encode(realpath(candidate))` must equal
+ * the folder — because claude only finds the session from a dir whose encoded REALPATH matches:
+ * a symlink whose target encodes differently is a false match the lossy encoding can't see.
+ * Returns the first verified match, or null if none exists (the dir was deleted/moved).
  */
 export function decodeStorageFolder(folder: string): string | null {
+  return decodeStorageFolderAll(folder)[0] ?? null;
+}
+
+/**
+ * All round-trip-verified matches for a storage folder, capped at MAX_MATCHES — two is enough
+ * to know the encoding is ambiguous (`/a-b` vs `/a/b`), which the caller should surface rather
+ * than silently resuming in whichever the walk met first.
+ */
+export function decodeStorageFolderAll(folder: string): string[] {
   // Real Claude Code storage folders encode an absolute path, so they always start with `-`
   // (the leading `/`). Anything else is not a decodable folder.
-  if (!folder.startsWith("-")) return null;
-  return walk("/", folder.slice(1), 0, { n: MAX_NODES });
+  if (!folder.startsWith("-")) return [];
+  const matches: string[] = [];
+  walk("/", folder.slice(1), 0, { n: MAX_NODES }, folder, matches);
+  return matches;
 }
 
 // Bounds so the fallback walk can never freeze the resume path (see review C2). The encoded
@@ -37,30 +50,47 @@ export function decodeStorageFolder(folder: string): string | null {
 // guards against pathological fan-out (many same-encoding siblings on a huge/slow tree).
 const MAX_DEPTH = 24;
 const MAX_NODES = 5000;
+const MAX_MATCHES = 2;
 
-function walk(base: string, remaining: string, depth: number, budget: { n: number }): string | null {
-  if (remaining === "") return base;
-  if (depth > MAX_DEPTH || budget.n <= 0) return null;
+/** Whether launching claude in this dir would actually surface the session (realpath check). */
+function roundTrips(dir: string, folder: string): boolean {
+  try {
+    return encodePath(realpathSync(dir)) === folder;
+  } catch {
+    return false;
+  }
+}
+
+function walk(
+  base: string,
+  remaining: string,
+  depth: number,
+  budget: { n: number },
+  folder: string,
+  matches: string[],
+): void {
+  if (depth > MAX_DEPTH || budget.n <= 0 || matches.length >= MAX_MATCHES) return;
   let names: string[];
   try {
     names = readdirSync(base, { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => String(e.name));
   } catch {
-    return null;
+    return;
   }
   for (const name of names) {
-    if (budget.n <= 0) return null;
+    if (budget.n <= 0 || matches.length >= MAX_MATCHES) return;
     budget.n--;
     const enc = encodePath(name);
     const full = join(base, name);
-    if (enc === remaining) return full;
-    if (remaining.startsWith(enc + "-")) {
-      const found = walk(full, remaining.slice(enc.length + 1), depth + 1, budget);
-      if (found) return found;
+    if (enc === remaining) {
+      // A false match (symlink to elsewhere) is rejected and the search CONTINUES — the real
+      // dir may be a later sibling or live down a different prefix split.
+      if (roundTrips(full, folder)) matches.push(full);
+    } else if (remaining.startsWith(enc + "-")) {
+      walk(full, remaining.slice(enc.length + 1), depth + 1, budget, folder, matches);
     }
   }
-  return null;
 }
 
 /**
@@ -69,13 +99,10 @@ function walk(base: string, remaining: string, depth: number, budget: { n: numbe
  * located on disk (caller should fall back to recorded cwd / project root / home).
  */
 export function locateLaunchDir(filePath: string): string | null {
-  const folder = storageFolderOf(filePath);
-  const decoded = decodeStorageFolder(folder);
-  if (!decoded) return null;
-  // Sanity: confirm it round-trips (guards against a lossy-encoding false match).
-  try {
-    return encodePath(realpathSync(decoded)) === folder ? decoded : decoded;
-  } catch {
-    return decoded;
-  }
+  return locateLaunchDirs(filePath)[0] ?? null;
+}
+
+/** All verified launch dirs for a session file (≥2 means the lossy encoding is ambiguous). */
+export function locateLaunchDirs(filePath: string): string[] {
+  return decodeStorageFolderAll(storageFolderOf(filePath));
 }

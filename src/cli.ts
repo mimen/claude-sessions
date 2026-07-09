@@ -206,6 +206,8 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
   try {
     const scan = scanStore(config.store.path);
     if (scan.ok) await reindexStore(db, scan.value, config.host.label);
+    // A failed scan must not masquerade as "no sessions" — say so (stale Index still browsable).
+    else console.error(`ccs: store scan failed — showing the last-indexed state. ${scan.error.message}`);
 
     const { render } = await import("ink");
     const { createElement } = await import("react");

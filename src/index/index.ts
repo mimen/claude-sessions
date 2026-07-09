@@ -409,7 +409,8 @@ export function getSkeleton(db: Database, sessionId: string): string {
   return row?.skeleton ?? "";
 }
 
-/** FTS search over title + skeleton, ranked, returning full rows. */
+/** FTS search over title + skeleton. FTS rank only SELECTS the matches — the returned rows are
+ *  ordered by recency, matching the browse list (the TUI re-ranks fuzzily on top). */
 export function search(db: Database, query: string, includeSubagents = false): SessionRow[] {
   const trimmed = query.trim();
   if (!trimmed) return listByRecency(db, includeSubagents);

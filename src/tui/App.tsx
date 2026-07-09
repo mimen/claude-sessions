@@ -394,15 +394,20 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
     if (!item || item.kind !== "session") return;
     const r = item.row;
     setStatus(`Re-titling "${r.title}"…`);
-    void titler.generate(getSkeleton(db, r.sessionId)).then((t) => {
-      if (t) {
-        saveCodexTitle(db, r.sessionId, t);
-        setStatus(`Re-titled → ${t}`);
-        reload();
-      } else {
-        setStatus("Re-title failed.");
-      }
-    });
+    void titler
+      .generate(getSkeleton(db, r.sessionId))
+      .then((t) => {
+        if (t) {
+          saveCodexTitle(db, r.sessionId, t);
+          setStatus(`Re-titled → ${t}`);
+          reload();
+        } else {
+          setStatus("Re-title failed.");
+        }
+      })
+      // The Titler interface doesn't promise resolution — a rejecting titler (test mock,
+      // future backend) must set status, not blow up as an unhandled rejection.
+      .catch(() => setStatus("Re-title failed."));
   };
 
   // Run a natural-language metadata command through Codex and apply the result live.
