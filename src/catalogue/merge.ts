@@ -92,14 +92,15 @@ interface SourceData {
   readonly index: Map<string, IndexSnapshot>;
 }
 
-/** Copy a sqlite db (with WAL sidecars) into `dir` so nothing ever opens the source itself. */
+/** Copy a sqlite db + its -wal into `dir` so nothing ever opens the source itself. The -shm is
+ *  deliberately NOT copied: it's live shared-memory state, and a stale copy makes WAL recovery
+ *  silently drop un-checkpointed rows (found live: 1243-session replica read as 219). Without
+ *  it, sqlite rebuilds the map and replays the full wal. */
 function snapshotDb(sourcePath: string, dir: string, name: string): string | null {
   if (!existsSync(sourcePath)) return null;
   const dest = join(dir, name);
   copyFileSync(sourcePath, dest);
-  for (const suffix of ["-wal", "-shm"]) {
-    if (existsSync(sourcePath + suffix)) copyFileSync(sourcePath + suffix, dest + suffix);
-  }
+  if (existsSync(sourcePath + "-wal")) copyFileSync(sourcePath + "-wal", dest + "-wal");
   return dest;
 }
 

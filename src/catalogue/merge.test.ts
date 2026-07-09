@@ -138,6 +138,37 @@ test("tags merge across sources", () => {
   }
 });
 
+test("un-checkpointed WAL rows are seen even with a stale -shm beside them", () => {
+  const base = mkdtempSync(join(tmpdir(), "ccs-merge-"));
+  try {
+    const mini = makeSource(base, "mini");
+    indexSession(mini, "s-old", "Checkpointed", "2026-07-08T09:00:00Z");
+    // Reopen and write MORE rows, keeping the connection open so they stay in the -wal;
+    // meanwhile a stale -shm (from the first, closed connection) sits beside the fresh wal —
+    // exactly what rsync delivers from a live machine.
+    const live = new Database(join(mini, "index.db"));
+    live.exec("PRAGMA journal_mode = WAL;");
+    live
+      .query(
+        `INSERT INTO sessions (session_id, host, path, project_root, project_name, fallback_label,
+                               file_mtime, file_size, last_ts, msg_count)
+         VALUES ('s-hot', 'h', '/p', '/r', 'repo', 'Hot In WAL', 1, 1, '2026-07-08T11:00:00Z', 3)`,
+      )
+      .run();
+
+    const out = join(base, "merge.db");
+    buildMerge([{ host: "mini", dir: mini }], out, NOW);
+    live.close();
+
+    const db = openMerge(out)!;
+    const ids = mergedRows(db).map((r) => r.sessionId).sort();
+    expect(ids).toEqual(["s-hot", "s-old"]); // the wal-resident row must not vanish
+    db.close();
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("a version-lagging replica index is READ, never migrated or wiped (archive integrity)", () => {
   const base = mkdtempSync(join(tmpdir(), "ccs-merge-"));
   try {
