@@ -13,6 +13,7 @@ import { liveByCwd } from "./catalogue/live-by-cwd.ts";
 import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, event, parent, skill, project, system, phase, meta } from "./catalogue/commands.ts";
+import { newSession } from "./catalogue/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { backfillTitles } from "./titler/queue.ts";
 import { createCodexTitler } from "./titler/codex.ts";
@@ -40,6 +41,10 @@ Usage:
   ccs skill [<id>|.] <name> [--off]   Set/clear the backing skill or slash-command
   ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
   ccs system [<id>|.] <slug> [--off]   Set/clear the system grouping
+  ccs new-session [flags]   Mint a session id, tag its metadata AT BIRTH, then launch \`claude --session-id\`
+                            flags: --system --role --kind loop|session --phase --project --key
+                                   --title --parent <id> --cwd <dir> --prompt "<text>"
+                                   --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<id>|.|--all]   Sync catalogue metadata to live cmux tabs (title/description/color/pill)
   ccs cluster <system>  Show the cluster map: members by role, liveness, how to reach each
   ccs resume <system>   Resume all sessions in a system (idempotent)
@@ -97,6 +102,9 @@ export async function main(argv: string[]): Promise<number> {
       return system(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "phase":
       return phase(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "new-session":
+    case "new":
+      return newSession(args.slice(1));
     case "sync-tabs":
       return syncTabs(args.slice(1));
     case "cluster":
