@@ -4,7 +4,7 @@ import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
 import { theme, isRecentAge, costColor } from "./theme.ts";
 import { dominantModel, formatCostList, formatCompactUSD } from "./format.ts";
-import { CARET_W, GLYPH_W, ROLE_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
+import { CARET_W, GLYPH_W, PHASE_W, ROLE_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
 
 /** List cost color: dimmed by default so cost doesn't shout over status/title; only a
  * genuine outlier (≥ the high tier) keeps its warning color. */
@@ -38,6 +38,8 @@ interface SessionBadge {
   role?: string | null;
   /** Status label (lifecycle × live open-state), shown in the status column. */
   status?: string | null;
+  /** Per-system phase (worker's current activity), shown in the phase column. */
+  phase?: string | null;
 }
 
 interface SessionListProps {
@@ -181,13 +183,22 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
               </Box>
             ) : null}
             {showRoleStatus ? (
-              <Box width={ROLE_W} flexShrink={0}>
-                <Text color={sel ? theme.selFg : theme.faint} wrap="truncate-end">
-                  {/* Only non-worker roles carry signal — "worker" is the default 20x over, so
-                      blank it. eval/designer/control/concierge stand out. */}
-                  {roleLabel(badge?.role) === "worker" ? "" : roleLabel(badge?.role)}
-                </Text>
-              </Box>
+              <>
+                <Box width={PHASE_W} flexShrink={0}>
+                  {/* The worker's current activity (building/validating/blocked). Blank when
+                      unset. More informative than the dot for what's happening right now. */}
+                  <Text color={sel ? theme.selFg : theme.accent} wrap="truncate-end">
+                    {badge?.phase ?? ""}
+                  </Text>
+                </Box>
+                <Box width={ROLE_W} flexShrink={0}>
+                  <Text color={sel ? theme.selFg : theme.faint} wrap="truncate-end">
+                    {/* Only non-worker roles carry signal — "worker" is the default 20x over, so
+                        blank it. eval/designer/control/concierge stand out. */}
+                    {roleLabel(badge?.role) === "worker" ? "" : roleLabel(badge?.role)}
+                  </Text>
+                </Box>
+              </>
             ) : null}
             <Box width={MODEL_W} flexShrink={0}>
               <Text color={sel ? theme.selFg : model?.color ?? theme.faint} wrap="truncate-end">

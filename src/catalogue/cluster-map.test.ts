@@ -5,7 +5,7 @@ import type { CatalogueRow } from "./db.ts";
 const row = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,
   archived: false, parkedTaskId: null, event: null, key: null, parentSessionId: null,
-  skill: null, project: null, system: "pr-watch", gusWork: null, epicId: null, notes: null, updatedAt: null,
+  skill: null, project: null, system: "pr-watch", gusWork: null, epicId: null, phase: null, notes: null, updatedAt: null,
   prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...o,
 });
 

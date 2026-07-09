@@ -60,6 +60,8 @@ export interface SessionBadge {
   role?: string | null;
   /** Status label (lifecycle × live open-state), shown in the status column. */
   status?: string | null;
+  /** Per-system phase (catalogue.phase) — the worker's current activity. */
+  phase?: string | null;
 }
 
 interface AppProps {
@@ -210,6 +212,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         prState: c?.prState ?? null,
         role: c?.skill ?? null,
         status: describeDisposition(lc, open).label,
+        phase: c?.phase ?? null,
       });
     }
     return m;

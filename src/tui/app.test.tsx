@@ -51,8 +51,9 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
   const frame = lastFrame() ?? "";
   expect(frame).toContain("ccs");
   // The real (non-subagent) session is listed — assert its truncation-safe title prefix
-  // ("Real" survives even the narrow test width; STATUS/ROLE cols only show in cluster view).
-  expect(frame).toContain("Real"); // visible real session (title may truncate)
+  // ("Rea" survives the narrow test width; the cluster view's PHASE/ROLE columns eat into
+  // the title, so the full word "Real" no longer fits at this width).
+  expect(frame).toContain("Rea"); // visible real session (title truncates to "Rea…")
   expect(frame).not.toContain("SUBAGENTONLY"); // subagent hidden by default
   expect(frame).toContain("sessions"); // dashboard header stat
   // Footer truncates at test width; assert its head (mode toggle) rather than the far tail.

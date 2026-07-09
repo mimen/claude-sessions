@@ -9,6 +9,7 @@ import {
   setKey,
   setParent,
   setSkill,
+  setPhase,
   setProject,
   setSystem,
   addTag,
@@ -167,6 +168,26 @@ export function key(sessionArg: string | undefined, slug: string | undefined, fl
  */
 export function event(sessionArg: string | undefined, slug: string | undefined, flags: string[]): number {
   return key(sessionArg, slug, flags);
+}
+
+/** Set (or clear, with --off) the session's free-form PER-SYSTEM phase (current activity). */
+export function phase(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!off && (!value || !value.trim())) {
+    console.error("usage: ccs phase [<session-id>|.] <phase> | --off");
+    return 1;
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH);
+  try {
+    setPhase(db, id, off ? null : value!.trim(), now());
+    console.log(off ? `cleared phase on ${id.slice(0, 8)}…` : `phase ${value!.trim()} → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
 }
 
 /** Set (or clear, with --off) the parent session that spawned/owns this one. */

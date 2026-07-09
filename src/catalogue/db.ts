@@ -43,6 +43,9 @@ export interface CatalogueRow {
    * the name/url live once on the entity, not copied per session. Set by the fleet
    * orchestrator from its W->epic resolution. Nullable. */
   epicId: string | null;
+  /** Free-form, PER-SYSTEM current activity (pr-watch: building/validating/reviewing/
+   * blocked; other systems define their own). Distinct from generic `lifecycle`. */
+  phase: string | null;
   notes: string | null;
   updatedAt: string | null;
   /** PR facts sensed from the session's cwd git worktree (VCS-intrinsic only). */
@@ -61,7 +64,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 10;
+const CATALOGUE_VERSION = 11;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -195,6 +198,15 @@ function migrate(db: Database): void {
       db.exec("ALTER TABLE epics ADD COLUMN short_name TEXT;");
     }
   }
+  if (v < 11) {
+    // Additive: a free-form `phase` — the session's current fine-grained activity. Unlike
+    // `lifecycle` (generic across all sessions: idle/parked/completed/archived), phase is
+    // PER-SYSTEM: pr-watch workers use building/validating/reviewing/blocked, event-watch
+    // would use its own vocabulary. ccs stores it opaquely; each system defines its values.
+    if (!hasColumn(db, "catalogue", "phase")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN phase TEXT;");
+    }
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -222,6 +234,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     system: (r.system as string) ?? null,
     gusWork: (r.gus_work as string) ?? null,
     epicId: (r.epic_id as string) ?? null,
+    phase: (r.phase as string) ?? null,
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
     prNumber: (r.pr_number as number) ?? null,
@@ -330,6 +343,9 @@ export function setSystem(db: Database, sessionId: string, system: string | null
 }
 export function setGusWork(db: Database, sessionId: string, gusWork: string | null, now: string): void {
   set(db, sessionId, "gus_work", gusWork, now);
+}
+export function setPhase(db: Database, sessionId: string, phase: string | null, now: string): void {
+  set(db, sessionId, "phase", phase, now);
 }
 
 /** Reverse lookup: which sessions are working this GUS work item (a work-unit may span sessions). */
