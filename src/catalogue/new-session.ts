@@ -17,6 +17,7 @@ import {
   setResumeId,
   getRoleDef,
   type Kind,
+  type RoleDef,
 } from "./db.ts";
 import { shellQuote } from "../resume/command.ts";
 
@@ -58,6 +59,10 @@ export interface NewSessionOpts {
   permissionMode?: string;
   /** Reserve mode: write metadata + print the id, don't launch. */
   printId: boolean;
+  /** Escape hatch: launch INLINE in the current terminal (Bun.spawnSync, inherits this
+   * surface). Default is DETACHED into a fresh cmux workspace — inline hijacks the caller's
+   * CMUX_SURFACE_ID and rebinds their tab to the new session (ADR-0042). */
+  inline: boolean;
 }
 
 /** Read the value following `--flag`; returns undefined if absent or immediately followed by another flag. */
@@ -86,6 +91,7 @@ export function parseOpts(args: string[]): NewSessionOpts {
     prompt: flagValue(args, "--prompt"),
     permissionMode: flagValue(args, "--permission-mode"),
     printId: args.includes("--print-id"),
+    inline: args.includes("--inline"),
   };
 }
 
@@ -121,6 +127,26 @@ function buildLaunchArgv(id: string, opts: NewSessionOpts): string[] {
   return argv;
 }
 
+/**
+ * Validate a spawn is fully + correctly configured. Returns an error string (caller errors
+ * out) or null. The determinism gate: a misconfigured spawn fails LOUD, never half-born.
+ */
+export function validateSpawn(opts: NewSessionOpts, roleDef: RoleDef | null): string | null {
+  // A --role must name a real registry role (else its home_dir/arming can't be resolved).
+  if (opts.role && !roleDef) {
+    return `role "${opts.role.replace(/^\//, "")}" is not in the registry — define it with \`ccs roles upsert\` first`;
+  }
+  // The cwd we'll launch in must exist (explicit --cwd or the role's home_dir).
+  if (opts.cwd && !existsSync(opts.cwd)) {
+    return `cwd does not exist: ${opts.cwd}`;
+  }
+  // A loop role must know how to come back running.
+  if (roleDef?.kind === "loop" && !opts.resumeCommand) {
+    return `loop role "${roleDef.role}" has no resume_command (it would launch dormant) — set one in the registry`;
+  }
+  return null;
+}
+
 export function newSession(args: string[]): number {
   const opts = parseOpts(args);
 
@@ -128,33 +154,37 @@ export function newSession(args: string[]): number {
   // Registry defaults (ADR-0022): if --role names a defined role, inherit its home_dir as
   // the cwd and its resume_command — so bringing up a core role is just `--role <name>`.
   // Explicit --cwd / --resume-command still win.
+  let roleDef: RoleDef | null = null;
   {
     const rdb = openCatalogue(CATALOGUE_PATH);
     try {
-      const def = opts.role ? getRoleDef(rdb, opts.role.replace(/^\//, "")) : null;
-      if (def) {
-        if (!opts.system && def.cluster) opts.system = def.cluster; // cluster membership from the registry
-        if (!opts.cwd && def.homeDir) opts.cwd = def.homeDir;
-        if (!opts.resumeCommand && def.resumeCommand) opts.resumeCommand = def.resumeCommand;
+      roleDef = opts.role ? getRoleDef(rdb, opts.role.replace(/^\//, "")) : null;
+      if (roleDef) {
+        if (!opts.system && roleDef.cluster) opts.system = roleDef.cluster; // cluster from the registry
+        if (!opts.cwd && roleDef.homeDir) opts.cwd = roleDef.homeDir;
+        if (!opts.resumeCommand && roleDef.resumeCommand) opts.resumeCommand = roleDef.resumeCommand;
         // A loop role born fresh should START RUNNING: default the launch prompt to its
-        // resume_command (the /loop …) unless an explicit --prompt was given. Non-loop roles
-        // (no resume_command) launch bare and get their first task another way.
+        // resume_command (the /loop …) unless an explicit --prompt was given.
         if (!opts.prompt && opts.resumeCommand) opts.prompt = opts.resumeCommand;
         // Loops run unattended → default to acceptEdits so they don't stall on edit prompts
         // (the folder-trust gate is handled separately via ~/.claude.json pre-trust).
-        if (!opts.permissionMode && def.kind === "loop") opts.permissionMode = "acceptEdits";
+        if (!opts.permissionMode && roleDef.kind === "loop") opts.permissionMode = "acceptEdits";
       }
     } finally {
       rdb.close();
     }
   }
 
-  const cwd = opts.cwd ?? process.cwd();
-
-  if (opts.cwd && !existsSync(opts.cwd)) {
-    console.error(`ccs: --cwd does not exist: ${opts.cwd}`);
-    return 1;
+  // DETERMINISM: validate the spawn is fully set up, or ERROR OUT — never produce a
+  // half-configured / mis-bound session (ADR-0042, Milad's determinism mandate). Skipped for
+  // --print-id (a bare reserve is allowed) only where a check can't apply.
+  const err = validateSpawn(opts, roleDef);
+  if (err) {
+    console.error(`ccs new-session: ${err}`);
+    return 2;
   }
+
+  const cwd = opts.cwd ?? process.cwd();
 
   const id = randomUUID();
   const db = openCatalogue(CATALOGUE_PATH);
@@ -180,19 +210,55 @@ export function newSession(args: string[]): number {
     return 0;
   }
 
-  // Launch mode: hand the TTY to an interactive claude bound to the id we just tagged.
   const argv = buildLaunchArgv(id, opts);
-  console.error(`ccs: launching ${argv.map(shellQuote).join(" ")}  (cwd: ${cwd})`);
-  let result;
+
+  // --inline: genuine interactive launch in THIS terminal. Binds to the caller's surface —
+  // correct only when that IS the intent. NOT the default (ADR-0042).
+  if (opts.inline) {
+    console.error(`ccs: launching INLINE ${argv.map(shellQuote).join(" ")}  (cwd: ${cwd})`);
+    try {
+      const result = Bun.spawnSync(argv, { cwd, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+      if (!result.success && result.exitCode == null) {
+        console.error(`ccs: could not run claude — is it on your PATH?`);
+        return 127;
+      }
+      return result.exitCode ?? 0;
+    } catch (e) {
+      console.error(`ccs: failed to launch claude: ${(e as Error).message}`);
+      return 127;
+    }
+  }
+
+  // DEFAULT: spawn DETACHED into a fresh cmux workspace. The new surface gets its OWN
+  // CMUX_SURFACE_ID, so the new session's SessionStart hook binds THAT surface — never
+  // rebinding the caller's (the hijack ADR-0042 documents). Deterministic: own surface or fail.
+  return spawnDetached(id, argv, cwd, opts.title || opts.role || id.slice(0, 8));
+}
+
+/**
+ * Spawn a session into a NEW cmux workspace (its own surface). Scrubs CMUX_SURFACE_ID /
+ * CMUX_WORKSPACE_ID from the child env (belt-and-suspenders — cmux assigns fresh ones for the
+ * new surface; an inherited value would let the child's hook rebind a foreign surface).
+ */
+function spawnDetached(id: string, argv: string[], cwd: string, name: string): number {
+  const cmux = process.env.CMUX_BIN ?? "cmux";
+  const command = argv.map(shellQuote).join(" ");
+  // Prepend an env-scrub so no inherited surface id leaks into the child (ADR-0042).
+  const guarded = `unset CMUX_SURFACE_ID CMUX_WORKSPACE_ID; exec ${command}`;
   try {
-    result = Bun.spawnSync(argv, { cwd, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+    const r = Bun.spawnSync(
+      [cmux, "new-workspace", "--cwd", cwd, "--name", name, "--command", guarded],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const out = (r.stdout?.toString() ?? "") + (r.stderr?.toString() ?? "");
+    if (!r.success) {
+      console.error(`ccs: failed to spawn cmux workspace for ${id.slice(0, 8)}: ${out.trim()}`);
+      return 1;
+    }
+    console.error(`ccs: spawned ${name} → ${out.trim()} (session ${id.slice(0, 8)}, cwd ${cwd})`);
+    return 0;
   } catch (e) {
-    console.error(`ccs: failed to launch claude: ${(e as Error).message}`);
+    console.error(`ccs: could not run cmux: ${(e as Error).message}`);
     return 127;
   }
-  if (!result.success && result.exitCode == null) {
-    console.error(`ccs: could not run claude — is it on your PATH?`);
-    return 127;
-  }
-  return result.exitCode ?? 0;
 }

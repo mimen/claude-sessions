@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
-import { openCatalogue, getRow, getAll } from "./db.ts";
+import { openCatalogue, getRow, getAll, lifecycleOf } from "./db.ts";
 import { workspaceForSession } from "../cmux/liveness.ts";
 import { renderTab } from "./render-tab.ts";
 import { execFileSync } from "node:child_process";
@@ -123,7 +123,16 @@ export function syncTabs(args: string[]): number {
 
     let synced = 0;
     let notOpen = 0;
-    for (const [sid] of catMap) {
+    let skippedRetired = 0;
+    for (const [sid, row] of catMap) {
+      // Never paint a retired session's tab: an archived/completed row must not resolve to a
+      // live surface and rename it (the stale-mapping clobber — a defunct control session's
+      // record renaming a live designer tab). Retired = leave the live tab alone.
+      const lc = lifecycleOf(row);
+      if (lc === "archived" || lc === "completed") {
+        skippedRetired++;
+        continue;
+      }
       const pushed = pushRenderOps(sid, cmuxBin);
       if (pushed) synced++;
       else notOpen++;

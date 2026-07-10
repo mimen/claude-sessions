@@ -113,3 +113,28 @@ test("writeSessionMetadata: only the provided fields are written (no clobber to 
     db.close();
   }
 });
+
+import { validateSpawn } from "./new-session.ts";
+import type { RoleDef } from "./db.ts";
+
+const loopDef: RoleDef = {
+  role: "control", cluster: "pr-watch", kind: "loop", homeDir: "/tmp",
+  resumeCommand: "/loop 15m /pr-watch-control", skills: [], commands: [], hooks: [], updatedAt: null,
+};
+
+test("validateSpawn: unknown role errors", () => {
+  expect(validateSpawn(parseOpts(["--role", "ghost"]), null)).toContain("not in the registry");
+});
+
+test("validateSpawn: loop role without resume_command errors (would launch dormant)", () => {
+  const def: RoleDef = { ...loopDef, resumeCommand: null };
+  expect(validateSpawn({ printId: false, inline: false }, def)).toContain("no resume_command");
+});
+
+test("validateSpawn: missing cwd errors", () => {
+  expect(validateSpawn({ printId: false, inline: false, cwd: "/no/such/dir/xyz" }, null)).toContain("cwd does not exist");
+});
+
+test("validateSpawn: a well-formed loop role passes", () => {
+  expect(validateSpawn({ printId: false, inline: false, role: "control", cwd: "/tmp", resumeCommand: "/loop 15m /x" }, loopDef)).toBeNull();
+});
