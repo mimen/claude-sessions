@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { mergeManagedHooks, MANAGED_TAG, type HookEntry } from "./hook-materialize.ts";
+import {
+  mergeManagedHooks,
+  mergeManagedStatusline,
+  MANAGED_TAG,
+  type HookEntry,
+  type StatusLineSetting,
+} from "./hook-materialize.ts";
+
+const ccsStatusline: StatusLineSetting = { type: "command", command: "ccs statusline" };
 
 /** A ccs-managed hook entry carries the sentinel tag so re-sync can find + replace only its own. */
 const ccsHook = (event: string, cmd: string): { event: string; entry: HookEntry } => ({
@@ -59,5 +67,39 @@ describe("mergeManagedHooks", () => {
     const out = mergeManagedHooks(existing, [ccsHook("SessionStart", "ccs register-session")]);
     expect(out.model).toBe("opus");
     expect(out.permissions).toEqual({ allow: ["x"] });
+  });
+});
+
+describe("mergeManagedStatusline", () => {
+  test("writes the ccs statusLine into a free slot, tagged managed", () => {
+    const { settings, collision } = mergeManagedStatusline({}, ccsStatusline);
+    expect(collision).toBe(false);
+    expect((settings.statusLine as any).command).toBe("ccs statusline");
+    expect((settings.statusLine as any)[MANAGED_TAG]).toBe(true);
+  });
+
+  test("NEVER clobbers a user's own statusLine (reports a collision)", () => {
+    const user = { statusLine: { type: "command", command: "my-own-statusline.sh" } };
+    const { settings, collision } = mergeManagedStatusline(user, ccsStatusline);
+    expect(collision).toBe(true);
+    expect((settings.statusLine as any).command).toBe("my-own-statusline.sh"); // untouched
+  });
+
+  test("re-sync replaces ccs's own managed statusLine, not stacking", () => {
+    const first = mergeManagedStatusline({}, ccsStatusline).settings;
+    const second = mergeManagedStatusline(first, { type: "command", command: "ccs statusline --v2" }).settings;
+    expect((second.statusLine as any).command).toBe("ccs statusline --v2");
+  });
+
+  test("desired=null removes a previously-managed statusLine", () => {
+    const withCcs = mergeManagedStatusline({}, ccsStatusline).settings;
+    const { settings } = mergeManagedStatusline(withCcs, null);
+    expect(settings.statusLine).toBeUndefined();
+  });
+
+  test("desired=null leaves a user's statusLine intact", () => {
+    const user = { statusLine: { type: "command", command: "my-own.sh" } };
+    const { settings } = mergeManagedStatusline(user, null);
+    expect((settings.statusLine as any).command).toBe("my-own.sh");
   });
 });

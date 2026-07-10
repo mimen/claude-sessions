@@ -25,7 +25,13 @@ import {
   type LinkState,
   type ReconcilePlan,
 } from "./materialize.ts";
-import { mergeManagedHooks, MANAGED_TAG, type DesiredHook } from "./hook-materialize.ts";
+import {
+  mergeManagedHooks,
+  mergeManagedStatusline,
+  MANAGED_TAG,
+  type DesiredHook,
+  type StatusLineSetting,
+} from "./hook-materialize.ts";
 
 const CLAUDE_DIR = join(homedir(), ".claude");
 const SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
@@ -35,6 +41,19 @@ const HOOK_EVENT: Record<string, string> = {
   "session-start": "SessionStart",
   stop: "Stop",
 };
+
+/** The instrumentation name a role lists in `hooks` to opt into the ccs statusline (ADR-0027).
+ * It's not a hook EVENT (so desiredHooksForRoles skips it); it drives the statusLine slot. */
+const STATUSLINE_NAME = "statusline";
+
+/** The ccs-managed statusLine setting if ANY role opts in (lists "statusline" in its hooks),
+ * else null. ccs hooks are global + self-filtering (ADR-0018), and so is the statusline: the
+ * `ccs statusline` command prints a plain default for non-worker sessions. */
+export function desiredStatuslineForRoles(roles: RoleDef[], ccsBin = "ccs"): StatusLineSetting | null {
+  const wanted = roles.some((r) => r.hooks.includes(STATUSLINE_NAME));
+  if (!wanted) return null;
+  return { type: "command", command: `${ccsBin} statusline` };
+}
 
 /**
  * Desired ccs-managed hook entries from the registry. Each role's `hooks: [name]` becomes a
@@ -95,6 +114,8 @@ export interface SyncResult {
   pruned: number;
   collisions: string[];
   hooks: number;
+  /** true iff a role wants the ccs statusline but the user has their own (we never clobber it). */
+  statuslineBlocked: boolean;
   dryRun: boolean;
 }
 
@@ -111,7 +132,10 @@ export function syncRoles(
   opts: { dryRun?: boolean; hooks?: boolean } = {},
 ): SyncResult {
   const plan = planSyncRoles(db);
-  const hookEntries = desiredHooksForRoles([...allRoles(db).values()]);
+  const roles = [...allRoles(db).values()];
+  const hookEntries = desiredHooksForRoles(roles);
+  const statusline = desiredStatuslineForRoles(roles);
+  let statuslineBlocked = false;
   if (!opts.dryRun) {
     for (const link of plan.create) {
       mkdirSync(dirname(link.linkPath), { recursive: true });
@@ -136,32 +160,37 @@ export function syncRoles(
       }
     }
     writeManifest(plan.nextManifest);
-    // Hooks are written into the GLOBAL settings.json (ADR-0018 — role-dir hooks don't
-    // resolve; ccs hooks fire everywhere + self-filter by role). Opt-in (opts.hooks) since
-    // it touches the user's settings; the managed-merge preserves the user's own hooks.
-    if (opts.hooks) writeHookSettings(hookEntries);
+    // Hooks + statusLine are written into the GLOBAL settings.json (ADR-0018/0027 — role-dir
+    // settings don't resolve; ccs instrumentation fires everywhere + self-filters by role).
+    // Opt-in (opts.hooks) since it touches the user's settings; the managed-merges preserve
+    // the user's own hooks + statusLine.
+    if (opts.hooks) statuslineBlocked = writeHookSettings(hookEntries, statusline);
   }
   return {
     created: plan.create.length,
     pruned: plan.prune.length,
     collisions: plan.collisions,
     hooks: opts.hooks ? hookEntries.length : 0,
+    statuslineBlocked,
     dryRun: !!opts.dryRun,
   };
 }
 
-/** Atomically merge ccs's managed hooks into ~/.claude/settings.json (preserves user hooks). */
-function writeHookSettings(desired: DesiredHook[]): void {
+/** Atomically merge ccs's managed hooks + statusLine into ~/.claude/settings.json (preserves
+ * the user's own hooks + statusLine). Returns true iff a user statusLine blocked ours. */
+function writeHookSettings(desired: DesiredHook[], statusline: StatusLineSetting | null): boolean {
   let settings: Record<string, unknown> = {};
   try {
     settings = JSON.parse(readFileSync(SETTINGS_PATH, "utf8"));
   } catch {
     settings = {}; // missing/unreadable -> start fresh (rare; user usually has one)
   }
-  const merged = mergeManagedHooks(settings, desired);
+  const withHooks = mergeManagedHooks(settings, desired);
+  const { settings: merged, collision } = mergeManagedStatusline(withHooks, statusline);
   const tmp = SETTINGS_PATH + ".tmp";
   writeFileSync(tmp, JSON.stringify(merged, null, 2) + "\n");
   // atomic replace so a crash never leaves settings.json half-written
   const { renameSync } = require("node:fs") as typeof import("node:fs");
   renameSync(tmp, SETTINGS_PATH);
+  return collision;
 }

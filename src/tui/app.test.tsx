@@ -56,8 +56,11 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
   expect(frame).toContain("Rea"); // visible real session (title truncates to "Rea…")
   expect(frame).not.toContain("SUBAGENTONLY"); // subagent hidden by default
   expect(frame).toContain("sessions"); // dashboard header stat
-  // Footer truncates at test width; assert its head (mode toggle) rather than the far tail.
-  expect(frame).toContain("Tab skills");
+  // Footer highlights keys with ANSI escapes (the key and its label are separated by color
+  // codes), so "Tab skills" is never a contiguous substring. Assert the mode-toggle label +
+  // the key independently — both present means the skills toggle rendered.
+  expect(frame).toContain("skills");
+  expect(frame).toContain("Tab");
 
   unmount();
   real.close();

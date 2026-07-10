@@ -2,8 +2,8 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, existsSync, lstatSync, readlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { planSyncRoles } from "./sync-roles.ts";
-import { openCatalogue, upsertRole } from "../catalogue/db.ts";
+import { planSyncRoles, desiredStatuslineForRoles } from "./sync-roles.ts";
+import { openCatalogue, upsertRole, allRoles } from "../catalogue/db.ts";
 
 const NOW = "2026-07-09T00:00:00Z";
 
@@ -44,5 +44,28 @@ test("planSyncRoles: a real user file at a desired path is a collision, not clob
   } finally {
     db.close();
     rmSync(claude, { recursive: true, force: true });
+  }
+});
+
+test("desiredStatuslineForRoles: opt-in via a role's hooks list (ADR-0027)", () => {
+  const db = openCatalogue(":memory:");
+  try {
+    upsertRole(db, { role: "control", homeDir: "/roles/control", hooks: ["session-start", "statusline"], now: NOW });
+    upsertRole(db, { role: "plain", homeDir: "/roles/plain", hooks: ["session-start"], now: NOW });
+    const roles = [...allRoles(db).values()];
+    // at least one role wants it -> the ccs statusLine command is desired
+    expect(desiredStatuslineForRoles(roles)?.command).toBe("ccs statusline");
+  } finally {
+    db.close();
+  }
+});
+
+test("desiredStatuslineForRoles: no role opts in -> null (leave the slot alone)", () => {
+  const db = openCatalogue(":memory:");
+  try {
+    upsertRole(db, { role: "plain", homeDir: "/roles/plain", hooks: ["session-start"], now: NOW });
+    expect(desiredStatuslineForRoles([...allRoles(db).values()])).toBeNull();
+  } finally {
+    db.close();
   }
 });

@@ -33,11 +33,52 @@ export interface DesiredHook {
 }
 interface SettingsLike {
   hooks?: Record<string, HookEntry[]>;
+  statusLine?: StatusLineSetting | null;
   [k: string]: unknown;
 }
 
 const isManagedEntry = (e: HookEntry): boolean =>
   Array.isArray(e.hooks) && e.hooks.some((h) => h[MANAGED_TAG] === true);
+
+/** A settings.json `statusLine` slot (single object, not an array). */
+export interface StatusLineSetting {
+  type: string;
+  command: string;
+  [MANAGED_TAG]?: boolean;
+  [k: string]: unknown;
+}
+
+/**
+ * Merge the ccs-managed statusLine into `settings` (ADR-0027). The statusLine is a SINGLE
+ * slot, so — mirroring the symlink-collision rule — ccs owns it only when it's absent or
+ * already ccs-managed; a user's own (untagged) statusLine is NEVER clobbered.
+ *
+ *  - `desired` set + slot free/managed  -> write the ccs statusLine (tagged).
+ *  - `desired` null + slot ccs-managed  -> remove it (a role stopped wanting it).
+ *  - user's own statusLine present      -> leave untouched (returns collision=true).
+ *
+ * Returns the new settings object + whether a user statusLine blocked the write. Pure.
+ */
+export function mergeManagedStatusline(
+  settings: SettingsLike,
+  desired: StatusLineSetting | null,
+): { settings: SettingsLike; collision: boolean } {
+  const current = settings.statusLine ?? null;
+  const currentIsManaged = !!current && current[MANAGED_TAG] === true;
+  const userOwns = !!current && !currentIsManaged;
+
+  if (userOwns) {
+    // never clobber the user's own statusline; report the collision so the caller can warn.
+    return { settings, collision: true };
+  }
+  const next = { ...settings };
+  if (desired) {
+    next.statusLine = { ...desired, [MANAGED_TAG]: true };
+  } else if (currentIsManaged) {
+    delete next.statusLine; // was ours, no longer desired -> drop it
+  }
+  return { settings: next, collision: false };
+}
 
 /**
  * Merge the desired ccs-managed hooks into `settings`, replacing ccs's prior managed entries

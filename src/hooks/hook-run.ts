@@ -10,11 +10,13 @@
  */
 import { registerSessionCommand } from "./register-command.ts";
 import { workerStopCommand } from "./worker-stop-command.ts";
+import { statuslineCommand } from "./statusline-command.ts";
 
 /** name -> handler. Handlers are self-contained (read stdin, do work, exit-0 semantics). */
 const HOOKS: Record<string, () => Promise<number>> = {
   "session-start": registerSessionCommand,
   stop: workerStopCommand,
+  statusline: statuslineCommand,
 };
 
 export async function hookRunCommand(args: string[]): Promise<number> {

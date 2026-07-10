@@ -81,6 +81,29 @@ test("writeSessionMetadata: a leading slash on the role is normalised away", () 
   }
 });
 
+test("writeSessionMetadata: stamps gus-work + PR facts at birth (statusline link from turn one)", () => {
+  const db = openCatalogue(":memory:");
+  try {
+    const id = "cccccccc-dddd-eeee-ffff-000000000000";
+    writeSessionMetadata(db, id, parseOpts([
+      "--role", "pr-agent", "--gus-work", "W-23034218",
+      "--pr-number", "12080", "--pr-repo", "heroku/dashboard",
+    ]), NOW);
+    const row = getRow(db, id)!;
+    expect(row.gusWork).toBe("W-23034218");
+    expect(row.prNumber).toBe(12080);
+    expect(row.prRepo).toBe("heroku/dashboard");
+    expect(row.prState).toBe("open"); // sensible default until git-sense refines it
+  } finally {
+    db.close();
+  }
+});
+
+test("parseOpts: --pr-number 0 (no PR yet) is treated as absent, not stamped", () => {
+  const o = parseOpts(["--pr-number", "0", "--pr-repo", "heroku/dashboard"]);
+  expect(o.prNumber).toBeUndefined();
+});
+
 test("writeSessionMetadata: --resume-command is stored for a loop (comes back running)", () => {
   const db = openCatalogue(":memory:");
   try {

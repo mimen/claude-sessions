@@ -15,6 +15,8 @@ import {
   setProject,
   setSystem,
   setResumeId,
+  setGusWork,
+  stampPrFacts,
   getRoleDef,
   type Kind,
   type RoleDef,
@@ -53,6 +55,13 @@ export interface NewSessionOpts {
   key?: string;
   title?: string;
   parent?: string;
+  /** Work-item id (W-number) — stamped at birth so the statusline/tab link the ticket from
+   * turn one (ADR-0027), before any later git/PR sense tick. */
+  gusWork?: string;
+  /** PR facts known at spawn (the fleet already has repo + number in hand). Stamped at birth
+   * so the clickable PR link is present immediately — no gap until the next sense tick. */
+  prNumber?: number;
+  prRepo?: string;
   cwd?: string;
   prompt?: string;
   /** Passed through to `claude --permission-mode <mode>` when launching. */
@@ -63,6 +72,13 @@ export interface NewSessionOpts {
    * surface). Default is DETACHED into a fresh cmux workspace — inline hijacks the caller's
    * CMUX_SURFACE_ID and rebinds their tab to the new session (ADR-0042). */
   inline: boolean;
+}
+
+/** Parse a --pr-number value to a positive integer, or undefined (0 / non-numeric = "no PR yet"). */
+function prNumberFrom(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 /** Read the value following `--flag`; returns undefined if absent or immediately followed by another flag. */
@@ -87,6 +103,9 @@ export function parseOpts(args: string[]): NewSessionOpts {
     key: flagValue(args, "--key"),
     title: flagValue(args, "--title"),
     parent: flagValue(args, "--parent"),
+    gusWork: flagValue(args, "--gus-work"),
+    prNumber: prNumberFrom(flagValue(args, "--pr-number")),
+    prRepo: flagValue(args, "--pr-repo"),
     cwd: flagValue(args, "--cwd"),
     prompt: flagValue(args, "--prompt"),
     permissionMode: flagValue(args, "--permission-mode"),
@@ -117,6 +136,13 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
   if (opts.key) setKey(db, id, opts.key, now);
   if (opts.title) setCustomTitle(db, id, opts.title, now);
   if (opts.parent) setParent(db, id, opts.parent, now);
+  if (opts.gusWork) setGusWork(db, id, opts.gusWork, now);
+  // Stamp PR facts at birth so the statusline links the PR immediately (ADR-0027). Only
+  // number + repo are known at spawn; branch/state/sha are git-sensed later. Default state
+  // to "open" (a freshly-spawned worker's PR) so the tab colors correctly until then.
+  if (opts.prNumber && opts.prRepo) {
+    stampPrFacts(db, id, { prNumber: opts.prNumber, prRepo: opts.prRepo, prBranch: "", prState: "open", prHeadSha: "" }, now);
+  }
 }
 
 /** Build the `claude` invocation for launch mode. Prompt (if any) is a trailing positional arg. */

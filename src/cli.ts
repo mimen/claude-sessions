@@ -25,6 +25,7 @@ import { syncRoles } from "./roles/sync-roles.ts";
 import { rolesCommand } from "./catalogue/roles-command.ts";
 import { registerSessionCommand } from "./hooks/register-command.ts";
 import { hookRunCommand } from "./hooks/hook-run.ts";
+import { statuslineCommand } from "./hooks/statusline-command.ts";
 import { inboxCommand } from "./inbox/inbox-command.ts";
 import { stateCommand } from "./state/state-command.ts";
 
@@ -137,6 +138,11 @@ export async function main(argv: string[]): Promise<number> {
       return 1;
     case "register-session":
       return await registerSessionCommand(); // back-compat alias for `hook run session-start`
+    case "statusline":
+      // The Claude Code statusLine command (ADR-0027): reads session context on stdin,
+      // prints the one-line status from ccs metadata. sync-roles materializes this into
+      // settings.json's statusLine slot.
+      return await statuslineCommand();
     case "inbox":
       return inboxCommand(args.slice(1));
     case "state":
