@@ -15,6 +15,7 @@ import {
   setProject,
   setSystem,
   setResumeId,
+  getRoleDef,
   type Kind,
 } from "./db.ts";
 import { shellQuote } from "../resume/command.ts";
@@ -122,6 +123,24 @@ function buildLaunchArgv(id: string, opts: NewSessionOpts): string[] {
 
 export function newSession(args: string[]): number {
   const opts = parseOpts(args);
+
+  ensureDataDir();
+  // Registry defaults (ADR-0022): if --role names a defined role, inherit its home_dir as
+  // the cwd and its resume_command — so bringing up a core role is just `--role <name>`.
+  // Explicit --cwd / --resume-command still win.
+  {
+    const rdb = openCatalogue(CATALOGUE_PATH);
+    try {
+      const def = opts.role ? getRoleDef(rdb, opts.role.replace(/^\//, "")) : null;
+      if (def) {
+        if (!opts.cwd && def.homeDir) opts.cwd = def.homeDir;
+        if (!opts.resumeCommand && def.resumeCommand) opts.resumeCommand = def.resumeCommand;
+      }
+    } finally {
+      rdb.close();
+    }
+  }
+
   const cwd = opts.cwd ?? process.cwd();
 
   if (opts.cwd && !existsSync(opts.cwd)) {
@@ -130,7 +149,6 @@ export function newSession(args: string[]): number {
   }
 
   const id = randomUUID();
-  ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH);
   try {
     writeSessionMetadata(db, id, opts, new Date().toISOString());
