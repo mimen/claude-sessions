@@ -21,6 +21,7 @@ import { handoffInline } from "./resume/inline.ts";
 import type { ResumeCommand } from "./resume/command.ts";
 import { executeSystemResume } from "./resume/execute-system.ts";
 import { resumeSessionEntry } from "./resume/resume-session.ts";
+import { resumeClusterEntry } from "./resume/resume-cluster.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -49,7 +50,8 @@ Usage:
   ccs sync-tabs [<id>|.|--all]   Sync catalogue metadata to live cmux tabs (title/description/color/pill)
   ccs cluster <system>  Show the cluster map: members by role, liveness, how to reach each
   ccs resume-session <id>  Re-embody one identity (the core op; loops come back running)
-  ccs resume <system>   Resume all sessions in a system (idempotent)
+  ccs resume-cluster <c>   Resume every not-open identity in a cluster (loop over resume-session)
+  ccs resume <system>   Resume all sessions in a system (idempotent; legacy alias)
   ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
   ccs --version       Print version
   ccs --help          Show this help
@@ -113,6 +115,8 @@ export async function main(argv: string[]): Promise<number> {
       return clusterView(args[1], args.includes("--expand") || args.includes("--all"));
     case "resume-session":
       return resumeSession(args[1], args.includes("--dry-run"));
+    case "resume-cluster":
+      return resumeCluster(args[1], args.includes("--dry-run"));
     case "resume":
       return resumeSystem(args[1]);
     case "skills": {
@@ -409,6 +413,28 @@ function resumeSession(sessionId: string | undefined, dryRun: boolean): number {
         console.error(`ccs: failed to spawn cmux workspace for ${sessionId}`);
         return 1;
     }
+  } finally {
+    db.close();
+    cat.close();
+  }
+}
+
+/** `ccs resume-cluster <cluster>` — a thin loop over resume-session (ADR-0015). */
+function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
+  if (!cluster) {
+    console.error("ccs: missing cluster. Usage: ccs resume-cluster <cluster> [--dry-run]");
+    return 1;
+  }
+  const db = openIndex(DB_PATH);
+  const cat = openCatalogue(CATALOGUE_PATH);
+  try {
+    const s = resumeClusterEntry(db, cat, cluster, { dryRun });
+    const verb = dryRun ? "would resume" : "resumed";
+    console.log(
+      `ccs: cluster "${cluster}" — ${verb} ${s.resumed}, ${s.alreadyOpen} already open, ` +
+        `${s.notIndexed} not indexed${s.failed ? `, ${s.failed} failed` : ""}`,
+    );
+    return s.failed > 0 ? 1 : 0;
   } finally {
     db.close();
     cat.close();
