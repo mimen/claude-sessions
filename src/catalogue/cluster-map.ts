@@ -39,7 +39,7 @@ export interface ClusterMap {
  * Clean role labels (ADR-0015), not the old command-name labels. Legacy pr-watch-* names kept
  * so pre-retag sessions still group correctly during migration. */
 const CORE_ROLES = new Set([
-  "control", "scout", "eval", "concierge",
+  "control", "scout", "eval", "concierge", "designer",
   // legacy command-name labels (pre-ADR-0015 retag) — remove once no session uses them:
   "pr-watch-control", "pr-watch-scout", "pr-watch-eval", "pr-watch-2", "loop-designer",
 ]);
@@ -80,7 +80,7 @@ export function buildClusterMap(system: string, members: ClusterMember[]): Clust
   const groups: ClusterMap["groups"] = [];
   // Core groups first (a stable, human-sensible order), then fleet roles alphabetically.
   // Core/fleet is decided by isCoreRole — the single source of truth — not a parallel list.
-  const CORE_ORDER = ["control", "concierge", "scout", "eval", "loop-designer",
+  const CORE_ORDER = ["control", "concierge", "scout", "eval", "designer", "loop-designer",
     // legacy labels, in case a pre-retag session still carries one:
     "pr-watch-control", "pr-watch-2", "pr-watch-eval", "pr-watch-scout"];
   const coreRoles = [...byRole.keys()].filter((r) => isCoreRole(r));

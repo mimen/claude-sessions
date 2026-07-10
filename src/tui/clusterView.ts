@@ -17,7 +17,7 @@ import { sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./g
 
 /** Core/fleet membership is decided by isCoreRole (the single source of truth in
  * cluster-map.ts) so the TUI and `ccs cluster` never diverge. Clean labels (ADR-0015). */
-const CORE_ORDER = ["control", "concierge", "scout", "eval", "loop-designer",
+const CORE_ORDER = ["control", "concierge", "scout", "eval", "designer", "loop-designer",
   "pr-watch-control", "pr-watch-2", "pr-watch-eval", "pr-watch-scout"]; // legacy fallbacks
 
 export interface ClusterViewCtx {
