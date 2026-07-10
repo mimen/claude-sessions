@@ -156,8 +156,12 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       .filter((r) => !pinned || pinned.paths.has(r.path))
       .filter((r) => showArchived || lifecycleOf(catMap.get(r.sessionId) ?? null) !== "archived")
       .map((r) => {
-        // Precedence: live cmux title (open) → user's custom title → resolved Title.
-        const title = openTitles.get(r.sessionId) ?? catMap.get(r.sessionId)?.customTitle ?? r.title;
+        // Precedence: live cmux title (open) → user's custom title → ROLE (a role-tagged
+        // session reads as its role, e.g. "designer", not the auto-generated skeleton title)
+        // → resolved Title. Mirrors render-tab so the TUI + cmux tab agree.
+        const cat = catMap.get(r.sessionId);
+        const title =
+          openTitles.get(r.sessionId) ?? cat?.customTitle ?? cat?.role ?? r.title;
         return title === r.title ? r : { ...r, title };
       });
   }, [db, includeSubagents, refreshTick, catMap, showArchived, openTitles]);
@@ -169,6 +173,10 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
     const now = new Date().toISOString();
     let changed = false;
     for (const [sid, title] of openTitles) {
+      // Never persist a slug-shaped title (the session-id or its 8-char prefix): a tab that
+      // briefly showed the raw id before getting a real name would otherwise poison the
+      // customTitle, hiding the role/real name forever (hit the designer row).
+      if (!title || sid.startsWith(title) || title === sid.slice(0, 8)) continue;
       if ((catMap.get(sid)?.customTitle ?? null) !== title) {
         setCustomTitle(catalogue, sid, title, now);
         changed = true;
