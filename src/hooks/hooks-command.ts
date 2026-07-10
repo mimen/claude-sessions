@@ -10,28 +10,15 @@
  */
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { openCatalogue, getRow, getRoleDef } from "../catalogue/db.ts";
+import { openCatalogue, getRow } from "../catalogue/db.ts";
 import { CATALOGUE_PATH } from "../paths.ts";
 import { ccsRuntimeRoot } from "../inbox/identity-path.ts";
+import { ccsConfigRoot } from "../roles/role-files.ts";
 import { resolveConfig } from "./resolve-config.ts";
-import { type ResolveCtx } from "./resolve-levels.ts";
+import { liveResolveCtx } from "./compose-claude-md.ts";
 import { knownHookTypes } from "./hook-types.ts";
 import { classifyFields } from "./meta-fields.ts";
 import { knownStartActions } from "./start-actions.ts";
-
-/** The config root (definitions). Honors $CCS_CONFIG_ROOT, else ~/.ccs-config. */
-function ccsConfigRoot(): string {
-  return process.env.CCS_CONFIG_ROOT ?? join(process.env.HOME ?? "", ".ccs-config");
-}
-
-/** Build the resolve ctx from the live catalogue (role home_dir lookup + the two roots). */
-function liveCtx(db: ReturnType<typeof openCatalogue>): ResolveCtx {
-  return {
-    configRoot: ccsConfigRoot(),
-    runtimeRoot: ccsRuntimeRoot(),
-    roleHomeDir: (role) => getRoleDef(db, role)?.homeDir ?? null,
-  };
-}
 
 function resolveSessionId(raw: string | undefined): string | undefined {
   if (!raw || raw === ".") return process.env.CLAUDE_CODE_SESSION_ID;
@@ -46,8 +33,7 @@ function explain(sessionId: string, type: string): number {
       console.error(`ccs hooks explain: no catalogue row for session ${sessionId}`);
       return 1;
     }
-    const ctx = liveCtx(db);
-    const res = resolveConfig(row, type, ctx);
+    const res = resolveConfig(row, type, liveResolveCtx());
     const home = (p: string) => p.replace(process.env.HOME ?? "~", "~");
     console.log(`hook: ${type}   session: ${sessionId.slice(0, 8)}   role: ${row.role ?? "(none)"}   cluster: ${row.system ?? "(none)"}`);
     console.log(`\nlevels (broad → specific):`);

@@ -468,19 +468,15 @@ function resumeSession(sessionId: string | undefined, dryRun: boolean): number {
 
 /** `ccs sync-roles` — materialize the roles registry into ~/.claude (ADR-0022/0034). */
 function syncRolesCmd(dryRun: boolean, hookFlag: boolean): number {
-  const cat = openCatalogue(CATALOGUE_PATH);
-  try {
-    const r = syncRoles(cat, { dryRun, hooks: hookFlag });
-    const verb = dryRun ? "would create" : "created";
-    console.log(`ccs: sync-roles — ${verb} ${r.created}, pruned ${r.pruned}${hookFlag ? `, hooks ${r.hooks}` : ""}`);
-    if (r.collisions.length) {
-      console.warn(`ccs: skipped ${r.collisions.length} (a non-ccs file is in the way):`);
-      for (const c of r.collisions) console.warn(`  ${c}`);
-    }
-    return 0;
-  } finally {
-    cat.close();
+  // Roles are read from config FILES now (ADR-0050), so no catalogue is opened.
+  const r = syncRoles({ dryRun, hooks: hookFlag });
+  const verb = dryRun ? "would create" : "created";
+  console.log(`ccs: sync-roles — ${verb} ${r.created}, pruned ${r.pruned}${hookFlag ? `, hooks ${r.hooks}` : ""}`);
+  if (r.collisions.length) {
+    console.warn(`ccs: skipped ${r.collisions.length} (a non-ccs file is in the way):`);
+    for (const c of r.collisions) console.warn(`  ${c}`);
   }
+  return 0;
 }
 
 /** `ccs resume-cluster <cluster>` — a thin loop over resume-session (ADR-0015). */

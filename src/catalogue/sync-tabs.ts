@@ -45,7 +45,7 @@ export function pushRenderOps(sessionId: string, cmuxBin = process.env.CMUX_BIN 
   let paint: CmuxPaintOverride | null = null;
   if (row) {
     try {
-      paint = resolveConfig(row, "cmux-paint", liveResolveCtx(db)).effective as CmuxPaintOverride | null;
+      paint = resolveConfig(row, "cmux-paint", liveResolveCtx()).effective as CmuxPaintOverride | null;
     } catch {
       paint = null;
     }

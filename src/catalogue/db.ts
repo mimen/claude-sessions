@@ -72,7 +72,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 13;
+const CATALOGUE_VERSION = 14;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -249,6 +249,13 @@ function migrate(db: Database): void {
       );
     `);
     db.exec("CREATE INDEX IF NOT EXISTS idx_roles_cluster ON roles(cluster);");
+  }
+  if (v < 14) {
+    // ADR-0050: role DEFINITIONS are read from config FILES now (src/roles/role-files.ts), so
+    // the `roles` table is no longer a source of truth. DROP it — the one deliberate exception
+    // to "additive only" (a duplicated definition store is worse than a drop). Definitions live
+    // in ~/.ccs-config; nothing rebuilds this table.
+    db.exec("DROP TABLE IF EXISTS roles;");
   }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
@@ -507,95 +514,10 @@ export interface RoleDef {
   updatedAt: string | null;
 }
 
-interface UpsertRoleInput {
-  role: string;
-  cluster?: string | null;
-  kind?: Kind | null;
-  homeDir?: string | null;
-  resumeCommand?: string | null;
-  skills?: string[];
-  commands?: string[];
-  hooks?: string[];
-  now: string;
-}
+// Role DEFINITIONS are read from config FILES now (ADR-0048/0050), not a sqlite table — see
+// src/roles/role-files.ts. The `RoleDef` type stays (shared shape); the `roles` table + its
+// accessors were removed. The `roles` table is dropped in the migration below.
 
-const jsonArr = (a: string[] | undefined): string | null =>
-  a && a.length ? JSON.stringify(a) : null;
-const parseArr = (s: string | null): string[] => {
-  if (!s) return [];
-  try {
-    const v = JSON.parse(s);
-    return Array.isArray(v) ? v : [];
-  } catch {
-    return [];
-  }
-};
-
-/** Create or update a role definition (idempotent upsert on the role name). */
-export function upsertRole(db: Database, input: UpsertRoleInput): void {
-  db.query(
-    `INSERT INTO roles (role, cluster, kind, home_dir, resume_command, skills, commands, hooks, updated_at)
-     VALUES ($role, $cluster, $kind, $home, $resume, $skills, $commands, $hooks, $now)
-     ON CONFLICT(role) DO UPDATE SET
-       cluster=excluded.cluster, kind=excluded.kind, home_dir=excluded.home_dir,
-       resume_command=excluded.resume_command, skills=excluded.skills,
-       commands=excluded.commands, hooks=excluded.hooks, updated_at=excluded.updated_at`,
-  ).run({
-    $role: input.role,
-    $cluster: input.cluster ?? null,
-    $kind: input.kind ?? null,
-    $home: input.homeDir ?? null,
-    $resume: input.resumeCommand ?? null,
-    $skills: jsonArr(input.skills),
-    $commands: jsonArr(input.commands),
-    $hooks: jsonArr(input.hooks),
-    $now: input.now,
-  });
-}
-
-interface RoleRow {
-  role: string; cluster: string | null; kind: string | null; home_dir: string | null;
-  resume_command: string | null; skills: string | null; commands: string | null;
-  hooks: string | null; updated_at: string | null;
-}
-
-function roleDefFrom(r: RoleRow): RoleDef {
-  return {
-    role: r.role,
-    cluster: r.cluster,
-    kind: (r.kind as Kind) ?? null,
-    homeDir: r.home_dir,
-    resumeCommand: r.resume_command,
-    skills: parseArr(r.skills),
-    commands: parseArr(r.commands),
-    hooks: parseArr(r.hooks),
-    updatedAt: r.updated_at,
-  };
-}
-
-const ROLE_COLS =
-  "role, cluster, kind, home_dir, resume_command, skills, commands, hooks, updated_at";
-
-export function getRoleDef(db: Database, role: string): RoleDef | null {
-  const r = db.query(`SELECT ${ROLE_COLS} FROM roles WHERE role = $r`).get({ $r: role }) as RoleRow | null;
-  return r ? roleDefFrom(r) : null;
-}
-
-export function allRoles(db: Database): Map<string, RoleDef> {
-  const rows = db.query(`SELECT ${ROLE_COLS} FROM roles ORDER BY role`).all() as RoleRow[];
-  return new Map(rows.map((r) => [r.role, roleDefFrom(r)]));
-}
-
-export function rolesForCluster(db: Database, cluster: string): RoleDef[] {
-  const rows = db
-    .query(`SELECT ${ROLE_COLS} FROM roles WHERE cluster = $c ORDER BY role`)
-    .all({ $c: cluster }) as RoleRow[];
-  return rows.map(roleDefFrom);
-}
-
-export function deleteRole(db: Database, role: string): void {
-  db.query("DELETE FROM roles WHERE role = $r").run({ $r: role });
-}
 /** Stamp PR facts sensed from the session's cwd git worktree (VCS-intrinsic only). */
 export function stampPrFacts(
   db: Database,

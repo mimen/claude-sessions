@@ -17,10 +17,10 @@ import {
   setResumeId,
   setGusWork,
   stampPrFacts,
-  getRoleDef,
   type Kind,
   type RoleDef,
 } from "./db.ts";
+import { resolveRole } from "../roles/role-files.ts";
 import { shellQuote } from "../resume/command.ts";
 import { execFileSync } from "node:child_process";
 import { spawnContractError, rowWorkUnit, type SpawnFacts, type WorktreeState } from "./spawn-contract.ts";
@@ -187,33 +187,26 @@ export function newSession(args: string[]): number {
   // Registry defaults (ADR-0022): if --role names a defined role, inherit its home_dir as
   // the cwd and its resume_command — so bringing up a core role is just `--role <name>`.
   // Explicit --cwd / --resume-command still win.
-  let roleDef: RoleDef | null = null;
+  // Role definitions come from config FILES now (ADR-0050) — no catalogue read for the registry.
+  let roleDef: RoleDef | null = opts.role ? resolveRole(opts.role.replace(/^\//, "")) : null;
   let spawnLocationErr: string | null = null;
-  {
-    const rdb = openCatalogue(CATALOGUE_PATH);
-    try {
-      roleDef = opts.role ? getRoleDef(rdb, opts.role.replace(/^\//, "")) : null;
-      if (roleDef) {
-        if (!opts.system && roleDef.cluster) opts.system = roleDef.cluster; // cluster from the registry
-        // spawn-location config (ADR-0046) resolves the launch cwd from the LAUNCH REQUEST
-        // (pre-row): "role-dir" → home_dir, "worktree" → the passed --cwd, or an abs path.
-        // Config wins; the role's home_dir stays the fallback when no config resolves.
-        if (!opts.cwd) {
-          const resolvedCwd = resolveSpawnLocationCwd(rdb, opts, roleDef);
-          if (resolvedCwd.error) { spawnLocationErr = resolvedCwd.error; }
-          opts.cwd = resolvedCwd.cwd ?? roleDef.homeDir ?? undefined;
-        }
-        if (!opts.resumeCommand && roleDef.resumeCommand) opts.resumeCommand = roleDef.resumeCommand;
-        // A loop role born fresh should START RUNNING: default the launch prompt to its
-        // resume_command (the /loop …) unless an explicit --prompt was given.
-        if (!opts.prompt && opts.resumeCommand) opts.prompt = opts.resumeCommand;
-        // Loops run unattended → default to acceptEdits so they don't stall on edit prompts
-        // (the folder-trust gate is handled separately via ~/.claude.json pre-trust).
-        if (!opts.permissionMode && roleDef.kind === "loop") opts.permissionMode = "acceptEdits";
-      }
-    } finally {
-      rdb.close();
+  if (roleDef) {
+    if (!opts.system && roleDef.cluster) opts.system = roleDef.cluster; // cluster from the definition
+    // spawn-location config (ADR-0046) resolves the launch cwd from the LAUNCH REQUEST
+    // (pre-row): "role-dir" → home_dir, "worktree" → the passed --cwd, or an abs path.
+    // Config wins; the role's home_dir stays the fallback when no config resolves.
+    if (!opts.cwd) {
+      const resolvedCwd = resolveSpawnLocationCwd(opts, roleDef);
+      if (resolvedCwd.error) { spawnLocationErr = resolvedCwd.error; }
+      opts.cwd = resolvedCwd.cwd ?? roleDef.homeDir ?? undefined;
     }
+    if (!opts.resumeCommand && roleDef.resumeCommand) opts.resumeCommand = roleDef.resumeCommand;
+    // A loop role born fresh should START RUNNING: default the launch prompt to its
+    // resume_command (the /loop …) unless an explicit --prompt was given.
+    if (!opts.prompt && opts.resumeCommand) opts.prompt = opts.resumeCommand;
+    // Loops run unattended → default to acceptEdits so they don't stall on edit prompts
+    // (the folder-trust gate is handled separately via ~/.claude.json pre-trust).
+    if (!opts.permissionMode && roleDef.kind === "loop") opts.permissionMode = "acceptEdits";
   }
 
   // A spawn-location config that named a mode whose input is missing (e.g. "worktree" with no
@@ -302,7 +295,6 @@ export function newSession(args: string[]): number {
  * yields null (fall back), never a throw.
  */
 function resolveSpawnLocationCwd(
-  db: Database,
   opts: NewSessionOpts,
   roleDef: RoleDef,
 ): { cwd: string | null; error?: string } {
@@ -311,7 +303,7 @@ function resolveSpawnLocationCwd(
       system: opts.system, role: opts.role?.replace(/^\//, ""), gusWork: opts.gusWork,
       prNumber: opts.prNumber, prRepo: opts.prRepo,
     });
-    const config = resolveConfig(row, "spawn-location", liveResolveCtx(db)).effective as SpawnLocationConfig | null;
+    const config = resolveConfig(row, "spawn-location", liveResolveCtx()).effective as SpawnLocationConfig | null;
     return interpretSpawnLocation(config, { homeDir: roleDef.homeDir, requestedCwd: opts.cwd ?? null });
   } catch {
     return { cwd: null }; // resolver hiccup → fall back to home_dir default

@@ -1,7 +1,5 @@
-import type { Database } from "bun:sqlite";
-import { join } from "node:path";
 import type { CatalogueRow } from "../catalogue/db.ts";
-import { getRoleDef } from "../catalogue/db.ts";
+import { resolveRole, ccsConfigRoot } from "../roles/role-files.ts";
 import { ccsRuntimeRoot } from "../inbox/identity-path.ts";
 import { resolveConfig } from "./resolve-config.ts";
 import { renderSections, type Section } from "./merge.ts";
@@ -18,17 +16,12 @@ import type { ResolveCtx } from "./resolve-levels.ts";
  * dropped and the valid layers still compose (ADR-0045). Never throws — the caller is a hook.
  */
 
-/** The config root (definitions). Honors $CCS_CONFIG_ROOT, else ~/.ccs-config (ADR-0041). */
-export function ccsConfigRoot(): string {
-  return process.env.CCS_CONFIG_ROOT ?? join(process.env.HOME ?? "", ".ccs-config");
-}
-
-/** Build the live resolve ctx (role home_dir from the registry + the two roots). */
-export function liveResolveCtx(db: Database): ResolveCtx {
+/** Build the live resolve ctx. Roles resolve from config FILES now (ADR-0050), so no db. */
+export function liveResolveCtx(): ResolveCtx {
   return {
     configRoot: ccsConfigRoot(),
     runtimeRoot: ccsRuntimeRoot(),
-    roleHomeDir: (role) => getRoleDef(db, role)?.homeDir ?? null,
+    roleHomeDir: (role) => resolveRole(role)?.homeDir ?? null,
   };
 }
 
@@ -40,9 +33,9 @@ export interface ComposedClaudeMd {
 }
 
 /** Resolve + render the layered claude-md for a row. Never throws. */
-export function composeClaudeMd(db: Database, row: CatalogueRow): ComposedClaudeMd {
+export function composeClaudeMd(row: CatalogueRow): ComposedClaudeMd {
   try {
-    const res = resolveConfig(row, "claude-md", liveResolveCtx(db));
+    const res = resolveConfig(row, "claude-md", liveResolveCtx());
     const sections = (res.effective as Section[] | null) ?? [];
     const rendered = renderSections(sections);
     return { context: rendered.length > 0 ? rendered : null, degraded: res.degraded };

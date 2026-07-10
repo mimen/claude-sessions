@@ -31,7 +31,7 @@ async function readStdin(): Promise<string> {
  * the base {updated_at} for any registered session so the heartbeat never regresses. */
 function metaUpdateFields(db: ReturnType<typeof openCatalogue>, row: NonNullable<ReturnType<typeof getRow>>): string[] {
   try {
-    const res = resolveConfig(row, "meta-update", liveResolveCtx(db));
+    const res = resolveConfig(row, "meta-update", liveResolveCtx());
     const fields = (res.effective as string[] | null) ?? [];
     return fields.length > 0 ? fields : ["updated_at"];
   } catch {

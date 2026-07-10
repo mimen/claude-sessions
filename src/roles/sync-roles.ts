@@ -17,8 +17,8 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import type { Database } from "bun:sqlite";
-import { allRoles, type RoleDef } from "../catalogue/db.ts";
+import { allRolesFromFiles } from "./role-files.ts";
+import { ccsRuntimeRoot } from "../inbox/identity-path.ts";
 import {
   desiredLinksForRoles,
   planReconcile,
@@ -36,46 +36,40 @@ import {
 const CLAUDE_DIR = join(homedir(), ".claude");
 const SETTINGS_PATH = join(homedir(), ".claude", "settings.json");
 
-/** Which Claude Code event a ccs hook name fires on. */
-const HOOK_EVENT: Record<string, string> = {
-  "session-start": "SessionStart",
-  stop: "Stop",
-};
+/**
+ * The GLOBAL ccs hooks (ADR-0048 model A): `session-start` + `stop` fire for EVERY session and
+ * self-filter by the session's row (ADR-0018) — so they are wired ONCE, unconditionally, not
+ * enrolled per-role. Listing them per-role was always redundant (they're global), and it
+ * conflated the materialization list with the layered-config types derived from `.ccs-hooks/`.
+ * This is the whole set; adding a global hook = adding an entry here + a handler.
+ */
+const GLOBAL_HOOKS: ReadonlyArray<{ name: string; event: string }> = [
+  { name: "session-start", event: "SessionStart" },
+  { name: "stop", event: "Stop" },
+];
 
-/** The instrumentation name a role lists in `hooks` to opt into the ccs statusline (ADR-0027).
- * It's not a hook EVENT (so desiredHooksForRoles skips it); it drives the statusLine slot. */
-const STATUSLINE_NAME = "statusline";
-
-/** The ccs-managed statusLine setting if ANY role opts in (lists "statusline" in its hooks),
- * else null. ccs hooks are global + self-filtering (ADR-0018), and so is the statusline: the
- * `ccs statusline` command prints a plain default for non-worker sessions. */
-export function desiredStatuslineForRoles(roles: RoleDef[], ccsBin = "ccs"): StatusLineSetting | null {
-  const wanted = roles.some((r) => r.hooks.includes(STATUSLINE_NAME));
-  if (!wanted) return null;
+/** The ccs-managed statusLine setting, materialized unconditionally: the `ccs statusline`
+ * command self-filters (a non-worker session prints a plain cwd default), so there's no per-role
+ * enrollment to compute — a role that wants a rich line ships a `.ccs-hooks/statusline.json`,
+ * which the resolver reads at render time (ADR-0027/0048). */
+export function desiredStatusline(ccsBin = "ccs"): StatusLineSetting {
   return { type: "command", command: `${ccsBin} statusline` };
 }
 
 /**
- * Desired ccs-managed hook entries from the registry. Each role's `hooks: [name]` becomes a
- * `ccs hook run <name>` command on the mapped event. ccs hooks are GLOBAL + self-filtering
- * (ADR-0018: role-dir hooks don't resolve), so we de-dupe by name across all roles — one
- * managed entry per (event, name), not one per role.
+ * The GLOBAL ccs-managed hook entries — one per global hook, unconditional. They're global +
+ * self-filtering (ADR-0018: role-dir hooks don't resolve), so materialization doesn't depend on
+ * which roles exist. No per-role `hooks` list is consulted (ADR-0048 model A).
  */
-export function desiredHooksForRoles(roles: RoleDef[], ccsBin = "ccs"): DesiredHook[] {
-  const names = new Set<string>();
-  for (const r of roles) for (const h of r.hooks) names.add(h);
-  const out: DesiredHook[] = [];
-  for (const name of names) {
-    const event = HOOK_EVENT[name];
-    if (!event) continue; // unknown hook name -> skip (don't wire a command that no-ops)
-    out.push({
-      event,
-      entry: { matcher: "*", hooks: [{ type: "command", command: `${ccsBin} hook run ${name}`, [MANAGED_TAG]: true }] },
-    });
-  }
-  return out;
+export function desiredHooks(ccsBin = "ccs"): DesiredHook[] {
+  return GLOBAL_HOOKS.map(({ name, event }) => ({
+    event,
+    entry: { matcher: "*", hooks: [{ type: "command", command: `${ccsBin} hook run ${name}`, [MANAGED_TAG]: true }] },
+  }));
 }
-const MANIFEST_PATH = join(homedir(), ".ccs", "materialization-manifest.json");
+// The manifest is RUNTIME state (what ccs materialized, for safe pruning) — under ~/.ccs,
+// honoring $CCS_ROOT (ADR-0041/0049), not a raw homedir join.
+const manifestPath = () => join(ccsRuntimeRoot(), "materialization-manifest.json");
 
 /** Probe what's currently at a link path (absent / our-ish symlink / a real file). */
 function probe(linkPath: string): LinkState {
@@ -97,7 +91,7 @@ function probe(linkPath: string): LinkState {
 
 function readManifest(): string[] {
   try {
-    const v = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
+    const v = JSON.parse(readFileSync(manifestPath(), "utf8"));
     return Array.isArray(v?.links) ? v.links : [];
   } catch {
     return [];
@@ -105,8 +99,8 @@ function readManifest(): string[] {
 }
 
 function writeManifest(links: string[]): void {
-  mkdirSync(dirname(MANIFEST_PATH), { recursive: true });
-  writeFileSync(MANIFEST_PATH, JSON.stringify({ links: links.sort() }, null, 2) + "\n");
+  mkdirSync(dirname(manifestPath()), { recursive: true });
+  writeFileSync(manifestPath(), JSON.stringify({ links: links.sort() }, null, 2) + "\n");
 }
 
 export interface SyncResult {
@@ -119,22 +113,19 @@ export interface SyncResult {
   dryRun: boolean;
 }
 
-/** Compute the reconcile plan for the current registry (no side effects). */
-export function planSyncRoles(db: Database, claudeDir = CLAUDE_DIR): ReconcilePlan {
-  const roles = [...allRoles(db).values()];
+/** Compute the reconcile plan from the config PACKAGE FILES (ADR-0048/0050), no side effects. */
+export function planSyncRoles(claudeDir = CLAUDE_DIR): ReconcilePlan {
+  const roles = [...allRolesFromFiles().values()];
   const desired = desiredLinksForRoles(roles, claudeDir);
   return planReconcile(desired, readManifest(), probe);
 }
 
-/** Apply the reconcile: create/prune symlinks + rewrite the manifest. */
-export function syncRoles(
-  db: Database,
-  opts: { dryRun?: boolean; hooks?: boolean } = {},
-): SyncResult {
-  const plan = planSyncRoles(db);
-  const roles = [...allRoles(db).values()];
-  const hookEntries = desiredHooksForRoles(roles);
-  const statusline = desiredStatuslineForRoles(roles);
+/** Apply the reconcile: create/prune symlinks + rewrite the manifest. Roles come from files
+ * (ADR-0050); the GLOBAL hooks + statusline are materialized unconditionally (ADR-0048 model A). */
+export function syncRoles(opts: { dryRun?: boolean; hooks?: boolean } = {}): SyncResult {
+  const plan = planSyncRoles();
+  const hookEntries = desiredHooks();
+  const statusline = desiredStatusline();
   let statuslineBlocked = false;
   if (!opts.dryRun) {
     for (const link of plan.create) {

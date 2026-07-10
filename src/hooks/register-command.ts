@@ -42,12 +42,12 @@ export async function registerSessionCommand(): Promise<number> {
           // merged order. If a `start.json` ran an `arm` action, it OWNS arming — suppress
           // handleSessionStart's built-in re-arm note to avoid a duplicate. With no start.json,
           // the built-in re-arm note is the safety net.
-          const started = runStartActions({ db, row, source: payload.source });
+          const started = runStartActions({ row, source: payload.source });
           const armedByConfig = started.ran.includes("arm");
           if (res.additionalContext && !armedByConfig) parts.push(res.additionalContext);
           if (started.context) parts.push(started.context);
           // Layered claude-md context composition (ADR-0043/0044).
-          const composed = composeClaudeMd(db, row);
+          const composed = composeClaudeMd(row);
           if (composed.context) parts.push(composed.context);
           // Predecessor rehydration (ADR-0038): a FRESH embodiment (startup, not a resume of
           // its own transcript) is pointed at prior embodiments' transcripts of the same

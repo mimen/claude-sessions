@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import type { CatalogueRow } from "../catalogue/db.ts";
 import { drain } from "../inbox/inbox.ts";
 import { identityDir, ccsRuntimeRoot, type Responsibility } from "../inbox/identity-path.ts";
@@ -19,7 +18,6 @@ import type { Action } from "./merge.ts";
  */
 
 export interface StartActionCtx {
-  db: Database;
   row: CatalogueRow;
   /** The SessionStart source (startup/resume/clear/compact) — arm only acts on resume. */
   source: string;
@@ -77,7 +75,7 @@ export function runStartActions(
 ): { context: string | null; errors: string[]; ran: string[] } {
   let actions: Action[] = [];
   try {
-    const res = resolveConfig(ctx.row, "start", liveResolveCtx(ctx.db));
+    const res = resolveConfig(ctx.row, "start", liveResolveCtx());
     actions = (res.effective as Action[] | null) ?? [];
   } catch {
     return { context: null, errors: ["start config unresolved"], ran: [] };
