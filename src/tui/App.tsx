@@ -210,7 +210,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         event: identityKeyOf(c),
         pr: c?.prNumber ?? null,
         prState: c?.prState ?? null,
-        role: c?.skill ?? null,
+        role: c?.role ?? null,
         status: describeDisposition(lc, open).label,
         phase: c?.phase ?? null,
       });

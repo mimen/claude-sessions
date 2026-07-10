@@ -51,7 +51,7 @@ export function toMember(
 ): ClusterMember {
   return {
     sessionId: row.sessionId,
-    role: row.skill ?? "(unroled)",
+    role: row.role ?? "(unroled)",
     title: row.customTitle,
     cwd,
     resumeId,

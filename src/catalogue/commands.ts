@@ -336,7 +336,7 @@ export function meta(sessionArg: string | undefined): number {
       `  lifecycle: ${row?.archived ? "archived" : row?.completed ? "completed" : row?.parkedTaskId ? "parked" : "idle"}`,
     );
     if (row?.system) console.log(`  system: ${row.system}`);
-    if (row?.skill) console.log(`  skill: ${row.skill}`);
+    if (row?.role) console.log(`  role: ${row.role}`);
     if (row?.phase) console.log(`  phase: ${row.phase}`);
     if (row?.parentSessionId) console.log(`  parent: ${labelFor(row.parentSessionId)}`);
     if (children.length) {

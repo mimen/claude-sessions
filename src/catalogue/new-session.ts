@@ -8,6 +8,8 @@ import {
   setKind,
   setKey,
   setParent,
+  setRole,
+  setResumeCommand,
   setSkill,
   setPhase,
   setProject,
@@ -39,8 +41,10 @@ import { shellQuote } from "../resume/command.ts";
 
 export interface NewSessionOpts {
   system?: string;
-  /** The session's role — stored in the catalogue `skill` field (what the TUI role column reads). */
+  /** The session's role — the canonical identity axis (ADR-0015). */
   role?: string;
+  /** How a loop is re-armed on resume so it comes back running (e.g. `/loop 15m /pr-watch-control`). */
+  resumeCommand?: string;
   kind?: Kind;
   phase?: string;
   project?: string;
@@ -70,6 +74,7 @@ export function parseOpts(args: string[]): NewSessionOpts {
     // `--role` reads best for the fleet ("this is a pr-agent"); `--skill` is accepted as a
     // synonym since both land in the catalogue `skill` column.
     role: flagValue(args, "--role") ?? flagValue(args, "--skill"),
+    resumeCommand: flagValue(args, "--resume-command"),
     kind: kindRaw === "loop" ? "loop" : kindRaw === "session" ? "session" : undefined,
     phase: flagValue(args, "--phase"),
     project: flagValue(args, "--project"),
@@ -93,7 +98,12 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
   // it now — `ccs resume` can then revive the session even before it's indexed.
   setResumeId(db, id, id, now);
   if (opts.system) setSystem(db, id, opts.system, now);
-  if (opts.role) setSkill(db, id, opts.role.replace(/^\//, ""), now);
+  if (opts.role) {
+    const role = opts.role.replace(/^\//, "");
+    setRole(db, id, role, now); // canonical (ADR-0015)
+    setSkill(db, id, role, now); // legacy mirror, kept until every consumer reads `role`
+  }
+  if (opts.resumeCommand) setResumeCommand(db, id, opts.resumeCommand, now);
   if (opts.kind) setKind(db, id, opts.kind, now);
   if (opts.phase) setPhase(db, id, opts.phase, now);
   if (opts.project) setProject(db, id, opts.project, now);

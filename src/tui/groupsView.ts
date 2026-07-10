@@ -100,7 +100,7 @@ export function buildGroupsView(rows: readonly SessionRow[], ctx: GroupsCtx): Di
     if (key.startsWith("p:")) return { key, name: key.slice(2).toUpperCase(), glyph: PROJECT_GLYPH };
     const rootId = key.slice(2);
     const root = rowById.get(rootId);
-    const name = ctx.catMap.get(rootId)?.skill ?? (root ? cleanName(root.title) : rootId);
+    const name = ctx.catMap.get(rootId)?.role ?? (root ? cleanName(root.title) : rootId);
     return { key, name: name.toUpperCase(), glyph: CONSTELLATION_GLYPH };
   };
 

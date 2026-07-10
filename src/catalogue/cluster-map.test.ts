@@ -5,7 +5,7 @@ import type { CatalogueRow } from "./db.ts";
 const row = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,
   archived: false, parkedTaskId: null, event: null, key: null, parentSessionId: null,
-  skill: null, project: null, system: "pr-watch", gusWork: null, epicId: null, phase: null, notes: null, updatedAt: null,
+  skill: null, role: null, resumeCommand: null, project: null, system: "pr-watch", gusWork: null, epicId: null, phase: null, notes: null, updatedAt: null,
   prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...o,
 });
 
@@ -17,9 +17,9 @@ test("isCoreRole: control/concierge/eval/designer are core; pr-agent is not", ()
 
 test("buildClusterMap: core group first, fleet folds multi-session PRs to one primary", () => {
   const members = [
-    toMember(row({ sessionId: "eval", skill: "pr-watch-eval" }), "~/x", "re", true),
-    toMember(row({ sessionId: "w-old", skill: "pr-agent", prRepo: "r", prNumber: 12120, updatedAt: "2026-07-01" }), "/wt/a", "ro", false),
-    toMember(row({ sessionId: "w-new", skill: "pr-agent", prRepo: "r", prNumber: 12120, updatedAt: "2026-07-08" }), "/wt/a", "rn", true),
+    toMember(row({ sessionId: "eval", role: "pr-watch-eval" }), "~/x", "re", true),
+    toMember(row({ sessionId: "w-old", role: "pr-agent", prRepo: "r", prNumber: 12120, updatedAt: "2026-07-01" }), "/wt/a", "ro", false),
+    toMember(row({ sessionId: "w-new", role: "pr-agent", prRepo: "r", prNumber: 12120, updatedAt: "2026-07-08" }), "/wt/a", "rn", true),
   ];
   const map = buildClusterMap("pr-watch", members);
   expect(map.counts.core).toBe(1);

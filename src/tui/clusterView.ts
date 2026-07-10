@@ -49,7 +49,7 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
   for (const row of rows) {
     const cat = ctx.catMap.get(row.sessionId) ?? null;
     const system = cat?.system ?? "";
-    const role = cat?.skill ?? "(unroled)";
+    const role = cat?.role ?? "(unroled)";
     const b = bySystem.get(system) ?? bySystem.set(system, { core: new Map(), workers: new Map() }).get(system)!;
     if (CORE_ROLES.has(role)) {
       (b.core.get(role) ?? b.core.set(role, []).get(role)!).push(row);

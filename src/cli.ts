@@ -258,7 +258,7 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
       const childMark = c?.parentSessionId ? "↳ " : "";
       const title = pad(childMark + (c?.customTitle ?? r.title), 42);
       const badge = pad((c?.kind === "loop" ? "LOOP " : "") + d.label + (d.nudge ? "!" : ""), 16);
-      const sk = pad(c?.skill ? `⚙${c.skill}` : "", 14);
+      const sk = pad(c?.role ? `⚙${c.role}` : "", 14);
       // Only print the event column when not already filtering to a single event.
       const evt = opts.event ? "" : pad(keyValue ? `⊞${keyValue}` : "", 18);
       const project = pad(r.projectName, 16);
@@ -306,7 +306,7 @@ function tree(_opts: { all: boolean }): number {
     for (const kids of childMap.values()) kids.sort();
     const catMap = getAll(cat);
     const skillOf = (id: string): string => {
-      const s = catMap.get(id)?.skill;
+      const s = catMap.get(id)?.role;
       return s ? `  ⚙${s}` : "";
     };
     // A node's own cost includes its index-level subagent runs (agent-*.jsonl files).

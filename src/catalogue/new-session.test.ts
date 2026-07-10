@@ -57,7 +57,8 @@ test("writeSessionMetadata: binds identity to a not-yet-indexed id (forward refe
     const row = getRow(db, id);
     expect(row).not.toBeNull();
     expect(row!.system).toBe("pr-watch");
-    expect(row!.skill).toBe("pr-agent"); // role lands in the `skill` column
+    expect(row!.role).toBe("pr-agent"); // canonical role axis (ADR-0015)
+    expect(row!.skill).toBe("pr-agent"); // legacy mirror still written during migration
     expect(row!.kind).toBe("loop");
     expect(row!.phase).toBe("building");
     expect(identityKeyOf(row)).toBe("heroku_dashboard-12080");
@@ -74,7 +75,23 @@ test("writeSessionMetadata: a leading slash on the role is normalised away", () 
   try {
     const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     writeSessionMetadata(db, id, parseOpts(["--role", "/pr-watch-control"]), NOW);
-    expect(getRow(db, id)!.skill).toBe("pr-watch-control");
+    expect(getRow(db, id)!.role).toBe("pr-watch-control");
+  } finally {
+    db.close();
+  }
+});
+
+test("writeSessionMetadata: --resume-command is stored for a loop (comes back running)", () => {
+  const db = openCatalogue(":memory:");
+  try {
+    const id = "ffffffff-0000-1111-2222-333333333333";
+    writeSessionMetadata(
+      db,
+      id,
+      parseOpts(["--role", "control", "--resume-command", "/loop 15m /pr-watch-control"]),
+      NOW,
+    );
+    expect(getRow(db, id)!.resumeCommand).toBe("/loop 15m /pr-watch-control");
   } finally {
     db.close();
   }

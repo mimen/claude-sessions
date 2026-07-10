@@ -26,8 +26,16 @@ export interface CatalogueRow {
   key: string | null;
   /** The session that spawned/owns this one (a sessionId). Children are a reverse lookup. */
   parentSessionId: string | null;
-  /** The skill or slash-command backing this session (e.g. `loop-manager`, `event-watch`). */
+  /** DEPRECATED (ADR-0015): the old "backing skill/slash-command" axis, overloaded as role.
+   * Kept for migration safety (additive-only, never dropped); superseded by `role`. */
   skill: string | null;
+  /** The session's ROLE — first-class identity axis (control, concierge, scout, pr-agent…).
+   * Replaces `skill`. Reads fall back to `skill` when unset (pre-migration rows). */
+  role: string | null;
+  /** How this session is re-armed on resume so it comes back RUNNING (e.g. a loop's
+   * `/loop 15m /pr-watch-control`). Null for non-looping roles (a worker gets a bare resume,
+   * then rehydrates). ADR-0015. */
+  resumeCommand: string | null;
   /** User-assigned project/initiative label — groups otherwise-solo sessions (e.g. `ccs`). */
   project: string | null;
   /** Operation-level grouping (e.g. `pr-watch`) — sits between constellation and session. */
@@ -64,7 +72,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 11;
+const CATALOGUE_VERSION = 12;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -207,6 +215,20 @@ function migrate(db: Database): void {
       db.exec("ALTER TABLE catalogue ADD COLUMN phase TEXT;");
     }
   }
+  if (v < 12) {
+    // Additive: `role` (first-class, replaces the overloaded `skill`) + `resume_command`
+    // (how a loop is re-armed so it comes back RUNNING). ADR-0015 abandons `skill` as an
+    // identity axis; we keep the column (additive-only, never drop) and backfill role from
+    // it, so old rows keep working and reads fall back to skill when role is unset.
+    if (!hasColumn(db, "catalogue", "role")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN role TEXT;");
+    }
+    if (!hasColumn(db, "catalogue", "resume_command")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN resume_command TEXT;");
+    }
+    // one-time backfill: seed role from the legacy skill where role is still empty
+    db.exec("UPDATE catalogue SET role = skill WHERE role IS NULL AND skill IS NOT NULL;");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -230,6 +252,9 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     key: (r.key as string) ?? null,
     parentSessionId: (r.parent_session_id as string) ?? null,
     skill: (r.skill as string) ?? null,
+    // role is canonical; fall back to the legacy skill for rows written before v12
+    role: (r.role as string) ?? (r.skill as string) ?? null,
+    resumeCommand: (r.resume_command as string) ?? null,
     project: (r.project as string) ?? null,
     system: (r.system as string) ?? null,
     gusWork: (r.gus_work as string) ?? null,
@@ -334,6 +359,14 @@ export function setParent(db: Database, sessionId: string, parentId: string | nu
 }
 export function setSkill(db: Database, sessionId: string, skill: string | null, now: string): void {
   set(db, sessionId, "skill", skill, now);
+}
+/** Set the session's ROLE (ADR-0015) — the canonical identity axis replacing `skill`. */
+export function setRole(db: Database, sessionId: string, role: string | null, now: string): void {
+  set(db, sessionId, "role", role, now);
+}
+/** Set how a session is re-armed on resume (a loop's resume_command); null for non-loops. */
+export function setResumeCommand(db: Database, sessionId: string, cmd: string | null, now: string): void {
+  set(db, sessionId, "resume_command", cmd, now);
 }
 export function setProject(db: Database, sessionId: string, project: string | null, now: string): void {
   set(db, sessionId, "project", project, now);

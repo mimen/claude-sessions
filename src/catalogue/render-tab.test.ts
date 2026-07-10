@@ -15,6 +15,8 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   key: null,
   parentSessionId: null,
   skill: null,
+  role: null,
+  resumeCommand: null,
   project: null,
   system: null,
   gusWork: null,
