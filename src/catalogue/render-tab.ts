@@ -40,7 +40,10 @@ function renderSession(row: CatalogueRow): TabRenderOps {
 }
 
 function renderLoop(row: CatalogueRow): TabRenderOps {
-  const title = row.skill || row.customTitle || identityKeyOf(row) || row.sessionId.slice(0, 8);
+  // role is the canonical label (ADR-0015); skill is dead. A loop's tab reads best as its
+  // role name (control/scout/eval), falling back to custom title / key / id.
+  const title =
+    row.customTitle || row.role || row.skill || identityKeyOf(row) || row.sessionId.slice(0, 8);
   const description = buildLoopDescription(row);
   const color = "Purple";
   const statusPill = computeLifecyclePill(row);
@@ -64,6 +67,7 @@ function buildSessionTitle(row: CatalogueRow): string {
   }
   const key = identityKeyOf(row);
   if (key) return key;
+  if (row.role) return row.role; // a role-tagged session with no title reads as its role
   return row.sessionId.slice(0, 8);
 }
 
