@@ -1,4 +1,4 @@
-import type { CatalogueRow, EpicRow } from "./db.ts";
+import type { CatalogueRow } from "./db.ts";
 
 /**
  * The Claude Code statusline renderer (ADR-0027): a pure projection of a session's ccs
@@ -37,9 +37,16 @@ const PHASE_DOT: Record<string, string> = {
  * it as current. The statusline re-runs every turn, so this only bites a truly abandoned row. */
 export const DEFAULT_STALENESS_MS = 6 * 60 * 60 * 1000; // 6h
 
+/** A generic grouping's display bits — a {label, url} the CLUSTER supplied (ADR-0051). The
+ * platform renders it clickable; it does NOT know the url is a GUS epic link. */
+export interface GroupingDisplay {
+  label: string | null;
+  url: string | null;
+}
+
 export interface StatuslineCtx {
-  /** The epic entity this row points at (for the epic short-name + url), if any. */
-  epic?: EpicRow | null;
+  /** This row's grouping display metadata (label + link), if any — supplied by the cluster. */
+  grouping?: GroupingDisplay | null;
   /** Current time as epoch ms — injected so the renderer stays pure/testable. */
   nowMs: number;
   /** Override the staleness window (ms). */
@@ -66,7 +73,7 @@ function workLabel(row: CatalogueRow): string {
 
 /**
  * Render the statusline for a session row. Returns a single line (no trailing newline).
- * Order: phase dot · linked PR/work · epic short-name · W-number.
+ * Order: phase dot · linked PR/work · grouping label · W-number.
  */
 export function renderStatusline(row: CatalogueRow, ctx: StatuslineCtx): string {
   const stale = phaseIsStale(row, ctx.nowMs, ctx.stalenessMs ?? DEFAULT_STALENESS_MS);
@@ -76,13 +83,14 @@ export function renderStatusline(row: CatalogueRow, ctx: StatuslineCtx): string 
   const url = row.prNumber && row.prRepo ? `https://github.com/${row.prRepo}/pull/${row.prNumber}` : "";
   const linked = osc8(url, workLabel(row));
 
-  const epicName = ctx.epic?.shortName || ctx.epic?.name?.replace(/^\[[^\]]+\]\s*/, "") || null;
-  const epicBit = ctx.epic?.url && epicName ? osc8(ctx.epic.url, epicName) : epicName;
+  // The grouping is a generic {label, url} the cluster supplied (ADR-0051) — clickable if a url.
+  const gLabel = ctx.grouping?.label?.replace(/^\[[^\]]+\]\s*/, "") || null;
+  const groupingBit = ctx.grouping?.url && gLabel ? osc8(ctx.grouping.url, gLabel) : gLabel;
 
   // W-number only when it isn't already the primary label (avoid "W-123 … · W-123").
   const wBit = row.gusWork && row.prNumber ? row.gusWork : null;
 
-  const bits = [dot, linked, epicBit, wBit].filter((b): b is string => !!b);
+  const bits = [dot, linked, groupingBit, wBit].filter((b): b is string => !!b);
   return bits.join(" · ");
 }
 

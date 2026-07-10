@@ -11,9 +11,10 @@
  * (ADR-0035): any error prints the safe default and exits 0 — the statusline never blocks a turn.
  */
 import { basename } from "node:path";
-import { openCatalogue, getRow, getEpic } from "../catalogue/db.ts";
+import { openCatalogue, getRow } from "../catalogue/db.ts";
 import { CATALOGUE_PATH } from "../paths.ts";
 import { renderStatusline } from "../catalogue/render-statusline.ts";
+import { getGrouping } from "../state/groupings.ts";
 
 interface StatuslinePayload {
   session_id?: string;
@@ -57,8 +58,11 @@ export async function statuslineCommand(): Promise<number> {
         const row = getRow(db, payload.session_id);
         // Only sessions with a PR or work-item get the rich statusline; others stay default.
         if (row && (row.prNumber || row.gusWork)) {
-          const epic = row.epicId ? getEpic(db, row.epicId) : null;
-          line = renderStatusline(row, { nowMs: Date.now(), epic });
+          // Grouping display (label+url) is cluster RUNTIME state now (ADR-0051), not a platform
+          // epics table — the cluster's sensor filled it; we read the generic slot.
+          const g = row.system && row.epicId ? getGrouping(row.system, row.epicId) : null;
+          const grouping = g ? { label: g.shortName ?? g.label, url: g.url } : null;
+          line = renderStatusline(row, { nowMs: Date.now(), grouping });
         }
       } finally {
         db.close();

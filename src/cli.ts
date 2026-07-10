@@ -29,6 +29,7 @@ import { statuslineCommand } from "./hooks/statusline-command.ts";
 import { hooksCommand } from "./hooks/hooks-command.ts";
 import { inboxCommand } from "./inbox/inbox-command.ts";
 import { stateCommand } from "./state/state-command.ts";
+import { groupingCommand } from "./state/grouping-command.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -151,6 +152,8 @@ export async function main(argv: string[]): Promise<number> {
       return inboxCommand(args.slice(1));
     case "state":
       return stateCommand(args.slice(1));
+    case "grouping":
+      return groupingCommand(args.slice(1));
     case "roles":
       return rolesCommand(args.slice(1));
     case "sync-roles":

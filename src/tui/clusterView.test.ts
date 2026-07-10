@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { SessionRow } from "../index/index.ts";
-import type { CatalogueRow, EpicRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db.ts";
+import type { EpicDisplay } from "../state/groupings.ts";
 import { buildClusterView } from "./clusterView.ts";
 
 const row = (id: string): SessionRow => ({ sessionId: id, lastTs: "2026-07-08" } as unknown as SessionRow);
@@ -19,8 +20,8 @@ test("buildClusterView: core tier first (★), then WORKERS grouped by epic shor
     ["w3", cat({ sessionId: "w3", system: "pr-watch", role: "pr-agent", epicId: null })], // no epic
     ["stray", cat({ sessionId: "stray" })], // no system
   ]);
-  const epicMap = new Map<string, EpicRow>([
-    ["E1", { epicId: "E1", name: "[Front End] Team-Owned Tokens UI", shortName: "Team Tokens", url: null, updatedAt: null }],
+  const epicMap = new Map<string, EpicDisplay>([
+    ["E1", { name: "[Front End] Team-Owned Tokens UI", shortName: "Team Tokens", url: null }],
   ]);
   const items = buildClusterView([row("eval"), row("w1"), row("w2"), row("w3"), row("stray")], {
     catMap, epicMap, openSet: new Set(), collapsedSections: new Set(),

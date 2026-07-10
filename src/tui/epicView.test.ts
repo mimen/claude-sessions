@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { SessionRow } from "../index/index.ts";
-import type { CatalogueRow, EpicRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db.ts";
+import type { EpicDisplay } from "../state/groupings.ts";
 import { buildEpicView } from "./epicView.ts";
 
 const row = (id: string): SessionRow => ({ sessionId: id, lastTs: "2026-07-08" } as unknown as SessionRow);
@@ -18,8 +19,8 @@ test("buildEpicView: groups system members by epic, strips team prefix, no-epic 
     ["c", cat({ sessionId: "c", system: "pr-watch", epicId: null })], // no epic
     ["x", cat({ sessionId: "x" })], // no system -> excluded
   ]);
-  const epicMap = new Map<string, EpicRow>([
-    ["E1", { epicId: "E1", name: "[Front End] FY27 Metered Pricing", shortName: "Metered", url: "http://gus/E1", updatedAt: null }],
+  const epicMap = new Map<string, EpicDisplay>([
+    ["E1", { name: "[Front End] FY27 Metered Pricing", shortName: "Metered", url: "http://gus/E1" }],
   ]);
   const items = buildEpicView([row("a"), row("b"), row("c"), row("x")], {
     catMap, epicMap, collapsedSections: new Set(),

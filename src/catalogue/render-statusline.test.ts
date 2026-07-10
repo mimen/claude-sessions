@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { renderStatusline, osc8, DEFAULT_STALENESS_MS } from "./render-statusline.ts";
-import type { CatalogueRow, EpicRow } from "./db.ts";
+import type { CatalogueRow } from "./db.ts";
 
 const NOW = Date.parse("2026-07-10T12:00:00Z");
 
@@ -35,15 +35,24 @@ test("strips a leading #num already baked into the title (no double PR#)", () =>
   expect(line.match(/#12080/g)?.length).toBe(1);
 });
 
-test("adds epic short-name (linked) and W-number when both present", () => {
-  const epic: EpicRow = { epicId: "e1", name: "[Heroku] FY27 Metered Pricing", shortName: "Metered Pricing", url: "https://gus/epic", updatedAt: null };
+test("adds the grouping label (linked) and W-number when both present", () => {
+  const grouping = { label: "Metered Pricing", url: "https://gus/epic" };
   const line = renderStatusline(
     row({ prNumber: 12080, prRepo: "heroku/dashboard", gusWork: "W-23392849", phase: "ready" }),
-    { nowMs: NOW, epic },
+    { nowMs: NOW, grouping },
   );
   expect(line).toContain("Metered Pricing");
   expect(line).toContain("W-23392849");
   expect(line).toContain(osc8("https://gus/epic", "Metered Pricing"));
+});
+
+test("strips a [Team] prefix from the grouping label", () => {
+  const line = renderStatusline(
+    row({ prNumber: 5, prRepo: "a/b" }),
+    { nowMs: NOW, grouping: { label: "[Heroku] Metered Pricing", url: null } },
+  );
+  expect(line).toContain("Metered Pricing");
+  expect(line).not.toContain("[Heroku]");
 });
 
 test("a W-only session (no PR) uses the W-number as the label, not a trailing dup", () => {

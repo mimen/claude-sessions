@@ -30,7 +30,8 @@ import { SectionCard } from "./SectionCard.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
-import { getAll, allEpics, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle, identityKeyOf } from "../catalogue/db.ts";
+import { getAll, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle, identityKeyOf } from "../catalogue/db.ts";
+import { allGroupingsAcrossClusters } from "../state/groupings.ts";
 import { describe as describeDisposition } from "../catalogue/disposition.ts";
 import { loadPrefs, savePrefs } from "./prefs.ts";
 import { openSessionTitlesAsync } from "../catalogue/open-state.ts";
@@ -134,10 +135,16 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
     () => (catalogue ? getAll(catalogue) : new Map()),
     [catalogue, refreshTick],
   );
-  const epicMap = useMemo(
-    () => (catalogue ? allEpics(catalogue) : new Map()),
-    [catalogue, refreshTick],
-  );
+  // Grouping (epic) display metadata is CLUSTER RUNTIME state now (ADR-0051), not a platform
+  // epics table. Read it across all clusters and adapt to the {name,shortName,url} shape the
+  // TUI's epic views expect — the clickable-epic experience is unchanged, just re-sourced.
+  const epicMap = useMemo(() => {
+    const out = new Map<string, { name: string | null; shortName: string | null; url: string | null }>();
+    for (const [id, g] of allGroupingsAcrossClusters()) {
+      out.set(id, { name: g.label, shortName: g.shortName, url: g.url });
+    }
+    return out;
+  }, [refreshTick]);
   // Live cmux workspace titles (source of truth for open sessions) — override the ccs Title while
   // open. Also gives us the open-set (its keys) so we probe cmux once, not twice.
   const [openTitles, setOpenTitles] = useState<Map<string, string>>(new Map());

@@ -72,7 +72,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 14;
+const CATALOGUE_VERSION = 15;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -257,6 +257,13 @@ function migrate(db: Database): void {
     // in ~/.ccs-config; nothing rebuilds this table.
     db.exec("DROP TABLE IF EXISTS roles;");
   }
+  if (v < 15) {
+    // ADR-0051: a grouping's DISPLAY metadata (name/link/shortname) + notes are CLUSTER RUNTIME
+    // state (src/state/groupings.ts), written by the cluster's adapter — not a platform table
+    // that leaked a GUS concept into the schema. DROP `epics`; the generic `epic_id` grouping
+    // axis stays on the catalogue row (+ its index). Same deliberate exception as v14.
+    db.exec("DROP TABLE IF EXISTS epics;");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -427,66 +434,18 @@ export function sessionsForGusWork(db: Database, gusWork: string): string[] {
   ).map((r) => r.session_id);
 }
 
-// ---- Epic entity (first-class: name + url stored once, sessions reference by id) ----
+// ---- Grouping axis (epic) ------------------------------------------------------
+// `epic_id` on a session is a GENERIC grouping axis (ADR-0051). The grouping's DISPLAY metadata
+// (name/link/shortname) + notes are CLUSTER RUNTIME state (src/state/groupings.ts), written by
+// the cluster's adapter — NOT a hardcoded platform `epics` table (which was dropped, v15). GUS
+// is one adapter behind that seam, not a platform concept. Only the row-FK operations live here.
 
-export interface EpicRow {
-  epicId: string;
-  name: string | null;
-  /** Short, column-friendly label (e.g. "Team Tokens") — for grouping headers / a narrow column. */
-  shortName: string | null;
-  url: string | null;
-  updatedAt: string | null;
-}
-
-/** Derive a short epic label from the full name: drop the "[Team]" prefix + "FY27 " filler,
- * then take a few significant leading words. A caller-supplied short name always wins. */
-export function deriveShortName(name: string | null): string | null {
-  if (!name) return null;
-  let s = name.replace(/^\[[^\]]+\]\s*/, "").replace(/^FY\d{2}\s+/, "").trim();
-  // Cut at a natural boundary (before "&", ":", "—", or after ~3 words) for a tight label.
-  s = s.split(/\s*[&:—-]\s*/)[0]!.trim();
-  const words = s.split(/\s+/);
-  return (words.length > 4 ? words.slice(0, 4).join(" ") : s) || null;
-}
-
-/** Upsert an epic entity (id + name + short_name + url). short_name derived if not given. */
-export function upsertEpic(
-  db: Database, epicId: string, name: string | null, url: string | null, now: string, shortName?: string | null,
-): void {
-  const short = shortName ?? deriveShortName(name);
-  db.query(
-    `INSERT INTO epics (epic_id, name, short_name, url, updated_at) VALUES ($id, $name, $short, $url, $now)
-     ON CONFLICT(epic_id) DO UPDATE SET name=excluded.name, short_name=excluded.short_name,
-       url=excluded.url, updated_at=excluded.updated_at`,
-  ).run({ $id: epicId, $name: name, $short: short, $url: url, $now: now });
-}
-
-/** Point a session at its epic entity (FK). null clears it. */
+/** Point a session at its grouping (the epic_id axis). null clears it. */
 export function setSessionEpic(db: Database, sessionId: string, epicId: string | null, now: string): void {
   set(db, sessionId, "epic_id", epicId, now);
 }
 
-function epicRowFrom(r: {
-  epic_id: string; name: string | null; short_name: string | null; url: string | null; updated_at: string | null;
-}): EpicRow {
-  return { epicId: r.epic_id, name: r.name, shortName: r.short_name, url: r.url, updatedAt: r.updated_at };
-}
-
-export function getEpic(db: Database, epicId: string): EpicRow | null {
-  const r = db.query("SELECT epic_id, name, short_name, url, updated_at FROM epics WHERE epic_id = $id").get({ $id: epicId }) as
-    | { epic_id: string; name: string | null; short_name: string | null; url: string | null; updated_at: string | null }
-    | null;
-  return r ? epicRowFrom(r) : null;
-}
-
-export function allEpics(db: Database): Map<string, EpicRow> {
-  const rows = db.query("SELECT epic_id, name, short_name, url, updated_at FROM epics").all() as {
-    epic_id: string; name: string | null; short_name: string | null; url: string | null; updated_at: string | null;
-  }[];
-  return new Map(rows.map((r) => [r.epic_id, epicRowFrom(r)]));
-}
-
-/** Reverse lookup: sessions belonging to an epic. */
+/** Reverse lookup: sessions belonging to a grouping. */
 export function sessionsForEpic(db: Database, epicId: string): string[] {
   return (
     db.query("SELECT session_id FROM catalogue WHERE epic_id = $e").all({ $e: epicId }) as {

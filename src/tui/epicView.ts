@@ -1,5 +1,6 @@
 import type { SessionRow } from "../index/index.ts";
-import type { CatalogueRow, EpicRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db.ts";
+import type { EpicDisplay } from "../state/groupings.ts";
 import { sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./groupByProject.ts";
 
 /**
@@ -14,7 +15,7 @@ import { sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./g
 
 export interface EpicViewCtx {
   catMap: ReadonlyMap<string, CatalogueRow>;
-  epicMap: ReadonlyMap<string, EpicRow>;
+  epicMap: ReadonlyMap<string, EpicDisplay>;
   collapsedSections: ReadonlySet<string>;
   expandedSessions?: ReadonlySet<string>;
   childCounts?: ReadonlyMap<string, number>;

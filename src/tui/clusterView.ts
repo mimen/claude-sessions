@@ -1,7 +1,8 @@
 import type { SessionRow } from "../index/index.ts";
-import type { CatalogueRow, EpicRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db.ts";
 import { lifecycleOf } from "../catalogue/db.ts";
 import { isCoreRole } from "../catalogue/cluster-map.ts";
+import type { EpicDisplay } from "../state/groupings.ts";
 import { sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./groupByProject.ts";
 
 /**
@@ -22,7 +23,7 @@ const CORE_ORDER = ["control", "concierge", "slack-scout", "eval", "designer", "
 
 export interface ClusterViewCtx {
   catMap: ReadonlyMap<string, CatalogueRow>;
-  epicMap: ReadonlyMap<string, EpicRow>;
+  epicMap: ReadonlyMap<string, EpicDisplay>;
   openSet: ReadonlySet<string>;
   collapsedSections: ReadonlySet<string>;
   expandedSessions?: ReadonlySet<string>;

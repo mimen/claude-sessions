@@ -3,6 +3,7 @@ import { resolveRole, ccsConfigRoot } from "../roles/role-files.ts";
 import { ccsRuntimeRoot } from "../inbox/identity-path.ts";
 import { resolveConfig } from "./resolve-config.ts";
 import { renderSections, type Section } from "./merge.ts";
+import { getGrouping } from "../state/groupings.ts";
 import type { ResolveCtx } from "./resolve-levels.ts";
 
 /**
@@ -32,12 +33,24 @@ export interface ComposedClaudeMd {
   degraded: boolean;
 }
 
-/** Resolve + render the layered claude-md for a row. Never throws. */
+/** Resolve + render the layered claude-md for a row, then append the grouping's accumulated
+ * NOTES (ADR-0051: a grouping's context = authored config sections + agent-accumulated runtime
+ * notes). The authored context comes from the config layers; the notes from cluster runtime
+ * state. Never throws. */
 export function composeClaudeMd(row: CatalogueRow): ComposedClaudeMd {
   try {
     const res = resolveConfig(row, "claude-md", liveResolveCtx());
     const sections = (res.effective as Section[] | null) ?? [];
-    const rendered = renderSections(sections);
+    const parts = [renderSections(sections)];
+    // Grouping notes: project-level memory accumulated by agents (ADR-0051), injected after the
+    // authored context. Runtime state, so it grows as the initiative is worked.
+    if (row.system && row.epicId) {
+      const g = getGrouping(row.system, row.epicId);
+      if (g && g.notes.length > 0) {
+        parts.push(`## grouping-notes\n${g.notes.map((n) => `- ${n}`).join("\n")}`);
+      }
+    }
+    const rendered = parts.filter((p) => p.length > 0).join("\n\n");
     return { context: rendered.length > 0 ? rendered : null, degraded: res.degraded };
   } catch {
     return { context: null, degraded: false }; // fail-open: a hook must never block
