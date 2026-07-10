@@ -112,6 +112,29 @@ ccs sync-roles --hooks        # ALSO merge ccs hooks into ~/.claude/settings.jso
 Safe: prunes only ccs-created links (tracked in `~/.ccs/materialization-manifest.json`), never
 touches user files. Hooks merge with the user's own — ccs owns only its tagged entries.
 
+## Layered hook config (ADR-0043/0044/0045)
+
+A session's behavior is composed from layered config resolved from its ROW (identity), not its
+cwd. Config files live at `<level-dir>/.ccs-hooks/<type>.{md,json}`, layered broad → specific:
+`user → cluster → role → epic → work-unit → identity`. Enrollment = file-presence (a level
+opts in by having the file). Config levels live in `~/.ccs-config` (git); the identity level in
+`~/.ccs` (runtime).
+
+```bash
+ccs hooks explain <session|.> <type>   # which levels contributed + the effective merged config
+ccs hooks lint                         # flag unknown types / bad formats / collisions /
+                                       #   dead meta-update fields / unhandled start actions
+```
+Hook types + how their layers merge:
+- `claude-md` (sections, floor-protected) — the layered context injected on SessionStart.
+- `meta-update` (set-union) — a FRESHNESS CONTRACT: which fields should be fresh; values come
+  from each field's own writer (sensor/artifact/timestamp), never from the agent remembering.
+- `start` (ordered-actions, EXECUTED) — arm / drain-inbox on SessionStart.
+- `cmux-paint` / `statusline` / `spawn-location` (most-specific-wins) — one owner each.
+
+Determinism: resolves purely from the row; a corrupt layer fails THAT type closed (session
+`degraded`) while valid layers still apply. Edit config → `ccs hooks lint` → `ccs hooks explain`.
+
 ## Messaging + state (any cluster)
 
 ```bash
@@ -133,6 +156,7 @@ All state is enveloped (schemaVersion + updatedAt + source), atomic, under `~/.c
 4. Tabs stale? `ccs sync-tabs --all`.
 5. State fresh? `ccs state get --cluster <c> board` — check `updatedAt` is recent (a loop tick).
 6. Old/misplaced sessions left behind? `ccs mark <id> --archived`.
+7. Hook config sound? `ccs hooks lint` — no dead contracts / unhandled actions / collisions.
 
 ## Don'ts
 
