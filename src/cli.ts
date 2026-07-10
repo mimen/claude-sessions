@@ -11,7 +11,7 @@ import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf,
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, key, event, parent, skill, project, system, phase, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, key, event, parent, skill, role, resumeCommand, gusWork, sessionEpic, project, system, phase, meta } from "./catalogue/commands.ts";
 import { newSession } from "./catalogue/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { backfillTitles } from "./titler/queue.ts";
@@ -111,6 +111,14 @@ export async function main(argv: string[]): Promise<number> {
       return project(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "system":
       return system(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "role":
+      return role(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "resume-command":
+      return resumeCommand(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "gus-work":
+      return gusWork(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "epic":
+      return sessionEpic(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "phase":
       return phase(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "new-session":

@@ -9,6 +9,10 @@ import {
   setKey,
   setParent,
   setSkill,
+  setRole,
+  setResumeCommand,
+  setGusWork,
+  setSessionEpic,
   setPhase,
   setProject,
   setSystem,
@@ -296,6 +300,86 @@ export function system(sessionArg: string | undefined, slug: string | undefined,
   try {
     setSystem(db, id, off ? null : slug!.trim(), now());
     console.log(off ? `cleared system on ${id.slice(0, 8)}…` : `system ${slug!.trim()} → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/** ccs role [<id>|.] <role> [--off] — set the canonical role (ADR-0015). */
+export function role(sessionArg: string | undefined, roleName: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!off && (!roleName || !roleName.trim())) {
+    console.error("usage: ccs role [<session-id>|.] <role> [--off]");
+    return 1;
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH);
+  try {
+    setRole(db, id, off ? null : roleName!.trim().replace(/^\//, ""), now());
+    console.log(off ? `cleared role on ${id.slice(0, 8)}…` : `role ${roleName!.trim()} → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/** ccs resume-command [<id>|.] "<cmd>" [--off] — set how a loop re-arms on resume (ADR-0015). */
+export function resumeCommand(sessionArg: string | undefined, cmd: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!off && (!cmd || !cmd.trim())) {
+    console.error('usage: ccs resume-command [<session-id>|.] "<command>" [--off]');
+    return 1;
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH);
+  try {
+    setResumeCommand(db, id, off ? null : cmd!.trim(), now());
+    console.log(off ? `cleared resume-command on ${id.slice(0, 8)}…` : `resume-command set → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/** ccs gus-work [<id>|.] <W-number> [--off] — set the work-item id (ADR-0013). */
+export function gusWork(sessionArg: string | undefined, w: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!off && (!w || !w.trim())) {
+    console.error("usage: ccs gus-work [<session-id>|.] <W-number> [--off]");
+    return 1;
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH);
+  try {
+    setGusWork(db, id, off ? null : w!.trim(), now());
+    console.log(off ? `cleared gus-work on ${id.slice(0, 8)}…` : `gus-work ${w!.trim()} → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/** ccs epic [<id>|.] <epic-id> [--off] — point a session at its epic entity (FK). */
+export function sessionEpic(sessionArg: string | undefined, epicId: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!off && (!epicId || !epicId.trim())) {
+    console.error("usage: ccs epic [<session-id>|.] <epic-id> [--off]");
+    return 1;
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH);
+  try {
+    setSessionEpic(db, id, off ? null : epicId!.trim(), now());
+    console.log(off ? `cleared epic on ${id.slice(0, 8)}…` : `epic ${epicId!.trim()} → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
   }

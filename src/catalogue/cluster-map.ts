@@ -35,8 +35,14 @@ export interface ClusterMap {
   readonly groups: { role: string; kind: "core" | "fleet"; members: ClusterMember[]; folded: Map<string, ClusterMember[]> }[];
 }
 
-/** Roles that are CORE (the star/support that runs the cluster) vs FLEET (per-PR workers). */
-const CORE_ROLES = new Set(["pr-watch-control", "pr-watch-2", "pr-watch-eval", "loop-designer"]);
+/** Roles that are CORE (the singletons that run the cluster) vs FLEET (per-work-unit workers).
+ * Clean role labels (ADR-0015), not the old command-name labels. Legacy pr-watch-* names kept
+ * so pre-retag sessions still group correctly during migration. */
+const CORE_ROLES = new Set([
+  "control", "scout", "eval", "concierge",
+  // legacy command-name labels (pre-ADR-0015 retag) — remove once no session uses them:
+  "pr-watch-control", "pr-watch-scout", "pr-watch-eval", "pr-watch-2", "loop-designer",
+]);
 
 export function isCoreRole(role: string | null): boolean {
   return !!role && CORE_ROLES.has(role);
@@ -72,14 +78,20 @@ export function buildClusterMap(system: string, members: ClusterMember[]): Clust
     byRole.set(m.role, list);
   }
   const groups: ClusterMap["groups"] = [];
-  // Core groups first, in a stable role order; then fleet roles alphabetically.
-  const coreOrder = ["pr-watch-control", "pr-watch-2", "pr-watch-eval", "loop-designer"];
-  for (const role of coreOrder) {
-    if (byRole.has(role)) {
-      const { primaries, folded } = foldByUnit(byRole.get(role)!);
-      groups.push({ role, kind: "core", members: primaries, folded });
-      byRole.delete(role);
-    }
+  // Core groups first (a stable, human-sensible order), then fleet roles alphabetically.
+  // Core/fleet is decided by isCoreRole — the single source of truth — not a parallel list.
+  const CORE_ORDER = ["control", "concierge", "scout", "eval", "loop-designer",
+    // legacy labels, in case a pre-retag session still carries one:
+    "pr-watch-control", "pr-watch-2", "pr-watch-eval", "pr-watch-scout"];
+  const coreRoles = [...byRole.keys()].filter((r) => isCoreRole(r));
+  coreRoles.sort((a, b) => {
+    const ia = CORE_ORDER.indexOf(a), ib = CORE_ORDER.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || (a < b ? -1 : 1);
+  });
+  for (const role of coreRoles) {
+    const { primaries, folded } = foldByUnit(byRole.get(role)!);
+    groups.push({ role, kind: "core", members: primaries, folded });
+    byRole.delete(role);
   }
   for (const role of [...byRole.keys()].sort()) {
     const { primaries, folded } = foldByUnit(byRole.get(role)!);
