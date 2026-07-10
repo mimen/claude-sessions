@@ -22,6 +22,7 @@ import type { ResumeCommand } from "./resume/command.ts";
 import { executeSystemResume } from "./resume/execute-system.ts";
 import { resumeSessionEntry } from "./resume/resume-session.ts";
 import { resumeClusterEntry } from "./resume/resume-cluster.ts";
+import { syncRoles } from "./roles/sync-roles.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -49,6 +50,7 @@ Usage:
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<id>|.|--all]   Sync catalogue metadata to live cmux tabs (title/description/color/pill)
   ccs cluster <system>  Show the cluster map: members by role, liveness, how to reach each
+  ccs sync-roles        Materialize the roles registry into ~/.claude (symlink reconcile)
   ccs resume-session <id>  Re-embody one identity (the core op; loops come back running)
   ccs resume-cluster <c>   Resume every not-open identity in a cluster (loop over resume-session)
   ccs resume <system>   Resume all sessions in a system (idempotent; legacy alias)
@@ -111,6 +113,8 @@ export async function main(argv: string[]): Promise<number> {
       return newSession(args.slice(1));
     case "sync-tabs":
       return syncTabs(args.slice(1));
+    case "sync-roles":
+      return syncRolesCmd(args.includes("--dry-run"));
     case "cluster":
       return clusterView(args[1], args.includes("--expand") || args.includes("--all"));
     case "resume-session":
@@ -415,6 +419,23 @@ function resumeSession(sessionId: string | undefined, dryRun: boolean): number {
     }
   } finally {
     db.close();
+    cat.close();
+  }
+}
+
+/** `ccs sync-roles` — materialize the roles registry into ~/.claude (ADR-0022/0034). */
+function syncRolesCmd(dryRun: boolean): number {
+  const cat = openCatalogue(CATALOGUE_PATH);
+  try {
+    const r = syncRoles(cat, { dryRun });
+    const verb = dryRun ? "would create" : "created";
+    console.log(`ccs: sync-roles — ${verb} ${r.created}, pruned ${r.pruned}`);
+    if (r.collisions.length) {
+      console.warn(`ccs: skipped ${r.collisions.length} (a non-ccs file is in the way):`);
+      for (const c of r.collisions) console.warn(`  ${c}`);
+    }
+    return 0;
+  } finally {
     cat.close();
   }
 }
