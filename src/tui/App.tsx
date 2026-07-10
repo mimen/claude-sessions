@@ -18,6 +18,7 @@ import { backfillTitles } from "../titler/queue.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "../resume/command.ts";
 import { resolveTarget, cmuxReachableAsync } from "../resume/target.ts";
 import { openInCmux } from "../resume/cmux.ts";
+import { focusSession } from "../cmux/liveness.ts";
 import { searchRows } from "./search.ts";
 import { buildDisplayItems, type SortMode } from "./groupByProject.ts";
 import { SessionList } from "./SessionList.tsx";
@@ -415,6 +416,13 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
     const r = item.row;
     if (r.isSubagent) {
       setStatus("subagent runs aren't resumable — they're task runs spawned by a parent session");
+      return;
+    }
+    // If the session is already live, FOCUS its existing tab instead of spawning a duplicate
+    // (ADR-0040: exact session→surface→workspace resolution). Enter = "take me to it".
+    if (openSet.has(r.sessionId) || openSet.has(r.resumeId)) {
+      const focused = focusSession(r.sessionId);
+      setStatus(focused ? `switched to → ${r.title}` : `already open, but couldn't switch to ${r.title}`);
       return;
     }
     const { cwd, note } = resolveResumeCwd(r);

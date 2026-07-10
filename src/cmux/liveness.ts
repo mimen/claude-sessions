@@ -70,6 +70,27 @@ export function primaryWorkspaceForSession(
 }
 
 /**
+ * Focus the live workspace running a session (switch to its tab), if it's open. Resolves
+ * the workspace + window by surface UUID (exact, ADR-0040). Returns whether it focused —
+ * false if the session isn't live (caller should then resume instead).
+ */
+export function focusSession(sessionId: string, cmuxBin = "cmux"): boolean {
+  const loc = workspaceForSession(sessionId);
+  if (!loc) return false;
+  try {
+    execFileSync(cmuxBin, ["select-workspace", "--workspace", loc.workspaceRef, "--window", loc.windowRef], {
+      timeout: 3000,
+      stdio: "ignore",
+    });
+    // bring its window forward too (the workspace may be in a background window)
+    execFileSync(cmuxBin, ["focus-window", "--window", loc.windowRef], { timeout: 3000, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Push a workspace rename to cmux if the session is currently open there, resolving the
  * workspace by SURFACE UUID (exact, ADR-0040) — no cwd/title guess. Returns success.
  */
