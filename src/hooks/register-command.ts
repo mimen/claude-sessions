@@ -6,9 +6,10 @@
  * a SessionStart hook's stdout to the agent as context). ALWAYS exits 0 — a hook must never
  * block session start (fail-open, ADR-0035).
  */
-import { openCatalogue } from "../catalogue/db.ts";
+import { openCatalogue, getRow } from "../catalogue/db.ts";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import { handleSessionStart, type SessionStartPayload } from "./register.ts";
+import { composeClaudeMd } from "./compose-claude-md.ts";
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -31,7 +32,18 @@ export async function registerSessionCommand(): Promise<number> {
     const db = openCatalogue(CATALOGUE_PATH);
     try {
       const res = handleSessionStart(db, payload, now());
-      if (res.additionalContext) process.stdout.write(res.additionalContext + "\n");
+      // Compose the layered claude-md context (ADR-0043/0044) for a registered session and
+      // append it after any register/re-arm note. Best-effort; a miss injects nothing.
+      const parts: string[] = [];
+      if (res.additionalContext) parts.push(res.additionalContext);
+      if (res.registered && payload.session_id) {
+        const row = getRow(db, payload.session_id);
+        if (row) {
+          const composed = composeClaudeMd(db, row);
+          if (composed.context) parts.push(composed.context);
+        }
+      }
+      if (parts.length > 0) process.stdout.write(parts.join("\n\n") + "\n");
     } finally {
       db.close();
     }
