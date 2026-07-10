@@ -11,6 +11,7 @@ import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import { handleSessionStart, type SessionStartPayload } from "./register.ts";
 import { composeClaudeMd } from "./compose-claude-md.ts";
 import { runStartActions } from "./start-actions.ts";
+import { composePredecessors } from "./compose-predecessors.ts";
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -48,6 +49,13 @@ export async function registerSessionCommand(): Promise<number> {
           // Layered claude-md context composition (ADR-0043/0044).
           const composed = composeClaudeMd(db, row);
           if (composed.context) parts.push(composed.context);
+          // Predecessor rehydration (ADR-0038): a FRESH embodiment (startup, not a resume of
+          // its own transcript) is pointed at prior embodiments' transcripts of the same
+          // identity. Skip on resume — that session keeps its own history.
+          if (payload.source !== "resume") {
+            const preds = composePredecessors(payload.session_id);
+            if (preds) parts.push(preds);
+          }
         }
       } else if (res.additionalContext) {
         // Unregistered: surface the ask-to-register note (no row to run start actions against).
