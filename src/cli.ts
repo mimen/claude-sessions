@@ -24,6 +24,7 @@ import { resumeClusterEntry } from "./resume/resume-cluster.ts";
 import { syncRoles } from "./roles/sync-roles.ts";
 import { rolesCommand } from "./catalogue/roles-command.ts";
 import { registerSessionCommand } from "./hooks/register-command.ts";
+import { hookRunCommand } from "./hooks/hook-run.ts";
 import { inboxCommand } from "./inbox/inbox-command.ts";
 import { stateCommand } from "./state/state-command.ts";
 
@@ -55,7 +56,8 @@ Usage:
   ccs cluster <system>  Show the cluster map: members by role, liveness, how to reach each
   ccs inbox send|bump|drain|pending  Durable per-identity messaging; bump also wakes a live tab (ADR-0028)
   ccs state get|set|merge  Durable state store (--cluster <c> or --role <r> …) (ADR-0031)
-  ccs register-session  SessionStart hook: register/refresh a session from its stdin payload
+  ccs hook run <name>   Run a named ccs hook (session-start | stop) from its stdin payload
+  ccs register-session  (alias for 'ccs hook run session-start')
   ccs roles [ls|upsert|rm]  Manage the roles registry (definitions sync-roles/resume use)
   ccs sync-roles        Materialize the roles registry into ~/.claude (symlink reconcile)
   ccs resume-session <id>  Re-embody one identity (the core op; loops come back running)
@@ -128,8 +130,13 @@ export async function main(argv: string[]): Promise<number> {
       return newSession(args.slice(1));
     case "sync-tabs":
       return syncTabs(args.slice(1));
+    case "hook":
+      // `ccs hook run <name>` — the named-hook dispatcher (settings.json wires these)
+      if (args[1] === "run") return await hookRunCommand(args.slice(2));
+      console.error("usage: ccs hook run <name>");
+      return 1;
     case "register-session":
-      return await registerSessionCommand();
+      return await registerSessionCommand(); // back-compat alias for `hook run session-start`
     case "inbox":
       return inboxCommand(args.slice(1));
     case "state":
@@ -137,7 +144,7 @@ export async function main(argv: string[]): Promise<number> {
     case "roles":
       return rolesCommand(args.slice(1));
     case "sync-roles":
-      return syncRolesCmd(args.includes("--dry-run"));
+      return syncRolesCmd(args.includes("--dry-run"), args.includes("--hooks"));
     case "cluster":
       return clusterView(args[1], args.includes("--expand") || args.includes("--all"));
     case "resume-session":
@@ -450,12 +457,12 @@ function resumeSession(sessionId: string | undefined, dryRun: boolean): number {
 }
 
 /** `ccs sync-roles` — materialize the roles registry into ~/.claude (ADR-0022/0034). */
-function syncRolesCmd(dryRun: boolean): number {
+function syncRolesCmd(dryRun: boolean, hookFlag: boolean): number {
   const cat = openCatalogue(CATALOGUE_PATH);
   try {
-    const r = syncRoles(cat, { dryRun });
+    const r = syncRoles(cat, { dryRun, hooks: hookFlag });
     const verb = dryRun ? "would create" : "created";
-    console.log(`ccs: sync-roles — ${verb} ${r.created}, pruned ${r.pruned}`);
+    console.log(`ccs: sync-roles — ${verb} ${r.created}, pruned ${r.pruned}${hookFlag ? `, hooks ${r.hooks}` : ""}`);
     if (r.collisions.length) {
       console.warn(`ccs: skipped ${r.collisions.length} (a non-ccs file is in the way):`);
       for (const c of r.collisions) console.warn(`  ${c}`);
