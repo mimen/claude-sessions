@@ -63,3 +63,17 @@ test("explain: bad usage returns 1", () => {
 test("unknown subcommand returns 1", () => {
   expect(hooksCommand(["frobnicate"])).toBe(1);
 });
+
+test("lint: a meta-update field with no known writer is a dead contract (fails)", () => {
+  withRoots((cfg) => {
+    writeHook(cfg, "clusters/pr-watch", "meta-update.json", JSON.stringify({ fields: ["updated_at", "bogus_field"] }));
+    expect(hooksCommand(["lint"])).toBe(1);
+  });
+});
+
+test("lint: a meta-update with only known fields passes", () => {
+  withRoots((cfg) => {
+    writeHook(cfg, "clusters/pr-watch", "meta-update.json", JSON.stringify({ fields: ["updated_at", "phase", "pr_state"] }));
+    expect(hooksCommand(["lint"])).toBe(0);
+  });
+});

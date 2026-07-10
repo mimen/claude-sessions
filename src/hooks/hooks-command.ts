@@ -8,14 +8,15 @@
  * explainable after the fact (which levels, which merge, what result), and a typo that would
  * silently un-enroll a level (file-presence = enrollment) surfaces as a lint error.
  */
-import { readdirSync, existsSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { openCatalogue, getRow, getRoleDef } from "../catalogue/db.ts";
 import { CATALOGUE_PATH } from "../paths.ts";
 import { ccsRuntimeRoot } from "../inbox/identity-path.ts";
 import { resolveConfig } from "./resolve-config.ts";
-import { resolveLevels, type ResolveCtx } from "./resolve-levels.ts";
+import { type ResolveCtx } from "./resolve-levels.ts";
 import { knownHookTypes } from "./hook-types.ts";
+import { classifyFields } from "./meta-fields.ts";
 
 /** The config root (definitions). Honors $CCS_CONFIG_ROOT, else ~/.ccs-config. */
 function ccsConfigRoot(): string {
@@ -55,6 +56,16 @@ function explain(sessionId: string, type: string): number {
       console.log(`  ${mark} ${l.level.padEnd(10)} ${home(l.dir)}${note}`);
     }
     if (res.degraded) console.log(`\n⚠ degraded — ${res.errors.length} error(s); valid layers still applied`);
+    // meta-update is a freshness CONTRACT (ADR-0044): show each declared field's writer, so it's
+    // clear the hook doesn't invent values — each field is kept fresh by its own source.
+    if (type === "meta-update") {
+      const fields = (res.effective as string[] | null) ?? [];
+      const { known, unknown } = classifyFields(fields);
+      console.log(`\nfreshness contract (${fields.length} field(s) — kept fresh by their writers, not this hook):`);
+      for (const m of known) console.log(`  • ${m.field.padEnd(13)} source: ${m.source.padEnd(9)} ${m.note}`);
+      for (const u of unknown) console.log(`  ✗ ${u.padEnd(13)} NO KNOWN WRITER — dead contract (add to meta-fields.ts)`);
+      return res.degraded || unknown.length > 0 ? 2 : 0;
+    }
     console.log(`\neffective config:`);
     console.log(JSON.stringify(res.effective, null, 2));
     return res.degraded ? 2 : 0;
@@ -92,8 +103,16 @@ function lint(): number {
       const dot = f.lastIndexOf(".");
       const base = dot === -1 ? f : f.slice(0, dot);
       const ext = dot === -1 ? "" : f.slice(dot + 1);
-      if (!validExts.has(ext)) problems.push(`${join(dir, f)}: not a .md/.json hook file`);
-      else if (!known.has(base)) problems.push(`${join(dir, f)}: unknown hook type "${base}" (known: ${[...known].join(", ")})`);
+      if (!validExts.has(ext)) { problems.push(`${join(dir, f)}: not a .md/.json hook file`); continue; }
+      if (!known.has(base)) { problems.push(`${join(dir, f)}: unknown hook type "${base}" (known: ${[...known].join(", ")})`); continue; }
+      // A meta-update file declaring a field with no known writer is a dead contract (ADR-0044).
+      if (base === "meta-update" && ext === "json") {
+        try {
+          const parsed = JSON.parse(readFileSync(join(dir, f), "utf8")) as { fields?: string[] };
+          const { unknown } = classifyFields(parsed.fields ?? []);
+          for (const u of unknown) problems.push(`${join(dir, f)}: meta-update field "${u}" has no known writer (dead contract)`);
+        } catch { /* parse errors are caught elsewhere (resolveConfig degraded path) */ }
+      }
     }
     // collision: same base with two extensions
     const byBase = new Map<string, string[]>();
