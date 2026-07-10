@@ -1,6 +1,7 @@
 import type { SessionRow } from "../index/index.ts";
 import type { CatalogueRow, EpicRow } from "../catalogue/db.ts";
 import { lifecycleOf } from "../catalogue/db.ts";
+import { isCoreRole } from "../catalogue/cluster-map.ts";
 import { sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./groupByProject.ts";
 
 /**
@@ -14,9 +15,10 @@ import { sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./g
  * parent graph), because core sessions are deliberately parent-less peers.
  */
 
-/** Roles that are CORE (the star/support that runs a cluster). Others are fleet. */
-const CORE_ROLES = new Set(["pr-watch-control", "pr-watch-2", "pr-watch-eval", "loop-designer"]);
-const CORE_ORDER = ["pr-watch-control", "pr-watch-2", "pr-watch-eval", "loop-designer"];
+/** Core/fleet membership is decided by isCoreRole (the single source of truth in
+ * cluster-map.ts) so the TUI and `ccs cluster` never diverge. Clean labels (ADR-0015). */
+const CORE_ORDER = ["control", "concierge", "scout", "eval", "loop-designer",
+  "pr-watch-control", "pr-watch-2", "pr-watch-eval", "pr-watch-scout"]; // legacy fallbacks
 
 export interface ClusterViewCtx {
   catMap: ReadonlyMap<string, CatalogueRow>;
@@ -51,7 +53,7 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
     const system = cat?.system ?? "";
     const role = cat?.role ?? "(unroled)";
     const b = bySystem.get(system) ?? bySystem.set(system, { core: new Map(), workers: new Map() }).get(system)!;
-    if (CORE_ROLES.has(role)) {
+    if (isCoreRole(role)) {
       (b.core.get(role) ?? b.core.set(role, []).get(role)!).push(row);
     } else {
       const epicKey = cat?.epicId ?? ""; // "" = no epic
