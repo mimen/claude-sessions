@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import { openCatalogue, getRow, getAll } from "./db.ts";
-import { cmuxWorkspaceForSession } from "./open-state.ts";
+import { workspaceForSession } from "../cmux/liveness.ts";
 import { renderTab } from "./render-tab.ts";
 import { execFileSync } from "node:child_process";
 
@@ -26,13 +26,13 @@ function notInSession(): number {
  * All ops are best-effort; a failed push doesn't throw (cmux might be unreachable).
  */
 function pushRenderOps(sessionId: string, cmuxBin: string): boolean {
-  // Resolve the live workspace by SESSION ID (cwd+title join with an ambiguity guard).
-  // NOT by cwd-first: multiple sessions share cwd=~ (the home-dir core sessions), and a
-  // cwd-first "return the first match" clobbered the WRONG tab — it renamed the Loop
-  // Designer with another home session's title (2026-07-08). sessionId is unique per
-  // workspace and never guesses; if it can't resolve unambiguously, we skip (no rename).
-  const ref = cmuxWorkspaceForSession(sessionId, cmuxBin);
-  if (!ref) return false;
+  // Resolve the live workspace by SURFACE UUID (the exact join key cmux exposes, ADR-0040).
+  // This replaces the old cwd+title join, which clobbered the WRONG tab when sessions shared
+  // a cwd or title (the Loop Designer rename bug, 2026-07-08). The surface UUID is unique per
+  // session and never guesses; if the session isn't live, we skip (no rename).
+  const loc = workspaceForSession(sessionId);
+  if (!loc) return false;
+  const ref = loc.workspaceRef;
 
   if (!existsSync(CATALOGUE_PATH)) return false;
   const db = openCatalogue(CATALOGUE_PATH);

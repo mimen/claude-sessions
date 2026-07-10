@@ -8,7 +8,7 @@ import type { Database } from "bun:sqlite";
 import { reindexStore, listByRecency, titleOf, costOf, subagentCosts } from "./index/index.ts";
 import { formatCost } from "./cost.ts";
 import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForSystem } from "./catalogue/db.ts";
-import { openSessionIds } from "./catalogue/open-state.ts";
+import { openSessionIds } from "./cmux/liveness.ts";
 import { liveByCwd } from "./catalogue/live-by-cwd.ts";
 import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
