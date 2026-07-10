@@ -26,6 +26,7 @@ import { rolesCommand } from "./catalogue/roles-command.ts";
 import { registerSessionCommand } from "./hooks/register-command.ts";
 import { hookRunCommand } from "./hooks/hook-run.ts";
 import { statuslineCommand } from "./hooks/statusline-command.ts";
+import { hooksCommand } from "./hooks/hooks-command.ts";
 import { inboxCommand } from "./inbox/inbox-command.ts";
 import { stateCommand } from "./state/state-command.ts";
 
@@ -136,6 +137,9 @@ export async function main(argv: string[]): Promise<number> {
       if (args[1] === "run") return await hookRunCommand(args.slice(2));
       console.error("usage: ccs hook run <name>");
       return 1;
+    case "hooks":
+      // `ccs hooks <explain|lint>` — layered-hook observability (ADR-0045)
+      return hooksCommand(args.slice(1));
     case "register-session":
       return await registerSessionCommand(); // back-compat alias for `hook run session-start`
     case "statusline":
