@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { openIndex } from "../index/schema.ts";
-import { openCatalogue, setSystem, setRole, setResumeCommand, setResumeId } from "../catalogue/db.ts";
+import { openCatalogue, setSystem, setRole, setResumeCommand, setResumeId, setCompleted, setArchived } from "../catalogue/db.ts";
 import { resumeClusterEntry } from "./resume-cluster.ts";
 
 const NOW = "2026-07-09T00:00:00Z";
@@ -48,6 +48,28 @@ test("a member that isn't indexed is counted, not fatal", () => {
     const summary = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true });
     expect(summary.notIndexed).toBe(1);
     expect(summary.resumed).toBe(0);
+  } finally {
+    idx.close();
+    cat.close();
+  }
+});
+
+test("completed + archived members are retired, never resumed (ADR-0010)", () => {
+  const idx = openIndex(":memory:");
+  const cat = openCatalogue(":memory:");
+  try {
+    for (const id of ["live", "merged", "closed"]) {
+      seedIndex(idx, id, "/tmp");
+      setResumeId(cat, id, id, NOW);
+      setSystem(cat, id, "pr-watch", NOW);
+      setRole(cat, id, "pr-agent", NOW);
+    }
+    setCompleted(cat, "merged", true, NOW); // a merged PR
+    setArchived(cat, "closed", true, NOW); // a closed PR
+    const s = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true });
+    expect(s.retired).toBe(2);
+    expect(s.resumed).toBe(1); // only "live"
+    expect(s.perSession.find((p) => p.sessionId === "merged")!.result).toBe("retired");
   } finally {
     idx.close();
     cat.close();

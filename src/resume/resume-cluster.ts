@@ -10,7 +10,7 @@
  * resolve members via sessionsForSystem.
  */
 import type { Database } from "bun:sqlite";
-import { sessionsForSystem } from "../catalogue/db.ts";
+import { sessionsForSystem, getRow, lifecycleOf } from "../catalogue/db.ts";
 import { liveBridge } from "../cmux/live.ts";
 import { resumeSessionEntry, type ResumeSessionResult } from "./resume-session.ts";
 
@@ -19,7 +19,9 @@ export interface ClusterResumeSummary {
   alreadyOpen: number;
   notIndexed: number;
   failed: number;
-  perSession: { sessionId: string; result: ResumeSessionResult["status"] }[];
+  /** completed/archived members skipped — done work must not be revived (ADR-0010). */
+  retired: number;
+  perSession: { sessionId: string; result: ResumeSessionResult["status"] | "retired" }[];
 }
 
 export function resumeClusterEntry(
@@ -37,10 +39,19 @@ export function resumeClusterEntry(
     alreadyOpen: 0,
     notIndexed: 0,
     failed: 0,
+    retired: 0,
     perSession: [],
   };
 
   for (const sessionId of sessionIds) {
+    // Skip retired members: a completed (merged) or archived (closed) PR is DONE — reviving
+    // it would spawn a pane for finished work (ADR-0010). Only live work resumes.
+    const lc = lifecycleOf(getRow(catalogueDb, sessionId));
+    if (lc === "completed" || lc === "archived") {
+      summary.retired++;
+      summary.perSession.push({ sessionId, result: "retired" });
+      continue;
+    }
     const res = resumeSessionEntry(indexDb, catalogueDb, sessionId, {
       dryRun: opts.dryRun,
       cmuxBin: opts.cmuxBin,

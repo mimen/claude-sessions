@@ -453,7 +453,7 @@ function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
     const verb = dryRun ? "would resume" : "resumed";
     console.log(
       `ccs: cluster "${cluster}" — ${verb} ${s.resumed}, ${s.alreadyOpen} already open, ` +
-        `${s.notIndexed} not indexed${s.failed ? `, ${s.failed} failed` : ""}`,
+        `${s.retired} retired, ${s.notIndexed} not indexed${s.failed ? `, ${s.failed} failed` : ""}`,
     );
     return s.failed > 0 ? 1 : 0;
   } finally {
