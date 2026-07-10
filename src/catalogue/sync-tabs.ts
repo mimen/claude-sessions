@@ -25,7 +25,7 @@ function notInSession(): number {
  * Push render ops to cmux for a live/open session. Returns true if pushed, false if not open.
  * All ops are best-effort; a failed push doesn't throw (cmux might be unreachable).
  */
-function pushRenderOps(sessionId: string, cmuxBin: string): boolean {
+export function pushRenderOps(sessionId: string, cmuxBin = process.env.CMUX_BIN ?? "cmux"): boolean {
   // Resolve the live workspace by SURFACE UUID (the exact join key cmux exposes, ADR-0040).
   // This replaces the old cwd+title join, which clobbered the WRONG tab when sessions shared
   // a cwd or title (the Loop Designer rename bug, 2026-07-08). The surface UUID is unique per

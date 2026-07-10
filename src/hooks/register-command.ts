@@ -35,6 +35,17 @@ export async function registerSessionCommand(): Promise<number> {
     } finally {
       db.close();
     }
+    // ADR-0029: a role keeps its own surfaces current — paint this session's cmux tab from
+    // its ccs metadata on start. Best-effort; a miss (e.g. cmux not yet aware of the surface)
+    // is retried on the next hook fire. Never blocks the session.
+    if (payload?.session_id) {
+      try {
+        const { pushRenderOps } = await import("../catalogue/sync-tabs.ts");
+        pushRenderOps(payload.session_id);
+      } catch {
+        /* fail-open */
+      }
+    }
   } catch {
     // Malformed payload / unreachable catalogue / anything — fail open, say nothing.
   }
