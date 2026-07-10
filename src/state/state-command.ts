@@ -40,9 +40,23 @@ function scopeOf(args: string[]): { kind: "cluster"; cluster: string } | { kind:
   return null;
 }
 
+/** The doc name = the first positional that is NOT a flag NOR a flag's value. */
+function positionalName(args: string[]): string | undefined {
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i];
+    if (a === undefined) continue;
+    if (a.startsWith("--")) {
+      i++; // skip this flag's value (all our flags take one)
+      continue;
+    }
+    return a;
+  }
+  return undefined;
+}
+
 export function stateCommand(args: string[]): number {
   const sub = args[0];
-  const name = args.slice(1).find((a) => !a.startsWith("--"));
+  const name = positionalName(args);
   const scope = scopeOf(args);
   if (!scope) {
     console.error("ccs state: need --cluster <c> (cluster-scoped) or --role <r> (identity-scoped)");
