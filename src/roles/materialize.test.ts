@@ -17,7 +17,7 @@ describe("desiredLinksForRoles", () => {
     );
     const paths = links.map((l) => `${l.linkPath} -> ${l.target}`).sort();
     expect(paths).toEqual([
-      "/home/.claude/commands/pr-watch-control -> /roles/control/commands/pr-watch-control",
+      "/home/.claude/commands/pr-watch-control.md -> /roles/control/commands/pr-watch-control.md",
       "/home/.claude/skills/pr-watch-control -> /roles/control/skills/pr-watch-control",
     ]);
   });

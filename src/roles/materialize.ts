@@ -46,9 +46,12 @@ export function desiredLinksForRoles(roles: RoleDef[], claudeDir: string): Desir
       });
     }
     for (const cmd of r.commands) {
+      // Claude Code discovers slash-commands as `<name>.md`; the registry stores the bare
+      // name, so we add the extension on both the link and its target.
+      const file = cmd.endsWith(".md") ? cmd : `${cmd}.md`;
       links.push({
-        linkPath: `${claudeDir}/commands/${cmd}`,
-        target: `${r.homeDir}/commands/${cmd}`,
+        linkPath: `${claudeDir}/commands/${file}`,
+        target: `${r.homeDir}/commands/${file}`,
       });
     }
   }
