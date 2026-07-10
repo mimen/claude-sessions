@@ -27,9 +27,15 @@ export interface ResumeCommand {
  * `claude --resume <id>` ourselves and run it in the Session's recorded cwd — this is what
  * sidesteps the cwd-scoped picker and the unreliable end-of-session hint (failure modes A/B/D).
  */
-export function buildResumeCommand(row: SessionRow, opts: { fork: boolean; cwd: string }): ResumeCommand {
+export function buildResumeCommand(
+  row: SessionRow,
+  opts: { fork: boolean; cwd: string; resumeCommand?: string | null },
+): ResumeCommand {
   const argv = ["claude", "--resume", row.resumeId];
   if (opts.fork) argv.push("--fork-session");
+  // ADR-0015: a loop's resume_command is replayed as the trailing prompt so it comes back
+  // RUNNING (`claude --resume <id> '<resume_command>'`). Workers have none → bare resume.
+  if (opts.resumeCommand) argv.push(opts.resumeCommand);
   return {
     argv,
     cwd: opts.cwd,

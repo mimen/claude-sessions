@@ -20,6 +20,7 @@ import { createCodexTitler } from "./titler/codex.ts";
 import { handoffInline } from "./resume/inline.ts";
 import type { ResumeCommand } from "./resume/command.ts";
 import { executeSystemResume } from "./resume/execute-system.ts";
+import { resumeSessionEntry } from "./resume/resume-session.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -47,6 +48,7 @@ Usage:
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<id>|.|--all]   Sync catalogue metadata to live cmux tabs (title/description/color/pill)
   ccs cluster <system>  Show the cluster map: members by role, liveness, how to reach each
+  ccs resume-session <id>  Re-embody one identity (the core op; loops come back running)
   ccs resume <system>   Resume all sessions in a system (idempotent)
   ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
   ccs --version       Print version
@@ -109,6 +111,8 @@ export async function main(argv: string[]): Promise<number> {
       return syncTabs(args.slice(1));
     case "cluster":
       return clusterView(args[1], args.includes("--expand") || args.includes("--all"));
+    case "resume-session":
+      return resumeSession(args[1], args.includes("--dry-run"));
     case "resume":
       return resumeSystem(args[1]);
     case "skills": {
@@ -381,6 +385,36 @@ function clusterView(systemSlug: string | undefined, expand = false): number {
 }
 
 /** Resume all sessions in a system (idempotent reconcile). */
+/** `ccs resume-session <id>` — the core op: re-embody one identity (ADR-0015). */
+function resumeSession(sessionId: string | undefined, dryRun: boolean): number {
+  if (!sessionId) {
+    console.error("ccs: missing session id. Usage: ccs resume-session <id> [--dry-run]");
+    return 1;
+  }
+  const db = openIndex(DB_PATH);
+  const cat = openCatalogue(CATALOGUE_PATH);
+  try {
+    const res = resumeSessionEntry(db, cat, sessionId, { dryRun });
+    switch (res.status) {
+      case "resumed":
+        console.log(`ccs: ${dryRun ? "would resume" : "resumed"} ${sessionId}${res.note ? ` (${res.note})` : ""}`);
+        return 0;
+      case "already-open":
+        console.log(`ccs: ${sessionId} is already open — nothing to do`);
+        return 0;
+      case "not-indexed":
+        console.error(`ccs: ${sessionId} is not indexed (run \`ccs reindex\`)`);
+        return 1;
+      case "spawn-failed":
+        console.error(`ccs: failed to spawn cmux workspace for ${sessionId}`);
+        return 1;
+    }
+  } finally {
+    db.close();
+    cat.close();
+  }
+}
+
 function resumeSystem(systemSlug: string | undefined): number {
   if (!systemSlug) {
     console.error("ccs: missing system slug. Usage: ccs resume <system>");

@@ -281,6 +281,14 @@ export function childrenOf(db: Database, parentSessionId: string): SessionRow[] 
   );
 }
 
+/** Load a single indexed Session by its (filename) session id, or null if not indexed. */
+export function sessionById(db: Database, sessionId: string): SessionRow | null {
+  const rows = mapRows(
+    db.query(`SELECT ${SELECT_COLS} FROM sessions WHERE session_id = $id`).all({ $id: sessionId }),
+  );
+  return rows[0] ?? null;
+}
+
 /** Full token/cost detail for one Session (drives `ccs meta`). */
 export interface SessionUsage {
   readonly costUSD: number;
