@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { CatalogueRow, Kind } from "./db.ts";
-import { renderTab } from "./render-tab.ts";
+import { renderTab, applyPaintOverride, type TabRenderOps } from "./render-tab.ts";
 
 /** Build a full CatalogueRow fixture. */
 const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
@@ -139,4 +139,37 @@ test("renderTab: loop kind gets distinct color (Purple)", () => {
   const r = row({ kind: "loop", skill: "event-watch" });
   const ops = renderTab(r, "loop");
   expect(ops.color).toBe("Purple");
+});
+
+// ── applyPaintOverride (cmux-paint, ADR-0027/0044) ──────────────────────────────
+const baseOps: TabRenderOps = { title: "#12080 Fix navbar", description: "pr-watch", color: "Aqua", statusPill: null };
+
+test("applyPaintOverride: null override leaves base ops unchanged", () => {
+  expect(applyPaintOverride(baseOps, null)).toEqual(baseOps);
+});
+
+test("applyPaintOverride: an empty override leaves base ops unchanged", () => {
+  expect(applyPaintOverride(baseOps, {})).toEqual(baseOps);
+});
+
+test("applyPaintOverride: overrides only the fields it sets", () => {
+  const out = applyPaintOverride(baseOps, { color: "Purple" });
+  expect(out.color).toBe("Purple");
+  expect(out.title).toBe("#12080 Fix navbar"); // untouched
+  expect(out.description).toBe("pr-watch"); // untouched
+});
+
+test("applyPaintOverride: explicit null clears a field (color -> none)", () => {
+  const out = applyPaintOverride(baseOps, { color: null });
+  expect(out.color).toBeNull();
+});
+
+test("applyPaintOverride: title never nulls (a tab must have a name)", () => {
+  const out = applyPaintOverride(baseOps, { title: "control" });
+  expect(out.title).toBe("control");
+});
+
+test("applyPaintOverride: can set a custom status pill", () => {
+  const out = applyPaintOverride(baseOps, { statusPill: { key: "k", label: "building" } });
+  expect(out.statusPill?.label).toBe("building");
 });

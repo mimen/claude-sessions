@@ -31,6 +31,31 @@ export function renderTab(row: CatalogueRow, kind: Kind): TabRenderOps {
   return renderSession(row);
 }
 
+/**
+ * A `cmux-paint` config overlay (ADR-0027/0044): the resolved most-specific-wins config for a
+ * session's tab. Every field is an OPTIONAL override on the computed base ops — a role/cluster
+ * customizes specific aspects (a loop's Purple color, a role-name title) without reimplementing
+ * the renderer. No config → base ops unchanged (backward-compatible). A `null` explicitly clears
+ * (e.g. `"color": null` forces no color); an absent key leaves the base value.
+ */
+export interface CmuxPaintOverride {
+  title?: string;
+  description?: string | null;
+  color?: string | null;
+  statusPill?: StatusPill | null;
+}
+
+/** Overlay a resolved cmux-paint config onto the computed base ops. Pure. */
+export function applyPaintOverride(base: TabRenderOps, over: CmuxPaintOverride | null): TabRenderOps {
+  if (!over) return base;
+  return {
+    title: over.title ?? base.title, // title never nulls (a tab must have a name)
+    description: "description" in over ? over.description ?? null : base.description,
+    color: "color" in over ? over.color ?? null : base.color,
+    statusPill: "statusPill" in over ? over.statusPill ?? null : base.statusPill,
+  };
+}
+
 function renderSession(row: CatalogueRow): TabRenderOps {
   const title = buildSessionTitle(row);
   const description = buildSessionDescription(row);

@@ -2,7 +2,9 @@ import { existsSync } from "node:fs";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import { openCatalogue, getRow, getAll, lifecycleOf } from "./db.ts";
 import { workspaceForSession } from "../cmux/liveness.ts";
-import { renderTab } from "./render-tab.ts";
+import { renderTab, applyPaintOverride, type CmuxPaintOverride } from "./render-tab.ts";
+import { resolveConfig } from "../hooks/resolve-config.ts";
+import { liveResolveCtx } from "../hooks/compose-claude-md.ts";
 import { execFileSync } from "node:child_process";
 
 /**
@@ -37,10 +39,21 @@ export function pushRenderOps(sessionId: string, cmuxBin = process.env.CMUX_BIN 
   if (!existsSync(CATALOGUE_PATH)) return false;
   const db = openCatalogue(CATALOGUE_PATH);
   const row = getRow(db, sessionId);
+  // Resolve the cmux-paint config overlay (ADR-0027/0044) while the db is open. Best-effort:
+  // no config (or any error) → base ops unchanged. most-specific-wins so a role's paint fully
+  // overrides the cluster's generic one.
+  let paint: CmuxPaintOverride | null = null;
+  if (row) {
+    try {
+      paint = resolveConfig(row, "cmux-paint", liveResolveCtx(db)).effective as CmuxPaintOverride | null;
+    } catch {
+      paint = null;
+    }
+  }
   db.close();
   if (!row) return false;
 
-  const ops = renderTab(row, row.kind);
+  const ops = applyPaintOverride(renderTab(row, row.kind), paint);
   try {
     execFileSync(cmuxBin, ["rename-workspace", "--workspace", ref, "--", ops.title], {
       timeout: 4000,
