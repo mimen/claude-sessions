@@ -24,6 +24,7 @@ import { resumeClusterEntry } from "./resume/resume-cluster.ts";
 import { syncRoles } from "./roles/sync-roles.ts";
 import { rolesCommand } from "./catalogue/roles-command.ts";
 import { registerSessionCommand } from "./hooks/register-command.ts";
+import { inboxCommand } from "./inbox/inbox-command.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -51,6 +52,7 @@ Usage:
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<id>|.|--all]   Sync catalogue metadata to live cmux tabs (title/description/color/pill)
   ccs cluster <system>  Show the cluster map: members by role, liveness, how to reach each
+  ccs inbox send|drain|pending  Durable per-identity messaging (--role [--cluster/--epic/--work-unit])
   ccs register-session  SessionStart hook: register/refresh a session from its stdin payload
   ccs roles [ls|upsert|rm]  Manage the roles registry (definitions sync-roles/resume use)
   ccs sync-roles        Materialize the roles registry into ~/.claude (symlink reconcile)
@@ -118,6 +120,8 @@ export async function main(argv: string[]): Promise<number> {
       return syncTabs(args.slice(1));
     case "register-session":
       return await registerSessionCommand();
+    case "inbox":
+      return inboxCommand(args.slice(1));
     case "roles":
       return rolesCommand(args.slice(1));
     case "sync-roles":
