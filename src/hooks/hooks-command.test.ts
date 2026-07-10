@@ -77,3 +77,17 @@ test("lint: a meta-update with only known fields passes", () => {
     expect(hooksCommand(["lint"])).toBe(0);
   });
 });
+
+test("lint: a start action with no handler fails", () => {
+  withRoots((cfg) => {
+    writeHook(cfg, "roles/x", "start.json", JSON.stringify({ actions: [{ name: "arm" }, { name: "teleport" }] }));
+    expect(hooksCommand(["lint"])).toBe(1);
+  });
+});
+
+test("lint: start with only known actions passes", () => {
+  withRoots((cfg) => {
+    writeHook(cfg, "roles/x", "start.json", JSON.stringify({ actions: [{ name: "arm" }, { name: "drain-inbox" }] }));
+    expect(hooksCommand(["lint"])).toBe(0);
+  });
+});

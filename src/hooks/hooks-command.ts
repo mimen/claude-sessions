@@ -17,6 +17,7 @@ import { resolveConfig } from "./resolve-config.ts";
 import { type ResolveCtx } from "./resolve-levels.ts";
 import { knownHookTypes } from "./hook-types.ts";
 import { classifyFields } from "./meta-fields.ts";
+import { knownStartActions } from "./start-actions.ts";
 
 /** The config root (definitions). Honors $CCS_CONFIG_ROOT, else ~/.ccs-config. */
 function ccsConfigRoot(): string {
@@ -78,6 +79,7 @@ function explain(sessionId: string, type: string): number {
 function lint(): number {
   const roots = [ccsConfigRoot(), ccsRuntimeRoot()];
   const known = new Set(knownHookTypes());
+  const knownActions = new Set(knownStartActions());
   const validExts = new Set(["md", "json"]);
   const problems: string[] = [];
   let checked = 0;
@@ -112,6 +114,17 @@ function lint(): number {
           const { unknown } = classifyFields(parsed.fields ?? []);
           for (const u of unknown) problems.push(`${join(dir, f)}: meta-update field "${u}" has no known writer (dead contract)`);
         } catch { /* parse errors are caught elsewhere (resolveConfig degraded path) */ }
+      }
+      // A start file naming an action with no handler would silently no-op (ADR-0044).
+      if (base === "start" && ext === "json") {
+        try {
+          const parsed = JSON.parse(readFileSync(join(dir, f), "utf8")) as { actions?: Array<{ name?: string }> };
+          for (const a of parsed.actions ?? []) {
+            if (a.name && !knownActions.has(a.name)) {
+              problems.push(`${join(dir, f)}: start action "${a.name}" has no handler (known: ${[...knownActions].join(", ")})`);
+            }
+          }
+        } catch { /* parse errors caught elsewhere */ }
       }
     }
     // collision: same base with two extensions

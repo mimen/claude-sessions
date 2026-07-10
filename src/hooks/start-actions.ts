@@ -65,6 +65,11 @@ export const BUILTIN_ACTIONS: Record<string, ActionHandler> = {
   },
 };
 
+/** Every start action name that has a built-in handler (for `ccs hooks lint` to flag typos). */
+export function knownStartActions(): string[] {
+  return Object.keys(BUILTIN_ACTIONS);
+}
+
 /** Resolve + run a session's start actions. Returns the merged context + any errors. */
 export function runStartActions(
   ctx: StartActionCtx,

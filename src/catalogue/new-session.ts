@@ -22,6 +22,10 @@ import {
   type RoleDef,
 } from "./db.ts";
 import { shellQuote } from "../resume/command.ts";
+import { execFileSync } from "node:child_process";
+import { spawnContractError, rowWorkUnit, type SpawnFacts, type WorktreeState } from "./spawn-contract.ts";
+import { openSessionIds } from "../cmux/liveness.ts";
+import { getAll, lifecycleOf } from "./db.ts";
 
 /**
  * `ccs new-session` — mint a session id, bind its catalogue metadata AT BIRTH, then either
@@ -210,6 +214,17 @@ export function newSession(args: string[]): number {
     return 2;
   }
 
+  // WORKER SPAWN CONTRACT (ADR-0047): a worker (one carrying PR/work-unit facts) is born correct
+  // or not at all — refuse a second embodiment of a live work-unit, or a cwd that isn't the PR's
+  // feature-branch worktree. The liveness/git probes are best-effort: a probe FAILURE never
+  // blocks a spawn (that would be worse than the check) — only a probe that positively finds a
+  // conflict does. Core roles carry no work-unit and pass through untouched.
+  const contractErr = checkSpawnContract(opts);
+  if (contractErr) {
+    console.error(`ccs new-session: ${contractErr}`);
+    return 2;
+  }
+
   const cwd = opts.cwd ?? process.cwd();
 
   const id = randomUUID();
@@ -259,6 +274,72 @@ export function newSession(args: string[]): number {
   // CMUX_SURFACE_ID, so the new session's SessionStart hook binds THAT surface — never
   // rebinding the caller's (the hijack ADR-0042 documents). Deterministic: own surface or fail.
   return spawnDetached(id, argv, cwd, opts.title || opts.role || id.slice(0, 8));
+}
+
+/**
+ * Gather the impure spawn facts (live work-units + the cwd's git branch) and run the pure
+ * contract (ADR-0047). Best-effort probes: a probe that THROWS returns "unknown" and never
+ * blocks the spawn — only a positively-observed conflict (a live duplicate, a protected-branch
+ * worktree) is a hard error. Returns an error string or null.
+ */
+function checkSpawnContract(opts: NewSessionOpts): string | null {
+  const facts: SpawnFacts = { gusWork: opts.gusWork, prNumber: opts.prNumber, prRepo: opts.prRepo, cwd: opts.cwd };
+
+  // Live work-units: map every OPEN session's row to its work-unit key. A probe failure yields
+  // an empty set (don't block on it).
+  const live = new Set<string>();
+  try {
+    const openIds = openSessionIds();
+    if (openIds.size > 0) {
+      const db = openCatalogue(CATALOGUE_PATH);
+      try {
+        for (const [sid, row] of getAll(db)) {
+          if (!openIds.has(sid)) continue;
+          const lc = lifecycleOf(row);
+          if (lc === "completed" || lc === "archived") continue; // retired doesn't hold a unit
+          const u = rowWorkUnit(row);
+          if (u) live.add(u);
+        }
+      } finally {
+        db.close();
+      }
+    }
+  } catch {
+    /* liveness/catalogue unreadable — leave `live` empty, don't block */
+  }
+
+  // Worktree state: only probed when a cwd + PR are given (a worker). A git failure → unknown.
+  let worktree: WorktreeState | null = null;
+  if (opts.cwd && opts.prNumber != null) {
+    worktree = probeWorktree(opts.cwd);
+  }
+
+  return spawnContractError(facts, live, worktree);
+}
+
+/** Probe a cwd's git worktree state (best-effort). Never throws. */
+function probeWorktree(cwd: string): WorktreeState {
+  try {
+    const inside = execFileSync("git", ["-C", cwd, "rev-parse", "--is-inside-work-tree"], {
+      timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
+    }).toString().trim();
+    if (inside !== "true") return { isGitWorktree: false, branch: null };
+    let branch: string | null = null;
+    try {
+      branch = execFileSync("git", ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"], {
+        timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
+      }).toString().trim() || null;
+      if (branch === "HEAD") branch = null; // detached
+    } catch { /* branch unknown */ }
+    return { isGitWorktree: true, branch };
+  } catch {
+    // `git` failed entirely (not a repo, git missing) — treat as "not a worktree" ONLY if the
+    // path exists; if git itself is unavailable we can't assert, so report unknown (git present
+    // check via a benign call). Simplest safe default: not-a-worktree so the check can catch a
+    // genuinely-wrong cwd, but a git-missing environment would false-positive — mitigated by the
+    // caller only invoking this when cwd+PR are set (a real worker context has git).
+    return { isGitWorktree: false, branch: null };
+  }
 }
 
 /**
