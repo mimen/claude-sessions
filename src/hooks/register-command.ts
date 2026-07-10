@@ -10,6 +10,7 @@ import { openCatalogue, getRow } from "../catalogue/db.ts";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import { handleSessionStart, type SessionStartPayload } from "./register.ts";
 import { composeClaudeMd } from "./compose-claude-md.ts";
+import { runStartActions } from "./start-actions.ts";
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -32,16 +33,25 @@ export async function registerSessionCommand(): Promise<number> {
     const db = openCatalogue(CATALOGUE_PATH);
     try {
       const res = handleSessionStart(db, payload, now());
-      // Compose the layered claude-md context (ADR-0043/0044) for a registered session and
-      // append it after any register/re-arm note. Best-effort; a miss injects nothing.
       const parts: string[] = [];
-      if (res.additionalContext) parts.push(res.additionalContext);
       if (res.registered && payload.session_id) {
         const row = getRow(db, payload.session_id);
         if (row) {
+          // Run the config-driven start actions (ADR-0044): arm, drain-inbox, etc., executed in
+          // merged order. If a `start.json` ran an `arm` action, it OWNS arming — suppress
+          // handleSessionStart's built-in re-arm note to avoid a duplicate. With no start.json,
+          // the built-in re-arm note is the safety net.
+          const started = runStartActions({ db, row, source: payload.source });
+          const armedByConfig = started.ran.includes("arm");
+          if (res.additionalContext && !armedByConfig) parts.push(res.additionalContext);
+          if (started.context) parts.push(started.context);
+          // Layered claude-md context composition (ADR-0043/0044).
           const composed = composeClaudeMd(db, row);
           if (composed.context) parts.push(composed.context);
         }
+      } else if (res.additionalContext) {
+        // Unregistered: surface the ask-to-register note (no row to run start actions against).
+        parts.push(res.additionalContext);
       }
       if (parts.length > 0) process.stdout.write(parts.join("\n\n") + "\n");
     } finally {
