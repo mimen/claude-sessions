@@ -133,8 +133,16 @@ export function newSession(args: string[]): number {
     try {
       const def = opts.role ? getRoleDef(rdb, opts.role.replace(/^\//, "")) : null;
       if (def) {
+        if (!opts.system && def.cluster) opts.system = def.cluster; // cluster membership from the registry
         if (!opts.cwd && def.homeDir) opts.cwd = def.homeDir;
         if (!opts.resumeCommand && def.resumeCommand) opts.resumeCommand = def.resumeCommand;
+        // A loop role born fresh should START RUNNING: default the launch prompt to its
+        // resume_command (the /loop …) unless an explicit --prompt was given. Non-loop roles
+        // (no resume_command) launch bare and get their first task another way.
+        if (!opts.prompt && opts.resumeCommand) opts.prompt = opts.resumeCommand;
+        // Loops run unattended → default to acceptEdits so they don't stall on edit prompts
+        // (the folder-trust gate is handled separately via ~/.claude.json pre-trust).
+        if (!opts.permissionMode && def.kind === "loop") opts.permissionMode = "acceptEdits";
       }
     } finally {
       rdb.close();
