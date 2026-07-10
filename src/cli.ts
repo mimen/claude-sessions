@@ -9,7 +9,6 @@ import { reindexStore, listByRecency, titleOf, costOf, subagentCosts } from "./i
 import { formatCost } from "./cost.ts";
 import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForSystem } from "./catalogue/db.ts";
 import { openSessionIds } from "./cmux/liveness.ts";
-import { liveByCwd } from "./catalogue/live-by-cwd.ts";
 import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, event, parent, skill, project, system, phase, meta } from "./catalogue/commands.ts";
@@ -23,6 +22,7 @@ import { executeSystemResume } from "./resume/execute-system.ts";
 import { resumeSessionEntry } from "./resume/resume-session.ts";
 import { resumeClusterEntry } from "./resume/resume-cluster.ts";
 import { syncRoles } from "./roles/sync-roles.ts";
+import { rolesCommand } from "./catalogue/roles-command.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -50,6 +50,7 @@ Usage:
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<id>|.|--all]   Sync catalogue metadata to live cmux tabs (title/description/color/pill)
   ccs cluster <system>  Show the cluster map: members by role, liveness, how to reach each
+  ccs roles [ls|upsert|rm]  Manage the roles registry (definitions sync-roles/resume use)
   ccs sync-roles        Materialize the roles registry into ~/.claude (symlink reconcile)
   ccs resume-session <id>  Re-embody one identity (the core op; loops come back running)
   ccs resume-cluster <c>   Resume every not-open identity in a cluster (loop over resume-session)
@@ -113,6 +114,8 @@ export async function main(argv: string[]): Promise<number> {
       return newSession(args.slice(1));
     case "sync-tabs":
       return syncTabs(args.slice(1));
+    case "roles":
+      return rolesCommand(args.slice(1));
     case "sync-roles":
       return syncRolesCmd(args.includes("--dry-run"));
     case "cluster":
@@ -371,14 +374,17 @@ function clusterView(systemSlug: string | undefined, expand = false): number {
   const db = openIndex(DB_PATH);
   const cat = openCatalogue(CATALOGUE_PATH);
   try {
-    const live = liveByCwd();
+    // Liveness is surface-keyed (exact) via the cmux bridge, not cwd-approximate: a session
+    // is live iff its id or resumeId has a live surface (ADR-0014/0040).
+    const open = openSessionIds();
     const members = sessionsForSystem(cat, systemSlug).map((sid) => {
       const row = getRow(cat, sid)!;
       const ir = db
         .query("SELECT cwd, resume_id FROM sessions WHERE session_id = $id")
         .get({ $id: sid }) as { cwd: string | null; resume_id: string | null } | null;
       const cwd = ir?.cwd ?? null;
-      return toMember(row, cwd, ir?.resume_id ?? null, !!cwd && live.has(cwd));
+      const live = open.has(sid) || (!!ir?.resume_id && open.has(ir.resume_id));
+      return toMember(row, cwd, ir?.resume_id ?? null, live);
     });
     if (members.length === 0) {
       console.log(`cluster ${systemSlug}: no members (nothing tagged system=${systemSlug}).`);

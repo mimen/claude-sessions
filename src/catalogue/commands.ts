@@ -23,7 +23,7 @@ import {
 import { openIndex } from "../index/schema.ts";
 import { titleOf, usageOf, subagentCostOf, type SessionUsage } from "../index/index.ts";
 import { formatCost, formatTokens } from "../cost.ts";
-import { pushCmuxRename } from "./open-state.ts";
+import { pushCmuxRename } from "../cmux/liveness.ts";
 
 /**
  * CLI surface for the catalogue. These are the primitives the in-session slash commands

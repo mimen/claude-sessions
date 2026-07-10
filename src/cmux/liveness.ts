@@ -9,6 +9,7 @@
  *
  * Pure `*From(bridge, …)` functions are fixture-tested; the `live*` wrappers add I/O.
  */
+import { execFileSync } from "node:child_process";
 import { type Bridge, type SurfaceLocation } from "./bridge";
 import { liveBridge } from "./live";
 
@@ -66,4 +67,23 @@ export function primaryWorkspaceForSession(
   sessionId: string,
 ): PrimaryWorkspace | null {
   return primaryWorkspaceForSessionFrom(liveBridge(), sessionId);
+}
+
+/**
+ * Push a workspace rename to cmux if the session is currently open there, resolving the
+ * workspace by SURFACE UUID (exact, ADR-0040) — no cwd/title guess. Returns success.
+ */
+export function pushCmuxRename(sessionId: string, title: string, cmuxBin = "cmux"): boolean {
+  const loc = workspaceForSession(sessionId);
+  if (!loc) return false;
+  try {
+    // `rename-workspace --workspace <ref> -- <title>`; `--` guards dash-leading titles.
+    execFileSync(cmuxBin, ["rename-workspace", "--workspace", loc.workspaceRef, "--", title], {
+      timeout: 4000,
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
