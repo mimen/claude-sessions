@@ -1,7 +1,18 @@
 import { test, expect } from "bun:test";
 import { openIndex } from "../index/schema.ts";
 import { openCatalogue, setSystem, setRole, setResumeCommand, setResumeId, setCompleted, setArchived } from "../catalogue/db.ts";
-import { resumeClusterEntry } from "./resume-cluster.ts";
+import { resumeClusterEntry, planClusterMembers } from "./resume-cluster.ts";
+import type { CatalogueRow } from "../catalogue/db.ts";
+
+function catRow(over: Partial<CatalogueRow>): CatalogueRow {
+  return {
+    sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
+    archived: false, parkedTaskId: null, event: null, key: null, parentSessionId: null,
+    skill: null, role: "pr-agent", resumeCommand: null, project: null, system: "pr-watch",
+    gusWork: null, epicId: null, phase: null, notes: null, updatedAt: null,
+    prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...over,
+  };
+}
 
 const NOW = "2026-07-09T00:00:00Z";
 
@@ -74,6 +85,30 @@ test("completed + archived members are retired, never resumed (ADR-0010)", () =>
     idx.close();
     cat.close();
   }
+});
+
+test("planClusterMembers: a dead sibling of a LIVE work-unit is superseded, not resumed", () => {
+  // the real 12120/12121 case: a fresh LIVE session + a stale dead session, same PR
+  const members = [
+    { sessionId: "live-12120", row: catRow({ sessionId: "live-12120", resumeId: "live-12120", prRepo: "heroku/dashboard", prNumber: 12120, updatedAt: "2026-07-09" }) },
+    { sessionId: "dead-12120", row: catRow({ sessionId: "dead-12120", resumeId: "dead-12120", prRepo: "heroku/dashboard", prNumber: 12120, updatedAt: "2026-07-08" }) },
+  ];
+  const isLive = (sid: string) => sid === "live-12120";
+  const plan = planClusterMembers(members, isLive);
+  const byId = new Map(plan.map((p) => [p.sessionId, p.disposition]));
+  expect(byId.get("live-12120")).toBe("resume-candidate"); // the live one (resume-session -> already-open)
+  expect(byId.get("dead-12120")).toBe("superseded"); // the dead sibling: NOT a duplicate pane
+});
+
+test("planClusterMembers: freshest dead session wins an unclaimed unit; older ones supersede", () => {
+  const members = [
+    { sessionId: "old", row: catRow({ sessionId: "old", prRepo: "r", prNumber: 5, updatedAt: "2026-07-01" }) },
+    { sessionId: "new", row: catRow({ sessionId: "new", prRepo: "r", prNumber: 5, updatedAt: "2026-07-08" }) },
+  ];
+  const plan = planClusterMembers(members, () => false); // neither live
+  const byId = new Map(plan.map((p) => [p.sessionId, p.disposition]));
+  expect(byId.get("new")).toBe("resume-candidate");
+  expect(byId.get("old")).toBe("superseded");
 });
 
 test("empty cluster is a clean no-op", () => {
