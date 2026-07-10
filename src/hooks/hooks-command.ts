@@ -26,7 +26,7 @@ function resolveSessionId(raw: string | undefined): string | undefined {
 }
 
 function explain(sessionId: string, type: string): number {
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     const row = getRow(db, sessionId);
     if (!row) {

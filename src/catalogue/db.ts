@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 
 /**
  * The Catalogue: durable, user-authored session metadata that the Index cache cannot hold
- * (it gets dropped on schema bumps). Stored in its own SQLite file (see paths.CATALOGUE_PATH)
+ * (it gets dropped on schema bumps). Stored in its own SQLite file (see paths.CATALOGUE_PATH())
  * so the Index can be nuked/rebuilt without ever touching this.
  *
  * Migrations here are ADDITIVE ONLY — we never drop. `user_version` gates each step.

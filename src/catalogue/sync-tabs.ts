@@ -36,8 +36,8 @@ export function pushRenderOps(sessionId: string, cmuxBin = process.env.CMUX_BIN 
   if (!loc) return false;
   const ref = loc.workspaceRef;
 
-  if (!existsSync(CATALOGUE_PATH)) return false;
-  const db = openCatalogue(CATALOGUE_PATH);
+  if (!existsSync(CATALOGUE_PATH())) return false;
+  const db = openCatalogue(CATALOGUE_PATH());
   const row = getRow(db, sessionId);
   // Resolve the cmux-paint config overlay (ADR-0027/0044) while the db is open. Best-effort:
   // no config (or any error) → base ops unchanged. most-specific-wins so a role's paint fully
@@ -125,12 +125,12 @@ export function syncTabs(args: string[]): number {
   const sessionArg = args.find((a) => !a.startsWith("--"));
 
   if (all) {
-    if (!existsSync(CATALOGUE_PATH)) {
+    if (!existsSync(CATALOGUE_PATH())) {
       console.error("No catalogue found (run ccs reindex first).");
       return 1;
     }
     ensureDataDir();
-    const db = openCatalogue(CATALOGUE_PATH);
+    const db = openCatalogue(CATALOGUE_PATH());
     const catMap = getAll(db);
     db.close();
 

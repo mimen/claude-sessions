@@ -18,9 +18,9 @@ import { resolvePredecessors } from "../catalogue/lineage.ts";
  */
 export function composePredecessors(sessionId: string): string | null {
   try {
-    if (!existsSync(CATALOGUE_PATH) || !existsSync(DB_PATH)) return null;
-    const catalogue = openCatalogue(CATALOGUE_PATH);
-    const index = openIndex(DB_PATH);
+    if (!existsSync(CATALOGUE_PATH()) || !existsSync(DB_PATH())) return null;
+    const catalogue = openCatalogue(CATALOGUE_PATH());
+    const index = openIndex(DB_PATH());
     try {
       // Skip if this session isn't itself registered (nothing to key a lineage on).
       if (!getRow(catalogue, sessionId)) return null;

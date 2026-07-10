@@ -6,7 +6,7 @@ import { CONFIG_PATH, DEFAULT_STORE_PATH, expandHome } from "./paths.ts";
 import { type Result, ok, err } from "./result.ts";
 
 /**
- * User config lives at ~/.claude-sessions/config.toml. Every key is optional;
+ * User config lives at ~/.ccs/config.toml (ADR-0049 — runtime home). Every key is optional;
  * defaults make the tool work with zero config. Validated at the boundary.
  */
 const ConfigSchema = z.object({
@@ -43,7 +43,7 @@ const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 /** Load and validate config, applying defaults. `store.path` is `~`-expanded. */
-export function loadConfig(path: string = CONFIG_PATH): Result<Config> {
+export function loadConfig(path: string = CONFIG_PATH()): Result<Config> {
   let raw: unknown = {};
   try {
     const text = readFileSync(path, "utf8");

@@ -52,7 +52,7 @@ export async function statuslineCommand(): Promise<number> {
   let line = fallback(payload);
   try {
     if (payload.session_id) {
-      const db = openCatalogue(CATALOGUE_PATH);
+      const db = openCatalogue(CATALOGUE_PATH());
       try {
         const row = getRow(db, payload.session_id);
         // Only sessions with a PR or work-item get the rich statusline; others stay default.

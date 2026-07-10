@@ -53,8 +53,8 @@ function resolveSessionId(arg: string | undefined): string | null {
  */
 function labelFor(id: string): string {
   const short = `${id.slice(0, 8)}…`;
-  if (!existsSync(DB_PATH)) return short;
-  const db = openIndex(DB_PATH);
+  if (!existsSync(DB_PATH())) return short;
+  const db = openIndex(DB_PATH());
   try {
     const title = titleOf(db, id);
     return title ? `${short} ${title}` : short;
@@ -81,7 +81,7 @@ export function rename(sessionArg: string | undefined, name: string | undefined)
     return 1;
   }
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     setCustomTitle(db, id, name.trim(), now());
     const pushed = pushCmuxRename(id, name.trim());
@@ -97,7 +97,7 @@ export function mark(sessionArg: string | undefined, flags: string[]): number {
   if (!id) return notInSession();
   const off = flags.includes("--off");
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   const changes: string[] = [];
   try {
     if (flags.includes("--loop")) {
@@ -132,7 +132,7 @@ export function tag(sessionArg: string | undefined, entity: string | undefined, 
     return 1;
   }
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     if (flags.includes("--remove")) {
       removeTag(db, id, entity);
@@ -157,7 +157,7 @@ export function key(sessionArg: string | undefined, slug: string | undefined, fl
     return 1;
   }
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     setKey(db, id, off ? null : slug!.trim(), now());
     console.log(off ? `cleared key on ${id.slice(0, 8)}…` : `key ${slug!.trim()} → ${id.slice(0, 8)}…`);
@@ -184,7 +184,7 @@ export function phase(sessionArg: string | undefined, value: string | undefined,
     return 1;
   }
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     setPhase(db, id, off ? null : value!.trim(), now());
     console.log(off ? `cleared phase on ${id.slice(0, 8)}…` : `phase ${value!.trim()} → ${id.slice(0, 8)}…`);
@@ -204,7 +204,7 @@ export function parent(
   if (!id) return notInSession();
   const off = flags.includes("--off");
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     if (off) {
       setParent(db, id, null, now());
@@ -228,8 +228,8 @@ export function parent(
     setParent(db, id, parentId, now());
     console.log(`parent ${parentId.slice(0, 8)}… → ${id.slice(0, 8)}…`);
     // Warn (don't fail) on a parent we've never indexed — forward references are allowed.
-    if (existsSync(DB_PATH)) {
-      const ix = openIndex(DB_PATH);
+    if (existsSync(DB_PATH())) {
+      const ix = openIndex(DB_PATH());
       try {
         if (titleOf(ix, parentId) === null) {
           console.warn(`  note: parent ${parentId.slice(0, 8)}… isn't in the index (forward reference — ok).`);
@@ -254,7 +254,7 @@ export function skill(sessionArg: string | undefined, name: string | undefined, 
     return 1;
   }
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     // Normalise a leading slash so `/event-watch` and `event-watch` land on the same value.
     const value = off ? null : name!.trim().replace(/^\//, "");
@@ -276,7 +276,7 @@ export function project(sessionArg: string | undefined, label: string | undefine
     return 1;
   }
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     setProject(db, id, off ? null : label!.trim(), now());
     console.log(off ? `cleared project on ${id.slice(0, 8)}…` : `project ${label!.trim()} → ${id.slice(0, 8)}…`);
@@ -296,7 +296,7 @@ export function system(sessionArg: string | undefined, slug: string | undefined,
     return 1;
   }
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     setSystem(db, id, off ? null : slug!.trim(), now());
     console.log(off ? `cleared system on ${id.slice(0, 8)}…` : `system ${slug!.trim()} → ${id.slice(0, 8)}…`);
@@ -316,7 +316,7 @@ export function role(sessionArg: string | undefined, roleName: string | undefine
     return 1;
   }
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     setRole(db, id, off ? null : roleName!.trim().replace(/^\//, ""), now());
     console.log(off ? `cleared role on ${id.slice(0, 8)}…` : `role ${roleName!.trim()} → ${id.slice(0, 8)}…`);
@@ -336,7 +336,7 @@ export function resumeCommand(sessionArg: string | undefined, cmd: string | unde
     return 1;
   }
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     setResumeCommand(db, id, off ? null : cmd!.trim(), now());
     console.log(off ? `cleared resume-command on ${id.slice(0, 8)}…` : `resume-command set → ${id.slice(0, 8)}…`);
@@ -356,7 +356,7 @@ export function gusWork(sessionArg: string | undefined, w: string | undefined, f
     return 1;
   }
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     setGusWork(db, id, off ? null : w!.trim(), now());
     console.log(off ? `cleared gus-work on ${id.slice(0, 8)}…` : `gus-work ${w!.trim()} → ${id.slice(0, 8)}…`);
@@ -376,7 +376,7 @@ export function sessionEpic(sessionArg: string | undefined, epicId: string | und
     return 1;
   }
   ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     setSessionEpic(db, id, off ? null : epicId!.trim(), now());
     console.log(off ? `cleared epic on ${id.slice(0, 8)}…` : `epic ${epicId!.trim()} → ${id.slice(0, 8)}…`);
@@ -388,8 +388,8 @@ export function sessionEpic(sessionArg: string | undefined, epicId: string | und
 
 /** Token/cost detail from the Index for one session, or null when unindexed. */
 function usageFor(id: string): { usage: SessionUsage; subagentUSD: number } | null {
-  if (!existsSync(DB_PATH)) return null;
-  const db = openIndex(DB_PATH);
+  if (!existsSync(DB_PATH())) return null;
+  const db = openIndex(DB_PATH());
   try {
     const usage = usageOf(db, id);
     if (!usage) return null;
@@ -404,7 +404,7 @@ export function meta(sessionArg: string | undefined): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
   const cost = usageFor(id);
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     const row = getRow(db, id);
     const tags = getTags(db, id);

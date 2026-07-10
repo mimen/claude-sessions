@@ -3,32 +3,37 @@ import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 
 /**
- * Filesystem locations the tool owns. The data dir holds the config file and the
- * Index (a pure, rebuildable cache); see CONTEXT.md.
+ * Filesystem locations the tool owns. Everything here is RUNTIME/derived (session state +
+ * rebuildable caches + UI prefs), so it lives under ~/.ccs (ADR-0049 — three homes, not four;
+ * the old ~/.claude-sessions "fourth home" is retired). Honors $CCS_ROOT for test isolation,
+ * matching inbox/identity-path.ccsRuntimeRoot (Bun's os.homedir ignores a reassigned $HOME).
  */
-export const DATA_DIR = join(homedir(), ".claude-sessions");
-export const CONFIG_PATH = join(DATA_DIR, "config.toml");
-export const DB_PATH = join(DATA_DIR, "index.db");
+export function runtimeRoot(): string {
+  const override = process.env.CCS_ROOT;
+  if (override) return override;
+  return join(process.env.HOME ?? homedir(), ".ccs");
+}
+/** The tool's own data dir under the runtime root. `cache/` holds the SQLite (state + caches). */
+export const DATA_DIR = () => join(runtimeRoot(), "cache");
+export const CONFIG_PATH = () => join(runtimeRoot(), "config.toml");
+export const DB_PATH = () => join(DATA_DIR(), "index.db");
 /**
- * Catalogue: durable user-authored session metadata (rename, loop, lifecycle, tags).
- * A SEPARATE file from the Index on purpose — the Index is a pure cache that gets dropped
- * and rebuilt on schema bumps; the catalogue must survive that, so it never shares the file.
+ * Catalogue: session metadata (rename, loop, lifecycle, tags). A SEPARATE file from the Index
+ * on purpose — the Index is a pure cache dropped + rebuilt on schema bumps; the catalogue holds
+ * session state that must survive that, so it never shares the file.
  */
-export const CATALOGUE_PATH = join(DATA_DIR, "catalogue.db");
-/**
- * Skills DB: machine-wide skill registry + transcript usage cache (rebuildable),
- * plus durable user-authored tags. Separate file so Index schema bumps never touch it.
- */
-export const SKILLS_DB_PATH = join(DATA_DIR, "skills.db");
+export const CATALOGUE_PATH = () => join(DATA_DIR(), "catalogue.db");
+/** Skills DB: machine-wide skill registry + usage cache (rebuildable) + user tags. */
+export const SKILLS_DB_PATH = () => join(DATA_DIR(), "skills.db");
 /** Small JSON of remembered UI prefs (e.g. last TUI view), so the browser reopens as left. */
-export const PREFS_PATH = join(DATA_DIR, "prefs.json");
+export const PREFS_PATH = () => join(runtimeRoot(), "prefs.json");
 
 /** Default Store: the single directory Claude Code centralises all Sessions into. */
 export const DEFAULT_STORE_PATH = join(homedir(), ".claude", "projects");
 
 /** Create the data dir lazily. Idempotent. */
 export function ensureDataDir(): void {
-  mkdirSync(DATA_DIR, { recursive: true });
+  mkdirSync(DATA_DIR(), { recursive: true });
 }
 
 /** Expand a leading `~` to the home directory; pass other paths through. */

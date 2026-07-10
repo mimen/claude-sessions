@@ -239,7 +239,7 @@ export function newSession(args: string[]): number {
   const cwd = opts.cwd ?? process.cwd();
 
   const id = randomUUID();
-  const db = openCatalogue(CATALOGUE_PATH);
+  const db = openCatalogue(CATALOGUE_PATH());
   try {
     writeSessionMetadata(db, id, opts, new Date().toISOString());
   } finally {
@@ -325,7 +325,7 @@ function checkSpawnContract(opts: NewSessionOpts): string | null {
   try {
     const openIds = openSessionIds();
     if (openIds.size > 0) {
-      const db = openCatalogue(CATALOGUE_PATH);
+      const db = openCatalogue(CATALOGUE_PATH());
       try {
         for (const [sid, row] of getAll(db)) {
           if (!openIds.has(sid)) continue;

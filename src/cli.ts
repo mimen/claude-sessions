@@ -201,7 +201,7 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
     return 1;
   }
 
-  const db = openIndex(DB_PATH);
+  const db = openIndex(DB_PATH());
   try {
     const totalBytes = scan.value.reduce((sum, f) => sum + f.sizeBytes, 0);
     const stats = await reindexStore(db, scan.value, config.host.label);
@@ -246,14 +246,14 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
   if (!config) return 1;
   ensureDataDir();
 
-  const firstRun = !existsSync(DB_PATH);
+  const firstRun = !existsSync(DB_PATH());
   if (firstRun) console.log("First run — indexing your sessions…");
 
-  const db = openIndex(DB_PATH);
-  const catalogue = openCatalogue(CATALOGUE_PATH);
+  const db = openIndex(DB_PATH());
+  const catalogue = openCatalogue(CATALOGUE_PATH());
   const { openSkillsDb } = await import("./skills/db.ts");
   const { SKILLS_DB_PATH } = await import("./paths.ts");
-  const skillsDb = openSkillsDb(SKILLS_DB_PATH);
+  const skillsDb = openSkillsDb(SKILLS_DB_PATH());
   const resumeRequest: { current: ResumeCommand | null } = { current: null };
   try {
     const scan = scanStore(config.store.path);
@@ -284,8 +284,8 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
 
 /** Table of indexed sessions, joined with catalogue metadata + live open-state. */
 function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
-  const db = openIndex(DB_PATH);
-  const cat = openCatalogue(CATALOGUE_PATH);
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
   try {
     const rows = listByRecency(db);
     if (rows.length === 0) {
@@ -339,8 +339,8 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
  * every parent as a root, and a seen-set guards the recursion so a cycle prints once, not forever.
  */
 function tree(_opts: { all: boolean }): number {
-  const db = openIndex(DB_PATH);
-  const cat = openCatalogue(CATALOGUE_PATH);
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
   try {
     const edges = parentEdges(cat);
     if (edges.length === 0) {
@@ -408,8 +408,8 @@ function clusterView(systemSlug: string | undefined, expand = false): number {
     console.error("ccs: missing system slug. Usage: ccs cluster <system>");
     return 1;
   }
-  const db = openIndex(DB_PATH);
-  const cat = openCatalogue(CATALOGUE_PATH);
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
   try {
     // Liveness is surface-keyed (exact) via the cmux bridge, not cwd-approximate: a session
     // is live iff its id or resumeId has a live surface (ADR-0014/0040).
@@ -442,8 +442,8 @@ function resumeSession(sessionId: string | undefined, dryRun: boolean): number {
     console.error("ccs: missing session id. Usage: ccs resume-session <id> [--dry-run]");
     return 1;
   }
-  const db = openIndex(DB_PATH);
-  const cat = openCatalogue(CATALOGUE_PATH);
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
   try {
     const res = resumeSessionEntry(db, cat, sessionId, { dryRun });
     switch (res.status) {
@@ -485,8 +485,8 @@ function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
     console.error("ccs: missing cluster. Usage: ccs resume-cluster <cluster> [--dry-run]");
     return 1;
   }
-  const db = openIndex(DB_PATH);
-  const cat = openCatalogue(CATALOGUE_PATH);
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
   try {
     const s = resumeClusterEntry(db, cat, cluster, { dryRun });
     const verb = dryRun ? "would resume" : "resumed";
@@ -511,8 +511,8 @@ function resumeSystem(systemSlug: string | undefined): number {
   const config = getConfig();
   if (!config) return 1;
 
-  const db = openIndex(DB_PATH);
-  const cat = openCatalogue(CATALOGUE_PATH);
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
   try {
     const result = executeSystemResume(db, cat, systemSlug);
     console.log(

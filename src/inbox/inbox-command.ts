@@ -81,7 +81,7 @@ export function inboxCommand(args: string[]): number {
       const path = writeMessage(dir, from, message, stamp());
       // Resolve the wake target: a live surface whose catalogue row matches this responsibility.
       const bridge = liveBridge();
-      const cat = openCatalogue(CATALOGUE_PATH);
+      const cat = openCatalogue(CATALOGUE_PATH());
       let woke = false;
       try {
         for (const s of bridge.surfaces) {

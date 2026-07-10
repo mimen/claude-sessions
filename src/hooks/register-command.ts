@@ -31,7 +31,7 @@ export async function registerSessionCommand(): Promise<number> {
     const raw = await readStdin();
     const payload = JSON.parse(raw) as SessionStartPayload;
     ensureDataDir();
-    const db = openCatalogue(CATALOGUE_PATH);
+    const db = openCatalogue(CATALOGUE_PATH());
     try {
       const res = handleSessionStart(db, payload, now());
       const parts: string[] = [];

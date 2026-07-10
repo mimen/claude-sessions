@@ -46,7 +46,7 @@ export async function workerStopCommand(): Promise<number> {
     const id = payload?.session_id;
     if (!id) return 0;
     ensureDataDir();
-    const db = openCatalogue(CATALOGUE_PATH);
+    const db = openCatalogue(CATALOGUE_PATH());
     try {
       // Only self-report for a registered session (has a role); a bare/foreign session is a no-op.
       const row = getRow(db, id);

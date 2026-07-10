@@ -13,8 +13,8 @@ export interface Prefs {
 
 export function loadPrefs(): Prefs {
   try {
-    if (!existsSync(PREFS_PATH)) return {};
-    return JSON.parse(readFileSync(PREFS_PATH, "utf8")) as Prefs;
+    if (!existsSync(PREFS_PATH())) return {};
+    return JSON.parse(readFileSync(PREFS_PATH(), "utf8")) as Prefs;
   } catch {
     return {};
   }
@@ -22,8 +22,8 @@ export function loadPrefs(): Prefs {
 
 export function savePrefs(prefs: Prefs): void {
   try {
-    mkdirSync(dirname(PREFS_PATH), { recursive: true });
-    writeFileSync(PREFS_PATH, JSON.stringify(prefs, null, 2));
+    mkdirSync(dirname(PREFS_PATH()), { recursive: true });
+    writeFileSync(PREFS_PATH(), JSON.stringify(prefs, null, 2));
   } catch {
     // best-effort — prefs are a nicety, never block the UI on a write failure.
   }
