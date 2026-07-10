@@ -44,3 +44,9 @@ export function identityDir(root: string, r: Responsibility): string {
   if (r.workUnit) dir = join(dir, seg(r.workUnit));
   return dir;
 }
+
+/** The runtime directory for a cluster's SHARED state (board, gate, dispositions — ADR-0031).
+ * Distinct from identity state: one per cluster, not per responsibility. */
+export function clusterStateDir(root: string, cluster: string): string {
+  return join(root, "clusters", seg(cluster), "cluster");
+}
