@@ -24,6 +24,9 @@ import {
 import { shellQuote } from "../resume/command.ts";
 import { execFileSync } from "node:child_process";
 import { spawnContractError, rowWorkUnit, type SpawnFacts, type WorktreeState } from "./spawn-contract.ts";
+import { interpretSpawnLocation, syntheticRow, type SpawnLocationConfig } from "./spawn-location.ts";
+import { resolveConfig } from "../hooks/resolve-config.ts";
+import { liveResolveCtx } from "../hooks/compose-claude-md.ts";
 import { openSessionIds } from "../cmux/liveness.ts";
 import { getAll, lifecycleOf } from "./db.ts";
 
@@ -185,13 +188,21 @@ export function newSession(args: string[]): number {
   // the cwd and its resume_command — so bringing up a core role is just `--role <name>`.
   // Explicit --cwd / --resume-command still win.
   let roleDef: RoleDef | null = null;
+  let spawnLocationErr: string | null = null;
   {
     const rdb = openCatalogue(CATALOGUE_PATH);
     try {
       roleDef = opts.role ? getRoleDef(rdb, opts.role.replace(/^\//, "")) : null;
       if (roleDef) {
         if (!opts.system && roleDef.cluster) opts.system = roleDef.cluster; // cluster from the registry
-        if (!opts.cwd && roleDef.homeDir) opts.cwd = roleDef.homeDir;
+        // spawn-location config (ADR-0046) resolves the launch cwd from the LAUNCH REQUEST
+        // (pre-row): "role-dir" → home_dir, "worktree" → the passed --cwd, or an abs path.
+        // Config wins; the role's home_dir stays the fallback when no config resolves.
+        if (!opts.cwd) {
+          const resolvedCwd = resolveSpawnLocationCwd(rdb, opts, roleDef);
+          if (resolvedCwd.error) { spawnLocationErr = resolvedCwd.error; }
+          opts.cwd = resolvedCwd.cwd ?? roleDef.homeDir ?? undefined;
+        }
         if (!opts.resumeCommand && roleDef.resumeCommand) opts.resumeCommand = roleDef.resumeCommand;
         // A loop role born fresh should START RUNNING: default the launch prompt to its
         // resume_command (the /loop …) unless an explicit --prompt was given.
@@ -203,6 +214,13 @@ export function newSession(args: string[]): number {
     } finally {
       rdb.close();
     }
+  }
+
+  // A spawn-location config that named a mode whose input is missing (e.g. "worktree" with no
+  // --cwd) is a determinism failure — fail LOUD, don't silently fall back to the wrong dir.
+  if (spawnLocationErr) {
+    console.error(`ccs new-session: ${spawnLocationErr}`);
+    return 2;
   }
 
   // DETERMINISM: validate the spawn is fully set up, or ERROR OUT — never produce a
@@ -274,6 +292,30 @@ export function newSession(args: string[]): number {
   // CMUX_SURFACE_ID, so the new session's SessionStart hook binds THAT surface — never
   // rebinding the caller's (the hijack ADR-0042 documents). Deterministic: own surface or fail.
   return spawnDetached(id, argv, cwd, opts.title || opts.role || id.slice(0, 8));
+}
+
+/**
+ * Resolve the launch cwd from the role's spawn-location config (ADR-0046), pre-row. Builds a
+ * synthetic row from the launch opts, resolves `spawn-location` (most-specific-wins) through the
+ * shared config resolver, and interprets it. Returns {cwd} (null → caller uses home_dir default)
+ * or {error} when config names a mode whose input is missing. Best-effort: a resolver failure
+ * yields null (fall back), never a throw.
+ */
+function resolveSpawnLocationCwd(
+  db: Database,
+  opts: NewSessionOpts,
+  roleDef: RoleDef,
+): { cwd: string | null; error?: string } {
+  try {
+    const row = syntheticRow({
+      system: opts.system, role: opts.role?.replace(/^\//, ""), gusWork: opts.gusWork,
+      prNumber: opts.prNumber, prRepo: opts.prRepo,
+    });
+    const config = resolveConfig(row, "spawn-location", liveResolveCtx(db)).effective as SpawnLocationConfig | null;
+    return interpretSpawnLocation(config, { homeDir: roleDef.homeDir, requestedCwd: opts.cwd ?? null });
+  } catch {
+    return { cwd: null }; // resolver hiccup → fall back to home_dir default
+  }
 }
 
 /**
