@@ -73,6 +73,20 @@ describe("drain (move-on-drain, ADR-0033)", () => {
     }
   });
 
+  test("sender survives a DASHED ISO stamp (the stamp-tail leak regression)", () => {
+    const dir = fresh();
+    try {
+      // A real ISO stamp has dashes; the old filename parse captured the stamp tail as the
+      // sender. The sentinel header makes the sender authoritative regardless.
+      writeMessage(dir, "slack-scout", "review landed", "2026-07-10T00-00-00Z");
+      const [msg] = drain(dir);
+      expect(msg!.sender).toBe("slack-scout");
+      expect(msg!.body.trim()).toBe("review landed"); // header stripped from body
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("idempotent: a second drain returns nothing (already moved)", () => {
     const dir = fresh();
     try {

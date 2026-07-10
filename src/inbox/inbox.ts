@@ -40,6 +40,12 @@ function inboxDir(identityDir: string): string {
 }
 
 /** Atomically write one inbox message; returns its path. Disambiguates same-stamp/sender. */
+/** Sentinel header line carrying the sender, so it survives even though the stamp in the
+ * filename contains dashes (an ISO stamp like 2026-07-10T00-00-00Z made filename-parsing the
+ * sender impossible — the stamp tail leaked into it). The header is authoritative; the filename
+ * is only for chronological sort + uniqueness. */
+const FROM_HEADER = /^<!--\s*ccs-from:\s*(.*?)\s*-->\s*\n?/;
+
 export function writeMessage(
   identityDir: string,
   sender: string,
@@ -56,7 +62,8 @@ export function writeMessage(
     n++;
   }
   const tmp = path + ".tmp";
-  writeFileSync(tmp, body.replace(/\s+$/, "") + "\n");
+  // Store the sender in a sentinel header (authoritative on drain), then the body.
+  writeFileSync(tmp, `<!-- ccs-from: ${sender} -->\n${body.replace(/\s+$/, "")}\n`);
   renameSync(tmp, path); // atomic — a reader never sees a half-written message
   return path;
 }
@@ -93,10 +100,14 @@ export function drain(identityDir: string): InboxMessage[] {
   const processed = join(root, "processed");
   const out: InboxMessage[] = [];
   for (const path of pendingMessages(identityDir)) {
-    const body = readFileSync(path, "utf8");
+    const raw = readFileSync(path, "utf8");
     const name = path.split("/").pop()!;
+    // Sender: the sentinel header is authoritative; fall back to the legacy filename parse for
+    // messages written before the header existed (stamp-tail leak notwithstanding — best effort).
+    const m = raw.match(FROM_HEADER);
+    const body = m ? raw.slice(m[0].length) : raw;
     const stem = name.replace(/\.md$/, "");
-    const sender = stem.includes("-") ? stem.split("-").slice(1).join("-") : "unknown";
+    const sender = m ? m[1]! : stem.includes("-") ? stem.split("-").slice(1).join("-") : "unknown";
     mkdirSync(processed, { recursive: true });
     let dest = join(processed, name);
     let n = 2;

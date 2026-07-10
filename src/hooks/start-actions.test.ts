@@ -110,10 +110,8 @@ test("built-in drain-inbox: executes the drain and returns the content", () => {
     const out = BUILTIN_ACTIONS["drain-inbox"]!({ name: "drain-inbox" }, ctxFor(db, "s5"));
     expect(out.context).toContain("1 inbox message");
     expect(out.context).toContain("PR #12080 got a review comment");
-    // sender is derived from the filename by drain(); with a dashed ISO stamp it currently
-    // includes the stamp tail (a pre-existing inbox.ts parsing quirk, out of scope here) —
-    // assert the sender name is present, not its exact prefix.
-    expect(out.context).toContain("scout");
+    // sender now comes from the sentinel header — clean, no stamp-tail leak.
+    expect(out.context).toContain("from scout:");
   });
 });
 
