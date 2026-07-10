@@ -45,18 +45,21 @@ test("g inside a context lens cycles access -> home -> ... -> category", async (
   const config = { ...cr.value, store: { path: mkdtempSync(join(tmpdir(), "ccs-gx-")) } };
   const { lastFrame, stdin, unmount } = render(createElement(SkillsPanel, { skillsDb, indexDb, config, onSwitchMode: () => {}, onShowSessions: () => {} }));
   await new Promise((r) => setTimeout(r, 60));
+  // Inside a context lens the header carries the long ⌖ path, so the header's "view <x>"
+  // label wraps across the 80-col boundary. Assert on the footer's short, stable
+  // `group:<view>` token instead (same state, never wraps).
   stdin.write("x"); // -> claude @ ~
   await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("view access");
+  expect(lastFrame()).toContain("group:access");
   expect(lastFrame()).toContain("GLOBAL");
   stdin.write("g");
   await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("view home");
+  expect(lastFrame()).toContain("group:home");
   stdin.write("g"); stdin.write("g");
   await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("view category");
+  expect(lastFrame()).toContain("group:category");
   stdin.write("x"); // next context resets to access
   await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("view access");
+  expect(lastFrame()).toContain("group:access");
   unmount();
 });

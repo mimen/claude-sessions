@@ -18,8 +18,10 @@ test("planSyncRoles: desired links for a role's skills + commands", () => {
     });
     const plan = planSyncRoles(db, claude);
     const created = plan.create.map((l) => l.linkPath).sort();
+    // Commands materialize with a `.md` extension (Claude Code slash-command files are
+    // `<name>.md`); skills are directories, so no extension.
     expect(created).toEqual([
-      join(claude, "commands/pr-watch-control"),
+      join(claude, "commands/pr-watch-control.md"),
       join(claude, "skills/pr-watch-control"),
     ]);
     expect(plan.collisions).toEqual([]);

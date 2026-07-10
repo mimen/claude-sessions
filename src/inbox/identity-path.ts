@@ -26,9 +26,15 @@ export interface Responsibility {
   workUnit?: string | null;
 }
 
-/** Default runtime root (ADR-0041): ~/.ccs (state, never git). */
+/** Default runtime root (ADR-0041): ~/.ccs (state, never git). Honors $CCS_ROOT (explicit
+ * override), then $HOME, then the OS home. We read $HOME directly rather than os.homedir()
+ * because Bun's homedir() resolves from OS user info and ignores a reassigned $HOME — which
+ * would send test/isolated runs to the REAL ~/.ccs and corrupt live state. */
 export function ccsRuntimeRoot(): string {
-  return join(homedir(), ".ccs");
+  const override = process.env.CCS_ROOT;
+  if (override) return override;
+  const home = process.env.HOME ?? homedir();
+  return join(home, ".ccs");
 }
 
 /** The runtime directory for a responsibility's identity (inbox + state live here). */
