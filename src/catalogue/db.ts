@@ -348,6 +348,15 @@ function set(db: Database, sessionId: string, col: string, value: unknown, now: 
   });
 }
 
+/** Bump updated_at on a session (creating the row if absent) without changing any field. */
+export function touch(db: Database, sessionId: string, now: string): void {
+  ensureRow(db, sessionId, now);
+  db.query("UPDATE catalogue SET updated_at = $now WHERE session_id = $id").run({
+    $now: now,
+    $id: sessionId,
+  });
+}
+
 export function setCustomTitle(db: Database, sessionId: string, title: string | null, now: string): void {
   set(db, sessionId, "custom_title", title, now);
 }
