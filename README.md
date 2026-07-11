@@ -70,7 +70,7 @@ ccs ls                 # debug: print the indexed sessions
 
 ## Configuration
 
-Optional `~/.claude-sessions/config.toml` (every key has a default):
+Optional `~/.ccs/config.toml` (every key has a default):
 
 ```toml
 [store]
@@ -94,7 +94,7 @@ maxAttempts = 3
 
 - The **store** (`~/.claude/projects/`) is the single source of truth; `ccs` never writes to
   it. Sessions are `<uuid>.jsonl`; the working directory is encoded in the folder name.
-- The **index** (`~/.claude-sessions/index.db`, SQLite) is a pure, rebuildable cache —
+- The **index** (`~/.ccs/cache/index.db`, SQLite) is a pure, rebuildable cache —
   delete it any time and `ccs reindex` reconstructs it. Reindex is incremental (only changed
   files are re-parsed). Big transcripts are streamed, never fully loaded.
 
