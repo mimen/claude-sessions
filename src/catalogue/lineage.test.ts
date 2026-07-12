@@ -70,3 +70,22 @@ test("predecessorsOf: null timestamps sort last (still listed)", () => {
   const preds = predecessorsOf(rows, "cur", paths({ a: ["/t/a.jsonl", "2026-07-01T00:00:00Z"], b: [null, null] }));
   expect(preds.map((p) => p.sessionId)).toEqual(["a", "b"]); // a (has ts) before b (null)
 });
+
+test("predecessorsOf: equal/both-null timestamps break ties by sessionId (deterministic, ADR-0072/CI-1)", () => {
+  // both null → must order by sessionId, not the JS engine's unstable-sort whim
+  const rows = new Map<string, CatalogueRow>([
+    ["z", row({ sessionId: "z", role: "control" })],
+    ["a", row({ sessionId: "a", role: "control" })],
+    ["m", row({ sessionId: "m", role: "control" })],
+    ["cur", row({ sessionId: "cur", role: "control" })],
+  ]);
+  const preds = predecessorsOf(rows, "cur", paths({}));
+  expect(preds.map((p) => p.sessionId)).toEqual(["a", "m", "z"]);
+  // same timestamp on all → still sessionId order
+  const same = predecessorsOf(rows, "cur", paths({
+    z: ["/t/z.jsonl", "2026-07-01T00:00:00Z"],
+    a: ["/t/a.jsonl", "2026-07-01T00:00:00Z"],
+    m: ["/t/m.jsonl", "2026-07-01T00:00:00Z"],
+  }));
+  expect(same.map((p) => p.sessionId)).toEqual(["a", "m", "z"]);
+});

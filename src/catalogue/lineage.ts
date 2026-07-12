@@ -65,11 +65,16 @@ export function predecessorsOf(
     });
   }
   // oldest → newest by lastTs (nulls last), so the fresh embodiment reads history in order.
+  // sessionId is the stable final tie-break: equal (or both-null) lastTs must not depend on the
+  // JS engine's unstable-sort behavior, or lineage order flips between runtimes (ADR determinism).
   sibs.sort((a, b) => {
-    if (a.lastTs && b.lastTs) return a.lastTs < b.lastTs ? -1 : a.lastTs > b.lastTs ? 1 : 0;
+    if (a.lastTs && b.lastTs) {
+      if (a.lastTs !== b.lastTs) return a.lastTs < b.lastTs ? -1 : 1;
+      return a.sessionId.localeCompare(b.sessionId);
+    }
     if (a.lastTs) return -1;
     if (b.lastTs) return 1;
-    return 0;
+    return a.sessionId.localeCompare(b.sessionId);
   });
   return sibs;
 }
