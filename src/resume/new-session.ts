@@ -14,10 +14,12 @@ import {
   setCluster,
   setResumeId,
   setGusWork,
+  setWorkUnitId,
   stampPrFacts,
   type Kind,
   type RoleDef,
 } from "../catalogue/db.ts";
+import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import { resolveRole } from "../roles/role-files.ts";
 import { shellQuote } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
@@ -142,6 +144,23 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
   // to "open" (a freshly-spawned worker's PR) so the tab colors correctly until then.
   if (opts.prNumber && opts.prRepo) {
     stampPrFacts(db, id, { prNumber: opts.prNumber, prRepo: opts.prRepo, prBranch: "", prState: "open", prHeadSha: "" }, now);
+  }
+  // ADR-0057: resolve-or-mint the work-unit ENTITY this session belongs to, and FK the row to it.
+  // The work-unit lives in cluster state, so this only applies to a cluster-scoped session with an
+  // anchor (PR/GUS). find-or-create: a second spawn for the same PR reconnects to the same id
+  // (the dedup/lineage foundation). Best-effort — a work-unit-store failure never blocks the spawn.
+  if (opts.cluster && (opts.gusWork || (opts.prNumber && opts.prRepo))) {
+    try {
+      const wuId = resolveWorkUnit(
+        opts.cluster,
+        { prRepo: opts.prRepo ?? null, prNumber: opts.prNumber ?? null, gusWork: opts.gusWork ?? null },
+        now,
+        "new-session",
+      );
+      setWorkUnitId(db, id, wuId, now);
+    } catch {
+      /* work-unit store unwritable → leave workUnitId null; sensing/backfill can attach it later */
+    }
   }
 }
 

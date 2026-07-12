@@ -24,6 +24,7 @@ import { resumeClusterEntry, resumeMany } from "./resume/resume-cluster.ts";
 import { checkClusterGate } from "./cluster/manifest.ts";
 import { resolveSelector, type SelectorKind } from "./resume/selector.ts";
 import { syncRoles } from "./roles/sync-roles.ts";
+import { backfillWorkUnits } from "./catalogue/backfill-work-units.ts";
 import { rolesCommand } from "./catalogue/roles-command.ts";
 import { registerSessionCommand } from "./hooks/register-command.ts";
 import { hookRunCommand } from "./hooks/hook-run.ts";
@@ -179,6 +180,9 @@ export async function main(argv: string[]): Promise<number> {
       return rolesCommand(args.slice(1));
     case "sync-roles":
       return syncRolesCmd(args.includes("--dry-run"), args.includes("--hooks"));
+    case "backfill-work-units":
+      // one-time ADR-0057 migration: link existing anchored rows to a work-unit entity
+      return backfillWorkUnits(args.slice(1));
     case "cluster":
       return clusterView(args[1], args.includes("--expand") || args.includes("--all"));
     case "resume-session":

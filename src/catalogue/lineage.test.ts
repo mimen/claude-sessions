@@ -12,7 +12,11 @@ function row(over: Partial<CatalogueRow>): CatalogueRow {
   };
 }
 
-test("identityKey: work-unit (PR) wins, else gus, else role", () => {
+test("identityKey: work-unit id wins (ADR-0057), else derived PR, else gus, else role", () => {
+  // ADR-0057: a linked work-unit id is the identity — it wins over the derived string, and matches
+  // even if the derived string drifted or the PR was attached after the session started.
+  expect(identityKey(row({ workUnitId: "wu_dashboard_12118", prRepo: "heroku/dashboard", prNumber: 12118 }))).toBe("wu:wu_dashboard_12118");
+  // legacy (pre-backfill) rows without a work_unit_id fall back to the derived string
   expect(identityKey(row({ prRepo: "heroku/dashboard", prNumber: 12118 }))).toBe("pr:heroku/dashboard#12118");
   expect(identityKey(row({ gusWork: "W-1" }))).toBe("gus:W-1");
   expect(identityKey(row({ role: "control" }))).toBe("role:control");

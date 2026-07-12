@@ -16,11 +16,13 @@ import { rowWorkUnit } from "./spawn-contract.ts";
  */
 
 /** The responsibility key a row belongs to (work-unit for fleet, role for core). Null = unkeyed.
- * TODO(ADR-0057): this uses the derived-string rowWorkUnit(). The canonical path is now the
- * stable work-unit id (row.workUnitId), not the derived pr:/gus: string. This function will
- * migrate to key on row.workUnitId when available, falling back to derived string for old rows. */
+ * ADR-0057: prefer the STABLE work-unit id (the entity's identity) when the row carries one; fall
+ * back to the derived pr:/gus: string for older rows not yet backfilled, then to the role for a
+ * core singleton. Keying on the id means two sessions of the same work-unit group even if their
+ * derived strings drifted, and a work-unit whose PR was attached later still matches its lineage. */
 export function identityKey(row: CatalogueRow): string | null {
-  const unit = rowWorkUnit(row); // pr:repo#num | gus:W-… | null
+  if (row.workUnitId) return `wu:${row.workUnitId}`;
+  const unit = rowWorkUnit(row); // pr:repo#num | gus:W-… | null (legacy, pre-backfill)
   if (unit) return unit;
   if (row.role) return `role:${row.role}`;
   return null;
