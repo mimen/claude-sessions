@@ -4,6 +4,7 @@ import { identityDir, ccsRuntimeRoot, type Responsibility } from "../inbox/ident
 import { resolveConfig } from "./resolve-config.ts";
 import { liveResolveCtx } from "./compose-claude-md.ts";
 import type { Action } from "./merge.ts";
+import { workUnitPath } from "../catalogue/spawn-contract.ts";
 
 /**
  * The `start` hook action runner (ADR-0044, execute-deterministically): a session's resolved
@@ -38,7 +39,10 @@ function responsibilityOf(row: CatalogueRow): Responsibility {
     cluster: row.system ?? null,
     role: row.role ?? "unknown",
     epic: row.epicId ?? null,
-    workUnit: row.prRepo && row.prNumber != null ? `${row.prRepo}-${row.prNumber}` : row.gusWork ?? null,
+    // canonical filesystem-safe key — MUST match the hook-level dir (resolve-levels.workUnitOf)
+    // so a worker's inbox dir and its config dir resolve identically. Previously a no-seg
+    // `repo-num` form that diverged for slash'd repos (the P0 inbox-routing bug).
+    workUnit: workUnitPath(row),
   };
 }
 

@@ -17,6 +17,7 @@ import { liveBridge } from "../cmux/live.ts";
 import { openSessionIdsFrom } from "../cmux/liveness.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import { resumeSessionEntry, type ResumeSessionResult } from "./resume-session.ts";
+import { workUnitKey } from "../catalogue/spawn-contract.ts";
 
 export type MemberDisposition = ResumeSessionResult["status"] | "retired" | "superseded";
 
@@ -32,11 +33,11 @@ export interface ClusterResumeSummary {
   perSession: { sessionId: string; result: MemberDisposition }[];
 }
 
-/** The work-unit a session belongs to (pr → gus → cwd → sid). Matches the old planner. */
+/** The work-unit a session belongs to (pr → gus → sid). The pr/gus tiers use the canonical
+ * key (spawn-contract.workUnitKey); a keyless session falls back to its own id so dedup still
+ * gives it a unique slot. */
 function workUnit(row: CatalogueRow | null, sessionId: string): string {
-  if (row?.prRepo && row?.prNumber != null) return `pr:${row.prRepo}#${row.prNumber}`;
-  if (row?.gusWork) return `gus:${row.gusWork}`;
-  return `sid:${sessionId}`;
+  return (row ? workUnitKey(row) : null) ?? `sid:${sessionId}`;
 }
 
 interface PlannedMember {

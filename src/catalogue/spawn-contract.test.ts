@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { spawnWorkUnit, rowWorkUnit, spawnContractError, type SpawnFacts, type WorktreeState } from "./spawn-contract.ts";
+import { spawnWorkUnit, rowWorkUnit, workUnitKey, workUnitPath, spawnContractError, type SpawnFacts, type WorktreeState } from "./spawn-contract.ts";
+import { workUnitOf } from "../hooks/resolve-levels.ts";
 import type { CatalogueRow } from "./db.ts";
 
 const NONE: ReadonlySet<string> = new Set();
@@ -24,6 +25,27 @@ test("spawnWorkUnit: PR wins over gus-work; null when neither", () => {
 test("rowWorkUnit matches spawnWorkUnit shape", () => {
   expect(rowWorkUnit(row({ prRepo: "a/b", prNumber: 5 }))).toBe("pr:a/b#5");
   expect(rowWorkUnit(row({ gusWork: "W-9" }))).toBe("gus:W-9");
+});
+
+test("workUnitKey (join form) is stable + joinable; slash/# preserved", () => {
+  expect(workUnitKey({ prRepo: "heroku/dashboard", prNumber: 12 })).toBe("pr:heroku/dashboard#12");
+  expect(workUnitKey({ gusWork: "W-1" })).toBe("gus:W-1");
+  expect(workUnitKey({})).toBeNull();
+});
+
+test("workUnitPath (fs form) segs consistently; NO slash/# in a path component", () => {
+  const p = workUnitPath({ prRepo: "heroku/dashboard", prNumber: 12 });
+  expect(p).toBe("heroku-dashboard-12");
+  expect(p).not.toContain("/");
+  expect(p).not.toContain("#");
+});
+
+test("DRIFT FIX (U4/P0): the hook-level dir key == the inbox dir key for a slash'd repo", () => {
+  // resolve-levels.workUnitOf (hook-level dir) and the inbox responsibility key both now come
+  // from workUnitPath — so a worker's config dir and its inbox dir resolve to the SAME name.
+  const r = row({ prRepo: "heroku/dashboard", prNumber: 12080 });
+  expect(workUnitOf(r)).toBe(workUnitPath(r)); // one source of truth
+  expect(workUnitOf(r)).toBe("heroku-dashboard-12080");
 });
 
 test("core role (no work-unit) has no contract — always passes", () => {

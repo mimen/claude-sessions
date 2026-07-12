@@ -1,5 +1,6 @@
 import type { CatalogueRow } from "../catalogue/db.ts";
 import { join } from "node:path";
+import { workUnitPath } from "../catalogue/spawn-contract.ts";
 
 /**
  * Layered hook resolution — the PURE level resolver (ADR-0043).
@@ -44,11 +45,10 @@ function seg(s: string): string {
   return cleaned || "unknown";
 }
 
-/** The work-unit key for a row (PR wins over gus-work), or null if the row has neither. */
+/** The filesystem-safe work-unit key for a row's hook-level dir — the canonical path form
+ * (spawn-contract.workUnitPath), shared with the identity/inbox dir so they never diverge. */
 export function workUnitOf(row: CatalogueRow): string | null {
-  if (row.prRepo && row.prNumber != null) return `${seg(row.prRepo)}-${row.prNumber}`;
-  if (row.gusWork) return seg(row.gusWork);
-  return null;
+  return workUnitPath(row);
 }
 
 /**

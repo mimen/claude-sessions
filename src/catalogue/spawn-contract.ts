@@ -19,24 +19,53 @@ export interface SpawnFacts {
   cwd?: string;
 }
 
-/** The work-unit key a spawn targets (PR wins over gus-work), or null if neither is given.
- * TODO(ADR-0057): this is one of the 6 derived-string copies. The canonical path is now
- * `resolveWorkUnit()` in resolve-work-unit.ts, which returns the stable work-unit id (not
- * a derived string). This function stays for migration safety; callers will move to the
- * canonical resolver. */
-export function spawnWorkUnit(f: SpawnFacts): string | null {
-  if (f.prRepo && f.prNumber != null) return `pr:${f.prRepo}#${f.prNumber}`;
-  if (f.gusWork) return `gus:${f.gusWork}`;
+/** The minimal anchor fields a work-unit key is derived from (row or spawn facts). */
+export interface WorkUnitAnchor {
+  prRepo?: string | null;
+  prNumber?: number | null;
+  gusWork?: string | null;
+}
+
+// --- the ONE canonical work-unit key derivation (ADR-0057/U4) ---------------------
+// Every work-unit key in the codebase derives from HERE. There used to be 6 copies, 2 of
+// which had drifted to an incompatible filesystem form (the P0 inbox-routing bug): the hook
+// LEVEL dir used `seg(repo)-num` while the inbox dir used `repo-num` (no seg), so a repo with
+// a slash resolved to two different dirs. Both forms now come from one place, consistently.
+
+const PATH_UNSAFE = /[^a-zA-Z0-9_.-]+/g;
+/** Sanitize one path component (mirrors inbox/identity-path.seg): no separators/traversal. */
+function seg(s: string): string {
+  const cleaned = s.replace(/[/\\]/g, "-").replace(/\.\.+/g, "-").replace(PATH_UNSAFE, "-").replace(/^-+|-+$/g, "");
+  return cleaned || "unknown";
+}
+
+/** The canonical JOIN/DEDUP key: `pr:repo#num` | `gus:W-…` | null. Used for one-embodiment,
+ * supersede-dedup, lineage — anywhere two things must recognize the SAME work-unit. Stable
+ * and joinable (never sanitized), so `heroku/dashboard#12` matches everywhere. */
+export function workUnitKey(a: WorkUnitAnchor): string | null {
+  if (a.prRepo && a.prNumber != null) return `pr:${a.prRepo}#${a.prNumber}`;
+  if (a.gusWork) return `gus:${a.gusWork}`;
   return null;
 }
 
-/** The work-unit key for an existing catalogue row (same shape as spawnWorkUnit).
- * TODO(ADR-0057): this is one of the 6 derived-string copies. The canonical path is now
- * `resolveWorkUnit()` in resolve-work-unit.ts. This stays for migration safety. */
-export function rowWorkUnit(row: CatalogueRow): string | null {
-  if (row.prRepo && row.prNumber != null) return `pr:${row.prRepo}#${row.prNumber}`;
-  if (row.gusWork) return `gus:${row.gusWork}`;
+/** The canonical FILESYSTEM-SAFE work-unit key: `repo-num` (seg'd) | `W-…` (seg'd) | null.
+ * Used ONLY for directory names (hook levels, identity/inbox dirs). Distinct from the join
+ * key because path components can't contain `/` or `#`. One seg policy for BOTH dir uses,
+ * fixing the drift where the level dir and inbox dir disagreed. */
+export function workUnitPath(a: WorkUnitAnchor): string | null {
+  if (a.prRepo && a.prNumber != null) return `${seg(a.prRepo)}-${a.prNumber}`;
+  if (a.gusWork) return seg(a.gusWork);
   return null;
+}
+
+/** The work-unit key a spawn targets (PR wins over gus-work), or null if neither is given. */
+export function spawnWorkUnit(f: SpawnFacts): string | null {
+  return workUnitKey(f);
+}
+
+/** The work-unit key for an existing catalogue row — the canonical join/dedup key. */
+export function rowWorkUnit(row: CatalogueRow): string | null {
+  return workUnitKey(row);
 }
 
 /** Facts about the worktree the caller probed (git), passed to the branch check. */

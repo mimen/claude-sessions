@@ -1,5 +1,6 @@
 import type { CatalogueRow } from "./db.ts";
 import { lifecycleOf } from "./db.ts";
+import { workUnitKey } from "./spawn-contract.ts";
 
 /**
  * The cluster map: a readable roll-up of a system's members grouped by role, so any
@@ -132,9 +133,8 @@ export interface FoldedGroup {
 }
 
 function unitKey(m: ClusterMember): string {
-  if (m.prRepo && m.prNumber != null) return `pr:${m.prRepo}#${m.prNumber}`;
-  if (m.gusWork) return `gus:${m.gusWork}`;
-  return `sid:${m.sessionId}`;
+  // canonical join key (spawn-contract), with the keyless-session sid fallback for folding
+  return workUnitKey(m) ?? `sid:${m.sessionId}`;
 }
 
 function foldByUnit(members: ClusterMember[]): { primaries: ClusterMember[]; folded: Map<string, ClusterMember[]> } {
