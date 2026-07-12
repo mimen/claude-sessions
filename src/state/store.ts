@@ -22,6 +22,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
+import { log } from "../logger.ts";
 
 /** Bump when the envelope shape changes. Unknown (future) versions are refused on read. */
 export const SCHEMA_VERSION = 1;
@@ -63,13 +64,21 @@ export function readDoc<T = unknown>(path: string): StateDoc<T> | null {
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
-  } catch {
+  } catch (error) {
+    log.error("Failed to read state document", {
+      path,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch {
+  } catch (error) {
+    log.error("Corrupt state document, quarantining", {
+      path,
+      error: error instanceof Error ? error.message : String(error),
+    });
     quarantine(path);
     return null;
   }
@@ -80,6 +89,11 @@ export function readDoc<T = unknown>(path: string): StateDoc<T> | null {
     typeof doc.schemaVersion !== "number" ||
     doc.schemaVersion > SCHEMA_VERSION // future/unknown -> refuse, don't misread
   ) {
+    log.error("Invalid or future-version state document, quarantining", {
+      path,
+      schemaVersion: doc?.schemaVersion,
+      expected: SCHEMA_VERSION,
+    });
     quarantine(path);
     return null;
   }
