@@ -51,7 +51,7 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
   const bySystem = new Map<string, SysBuckets>();
   for (const row of rows) {
     const cat = ctx.catMap.get(row.sessionId) ?? null;
-    const system = cat?.system ?? "";
+    const system = cat?.cluster ?? "";
     const role = cat?.role ?? "(unroled)";
     const b = bySystem.get(system) ?? bySystem.set(system, { core: new Map(), workers: new Map() }).get(system)!;
     if (isCoreRole(role)) {

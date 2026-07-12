@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import {
-  sessionsForSystem,
+  sessionsForCluster,
   sessionsForRole,
   sessionsForPr,
   sessionsForGusWork,
@@ -69,15 +69,15 @@ function epicIdForShortName(db: Database, token: string, cluster?: string): stri
 /** Distinct clusters that appear on catalogue rows (so epic lookup needn't be told the cluster). */
 function clustersInPlay(db: Database): string[] {
   return (
-    db.query("SELECT DISTINCT system FROM catalogue WHERE system IS NOT NULL").all() as {
-      system: string;
+    db.query("SELECT DISTINCT cluster FROM catalogue WHERE cluster IS NOT NULL").all() as {
+      cluster: string;
     }[]
-  ).map((r) => r.system);
+  ).map((r) => r.cluster);
 }
 
-/** Is this token a known cluster (some row carries it as `system`)? */
+/** Is this token a known cluster (some row carries it as `cluster`)? */
 function isCluster(db: Database, token: string): boolean {
-  return sessionsForSystem(db, token).length > 0;
+  return sessionsForCluster(db, token).length > 0;
 }
 
 export interface ResolveOpts {
@@ -101,7 +101,7 @@ export function resolveSelector(
 
   // Explicit pins first — no inference.
   if (pin === "role") return { kind: "role", label: `role "${token}"`, sessionIds: sessionsForRole(catalogueDb, token) };
-  if (pin === "cluster") return { kind: "cluster", label: `cluster "${token}"`, sessionIds: sessionsForSystem(catalogueDb, token) };
+  if (pin === "cluster") return { kind: "cluster", label: `cluster "${token}"`, sessionIds: sessionsForCluster(catalogueDb, token) };
   if (pin === "gus-work") return { kind: "gus-work", label: `work item ${token}`, sessionIds: sessionsForGusWork(catalogueDb, token) };
   if (pin === "key") return { kind: "key", label: `key "${token}"`, sessionIds: sessionsForKey(catalogueDb, token) };
   if (pin === "epic") {
@@ -139,7 +139,7 @@ export function resolveSelector(
 
   // Ambiguous bare word: probe axes in a fixed order — cluster, role, epic. First non-empty wins.
   if (isCluster(catalogueDb, token)) {
-    return { kind: "cluster", label: `cluster "${token}"`, sessionIds: sessionsForSystem(catalogueDb, token) };
+    return { kind: "cluster", label: `cluster "${token}"`, sessionIds: sessionsForCluster(catalogueDb, token) };
   }
   const byRole = sessionsForRole(catalogueDb, token);
   if (byRole.length > 0) return { kind: "role", label: `role "${token}"`, sessionIds: byRole };

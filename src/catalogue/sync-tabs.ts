@@ -74,9 +74,9 @@ export function pushRenderOps(
   // Resolve the grouping (epic) display so the worker description can show it (ADR-0051 —
   // display metadata is cluster runtime state, not on the row). Best-effort: no grouping → null.
   let grouping = null;
-  if (row.system && row.epicId) {
+  if (row.cluster && row.epicId) {
     try {
-      const g = getGrouping(row.system, row.epicId);
+      const g = getGrouping(row.cluster, row.epicId);
       if (g) grouping = { label: g.shortName ?? g.label, url: g.url };
     } catch {
       grouping = null;

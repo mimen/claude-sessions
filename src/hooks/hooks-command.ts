@@ -35,7 +35,7 @@ function explain(sessionId: string, type: string): number {
     }
     const res = resolveConfig(row, type, liveResolveCtx());
     const home = (p: string) => p.replace(process.env.HOME ?? "~", "~");
-    console.log(`hook: ${type}   session: ${sessionId.slice(0, 8)}   role: ${row.role ?? "(none)"}   cluster: ${row.system ?? "(none)"}`);
+    console.log(`hook: ${type}   session: ${sessionId.slice(0, 8)}   role: ${row.role ?? "(none)"}   cluster: ${row.cluster ?? "(none)"}`);
     console.log(`\nlevels (broad → specific):`);
     for (const l of res.layers) {
       const mark = l.error ? "✗" : l.config !== null ? "✓" : "·";

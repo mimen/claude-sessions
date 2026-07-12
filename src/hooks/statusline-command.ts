@@ -60,7 +60,7 @@ export async function statuslineCommand(): Promise<number> {
         if (row && (row.prNumber || row.gusWork)) {
           // Grouping display (label+url) is cluster RUNTIME state now (ADR-0051), not a platform
           // epics table — the cluster's sensor filled it; we read the generic slot.
-          const g = row.system && row.epicId ? getGrouping(row.system, row.epicId) : null;
+          const g = row.cluster && row.epicId ? getGrouping(row.cluster, row.epicId) : null;
           const grouping = g ? { label: g.shortName ?? g.label, url: g.url } : null;
           line = renderStatusline(row, { nowMs: Date.now(), grouping });
         }

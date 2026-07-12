@@ -12,7 +12,7 @@
  * "cluster" is the public word; members resolve via the `system` column (ADR-0037).
  */
 import type { Database } from "bun:sqlite";
-import { sessionsForSystem, getRow, lifecycleOf, type CatalogueRow } from "../catalogue/db.ts";
+import { sessionsForCluster, getRow, lifecycleOf, type CatalogueRow } from "../catalogue/db.ts";
 import { liveBridge } from "../cmux/live.ts";
 import { openSessionIdsFrom } from "../cmux/liveness.ts";
 import type { Bridge } from "../cmux/bridge.ts";
@@ -106,7 +106,7 @@ export function resumeClusterEntry(
   cluster: string,
   opts: { dryRun?: boolean; cmuxBin?: string; bridge?: Bridge; focus?: boolean } = {},
 ): ClusterResumeSummary {
-  return resumeMany(indexDb, catalogueDb, sessionsForSystem(catalogueDb, cluster), opts);
+  return resumeMany(indexDb, catalogueDb, sessionsForCluster(catalogueDb, cluster), opts);
 }
 
 /**
