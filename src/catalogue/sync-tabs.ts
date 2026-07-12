@@ -41,10 +41,10 @@ export function pushRenderOps(
   refOverride?: string,
 ): boolean {
   // Resolve the live workspace by SURFACE UUID (the exact join key cmux exposes, ADR-0040).
-  // This replaces the old cwd+title join, which clobbered the WRONG tab when sessions shared
-  // a cwd or title (the Loop Designer rename bug, 2026-07-08). The surface UUID is unique per
-  // session and never guesses; if the session isn't live, we skip (no rename). A caller-supplied
-  // ref (just-spawned workspace) short-circuits the lookup to dodge the surface-binding race.
+  // This replaces the old cwd+title join, which clobbered the wrong tab when multiple sessions
+  // shared a cwd or title. The surface UUID is unique per session and never guesses; if the
+  // session isn't live, we skip (no rename). A caller-supplied ref (just-spawned workspace)
+  // short-circuits the lookup to dodge the surface-binding race.
   let ref: string;
   if (refOverride) {
     ref = refOverride;

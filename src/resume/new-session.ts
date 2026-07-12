@@ -230,8 +230,8 @@ export function newSession(args: string[]): number {
   }
 
   // DETERMINISM: validate the spawn is fully set up, or ERROR OUT — never produce a
-  // half-configured / mis-bound session (ADR-0042, Milad's determinism mandate). Skipped for
-  // --print-id (a bare reserve is allowed) only where a check can't apply.
+  // half-configured / mis-bound session (ADR-0042). Skipped for --print-id (a bare reserve
+  // is allowed) only where a check can't apply.
   const err = validateSpawn(opts, roleDef);
   if (err) {
     console.error(`ccs new-session: ${err}`);

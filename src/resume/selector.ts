@@ -12,8 +12,8 @@ import { sessionById } from "../index/index.ts";
 import { allGroupings } from "../state/groupings.ts";
 
 /**
- * Resolve a resume SELECTOR into a set of session ids. A selector is "anything that identifies a
- * session or a group of them" (Milad): a session id, a PR (`#123` or `repo#123`), a GUS work item
+ * Resolve a resume SELECTOR into a set of session ids. A selector is anything that identifies a
+ * session or a group of them: a session id, a PR (`#123` or `repo#123`), a GUS work item
  * (`W-1234567`), an epic shortname, a role, or a cluster. One string in → zero-or-more ids out;
  * the caller resumes them (a single id → resume-session semantics, multiple → cluster semantics
  * with one-live-worker-per-work-unit dedup).

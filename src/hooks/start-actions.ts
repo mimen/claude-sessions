@@ -41,8 +41,7 @@ export function responsibilityOf(row: CatalogueRow): Responsibility {
     role: row.role ?? "unknown",
     epic: row.groupingId ?? null,
     // canonical filesystem-safe key — MUST match the hook-level dir (resolve-levels.workUnitOf)
-    // so a worker's inbox dir and its config dir resolve identically. Previously a no-seg
-    // `repo-num` form that diverged for slash'd repos (the P0 inbox-routing bug).
+    // so a worker's inbox dir and its config dir resolve identically (ADR-0057).
     workUnit: workUnitPath(row),
   };
 }

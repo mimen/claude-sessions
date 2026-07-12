@@ -112,7 +112,7 @@ export function mark(sessionArg: string | undefined, flags: string[]): number {
       changes.push(`archived=${!off}`);
     }
     if (changes.length === 0) {
-      console.error("usage: ccs mark [<session-id>|.] --loop|--completed|--archived [--off]");
+      console.error("usage: ccs mark [<session-id>|.] --completed|--archived [--off]");
       return 1;
     }
     console.log(`marked ${id.slice(0, 8)}… ${changes.join(" ")}`);
@@ -195,7 +195,7 @@ export function status(sessionArg: string | undefined, value: string | undefined
 
 /**
  * `ccs activity [<id>|.] needs-you | --off` — the worker self-reports being STUCK on an ambiguous
- * fork (needs Milad's decision). `--off` clears back to DORMANT (the bare stage — awaiting review /
+ * fork (needs operator input). `--off` clears back to DORMANT (the bare stage — awaiting review /
  * merge / actively building). There is no "working" activity: a stage's resting state IS the bare
  * stage. `fixing` is engine-sensed (don't set it here). Orthogonal to stage (engine-latched).
  */

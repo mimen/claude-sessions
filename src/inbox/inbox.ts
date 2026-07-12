@@ -41,8 +41,8 @@ function inboxDir(identityDir: string): string {
 
 /** Atomically write one inbox message; returns its path. Disambiguates same-stamp/sender. */
 /** Sentinel header line carrying the sender, so it survives even though the stamp in the
- * filename contains dashes (an ISO stamp like 2026-07-10T00-00-00Z made filename-parsing the
- * sender impossible — the stamp tail leaked into it). The header is authoritative; the filename
+ * filename contains dashes (an ISO stamp with dashes makes filename-parsing the sender
+ * ambiguous — the stamp tail can leak into it). The header is authoritative; the filename
  * is only for chronological sort + uniqueness. */
 const FROM_HEADER = /^<!--\s*ccs-from:\s*(.*?)\s*-->\s*\n?/;
 

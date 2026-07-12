@@ -110,9 +110,9 @@ export function resumeSessionEntry(
  * Execute a resume plan: spawn a new detached cmux workspace running the resume command (via the
  * shared spawnCmux primitive — same env-scrub as new-session, ADR-0042), then EAGERLY paint the
  * tab from the session's ccs metadata so it renders correct immediately, without waiting for the
- * spawned session's own SessionStart hook to boot and fire (the cluster-resume tab-lag fix). The
- * hook remains the steady-state owner; this is just the first paint. Best-effort: a paint miss
- * (cmux may not have registered the new surface yet) is harmless — the hook repaints on boot.
+ * spawned session's own SessionStart hook to boot and fire. The hook remains the steady-state
+ * owner; this is just the first paint. Best-effort: a paint miss (cmux may not have registered
+ * the new surface yet) is harmless — the hook repaints on boot.
  */
 /**
  * Warn (never block) when OTHER live sessions share the identity we're about to resume (ADR-0073).
@@ -159,7 +159,7 @@ export function executeResumePlan(
   if (ref === null) return false;
   try {
     // Paint the JUST-CREATED workspace by its ref — cmux hasn't bound surface→sessionId yet, so a
-    // by-session lookup would miss (the eager-paint race). The hook repaints on boot regardless.
+    // by-session lookup would miss. The hook repaints on boot regardless.
     pushRenderOps(plan.sessionId, opts.cmuxBin, ref);
   } catch {
     /* eager paint is best-effort; the SessionStart hook repaints on boot */

@@ -34,7 +34,7 @@ export interface ClusterViewCtx {
 }
 
 /**
- * Cluster view structure (Milad's ask): for each system, TWO tiers —
+ * Cluster view structure: for each system, TWO tiers —
  *   CORE   : the star/support sessions, one section per core role (★)
  *   WORKERS: the fleet, grouped BY EPIC (using each epic's short name)
  * Sessions with no system fall into a trailing "(no system)" tier.

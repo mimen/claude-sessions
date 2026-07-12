@@ -9,10 +9,10 @@ import { shellQuote } from "./command.ts";
  * integrated shell, so cmux's `claude` shim wraps it and its hooks register the session in
  * ~/.cmuxterm/claude-hook-sessions.json (surfaceId → sessionId). That store is how ccs knows a
  * session is live. We deliberately DO NOT `exec` or scrub CMUX_SURFACE_ID/CMUX_WORKSPACE_ID:
- * a live experiment (2026-07-11) proved that scrub PREVENTED cmux from binding the session to its
- * surface (the shim needs those vars), leaving the session untracked — the "everything shows
- * closed" bug. cmux assigns the new workspace its own fresh surface id, so there's nothing to
- * hijack (and we hold to one-session-per-workspace, so no sibling to clobber). Plain command it is.
+ * scrubbing those vars prevents cmux from binding the session to its surface (the shim needs
+ * them), leaving the session untracked. cmux assigns the new workspace its own fresh surface id,
+ * so there's nothing to hijack (and we hold to one-session-per-workspace, so no sibling to
+ * clobber). Plain command it is.
  */
 
 export interface SpawnCmuxOpts {

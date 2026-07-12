@@ -27,10 +27,8 @@ export interface WorkUnitAnchor {
 }
 
 // --- the ONE canonical work-unit key derivation (ADR-0057/U4) ---------------------
-// Every work-unit key in the codebase derives from HERE. There used to be 6 copies, 2 of
-// which had drifted to an incompatible filesystem form (the P0 inbox-routing bug): the hook
-// LEVEL dir used `seg(repo)-num` while the inbox dir used `repo-num` (no seg), so a repo with
-// a slash resolved to two different dirs. Both forms now come from one place, consistently.
+// Every work-unit key in the codebase derives from HERE. Both the join key (stable, never
+// sanitized) and the path key (filesystem-safe) come from one place, consistently.
 
 const PATH_UNSAFE = /[^a-zA-Z0-9_.-]+/g;
 /** Sanitize one path component (mirrors inbox/identity-path.seg): no separators/traversal. */

@@ -8,8 +8,8 @@ import { log } from "../logger.ts";
  * `<folder> = encode(realpath(cwd_at_creation))` and `encode` maps every non-alphanumeric
  * char to `-`. On resume it looks under `encode(realpath(current_dir))`. So a session is
  * resumable only from the directory whose encoded realpath equals its storage folder — which
- * is NOT always the recorded `cwd` (it drifts when a symlinked cwd is later changed/removed,
- * the "No conversation found" bug). The storage folder is therefore authoritative.
+ * is NOT always the recorded `cwd` (it drifts when a symlinked cwd is later changed/removed).
+ * The storage folder is therefore authoritative.
  */
 
 /** Mirror Claude Code's path → folder encoding. */
