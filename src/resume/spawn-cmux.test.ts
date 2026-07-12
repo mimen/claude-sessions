@@ -316,31 +316,13 @@ exit 0
     );
   });
 
-  test("defaults to 'cmux' when neither cmuxBin nor CMUX_BIN provided (real binary test)", () => {
-    // This test only runs if `cmux` is in PATH. If not, spawnCmux returns null, which is
-    // expected behavior (absent binary → null). The actual command construction is already
-    // tested above with fake binaries, so this is a smoke test for the default path.
-    const opts: SpawnCmuxOpts = {
-      argv: ["claude", "--resume", "s111"],
-      cwd: "/tmp/test-dir",
-      name: "default-cmux",
-      // NO cmuxBin, NO CMUX_BIN → should try "cmux"
-    };
-
-    // Clear CMUX_BIN to ensure default path
-    const prevCmuxBin = process.env.CMUX_BIN;
-    delete process.env.CMUX_BIN;
-
-    try {
-      const ref = spawnCmux(opts);
-      // Either: cmux exists in PATH and we get a ref (or null on error),
-      // or: cmux doesn't exist and we get null. Both are valid.
-      // We just test that the function doesn't crash.
-      expect(ref === null || typeof ref === "string").toBe(true);
-    } finally {
-      if (prevCmuxBin !== undefined) {
-        process.env.CMUX_BIN = prevCmuxBin;
-      }
-    }
-  });
+  // NOTE: the `?? "cmux"` default branch is deliberately NOT e2e-tested.
+  // A test that invokes spawnCmux with no cmuxBin/CMUX_BIN against the REAL `cmux` on PATH ran
+  // `cmux new-workspace --command "claude --resume s111"`, opening a live tab that hangs forever
+  // on the resume picker (s111 isn't a real session) — every `bun test` of this file leaked a
+  // rogue tab (Milad, 2026-07-12). There is no safe way to exercise the literal default: spawnCmux
+  // passes no env to Bun.spawnSync, and Bun resolves a bare "cmux" against the STARTUP PATH,
+  // ignoring runtime process.env.PATH mutation, so even a stub-on-PATH can't intercept it. The
+  // CMUX_BIN override path is covered by the "env-bin" test and argv construction by the
+  // fake-binary tests above; the `?? "cmux"` string itself needs no real spawn to verify.
 });
