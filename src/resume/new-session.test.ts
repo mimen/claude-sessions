@@ -134,7 +134,7 @@ import { validateSpawn } from "./new-session.ts";
 import type { RoleDef } from "../catalogue/db.ts";
 
 const loopDef: RoleDef = {
-  role: "control", cluster: "pr-watch", kind: "loop", topology: "core", homeDir: "/tmp",
+  role: "control", cluster: "pr-watch", kind: "loop", workUnit: "none", homeDir: "/tmp",
   resumeCommand: "/loop 15m /pr-watch-control", stageSchema: null, skills: [], commands: [], hooks: [], updatedAt: null,
 };
 

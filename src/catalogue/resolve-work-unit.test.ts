@@ -66,12 +66,14 @@ test("resolveWorkUnit: PR anchor takes precedence over GUS", () => {
       { prRepo: "acme/web", prNumber: 200, gusWork: "W-99999999" },
       NOW,
     );
-    expect(id).toBe("wu_web_200"); // PR anchor wins
+    expect(id).toBe("wu_web_200"); // PR anchor wins the id
 
     const wu = getWorkUnit("pr-watch", id)!;
     expect(wu.prRepo).toBe("acme/web");
     expect(wu.prNumber).toBe(200);
-    expect(wu.gusWork).toBeNull(); // GUS not attached (mint only took PR)
+    // ADR-0057/0069: PR wins the IDENTITY, but a GUS given alongside attaches as an ATTRIBUTE
+    // (attributes accrue on the work-unit; the id is what's keyed on).
+    expect(wu.gusWork).toBe("W-99999999");
   });
 });
 

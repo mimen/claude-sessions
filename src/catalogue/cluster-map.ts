@@ -49,27 +49,28 @@ const LEGACY_CORE_ROLES = new Set([
   "pr-watch-control", "pr-watch-scout", "pr-watch-eval", "pr-watch-2", "loop-designer",
 ]);
 
-/** role → declared topology, built once from the config tree (files-are-truth, ADR-0050). Lazily
- * memoized; a process reads role definitions rarely-changing within its lifetime. */
-let topologyByRole: Map<string, string | null> | null = null;
-function declaredTopology(role: string): string | null {
-  if (!topologyByRole) {
-    topologyByRole = new Map();
+/** role → declared work-unit anchor type, built once from the config tree (files-are-truth,
+ * ADR-0050). Lazily memoized; role definitions rarely change within a process lifetime. */
+let anchorByRole: Map<string, string | null> | null = null;
+function declaredAnchor(role: string): string | null {
+  if (!anchorByRole) {
+    anchorByRole = new Map();
     try {
-      for (const [name, def] of allRolesFromFiles()) topologyByRole.set(name, def.topology);
+      for (const [name, def] of allRolesFromFiles()) anchorByRole.set(name, def.workUnit);
     } catch {
       /* config unreadable → empty map, falls back to the legacy set below */
     }
   }
-  return topologyByRole.get(role) ?? null;
+  return anchorByRole.get(role) ?? null;
 }
 
-/** Is this role a CORE singleton (vs a FLEET worker)? Prefers the role's DECLARED topology
- * (role.toml, ADR-0062); falls back to the legacy hardcoded set only when undeclared. */
+/** Is this role a CORE singleton (vs a FLEET worker)? Fleet-ness DERIVES from the declared
+ * work-unit anchor type (ADR-0069): `none` ⇒ core, any other anchor ⇒ fleet. Falls back to the
+ * legacy hardcoded set only for a role that declares no anchor (pre-migration / old labels). */
 export function isCoreRole(role: string | null): boolean {
   if (!role) return false;
-  const declared = declaredTopology(role);
-  if (declared) return declared === "core";
+  const anchor = declaredAnchor(role);
+  if (anchor) return anchor === "none";
   return LEGACY_CORE_ROLES.has(role);
 }
 

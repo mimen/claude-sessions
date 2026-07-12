@@ -673,7 +673,10 @@ export function sessionsForEpic(db: Database, epicId: string): string[] {
 // --- roles registry (ADR-0022) -------------------------------------------------
 
 /** A role DEFINITION: its runtime wiring + what to materialize into ~/.claude. */
-export type Topology = "core" | "fleet";
+/** A role's work-unit anchor type (ADR-0069): what shape of work-unit the role owns, and how a
+ * work-unit reconnects across sessions. `none` ⇒ the role owns no work-unit ⇒ it is CORE; anything
+ * else ⇒ FLEET. `pr`/`gus` reconnect by that anchor attribute; `freeform` is a ccs-minted id only. */
+export type WorkUnitAnchorType = "pr" | "gus" | "freeform" | "none";
 
 /** Role-declared schema for the blessed `stage` column (ADR-0064): the allowed vocabulary and
  * whether the stage is monotonic (forward-only). The tool ENFORCES these guarantees; the cluster
@@ -690,10 +693,10 @@ export interface RoleDef {
   /** Optional cluster grouping (nullable — a role can stand alone, ADR-0022). */
   cluster: string | null;
   kind: Kind | null;
-  /** Declared topology (ADR-0062): `core` = a cluster singleton (control/concierge/…), `fleet` =
-   * a per-work-unit worker (pr-agent). Replaces the hardcoded CORE_ROLES set. Nullable when a
-   * role.toml doesn't declare it (treated as fleet — the safe default: a non-core role). */
-  topology: Topology | null;
+  /** Declared work-unit anchor type (ADR-0069): what shape of work-unit this role owns. Fleet-ness
+   * derives from it — `none` ⇒ core, anything else ⇒ fleet (subsumes the interim ADR-0062
+   * `topology`). Nullable when role.toml declares neither `work_unit` nor `topology`. */
+  workUnit: WorkUnitAnchorType | null;
   /** Where sessions of this role spawn (permission/statusLine scope, ADR-0018/0036). */
   homeDir: string | null;
   /** How a loop role is re-armed on resume (ADR-0015); null for non-loop roles. */

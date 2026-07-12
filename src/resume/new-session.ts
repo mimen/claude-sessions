@@ -151,13 +151,18 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
   // (the dedup/lineage foundation). Best-effort — a work-unit-store failure never blocks the spawn.
   if (opts.cluster && (opts.gusWork || (opts.prNumber && opts.prRepo))) {
     try {
-      const wuId = resolveWorkUnit(
-        opts.cluster,
-        { prRepo: opts.prRepo ?? null, prNumber: opts.prNumber ?? null, gusWork: opts.gusWork ?? null },
-        now,
-        "new-session",
-      );
-      setWorkUnitId(db, id, wuId, now);
+      // ADR-0069: dispatch on the role's declared anchor type (a core role — work_unit "none" —
+      // owns no work-unit, so skip). Undeclared roles infer PR-then-GUS (resolver default).
+      const anchorType = opts.role ? resolveRole(opts.role.replace(/^\//, ""))?.workUnit ?? undefined : undefined;
+      if (anchorType !== "none") {
+        const wuId = resolveWorkUnit(
+          opts.cluster,
+          { prRepo: opts.prRepo ?? null, prNumber: opts.prNumber ?? null, gusWork: opts.gusWork ?? null, anchorType: anchorType ?? undefined },
+          now,
+          "new-session",
+        );
+        setWorkUnitId(db, id, wuId, now);
+      }
     } catch {
       /* work-unit store unwritable → leave workUnitId null; sensing/backfill can attach it later */
     }
