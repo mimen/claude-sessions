@@ -67,7 +67,7 @@ Ground truth: extracted from `src/` on 2026-07-11. `⚠` marks a known issue.
 ### S6 · CatalogueRow + catalogue store  ·  [U2, P0]
 - **Definition:** the durable **catalogue** — one **CatalogueRow** per **session**, with typed
   QUERY/MUTATION accessors and a versioned **migration** chain. Every metadata axis (**role**, **cluster**/
-  system, **key**, **grouping**/epicId, gusWork, PR facts, **stage**, **activity**, **statusLine (field)**,
+  cluster, **key**, **grouping**/epicId, gusWork, PR facts, **stage**, **activity**, **statusLine (field)**,
   **miladReview**, **buildComplete**, lifecycle) lives here.
 - **Inputs:** a DB handle + sessionId; mutations also take a value + `now` timestamp.
 - **Outputs:** a **CatalogueRow** / lists of sessionIds (`sessionsForRole`, `sessionsForSystem`,
@@ -219,7 +219,7 @@ Ground truth: extracted from `src/` on 2026-07-11. `⚠` marks a known issue.
 - **Definition:** mint a **sessionId**, resolve the **spawn-location** (**hook**), run the **spawn
   contract**, write **catalogue** metadata (forward reference), then launch via **spawnCmux** (detached
   default) — or inline / print-id.
-- **Inputs:** parsed `NewSessionOpts` (role, cluster/system, kind, work-unit facts, cwd, prompt, …).
+- **Inputs:** parsed `NewSessionOpts` (role, cluster, kind, work-unit facts, cwd, prompt, …).
 - **Outputs:** exit code; a live **session** bound to a **surface**.
 - **Composes:** S19 (contract), S15 (spawn-location config), S6 (write metadata), S11 (spawnCmux), S13
   (role-def validation).

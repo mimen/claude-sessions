@@ -48,8 +48,9 @@ inside another definition (so you can always trace the vocabulary).
     `repo-number` form (the P0 U4/S2 finding). ADR-0057 replaces the string with the entity; `pr:repo#123`
     survives at most as a display label. (`spawn-contract.ts:23` today; entity per ADR-0057)
 - **cluster** — a named set of sessions that run one operation together (e.g. `pr-watch`). The **fleet**
-  plus the **core** roles. Canonical everywhere (ADR-0059); the DB column `system` is being renamed to
-  `cluster`. (`cluster-map.ts`, `db.ts:42`)
+  plus the **core** roles. Canonical everywhere; the DB column is `cluster` (renamed from the legacy
+  `system` in migration v27, ADR-0059). Set via `ccs set-cluster` (`ccs system` is a back-compat alias);
+  `ccs cluster <slug>` is the map VIEW. (`cluster-map.ts`, `db.ts`)
 - **grouping** — a mid-level work grouping bigger than a **work-unit**. The platform concept is **grouping**;
   a grouping has a **type**, and pr-watch uses an **epic**-type grouping (ADR-0059). A **session** carries an
   `epicId` FK (a typed grouping reference); the display metadata (label/url/shortName/notes) lives in
@@ -83,7 +84,7 @@ inside another definition (so you can always trace the vocabulary).
 
 - **catalogue** — the durable, user/agent-authored metadata store (SQLite). One **row** per **session**
   (**CatalogueRow**). Survives **index** rebuilds. (`catalogue/db.ts`)
-- **CatalogueRow** — the metadata record for a session: identity axes (role, cluster/system, key, epicId,
+- **CatalogueRow** — the metadata record for a session: identity axes (role, cluster, key, epicId,
   gusWork), PR facts, **stage**/**activity**, **statusLine**, **miladReview**, **buildComplete**, lifecycle
   bits. (`db.ts:15-79`)
 - **index** — the ephemeral cache of parsed transcripts (SQLite). Dropped and rebuilt on schema bump; pure
