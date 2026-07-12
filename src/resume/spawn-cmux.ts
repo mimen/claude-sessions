@@ -38,10 +38,31 @@ export function spawnCmux(opts: SpawnCmuxOpts): string | null {
   const args = ["new-workspace", "--cwd", opts.cwd, "--name", opts.name, "--command", command];
   if (opts.focus) args.push("--focus", "true");
   try {
-    const r = Bun.spawnSync([cmux, ...args], { stdout: "pipe", stderr: "pipe" });
+    const r = Bun.spawnSync([cmux, ...args], {
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 10000,
+    });
     if (!r.success) return null;
-    const out = (r.stdout?.toString() ?? "") + (r.stderr?.toString() ?? "");
-    const ref = out.match(/workspace:[0-9]+/)?.[0] ?? null;
+
+    // Parse the workspace ref: JSON-first (look for a ref or id field), then regex fallback
+    // to preserve current behavior if cmux returns plain text. Current 0.64.17 prints text,
+    // so the regex is the live path; the JSON parse future-proofs for structured output.
+    const stdout = r.stdout?.toString() ?? "";
+    const stderr = r.stderr?.toString() ?? "";
+
+    // Try JSON parse from stdout
+    try {
+      const json = JSON.parse(stdout);
+      if (json?.ref) return json.ref;
+      if (json?.id) return json.id;
+    } catch {
+      // Not JSON, fall through to regex
+    }
+
+    // Regex fallback on both stdout + stderr (current behavior)
+    const combined = stdout + stderr;
+    const ref = combined.match(/workspace:[0-9]+/)?.[0] ?? null;
     return ref;
   } catch {
     return null;
