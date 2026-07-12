@@ -1,8 +1,6 @@
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
-import { readFileSync, rmSync } from "node:fs";
 import type { Database } from "bun:sqlite";
+import type { InferenceEngine } from "../inference/engine.ts";
 import {
   setKind,
   setKey,
@@ -18,11 +16,11 @@ import {
 } from "./db.ts";
 
 /**
- * Natural-language editor for session ORGANIZATION METADATA, backed by Codex. The user types an
- * instruction ("mark all glizzy sessions done", "this is a loop backed by ops-watch"); Codex maps
- * it to a set of metadata mutations against a numbered session list; we apply them to the
- * catalogue. It only ever touches metadata (kind/event/skill/parent/lifecycle/title/tags) — never
- * the sessions themselves or the TUI. Runs `codex exec` hermetically, riding the user's Codex auth.
+ * Natural-language editor for session ORGANIZATION METADATA, backed by an inference engine. The
+ * user types an instruction ("mark all glizzy sessions done", "this is a loop backed by
+ * ops-watch"); the engine maps it to a set of metadata mutations against a numbered session
+ * list; we apply them to the catalogue. It only ever touches metadata
+ * (kind/event/skill/parent/lifecycle/title/tags) — never the sessions themselves or the TUI.
  */
 export interface SessionMeta {
   readonly sessionId: string;
@@ -44,13 +42,6 @@ export interface Mutation {
   readonly op: "kind" | "key" | "event" | "skill" | "parent" | "project" | "completed" | "archived" | "title" | "tag" | "untag";
   /** Resolved value: for `parent`, a target sessionId or null; booleans as "true"/"false". */
   readonly value: string | null;
-}
-
-export interface CodexConfig {
-  binary: string;
-  model: string;
-  reasoningEffort: string;
-  timeoutMs?: number;
 }
 
 const SCHEMA_PATH = join(import.meta.dir, "command-schema.json");
@@ -93,12 +84,13 @@ function renderSessions(sessions: readonly SessionMeta[]): string {
     .join("\n");
 }
 
-/** Run the instruction through Codex and return resolved mutations (or an error message). */
+/** Run the instruction through the engine and return resolved mutations (or an error message). */
 export async function runMetadataCommand(
   instruction: string,
   sessions: readonly SessionMeta[],
   focusSessionId: string | null,
-  codex: CodexConfig,
+  engine: InferenceEngine,
+  timeoutMs = 90_000,
 ): Promise<{ mutations: Mutation[] } | { error: string }> {
   if (!instruction.trim()) return { mutations: [] };
   const focusN = focusSessionId ? sessions.findIndex((s) => s.sessionId === focusSessionId) + 1 : 0;
@@ -107,37 +99,14 @@ export async function runMetadataCommand(
     (focusN > 0 ? `FOCUS: #${focusN}\n` : "") +
     `\nSESSIONS:\n${renderSessions(sessions)}\n`;
 
-  const outPath = join(tmpdir(), `ccs-cmd-${randomUUID()}.json`);
-  const args = [
-    "exec",
-    "--ephemeral",
-    "--skip-git-repo-check",
-    "--sandbox",
-    "read-only",
-    "--ignore-rules",
-    "--ignore-user-config",
-    "-c",
-    `model_reasoning_effort="${codex.reasoningEffort}"`,
-    "--output-schema",
-    SCHEMA_PATH,
-    "--output-last-message",
-    outPath,
-  ];
-  if (codex.model) args.push("-m", codex.model);
-  args.push(PROMPT);
-
   try {
-    const proc = Bun.spawn([codex.binary, ...args], {
-      stdin: new TextEncoder().encode(stdin),
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-    const timer = setTimeout(() => proc.kill(), codex.timeoutMs ?? 90_000);
-    const code = await proc.exited;
-    clearTimeout(timer);
-    if (code !== 0) return { error: "codex failed" };
-
-    const parsed = JSON.parse(readFileSync(outPath, "utf8")) as { mutations?: RawMutation[] };
+    const parsed = (await engine.runStructured({
+      prompt: PROMPT,
+      stdin,
+      schemaPath: SCHEMA_PATH,
+      timeoutMs,
+    })) as { mutations?: RawMutation[] } | null;
+    if (!parsed) return { error: `${engine.name} failed` };
     const raw = Array.isArray(parsed.mutations) ? parsed.mutations : [];
     const mutations: Mutation[] = [];
     for (const m of raw) {
@@ -180,9 +149,7 @@ export async function runMetadataCommand(
     }
     return { mutations };
   } catch {
-    return { error: "codex error" };
-  } finally {
-    rmSync(outPath, { force: true });
+    return { error: `${engine.name} error` };
   }
 }
 

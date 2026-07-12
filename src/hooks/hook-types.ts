@@ -56,7 +56,7 @@ export const HOOK_TYPES: Readonly<Record<string, HookTypeDef>> = {
   },
   "cmux-paint": {
     type: "cmux-paint", firesOn: "SessionStart", merge: "most-specific", formats: ["json"], rowResolved: true,
-    note: "the whole tab + workspace picture — one owner (most-specific level wins)",
+    note: "the whole tab + workspace picture — one owner (most-specific level wins). Painted on BOTH SessionStart (first paint) AND Stop (turn-end refresh, so the tab tracks state changes), plus eager-on-resume + `ccs sync-tabs`.",
   },
   statusline: {
     type: "statusline", firesOn: "statusLine", merge: "most-specific", formats: ["json"], rowResolved: true,

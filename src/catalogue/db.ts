@@ -51,9 +51,23 @@ export interface CatalogueRow {
    * the name/url live once on the entity, not copied per session. Set by the fleet
    * orchestrator from its W->epic resolution. Nullable. */
   epicId: string | null;
-  /** Free-form, PER-SYSTEM current activity (pr-watch: building/validating/reviewing/
-   * blocked; other systems define their own). Distinct from generic `lifecycle`. */
+  /** @deprecated superseded by stage × activity (v19). Kept for old rows / non-pr-watch systems. */
   phase: string | null;
+  /** The pr-agent PR STAGE: building | milad-review | in-review | approved | merged. Monotonic,
+   * forward-only, engine-latched (see roles/pr-agent/docs/phase-state-machine.md). */
+  stage: string | null;
+  /** The ACTIVITY within the current stage: working | needs-you | fixing. Worker self-reports
+   * working/needs-you; fixing is engine-sensed. Orthogonal to `stage`. */
+  activity: string | null;
+  /** A short freeform status a session writes about ITSELF (≤2 lines), shown on its tab.
+   * Human-readable prose (vs `phase`'s controlled vocabulary). Set via `ccs status`. */
+  statusLine: string | null;
+  /** Milad's +1 verdict on this PR (the submitter-review signal): "approved" or null. One field,
+   * many writers (ccs approve / sensed / self-report); the gate reads it. Set via `ccs approve`. */
+  miladReview: string | null;
+  /** The monotonic build→review latch: true once phase first hit `milad-review`. Once true the
+   * phase projection never returns `building` (see phase-state-machine.md). */
+  buildComplete: boolean;
   notes: string | null;
   updatedAt: string | null;
   /** PR facts sensed from the session's cwd git worktree (VCS-intrinsic only). */
@@ -72,7 +86,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 15;
+const CATALOGUE_VERSION = 19;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -264,6 +278,45 @@ function migrate(db: Database): void {
     // axis stays on the catalogue row (+ its index). Same deliberate exception as v14.
     db.exec("DROP TABLE IF EXISTS epics;");
   }
+  if (v < 16) {
+    // Additive: `status_line` — a short freeform status a session writes about ITSELF (≤2 lines),
+    // shown on its cmux tab when there's something worth saying, else cleared. Universal (any
+    // role can set one via `ccs status`); scout authors its own, the engine can set the mechanical
+    // ones. Distinct from `phase` (a controlled vocabulary → pill) — this is human-readable prose.
+    if (!hasColumn(db, "catalogue", "status_line")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN status_line TEXT;");
+    }
+  }
+  if (v < 17) {
+    // Additive: `milad_review` — Milad's +1 verdict on a worker's PR (the submitter-review signal).
+    // ONE field, MANY writers (ccs approve / a sensed Slack-GitHub "looks good" / self-report), so
+    // how the +1 arrives never matters — only that the field is set. The gate reads it for its
+    // submitter box; when set, a worker's `milad-review` phase advances to `in-review`. Values:
+    // "approved" (the +1 given) or NULL (not yet). Distinct from an external reviewer's approval.
+    if (!hasColumn(db, "catalogue", "milad_review")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN milad_review TEXT;");
+    }
+  }
+  if (v < 18) {
+    // Additive: `build_complete` — the MONOTONIC latch that makes the build→review hinge one-way
+    // (see roles/pr-agent/docs/phase-state-machine.md). Flips 1 the first time phase becomes
+    // `milad-review`; once set, the phase projection is forbidden from returning `building`
+    // (needs-you resolves to milad-review, fixing becomes reachable). Never flips back. 0/NULL =
+    // still in the build loop; 1 = review loop, building sealed off.
+    if (!hasColumn(db, "catalogue", "build_complete")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN build_complete INTEGER;");
+    }
+  }
+  if (v < 19) {
+    // The pr-agent phase is now STAGE × ACTIVITY (see roles/pr-agent/docs/phase-state-machine.md).
+    //  - `stage`: building | milad-review | in-review | approved | merged — monotonic, forward-only
+    //    (each step latched: buildComplete/miladApproved/approved/merged). Engine-sensed.
+    //  - `activity`: working | needs-you | fixing — the mini-loop inside ANY stage. Worker self-
+    //    reports working/needs-you; fixing is engine-sensed (CI red / conflict / changes-requested).
+    // The old single `phase` column stays (additive-only) but is superseded by these two.
+    if (!hasColumn(db, "catalogue", "stage")) db.exec("ALTER TABLE catalogue ADD COLUMN stage TEXT;");
+    if (!hasColumn(db, "catalogue", "activity")) db.exec("ALTER TABLE catalogue ADD COLUMN activity TEXT;");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -295,6 +348,11 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     gusWork: (r.gus_work as string) ?? null,
     epicId: (r.epic_id as string) ?? null,
     phase: (r.phase as string) ?? null,
+    stage: (r.stage as string) ?? null,
+    activity: (r.activity as string) ?? null,
+    statusLine: (r.status_line as string) ?? null,
+    miladReview: (r.milad_review as string) ?? null,
+    buildComplete: r.build_complete === 1,
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
     prNumber: (r.pr_number as number) ?? null,
@@ -425,6 +483,26 @@ export function setPhase(db: Database, sessionId: string, phase: string | null, 
   set(db, sessionId, "phase", phase, now);
 }
 
+/** The PR stage (building|milad-review|in-review|approved|merged). Engine-latched; forward-only. */
+export function setStage(db: Database, sessionId: string, stage: string | null, now: string): void {
+  set(db, sessionId, "stage", stage, now);
+}
+
+/** The activity within the current stage (working|needs-you|fixing). */
+export function setActivity(db: Database, sessionId: string, activity: string | null, now: string): void {
+  set(db, sessionId, "activity", activity, now);
+}
+
+/** A short freeform status a session writes about itself (≤2 lines on its tab). null clears it. */
+export function setStatusLine(db: Database, sessionId: string, statusLine: string | null, now: string): void {
+  set(db, sessionId, "status_line", statusLine, now);
+}
+
+/** Milad's +1 verdict on a PR (submitter-review signal): "approved" to grant, null to revoke. */
+export function setMiladReview(db: Database, sessionId: string, verdict: string | null, now: string): void {
+  set(db, sessionId, "milad_review", verdict, now);
+}
+
 /** Reverse lookup: which sessions are working this GUS work item (a work-unit may span sessions). */
 export function sessionsForGusWork(db: Database, gusWork: string): string[] {
   return (
@@ -432,6 +510,27 @@ export function sessionsForGusWork(db: Database, gusWork: string): string[] {
       session_id: string;
     }[]
   ).map((r) => r.session_id);
+}
+
+/** Reverse lookup: sessions assigned to a role (the canonical identity axis, ADR-0015). */
+export function sessionsForRole(db: Database, role: string): string[] {
+  return (
+    db.query("SELECT session_id FROM catalogue WHERE role = $r").all({ $r: role }) as {
+      session_id: string;
+    }[]
+  ).map((r) => r.session_id);
+}
+
+/** Reverse lookup: sessions on a PR. Repo optional — `#123` matches the number across repos. */
+export function sessionsForPr(db: Database, prNumber: number, prRepo?: string): string[] {
+  const rows = prRepo
+    ? (db
+        .query("SELECT session_id FROM catalogue WHERE pr_number = $n AND pr_repo = $repo")
+        .all({ $n: prNumber, $repo: prRepo }) as { session_id: string }[])
+    : (db
+        .query("SELECT session_id FROM catalogue WHERE pr_number = $n")
+        .all({ $n: prNumber }) as { session_id: string }[]);
+  return rows.map((r) => r.session_id);
 }
 
 // ---- Grouping axis (epic) ------------------------------------------------------

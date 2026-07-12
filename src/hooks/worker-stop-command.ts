@@ -10,10 +10,11 @@
  *
  * Reads the Stop payload (session_id) from stdin. ALWAYS exits 0 (fail-open, ADR-0035).
  */
-import { openCatalogue, getRow, touch } from "../catalogue/db.ts";
+import { openCatalogue, getRow, touch, type CatalogueRow } from "../catalogue/db.ts";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import { resolveConfig } from "./resolve-config.ts";
 import { liveResolveCtx } from "./compose-claude-md.ts";
+import { isPhaseWorker, phaseRubric } from "./phase-rubric.ts";
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -47,16 +48,39 @@ export async function workerStopCommand(): Promise<number> {
     if (!id) return 0;
     ensureDataDir();
     const db = openCatalogue(CATALOGUE_PATH());
+    let registered = false;
+    let worker: CatalogueRow | null = null;
     try {
       // Only self-report for a registered session (has a role); a bare/foreign session is a no-op.
       const row = getRow(db, id);
       if (row?.role) {
+        registered = true;
+        if (isPhaseWorker(row)) worker = row;
         const fields = metaUpdateFields(db, row);
         // `updated_at` is the one field a stop hook can refresh on its own (the heartbeat).
         if (fields.includes("updated_at")) touch(db, id, now());
       }
     } finally {
       db.close();
+    }
+    // Inject the phase self-check at turn-end (a pr-agent only). Non-blocking additionalContext —
+    // the worker re-evaluates + self-sets its activity next turn; never forces an extra turn (no
+    // `decision: block`), so there's zero loop risk (verified against the Stop hook contract).
+    if (worker) {
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: "Stop", additionalContext: phaseRubric(worker) },
+      }) + "\n");
+    }
+    // Repaint the tab on turn-end so it reflects whatever this turn changed (PR merged, parked,
+    // lifecycle flip, …). SessionStart alone painted once and then drifted; Stop keeps it fresh
+    // every turn. Best-effort + late (db already closed): a paint miss never fails the hook.
+    if (registered) {
+      try {
+        const { pushRenderOps } = await import("../catalogue/sync-tabs.ts");
+        pushRenderOps(id);
+      } catch {
+        /* fail-open — the tab just stays as last painted */
+      }
     }
   } catch {
     // fail-open

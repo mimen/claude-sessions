@@ -5,6 +5,7 @@ import { workspaceForSession } from "../cmux/liveness.ts";
 import { renderTab, applyPaintOverride, type CmuxPaintOverride } from "./render-tab.ts";
 import { resolveConfig } from "../hooks/resolve-config.ts";
 import { liveResolveCtx } from "../hooks/compose-claude-md.ts";
+import { getGrouping } from "../state/groupings.ts";
 import { execFileSync } from "node:child_process";
 
 /**
@@ -26,15 +27,30 @@ function notInSession(): number {
 /**
  * Push render ops to cmux for a live/open session. Returns true if pushed, false if not open.
  * All ops are best-effort; a failed push doesn't throw (cmux might be unreachable).
+ *
+ * `refOverride`: when the caller JUST created the workspace (resume/new-session) it already holds
+ * the workspace ref. At that instant cmux has NOT yet bound the surface→sessionId (claude hasn't
+ * booted in the new pane), so a surface-UUID lookup would return null and skip the paint — the
+ * eager-paint-on-resume race. Passing the known ref paints it directly, no lookup, no race.
  */
-export function pushRenderOps(sessionId: string, cmuxBin = process.env.CMUX_BIN ?? "cmux"): boolean {
+export function pushRenderOps(
+  sessionId: string,
+  cmuxBin = process.env.CMUX_BIN ?? "cmux",
+  refOverride?: string,
+): boolean {
   // Resolve the live workspace by SURFACE UUID (the exact join key cmux exposes, ADR-0040).
   // This replaces the old cwd+title join, which clobbered the WRONG tab when sessions shared
   // a cwd or title (the Loop Designer rename bug, 2026-07-08). The surface UUID is unique per
-  // session and never guesses; if the session isn't live, we skip (no rename).
-  const loc = workspaceForSession(sessionId);
-  if (!loc) return false;
-  const ref = loc.workspaceRef;
+  // session and never guesses; if the session isn't live, we skip (no rename). A caller-supplied
+  // ref (just-spawned workspace) short-circuits the lookup to dodge the surface-binding race.
+  let ref: string;
+  if (refOverride) {
+    ref = refOverride;
+  } else {
+    const loc = workspaceForSession(sessionId);
+    if (!loc) return false;
+    ref = loc.workspaceRef;
+  }
 
   if (!existsSync(CATALOGUE_PATH())) return false;
   const db = openCatalogue(CATALOGUE_PATH());
@@ -53,7 +69,19 @@ export function pushRenderOps(sessionId: string, cmuxBin = process.env.CMUX_BIN 
   db.close();
   if (!row) return false;
 
-  const ops = applyPaintOverride(renderTab(row, row.kind), paint);
+  // Resolve the grouping (epic) display so the worker description can show it (ADR-0051 —
+  // display metadata is cluster runtime state, not on the row). Best-effort: no grouping → null.
+  let grouping = null;
+  if (row.system && row.epicId) {
+    try {
+      const g = getGrouping(row.system, row.epicId);
+      if (g) grouping = { label: g.shortName ?? g.label, url: g.url };
+    } catch {
+      grouping = null;
+    }
+  }
+
+  const ops = applyPaintOverride(renderTab(row, row.kind, { grouping }), paint);
   try {
     execFileSync(cmuxBin, ["rename-workspace", "--workspace", ref, "--", ops.title], {
       timeout: 4000,

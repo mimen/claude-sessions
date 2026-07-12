@@ -14,6 +14,10 @@ import {
   setGusWork,
   setSessionEpic,
   setPhase,
+  setStage,
+  setActivity,
+  setStatusLine,
+  setMiladReview,
   setProject,
   setSystem,
   addTag,
@@ -188,6 +192,100 @@ export function phase(sessionArg: string | undefined, value: string | undefined,
   try {
     setPhase(db, id, off ? null : value!.trim(), now());
     console.log(off ? `cleared phase on ${id.slice(0, 8)}…` : `phase ${value!.trim()} → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/**
+ * `ccs status [<id>|.] "<freeform line>" | --off` — set a short freeform status a session writes
+ * about ITSELF, shown on its tab (≤2 lines). Unlike `phase` (a controlled vocabulary → pill),
+ * this is human-readable prose the agent authors. `--off` clears it. `value` is the full line
+ * (the CLI joins the non-flag args), so it can be a sentence, not a single token.
+ */
+export function status(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!off && (!value || !value.trim())) {
+    console.error('usage: ccs status [<session-id>|.] "<short freeform line>" | --off');
+    return 1;
+  }
+  // Keep tabs readable: clamp to a ~2-line budget so a runaway line can't blow out the sidebar.
+  const line = off ? null : value!.trim().replace(/\s+/g, " ").slice(0, 120);
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH());
+  try {
+    setStatusLine(db, id, line, now());
+    console.log(off ? `cleared status on ${id.slice(0, 8)}…` : `status "${line}" → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/**
+ * `ccs activity [<id>|.] needs-you | --off` — the worker self-reports being STUCK on an ambiguous
+ * fork (needs Milad's decision). `--off` clears back to DORMANT (the bare stage — awaiting review /
+ * merge / actively building). There is no "working" activity: a stage's resting state IS the bare
+ * stage. `fixing` is engine-sensed (don't set it here). Orthogonal to stage (engine-latched).
+ */
+export function activity(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  const v = value?.trim();
+  if (!off && v !== "needs-you") {
+    console.error("usage: ccs activity [<id>|.] needs-you | --off   (--off = back to dormant)");
+    return 1;
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH());
+  try {
+    setActivity(db, id, off ? null : "needs-you", now());
+    console.log(off ? `cleared activity (dormant) on ${id.slice(0, 8)}…` : `activity needs-you → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/**
+ * `ccs ready [<id>|.]` — the worker declares its build DONE and ready for Milad's review. Latches
+ * the stage forward to `milad-review` (monotonic; the build stage is sealed behind it) and clears
+ * any transient activity back to `working`. The one stage move a worker may make itself (L1).
+ */
+export function ready(sessionArg: string | undefined): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH());
+  try {
+    setStage(db, id, "milad-review", now());
+    setActivity(db, id, null, now()); // clear to dormant — awaiting Milad's review
+    console.log(`ready → milad-review (${id.slice(0, 8)}…)`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/**
+ * `ccs approve [<id>|.] [--off]` — record Milad's +1 on a PR (the submitter-review signal). Sets
+ * the `milad_review` field to "approved" (or clears with --off). This is ONE of several writers to
+ * that one field (a sensed Slack/GitHub "looks good" or a self-report can set it too); the gate
+ * reads the field, and a worker's `milad-review` phase advances to `in-review` once it's set.
+ */
+export function approve(sessionArg: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH());
+  try {
+    setMiladReview(db, id, off ? null : "approved", now());
+    console.log(off ? `cleared your +1 on ${id.slice(0, 8)}…` : `approved (your +1) → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
   }

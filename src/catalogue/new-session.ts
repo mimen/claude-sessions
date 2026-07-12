@@ -22,6 +22,7 @@ import {
 } from "./db.ts";
 import { resolveRole } from "../roles/role-files.ts";
 import { shellQuote } from "../resume/command.ts";
+import { spawnCmux } from "../resume/spawn-cmux.ts";
 import { execFileSync } from "node:child_process";
 import { spawnContractError, rowWorkUnit, type SpawnFacts, type WorktreeState } from "./spawn-contract.ts";
 import { interpretSpawnLocation, syntheticRow, type SpawnLocationConfig } from "./spawn-location.ts";
@@ -377,29 +378,16 @@ function probeWorktree(cwd: string): WorktreeState {
 }
 
 /**
- * Spawn a session into a NEW cmux workspace (its own surface). Scrubs CMUX_SURFACE_ID /
- * CMUX_WORKSPACE_ID from the child env (belt-and-suspenders — cmux assigns fresh ones for the
- * new surface; an inherited value would let the child's hook rebind a foreign surface).
+ * Spawn a session into a NEW cmux workspace (its own surface) via the shared spawnCmux primitive —
+ * the SAME detached-spawn + CMUX_SURFACE_ID env-scrub (ADR-0042) used by resume, so a born-fresh
+ * and a resumed session launch identically.
  */
 function spawnDetached(id: string, argv: string[], cwd: string, name: string): number {
-  const cmux = process.env.CMUX_BIN ?? "cmux";
-  const command = argv.map(shellQuote).join(" ");
-  // Prepend an env-scrub so no inherited surface id leaks into the child (ADR-0042).
-  const guarded = `unset CMUX_SURFACE_ID CMUX_WORKSPACE_ID; exec ${command}`;
-  try {
-    const r = Bun.spawnSync(
-      [cmux, "new-workspace", "--cwd", cwd, "--name", name, "--command", guarded],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-    const out = (r.stdout?.toString() ?? "") + (r.stderr?.toString() ?? "");
-    if (!r.success) {
-      console.error(`ccs: failed to spawn cmux workspace for ${id.slice(0, 8)}: ${out.trim()}`);
-      return 1;
-    }
-    console.error(`ccs: spawned ${name} → ${out.trim()} (session ${id.slice(0, 8)}, cwd ${cwd})`);
-    return 0;
-  } catch (e) {
-    console.error(`ccs: could not run cmux: ${(e as Error).message}`);
-    return 127;
+  const ref = spawnCmux({ argv, cwd, name });
+  if (ref === null) {
+    console.error(`ccs: failed to spawn cmux workspace for ${id.slice(0, 8)} (cwd ${cwd})`);
+    return 1;
   }
+  console.error(`ccs: spawned ${name} → ${ref} (session ${id.slice(0, 8)}, cwd ${cwd})`);
+  return 0;
 }
