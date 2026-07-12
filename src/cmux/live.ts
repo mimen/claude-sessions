@@ -21,11 +21,39 @@ import {
   type CmuxTree,
 } from "./bridge";
 
-const HOOK_STORE_PATH = join(
-  homedir(),
-  ".cmuxterm",
-  "claude-hook-sessions.json",
-);
+const HOOK_STORE_PATH =
+  process.env.CMUX_HOOK_STORE_PATH ??
+  join(homedir(), ".cmuxterm", "claude-hook-sessions.json");
+
+/** Parsed cmux version. */
+export interface CmuxVersion {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+/**
+ * Probe the cmux version via `cmux --version`. Returns {major, minor, patch} if parseable,
+ * null if cmux is absent or the version string doesn't match \d+\.\d+\.\d+.
+ */
+export function cmuxVersion(): CmuxVersion | null {
+  try {
+    const out = execFileSync("cmux", ["--version"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    });
+    const match = out.match(/(\d+)\.(\d+)\.(\d+)/);
+    if (!match || !match[1] || !match[2] || !match[3]) return null;
+    return {
+      major: parseInt(match[1], 10),
+      minor: parseInt(match[2], 10),
+      patch: parseInt(match[3], 10),
+    };
+  } catch {
+    return null;
+  }
+}
 
 /** Enumerate every window (ADR-0016): `--all` is required or the current window only. */
 function readTree(): { tree: CmuxTree; ok: boolean } {
@@ -56,7 +84,26 @@ function readHookStore(): { store: CmuxHookStore; ok: boolean } {
 
 /** Build a bridge from the live cmux state on this machine. */
 export function liveBridge(): Bridge {
+  const version = cmuxVersion();
   const { tree, ok: treeOk } = readTree();
   const { store, ok: storeOk } = readHookStore();
-  return buildBridge(tree, store, treeOk && storeOk);
+
+  // Version guard (ADR-0054 fail-closed contract): if cmux < 0.64.0, the hook store can't be
+  // trusted (it didn't exist) → prefer readable=false so resume fails closed rather than
+  // re-spawning a fleet we can't see. If >= 1.0.0, warn about untested major version.
+  let readable = treeOk && storeOk;
+  if (version) {
+    if (version.major === 0 && version.minor < 64) {
+      console.warn(
+        `cmux ${version.major}.${version.minor}.${version.patch} predates the hook store (0.64.0) — liveness unreadable, resume will fail closed`,
+      );
+      readable = false;
+    } else if (version.major >= 1) {
+      console.warn(
+        `cmux ${version.major}.${version.minor}.${version.patch} is an untested major version (built for 0.64.x)`,
+      );
+    }
+  }
+
+  return buildBridge(tree, store, readable);
 }
