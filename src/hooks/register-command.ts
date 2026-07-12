@@ -12,6 +12,7 @@ import { handleSessionStart, type SessionStartPayload } from "./register.ts";
 import { composeClaudeMd } from "./compose-claude-md.ts";
 import { runStartActions } from "./start-actions.ts";
 import { composePredecessors } from "./compose-predecessors.ts";
+import { log } from "../logger.ts";
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -20,7 +21,10 @@ function now(): string {
 async function readStdin(): Promise<string> {
   try {
     return await new Response(Bun.stdin.stream()).text();
-  } catch {
+  } catch (error) {
+    log.error("Failed to read SessionStart hook payload from stdin", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return "";
   }
 }
@@ -72,12 +76,18 @@ export async function registerSessionCommand(): Promise<number> {
       try {
         const { pushRenderOps } = await import("../catalogue/sync-tabs.ts");
         pushRenderOps(payload.session_id);
-      } catch {
-        /* fail-open */
+      } catch (error) {
+        log.warn("Best-effort tab paint failed on SessionStart", {
+          sessionId: payload.session_id,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
-  } catch {
-    // Malformed payload / unreachable catalogue / anything — fail open, say nothing.
+  } catch (error) {
+    // Malformed payload / unreachable catalogue / anything — fail open but log it.
+    log.error("SessionStart hook registration failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   return 0;
 }
