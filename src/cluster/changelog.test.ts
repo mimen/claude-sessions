@@ -1,5 +1,8 @@
-import { expect, test } from "bun:test";
-import { parseChangelog, changelogSince, renderDelta } from "./changelog.ts";
+import { expect, test, afterEach } from "bun:test";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseChangelog, changelogSince, renderDelta, catchUp } from "./changelog.ts";
 
 const SAMPLE = `# pr-watch CHANGELOG
 
@@ -76,4 +79,50 @@ test("renderDelta surfaces version transition, count, restart note, and each ent
   expect(text).toContain("[requiresRestart]");
   expect(text).toContain("screenshots auto-invalidate"); // v3 title present
   expect(text).not.toContain("prBranch"); // v1 is below the seen floor → excluded
+});
+
+// --- catchUp core (shared by the start action + `ccs catch-up`) -------------------
+const dirs: string[] = [];
+afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+function roots(changelog?: string): { cfg: string; rt: string } {
+  const cfg = mkdtempSync(join(tmpdir(), "ccs-cu-cfg-"));
+  const rt = mkdtempSync(join(tmpdir(), "ccs-cu-rt-"));
+  dirs.push(cfg, rt);
+  if (changelog !== undefined) {
+    const d = join(cfg, "clusters", "pr-watch");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "CHANGELOG.md"), changelog);
+  }
+  return { cfg, rt };
+}
+const R = { cluster: "pr-watch", role: "control" };
+const NOW = "2026-07-12T00:00:00Z";
+
+test("catchUp: fresh identity gets the full window, anyRestart reflects the entries, stamp advances", () => {
+  const { cfg, rt } = roots(SAMPLE);
+  const res = catchUp("pr-watch", R, cfg, rt, NOW);
+  expect(res.context).toContain("v0 → v3");
+  expect(res.currentVersion).toBe(3);
+  expect(res.seenVersion).toBe(0);
+  expect(res.anyRestart).toBe(true); // v2 requiresRestart is in the window
+  // second call is up to date → silent no-op, anyRestart clears
+  const again = catchUp("pr-watch", R, cfg, rt, NOW);
+  expect(again.context).toBeNull();
+  expect(again.anyRestart).toBe(false);
+});
+
+test("catchUp: a delta with no restart entries reports anyRestart false", () => {
+  const noRestart = "# c\nversion: 1\n\n## adopt prBranch (version 1)\nrequiresRestart: false\nUse prBranch.\n";
+  const { cfg, rt } = roots(noRestart);
+  const res = catchUp("pr-watch", R, cfg, rt, NOW);
+  expect(res.context).toContain("prBranch");
+  expect(res.anyRestart).toBe(false);
+});
+
+test("catchUp: no CHANGELOG file → empty result (currentVersion 0)", () => {
+  const { cfg, rt } = roots(); // no changelog written
+  const res = catchUp("pr-watch", R, cfg, rt, NOW);
+  expect(res.context).toBeNull();
+  expect(res.currentVersion).toBe(0);
+  expect(res.anyRestart).toBe(false);
 });

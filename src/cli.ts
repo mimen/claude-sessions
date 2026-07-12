@@ -29,6 +29,7 @@ import { registerSessionCommand } from "./hooks/register-command.ts";
 import { hookRunCommand } from "./hooks/hook-run.ts";
 import { statuslineCommand } from "./hooks/statusline-command.ts";
 import { hooksCommand } from "./hooks/hooks-command.ts";
+import { catchUpCommand } from "./hooks/catch-up-command.ts";
 import { inboxCommand } from "./inbox/inbox-command.ts";
 import { stateCommand } from "./state/state-command.ts";
 import { groupingCommand } from "./state/grouping-command.ts";
@@ -73,6 +74,7 @@ Usage:
   ccs resume <selector>  Resume by anything: id | #pr | owner/repo#pr | W-number | epic | role | cluster
                          (pin the axis with --role|--pr|--gus|--epic|--cluster|--key; --dry-run to preview)
   ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
+  ccs catch-up [<id>|.]  Surface unseen cluster CHANGELOG entries + advance the seen stamp (exit 2 if a restart is needed)
   ccs --version       Print version
   ccs --help          Show this help
 `;
@@ -156,6 +158,10 @@ export async function main(argv: string[]): Promise<number> {
     case "hooks":
       // `ccs hooks <explain|lint>` — layered-hook observability (ADR-0045)
       return hooksCommand(args.slice(1));
+    case "catch-up":
+      // `ccs catch-up [<id>|.]` — surface unseen cluster CHANGELOG entries + advance the stamp
+      // (ADR-0058). Per-tick companion to the catch-up start action, for long-lived loops.
+      return catchUpCommand(args.slice(1));
     case "register-session":
       return await registerSessionCommand(); // back-compat alias for `hook run session-start`
     case "statusline":

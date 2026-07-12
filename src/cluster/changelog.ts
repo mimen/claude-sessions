@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ccsConfigRoot } from "../roles/role-files.ts";
+import { ccsRuntimeRoot, type Responsibility } from "../inbox/identity-path.ts";
+import { readIdentityDoc, mergeIdentityDoc } from "../state/cluster-state.ts";
 
 /**
  * The cluster CHANGELOG (ADR-0058) — the agent-facing, prescriptive record of how a cluster's
@@ -103,4 +105,55 @@ export function renderDelta(cluster: string, delta: ChangelogDelta): string {
     .map((e) => `— v${e.version}${e.requiresRestart ? " [requiresRestart]" : ""}: ${e.title}\n${e.body}`)
     .join("\n\n");
   return `${header}\n\n${body}`;
+}
+
+/** The identity state doc + field where each identity records the cluster version it last saw. */
+export const CATCH_UP_DOC = "catch-up";
+export const SEEN_FIELD = "last_seen_cluster_version";
+
+/** The result of a catch-up: the rendered delta to surface (null when up-to-date / no changelog),
+ * plus the machine-read facts a caller (e.g. control) may act on. */
+export interface CatchUpResult {
+  /** additionalContext text to surface, or null when there's nothing new. */
+  context: string | null;
+  /** The cluster's current changelog version (0 when no changelog). */
+  currentVersion: number;
+  /** The version this identity had seen before this call. */
+  seenVersion: number;
+  /** Whether any newly-surfaced entry is requiresRestart (control acts on this). */
+  anyRestart: boolean;
+}
+
+/**
+ * The shared catch-up core (ADR-0058), used by BOTH the `catch-up` start action (SessionStart) and
+ * the `ccs catch-up` command (each tick, for long-lived loops that re-arm in the same session and
+ * so never re-hit SessionStart). Reads the cluster CHANGELOG, computes the delta since this
+ * identity's last-seen stamp, and — only when there's something new — advances the stamp AFTER the
+ * caller can surface it. The stamp advance is the sole side effect; it's idempotent: a session that
+ * dies before its next turn re-surfaces the same entries next call (same move-on-drain contract).
+ *
+ * `configRoot`/`runtimeRoot` are injectable for testing; production uses the ambient roots.
+ */
+export function catchUp(
+  cluster: string,
+  r: Responsibility,
+  configRoot = ccsConfigRoot(),
+  runtimeRoot = ccsRuntimeRoot(),
+  nowIso: string = new Date().toISOString(),
+): CatchUpResult {
+  const empty: CatchUpResult = { context: null, currentVersion: 0, seenVersion: 0, anyRestart: false };
+  const log = readClusterChangelog(cluster, configRoot);
+  if (!log) return empty; // cluster ships no CHANGELOG
+  // A fresh embodiment has no stamp → seen 0, so it sees the full window (ADR-0058: a just-spawned
+  // worker is never behind).
+  const doc = readIdentityDoc<{ [SEEN_FIELD]?: number }>(runtimeRoot, r, CATCH_UP_DOC);
+  const seen = typeof doc?.data?.[SEEN_FIELD] === "number" ? doc!.data[SEEN_FIELD]! : 0;
+  const delta = changelogSince(log, seen);
+  if (delta.entries.length === 0) {
+    return { context: null, currentVersion: log.currentVersion, seenVersion: seen, anyRestart: false };
+  }
+  const context = renderDelta(cluster, delta);
+  // Advance the stamp ONLY after composing the surfaced context (single-writer = catch-up).
+  mergeIdentityDoc(runtimeRoot, r, CATCH_UP_DOC, { [SEEN_FIELD]: delta.currentVersion }, { source: "catch-up", now: nowIso });
+  return { context, currentVersion: delta.currentVersion, seenVersion: seen, anyRestart: delta.anyRestart };
 }

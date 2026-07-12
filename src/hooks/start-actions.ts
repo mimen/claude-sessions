@@ -5,12 +5,7 @@ import { resolveConfig } from "./resolve-config.ts";
 import { liveResolveCtx } from "./compose-claude-md.ts";
 import type { Action } from "./merge.ts";
 import { workUnitPath } from "../catalogue/spawn-contract.ts";
-import { readClusterChangelog, changelogSince, renderDelta } from "../cluster/changelog.ts";
-import { readIdentityDoc, mergeIdentityDoc } from "../state/cluster-state.ts";
-
-/** The identity state doc + field where each identity records the cluster version it last saw. */
-const CATCH_UP_DOC = "catch-up";
-const SEEN_FIELD = "last_seen_cluster_version";
+import { catchUp } from "../cluster/changelog.ts";
 
 /**
  * The `start` hook action runner (ADR-0044, execute-deterministically): a session's resolved
@@ -40,7 +35,7 @@ export interface ActionOutcome {
 export type ActionHandler = (action: Action, ctx: StartActionCtx) => ActionOutcome;
 
 /** The responsibility key for a row (for locating its inbox). Mirrors the identity resolver. */
-function responsibilityOf(row: CatalogueRow): Responsibility {
+export function responsibilityOf(row: CatalogueRow): Responsibility {
   return {
     cluster: row.cluster ?? null,
     role: row.role ?? "unknown",
@@ -80,22 +75,10 @@ export const BUILTIN_ACTIONS: Record<string, ActionHandler> = {
   "catch-up": (_action, ctx) => {
     const cluster = ctx.row.cluster;
     if (!cluster) return { context: null }; // no cluster → no changelog to catch up on
-    const log = readClusterChangelog(cluster);
-    if (!log) return { context: null }; // cluster ships no CHANGELOG
-    const root = ccsRuntimeRoot();
-    const r = responsibilityOf(ctx.row);
-    // A fresh embodiment has no stamp → seen 0, so it sees the full window (ADR-0058: a
-    // just-spawned worker is never behind). readIdentityDoc returns the enveloped doc.
-    const doc = readIdentityDoc<{ [SEEN_FIELD]?: number }>(root, r, CATCH_UP_DOC);
-    const seen = typeof doc?.data?.[SEEN_FIELD] === "number" ? doc!.data[SEEN_FIELD]! : 0;
-    const delta = changelogSince(log, seen);
-    if (delta.entries.length === 0) return { context: null }; // up to date → silent no-op
-    const context = renderDelta(cluster, delta);
-    // Advance the stamp ONLY after composing the surfaced context (single-writer = this action).
-    // Clock at the side-effect boundary (mirrors register-command / worker-stop-command).
-    const nowIso = new Date().toISOString();
-    mergeIdentityDoc(root, r, CATCH_UP_DOC, { [SEEN_FIELD]: delta.currentVersion }, { source: "catch-up", now: nowIso });
-    return { context };
+    // Shared core with `ccs catch-up` (the per-tick path for long-lived loops). Fires on every
+    // SessionStart source (startup + resume): a resume is exactly when a session that missed a
+    // mid-flight bump must catch up.
+    return { context: catchUp(cluster, responsibilityOf(ctx.row)).context };
   },
 };
 
