@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
-import type { RoleDef, Kind, Topology } from "../catalogue/db.ts";
+import type { RoleDef, Kind, Topology, StageSchema } from "../catalogue/db.ts";
 
 /**
  * File-backed role definitions (ADR-0048/0050): a role is a directory in a cluster package;
@@ -29,6 +29,8 @@ interface RoleToml {
   kind?: string;
   resume_command?: string;
   topology?: string;
+  /** ADR-0064 [stage] schema block: `values = [...]`, `monotonic = true`. */
+  stage?: { values?: unknown; monotonic?: unknown };
 }
 
 /** Read a role dir into a RoleDef. `dir` is the role's home; `cluster` is its grouping or null. */
@@ -46,6 +48,13 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
   const kind: Kind | null = toml.kind === "loop" ? "loop" : toml.kind === "session" ? "session" : null;
   const topology: Topology | null =
     toml.topology === "core" ? "core" : toml.topology === "fleet" ? "fleet" : null;
+  // ADR-0064: role-declared stage schema. Only a [stage] block with a string[] `values` counts;
+  // anything malformed → null (unconstrained), fail-open like the rest of role.toml parsing.
+  let stageSchema: StageSchema | null = null;
+  const sv = toml.stage?.values;
+  if (Array.isArray(sv) && sv.every((v) => typeof v === "string")) {
+    stageSchema = { values: sv as string[], monotonic: toml.stage?.monotonic === true };
+  }
   return {
     role,
     cluster,
@@ -53,6 +62,7 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
     topology,
     homeDir: dir, // computed at load — the portability breaker (stored absolute path) is gone
     resumeCommand: toml.resume_command ?? null,
+    stageSchema,
     skills: dirNames(join(dir, "skills")),
     commands: commandNames(join(dir, "commands")),
     hooks: hookNames(join(dir, ".ccs-hooks")),

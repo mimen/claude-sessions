@@ -30,6 +30,8 @@ import { openIndex } from "../index/schema.ts";
 import { titleOf, usageOf, subagentCostOf, type SessionUsage } from "../index/index.ts";
 import { formatCost, formatTokens } from "../cost.ts";
 import { pushCmuxRename } from "../cmux/liveness.ts";
+import { resolveRole } from "../roles/role-files.ts";
+import { validateStageTransition } from "./stage-schema.ts";
 
 /**
  * CLI surface for the catalogue. These are the primitives the in-session slash commands
@@ -261,6 +263,18 @@ export function stage(sessionArg: string | undefined, value: string | undefined,
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
+    if (!off) {
+      // ADR-0064: validate against the role-declared stage schema (vocabulary + monotonic). The
+      // cluster owns the vocabulary (role.toml); the tool enforces it. Unconstrained if the role
+      // declares no [stage] block or isn't resolvable.
+      const row = getRow(db, id);
+      const schema = row?.role ? resolveRole(row.role)?.stageSchema ?? null : null;
+      const err = validateStageTransition(schema, row?.stage ?? null, v!);
+      if (err) {
+        console.error(`ccs stage: ${err}`);
+        return 1;
+      }
+    }
     setStage(db, id, off ? null : v!, now());
     console.log(off ? `cleared stage on ${id.slice(0, 8)}…` : `stage ${v} → ${id.slice(0, 8)}…`);
   } finally {

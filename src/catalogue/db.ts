@@ -675,6 +675,16 @@ export function sessionsForEpic(db: Database, epicId: string): string[] {
 /** A role DEFINITION: its runtime wiring + what to materialize into ~/.claude. */
 export type Topology = "core" | "fleet";
 
+/** Role-declared schema for the blessed `stage` column (ADR-0064): the allowed vocabulary and
+ * whether the stage is monotonic (forward-only). The tool ENFORCES these guarantees; the cluster
+ * OWNS the vocabulary (the ADR-0061 split). Absent = no constraint (the setter stores any string). */
+export interface StageSchema {
+  /** Allowed stage values, in monotonic order (index = rank). Empty/absent = unconstrained. */
+  values: string[];
+  /** When true, a stage may only move forward (to an equal-or-higher rank in `values`). */
+  monotonic: boolean;
+}
+
 export interface RoleDef {
   role: string;
   /** Optional cluster grouping (nullable — a role can stand alone, ADR-0022). */
@@ -688,6 +698,9 @@ export interface RoleDef {
   homeDir: string | null;
   /** How a loop role is re-armed on resume (ADR-0015); null for non-loop roles. */
   resumeCommand: string | null;
+  /** Role-declared schema for the `stage` column (ADR-0064): allowed values + monotonic guarantee.
+   * null when role.toml declares no [stage] block (the setter stays unconstrained). */
+  stageSchema: StageSchema | null;
   /** Skills / commands / hooks to materialize into ~/.claude for this role (ADR-0034). */
   skills: string[];
   commands: string[];
