@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { openCatalogue, getRow, lifecycleOf, identityKeyOf } from "./db.ts";
+import { openCatalogue, getRow, lifecycleOf, identityKeyOf } from "../catalogue/db.ts";
 import { parseOpts, writeSessionMetadata } from "./new-session.ts";
 
 const NOW = "2026-07-08T00:00:00.000Z";
@@ -131,7 +131,7 @@ test("writeSessionMetadata: only the provided fields are written (no clobber to 
 });
 
 import { validateSpawn } from "./new-session.ts";
-import type { RoleDef } from "./db.ts";
+import type { RoleDef } from "../catalogue/db.ts";
 
 const loopDef: RoleDef = {
   role: "control", cluster: "pr-watch", kind: "loop", homeDir: "/tmp",

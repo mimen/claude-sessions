@@ -12,7 +12,7 @@ import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, parent, role, resumeCommand, gusWork, sessionEpic, project, setClusterCmd, status, approve, activity, ready, meta } from "./catalogue/commands.ts";
-import { newSession } from "./catalogue/new-session.ts";
+import { newSession } from "./resume/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { backfillTitles } from "./titler/queue.ts";
 import { createTitler } from "./titler/codex.ts";

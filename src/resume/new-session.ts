@@ -17,17 +17,17 @@ import {
   stampPrFacts,
   type Kind,
   type RoleDef,
-} from "./db.ts";
+} from "../catalogue/db.ts";
 import { resolveRole } from "../roles/role-files.ts";
-import { shellQuote } from "../resume/command.ts";
-import { spawnCmux } from "../resume/spawn-cmux.ts";
+import { shellQuote } from "./command.ts";
+import { spawnCmux } from "./spawn-cmux.ts";
 import { execFileSync } from "node:child_process";
-import { spawnContractError, rowWorkUnit, type SpawnFacts, type WorktreeState } from "./spawn-contract.ts";
-import { interpretSpawnLocation, syntheticRow, type SpawnLocationConfig } from "./spawn-location.ts";
+import { spawnContractError, rowWorkUnit, type SpawnFacts, type WorktreeState } from "../catalogue/spawn-contract.ts";
+import { interpretSpawnLocation, syntheticRow, type SpawnLocationConfig } from "../catalogue/spawn-location.ts";
 import { resolveConfig } from "../hooks/resolve-config.ts";
 import { liveResolveCtx } from "../hooks/compose-claude-md.ts";
 import { openSessionIds } from "../cmux/liveness.ts";
-import { getAll, lifecycleOf } from "./db.ts";
+import { getAll, lifecycleOf } from "../catalogue/db.ts";
 
 /**
  * `ccs new-session` — mint a session id, bind its catalogue metadata AT BIRTH, then either
