@@ -8,7 +8,6 @@ import {
   setArchived,
   setKey,
   setParent,
-  setSkill,
   setRole,
   setResumeCommand,
   setGusWork,
@@ -171,13 +170,6 @@ export function key(sessionArg: string | undefined, slug: string | undefined, fl
   return 0;
 }
 
-/**
- * @deprecated Use `key()` instead. This alias writes to `key` for backward compatibility.
- */
-export function event(sessionArg: string | undefined, slug: string | undefined, flags: string[]): number {
-  return key(sessionArg, slug, flags);
-}
-
 /** Set (or clear, with --off) the session's free-form PER-SYSTEM phase (current activity). */
 export function phase(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
   const id = resolveSessionId(sessionArg);
@@ -336,28 +328,6 @@ export function parent(
         ix.close();
       }
     }
-  } finally {
-    db.close();
-  }
-  return 0;
-}
-
-/** Set (or clear, with --off) the skill / slash-command backing this session. */
-export function skill(sessionArg: string | undefined, name: string | undefined, flags: string[]): number {
-  const id = resolveSessionId(sessionArg);
-  if (!id) return notInSession();
-  const off = flags.includes("--off");
-  if (!off && (!name || !name.trim())) {
-    console.error("usage: ccs skill [<session-id>|.] <name> | --off");
-    return 1;
-  }
-  ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH());
-  try {
-    // Normalise a leading slash so `/event-watch` and `event-watch` land on the same value.
-    const value = off ? null : name!.trim().replace(/^\//, "");
-    setSkill(db, id, value, now());
-    console.log(off ? `cleared skill on ${id.slice(0, 8)}…` : `skill ${value} → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
   }

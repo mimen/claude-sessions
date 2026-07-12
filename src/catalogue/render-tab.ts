@@ -88,10 +88,10 @@ function renderSession(row: CatalogueRow, ctx: RenderContext): TabRenderOps {
 }
 
 function renderLoop(row: CatalogueRow): TabRenderOps {
-  // role is the canonical label (ADR-0015); skill is dead. A loop's tab reads best as its
+  // role is the canonical label (ADR-0015). A loop's tab reads best as its
   // role name (control/scout/eval), falling back to custom title / key / id.
   const title =
-    row.customTitle || row.role || row.skill || identityKeyOf(row) || row.sessionId.slice(0, 8);
+    row.customTitle || row.role || identityKeyOf(row) || row.sessionId.slice(0, 8);
   const description = buildLoopDescription(row);
   const color = "Purple";
   // A loop's pill is its role-specific glanceable status (control health / concierge queue / eval

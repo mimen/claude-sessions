@@ -58,7 +58,6 @@ test("writeSessionMetadata: binds identity to a not-yet-indexed id (forward refe
     expect(row).not.toBeNull();
     expect(row!.system).toBe("pr-watch");
     expect(row!.role).toBe("pr-agent"); // canonical role axis (ADR-0015)
-    expect(row!.skill).toBe("pr-agent"); // legacy mirror still written during migration
     expect(row!.kind).toBe("loop");
     expect(row!.phase).toBe("building");
     expect(identityKeyOf(row)).toBe("heroku_dashboard-12080");
@@ -129,7 +128,6 @@ test("writeSessionMetadata: only the provided fields are written (no clobber to 
     expect(row.system).toBe("pr-watch");
     expect(row.phase).toBeNull();
     expect(row.customTitle).toBeNull();
-    expect(row.skill).toBeNull();
     // A bare new session is idle by default (nothing set completed/archived/parked).
     expect(lifecycleOf(row)).toBe("idle");
   } finally {

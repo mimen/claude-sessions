@@ -12,7 +12,7 @@ const ctx: ResolveCtx = {
 function row(over: Partial<CatalogueRow>): CatalogueRow {
   return {
     sessionId: "s1", resumeId: null, customTitle: null, kind: "session",
-    completed: false, archived: false, parkedTaskId: null, event: null, key: null,
+    completed: false, archived: false, parkedTaskId: null, key: null,
     parentSessionId: null, skill: null, role: null, resumeCommand: null, project: null,
     system: null, gusWork: null, workUnitId: null, epicId: null, phase: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
     prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null,

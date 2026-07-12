@@ -11,10 +11,8 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   completed: false,
   archived: false,
   parkedTaskId: null,
-  event: null,
   key: null,
   parentSessionId: null,
-  skill: null,
   role: null,
   resumeCommand: null,
   project: null,
@@ -124,9 +122,9 @@ test("renderTab: loop description drops the redundant system (title carries the 
   expect(ops.description).toBeNull(); // was "pr-watch"; now empty (no distinguishing key)
 });
 
-test("renderTab: loop uses skill or custom title", () => {
-  const loopWithSkill = row({ kind: "loop", skill: "pr-watch-2" });
-  const ops1 = renderTab(loopWithSkill, "loop");
+test("renderTab: loop uses role or custom title", () => {
+  const loopWithRole = row({ kind: "loop", role: "pr-watch-2" });
+  const ops1 = renderTab(loopWithRole, "loop");
   expect(ops1.title).toBe("pr-watch-2");
 
   const loopWithTitle = row({ kind: "loop", customTitle: "/loop custom" });
@@ -179,7 +177,7 @@ test("renderTab: worker description drops the redundant cluster name (system)", 
 });
 
 test("renderTab: loop kind gets distinct color (Purple)", () => {
-  const r = row({ kind: "loop", skill: "event-watch" });
+  const r = row({ kind: "loop", role: "event-watch" });
   const ops = renderTab(r, "loop");
   expect(ops.color).toBe("Purple");
 });

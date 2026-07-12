@@ -10,7 +10,6 @@ import {
   setParent,
   setRole,
   setResumeCommand,
-  setSkill,
   setPhase,
   setProject,
   setSystem,
@@ -134,8 +133,7 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
   if (opts.system) setSystem(db, id, opts.system, now);
   if (opts.role) {
     const role = opts.role.replace(/^\//, "");
-    setRole(db, id, role, now); // canonical (ADR-0015)
-    setSkill(db, id, role, now); // legacy mirror, kept until every consumer reads `role`
+    setRole(db, id, role, now);
   }
   if (opts.resumeCommand) setResumeCommand(db, id, opts.resumeCommand, now);
   if (opts.kind) setKind(db, id, opts.kind, now);

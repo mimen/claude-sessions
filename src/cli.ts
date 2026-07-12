@@ -11,7 +11,7 @@ import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf,
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, key, event, parent, skill, role, resumeCommand, gusWork, sessionEpic, project, system, phase, status, approve, activity, ready, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, key, parent, role, resumeCommand, gusWork, sessionEpic, project, system, phase, status, approve, activity, ready, meta } from "./catalogue/commands.ts";
 import { newSession } from "./catalogue/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { backfillTitles } from "./titler/queue.ts";
@@ -39,7 +39,6 @@ Usage:
   ccs reindex         Refresh the session index from the store
   ccs reindex --titles   Also (re)generate titles, headless (cron-friendly)
   ccs ls              Print indexed sessions (with catalogue badges)
-  ccs ls --event <slug>   Only sessions assigned to that event
   ccs tree            Constellation view: children grouped under their parent
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
   ccs meta [<id>|.]   Show a session's catalogue metadata (. = current session)
@@ -47,9 +46,7 @@ Usage:
   ccs mark [<id>|.] --loop|--completed|--archived [--off]   Set lifecycle/kind flags
   ccs tag [<id>|.] "<Entity>" [--remove]   Add/remove an entity tag
   ccs key [<id>|.] <slug> [--off]   Assign/clear the session's identity key (canonical)
-  ccs event [<id>|.] <slug> [--off]   (deprecated alias for key)
   ccs parent [<id>|.] <parent-id|.> [--off]   Set/clear the spawning parent session
-  ccs skill [<id>|.] <name> [--off]   Set/clear the backing skill or slash-command
   ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
   ccs system [<id>|.] <slug> [--off]   Set/clear the system grouping
   ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab
@@ -98,7 +95,6 @@ export async function main(argv: string[]): Promise<number> {
       return ls({
         all: args.includes("--all"),
         loops: args.includes("--loops"),
-        event: flagValue(args, "--event"),
       });
     case "tree":
       return tree({ all: args.includes("--all") });
@@ -114,12 +110,8 @@ export async function main(argv: string[]): Promise<number> {
       return tag(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "key":
       return key(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
-    case "event":
-      return event(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "parent":
       return parent(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
-    case "skill":
-      return skill(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "project":
       return project(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "system":
@@ -296,7 +288,7 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
 }
 
 /** Table of indexed sessions, joined with catalogue metadata + live open-state. */
-function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
+function ls(opts: { all: boolean; loops: boolean }): number {
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
   try {
@@ -315,7 +307,6 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
       const c = catalogue.get(r.sessionId) ?? null;
       const lifecycle = lifecycleOf(c);
       const keyValue = identityKeyOf(c);
-      if (opts.event && keyValue !== opts.event) continue;
       if (!opts.all && lifecycle === "archived") continue;
       if (opts.loops && c?.kind !== "loop") continue;
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
@@ -324,20 +315,18 @@ function ls(opts: { all: boolean; loops: boolean; event?: string }): number {
       const title = pad(childMark + (c?.customTitle ?? r.title), 42);
       const badge = pad((c?.kind === "loop" ? "LOOP " : "") + d.label + (d.nudge ? "!" : ""), 16);
       const sk = pad(c?.role ? `⚙${c.role}` : "", 14);
-      // Only print the event column when not already filtering to a single event.
-      const evt = opts.event ? "" : pad(keyValue ? `⊞${keyValue}` : "", 18);
+      const key = pad(keyValue ? `⊞${keyValue}` : "", 18);
       const project = pad(r.projectName, 16);
       const age = pad(formatAge(r.lastTs), 5);
       const subCost = subCosts.get(r.sessionId) ?? subCosts.get(r.resumeId) ?? 0;
       const cost = pad(formatCost(r.costUSD + subCost), 7);
-      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${evt}${project} ${age} ${cost} ${r.msgCount}m`);
+      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${key}${project} ${age} ${cost} ${r.msgCount}m`);
       shown++;
     }
     const hidden = rows.length - shown;
     console.log(
-      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⚙=skill · ↳=child · ⊞=event · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
-        (opts.event ? ` · event=${opts.event}` : "") +
-        (hidden > 0 && !opts.all && !opts.event ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
+      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⚙=role · ↳=child · ⊞=key · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
+        (hidden > 0 && !opts.all ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
     );
   } finally {
     db.close();
