@@ -19,14 +19,20 @@ export interface SpawnFacts {
   cwd?: string;
 }
 
-/** The work-unit key a spawn targets (PR wins over gus-work), or null if neither is given. */
+/** The work-unit key a spawn targets (PR wins over gus-work), or null if neither is given.
+ * TODO(ADR-0057): this is one of the 6 derived-string copies. The canonical path is now
+ * `resolveWorkUnit()` in resolve-work-unit.ts, which returns the stable work-unit id (not
+ * a derived string). This function stays for migration safety; callers will move to the
+ * canonical resolver. */
 export function spawnWorkUnit(f: SpawnFacts): string | null {
   if (f.prRepo && f.prNumber != null) return `pr:${f.prRepo}#${f.prNumber}`;
   if (f.gusWork) return `gus:${f.gusWork}`;
   return null;
 }
 
-/** The work-unit key for an existing catalogue row (same shape as spawnWorkUnit). */
+/** The work-unit key for an existing catalogue row (same shape as spawnWorkUnit).
+ * TODO(ADR-0057): this is one of the 6 derived-string copies. The canonical path is now
+ * `resolveWorkUnit()` in resolve-work-unit.ts. This stays for migration safety. */
 export function rowWorkUnit(row: CatalogueRow): string | null {
   if (row.prRepo && row.prNumber != null) return `pr:${row.prRepo}#${row.prNumber}`;
   if (row.gusWork) return `gus:${row.gusWork}`;

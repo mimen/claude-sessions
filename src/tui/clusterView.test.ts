@@ -8,7 +8,7 @@ const row = (id: string): SessionRow => ({ sessionId: id, lastTs: "2026-07-08" }
 const cat = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
   archived: false, parkedTaskId: null, event: null, key: null, parentSessionId: null,
-  skill: null, role: null, resumeCommand: null, project: null, system: null, gusWork: null, epicId: null, phase: null, statusLine: null, miladReview: null, buildComplete: false, stage: null, activity: null, notes: null, updatedAt: null,
+  skill: null, role: null, resumeCommand: null, project: null, system: null, gusWork: null, workUnitId: null, epicId: null, phase: null, statusLine: null, miladReview: null, buildComplete: false, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
   prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...o,
 });
 

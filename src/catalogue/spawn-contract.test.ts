@@ -9,8 +9,8 @@ function row(over: Partial<CatalogueRow>): CatalogueRow {
   return {
     sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,
     archived: false, parkedTaskId: null, event: null, key: null, parentSessionId: null,
-    skill: null, role: null, resumeCommand: null, project: null, system: null, gusWork: null,
-    epicId: null, phase: null, statusLine: null, miladReview: null, buildComplete: false, stage: null, activity: null, notes: null, updatedAt: null, prNumber: null, prRepo: null,
+    skill: null, role: null, resumeCommand: null, project: null, system: null, gusWork: null, workUnitId: null,
+    epicId: null, phase: null, statusLine: null, miladReview: null, buildComplete: false, meta: {}, stage: null, activity: null, notes: null, updatedAt: null, prNumber: null, prRepo: null,
     prBranch: null, prState: null, prHeadSha: null, ...over,
   };
 }
