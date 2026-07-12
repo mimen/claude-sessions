@@ -34,6 +34,8 @@ interface RoleToml {
   topology?: string;
   /** ADR-0064 [stage] schema block: `values = [...]`, `monotonic = true`. */
   stage?: { values?: unknown; monotonic?: unknown };
+  /** ADR-0064 [activity] schema block: `values = [...]` (allowed non-dormant activities). */
+  activity?: { values?: unknown };
 }
 
 /** Read a role dir into a RoleDef. `dir` is the role's home; `cluster` is its grouping or null. */
@@ -65,6 +67,9 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
   if (Array.isArray(sv) && sv.every((v) => typeof v === "string")) {
     stageSchema = { values: sv as string[], monotonic: toml.stage?.monotonic === true };
   }
+  const av = toml.activity?.values;
+  const activityValues: string[] | null =
+    Array.isArray(av) && av.every((v) => typeof v === "string") ? (av as string[]) : null;
   return {
     role,
     cluster,
@@ -73,6 +78,7 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
     homeDir: dir, // computed at load — the portability breaker (stored absolute path) is gone
     resumeCommand: toml.resume_command ?? null,
     stageSchema,
+    activityValues,
     skills: dirNames(join(dir, "skills")),
     commands: commandNames(join(dir, "commands")),
     hooks: hookNames(join(dir, ".ccs-hooks")),

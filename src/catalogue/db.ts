@@ -715,6 +715,9 @@ export interface RoleDef {
   /** Role-declared schema for the `stage` column (ADR-0064): allowed values + monotonic guarantee.
    * null when role.toml declares no [stage] block (the setter stays unconstrained). */
   stageSchema: StageSchema | null;
+  /** Role-declared allowed values for the `activity` column (ADR-0064). null/empty = unconstrained;
+   * the resting/dormant baseline (cleared activity) is always allowed regardless. */
+  activityValues: string[] | null;
   /** Skills / commands / hooks to materialize into ~/.claude for this role (ADR-0034). */
   skills: string[];
   commands: string[];

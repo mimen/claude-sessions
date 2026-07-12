@@ -210,15 +210,26 @@ export function activity(sessionArg: string | undefined, value: string | undefin
   if (!id) return notInSession();
   const off = flags.includes("--off");
   const v = value?.trim();
-  if (!off && v !== "needs-you") {
-    console.error("usage: ccs activity [<id>|.] needs-you | --off   (--off = back to dormant)");
-    return 1;
-  }
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
-    setActivity(db, id, off ? null : "needs-you", now());
-    console.log(off ? `cleared activity (dormant) on ${id.slice(0, 8)}…` : `activity needs-you → ${id.slice(0, 8)}…`);
+    if (!off) {
+      if (!v) {
+        console.error("usage: ccs activity [<id>|.] <value> | --off   (--off = back to dormant)");
+        return 1;
+      }
+      // ADR-0064: validate against the role-declared activity vocabulary. A role that declares
+      // [activity] values constrains it; one that doesn't defaults to pr-watch's `needs-you`
+      // (the historical behavior — the worker's only self-set activity). `fixing` is engine-sensed.
+      const row = getRow(db, id);
+      const allowed = (row?.role ? resolveRole(row.role)?.activityValues : null) ?? ["needs-you"];
+      if (!allowed.includes(v)) {
+        console.error(`ccs activity: "${v}" not allowed (expected one of: ${allowed.join(" | ")}, or --off)`);
+        return 1;
+      }
+    }
+    setActivity(db, id, off ? null : v!, now());
+    console.log(off ? `cleared activity (dormant) on ${id.slice(0, 8)}…` : `activity ${v} → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
   }
