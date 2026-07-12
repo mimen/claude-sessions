@@ -8,7 +8,9 @@ const row = (o: Partial<CatalogueRow>): CatalogueRow => ({
   cluster: null, gusWork: null, workUnitId: null, epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...o,
 });
 
-test("isCoreRole: control/concierge/eval/designer are core; pr-agent is not", () => {
+test("isCoreRole: legacy command-name labels fall back to the hardcoded set (ADR-0062)", () => {
+  // These labels aren't declared in any role.toml, so they exercise the LEGACY_CORE_ROLES fallback.
+  // The declared-topology path (role.toml `topology = core|fleet`) is covered by a live smoke test.
   expect(isCoreRole("pr-watch-control")).toBe(true);
   expect(isCoreRole("loop-designer")).toBe(true);
   expect(isCoreRole("pr-agent")).toBe(false);

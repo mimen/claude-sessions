@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
-import type { RoleDef, Kind } from "../catalogue/db.ts";
+import type { RoleDef, Kind, Topology } from "../catalogue/db.ts";
 
 /**
  * File-backed role definitions (ADR-0048/0050): a role is a directory in a cluster package;
@@ -28,6 +28,7 @@ export function ccsConfigRoot(): string {
 interface RoleToml {
   kind?: string;
   resume_command?: string;
+  topology?: string;
 }
 
 /** Read a role dir into a RoleDef. `dir` is the role's home; `cluster` is its grouping or null. */
@@ -43,10 +44,13 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
     }
   }
   const kind: Kind | null = toml.kind === "loop" ? "loop" : toml.kind === "session" ? "session" : null;
+  const topology: Topology | null =
+    toml.topology === "core" ? "core" : toml.topology === "fleet" ? "fleet" : null;
   return {
     role,
     cluster,
     kind,
+    topology,
     homeDir: dir, // computed at load — the portability breaker (stored absolute path) is gone
     resumeCommand: toml.resume_command ?? null,
     skills: dirNames(join(dir, "skills")),

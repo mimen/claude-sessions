@@ -4,7 +4,7 @@ import type { RoleDef } from "../catalogue/db.ts";
 
 function role(over: Partial<RoleDef>): RoleDef {
   return {
-    role: "r", cluster: null, kind: "session", homeDir: "/roles/r",
+    role: "r", cluster: null, kind: "session", topology: null, homeDir: "/roles/r",
     resumeCommand: null, skills: [], commands: [], hooks: [], updatedAt: null, ...over,
   };
 }

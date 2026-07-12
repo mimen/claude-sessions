@@ -673,11 +673,17 @@ export function sessionsForEpic(db: Database, epicId: string): string[] {
 // --- roles registry (ADR-0022) -------------------------------------------------
 
 /** A role DEFINITION: its runtime wiring + what to materialize into ~/.claude. */
+export type Topology = "core" | "fleet";
+
 export interface RoleDef {
   role: string;
   /** Optional cluster grouping (nullable — a role can stand alone, ADR-0022). */
   cluster: string | null;
   kind: Kind | null;
+  /** Declared topology (ADR-0062): `core` = a cluster singleton (control/concierge/…), `fleet` =
+   * a per-work-unit worker (pr-agent). Replaces the hardcoded CORE_ROLES set. Nullable when a
+   * role.toml doesn't declare it (treated as fleet — the safe default: a non-core role). */
+  topology: Topology | null;
   /** Where sessions of this role spawn (permission/statusLine scope, ADR-0018/0036). */
   homeDir: string | null;
   /** How a loop role is re-armed on resume (ADR-0015); null for non-loop roles. */

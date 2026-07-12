@@ -1,6 +1,7 @@
 import type { CatalogueRow } from "./db.ts";
 import { lifecycleOf } from "./db.ts";
 import { workUnitKey } from "./spawn-contract.ts";
+import { allRolesFromFiles } from "../roles/role-files.ts";
 
 /**
  * The cluster map: a readable roll-up of a system's members grouped by role, so any
@@ -36,19 +37,40 @@ export interface ClusterMap {
   readonly groups: { role: string; kind: "core" | "fleet"; members: ClusterMember[]; folded: Map<string, ClusterMember[]> }[];
 }
 
-/** Roles that are CORE (the singletons that run the cluster) vs FLEET (per-work-unit workers).
- * Clean role labels (ADR-0015), not the old command-name labels. Legacy pr-watch-* names kept
- * so pre-retag sessions still group correctly during migration. */
-const CORE_ROLES = new Set([
+/** Legacy fallback set (ADR-0062): core-vs-fleet is now a DECLARED role property (`topology` in
+ * role.toml), read via the role registry. This hardcoded set is consulted ONLY for a role whose
+ * role.toml doesn't declare `topology` — pre-migration rows and the old command-name labels — so a
+ * declared role never needs a ccs release to be recognized. Remove once every role declares topology. */
+const LEGACY_CORE_ROLES = new Set([
   "control", "slack-scout", "eval", "concierge", "designer",
   // legacy labels kept so pre-rename rows still group: `scout` (pre slack-scout rename),
-  // and the pre-ADR-0015 command-name labels — remove once no session uses them:
+  // and the pre-ADR-0015 command-name labels:
   "scout",
   "pr-watch-control", "pr-watch-scout", "pr-watch-eval", "pr-watch-2", "loop-designer",
 ]);
 
+/** role → declared topology, built once from the config tree (files-are-truth, ADR-0050). Lazily
+ * memoized; a process reads role definitions rarely-changing within its lifetime. */
+let topologyByRole: Map<string, string | null> | null = null;
+function declaredTopology(role: string): string | null {
+  if (!topologyByRole) {
+    topologyByRole = new Map();
+    try {
+      for (const [name, def] of allRolesFromFiles()) topologyByRole.set(name, def.topology);
+    } catch {
+      /* config unreadable → empty map, falls back to the legacy set below */
+    }
+  }
+  return topologyByRole.get(role) ?? null;
+}
+
+/** Is this role a CORE singleton (vs a FLEET worker)? Prefers the role's DECLARED topology
+ * (role.toml, ADR-0062); falls back to the legacy hardcoded set only when undeclared. */
 export function isCoreRole(role: string | null): boolean {
-  return !!role && CORE_ROLES.has(role);
+  if (!role) return false;
+  const declared = declaredTopology(role);
+  if (declared) return declared === "core";
+  return LEGACY_CORE_ROLES.has(role);
 }
 
 /** Build a member view from a catalogue row + its index-resolved cwd/resumeId + liveness. */
