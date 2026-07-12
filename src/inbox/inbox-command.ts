@@ -81,6 +81,13 @@ export function inboxCommand(args: string[]): number {
       const path = writeMessage(dir, from, message, stamp());
       // Resolve the wake target: a live surface whose catalogue row matches this responsibility.
       const bridge = liveBridge();
+      // If liveness is unreadable (cmux down/unauthed/pre-0.64), bridge.surfaces may be stale — don't
+      // scan it to pick a wake target, or we'd nudge the wrong/no session. The message is already
+      // durably written above; a missed wake just delays it to the next drain (ADR-0054 fail-closed).
+      if (!bridge.readable) {
+        console.log(`queued (liveness unreadable — not woken): ${path}`);
+        return 0;
+      }
       const cat = openCatalogue(CATALOGUE_PATH());
       let woke = false;
       try {
