@@ -24,7 +24,8 @@ export interface ResumeMeta {
 
 export type ResumePlan =
   | { action: "skip"; reason: "already-open" }
-  | { action: "resume"; sessionId: string; command: ResumeCommand; name: string; note: string | null };
+  | { action: "resume"; sessionId: string; command: ResumeCommand; name: string; note: string | null }
+  | { action: "fail"; reason: "cwd-unreadable"; error: string };
 
 /** Is this session currently embodied? Check both the filename id and the resume id, since
  * cmux records the live Claude sessionId and either may match depending on how it was born. */
@@ -41,7 +42,12 @@ export function planResumeSession(
   if (sessionIsOpen(bridge, row)) {
     return { action: "skip", reason: "already-open" };
   }
-  const { cwd, note } = resolveResumeCwd(row);
+  const cwdResult = resolveResumeCwd(row);
+  if ("error" in cwdResult) {
+    // FAIL CLOSED: filesystem error locating the launch dir (ADR-0066/0054).
+    return { action: "fail", reason: "cwd-unreadable", error: cwdResult.error };
+  }
+  const { cwd, note } = cwdResult;
   const command = buildResumeCommand(row, {
     fork: false,
     cwd,
@@ -57,7 +63,9 @@ export type ResumeSessionResult =
   | { status: "not-indexed" }
   | { status: "spawn-failed" }
   /** liveness sources were unreadable — we fail closed and spawn nothing (ADR-0054) */
-  | { status: "liveness-unreadable" };
+  | { status: "liveness-unreadable" }
+  /** cwd location failed with I/O error — fail closed per ADR-0066 */
+  | { status: "cwd-unreadable"; error: string };
 
 /**
  * The full `ccs resume-session <id>` entry: resolve the row + its resume_command, plan, and
@@ -81,6 +89,7 @@ export function resumeSessionEntry(
   const plan = planResumeSession(bridge, row, { resumeCommand: cat?.resumeCommand ?? null });
 
   if (plan.action === "skip") return { status: "already-open" };
+  if (plan.action === "fail") return { status: "cwd-unreadable", error: plan.error };
   if (opts.dryRun) return { status: "resumed", note: plan.note };
   return executeResumePlan(plan, { cmuxBin: opts.cmuxBin, focus: opts.focus })
     ? { status: "resumed", note: plan.note }
@@ -99,7 +108,7 @@ export function executeResumePlan(
   plan: ResumePlan,
   opts: { cmuxBin?: string; focus?: boolean } = {},
 ): boolean {
-  if (plan.action === "skip") return false;
+  if (plan.action === "skip" || plan.action === "fail") return false;
   const ref = spawnCmux({
     argv: plan.command.argv,
     cwd: plan.command.cwd,

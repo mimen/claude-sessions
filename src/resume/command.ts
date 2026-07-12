@@ -53,8 +53,10 @@ export function shellQuote(arg: string): string {
  * Pick the directory to resume in. The Session's recorded cwd is preferred; if it no longer
  * exists (repo moved/deleted), fall back to the Project root, then the home dir — and report
  * the substitution so the UI can warn instead of silently launching in the wrong place.
+ * FAILS CLOSED on filesystem errors per ADR-0066 — a transient I/O error must never look like
+ * "absent" and unblock a wrong-dir resume.
  */
-export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string | null } {
+export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string | null } | { error: string } {
   const folder = storageFolderOf(row.path);
 
   // Best case: the recorded cwd still exists AND its encoded realpath matches the file's
@@ -67,7 +69,12 @@ export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string |
   // Otherwise the recorded cwd has drifted (symlink changed, dir moved). Walk the filesystem
   // to find the dir whose encoded realpath matches the storage folder — the only dir claude
   // will actually find the session from. Bounded so it can never hang the resume path.
-  const located = locateLaunchDir(row.path);
+  const locatedResult = locateLaunchDir(row.path);
+  if (!locatedResult.ok) {
+    // FAIL CLOSED: filesystem error during walk — must not proceed with a guess.
+    return { error: `Cannot locate resume directory: ${locatedResult.error.message}` };
+  }
+  const located = locatedResult.value;
   if (located) {
     const note =
       row.cwd && located !== row.cwd

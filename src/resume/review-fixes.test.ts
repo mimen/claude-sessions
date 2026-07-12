@@ -28,6 +28,7 @@ test("resolveResumeCwd prefers a valid recorded cwd that matches the storage fol
   const path = join(base, ".projects", folder, "s.jsonl");
 
   const out = resolveResumeCwd(row({ path, cwd: real, projectRoot: real }));
+  if ("error" in out) throw new Error("should succeed");
   expect(out.cwd).toBe(real); // the real recorded cwd, not the same-encoding sibling
   expect(out.note).toBeNull();
 
@@ -42,15 +43,18 @@ test("resolveResumeCwd walks to the storage dir when the recorded cwd has drifte
   const path = join(base, ".projects", encodePath(real), "s.jsonl");
 
   const out = resolveResumeCwd(row({ path, cwd: "/gone/old/path", projectRoot: "/gone/old" }));
+  if ("error" in out) throw new Error("should succeed");
   expect(out.cwd).toBe(real);
   expect(out.note).toContain("no longer maps");
 
   rmSync(base, { recursive: true, force: true });
 });
 
-// C2: the decoder is bounded — a non-existent deep folder returns null without hanging.
-test("decodeStorageFolder returns null (bounded) for an unmatched folder", () => {
-  expect(decodeStorageFolder("-nonexistent-" + "x".repeat(50))).toBeNull();
+// C2: the decoder is bounded — a non-existent deep folder returns Ok(null) without hanging.
+test("decodeStorageFolder returns Ok(null) (bounded) for an unmatched folder", () => {
+  const result = decodeStorageFolder("-nonexistent-" + "x".repeat(50));
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.value).toBeNull();
 });
 
 // H2: inline resume reports a non-zero code when the binary can't be run, not success.
