@@ -60,7 +60,7 @@ Usage:
                             flags: --system --role --kind loop|session --phase --project --key
                                    --title --parent <id> --cwd <dir> --prompt "<text>"
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
-  ccs sync-tabs [<id>|.|--all]   Sync catalogue metadata to live cmux tabs (title/description/color/pill)
+  ccs sync-tabs [<selector>|.|--all]   Paint cmux tabs from catalogue metadata (. | id | #pr | role | cluster | --all)
   ccs cluster <system>  Show the cluster map: members by role, liveness, how to reach each
   ccs inbox send|bump|drain|pending  Durable per-identity messaging; bump also wakes a live tab (ADR-0028)
   ccs state get|set|merge  Durable state store (--cluster <c> or --role <r> …) (ADR-0031)

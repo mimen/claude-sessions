@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
-import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
-import { openCatalogue, getRow, getAll, lifecycleOf } from "./db.ts";
+import { ensureDataDir, CATALOGUE_PATH, DB_PATH } from "../paths.ts";
+import { openCatalogue, getRow, getAll, lifecycleOf, type CatalogueRow } from "./db.ts";
+import { openIndex } from "../index/schema.ts";
+import { resolveSelector, type SelectorKind } from "../resume/selector.ts";
 import { workspaceForSession } from "../cmux/liveness.ts";
 import { renderTab, applyPaintOverride, type CmuxPaintOverride } from "./render-tab.ts";
 import { resolveConfig } from "../hooks/resolve-config.ts";
@@ -147,49 +149,100 @@ export function pushRenderOps(
   return true;
 }
 
+/** Paint a SET of sessionIds — the plural is a loop over the single-paint primitive (ADR-0056).
+ * Skips retired (archived/completed) rows so a defunct record never clobbers a live tab. Returns
+ * counts. `rows` is the catalogue map (for the retired check); a sid absent from it still paints
+ * (a just-minted session). */
+function paintSet(
+  sessionIds: Iterable<string>,
+  rows: Map<string, CatalogueRow>,
+  cmuxBin: string,
+): { synced: number; notOpen: number; skippedRetired: number } {
+  let synced = 0, notOpen = 0, skippedRetired = 0;
+  for (const sid of sessionIds) {
+    const row = rows.get(sid);
+    if (row) {
+      const lc = lifecycleOf(row);
+      if (lc === "archived" || lc === "completed") { skippedRetired++; continue; }
+    }
+    if (pushRenderOps(sid, cmuxBin)) synced++;
+    else notOpen++;
+  }
+  return { synced, notOpen, skippedRetired };
+}
+
+/**
+ * `ccs sync-tabs <selector>` — paint cmux tabs from catalogue metadata (ADR-0056). Selector-driven,
+ * mirroring `ccs resume <selector>` and sharing its resolution (S18): `.`/self → current session,
+ * a bare UUID → that session, `--all` → every non-retired session, else a token (#pr / W-num /
+ * role / cluster / epic) resolved via resolveSelector. The plural is a loop over the single-paint
+ * primitive; paint is a pure function of the row (the Stop hook fires the same primitive per turn).
+ */
 export function syncTabs(args: string[]): number {
   const cmuxBin = process.env.CMUX_BIN ?? "cmux";
   const all = args.includes("--all");
-  const sessionArg = args.find((a) => !a.startsWith("--"));
+  const token = args.find((a) => !a.startsWith("--"));
 
-  if (all) {
-    if (!existsSync(CATALOGUE_PATH())) {
-      console.error("No catalogue found (run ccs reindex first).");
-      return 1;
-    }
-    ensureDataDir();
-    const db = openCatalogue(CATALOGUE_PATH());
-    const catMap = getAll(db);
-    db.close();
-
-    let synced = 0;
-    let notOpen = 0;
-    let skippedRetired = 0;
-    for (const [sid, row] of catMap) {
-      // Never paint a retired session's tab: an archived/completed row must not resolve to a
-      // live surface and rename it (the stale-mapping clobber — a defunct control session's
-      // record renaming a live designer tab). Retired = leave the live tab alone.
-      const lc = lifecycleOf(row);
-      if (lc === "archived" || lc === "completed") {
-        skippedRetired++;
-        continue;
-      }
-      const pushed = pushRenderOps(sid, cmuxBin);
-      if (pushed) synced++;
-      else notOpen++;
-    }
-    console.log(`synced ${synced} tab(s) (${notOpen} not open / not synced)`);
+  // `.`/self/no-arg → the current session (the single-paint primitive, no DB needed).
+  if (!all && (!token || token === "." || token === "self")) {
+    const sessionId = resolveSessionId(token);
+    if (!sessionId) return notInSession();
+    const pushed = pushRenderOps(sessionId, cmuxBin);
+    console.log(pushed ? `synced tab for ${sessionId.slice(0, 8)}…` : `${sessionId.slice(0, 8)}… not open / not synced`);
     return 0;
   }
 
-  const sessionId = resolveSessionId(sessionArg);
-  if (!sessionId) return notInSession();
-
-  const pushed = pushRenderOps(sessionId, cmuxBin);
-  if (pushed) {
-    console.log(`synced tab for ${sessionId.slice(0, 8)}…`);
-  } else {
-    console.log(`${sessionId.slice(0, 8)}… not open / not synced`);
+  if (!existsSync(CATALOGUE_PATH())) {
+    console.error("No catalogue found (run ccs reindex first).");
+    return 1;
   }
-  return 0;
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH());
+  try {
+    const rows = getAll(db);
+
+    // --all → every session (paintSet skips retired).
+    if (all) {
+      const r = paintSet(rows.keys(), rows, cmuxBin);
+      console.log(`synced ${r.synced} tab(s) (${r.notOpen} not open / not synced)`);
+      return 0;
+    }
+
+    // A bare UUID → paint that one directly (no selector lookup needed).
+    if (token && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(token)) {
+      const pushed = pushRenderOps(token, cmuxBin);
+      console.log(pushed ? `synced tab for ${token.slice(0, 8)}…` : `${token.slice(0, 8)}… not open / not synced`);
+      return 0;
+    }
+
+    // Otherwise resolve the selector (#pr / W-num / role / cluster / epic) to a set (S18).
+    const idx = openIndex(DB_PATH());
+    try {
+      const sel = resolveSelector(db, idx, token!, selectorPin(args));
+      if (!sel || sel.sessionIds.length === 0) {
+        console.error(`ccs sync-tabs: "${token}" matched no sessions`);
+        return 1;
+      }
+      const r = paintSet(sel.sessionIds, rows, cmuxBin);
+      console.log(`synced ${r.synced}/${sel.sessionIds.length} tab(s) for ${sel.label} (${r.notOpen} not open)`);
+      return 0;
+    } finally {
+      idx.close();
+    }
+  } finally {
+    db.close();
+  }
+}
+
+/** Read the axis pin from flags (mirrors `ccs resume`), so `--role`/`--cluster`/etc. disambiguate. */
+function selectorPin(args: string[]): { pin?: SelectorKind; cluster?: string } {
+  const pin: SelectorKind | undefined =
+    args.includes("--role") ? "role"
+    : args.includes("--pr") ? "pr"
+    : args.includes("--gus") ? "gus-work"
+    : args.includes("--epic") ? "epic"
+    : args.includes("--cluster") ? "cluster"
+    : args.includes("--key") ? "key"
+    : undefined;
+  return { pin };
 }
