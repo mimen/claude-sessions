@@ -95,7 +95,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 21;
+const CATALOGUE_VERSION = 22;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -344,6 +344,36 @@ function migrate(db: Database): void {
     // reset version, re-run). No index — meta is per-session display/scratch, not a grouping axis.
     if (!hasColumn(db, "catalogue", "meta")) {
       db.exec("ALTER TABLE catalogue ADD COLUMN meta TEXT;");
+    }
+  }
+  if (v < 22) {
+    // ADR-0060 backfill: migrate existing milad_review + build_complete column values into the
+    // meta JSON map. For each row where these columns are non-NULL/non-zero, copy the value into
+    // the meta map under "milad_review" / "build_complete" keys. After this, step 3 (v23) will
+    // drop the columns. Guard on column presence (older binary can reset version, re-run).
+    if (hasColumn(db, "catalogue", "milad_review") || hasColumn(db, "catalogue", "build_complete")) {
+      const rows = db.query("SELECT session_id, milad_review, build_complete, meta FROM catalogue").all() as Array<{
+        session_id: string;
+        milad_review: string | null;
+        build_complete: number | null;
+        meta: string | null;
+      }>;
+      const update = db.prepare("UPDATE catalogue SET meta = ? WHERE session_id = ?");
+      for (const r of rows) {
+        const meta = r.meta ? JSON.parse(r.meta) : {};
+        let changed = false;
+        if (r.milad_review !== null && meta.milad_review === undefined) {
+          meta.milad_review = r.milad_review;
+          changed = true;
+        }
+        if (r.build_complete === 1 && meta.build_complete === undefined) {
+          meta.build_complete = true;
+          changed = true;
+        }
+        if (changed) {
+          update.run(JSON.stringify(meta), r.session_id);
+        }
+      }
     }
   }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
