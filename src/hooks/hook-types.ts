@@ -50,6 +50,10 @@ export const HOOK_TYPES: Readonly<Record<string, HookTypeDef>> = {
     type: "stop", firesOn: "Stop", merge: "ordered-actions", formats: ["json"], rowResolved: true,
     note: "turn-end reporting: touch, result capture, phase self-report",
   },
+  "stop-context": {
+    type: "stop-context", firesOn: "Stop", merge: "sections", formats: ["md"], rowResolved: true,
+    note: "layered TEXT injected at turn-end (additionalContext) — a role/cluster's per-turn self-check reminder (ADR-0063). The generic replacement for the hardcoded pr-agent phase rubric.",
+  },
   "meta-update": {
     type: "meta-update", firesOn: "Stop", merge: "set-union", formats: ["json"], rowResolved: true,
     note: "which ccs metadata fields get refreshed (a set, unioned down the chain)",

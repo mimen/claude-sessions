@@ -56,3 +56,21 @@ export function composeClaudeMd(row: CatalogueRow): ComposedClaudeMd {
     return { context: null, degraded: false }; // fail-open: a hook must never block
   }
 }
+
+/**
+ * Resolve + render a session's layered `stop-context` — the TEXT injected at turn-END (ADR-0063).
+ * Same section-merge machinery as claude-md, but for the `stop-context` hook type: a role/cluster
+ * authors a `.ccs-hooks/stop-context.md` fragment (e.g. pr-agent's per-turn phase self-check) and
+ * the tool resolves + injects it, keyed on FILE PRESENCE, never a hardcoded role name. Returns null
+ * when no level authored one (nothing injected). Never throws — the caller is a Stop hook.
+ */
+export function composeStopContext(row: CatalogueRow): string | null {
+  try {
+    const res = resolveConfig(row, "stop-context", liveResolveCtx());
+    const sections = (res.effective as Section[] | null) ?? [];
+    const rendered = renderSections(sections);
+    return rendered.length > 0 ? rendered : null;
+  } catch {
+    return null; // fail-open
+  }
+}

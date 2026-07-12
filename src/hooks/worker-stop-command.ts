@@ -10,11 +10,10 @@
  *
  * Reads the Stop payload (session_id) from stdin. ALWAYS exits 0 (fail-open, ADR-0035).
  */
-import { openCatalogue, getRow, touch, type CatalogueRow } from "../catalogue/db.ts";
+import { openCatalogue, getRow, touch } from "../catalogue/db.ts";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import { resolveConfig } from "./resolve-config.ts";
-import { liveResolveCtx } from "./compose-claude-md.ts";
-import { isPhaseWorker, phaseRubric } from "./phase-rubric.ts";
+import { liveResolveCtx, composeStopContext } from "./compose-claude-md.ts";
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -49,13 +48,16 @@ export async function workerStopCommand(): Promise<number> {
     ensureDataDir();
     const db = openCatalogue(CATALOGUE_PATH());
     let registered = false;
-    let worker: CatalogueRow | null = null;
+    let stopContext: string | null = null;
     try {
       // Only self-report for a registered session (has a role); a bare/foreign session is a no-op.
       const row = getRow(db, id);
       if (row?.role) {
         registered = true;
-        if (isPhaseWorker(row)) worker = row;
+        // ADR-0063: the turn-end self-check is a role-authored `stop-context` hook fragment now,
+        // resolved through the normal layering (file-presence keyed), NOT a hardcoded pr-agent
+        // rubric. Any role/cluster that authors one gets it; roles that don't, don't.
+        stopContext = composeStopContext(row);
         const fields = metaUpdateFields(db, row);
         // `updated_at` is the one field a stop hook can refresh on its own (the heartbeat).
         if (fields.includes("updated_at")) touch(db, id, now());
@@ -63,12 +65,12 @@ export async function workerStopCommand(): Promise<number> {
     } finally {
       db.close();
     }
-    // Inject the phase self-check at turn-end (a pr-agent only). Non-blocking additionalContext —
-    // the worker re-evaluates + self-sets its activity next turn; never forces an extra turn (no
+    // Inject the resolved stop-context at turn-end. Non-blocking additionalContext — the worker
+    // re-evaluates + self-sets its activity next turn; never forces an extra turn (no
     // `decision: block`), so there's zero loop risk (verified against the Stop hook contract).
-    if (worker) {
+    if (stopContext) {
       process.stdout.write(JSON.stringify({
-        hookSpecificOutput: { hookEventName: "Stop", additionalContext: phaseRubric(worker) },
+        hookSpecificOutput: { hookEventName: "Stop", additionalContext: stopContext },
       }) + "\n");
     }
     // Repaint the tab on turn-end so it reflects whatever this turn changed (PR merged, parked,
