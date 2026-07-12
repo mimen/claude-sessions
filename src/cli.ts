@@ -46,7 +46,7 @@ Usage:
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
   ccs meta [<id>|.]   Show a session's catalogue metadata (. = current session)
   ccs rename [<id>|.] "<name>"   Set a custom title (+ sync cmux workspace name)
-  ccs mark [<id>|.] --loop|--completed|--archived [--off]   Set lifecycle/kind flags
+  ccs mark [<id>|.] --completed|--archived [--off]   Set lifecycle flags (control-owned)
   ccs tag [<id>|.] "<Entity>" [--remove]   Add/remove an entity tag
   ccs key [<id>|.] <slug> [--off]   Assign/clear the session's identity key (canonical)
   ccs parent [<id>|.] <parent-id|.> [--off]   Set/clear the spawning parent session
