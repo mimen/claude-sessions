@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ccs — Production Readiness Review</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#30363d;
+    --ink:#e6edf3; --muted:#9aa7b4; --dim:#6e7b8a;
+    --p0:#f85149; --p1:#e3b341; --p2:#3fb950; --accent:#58a6ff; --accent2:#bc8cff;
+    --ok:#3fb950; --partial:#e3b341; --no:#f85149; --na:#4d5866;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  code,.mono{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86em;}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;color:#a5d6ff;border:1px solid var(--border);}
+  a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+  .wrap{display:flex;max-width:1500px;margin:0 auto;}
+  /* sidebar */
+  nav{position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;width:270px;
+    padding:20px 14px;border-right:1px solid var(--border);background:var(--panel);flex-shrink:0;}
+  nav h1{font-size:15px;margin:0 0 4px;letter-spacing:.3px}
+  nav .sub{color:var(--dim);font-size:12px;margin-bottom:16px}
+  nav a{display:block;color:var(--muted);padding:5px 10px;border-radius:6px;font-size:13px;margin:1px 0;}
+  nav a:hover{background:var(--panel2);color:var(--ink);text-decoration:none}
+  nav a.grp{color:var(--dim);text-transform:uppercase;font-size:10.5px;letter-spacing:.8px;margin-top:14px;padding-left:10px}
+  main{flex:1;padding:34px 44px;min-width:0;max-width:1230px}
+  h2{font-size:24px;margin:46px 0 6px;padding-top:10px;border-top:1px solid var(--border)}
+  h2:first-of-type{border-top:none;margin-top:8px}
+  h3{font-size:18px;margin:28px 0 8px;color:#d2dae2}
+  h4{font-size:15px;margin:18px 0 6px;color:var(--accent2)}
+  p{margin:8px 0}
+  .lead{color:var(--muted);font-size:15px}
+  .hero{background:linear-gradient(135deg,#161b22,#1c2330);border:1px solid var(--border);
+    border-radius:14px;padding:26px 30px;margin-bottom:10px}
+  .hero h1{margin:0 0 4px;font-size:30px}
+  .hero .meta{color:var(--dim);font-size:13px;margin-top:10px}
+  .badges{margin:14px 0 4px;display:flex;gap:8px;flex-wrap:wrap}
+  .pill{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid}
+  .pill.p0{color:var(--p0);border-color:var(--p0);background:rgba(248,81,73,.10)}
+  .pill.p1{color:var(--p1);border-color:var(--p1);background:rgba(227,179,65,.10)}
+  .pill.p2{color:var(--p2);border-color:var(--p2);background:rgba(63,185,80,.10)}
+  .pill.info{color:var(--accent);border-color:var(--accent);background:rgba(88,166,255,.10)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+  .stat .n{font-size:26px;font-weight:700}.stat .l{color:var(--dim);font-size:12px;margin-top:2px}
+  .stat.red .n{color:var(--p0)} .stat.yel .n{color:var(--p1)} .stat.grn .n{color:var(--p2)} .stat.blu .n{color:var(--accent)}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+  th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:#cdd7e1;font-weight:600;position:sticky;top:0;z-index:2}
+  tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+  td.mono,th.mono{font-family:"SF Mono",ui-monospace,monospace;font-size:12px}
+  .ax{text-align:center;font-weight:700}
+  td.ax{width:40px}
+  span.ax{display:inline-block;width:20px}
+  .ax.ok{color:var(--ok)} .ax.pt{color:var(--partial)} .ax.no{color:var(--no)} .ax.na{color:var(--na)}
+  #mtx th{text-align:center}#mtx th:first-child,#mtx th:nth-child(2){text-align:left}
+  .unit td:first-child{white-space:nowrap;font-weight:600}
+  section{scroll-margin-top:12px}
+  details{background:var(--panel);border:1px solid var(--border);border-radius:10px;margin:12px 0;overflow:hidden}
+  details>summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:15px;list-style:none;
+    display:flex;align-items:center;gap:10px;background:var(--panel)}
+  details>summary::-webkit-details-marker{display:none}
+  details>summary::before{content:"▸";color:var(--dim);font-size:12px}
+  details[open]>summary::before{content:"▾"}
+  details>summary:hover{background:var(--panel2)}
+  .body{padding:4px 20px 16px}
+  .find{border-left:3px solid var(--border);padding:6px 0 6px 14px;margin:14px 0}
+  .find.p0{border-color:var(--p0)} .find.p1{border-color:var(--p1)} .find.p2{border-color:var(--p2)}
+  .find .t{font-weight:600}
+  .fs{color:var(--muted);font-size:13.5px;margin:3px 0}
+  .fix{color:var(--ok);font-size:13.5px}
+  .tag{font-size:11px;color:var(--dim);border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:6px}
+  ul{margin:8px 0 8px 0;padding-left:22px}li{margin:3px 0}
+  .controls{position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:3;border-bottom:1px solid var(--border);margin-bottom:8px}
+  .controls button{background:var(--panel2);color:var(--muted);border:1px solid var(--border);
+    border-radius:6px;padding:5px 12px;font-size:13px;cursor:pointer;margin-right:6px}
+  .controls button:hover{color:var(--ink);border-color:var(--accent)}
+  .controls button.active{color:var(--ink);border-color:var(--accent);background:rgba(88,166,255,.12)}
+  .legend{color:var(--dim);font-size:12.5px;margin:6px 0 0}
+  .note{background:rgba(88,166,255,.07);border:1px solid rgba(88,166,255,.3);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13.5px}
+  .warn{background:rgba(248,81,73,.07);border:1px solid rgba(248,81,73,.3);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13.5px}
+  .hidden{display:none}
+  .tldr{background:var(--panel);border:1px solid var(--border);border-left:4px solid var(--accent);
+    border-radius:10px;padding:8px 22px 16px;margin:12px 0}
+  .tldr ol{margin:8px 0}.tldr li{margin:8px 0}
+  .keytbl{max-width:760px}.keytbl td:first-child{width:80px;white-space:nowrap}
+  .io{margin:8px 0 4px}.io b{color:var(--accent2)}
+  .io-in{color:#a5d6ff}.io-out{color:#7ee787}
+  .gdef{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:2px 16px 10px;margin:10px 0}
+  .gterm{color:var(--accent);font-weight:700}
+  .udef{border-left:3px solid var(--border);padding:2px 0 2px 16px;margin:18px 0}
+  .udef.p0{border-color:var(--p0)}.udef.p1{border-color:var(--p1)}.udef.p2{border-color:var(--p2)}
+  .udef .uh{font-size:16px;font-weight:700;margin:6px 0 2px}
+  .udef .dep{color:var(--dim);font-size:12px}
+  footer{color:var(--dim);font-size:12px;margin:50px 0 20px;border-top:1px solid var(--border);padding-top:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h1>ccs · prod readiness</h1>
+  <div class="sub">discovery sweep · 2026-07-11</div>
+  <a href="#top">Overview</a>
+  <a href="#matrix">Burn-down matrix</a>
+  <a class="grp">Shared model</a>
+  <a href="#glossary">Glossary</a>
+  <a href="#units">System units (in order)</a>
+  <a class="grp">Findings</a>
+  <a href="#p0">P0 correctness cluster</a>
+  <a class="grp">Audits</a>
+  <a href="#a-dead">Dead code / boundaries / errors</a>
+  <a href="#a-dry">Duplication &amp; determinism</a>
+  <a href="#a-cmux">cmux coupling surface</a>
+  <a href="#a-hooks">Hook system</a>
+  <a href="#a-test">Test coverage</a>
+  <a href="#a-cli">CLI &amp; config</a>
+  <a class="grp">Context</a>
+  <a href="#a-designer">Prior-designer transcript</a>
+  <a href="#a-sessions">Recent-session mining</a>
+  <a class="grp">Plan</a>
+  <a href="#invariants">Cross-cutting invariants</a>
+  <a href="#order">Burn-down order</a>
+  <a href="#tasks">Task backlog</a>
+</nav>
+<main>
+
+<section id="top">
+<div class="hero">
+  <h1>ccs — Production Readiness Review</h1>
+  <p class="lead">The whole platform decomposed into testable units, with the findings from an 8-way
+  parallel discovery sweep folded in. Everything here is verified against source or mined from real
+  session transcripts. Goal: burn this down to production.</p>
+  <div class="badges">
+    <span class="pill p0">P0 blocks production</span>
+    <span class="pill p1">P1 needed for confidence</span>
+    <span class="pill p2">P2 polish</span>
+  </div>
+  <div class="meta">cmux 0.64.17 · bun test 414 pass / 0 fail · tsc clean · nothing committed this arc</div>
+</div>
+
+<div class="grid">
+  <div class="stat blu"><div class="n">32</div><div class="l">system units mapped</div></div>
+  <div class="stat red"><div class="n">7</div><div class="l">P0 correctness issues</div></div>
+  <div class="stat yel"><div class="n">8</div><div class="l">parallel audits run</div></div>
+  <div class="stat"><div class="n">84</div><div class="l">dead exports found</div></div>
+  <div class="stat"><div class="n">67+</div><div class="l">silent catch blocks</div></div>
+  <div class="stat grn"><div class="n">414</div><div class="l">tests passing</div></div>
+</div>
+
+<h3>What this is</h3>
+<p>Markdown is hard to review, so this is the single navigable surface. Two things sit at the center:</p>
+<ul>
+  <li><a href="#matrix"><b>The burn-down matrix</b></a> — every concept (session resume, liveness, each
+  pr-watch role, the phase machine, hooks, etc.) as a unit scored on six production axes:
+  <b>Live · Unit · Integration · Determinism · Hardened · Doc</b>. Filter it, sort it, burn it down.</li>
+  <li><a href="#glossary"><b>The glossary + system units</b></a> — the shared vocabulary, then every unit
+  of the system defined in dependency order (smallest primitives first, big flows last as compositions),
+  each with its inputs and outputs. This is the mental model the rest of the page speaks in.</li>
+  <li><a href="#p0"><b>The P0 correctness cluster</b></a> — the seven things that would actually bite in
+  production, each verified against source with file:line.</li>
+</ul>
+<p>Below those, each audit is a collapsible section preserving every finding, table, file:line, and
+failure scenario. Nothing was summarized away; the source is in <code>docs/FINDINGS-*.md</code> and
+<code>docs/PRODUCTION-READINESS-CHECKLIST.md</code>.</p>
+
+<h3>The short version (read this first)</h3>
+<div class="tldr">
+<p><b>Where it stands:</b> ccs is <b>solid at its core and works day-to-day</b> — the liveness bridge,
+resume, and hook resolution are well-built and tested, and the whole pr-watch fleet runs on it. It is
+<b>not yet production-hardened</b>. The gap isn't "it's broken"; it's "a handful of edge cases could bite
+under load or after a dependency upgrade, and several things only work because we run them by hand rather
+than because a test proves they work."</p>
+
+<p><b>The four themes that matter:</b></p>
+<ol>
+<li><b>A few correctness edges could double-spawn or corrupt state.</b> The same PR can be claimed by two
+workers if two spawns race (no lock between "is it running?" and "start it"). The <code>work-unit key</code>
+that ties a session to its PR is copy-pasted six times and two copies drifted, so inbox routing can silently
+miss. These are rare-but-real, and they're the kind of bug that only shows up when the fleet is busy.</li>
+<li><b>The cmux dependency is unpinned.</b> Everything hangs on the terminal (cmux) behaving exactly like
+version 0.64.17. Nothing checks the version, so a cmux upgrade could silently make ccs think every session
+is closed again — the exact bug we just fixed. There's also one old code path left that "fails open" (guesses
+nothing is running when it can't tell), which is the unsafe direction.</li>
+<li><b>The riskiest code has the least test coverage.</b> The database migrations (which can corrupt the
+catalogue if wrong, and were hand-patched on the live DB), the spawn primitive, and the fail-closed safety
+check are all essentially untested — they work today because we watched them work, not because a test guards
+them.</li>
+<li><b>The whole pr-watch flow has never been proven end-to-end on a live fleet.</b> The phase state machine,
+the tab pills, the review gate — all built, none confirmed working against a running worker.</li>
+</ol>
+
+<p><b>What "done" looks like:</b> fix the ~7 correctness edges (most are small — two are near one-liners),
+pin + version-check cmux, write tests for the 4 catastrophic-if-wrong paths, and drive one real PR through
+the fleet start-to-finish. Roughly a focused week of work. The <a href="#order">burn-down order</a> at the
+bottom sequences it.</p>
+
+<p><b>The good news:</b> zero dead files, near-zero commented-out code, strict typing, the cmux bridge is a
+model boundary, and the hooks pass their own linter. This is a maturity/hardening pass, not a rescue.</p>
+</div>
+</section>
+
+<!-- ============ MATRIX ============ -->
+<section id="matrix">
+<h2>Burn-down matrix — 32 system units</h2>
+<p class="lead">Each row is one piece of the system. The six columns each ask one yes/no question about how
+production-ready that piece is. Read a row left-to-right: the more <span class="ax ok">✓</span> and the
+fewer <span class="ax no">✗</span>, the closer to production.</p>
+<table class="keytbl"><thead><tr><th>Column</th><th>The question it answers</th></tr></thead><tbody>
+<tr><td><b>Live</b></td><td>Have we actually run this for real (not just in a test or dry-run)?</td></tr>
+<tr><td><b>Unit</b></td><td>Are there unit tests that meaningfully check its logic?</td></tr>
+<tr><td><b>Integ</b></td><td>Is there an end-to-end / integration test exercising the real path (not just stubs)?</td></tr>
+<tr><td><b>Det</b></td><td>Deterministic — same inputs always give the same result (stable ordering, no fail-open)?</td></tr>
+<tr><td><b>Hard</b></td><td>Hardened — are its failure modes handled (timeouts, unreadable state, retries, fail-closed)?</td></tr>
+<tr><td><b>Doc</b></td><td>Documented well enough to operate and extend?</td></tr>
+</tbody></table>
+<p class="legend">Cell values: <span class="ax ok">✓</span> yes/done &nbsp; <span class="ax pt">◑</span> partial &nbsp;
+<span class="ax no">✗</span> no / missing / unknown &nbsp; <span class="ax na">—</span> not applicable to this unit</p>
+
+<div class="controls">
+  <button class="fbtn active" data-f="all">All (32)</button>
+  <button class="fbtn" data-f="p0">P0 only</button>
+  <button class="fbtn" data-f="platform">Layer 1: platform</button>
+  <button class="fbtn" data-f="cluster">Layer 2: pr-watch</button>
+  <button class="fbtn" data-f="gap">Has ✗ gaps</button>
+</div>
+
+<table id="mtx">
+<thead><tr>
+  <th>Unit</th><th>What</th>
+  <th title="Used for real">Live</th><th title="Unit tests">Unit</th><th title="Integration test">Integ</th>
+  <th title="Deterministic">Det</th><th title="Failure-hardened">Hard</th><th title="Documented">Doc</th>
+  <th>Pri</th>
+</tr></thead>
+<tbody>
+<!-- data rows: axes as ok/pt/no/na -->
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U1 Indexing / reindex</td><td>src/index/</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p0" data-gap="1"><td>U2 Catalogue DB + migrations</td><td>catalogue/db.ts</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax pt">◑</td><td><span class="pill p0">P0</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U3 Identity / responsibility key</td><td>cluster·role·work-unit</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p0" data-gap="1"><td>U4 Work-unit key</td><td>6 copies, 2 drifted</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax no">✗</td><td><span class="pill p0">P0</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U5 Liveness (cmux bridge)</td><td>src/cmux/</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p0" data-gap="1"><td>U6 Spawn primitive</td><td>resume/spawn-cmux.ts</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax ok">✓</td><td><span class="pill p0">P0</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U7 Resume — single</td><td>resume-session.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U8 Resume — cluster / dedup</td><td>resume-cluster.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p0" data-gap="1"><td>U9 Spawn contract (TOCTOU)</td><td>spawn-contract.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p0">P0</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U10 Hook resolution + merge</td><td>hooks/resolve-*, merge</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p0" data-gap="1"><td>U11 Hook types (per type)</td><td>8 types</td><td class="ax pt">◑</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p0">P0</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U12 Tab painting / sync-tabs</td><td>sync-tabs.ts</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U13 Statusline</td><td>render-statusline.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p2" data-gap="1"><td>U14 Inbox (deliver+wake)</td><td>src/inbox/</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td><span class="pill p2">P2</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p2" data-gap="1"><td>U15 State store / mergeFields</td><td>state/store.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p2">P2</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p2" data-gap="1"><td>U16 Grouping / epic</td><td>state/groupings.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td><span class="pill p2">P2</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p2" data-gap="1"><td>U17 Selector resolution</td><td>resume/selector.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td><span class="pill p2">P2</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U18 Inference engine</td><td>src/inference/ (new)</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U19 CLI surface / ergonomics</td><td>src/cli.ts</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p2" data-gap="1"><td>U20 TUI</td><td>src/tui/</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax no">✗</td><td><span class="pill p2">P2</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p0" data-gap="1"><td>U21 cmux integration surface</td><td>cmux/, open-state.ts</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax pt">◑</td><td><span class="pill p0">P0</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U22 control role</td><td>loop: sense/route/advance</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U23 concierge role</td><td>liaison to Milad</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U24 slack-scout role</td><td>Slack sensor</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U25 eval role</td><td>outside observer</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p0" data-gap="1"><td>U26 pr-agent role (worker)</td><td>owns ONE PR</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p0">P0</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p2" data-gap="0"><td>U27 designer role</td><td>this role</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax na">—</td><td class="ax na">—</td><td class="ax na">—</td><td class="ax pt">◑</td><td><span class="pill p2">P2</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p0" data-gap="1"><td>U28 Phase state machine</td><td>stage × activity</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax ok">✓</td><td><span class="pill p0">P0</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U29 The gate</td><td>internal+Milad before public</td><td class="ax pt">◑</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U30 Lifecycle marks</td><td>ccs mark (control-owned)</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U31 Board/gate/pending sensing</td><td>engine + !-injection</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p2" data-gap="1"><td>U32 catalogue_sync engine</td><td>catalogue_sync.py</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p2">P2</span></td></tr>
+</tbody>
+</table>
+<p class="legend">Full per-unit TODOs + evidence in <code>docs/PRODUCTION-READINESS-CHECKLIST.md</code>.</p>
+</section>
+
+<!-- ============ GLOSSARY ============ -->
+<section id="glossary">
+<h2>Glossary — the shared vocabulary</h2>
+<p class="lead">One canonical definition per concept, grounded in the actual code. The system-unit
+definitions below use <b>only</b> these terms, so the whole model reads in one language. Where a concept
+has two names in the code, the canonical term is defined and the alias is flagged as <b>naming debt</b> —
+using shared vocabulary everywhere is exactly what makes those inconsistencies visible. Full source:
+<code>docs/GLOSSARY.md</code>.</p>
+
+<div class="note"><b>6 naming inconsistencies were surfaced by writing this glossary — all now decided</b>
+(same concept, two names in the code). Resolved via ADR-0059 (naming reconciliation) + ADR-0057 (work-unit):
+<ul>
+<li><b>cluster</b> — canonical everywhere; the DB column <code>system</code> is being renamed to <code>cluster</code>. <i>(the big one, 44 files)</i></li>
+<li><b>grouping</b> — the platform concept; a grouping has a <b>type</b>, and pr-watch uses an <b>epic</b>-type grouping (not a rename — grouping is general, epic is a variant).</li>
+<li><b>key</b> — canonical; the deprecated <code>event</code> column/command is being removed.</li>
+<li><b>role</b> — canonical (ADR-0015); the deprecated <code>skill</code> column is being removed.</li>
+<li><b>phase</b> — removed entirely; superseded by <b>stage × activity</b> (renderers move fully off it).</li>
+<li><b>work-unit</b> — the 6-copy derived-string drift is retired by making the work-unit a first-class entity (ADR-0057), not by centralizing the string.</li>
+</ul>
+And one refinement: <b>identity</b> and <b>responsibility</b> are <i>not</i> synonyms (an earlier audit
+guessed they were) — a <b>responsibility</b> is the durable key; an <b>identity</b> is the runtime context
+it indexes.</div>
+
+<h3>Core identity</h3>
+<div class="gdef"><p><span class="gterm">session</span> — one Claude Code conversation (a transcript + its ccs metadata), named by a <b>sessionId</b>. A vessel: it can be closed and resumed; the <b>identity</b> it carries outlives it.</p>
+<p><span class="gterm">sessionId</span> — the UUID that names a session (transcript filename, primary key). &nbsp; <span class="gterm">resumeId</span> — the UUID passed to <code>claude --resume</code>; equals sessionId for fresh sessions, can differ for old ones.</p>
+<p><span class="gterm">responsibility</span> — the durable agent-identity KEY: <code>{cluster?, role, epic?, workUnit?}</code>. What a session is responsible for; survives resume. &nbsp; <span class="gterm">identity</span> — the runtime CONTEXT that key indexes (its <b>inbox</b> + <b>state</b> under <code>~/.ccs</code>).</p>
+<p><span class="gterm">embodiment</span> — a session actively running in a <b>surface</b> right now; <b>liveness</b> is the presence of an embodiment. &nbsp; <span class="gterm">lineage</span> — earlier embodiments of the same identity (matched by <b>identity-key</b>), so a fresh session can review prior attempts.</p></div>
+
+<h3>Work grouping</h3>
+<div class="gdef"><p><span class="gterm">work-unit</span> — the deliverable a session owns: <code>pr:repo#number</code> | <code>gus:W-id</code> | <code>sid:sessionId</code>. The unit of the <b>one-embodiment rule</b>.</p>
+<p><span class="gterm">cluster</span> — a named set of sessions running one operation (e.g. <code>pr-watch</code>): the <b>fleet</b> + the <b>core</b> roles. <i>(schema alias: system)</i> &nbsp; <span class="gterm">grouping</span> — a mid-level work grouping bigger than a work-unit (a GUS epic); display metadata lives in <b>cluster state</b>. <i>(schema/CLI alias: epic)</i></p>
+<p><span class="gterm">project</span> — a loose user label. &nbsp; <span class="gterm">key</span> — an opaque identity-grouping slug <i>(alias: event)</i>. &nbsp; <span class="gterm">tag</span> — an ad-hoc entity label. &nbsp; <span class="gterm">parent / constellation</span> — the optional session-to-session edge tree.</p></div>
+
+<h3>Role &amp; kind</h3>
+<div class="gdef"><p><span class="gterm">role</span> — a session's first-class identity axis (control/concierge/slack-scout/eval/pr-agent/designer); drives which skills/commands/hooks materialize. <i>(deprecated alias: skill)</i></p>
+<p><span class="gterm">kind</span> — a role's class: <b>loop</b> (re-arms via <b>resume_command</b>, comes back running) or <b>session</b> (bare, rehydrates from inbox/state). &nbsp; <span class="gterm">core vs fleet</span> — singleton infra roles vs per-work-unit workers.</p>
+<p><span class="gterm">role-def</span> — a role's definition read from files (<b>role.toml</b> + directory), never a DB cache: kind, homeDir, resumeCommand, skills[], commands[], hooks[].</p></div>
+
+<h3>Stores</h3>
+<div class="gdef"><p><span class="gterm">catalogue</span> — the durable metadata store (SQLite), one <b>CatalogueRow</b> per session; survives index rebuilds. &nbsp; <span class="gterm">index</span> — the ephemeral parsed-transcript cache (SQLite), one <b>SessionRow</b> per transcript; rebuildable.</p>
+<p><span class="gterm">state doc</span> — a durable JSON file in an envelope <code>{schemaVersion, updatedAt, source, data}</code>, written atomically. &nbsp; <span class="gterm">mergeFields</span> — its single-writer-per-field update. &nbsp; <span class="gterm">cluster state</span> — state docs scoped to a cluster (<b>board/gate/pending</b>, grouping metadata).</p>
+<p><span class="gterm">inbox</span> — a durable per-identity mailbox; delivery is independent of liveness. &nbsp; <span class="gterm">message</span> — one inbox item <code>{path, sender, body}</code>; <span class="gterm">drain</span> is move-on-drain into <code>processed/</code>.</p></div>
+
+<h3>cmux embodiment</h3>
+<div class="gdef"><p><span class="gterm">cmux</span> — the terminal multiplexer sessions run inside (external binary, v0.64.17). &nbsp; <span class="gterm">surface</span> — one cmux pane where an agent runs (stable <b>surfaceId</b>). &nbsp; <span class="gterm">workspace</span> — a cmux tab holding surfaces; its tab is owned by the <b>primary surface</b>.</p>
+<p><span class="gterm">tree</span> — the cmux JSON hierarchy (ground truth for what surface exists now). &nbsp; <span class="gterm">hook store</span> — cmux 0.64's file mapping <code>surfaceId → sessionId</code> (the authoritative binding).</p>
+<p><span class="gterm">bridge</span> — the surface-keyed link between sessions and live cmux bodies, built by intersecting the hook store with the tree. &nbsp; <span class="gterm">liveness</span> — whether a session has a live surface (via the bridge, exact). &nbsp; <span class="gterm">readable</span> — whether the bridge's inputs were actually read; if not, spawning operations <b>fail closed</b>.</p></div>
+
+<h3>Spawn / resume</h3>
+<div class="gdef"><p><span class="gterm">spawn</span> — birth of a NEW session (mint id, write catalogue, launch). &nbsp; <span class="gterm">spawnCmux</span> — the ONE primitive that launches into a fresh detached workspace. &nbsp; <span class="gterm">resume</span> — revival of a CLOSED session (check liveness, else <code>claude --resume</code>).</p>
+<p><span class="gterm">spawn contract</span> — the born-correct gate: refuse a worker spawn unless <b>one-embodiment rule</b> (≤1 live session per work-unit) and correct-worktree hold. &nbsp; <span class="gterm">supersede-dedup</span> — in a cluster resume, older dead siblings of a live work-unit are superseded, not resumed. &nbsp; <span class="gterm">retired</span> — completed/archived; never revived. &nbsp; <span class="gterm">selector</span> — a token resolving to sessionIds (id / #pr / W-id / grouping / role / cluster).</p></div>
+
+<h3>Hooks</h3>
+<div class="gdef"><p><span class="gterm">hook</span> — a layered config point firing at a Claude moment; each <b>hook type</b> (claude-md, start, stop, meta-update, cmux-paint, statusline, spawn-location, guard) declares a <b>merge strategy</b>.</p>
+<p><span class="gterm">level</span> — one identity layer, ordered broad→specific: <code>user → cluster → role → epic → work-unit → identity</code>. &nbsp; <span class="gterm">resolution</span> — the pure map from a CatalogueRow to the ordered levels + config dirs. &nbsp; <span class="gterm">merge</span> — folding the per-level layers by the type's strategy.</p>
+<p><span class="gterm">start action</span> — an action run at SessionStart: <b>arm</b> (re-fire a loop's resume_command) or <b>drain-inbox</b>. &nbsp; <span class="gterm">meta-update</span> — declares which CatalogueRow fields get refreshed at Stop (freshness contract, not an auto-writer).</p></div>
+
+<h3>Rendering &amp; pr-watch phase</h3>
+<div class="gdef"><p><span class="gterm">tab</span> — a workspace's rendered cmux tab <code>{title, description, color, statusPill}</code>, synced from the row each turn by <b>sync-tabs</b>. &nbsp; <span class="gterm">pill</span> — the tab/statusline status indicator. &nbsp; <span class="gterm">statusline</span> — the single rendered status line.</p>
+<p><span class="gterm">stage</span> — a PR's monotonic pipeline position (<code>building→milad-review→in-review→approved→merged</code>). &nbsp; <span class="gterm">activity</span> — the transient state within a stage (<code>working/needs-you/fixing</code>). <i>(these replaced the single <b>phase</b> column)</i> &nbsp; <span class="gterm">buildComplete</span> — the latch sealing the build stage once milad-review is hit.</p>
+<p><span class="gterm">gate</span> — the invariant that a PR clears internal + Milad review before public review. &nbsp; <span class="gterm">miladReview</span> — Milad's +1 verdict the gate reads. &nbsp; <span class="gterm">sense</span> — the engine step writing git/GitHub/Slack facts to cluster state. &nbsp; <span class="gterm">mark</span> — the control-owned completed/archived lifecycle transition.</p></div>
+</section>
+
+<!-- ============ SYSTEM UNITS ============ -->
+<section id="units">
+<h2>System units — defined in dependency order</h2>
+<p class="lead">Every unit of the system, ordered so each is built from units defined <b>above</b> it plus
+<a href="#glossary">glossary</a> terms. Smallest primitives first; the big flows last, as compositions.
+Each unit gives its <b>definition</b> (shared vocabulary only), <b>inputs</b>, <b>outputs</b>, and what it
+<b>composes</b>. IDs are re-sequenced by dependency; the burn-down-matrix ID is in brackets. Full source:
+<code>docs/SYSTEM-UNITS.md</code>.</p>
+<p class="legend"><b>Left-bar color = production priority</b> (same scale as the matrix):
+<span style="color:var(--p0);font-weight:700">▎red = P0</span> (blocks production) &nbsp;
+<span style="color:var(--p1);font-weight:700">▎yellow = P1</span> (needed for confidence) &nbsp;
+<span style="color:var(--p2);font-weight:700">▎green = P2</span> (polish) &nbsp;
+<span style="color:var(--dim);font-weight:700">▎gray = no priority</span> (solid unit, no flagged work).
+A <span class="fs" style="display:inline">⚠ line</span> inside a card is the specific issue.</p>
+
+<h3>Tier 0 — pure primitives</h3>
+
+<div class="udef"><div class="uh">S1 · path-encoding &amp; storage-folder <span class="dep">[matrix: part of U7]</span></div>
+<p>The pure mapping between a <b>session</b>'s cwd and its <b>storage folder</b>: encode a path (non-alphanumerics → <code>-</code>, mirroring Claude Code) and recover the <b>launch dir</b> by finding the real directory whose encoded realpath matches a storage folder.</p>
+<p class="io"><b>In:</b> <span class="io-in">a cwd string / a transcript file path</span> &nbsp; <b>Out:</b> <span class="io-out">an encoded folder name / the resolved launch dir (or null)</span> &nbsp; <b>Composes:</b> — (leaf) &nbsp; <span class="dep">resume/locate.ts</span></p></div>
+
+<div class="udef p0"><div class="uh">S2 · work-unit key <span class="dep">[U4 · P0]</span></div>
+<p>Derive the <b>work-unit</b> string for a session: <code>pr:repo#number</code> (PR wins) else <code>gus:W-id</code> else <code>sid:sessionId</code>. The join key many later units rely on.</p>
+<p class="io"><b>In:</b> <span class="io-in">a row's PR facts + gusWork + sessionId</span> &nbsp; <b>Out:</b> <span class="io-out">a canonical work-unit string (or null)</span> &nbsp; <b>Composes:</b> — (leaf) &nbsp; <span class="dep">spawn-contract.ts:23</span></p>
+<p class="fs">⚠ implemented 6×; 2 copies drifted to a non-joining <code>repo-number</code> form. Consolidate here.</p></div>
+
+<div class="udef"><div class="uh">S3 · shell-quote &amp; resume-command builder <span class="dep">[part of U7]</span></div>
+<p>Pure construction of the <code>claude --resume &lt;resumeId&gt; [resume_command]</code> invocation with its <b>launch dir</b>.</p>
+<p class="io"><b>In:</b> <span class="io-in">a SessionRow + {fork, cwd, resumeCommand}</span> &nbsp; <b>Out:</b> <span class="io-out">a ResumeCommand {argv, cwd, shell}</span> &nbsp; <b>Composes:</b> S1 &nbsp; <span class="dep">resume/command.ts</span></p></div>
+
+<div class="udef p2"><div class="uh">S4 · state doc + mergeFields <span class="dep">[U15 · P2]</span></div>
+<p>The durable JSON store primitive: write a <b>state doc</b> atomically in a versioned envelope, read one back (missing = null, corrupt = quarantined), and <b>mergeFields</b> for single-writer-per-field updates.</p>
+<p class="io"><b>In:</b> <span class="io-in">a path, a data object (or field subset), {now, source}</span> &nbsp; <b>Out:</b> <span class="io-out">void / the envelope or null</span> &nbsp; <b>Composes:</b> — (leaf) &nbsp; <span class="dep">state/store.ts</span></p>
+<p class="fs">⚠ read-modify-write has no lock (D3); safe only under the single-writer-per-field convention.</p></div>
+
+<div class="udef"><div class="uh">S5 · merge combinators <span class="dep">[part of U10]</span></div>
+<p>The five pure <b>merge strategy</b> functions that fold ordered <b>hook</b> layers: <code>sections</code>, <code>set-union</code>, <code>ordered-actions</code>, <code>most-specific</code>, <code>union-deny-wins</code>.</p>
+<p class="io"><b>In:</b> <span class="io-in">an ordered array of per-level layers</span> &nbsp; <b>Out:</b> <span class="io-out">the merged config</span> &nbsp; <b>Composes:</b> — (leaf) &nbsp; <span class="dep">hooks/merge.ts</span></p></div>
+
+<h3>Tier 1 — records &amp; parsing</h3>
+
+<div class="udef p0"><div class="uh">S6 · CatalogueRow + catalogue store <span class="dep">[U2 · P0]</span></div>
+<p>The durable <b>catalogue</b>: one <b>CatalogueRow</b> per session with typed query/mutation accessors and a versioned migration chain. Every metadata axis (role, cluster/system, key, grouping, gusWork, PR facts, stage, activity, statusLine, miladReview, buildComplete, lifecycle) lives here.</p>
+<p class="io"><b>In:</b> <span class="io-in">a DB handle + sessionId; mutations take a value + now</span> &nbsp; <b>Out:</b> <span class="io-out">a CatalogueRow / lists of sessionIds / void</span> &nbsp; <b>Composes:</b> S2 &nbsp; <span class="dep">catalogue/db.ts</span></p>
+<p class="fs">⚠ migrations v1→v19 untested; v16–v19 hand-patched on the live DB; v14/v15 DROP tables. Highest blast radius.</p></div>
+
+<div class="udef p1"><div class="uh">S7 · SessionRow + index/reindex <span class="dep">[U1 · P1]</span></div>
+<p>The ephemeral <b>index</b>: parse each transcript into a <b>SessionRow</b> (cwd, project, timestamps, resumeId, cost/tokens, resolved title) and incrementally reindex on mtime/size change.</p>
+<p class="io"><b>In:</b> <span class="io-in">transcript files + host; a DB handle</span> &nbsp; <b>Out:</b> <span class="io-out">upserted SessionRows; ReindexStats</span> &nbsp; <b>Composes:</b> — (shares sessionId/resumeId with S6) &nbsp; <span class="dep">index/index.ts</span></p></div>
+
+<div class="udef"><div class="uh">S8 · lineage / predecessors <span class="dep">[part of U3]</span></div>
+<p>Compute a session's <b>lineage</b> — earlier <b>embodiments</b> sharing its <b>identity-key</b> — by joining catalogue rows with index timestamps.</p>
+<p class="io"><b>In:</b> <span class="io-in">catalogue rows map + index paths map + sessionId</span> &nbsp; <b>Out:</b> <span class="io-out">an ordered Embodiment[]</span> &nbsp; <b>Composes:</b> S2, S6, S7 &nbsp; <span class="dep">catalogue/lineage.ts</span></p>
+<p class="fs">⚠ tie-break returns 0 when both timestamps null → nondeterministic order (D2, P0, one-line fix).</p></div>
+
+<h3>Tier 2 — cmux embodiment</h3>
+
+<div class="udef"><div class="uh">S9 · cmux tree + hook-store readers <span class="dep">[part of U5/U21]</span></div>
+<p>The two side-effecting reads of <b>cmux</b> state — run <b>tree</b>, read the <b>hook store</b> — each returning data plus a <b>readable</b> <code>ok</code> flag.</p>
+<p class="io"><b>In:</b> <span class="io-in">none (shells out / reads a fixed path)</span> &nbsp; <b>Out:</b> <span class="io-out">{tree, ok} and {store, ok}</span> &nbsp; <b>Composes:</b> — (leaf I/O) &nbsp; <span class="dep">cmux/live.ts</span></p>
+<p class="fs">⚠ no cmux version guard; hook-store path hardcoded (U21, P0).</p></div>
+
+<div class="udef p1"><div class="uh">S10 · the bridge (liveness) <span class="dep">[U5 · P1]</span></div>
+<p>Build the <b>bridge</b>: parse the <b>tree</b> into <b>surface</b> locations, intersect the <b>hook store</b> bindings with it (a surface counts as live only if in BOTH), and expose <b>liveness</b> queries + the <b>readable</b> flag.</p>
+<p class="io"><b>In:</b> <span class="io-in">a tree + hook store (+ readable), from S9 or injected</span> &nbsp; <b>Out:</b> <span class="io-out">a Bridge (surface list, session↔surface maps, readable)</span> &nbsp; <b>Composes:</b> S9 &nbsp; <span class="dep">cmux/bridge.ts, liveness.ts</span></p></div>
+
+<div class="udef p0"><div class="uh">S11 · spawnCmux primitive <span class="dep">[U6 · P0]</span></div>
+<p><b>spawnCmux</b>: launch a <code>claude</code> argv into a fresh detached <b>workspace</b> as a plain command (so cmux's shim registers it in the <b>hook store</b>), returning the new workspace ref.</p>
+<p class="io"><b>In:</b> <span class="io-in">{argv, cwd, name, focus?, cmuxBin?}</span> &nbsp; <b>Out:</b> <span class="io-out">the workspace ref, or null</span> &nbsp; <b>Composes:</b> S3 &nbsp; <span class="dep">resume/spawn-cmux.ts</span></p>
+<p class="fs">⚠ zero tests; no spawn timeout; ref parsed by bare regex (P0).</p></div>
+
+<h3>Tier 3 — hook resolution &amp; identity runtime</h3>
+
+<div class="udef p2"><div class="uh">S12 · responsibility → identityDir + inbox <span class="dep">[U14 · P2]</span></div>
+<p>Map a <b>responsibility</b> to its <b>identity</b> runtime dir, and operate its <b>inbox</b> — write a <b>message</b> atomically, <b>drain</b> move-on-drain, list pending.</p>
+<p class="io"><b>In:</b> <span class="io-in">a runtime root + responsibility; for write: sender/body/stamp</span> &nbsp; <b>Out:</b> <span class="io-out">the identity dir; message paths / drained InboxMessage[]</span> &nbsp; <b>Composes:</b> S2 &nbsp; <span class="dep">inbox/identity-path.ts, inbox.ts</span></p></div>
+
+<div class="udef"><div class="uh">S13 · role-def loading <span class="dep">[part of U8/U11]</span></div>
+<p>Read a <b>role-def</b> from files — parse <b>role.toml</b> for kind/resume_command, derive homeDir/skills/commands/hooks from the directory (files-as-truth).</p>
+<p class="io"><b>In:</b> <span class="io-in">a role dir + role name + optional cluster</span> &nbsp; <b>Out:</b> <span class="io-out">a RoleDef (or null); fail-open on bad TOML</span> &nbsp; <b>Composes:</b> — &nbsp; <span class="dep">roles/role-files.ts</span></p></div>
+
+<div class="udef"><div class="uh">S14 · hook level resolution <span class="dep">[part of U10]</span></div>
+<p>The pure <b>resolution</b> from a <b>CatalogueRow</b> to the ordered <b>level</b> list (<code>user→cluster→role→epic→work-unit→identity</code>) and each level's config dir — never reads cwd/env.</p>
+<p class="io"><b>In:</b> <span class="io-in">a CatalogueRow + {configRoot, runtimeRoot, roleHomeDir}</span> &nbsp; <b>Out:</b> <span class="io-out">an ordered ResolvedLevel[]</span> &nbsp; <b>Composes:</b> S2, S12, S13 &nbsp; <span class="dep">hooks/resolve-levels.ts</span></p></div>
+
+<div class="udef p1"><div class="uh">S15 · effective hook config <span class="dep">[U10 · P1]</span></div>
+<p>Read each <b>level</b>'s <code>.ccs-hooks/&lt;type&gt;</code> file and fold them with the type's <b>merge strategy</b> into one effective config, tracking a <code>degraded</code> flag on layer errors.</p>
+<p class="io"><b>In:</b> <span class="io-in">a CatalogueRow + hook type name + ctx</span> &nbsp; <b>Out:</b> <span class="io-out">EffectiveConfig {effective, layers, degraded, errors}</span> &nbsp; <b>Composes:</b> S14, S5 &nbsp; <span class="dep">hooks/resolve-config.ts</span></p></div>
+
+<h3>Tier 4 — rendering &amp; the spawn/resume flows</h3>
+
+<div class="udef"><div class="uh">S16 · tab &amp; statusline rendering <span class="dep">[U12/U13]</span></div>
+<p>Pure render of a <b>CatalogueRow</b> into a <b>tab</b> and a <b>statusline</b> — statusLine wins the description slot; the <b>pill</b> comes from <b>stage × activity</b> (or legacy phase); staleness-aware.</p>
+<p class="io"><b>In:</b> <span class="io-in">a CatalogueRow (+ kind, + grouping ctx)</span> &nbsp; <b>Out:</b> <span class="io-out">TabRenderOps / a statusline string</span> &nbsp; <b>Composes:</b> S6 &nbsp; <span class="dep">render-tab.ts, render-statusline.ts</span></p></div>
+
+<div class="udef p1"><div class="uh">S17 · sync-tabs <span class="dep">[U12 · P1]</span></div>
+<p>Push rendered <b>tab</b> ops to <b>cmux</b> by <b>surfaceId</b> — locate the surface via the <b>bridge</b>, apply the <b>cmux-paint</b> override, paint the workspace; never paint a <b>retired</b> tab.</p>
+<p class="io"><b>In:</b> <span class="io-in">a sessionId (or --all) + optional ref override</span> &nbsp; <b>Out:</b> <span class="io-out">boolean pushed / exit code</span> &nbsp; <b>Composes:</b> S10, S15, S16 &nbsp; <span class="dep">catalogue/sync-tabs.ts</span></p></div>
+
+<div class="udef p2"><div class="uh">S18 · selector resolution <span class="dep">[U17 · P2]</span></div>
+<p>Resolve a <b>selector</b> token to <b>sessionId</b>s — infer its axis (id / #pr / W-id / grouping / role / cluster) or take a pin, deterministically ordered.</p>
+<p class="io"><b>In:</b> <span class="io-in">catalogue + index handles, a token, {pin?, cluster?}</span> &nbsp; <b>Out:</b> <span class="io-out">SelectorResult {kind, label, sessionIds} or null</span> &nbsp; <b>Composes:</b> S6 &nbsp; <span class="dep">resume/selector.ts</span></p></div>
+
+<div class="udef p0"><div class="uh">S19 · spawn contract <span class="dep">[U9 · P0]</span></div>
+<p>The born-correct gate — refuse a worker <b>spawn</b> unless it passes the <b>one-embodiment rule</b> (its <b>work-unit</b> has no live <b>embodiment</b>) and the correct-worktree check; <b>core</b> roles pass through.</p>
+<p class="io"><b>In:</b> <span class="io-in">spawn facts, the set of live work-units, cwd worktree state</span> &nbsp; <b>Out:</b> <span class="io-out">an error string, or null (OK)</span> &nbsp; <b>Composes:</b> S2, S10 &nbsp; <span class="dep">catalogue/spawn-contract.ts</span></p>
+<p class="fs">⚠ TOCTOU — the live-work-units read and the spawn aren't atomic (D1, P0).</p></div>
+
+<div class="udef p1"><div class="uh">S20 · resume one session <span class="dep">[U7 · P1]</span></div>
+<p>Revive one closed <b>session</b> — check <b>liveness</b> via the <b>bridge</b> (skip if <b>embodied</b>), <b>fail closed</b> if not <b>readable</b>, else build the <b>ResumeCommand</b> and <b>spawnCmux</b>, then eager-paint the <b>tab</b>.</p>
+<p class="io"><b>In:</b> <span class="io-in">index + catalogue handles, a sessionId, {dryRun?, bridge?, focus?}</span> &nbsp; <b>Out:</b> <span class="io-out">ResumeSessionResult (resumed / already-open / not-indexed / spawn-failed / liveness-unreadable)</span> &nbsp; <b>Composes:</b> S10, S3, S1, S11, S17 &nbsp; <span class="dep">resume/resume-session.ts</span></p></div>
+
+<div class="udef"><div class="uh">S21 · spawn a new session <span class="dep">[new-session]</span></div>
+<p>Mint a <b>sessionId</b>, resolve the <b>spawn-location</b> hook, run the <b>spawn contract</b>, write <b>catalogue</b> metadata (forward reference), then launch via <b>spawnCmux</b> (detached default) — or inline / print-id.</p>
+<p class="io"><b>In:</b> <span class="io-in">parsed NewSessionOpts (role, cluster, kind, work-unit facts, cwd, prompt…)</span> &nbsp; <b>Out:</b> <span class="io-out">exit code; a live session bound to a surface</span> &nbsp; <b>Composes:</b> S19, S15, S6, S11, S13 &nbsp; <span class="dep">catalogue/new-session.ts</span></p></div>
+
+<div class="udef p1"><div class="uh">S22 · resume a cluster (supersede-dedup) <span class="dep">[U8 · P1]</span></div>
+<p>Resume every not-open <b>session</b> of a <b>cluster</b> — <b>fail closed</b> if unreadable, classify each member (<b>retired</b> / <b>superseded</b> / candidate) under the <b>one-embodiment rule</b> via <b>supersede-dedup</b>, then delegate survivors to S20.</p>
+<p class="io"><b>In:</b> <span class="io-in">index + catalogue handles, a cluster (or sessionId set), {dryRun?, bridge?}</span> &nbsp; <b>Out:</b> <span class="io-out">ClusterResumeSummary {resumed, alreadyOpen, retired, superseded, notIndexed, failed, abortedUnreadable, perSession[]}</span> &nbsp; <b>Composes:</b> S10, S6, S20, S18 &nbsp; <span class="dep">resume/resume-cluster.ts</span></p></div>
+
+<h3>Tier 5 — hooks firing &amp; the pr-watch cluster</h3>
+
+<div class="udef p0"><div class="uh">S23 · hook firing (SessionStart / Stop) <span class="dep">[U11 · P0]</span></div>
+<p>At a Claude lifecycle moment, resolve the <b>effective hook config</b> and act: SessionStart injects <b>claude-md</b> context and runs <b>start actions</b> (<b>arm</b>, <b>drain-inbox</b>); Stop runs <b>meta-update</b> refresh + the phase rubric and re-paints the <b>tab</b>.</p>
+<p class="io"><b>In:</b> <span class="io-in">the firing session's row + source</span> &nbsp; <b>Out:</b> <span class="io-out">additionalContext text; drained inbox, painted tab</span> &nbsp; <b>Composes:</b> S15, S12, S16/S17, S6 &nbsp; <span class="dep">hooks/register-command.ts, start-actions.ts, worker-stop-command.ts</span></p>
+<p class="fs">⚠ SessionStart &amp; Stop are double-registered in settings.json → every hook fires 2× (P0).</p></div>
+
+<div class="udef p0"><div class="uh">S24 · phase model (stage × activity) <span class="dep">[U28 · P0]</span></div>
+<p>A PR worker's status = a monotonic <b>stage</b> (engine-latched via <b>buildComplete</b>) crossed with a transient <b>activity</b>; surfaced as the <b>pill</b> and advanced by <code>ccs ready</code> / <code>ccs approve</code> / <code>ccs activity</code>.</p>
+<p class="io"><b>In:</b> <span class="io-in">worker self-reports (activity), engine sensing (stage, fixing), Milad (ready/approve)</span> &nbsp; <b>Out:</b> <span class="io-out">stage/activity/miladReview on the row</span> &nbsp; <b>Composes:</b> S6, S16</p>
+<p class="fs">⚠ built, never verified live on a running worker (P0 flow proof).</p></div>
+
+<div class="udef p1"><div class="uh">S25 · the roles <span class="dep">[U22–U27]</span></div>
+<p>The six <b>role</b>s of the <b>pr-watch</b> <b>cluster</b>, each a <b>loop</b> or <b>session</b> whose behavior is its skills/commands and whose runtime is its <b>identity</b>. control senses+drives; concierge talks to Milad; slack-scout senses Slack; eval grades; pr-agent owns one <b>work-unit</b>; designer designs.</p>
+<p class="io"><b>In:</b> <span class="io-in">each role's role-def + identity runtime + resolved hooks</span> &nbsp; <b>Out:</b> <span class="io-out">their actions + reports</span> &nbsp; <b>Composes:</b> S12, S13, S15, S23; workers via S19/S21; loop via S22</p>
+<p class="fs">⚠ all run daily but none verified end-to-end live this arc (P1).</p></div>
+
+<div class="udef"><div class="uh">S26 · sense + board/gate/pending <span class="dep">[U31/U32]</span></div>
+<p>The engine <b>sense</b> step reads git/GitHub/Slack and writes <b>cluster state</b> (<b>board/gate/pending</b>) via <b>mergeFields</b>; the control <b>tick</b> <code>!</code>-injects those docs. Sensor-driven, never session-remembered.</p>
+<p class="io"><b>In:</b> <span class="io-in">git/GitHub/Slack facts; the cluster</span> &nbsp; <b>Out:</b> <span class="io-out">updated cluster state docs; PR facts stamped onto rows</span> &nbsp; <b>Composes:</b> S4, S6 &nbsp; <span class="dep">engine/scripts/catalogue_sync.py, sense.sh</span></p></div>
+
+<div class="udef p1"><div class="uh">S27 · the gate + lifecycle marks <span class="dep">[U29/U30]</span></div>
+<p>The <b>gate</b> invariant (internal review AND <b>miladReview</b> before public review), enforced across the loop; and <b>mark</b>, the control-owned completed/archived transition (workers never self-mark; <b>retired</b> sessions are never resumed).</p>
+<p class="io"><b>In:</b> <span class="io-in">miladReview + sensed review facts (gate); sensed merge/deploy facts (mark)</span> &nbsp; <b>Out:</b> <span class="io-out">gate pass/hold; lifecycle bits on the row</span> &nbsp; <b>Composes:</b> S6, S24, S26</p></div>
+
+<h3>The big flows, as compositions</h3>
+<table><thead><tr><th>Flow</th><th>=</th></tr></thead><tbody>
+<tr><td><code>ccs new-session</code></td><td>S21 = S19(contract) + S13(role-def) + S15(spawn-location) + S6(write) + S11(spawn)</td></tr>
+<tr><td><code>ccs resume-session</code></td><td>S20 = S10(liveness) + S3(command) + S1(launch dir) + S11(spawn) + S17(paint)</td></tr>
+<tr><td><code>ccs resume-cluster</code></td><td>S22 = S10 + S6 + S20 (+ S18 if by selector)</td></tr>
+<tr><td>SessionStart</td><td>S23 = S15 + S12(drain) + S16/S17(paint)</td></tr>
+<tr><td>the pr-watch loop</td><td>S25 roles driving S26(sense) → S24(phase) → S27(gate/mark); workers born via S21, revived via S22</td></tr>
+</tbody></table>
+<p class="legend">Naming-debt reconciliation touches S6 (cluster/system, epic/grouping, key/event, role/skill,
+phase) + S2 (work-unit drift) — fixing it makes every unit above read in one vocabulary.</p>
+</section>
+
+<!-- ============ P0 CLUSTER ============ -->
+<section id="p0">
+<h2>P0 correctness cluster — fix before production</h2>
+<p class="lead">The seven things that would actually bite. All verified against source.</p>
+
+<div class="find p0"><span class="t">1. Hook double-registration</span> <span class="tag">U11 · hooks audit</span>
+<p class="fs"><code>~/.claude/settings.json:226-241</code> (SessionStart) &amp; <code>:277-289</code> (Stop):
+both <code>ccs hook run session-start</code> and <code>stop</code> are registered <b>twice</b> with
+<code>matcher:"*"</code>. Every session boundary fires the hook 2×: duplicate drain-inbox, double
+claude-md injection (bloats turn-1 context), double tab paint, ~2× I/O.</p>
+<p class="fix">Fix: remove one duplicate entry per hook array. Trivial.</p></div>
+
+<div class="find p0"><span class="t">2. Work-unit key: 6 copies, 2 drifted</span> <span class="tag">U4 · DRY audit</span>
+<p class="fs">The <code>pr:repo#n | gus:W | sid:x</code> key is implemented 6×. Two drifted:
+<code>resolve-levels.ts:48</code> uses a filesystem-safe <code>-</code> form; <code>start-actions.ts:36</code>
+uses a no-prefix form. Neither can join against the canonical <code>pr:repo#n</code> → inbox routing and
+identity resolution silently mismatch (<code>engineai-goose-12345</code> ≠ <code>pr:engineai/goose#12345</code>).</p>
+<p class="fix">Fix: one canonical <code>workUnitKey()</code> in spawn-contract.ts; inline the 4 dupes; rename
+the fs-safe one <code>workUnitOfForPath()</code>. Effort M (4-6h).</p></div>
+
+<div class="find p0"><span class="t">3. No cmux version guard + legacy fail-open path</span> <span class="tag">U21 · cmux audit</span>
+<p class="fs">cmux 0.64.17 installed; <b>nothing pins or checks it</b>. The bridge is tightly coupled to the
+0.64 hook-store schema — a cmux upgrade silently re-breaks liveness (unparseable → stuck; or &lt;0.64 →
+"nothing open"). Separately, the legacy <code>open-state.ts</code> title-join path still <b>fails open</b>
+(catch → "nothing open") — the remaining duplicate-spawn vector.</p>
+<p class="fix">Fix: <code>cmuxVersion()</code> probe in live.ts (require ≥0.64, warn ≥1.0); retire the legacy
+title-join path; <code>CMUX_HOOK_STORE_PATH</code> override.</p></div>
+
+<div class="find p0"><span class="t">4. DB migrations v1→v19 untested</span> <span class="tag">U2 · coverage audit</span>
+<p class="fs"><code>catalogue/db.ts</code> (693 LOC): the entire migration chain has ZERO tests. v16-v19
+were hand-patched on the live db. v14/v15 are deliberate <code>DROP TABLE</code> (roles, epics) guarded
+only by a version check. Idempotence (<code>hasColumn</code>) never exercised. A broken migration corrupts
+the production catalogue.</p>
+<p class="fix">Fix: test the full <code>migrate()</code> chain on <code>:memory:</code> (version=19, all columns,
+idempotent re-run, version-reset re-run).</p></div>
+
+<div class="find p0"><span class="t">5. spawnCmux: zero tests + no timeout</span> <span class="tag">U6 · coverage + cmux audits</span>
+<p class="fs"><code>resume/spawn-cmux.ts</code> — zero tests on the ONE spawn primitive both resume and
+new-session depend on. The new-workspace ref is extracted by bare regex; <code>Bun.spawnSync</code> at line
+41 has <b>no explicit timeout</b>. The no-scrub fix (ADR-0054) was a live experiment, never a test.</p>
+<p class="fix">Fix: add <code>timeout:10000</code>; mock spawnSync and assert argv shape; JSON-first ref parse.</p></div>
+
+<div class="find p0"><span class="t">6. D2 determinism hole — lineage tie-break</span> <span class="tag">CI-1 · DRY audit</span>
+<p class="fs"><code>lineage.ts:68-73</code>: the sort returns <code>0</code> when both <code>lastTs</code> are null.
+JS sort isn't stable on equality → two untranscripted same-PR embodiments order differently across
+runtimes → nondeterministic transcript replay (violates ADR-0045).</p>
+<p class="fix">Fix: add <code>return a.sessionId.localeCompare(b.sessionId)</code> final tie-break. One line.</p></div>
+
+<div class="find p0"><span class="t">7. Spawn TOCTOU (D1)</span> <span class="tag">U9 · DRY audit</span>
+<p class="fs"><code>new-session.ts:327→288</code>: a gap between the liveness check and the spawn with no lock.
+Two concurrent spawns for one PR both pass the one-embodiment check and both spawn (e.g. CI launching
+parallel jobs for a PR). Supersede-dedup retires one <i>later</i>, but both run until the next resume pass.</p>
+<p class="fix">Fix: optimistic re-check on <code>updated_at</code> after the check, or a lock file per work-unit.</p></div>
+
+<div class="note">Also flagged HIGH but below the P0 line: <b>67+ silent catch blocks</b> (several fail-open
+where they should fail-closed — <code>resume/locate.ts</code>, <code>state/store.ts</code>,
+<code>hooks/register-command.ts</code>), a <b>catalogue↔resume circular dependency</b>, and the
+<b>system-vs-cluster naming split</b>. See the dead-code audit below.</div>
+</section>
+
+<!-- ============ AUDIT: DEAD CODE ============ -->
+<section id="a-dead">
+<h2>Audit — Dead code, boundaries, naming, errors</h2>
+<p class="lead">Verdict: production-ready <b>with</b> critical fixes. Strengths: strict TS, clean cmux/
+boundary, zero commented-out code, rare throws (6). Weaknesses below. Est. 1-week hardening sprint.</p>
+
+<details open><summary>🔴 Error handling — 67+ silent catch blocks</summary><div class="body">
+<p>Many <code>catch {}</code> blocks swallow errors, several fail-open where they should fail-closed.</p>
+<table><thead><tr><th>File:Line</th><th>Issue</th><th>Verdict</th></tr></thead><tbody>
+<tr><td class="mono">cmux/live.ts:39-41,52-53</td><td>catch → {ok:false}</td><td>✓ fail-closed CORRECTLY (good pattern)</td></tr>
+<tr><td class="mono">resume/locate.ts:49,78</td><td>catch → {kind:"absent"} / null</td><td>⚠ RISKY: disk error looks like "not found" → resumes nothing</td></tr>
+<tr><td class="mono">roles/sync-roles.ts:79-80</td><td>lstat fail → "absent"</td><td>⚠ RISKY: permission error looks like "file missing"</td></tr>
+<tr><td class="mono">state/store.ts:66,72,109</td><td>read fail → defaults</td><td>⚠ FAIL-OPEN: corrupted state silently reset</td></tr>
+<tr><td class="mono">hooks/register-command.ts:23,75,79</td><td>catch swallowed</td><td>⚠ RISKY: session starts with broken hooks, no signal</td></tr>
+<tr><td class="mono">inference/engine.ts:97-98</td><td>catch → null</td><td>✓ acceptable (inference best-effort)</td></tr>
+<tr><td class="mono">parse.ts:130-131</td><td>catch → continue</td><td>✓ acceptable (streaming parse)</td></tr>
+</tbody></table>
+<p class="fix">Fix (M): add error logging to locate.ts / store.ts / register-command.ts; introduce a
+<code>tryOrLog(fn, fallback, ctx)</code> helper; classify all 67 as acceptable / log-needed / must-fail-closed.</p>
+<p>Result&lt;T&gt; used by only 4 functions (config, store, scan, archive); <code>liveBridge</code>,
+inference, resolve-config, locate return flags/null instead of type-forcing error handling. Hybrid model
+is workable; document it in a PATTERNS.md.</p>
+</div></details>
+
+<details><summary>🔴 Circular dependency — catalogue ↔ resume</summary><div class="body">
+<p><code>catalogue/new-session.ts</code> imports <code>resume/command.ts</code> + <code>resume/spawn-cmux.ts</code>;
+<code>resume/*</code> imports <code>catalogue/db.ts</code>. Root cause: <code>new-session.ts</code> is a spawn
+orchestrator misplaced in catalogue.</p>
+<p class="fix">Fix (M): move <code>new-session.ts</code> → <code>src/resume/</code> (or <code>src/spawn/</code>);
+verify with <code>bunx madge --circular src/</code>. Alternative (L): split into
+<code>catalogue/reserve-session.ts</code> (mints id/row, no resume imports) + <code>resume/launch-session.ts</code>.</p>
+</div></details>
+
+<details><summary>🟡 Naming inconsistency — system vs cluster, role vs skill, identity vs responsibility</summary><div class="body">
+<h4>system vs cluster (CRITICAL)</h4>
+<p>Schema column is <code>system</code>; UI/docs say <code>cluster</code>. Help text literally reads
+<code>ccs cluster &lt;system&gt;</code>. <code>isCluster()</code> calls <code>sessionsForSystem()</code>.
+resume-cluster.ts:12 admits: "cluster is the public word; members resolve via the <code>system</code> column."</p>
+<p class="fix">Recommendation: keep <code>system</code> everywhere (schema is authoritative; less churn), rename
+UI/vars, OR migrate schema → cluster. Effort M (~2 days).</p>
+<h4>role vs skill (managed debt)</h4>
+<p><code>skill</code> column deprecated (ADR-0015); reads fall back <code>role ?? skill</code>; backfill ran.
+Ghost column kept for migration safety. Document + guard against writes. Low priority.</p>
+<h4>session vs identity vs responsibility (overloaded)</h4>
+<p>Three overlapping terms; <code>Responsibility</code> is the interface but never in prose; "identity" is
+both the concept and a hook Level. Standardize <code>Responsibility</code> as the type, "identity" as the
+user-facing word. Tolerable, M to align.</p>
+</div></details>
+
+<details><summary>🟡 84 dead exports (61 types + 23 functions)</summary><div class="body">
+<p><b>Investigate (might be whole dead modules):</b></p>
+<table><thead><tr><th>File:Line</th><th>Export</th><th>Concern</th></tr></thead><tbody>
+<tr><td class="mono">pr-sense/pr-sense.ts:24</td><td>sensePrFacts</td><td>ENTIRE MODULE possibly dead</td></tr>
+<tr><td class="mono">resume/resume-session.ts:98</td><td>executeResumePlan</td><td>orphaned resume branch?</td></tr>
+<tr><td class="mono">resume/target.ts:12</td><td>cmuxReachable</td><td>dead post-bridge-refactor?</td></tr>
+</tbody></table>
+<p><b>Remove immediately (S):</b> <code>inference/engine.ts</code> — binaryExists, createCodexEngine,
+createClaudeEngine, detectAvailable; <code>cost.ts:96</code> emptyUsageTotals; <code>paths.ts:17</code> DATA_DIR.</p>
+<p><b>Un-export (M):</b> 61 types — TUI view-context types (ClusterViewCtx…), hook internals (SectionOp,
+ClaudeMdLayer…). Mark <code>@internal</code> or drop <code>export</code>.</p>
+</div></details>
+
+<details><summary>🟡 Module boundary smells — hooks/ and catalogue/db.ts</summary><div class="body">
+<p><b>hooks/</b> exports 60+ symbols, no clear contract or entry point. Recommend hooks/README.md
+(resolve→read→merge→execute), <code>@internal</code> tags, maybe subdirs.</p>
+<p><b>catalogue/db.ts</b> exports 42 functions mixing mutations, queries, migrations, lifecycle helpers →
+callers can bypass the command layer and mutate directly. Recommend split db-schema / db-queries /
+db-mutations; restrict mutation imports to commands.ts.</p>
+<p><b>Clean boundaries (praised):</b> cmux/ (pure bridge → I/O wrapper → query API, ADR-0054 fail-closed), roles/.</p>
+</div></details>
+
+<details><summary>Prioritized action plan (from this audit) — 13-16 days total</summary><div class="body">
+<p><b>CRITICAL (~1 week):</b> fix fail-open catches (locate/store/register-command); break the circular dep;
+pick system-or-cluster.<br>
+<b>HIGH (~1 day):</b> remove dead function exports; investigate sensePrFacts / executeResumePlan.<br>
+<b>MEDIUM (~2-3 days):</b> remove 61 dead types; document hooks/ boundary; split db.ts.<br>
+<b>LOW (~4-5 days):</b> identity-vs-responsibility naming; Result&lt;T&gt; consistency; structured logger.</p>
+</div></details>
+</section>
+
+<!-- ============ AUDIT: DRY ============ -->
+<section id="a-dry">
+<h2>Audit — Duplication &amp; determinism</h2>
+<p class="lead">4 real issues confirmed against source: 1 HIGH, 1 MED-HIGH, 2 LOW. D1-D3 from the brief all
+confirmed real. ~8-12h for P0+P1.</p>
+
+<details open><summary>🔴 HIGH — Work-unit key: 6 implementations, 2 drifted</summary><div class="body">
+<table><thead><tr><th>#</th><th>File:Line</th><th>Fn</th><th>Shape</th></tr></thead><tbody>
+<tr><td>1</td><td class="mono">spawn-contract.ts:23</td><td>spawnWorkUnit()</td><td>pr:repo#n | gus:W | null</td></tr>
+<tr><td>2</td><td class="mono">spawn-contract.ts:30</td><td>rowWorkUnit()</td><td>pr:repo#n | gus:W | null</td></tr>
+<tr><td>3</td><td class="mono">resume-cluster.ts:36</td><td>workUnit()</td><td>+ sid: fallback (never null)</td></tr>
+<tr><td>4</td><td class="mono">cluster-map.ts:134</td><td>unitKey()</td><td>+ sid: fallback (never null)</td></tr>
+<tr><td>5</td><td class="mono">resolve-levels.ts:48</td><td>workUnitOf()</td><td>⚠ DRIFTED: repo-n fs-safe, no join</td></tr>
+<tr><td>6</td><td class="mono">start-actions.ts:36</td><td>responsibilityOf()</td><td>⚠ DRIFTED: repo-n no-prefix, no join</td></tr>
+</tbody></table>
+<p class="fs"><b>Failure:</b> #5/#6 keys can't join #1-4 → inbox routing breaks, identity resolution misses,
+a fix to one copy misses five.</p>
+<p class="fix">Fix: canonical <code>workUnitKey()</code> in spawn-contract.ts; inline #3/#4; rename #5
+<code>workUnitOfForPath()</code>; shape-contract test. Effort M.</p>
+</div></details>
+
+<details><summary>🟡 MED-HIGH — Spawn TOCTOU (D1)</summary><div class="body">
+<p class="fs"><code>new-session.ts:234-352</code>: liveness read at 327, check at 352, spawn at ~288 — no lock.
+<code>resume-session.ts:41-103</code> shares one bridge snapshot per resumeMany().</p>
+<p class="fs"><b>Scenario:</b> two <code>ccs new-session --pr-number 12345</code> within ms → both see "not
+live" → both spawn → two live sessions for one PR. Trigger: CI parallel jobs.</p>
+<p class="fix">Option A: optimistic re-check on catalogue updated_at (3-4h). Option B: lock file per work-unit (6-8h).</p>
+</div></details>
+
+<details><summary>🟡 LOW-MED — Lineage tie-break nondeterminism (D2)</summary><div class="body">
+<p class="fs"><code>lineage.ts:68-73</code>: returns 0 when both lastTs null → JS unstable sort → order flips
+between runtimes. (resume-cluster.ts:72-76 is fine — has <code>a.i-b.i</code>.)</p>
+<p class="fix">Add <code>a.sessionId.localeCompare(b.sessionId)</code>. S (5 min + 1 test).</p>
+</div></details>
+
+<details><summary>🟢 LOW — mergeFields read-modify-write no lock (D3)</summary><div class="body">
+<p class="fs"><code>store.ts:93-101</code>: read→merge→write, no lock. Atomic write, but two concurrent
+mergeFields both read old doc; last write clobbers. Mitigated by single-writer-per-field convention
+(ADR-0031); breaks silently only if two roles write one field.</p>
+<p class="fix">Option C (recommended): <code>ccs state lint</code> flagging &gt;1 writer + document contract.
+Lock only if a real multi-writer appears.</p>
+</div></details>
+<p class="legend">Other duplication (JSON.parse ×40, cmux invocation ×20, validation) assessed — already
+centralized where it matters, no action.</p>
+</section>
+
+<!-- ============ AUDIT: CMUX ============ -->
+<section id="a-cmux">
+<h2>Audit — cmux coupling surface</h2>
+<p class="lead">11 subcommands, 22 call sites, 8 files. Surface-UUID join + fail-closed is CORRECT for
+0.64.17. P0 gaps block multi-machine/version-varied deployment.</p>
+
+<details open><summary>Dependency surface (the things that break on a cmux change)</summary><div class="body">
+<table><thead><tr><th>Subcommand</th><th>Location</th><th>Parsing</th><th>Failure</th></tr></thead><tbody>
+<tr><td class="mono">tree --all --json --id-format both</td><td class="mono">cmux/live.ts:35</td><td>JSON→parseTree</td><td>UNREADABLE → fail-closed ✓</td></tr>
+<tr><td class="mono">tree --all --json (legacy)</td><td class="mono">open-state.ts:129</td><td>title-join</td><td>⚠ fail-OPEN → "nothing open"</td></tr>
+<tr><td class="mono">list-workspaces --json</td><td class="mono">open-state.ts:199</td><td>2 schema variants</td><td>⚠ fail-OPEN</td></tr>
+<tr><td class="mono">new-workspace</td><td class="mono">spawn-cmux.ts:38</td><td>REGEX /workspace:\d+/</td><td>fail-closed; ref-miss silent</td></tr>
+<tr><td class="mono">select-workspace / focus-window</td><td class="mono">liveness.ts:81,86</td><td>none</td><td>best-effort</td></tr>
+<tr><td class="mono">rename-workspace / workspace-action / set-status</td><td class="mono">sync-tabs.ts</td><td>none</td><td>best-effort silent</td></tr>
+<tr><td class="mono">send / send-key</td><td class="mono">inbox/bump.ts:38,42</td><td>none</td><td>best-effort</td></tr>
+</tbody></table>
+<h4>Schema coupling — exact fields (break on rename)</h4>
+<p><b>tree:</b> windows[].{id,ref} → workspaces[].{id,ref,title} → panes[].{id,ref,index} →
+surfaces[].{<b>id</b>(join),ref,type,title,index_in_pane}.<br>
+<b>hook store</b> <code>~/.cmuxterm/claude-hook-sessions.json</code>:
+<code>activeSessionsBySurface[uuid].sessionId</code> (authoritative join) + <code>sessions[id]</code>
+detail. Path hardcoded; no <code>version</code> field.</p>
+<h4>Timeout inventory</h4>
+<p>tree 2s · select/focus 3s · rename 4s · workspace-action/set-status 4s · send/send-key 3s ·
+list-workspaces 2s · <b>spawn-cmux = NONE (Bun default)</b>.</p>
+</div></details>
+
+<details><summary>Findings ranked (P0→P3)</summary><div class="body">
+<div class="find p0"><span class="t">P0-1 No cmux version guard</span><p class="fs">Nothing checks 0.64. Add
+<code>cmuxVersion()</code> probe (live.ts:58); require ≥0.64, warn ≥1.0.</p></div>
+<div class="find p0"><span class="t">P0-2 Hook store path hardcoded</span><p class="fs">Add
+<code>CMUX_HOOK_STORE_PATH</code> override (live.ts:24).</p></div>
+<div class="find p0"><span class="t">P0-3 new-workspace ref via bare regex</span><p class="fs">Format change →
+ref=null → paint skipped. JSON-first parse; request upstream <code>--json</code>.</p></div>
+<div class="find p0"><span class="t">P0-4 spawn-cmux missing timeout</span><p class="fs">Add
+<code>timeout:10000</code> (spawn-cmux.ts:41).</p></div>
+<div class="find p1"><span class="t">P1-5 Retire legacy open-state.ts fail-OPEN title-join</span>
+<p class="fs">The remaining duplicate-spawn vector; migrate to surface-UUID bridge.</p></div>
+<div class="find p1"><span class="t">P1-6 list-workspaces 2 schema variants</span><p class="fs">Fragile to a
+third; retire with the legacy path.</p></div>
+<div class="find p2"><span class="t">P2-7/8 No paint retry; no wake delivery-confirm</span>
+<p class="fs">2×/500ms backoff; durable inbox already covers wake.</p></div>
+<div class="find p2"><span class="t">P3-9/10/11 Swallowed cmux errors; no metrics; upstream API</span>
+<p class="fs">Log actual error + CCS_DEBUG; traced-exec wrapper; request cmux <code>list-sessions --json</code>
++ hook-store <code>version</code> field.</p></div>
+</div></details>
+</section>
+
+<!-- ============ AUDIT: HOOKS ============ -->
+<section id="a-hooks">
+<h2>Audit — Hook system</h2>
+<p class="lead">Coherent, lint-clean (30 files), 69/69 tests. Production-ready AFTER the P0 double-registration
+fix. Resolution is deterministic (pure fn of the row).</p>
+
+<details open><summary>Hook inventory — 8 types</summary><div class="body">
+<table><thead><tr><th>Type</th><th>Fires</th><th>Merge</th><th>Status</th></tr></thead><tbody>
+<tr><td>claude-md</td><td>SessionStart</td><td>sections</td><td>Active — layered context</td></tr>
+<tr><td>start</td><td>SessionStart</td><td>ordered-actions</td><td>Active — arm, drain-inbox</td></tr>
+<tr><td>stop</td><td>Stop</td><td>ordered-actions</td><td>Active — turn-end (no config files)</td></tr>
+<tr><td>meta-update</td><td>Stop</td><td>set-union</td><td>Active — freshness contract</td></tr>
+<tr><td>cmux-paint</td><td>Start+Stop</td><td>most-specific</td><td>Active — tab appearance</td></tr>
+<tr><td>statusline</td><td>statusLine</td><td>most-specific</td><td>⚠ UNUSED (no config files)</td></tr>
+<tr><td>spawn-location</td><td>new-session</td><td>most-specific</td><td>Active — pre-row resolution</td></tr>
+<tr><td>guard</td><td>PreToolUse</td><td>union-deny-wins</td><td>⚠ FUTURE — declared, no handler</td></tr>
+</tbody></table>
+<p class="legend">Resolution order: user → cluster → role → epic → work-unit → identity. 30 hook files across
+global/cluster/6 roles/3 epics.</p>
+</div></details>
+
+<details><summary>Findings</summary><div class="body">
+<div class="find p0"><span class="t">🔴 CRITICAL — Hook double-registration</span>
+<p class="fs">settings.json:226-241 &amp; 277-289: session-start and stop registered TWICE (matcher:"*").
+Every boundary fires 2×.</p><p class="fix">Remove one duplicate per array.</p></div>
+<div class="find p1"><span class="t">🟡 Legacy worker-stop-hook.sh still registered</span>
+<p class="fs">settings.json:272 — old shell Stop hook races the new TS one; both update <code>phase</code> via
+different detection.</p><p class="fix">Confirm events/ still used; retire or merge.</p></div>
+<div class="find p1"><span class="t">🟡 phase-rubric injected only on Stop</span>
+<p class="fs">Fresh pr-agent makes turn-1 decisions without the activity self-check; comment claims "start via
+claude-md" but no SessionStart injection exists.</p><p class="fix">Inject on SessionStart for phase-workers,
+or fix the comment.</p></div>
+<p class="legend">🟢 By design (no action): guard placeholder; meta-update relies on external writers
+(ADR-0044); drain-inbox uses identityDir not cwd; arm dedup correct; dual Start+Stop paint intentional;
+resolution pure/deterministic (ADR-0045).</p>
+</div></details>
+</section>
+
+<!-- ============ AUDIT: TEST COVERAGE ============ -->
+<section id="a-test">
+<h2>Audit — Test coverage gaps</h2>
+<p class="lead">414 tests / 55 files. Well-tested: bridge, hooks/merge, resume-cluster plan, db accessors.
+Critical gaps below. Add Tier 1 before production.</p>
+
+<details open><summary>Coverage map + catastrophic-if-wrong</summary><div class="body">
+<table><thead><tr><th>Module</th><th>Coverage</th><th>Risk</th></tr></thead><tbody>
+<tr><td class="mono">catalogue/db.ts migrations</td><td>ZERO (accessors only)</td><td>CRITICAL</td></tr>
+<tr><td class="mono">resume/spawn-cmux.ts</td><td>ZERO</td><td>HIGH</td></tr>
+<tr><td class="mono">cmux/live.ts I/O</td><td>ZERO (stub only)</td><td>HIGH</td></tr>
+<tr><td class="mono">catalogue/sync-tabs.ts</td><td>ZERO</td><td>HIGH</td></tr>
+<tr><td class="mono">catalogue/commands.ts (555 LOC)</td><td>ZERO</td><td>HIGH</td></tr>
+<tr><td class="mono">index/index.ts reindex</td><td>~ZERO</td><td>HIGH</td></tr>
+</tbody></table>
+<p><b>Catastrophic if wrong, untested:</b> (1) DB migrations v1→v19 (corrupt catalogue; v14/v15 DROPs);
+(2) spawnCmux actual spawn; (3) fail-closed abort under unreadable liveness; (4) new-session one-embodiment
+(live work-unit gathering only stub-tested).</p>
+</div></details>
+
+<details><summary>Test-quality issues + missing integration tests</summary><div class="body">
+<p><b>Quality:</b> resume-session tests stub-heavy (would pass if the real Bridge API changed); static
+fixtures (2026-07-09) could drift from real cmux, no edge cases; no migration-idempotence test.</p>
+<p><b>Missing integration paths (manual-only today):</b> new-session→row→index→spawn→liveness; resume→check→
+spawn/skip→paint; cluster resume→dedup→fan-out (fan-out untested); catalogue-sync→render→cmux push; hook
+resolve→merge→inject.</p>
+</div></details>
+
+<details><summary>Prioritized test recommendations</summary><div class="body">
+<p><b>Tier 1 (CRITICAL):</b> (1) migration chain v1→v19 on :memory: incl. idempotent + version-reset re-run;
+(2) spawnCmux argv shape (mock spawnSync); (3) liveBridge I/O + fail-closed (stub execFileSync throw →
+readable=false → abort; missing store = readable-but-empty); (4) one-embodiment contract.</p>
+<p><b>Tier 2 (HIGH):</b> incremental reindex; resume-cluster fan-out supersede; catalogue commands rename+push;
+hook format-collision error.</p>
+<p><b>Tier 3 (MEDIUM):</b> spawn-location resolution; inference engine edge cases.</p>
+</div></details>
+</section>
+
+<!-- ============ AUDIT: CLI ============ -->
+<section id="a-cli">
+<h2>Audit — CLI ergonomics &amp; config</h2>
+<p class="lead">Command surface vs help drifted in several places; one destructive command lacks confirmation;
+config schemas undocumented.</p>
+
+<details open><summary>🔴 HIGH — help-vs-reality drift &amp; destructive gap</summary><div class="body">
+<ul>
+<li><b>5 functional commands missing from HELP:</b> <code>role</code>, <code>resume-command</code>,
+<code>gus-work</code>, <code>epic</code>, <code>phase</code> (cli.ts:127-136).</li>
+<li><b>new-session: 6 undocumented flags</b> — <code>--skill</code>, <code>--gus-work</code>,
+<code>--pr-number</code>, <code>--pr-repo</code>, <code>--resume-command</code>, <code>--inline</code>.</li>
+<li><b><code>ccs hooks</code> (explain/lint) undocumented</b> — the ADR-0045 determinism inspection.</li>
+<li><b><code>ccs grouping</code> (set/note/get) undocumented</b> — ADR-0051 epic metadata write path.</li>
+<li><b><code>ccs ls</code> --all/--loops undocumented.</b></li>
+<li><b><code>ccs roles rm</code> deletes homeDir with NO confirmation</b> (roles-command.ts:71). Add
+confirmation or require <code>--force</code>.</li>
+</ul>
+</div></details>
+
+<details><summary>🟡 MEDIUM / 🟢 LOW — consistency, footguns, config schemas</summary><div class="body">
+<p><b>Medium:</b> undocumented flags on cluster/tree/sync-roles; <code>mark</code> hidden --complete/--archive
+aliases; inbox/state help too vague; exit codes inconsistent (2 vs 1); <code>sync-tabs</code> silent no-op
+(returns 0 when skipped).</p>
+<p><b>Low:</b> clear-flag inconsistency (--off vs --clear vs --remove); --dry-run uneven; no per-command --help
+except <code>ccs skills</code>; selector syntax undocumented.</p>
+<p><b>Config schemas:</b> <code>role.toml</code> (kind, resume_command; rest derived) documented only in
+ADR-0048; hook/spawn-location schemas rely on <code>ccs hooks lint</code>; <code>~/.ccs/config.toml</code>
+fully documented in README. Recommend a <code>docs/config-schema.md</code> or inline <code>--help</code>.
+Note: pr-watch does have a <code>cluster.toml</code> — verify what it holds.</p>
+</div></details>
+</section>
+
+<!-- ============ CONTEXT: DESIGNER ============ -->
+<section id="a-designer">
+<h2>Context — Prior-designer transcript (aea5bc4f, 45MB)</h2>
+<p class="lead">Architectural rationale + gotchas that exist only in session logs. The "don't lose it" material.</p>
+
+<details open><summary>Critical bugs / gotchas &amp; the architecture rationale</summary><div class="body">
+<h4>Critical bugs / gotchas</h4>
+<ul>
+<li>Claude Code sends the wrong <code>cwd</code> to cmux's resume binding → breaks native resume; ccs is
+immune by deriving its own launch dir (ADR-0021). <span class="tag">verify post-0.64</span></li>
+<li>cmux workspace <b>title collision</b> → silent session misdirection — WHY identity keys on surface UUID.</li>
+<li>Role-directory hooks don't resolve (CC anchors discovery to launch cwd) → global hooks + self-filter (ADR-0018).</li>
+</ul>
+<h4>Major decisions (rationale not fully in ADRs → glossary)</h4>
+<ul>
+<li>Control-plane / concierge <b>split</b> solves mid-conversation nagging.</li>
+<li>Durable identity key = <code>[cluster]·role·[work-unit]</code>, NOT session-id — the keystone of lossless resume.</li>
+<li>Inbox keyed by identity (survives close); sessions are resumable vessels; "cluster" not "fleet";
+tab determinism via identity key; catalogue in ccs so it survives session close (ADR-0023).</li>
+</ul>
+<h4>Deferred ideas</h4>
+<ul>
+<li>Epic URLs + short names in cluster view; a ccs TUI; non-PR workflows; Slack scout classification
+precedence (<b>PR# &gt; W-number &gt; thread context</b> — confirm it's in the skill); upkeep runbook.</li>
+<li><b>A V3-learnings doc EXISTS:</b> <code>docs/superpowers/specs/2026-07-10-v2-learnings-for-v3.md</code>
+— READ IT, may hold more context.</li>
+</ul>
+<h4>Operational gotchas</h4>
+<ul>
+<li>Workers hang on prompts unless launched with acceptEdits.</li>
+<li>Statusline backfill on cold start; PR template drift; Cursor screenshot quality gate (hard gate v25);
+PR comment-reading gap (missed feedback on #12089).</li>
+</ul>
+</div></details>
+</section>
+
+<!-- ============ CONTEXT: SESSIONS ============ -->
+<section id="a-sessions">
+<h2>Context — Recent-session mining (60MB, 4 sessions)</h2>
+<p class="lead">Operational gotchas + rationale from the recent build sessions. Several items are already in
+ADRs; the un-captured operational ones feed the runbooks.</p>
+
+<details><summary>Gotchas that feed the platform runbook</summary><div class="body">
+<ul>
+<li><b>SIGTERM is ignored</b> by cmux-managed claude procs; cmux restarts them. Only SIGKILL works when the
+cmux server is dead. Clean shutdown = close cmux workspaces, NOT kill PIDs.</li>
+<li><b>cmux auto-resume can respawn killed workers</b> (<code>autoResumeAgentSessions</code>); SIGKILL just
+triggers respawn. To stop a fleet: close workspaces or disable autoResume first.</li>
+<li><code>$HOME</code> must precede <code>os.homedir()</code> in <code>ccsRuntimeRoot()</code> (Bun ignores
+$HOME) — tests polluted the real <code>~/.ccs</code> before the fix. <span class="tag">verify landed</span></li>
+<li>cmux-paint tab-rename lag ~300ms after resume → spawnCmux returns the surface ref for immediate paint.</li>
+<li>sense.sh runs <code>--keep --write</code> every tick so <code>pending.json</code> is always fresh (fix for
+the 7→14-events-no-drains bug).</li>
+<li>Duplicate arm notes when both handleSessionStart and start-actions arm — start.json owns arming.</li>
+</ul>
+</div></details>
+<details><summary>⚠ Contradictions to resolve (transcripts predate the 0.64 fix)</summary><div class="body">
+<div class="warn">Two mined claims are <b>superseded by ADR-0054</b> (this session's work): the transcripts
+say env-scrub is mandatory and the app-state file still records <code>agent.sessionId</code>. Current truth:
+the scrub was retired for the detached path (the shim needs those vars), and the app-state file stopped
+recording session identity — hence the hook-store rewrite. ADR-0054 wins.</div>
+</div></details>
+</section>
+
+<!-- ============ INVARIANTS ============ -->
+<section id="invariants">
+<h2>Cross-cutting invariants</h2>
+<p class="lead">Properties that must hold across units. Prove each.</p>
+<table><thead><tr><th>#</th><th>Invariant</th><th>Status</th><th>Gap</th></tr></thead><tbody>
+<tr><td>CI-1</td><td>Every sort has a stable final tie-break; same row+config → same behavior (ADR-0045)</td><td><span class="pill p0">P0</span></td><td>D2 hole: lineage.ts:68 returns 0 on both-null</td></tr>
+<tr><td>CI-2</td><td>Fail-closed everywhere it spawns</td><td><span class="pill p0">P0</span></td><td>legacy open-state.ts fail-OPEN path remains (U21)</td></tr>
+<tr><td>CI-3</td><td>No duplicate embodiment</td><td><span class="pill p0">P0</span></td><td>work-unit key drift (U4) + spawn TOCTOU (U9) + completeness cross-check (task #9)</td></tr>
+<tr><td>CI-4</td><td>Runtime state under ~/.ccs, never cwd-relative (ADR-0041)</td><td><span class="pill p1">P1</span></td><td>verify $HOME-before-homedir fix landed</td></tr>
+<tr><td>CI-5</td><td>Hooks fire once, in the right role/cwd</td><td><span class="pill p0">P0</span></td><td>BLOCKED by double-registration (U11)</td></tr>
+</tbody></table>
+</section>
+
+<!-- ============ ORDER ============ -->
+<section id="order">
+<h2>Suggested burn-down order</h2>
+<ol>
+<li><b>P0 correctness cluster</b> — U4 (work-unit key), U2 (migration tests), U6 (spawn timeout+tests),
+U11 (hook de-dup), U21 (cmux version guard + retire legacy path), CI-1 (D2 tie-break), U9 (TOCTOU).
+Mostly small + independent; the hook de-dup and D2 fix are near-trivial.</li>
+<li><b>P0 flow proof</b> — stand up a worker and drive the phase machine live: U28 + U26 + U29 (task #7).</li>
+<li><b>P1 confidence</b> — integration tests (U1/U5/U7/U8/U10), CLI help (U19), role live-checks (U22-U25,
+U30, U31), circular-dep break, fail-open catch fixes.</li>
+<li><b>P2 polish</b> — state lint (U15), docs (U16/U17/U20), sensor tests (U32), dead-export removal, naming.</li>
+</ol>
+</section>
+
+<!-- ============ TASKS ============ -->
+<section id="tasks">
+<h2>Task backlog (live)</h2>
+<p class="lead">Tracked in the session task list. Discovery (#4, #5) complete; the rest sequenced below.</p>
+<table><thead><tr><th>#</th><th>Task</th><th>State</th></tr></thead><tbody>
+<tr><td>3</td><td>ccs + cmux platform runbook (living ops doc)</td><td>pending</td></tr>
+<tr><td>6</td><td>Pin + runtime-check cmux version</td><td>pending · has plan</td></tr>
+<tr><td>7</td><td>Prove PR-watch loop live (phase machine, pills, repaint)</td><td>pending</td></tr>
+<tr><td>8</td><td>Verify all hooks fire + behave per role</td><td>pending</td></tr>
+<tr><td>9</td><td>Harden cmux integration (completeness cross-check, surface types)</td><td>pending</td></tr>
+<tr><td>10</td><td>Operator docs: how to operate + add a role/cluster</td><td>pending</td></tr>
+<tr><td>11</td><td>New-cluster / new-role front door (wizard)</td><td>pending</td></tr>
+<tr><td>12</td><td>ADR de-leak pass (blocked by audit)</td><td>pending</td></tr>
+<tr><td>13</td><td>Smaller determinism + hygiene items</td><td>pending</td></tr>
+<tr><td>14</td><td>Commit-grouping pass (both repos)</td><td>pending</td></tr>
+<tr><td>15</td><td>Synthesize final plan + ADR backlog</td><td>pending</td></tr>
+<tr><td>16</td><td>pr-watch cluster runbook</td><td>pending</td></tr>
+<tr><td>17</td><td>Maintain the burn-down checklist</td><td>pending</td></tr>
+<tr><td>18</td><td>This HTML review page</td><td>in progress</td></tr>
+</tbody></table>
+</section>
+
+<footer>
+Generated 2026-07-11 from the discovery sweep. Sources: <code>docs/PRODUCTION-READINESS-CHECKLIST.md</code>,
+<code>docs/FINDINGS-*.md</code> (7 audit files + dead-code report). Nothing committed this arc.
+cmux 0.64.17 · bun test 414/0.
+</footer>
+
+</main>
+</div>
+<script>
+(function(){
+  function wire(){
+    var btns = Array.prototype.slice.call(document.querySelectorAll('.fbtn'));
+    var rows = Array.prototype.slice.call(document.querySelectorAll('#mtx tbody tr.unit'));
+    if(!btns.length || !rows.length) return;
+    function apply(f){
+      rows.forEach(function(r){
+        var show = true;
+        if(f==='p0') show = (r.getAttribute('data-pri')==='p0');
+        else if(f==='platform') show = (r.getAttribute('data-layer')==='platform');
+        else if(f==='cluster') show = (r.getAttribute('data-layer')==='cluster');
+        else if(f==='gap') show = !!r.querySelector('td.ax.no');
+        r.style.display = show ? '' : 'none';
+      });
+    }
+    btns.forEach(function(b){
+      b.addEventListener('click', function(){
+        btns.forEach(function(x){ x.classList.remove('active'); });
+        b.classList.add('active');
+        apply(b.getAttribute('data-f') || 'all');
+      });
+    });
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', wire);
+  else wire();
+})();
+</script>
+</body>
+</html>
