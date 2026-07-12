@@ -12,6 +12,23 @@ test("missing config falls back to defaults", () => {
   expect(result.value.store.path).toBe(DEFAULT_STORE_PATH);
   expect(result.value.resume.target).toBe("auto");
   expect(result.value.titler.concurrency).toBe(3);
+  expect(result.value.inference.engine).toBe("auto");
+  expect(result.value.inference.codex.binary).toBe("codex");
+  expect(result.value.inference.claude.binary).toBe("claude");
+  expect(result.value.inference.claude.model).toBe("haiku");
+});
+
+test("inference engine can be forced in config", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ccs-"));
+  const path = join(dir, "config.toml");
+  writeFileSync(path, `[inference]\nengine = "claude"\n[inference.claude]\nmodel = "sonnet"\n`);
+  const result = loadConfig(path);
+  rmSync(dir, { recursive: true, force: true });
+
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.value.inference.engine).toBe("claude");
+  expect(result.value.inference.claude.model).toBe("sonnet");
 });
 
 test("user values override defaults and ~ expands", () => {

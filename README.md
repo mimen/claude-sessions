@@ -34,14 +34,15 @@ Update later with `git pull`.
 
 ### Dependencies
 
-- **claude** (required) — resume runs `claude --resume`.
-- **codex** (optional) — fills in titles for sessions Claude Code didn't title. Uses your
-  existing Codex auth; no model is hard-coded (inherits your Codex default). Codex is used
-  here (rather than `claude -p`) deliberately: title generation is a non-interactive,
-  high-volume background job, and running Claude commands non-interactively is expected to
-  start incurring API charges — so titling rides your existing Codex/ChatGPT auth instead to
-  avoid that cost. The titler sits behind one interface, so swapping back to `claude -p` is a
-  one-file change if that calculus ever flips.
+- **claude** (required) — resume runs `claude --resume`. Also works as an **inference engine**
+  (see below) for titling and the plain-English catalogue editor, via `claude -p`.
+- **codex** (optional) — the other inference engine. Rides your existing Codex/ChatGPT auth
+  (no marginal cost), which is why it's preferred for the high-volume background titling job.
+- **inference engine selection** — `ccs` needs one of `codex` or `claude` on your PATH to
+  generate titles and run the plain-English editor. By default it auto-detects: it uses
+  whichever is installed, preferring `codex` (free auth) when both are. Force a choice with
+  `inference.engine` in the config, the `CCS_INFERENCE_ENGINE` env var (`codex` | `claude` |
+  `auto`), or — when both are installed — the in-TUI `i` toggle (persisted across runs).
 - **cmux** (optional) — when reachable, resume opens a named cmux workspace.
 
 ## Usage
@@ -66,6 +67,7 @@ ccs ls                 # debug: print the indexed sessions
 | `p` | toggle preview pane |
 | `a` | show / hide subagent runs |
 | `t` | re-title the selected session |
+| `i` | swap inference engine (codex ⇄ claude; shown only when both are installed) |
 | `q` / `esc` | quit |
 
 ## Configuration
@@ -82,10 +84,19 @@ label = "<hostname>"             # tags indexed sessions with their origin host
 [resume]
 target = "auto"                  # auto | cmux | inline
 
-[titler]
+[inference]
+engine = "auto"                  # auto | codex | claude (env CCS_INFERENCE_ENGINE overrides)
+
+[inference.codex]
 binary = "codex"
 model = ""                       # "" = inherit your Codex default (account-safe)
 reasoningEffort = "low"
+
+[inference.claude]
+binary = "claude"
+model = "haiku"                  # cheap model for background titling; "" = CLI default
+
+[titler]
 concurrency = 3
 maxAttempts = 3
 ```

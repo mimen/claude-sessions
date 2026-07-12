@@ -25,14 +25,37 @@ const ConfigSchema = z.object({
       target: z.enum(["auto", "cmux", "inline"]).default("auto"),
     })
     .prefault({}),
+  /**
+   * The LLM backend `ccs` uses for titling and the natural-language catalogue editor.
+   * `engine` picks the backend: "auto" uses the first installed one (Codex preferred, then
+   * Claude); "codex"/"claude" force it (falling back if that one isn't installed). The
+   * `CCS_INFERENCE_ENGINE` env var and the in-TUI toggle both override this at runtime.
+   */
+  inference: z
+    .object({
+      engine: z.enum(["auto", "codex", "claude"]).default("auto"),
+      codex: z
+        .object({
+          /** Codex executable; resolved on PATH. Bun.spawn ignores shell aliases. */
+          binary: z.string().default("codex"),
+          /** Empty = inherit the user's configured Codex default model (account-safe). */
+          model: z.string().default(""),
+          /** Codex reasoning effort; low is plenty and keeps it fast/cheap. */
+          reasoningEffort: z.string().default("low"),
+        })
+        .prefault({}),
+      claude: z
+        .object({
+          /** Claude Code executable; resolved on PATH. */
+          binary: z.string().default("claude"),
+          /** Model alias/name; "haiku" keeps background titling cheap. Empty = CLI default. */
+          model: z.string().default("haiku"),
+        })
+        .prefault({}),
+    })
+    .prefault({}),
   titler: z
     .object({
-      /** Codex executable; resolved on PATH. Bun.spawn ignores shell aliases. */
-      binary: z.string().default("codex"),
-      /** Empty = inherit the user's configured Codex default model (account-safe). */
-      model: z.string().default(""),
-      /** Codex reasoning effort for titling; low is plenty and keeps it fast/cheap. */
-      reasoningEffort: z.string().default("low"),
       concurrency: z.number().int().positive().max(16).default(3),
       /** Give up titling a Session after this many failed attempts (across runs). */
       maxAttempts: z.number().int().positive().max(10).default(3),

@@ -11,16 +11,17 @@ import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf,
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, key, event, parent, skill, role, resumeCommand, gusWork, sessionEpic, project, system, phase, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, key, event, parent, skill, role, resumeCommand, gusWork, sessionEpic, project, system, phase, status, approve, activity, ready, meta } from "./catalogue/commands.ts";
 import { newSession } from "./catalogue/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { backfillTitles } from "./titler/queue.ts";
-import { createCodexTitler } from "./titler/codex.ts";
+import { createTitler } from "./titler/codex.ts";
+import { buildEngine, resolveEngine } from "./inference/engine.ts";
 import { handoffInline } from "./resume/inline.ts";
 import type { ResumeCommand } from "./resume/command.ts";
-import { executeSystemResume } from "./resume/execute-system.ts";
 import { resumeSessionEntry } from "./resume/resume-session.ts";
-import { resumeClusterEntry } from "./resume/resume-cluster.ts";
+import { resumeClusterEntry, resumeMany } from "./resume/resume-cluster.ts";
+import { resolveSelector, type SelectorKind } from "./resume/selector.ts";
 import { syncRoles } from "./roles/sync-roles.ts";
 import { rolesCommand } from "./catalogue/roles-command.ts";
 import { registerSessionCommand } from "./hooks/register-command.ts";
@@ -51,6 +52,10 @@ Usage:
   ccs skill [<id>|.] <name> [--off]   Set/clear the backing skill or slash-command
   ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
   ccs system [<id>|.] <slug> [--off]   Set/clear the system grouping
+  ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab
+  ccs activity [<id>|.] needs-you [--off]   A pr-agent self-reports being stuck (--off = back to dormant)
+  ccs ready [<id>|.]    A pr-agent declares its build done → latches stage to milad-review
+  ccs approve <selector> [--off]   Record Milad's +1 on a PR (the submitter-review signal)
   ccs new-session [flags]   Mint a session id, tag its metadata AT BIRTH, then launch \`claude --session-id\`
                             flags: --system --role --kind loop|session --phase --project --key
                                    --title --parent <id> --cwd <dir> --prompt "<text>"
@@ -65,7 +70,8 @@ Usage:
   ccs sync-roles        Materialize the roles registry into ~/.claude (symlink reconcile)
   ccs resume-session <id>  Re-embody one identity (the core op; loops come back running)
   ccs resume-cluster <c>   Resume every not-open identity in a cluster (loop over resume-session)
-  ccs resume <system>   Resume all sessions in a system (idempotent; legacy alias)
+  ccs resume <selector>  Resume by anything: id | #pr | owner/repo#pr | W-number | epic | role | cluster
+                         (pin the axis with --role|--pr|--gus|--epic|--cluster|--key; --dry-run to preview)
   ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
   ccs --version       Print version
   ccs --help          Show this help
@@ -128,6 +134,15 @@ export async function main(argv: string[]): Promise<number> {
       return sessionEpic(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "phase":
       return phase(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "status":
+      // status takes a full freeform LINE, so join all non-flag args (not just the first token).
+      return status(args[1], args.slice(2).filter((a) => !a.startsWith("--")).join(" ") || undefined, args.slice(2).filter((a) => a.startsWith("--")));
+    case "approve":
+      return approveSelector(args.slice(1));
+    case "activity":
+      return activity(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "ready":
+      return ready(args[1]);
     case "new-session":
     case "new":
       return newSession(args.slice(1));
@@ -165,7 +180,7 @@ export async function main(argv: string[]): Promise<number> {
     case "resume-cluster":
       return resumeCluster(args[1], args.includes("--dry-run"));
     case "resume":
-      return resumeSystem(args[1]);
+      return resumeSelector(args.slice(1));
     case "skills": {
       // Bare `ccs skills` on a terminal opens the TUI in skills mode; flags/subcommands
       // (or piped output) use the plain-table command path.
@@ -217,22 +232,22 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
     if (spend.usd) console.log(`  ${formatCost(spend.usd)} total API-equivalent spend across the store`);
 
     if (opts.titles) {
-      const titler = createCodexTitler({
-        binary: config.titler.binary,
-        model: config.titler.model,
-        reasoningEffort: config.titler.reasoningEffort,
-      });
+      const selection = resolveEngine(config);
+      const engine = selection.name ? buildEngine(selection.name, config) : null;
+      const titler = engine ? createTitler(engine) : null;
       process.stdout.write("Generating titles… ");
-      const title = await backfillTitles(db, titler, {
-        concurrency: config.titler.concurrency,
-        maxAttempts: config.titler.maxAttempts,
-        onProgress: (done, total) => {
-          process.stdout.write(`\rGenerating titles… ${done}/${total}   `);
-        },
-      });
+      const title = titler
+        ? await backfillTitles(db, titler, {
+            concurrency: config.titler.concurrency,
+            maxAttempts: config.titler.maxAttempts,
+            onProgress: (done, total) => {
+              process.stdout.write(`\rGenerating titles… ${done}/${total}   `);
+            },
+          })
+        : { generated: 0, failed: 0, skippedUnavailable: true };
       process.stdout.write("\n");
       if (title.skippedUnavailable) {
-        console.log(`  titling skipped — \`${config.titler.binary}\` not found on PATH`);
+        console.log("  titling skipped — no inference engine (codex/claude) found on PATH");
       } else {
         console.log(`  ${title.generated} generated, ${title.failed} failed`);
       }
@@ -265,12 +280,7 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
     const { render } = await import("ink");
     const { createElement } = await import("react");
     const { Root } = await import("./tui/Root.tsx");
-    const titler = createCodexTitler({
-      binary: config.titler.binary,
-      model: config.titler.model,
-      reasoningEffort: config.titler.reasoningEffort,
-    });
-    const app = render(createElement(Root, { db, catalogue, skillsDb, config, titler, resumeRequest, initialMode }));
+    const app = render(createElement(Root, { db, catalogue, skillsDb, config, resumeRequest, initialMode }));
     await app.waitUntilExit();
   } finally {
     db.close();
@@ -462,6 +472,12 @@ function resumeSession(sessionId: string | undefined, dryRun: boolean): number {
       case "spawn-failed":
         console.error(`ccs: failed to spawn cmux workspace for ${sessionId}`);
         return 1;
+      case "liveness-unreadable":
+        console.error(
+          "ccs: cmux liveness is unreadable (cmux down, socket unauthed, or store unparseable) — " +
+            "aborting to avoid duplicating a session that may be running. Nothing spawned.",
+        );
+        return 1;
     }
   } finally {
     db.close();
@@ -492,6 +508,13 @@ function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
   const cat = openCatalogue(CATALOGUE_PATH());
   try {
     const s = resumeClusterEntry(db, cat, cluster, { dryRun });
+    if (s.abortedUnreadable) {
+      console.error(
+        `ccs: cluster "${cluster}" — cmux liveness is unreadable (cmux down, socket unauthed, or ` +
+          "store unparseable). Aborted to avoid duplicating a running fleet. Nothing spawned.",
+      );
+      return 1;
+    }
     const verb = dryRun ? "would resume" : "resumed";
     console.log(
       `ccs: cluster "${cluster}" — ${verb} ${s.resumed}, ${s.alreadyOpen} already open, ` +
@@ -505,23 +528,90 @@ function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
   }
 }
 
-function resumeSystem(systemSlug: string | undefined): number {
-  if (!systemSlug) {
-    console.error("ccs: missing system slug. Usage: ccs resume <system>");
+/**
+ * `ccs resume <selector>` — resume anything that identifies a session or a group of them: a
+ * session id, a PR (`#123` / `owner/repo#123`), a GUS work item (`W-1234567`), an epic shortname,
+ * a role, or a cluster. Flags pin the axis (`--role`, `--pr`, `--gus`, `--epic`, `--cluster`,
+ * `--key`) and skip shape inference. One match → resume-session semantics; many → cluster
+ * semantics (one live worker per work-unit). All routes share the single resume core (resumeMany).
+ */
+function resumeSelector(args: string[]): number {
+  const token = args.find((a) => !a.startsWith("--"));
+  if (!token) {
+    console.error(
+      "ccs: missing selector. Usage: ccs resume <id|#pr|W-number|epic|role|cluster> [--role|--pr|--gus|--epic|--cluster|--key] [--dry-run]",
+    );
     return 1;
   }
-
-  const config = getConfig();
-  if (!config) return 1;
+  const dryRun = args.includes("--dry-run");
+  const pin: SelectorKind | undefined =
+    args.includes("--role") ? "role"
+    : args.includes("--pr") ? "pr"
+    : args.includes("--gus") ? "gus-work"
+    : args.includes("--epic") ? "epic"
+    : args.includes("--cluster") ? "cluster"
+    : args.includes("--key") ? "key"
+    : undefined;
+  const cluster = flagValue(args, "--in") ?? flagValue(args, "--cluster-scope");
 
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
   try {
-    const result = executeSystemResume(db, cat, systemSlug);
+    const sel = resolveSelector(cat, db, token, { pin, cluster });
+    if (!sel) {
+      console.error(`ccs: "${token}" didn't match any session, PR, work item, epic, role, or cluster`);
+      return 1;
+    }
+    if (sel.sessionIds.length === 0) {
+      console.error(`ccs: ${sel.label} matched no sessions`);
+      return 1;
+    }
+    const s = resumeMany(db, cat, sel.sessionIds, { dryRun });
+    if (s.abortedUnreadable) {
+      console.error(
+        `ccs: ${sel.label} — cmux liveness is unreadable (cmux down, socket unauthed, or store ` +
+          "unparseable). Aborted to avoid duplicating a running session. Nothing spawned.",
+      );
+      return 1;
+    }
+    const verb = dryRun ? "would resume" : "resumed";
     console.log(
-      `\nccs: system resume complete — ${result.resumed} resumed, ${result.reanchored} already live, ${result.skipped} retired, ${result.superseded} superseded`,
+      `ccs: ${sel.label} (${sel.sessionIds.length} session${sel.sessionIds.length === 1 ? "" : "s"}) — ${verb} ${s.resumed}, ` +
+        `${s.alreadyOpen} already open, ${s.superseded} superseded, ${s.retired} retired, ` +
+        `${s.notIndexed} not indexed${s.failed ? `, ${s.failed} failed` : ""}`,
     );
-    return 0;
+    return s.failed > 0 ? 1 : 0;
+  } finally {
+    db.close();
+    cat.close();
+  }
+}
+
+/**
+ * `ccs approve <selector> [--off]` — record Milad's +1 on whatever the selector resolves to (a PR
+ * `#123`, a session id, etc.). Resolves via the shared selector, then sets `milad_review` on each
+ * matched session. `.`/no-arg approves the current session (the common in-session case).
+ */
+function approveSelector(args: string[]): number {
+  const token = args.find((a) => !a.startsWith("--"));
+  const flags = args.filter((a) => a.startsWith("--"));
+  // No token or "." → the current session (in-session self-approve / direct id path).
+  if (!token || token === "." || token === "self") return approve(token, flags);
+  // A bare UUID is a session id — approve it directly (no catalogue lookup needed).
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(token)) return approve(token, flags);
+  // Otherwise resolve the selector (PR/gus/role/…) to session ids and approve each.
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
+  try {
+    const sel = resolveSelector(cat, db, token);
+    if (!sel || sel.sessionIds.length === 0) {
+      console.error(`ccs: "${token}" didn't match any session to approve`);
+      return 1;
+    }
+    let rc = 0;
+    for (const sid of sel.sessionIds) rc = approve(sid, flags) || rc;
+    console.log(`ccs: ${sel.label} — +1 applied to ${sel.sessionIds.length} session(s)`);
+    return rc;
   } finally {
     db.close();
     cat.close();
