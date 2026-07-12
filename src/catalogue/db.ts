@@ -82,7 +82,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 26;
+const CATALOGUE_VERSION = 27;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -397,6 +397,16 @@ function migrate(db: Database): void {
     // to `stage` (statusline dot / pill) and the loop-status pill that rode on it was retired.
     if (hasColumn(db, "catalogue", "phase")) {
       db.exec("ALTER TABLE catalogue DROP COLUMN phase;");
+    }
+  }
+  if (v < 27) {
+    // ADR-0059: rename the `system` column to `cluster` everywhere — the operation-level grouping
+    // is **cluster** in all UI/CLI/docs, so make the DB column match. SQLite 3.25+ supports RENAME COLUMN.
+    // Guard on column presence (older binary can reset version, re-run).
+    if (hasColumn(db, "catalogue", "system") && !hasColumn(db, "catalogue", "cluster")) {
+      db.exec("ALTER TABLE catalogue RENAME COLUMN system TO cluster;");
+      db.exec("DROP INDEX IF EXISTS idx_catalogue_system;");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_cluster ON catalogue(cluster);");
     }
   }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
