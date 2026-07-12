@@ -73,6 +73,10 @@ export interface CatalogueRow {
   /** The monotonic build→review latch: true once phase first hit `milad-review`. Once true the
    * phase projection never returns `building` (see phase-state-machine.md). */
   buildComplete: boolean;
+  /** Generic per-session metadata map (ADR-0060): cluster/role-specific scratch state (latches,
+   * flags, counters) that doesn't fit the blessed stage/activity columns. ccs stores + stamps it
+   * but does NOT interpret it — the cluster's state machine defines what keys exist and mean. */
+  meta: Record<string, unknown>;
   notes: string | null;
   updatedAt: string | null;
   /** PR facts sensed from the session's cwd git worktree (VCS-intrinsic only). */
@@ -91,7 +95,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 20;
+const CATALOGUE_VERSION = 21;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -332,6 +336,16 @@ function migrate(db: Database): void {
     }
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_work_unit ON catalogue(work_unit_id);");
   }
+  if (v < 21) {
+    // Additive: meta — a generic JSON blob for cluster/role-specific scratch state (ADR-0060).
+    // stage/activity are blessed columns (many roles need them, displayed as real columns); everything
+    // else role-specific (latches, flags, counters for a role's state machine) lives in this map.
+    // ccs stores + stamps it but does NOT interpret it. Guard on column presence (older binary can
+    // reset version, re-run). No index — meta is per-session display/scratch, not a grouping axis.
+    if (!hasColumn(db, "catalogue", "meta")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN meta TEXT;");
+    }
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -369,6 +383,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     statusLine: (r.status_line as string) ?? null,
     miladReview: (r.milad_review as string) ?? null,
     buildComplete: r.build_complete === 1,
+    meta: r.meta ? JSON.parse(r.meta as string) : {},
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
     prNumber: (r.pr_number as number) ?? null,
@@ -380,7 +395,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
 }
 
 /** Ensure a row exists for sessionId (no-op if present), so updates can UPDATE in place. */
-function ensureRow(db: Database, sessionId: string, now: string): void {
+export function ensureRow(db: Database, sessionId: string, now: string): void {
   db.query(
     "INSERT INTO catalogue (session_id, updated_at) VALUES ($id, $now) ON CONFLICT(session_id) DO NOTHING",
   ).run({ $id: sessionId, $now: now });
@@ -521,6 +536,36 @@ export function setStatusLine(db: Database, sessionId: string, statusLine: strin
 /** Milad's +1 verdict on a PR (submitter-review signal): "approved" to grant, null to revoke. */
 export function setMiladReview(db: Database, sessionId: string, verdict: string | null, now: string): void {
   set(db, sessionId, "milad_review", verdict, now);
+}
+
+/**
+ * Set a key in the session's meta map (ADR-0060). Reads the current meta JSON, merges the key/value,
+ * writes back. If value is null, the key is deleted from the map. Meta is cluster/role-specific scratch
+ * state (latches, flags, counters); ccs stores it but does NOT interpret it.
+ */
+export function setMeta(db: Database, sessionId: string, key: string, value: unknown, now: string): void {
+  ensureRow(db, sessionId, now);
+  const row = getRow(db, sessionId);
+  const meta = row?.meta ?? {};
+  if (value === null) {
+    delete meta[key];
+  } else {
+    meta[key] = value;
+  }
+  const metaJson = JSON.stringify(meta);
+  db.query("UPDATE catalogue SET meta = $m, updated_at = $now WHERE session_id = $id").run({
+    $m: metaJson,
+    $now: now,
+    $id: sessionId,
+  });
+}
+
+/**
+ * Get a key from a row's meta map (ADR-0060). Pure accessor — reads the row's meta, returns the key's
+ * value, or undefined if absent. The row's meta is already parsed (rowFrom() handles JSON deserialization).
+ */
+export function getMeta(row: CatalogueRow, key: string): unknown {
+  return row.meta[key];
 }
 
 /** Reverse lookup: which sessions are working this GUS work item (a work-unit may span sessions). */
