@@ -27,7 +27,7 @@ export interface SessionMeta {
   readonly title: string;
   readonly kind: Kind;
   readonly skill: string | null;
-  readonly event: string | null;
+  readonly key: string | null;
   readonly parentSessionId: string | null;
   readonly completed: boolean;
   readonly archived: boolean;
@@ -72,7 +72,7 @@ function renderSessions(sessions: readonly SessionMeta[]): string {
       const flags = [
         `kind=${s.kind}`,
         `skill=${s.skill ?? "none"}`,
-        `event=${s.event ?? "none"}`,
+        `key=${s.key ?? "none"}`,
         `project=${s.project ?? "none"}`,
         `parent=${parent}`,
         s.completed ? "done" : "",

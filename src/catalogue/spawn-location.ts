@@ -57,7 +57,7 @@ export function syntheticRow(facts: {
 }): CatalogueRow {
   return {
     sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
-    archived: false, parkedTaskId: null, event: null, key: null, parentSessionId: null,
+    archived: false, parkedTaskId: null, key: null, parentSessionId: null,
     skill: null, role: facts.role ?? null, resumeCommand: null, project: null,
     system: facts.system ?? null, gusWork: facts.gusWork ?? null, workUnitId: null, epicId: facts.epicId ?? null,
     phase: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null, prNumber: facts.prNumber ?? null,

@@ -20,9 +20,7 @@ export interface CatalogueRow {
   completed: boolean;
   archived: boolean;
   parkedTaskId: string | null;
-  /** Event slug this session belongs to (set by the event-watch scout, or manually). */
-  event: string | null;
-  /** Neutral, opaque identity key for system-level grouping (replaces event; both exist during migration). */
+  /** Neutral, opaque identity key for system-level grouping. */
   key: string | null;
   /** The session that spawned/owns this one (a sessionId). Children are a reverse lookup. */
   parentSessionId: string | null;
@@ -90,7 +88,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 23;
+const CATALOGUE_VERSION = 24;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -382,6 +380,15 @@ function migrate(db: Database): void {
       db.exec("ALTER TABLE catalogue DROP COLUMN build_complete;");
     }
   }
+  if (v < 24) {
+    // ADR-0059: remove `event` (canonical is `key`). Backfill key from event, then drop event.
+    // Guard on column presence (older binary can reset version, re-run).
+    if (hasColumn(db, "catalogue", "event")) {
+      db.exec("UPDATE catalogue SET key = event WHERE key IS NULL AND event IS NOT NULL;");
+      db.exec("DROP INDEX IF EXISTS idx_catalogue_event;");
+      db.exec("ALTER TABLE catalogue DROP COLUMN event;");
+    }
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -401,7 +408,6 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     completed: !!r.completed,
     archived: !!r.archived,
     parkedTaskId: (r.parked_task_id as string) ?? null,
-    event: (r.event as string) ?? null,
     key: (r.key as string) ?? null,
     parentSessionId: (r.parent_session_id as string) ?? null,
     skill: (r.skill as string) ?? null,
@@ -465,13 +471,11 @@ export function lifecycleOf(row: CatalogueRow | null): Lifecycle {
 }
 
 /**
- * Pure: the canonical identity key (prefers `key` over `event` for expand→migrate→contract).
- * During the transition, `key` is the modern canonical field; `event` is legacy.
- * Returns `key` if set, else falls back to `event`.
+ * Pure: the canonical identity key for system-level grouping.
  */
 export function identityKeyOf(row: CatalogueRow | null): string | null {
   if (!row) return null;
-  return row.key ?? row.event;
+  return row.key;
 }
 
 // ---- mutations (all stamp updated_at; all upsert the row) ----
@@ -514,12 +518,6 @@ export function setResumeId(db: Database, sessionId: string, resumeId: string, n
 }
 export function setKey(db: Database, sessionId: string, key: string | null, now: string): void {
   set(db, sessionId, "key", key, now);
-}
-/**
- * @deprecated Use `setKey` instead. This alias writes to `key` for backward compatibility.
- */
-export function setEvent(db: Database, sessionId: string, event: string | null, now: string): void {
-  setKey(db, sessionId, event, now);
 }
 export function setParent(db: Database, sessionId: string, parentId: string | null, now: string): void {
   set(db, sessionId, "parent_session_id", parentId, now);
@@ -719,13 +717,6 @@ export function sessionsForKey(db: Database, key: string): string[] {
       session_id: string;
     }[]
   ).map((r) => r.session_id);
-}
-
-/**
- * @deprecated Use `sessionsForKey` instead. This alias reads from `key` for backward compatibility.
- */
-export function sessionsForEvent(db: Database, event: string): string[] {
-  return sessionsForKey(db, event);
 }
 
 /** Reverse lookup: which sessions are assigned to this project label. */

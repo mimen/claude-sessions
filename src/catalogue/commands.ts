@@ -171,13 +171,6 @@ export function key(sessionArg: string | undefined, slug: string | undefined, fl
   return 0;
 }
 
-/**
- * @deprecated Use `key()` instead. This alias writes to `key` for backward compatibility.
- */
-export function event(sessionArg: string | undefined, slug: string | undefined, flags: string[]): number {
-  return key(sessionArg, slug, flags);
-}
-
 /** Set (or clear, with --off) the session's free-form PER-SYSTEM phase (current activity). */
 export function phase(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
   const id = resolveSessionId(sessionArg);

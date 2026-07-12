@@ -7,7 +7,7 @@ const NOW = Date.parse("2026-07-10T12:00:00Z");
 function row(over: Partial<CatalogueRow>): CatalogueRow {
   return {
     sessionId: "s1", resumeId: null, customTitle: null, kind: "session",
-    completed: false, archived: false, parkedTaskId: null, event: null, key: null,
+    completed: false, archived: false, parkedTaskId: null, key: null,
     parentSessionId: null, skill: null, role: null, resumeCommand: null, project: null,
     system: "pr-watch", gusWork: null, workUnitId: null, epicId: null, phase: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null,
     updatedAt: "2026-07-10T11:59:00Z", // fresh by default

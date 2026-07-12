@@ -11,14 +11,14 @@ import {
   setArchived,
   setCompleted,
   setCustomTitle,
-  setEvent,
+  setKey,
   setKind,
   setParent,
   setParked,
   setProject,
   setSkill,
   setSystem,
-  sessionsForEvent,
+  sessionsForKey,
   sessionsForProject,
   sessionsForSystem,
   setGusWork,
@@ -65,20 +65,17 @@ test("tags: add, list, reverse lookup", () => {
   expect(sessionsForEntity(db, "Glizzy Galaxy").sort()).toEqual(["s1", "s2"]);
 });
 
-test("event: set, round-trip, clear, reverse lookup (deprecated alias writes to key)", () => {
+test("key: set, round-trip, clear, reverse lookup", () => {
   const db = openCatalogue(":memory:");
   expect(getRow(db, "s1")?.key ?? null).toBeNull();
-  setEvent(db, "s1", "glizzy-galaxy", NOW);
-  setEvent(db, "s2", "glizzy-galaxy", NOW);
-  setEvent(db, "s3", "kiki-factory", NOW);
-  // setEvent now writes to key, not event
+  setKey(db, "s1", "glizzy-galaxy", NOW);
+  setKey(db, "s2", "glizzy-galaxy", NOW);
+  setKey(db, "s3", "kiki-factory", NOW);
   expect(getRow(db, "s1")!.key).toBe("glizzy-galaxy");
-  expect(getRow(db, "s1")!.event).toBeNull();
-  // sessionsForEvent is an alias for sessionsForKey
-  expect(sessionsForEvent(db, "glizzy-galaxy").sort()).toEqual(["s1", "s2"]);
-  setEvent(db, "s1", null, NOW); // clear
+  expect(sessionsForKey(db, "glizzy-galaxy").sort()).toEqual(["s1", "s2"]);
+  setKey(db, "s1", null, NOW); // clear
   expect(getRow(db, "s1")!.key).toBeNull();
-  expect(sessionsForEvent(db, "glizzy-galaxy")).toEqual(["s2"]);
+  expect(sessionsForKey(db, "glizzy-galaxy")).toEqual(["s2"]);
 });
 
 test("parent: set, round-trip, children reverse lookup, clear", () => {
@@ -253,36 +250,15 @@ test("key: set, round-trip, clear, reverse lookup", () => {
   expect(sessionsForKey(db, "heroku/dashboard#12345")).toEqual(["s2"]);
 });
 
-test("identityKeyOf: prefers key over event, falls back to event", () => {
+test("identityKeyOf: returns key or null", () => {
   const db = openCatalogue(":memory:");
   const { setKey, identityKeyOf } = require("./db.ts");
-  // legacy row: only event set (key is null) → identityKeyOf returns event
-  // Simulate legacy by directly writing to event column (setEvent now writes to key)
-  db.query("INSERT INTO catalogue (session_id, event, updated_at) VALUES ($id, $event, $now)").run({
-    $id: "legacy",
-    $event: "galaxy-summit",
-    $now: NOW,
-  });
-  const legacyRow = getRow(db, "legacy")!;
-  expect(legacyRow.key).toBeNull();
-  expect(legacyRow.event).toBe("galaxy-summit");
-  expect(identityKeyOf(legacyRow)).toBe("galaxy-summit");
-  // new row: key set → identityKeyOf prefers key
+  // row with key set
   setKey(db, "new", "heroku/dashboard#999", NOW);
   const newRow = getRow(db, "new")!;
   expect(newRow.key).toBe("heroku/dashboard#999");
-  expect(newRow.event).toBeNull();
   expect(identityKeyOf(newRow)).toBe("heroku/dashboard#999");
-  // both set: key wins
-  db.query("INSERT INTO catalogue (session_id, event, key, updated_at) VALUES ($id, $event, $key, $now)").run({
-    $id: "both",
-    $event: "old-event-slug",
-    $key: "modern-key",
-    $now: NOW,
-  });
-  const bothRow = getRow(db, "both")!;
-  expect(identityKeyOf(bothRow)).toBe("modern-key");
   // neither set: null
-  const emptyRow = getRow(db, "neither") ?? { key: null, event: null } as any;
+  const emptyRow = getRow(db, "neither") ?? { key: null } as any;
   expect(identityKeyOf(emptyRow)).toBeNull();
 });

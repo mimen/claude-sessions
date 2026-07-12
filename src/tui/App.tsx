@@ -524,7 +524,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         title: r.title,
         kind: c?.kind ?? "session",
         skill: c?.skill ?? null,
-        event: identityKeyOf(c),
+        key: identityKeyOf(c),
         parentSessionId: c?.parentSessionId ?? null,
         completed: !!c?.completed,
         archived: !!c?.archived,
