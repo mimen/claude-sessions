@@ -20,7 +20,7 @@ const cat = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   resumeCommand: null,
   project: null,
   system: null,
-  gusWork: null,
+  gusWork: null, workUnitId: null,
   epicId: null, phase: null, statusLine: null, miladReview: null, buildComplete: false, stage: null, activity: null,
   notes: null,
   updatedAt: null,

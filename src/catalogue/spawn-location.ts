@@ -59,7 +59,7 @@ export function syntheticRow(facts: {
     sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
     archived: false, parkedTaskId: null, event: null, key: null, parentSessionId: null,
     skill: null, role: facts.role ?? null, resumeCommand: null, project: null,
-    system: facts.system ?? null, gusWork: facts.gusWork ?? null, epicId: facts.epicId ?? null,
+    system: facts.system ?? null, gusWork: facts.gusWork ?? null, workUnitId: null, epicId: facts.epicId ?? null,
     phase: null, statusLine: null, miladReview: null, buildComplete: false, stage: null, activity: null, notes: null, updatedAt: null, prNumber: facts.prNumber ?? null,
     prRepo: facts.prRepo ?? null, prBranch: null, prState: null, prHeadSha: null,
   };

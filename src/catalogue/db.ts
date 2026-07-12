@@ -46,6 +46,11 @@ export interface CatalogueRow {
    * `key` for pr-watch). The FLEET ORCHESTRATOR owns what it means / membership; ccs
    * just stores it. Nullable (orphan PR = no ticket). */
   gusWork: string | null;
+  /** Reference to the work-unit ENTITY this session belongs to (ADR-0057). A work-unit
+   * is a first-class entity with a stable id; PR/GUS/cwd are attributes, not identity.
+   * Sessions reference it by FK (mirrors epicId). Nullable (session may not belong to
+   * a work-unit, or work-unit not yet created). */
+  workUnitId: string | null;
   /** Reference to the epic ENTITY this session's work belongs to (a FK into the
    * `epics` table, which holds the epic's name + url). A session points at one epic;
    * the name/url live once on the entity, not copied per session. Set by the fleet
@@ -86,7 +91,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 19;
+const CATALOGUE_VERSION = 20;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -317,6 +322,16 @@ function migrate(db: Database): void {
     if (!hasColumn(db, "catalogue", "stage")) db.exec("ALTER TABLE catalogue ADD COLUMN stage TEXT;");
     if (!hasColumn(db, "catalogue", "activity")) db.exec("ALTER TABLE catalogue ADD COLUMN activity TEXT;");
   }
+  if (v < 20) {
+    // Additive: work_unit_id — a session's FK to its work-unit ENTITY (ADR-0057). A work-unit is
+    // a first-class entity with a stable id (cluster state, like grouping); PR/GUS/cwd are attributes
+    // that attach to it, not its identity. This mirrors epic_id (grouping FK). Nullable (session may
+    // not belong to a work-unit). Guard on column presence (older binary can reset version, re-run).
+    if (!hasColumn(db, "catalogue", "work_unit_id")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN work_unit_id TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_work_unit ON catalogue(work_unit_id);");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -346,6 +361,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     project: (r.project as string) ?? null,
     system: (r.system as string) ?? null,
     gusWork: (r.gus_work as string) ?? null,
+    workUnitId: (r.work_unit_id as string) ?? null,
     epicId: (r.epic_id as string) ?? null,
     phase: (r.phase as string) ?? null,
     stage: (r.stage as string) ?? null,
@@ -479,6 +495,10 @@ export function setSystem(db: Database, sessionId: string, system: string | null
 export function setGusWork(db: Database, sessionId: string, gusWork: string | null, now: string): void {
   set(db, sessionId, "gus_work", gusWork, now);
 }
+/** Set the session's work-unit FK (ADR-0057) — the work-unit entity it belongs to. */
+export function setWorkUnitId(db: Database, sessionId: string, workUnitId: string | null, now: string): void {
+  set(db, sessionId, "work_unit_id", workUnitId, now);
+}
 export function setPhase(db: Database, sessionId: string, phase: string | null, now: string): void {
   set(db, sessionId, "phase", phase, now);
 }
@@ -507,6 +527,15 @@ export function setMiladReview(db: Database, sessionId: string, verdict: string 
 export function sessionsForGusWork(db: Database, gusWork: string): string[] {
   return (
     db.query("SELECT session_id FROM catalogue WHERE gus_work = $g").all({ $g: gusWork }) as {
+      session_id: string;
+    }[]
+  ).map((r) => r.session_id);
+}
+
+/** Reverse lookup: which sessions belong to this work-unit (ADR-0057). */
+export function sessionsForWorkUnit(db: Database, workUnitId: string): string[] {
+  return (
+    db.query("SELECT session_id FROM catalogue WHERE work_unit_id = $wu").all({ $wu: workUnitId }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);

@@ -20,6 +20,7 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   project: null,
   system: null,
   gusWork: null,
+  workUnitId: null,
   epicId: null, phase: null, statusLine: null, miladReview: null, buildComplete: false, stage: null, activity: null,
   notes: null,
   updatedAt: null,
