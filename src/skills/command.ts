@@ -174,7 +174,7 @@ async function list(opts: ListOpts): Promise<number> {
         JSON.stringify(
           rows.map((s) => ({
           ...s,
-          category: categories.get(s.name) ?? null,
+          category: s.category ?? categories.get(s.name) ?? null,
           tags: tags.get(s.name) ?? [],
           usage: usage.get(s.name) ?? null,
           ...(opts.context ? { access: accessByPath.get(s.path) ?? null } : {}),
@@ -212,7 +212,7 @@ async function list(opts: ListOpts): Promise<number> {
       const cols = [
         pad(s.name + (s.copies > 1 ? ` ×${s.copies}` : ""), 30),
         opts.context ? pad(accessByPath.get(s.path) ?? "", 24) : pad(s.ecosystem, 15),
-        pad(categories.get(s.name) ?? "", 13),
+        pad(s.category ?? categories.get(s.name) ?? "", 13),
         pad(t.join(","), 14),
         padLeft(u ? String(u.invocations) : "·", 8),
         padLeft(u ? String(u.commands) : "·", 6),

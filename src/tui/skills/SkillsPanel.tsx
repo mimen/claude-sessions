@@ -181,7 +181,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
       records.map((rec) => ({
         rec,
         home: homeOf(rec.path),
-        category: categories.get(rec.name) ?? null,
+        category: rec.category ?? categories.get(rec.name) ?? null,
         tags: tags.get(rec.name) ?? [],
         usage: usage.get(rec.name) ?? null,
         drift: drifted.has(rec.name),

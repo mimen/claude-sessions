@@ -6,7 +6,7 @@ import type { SkillRecord, Ecosystem } from "./scan.ts";
  * - Cache tables (skills, usage_files, usage_counts) are rebuildable — dropped on version bump.
  * - The tags table is durable user-authored organization (like the Catalogue) and is NEVER dropped.
  */
-export const SKILLS_CACHE_VERSION = 2;
+export const SKILLS_CACHE_VERSION = 3;
 
 export function openSkillsDb(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -44,7 +44,8 @@ export function openSkillsDb(dbPath: string): Database {
       description TEXT NOT NULL DEFAULT '',
       aliases     TEXT NOT NULL DEFAULT '[]',
       mtime_ms    REAL NOT NULL DEFAULT 0,
-      content_hash TEXT NOT NULL DEFAULT ''
+      content_hash TEXT NOT NULL DEFAULT '',
+      fm_category TEXT
     );
   `);
   db.exec(`
@@ -84,12 +85,12 @@ export function serializeSkillsWrite<T>(fn: () => Promise<T> | T): Promise<T> {
 /** Replace the whole cached registry with a fresh scan result. */
 export function saveSkills(db: Database, records: SkillRecord[]): void {
   const insert = db.prepare(
-    "INSERT OR REPLACE INTO skills (name, path, real_path, ecosystem, description, aliases, mtime_ms, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT OR REPLACE INTO skills (name, path, real_path, ecosystem, description, aliases, mtime_ms, content_hash, fm_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const tx = db.transaction((rows: SkillRecord[]) => {
     db.exec("DELETE FROM skills;");
     for (const r of rows) {
-      insert.run(r.name, r.path, r.realPath, r.ecosystem, r.description, JSON.stringify(r.aliases), r.mtimeMs, r.contentHash);
+      insert.run(r.name, r.path, r.realPath, r.ecosystem, r.description, JSON.stringify(r.aliases), r.mtimeMs, r.contentHash, r.category ?? null);
     }
   });
   tx(records);
@@ -110,6 +111,7 @@ export function loadSkills(db: Database): SkillRecord[] {
     aliases: string;
     mtime_ms: number;
     content_hash: string;
+    fm_category: string | null;
   }>;
   return rows.map((r) => ({
     name: r.name,
@@ -120,6 +122,7 @@ export function loadSkills(db: Database): SkillRecord[] {
     aliases: JSON.parse(r.aliases) as string[],
     mtimeMs: r.mtime_ms,
     contentHash: r.content_hash,
+    category: r.fm_category,
   }));
 }
 
