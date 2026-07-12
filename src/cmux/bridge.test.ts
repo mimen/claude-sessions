@@ -123,4 +123,45 @@ describe("buildBridge", () => {
       }
     }
   });
+
+  test("surface present in tree but unmapped in hook-store is NOT counted as open (ADR-task #9)", () => {
+    // Build a minimal fixture: tree with one surface, hook-store with zero bindings
+    const unmappedTree = {
+      windows: [
+        {
+          id: "win-1",
+          ref: "window:1",
+          workspaces: [
+            {
+              id: "ws-1",
+              ref: "workspace:1",
+              panes: [
+                {
+                  id: "pane-1",
+                  ref: "pane:1",
+                  index: 0,
+                  surfaces: [
+                    {
+                      id: "surface-unmapped",
+                      ref: "surface:1",
+                      type: "terminal",
+                      index_in_pane: 0,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const emptyStore = { sessions: {}, activeSessionsBySurface: {} };
+    const testBridge = buildBridge(unmappedTree, emptyStore);
+
+    // The surface is in the tree (readable), but with no hook-store binding it must not count as an open session
+    expect(testBridge.surfaces.length).toBe(1);
+    expect(testBridge.surfaceInfo("surface-unmapped")).toBeNull();
+    expect(testBridge.isOpen("any-session-id")).toBe(false);
+    expect(testBridge.primarySurface("ws-1")).toBeNull(); // no claude-running surface → no primary
+  });
 });

@@ -22,6 +22,10 @@
  * `cmux tree`. Identity/liveness key on the SURFACE UUID. The workspace tab is owned by the
  * workspace's PRIMARY session = the earliest surface running a claude agent (pane index, then
  * index-in-pane) — a pure function of tree position, no lock (ADR-0027/0032/0040).
+ *
+ * NOTE (ADR-task #9 hardening): parseTree and parseHookStore assume the cmux 0.64.x tree + hook
+ * store JSON shape. A cmux >=0.65 upgrade may require revisiting these parsers if the schema
+ * changes. The version guard in live.ts enforces 0.64 at runtime.
  */
 
 // --- shapes of the cmux JSON we consume (only the fields we need) ---------------
@@ -93,7 +97,9 @@ export function parseTree(tree: CmuxTree): SurfaceLocation[] {
     for (const ws of win.workspaces ?? []) {
       for (const pane of ws.panes ?? []) {
         for (const s of pane.surfaces ?? []) {
+          // Skip surfaces missing the id (ADR-task #9: defensive, matches the workspace guard)
           if (!s.id) continue;
+          if (!pane.id) continue; // pane.id must be present (same as surface.id guard)
           out.push({
             surfaceId: s.id,
             surfaceRef: s.ref,

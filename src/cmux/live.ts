@@ -103,6 +103,12 @@ export function liveBridge(): Bridge {
         `cmux ${version.major}.${version.minor}.${version.patch} is an untested major version (built for 0.64.x)`,
       );
     }
+  } else if (!treeOk) {
+    // When cmux is absent from PATH or socket is unauthed, surface the diagnostic explicitly
+    // (ADR-task #9 hardening). Still fail-closed (readable=false), just clearer than silent.
+    console.warn(
+      "cmux binary not found in PATH or socket unauthed — liveness unreadable, resume will fail closed",
+    );
   }
 
   return buildBridge(tree, store, readable);
