@@ -11,7 +11,7 @@ import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf,
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, key, parent, role, resumeCommand, gusWork, sessionEpic, project, setClusterCmd, status, approve, activity, ready, stage, metaSet, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, key, parent, role, resumeCommand, gusWork, sessionEpic, project, setClusterCmd, status, activity, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { backfillTitles } from "./titler/queue.ts";
@@ -53,11 +53,9 @@ Usage:
   ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
   ccs set-cluster [<id>|.] <slug> [--off]   Set/clear the cluster grouping
   ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab
-  ccs activity [<id>|.] needs-you [--off]   A pr-agent self-reports being stuck (--off = back to dormant)
-  ccs ready [<id>|.]    A pr-agent declares its build done → latches stage to milad-review
-  ccs stage [<id>|.] <value> [--off]   Generic stage setter (cluster defines the vocabulary)
-  ccs meta-set [<id>|.] <key> <value> [--off]   Set a key in the session's generic meta map (ADR-0060/0064)
-  ccs approve <selector> [--off]   Record Milad's +1 on a PR (the submitter-review signal)
+  ccs activity [<id>|.] <value> [--off]   Set the activity (cluster defines the vocabulary; --off = dormant)
+  ccs stage [<id>|.] <value> [--off]   Generic stage setter (cluster defines + the tool enforces the vocabulary)
+  ccs meta [<id>|.] <key> <value> [--off]   Set a key in the session's generic meta map (ADR-0060/0064)
   ccs new-session [flags]   Mint a session id, tag its metadata AT BIRTH, then launch \`claude --session-id\`
                             flags: --cluster --role --kind loop|session --project --key
                                    --title --parent <id> --cwd <dir> --prompt "<text>"
@@ -134,12 +132,8 @@ export async function main(argv: string[]): Promise<number> {
     case "status":
       // status takes a full freeform LINE, so join all non-flag args (not just the first token).
       return status(args[1], args.slice(2).filter((a) => !a.startsWith("--")).join(" ") || undefined, args.slice(2).filter((a) => a.startsWith("--")));
-    case "approve":
-      return approveSelector(args.slice(1));
     case "activity":
       return activity(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
-    case "ready":
-      return ready(args[1]);
     case "stage":
       return stage(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "meta-set": {
@@ -600,37 +594,6 @@ function resumeSelector(args: string[]): number {
         `${s.notIndexed} not indexed${s.failed ? `, ${s.failed} failed` : ""}`,
     );
     return s.failed > 0 ? 1 : 0;
-  } finally {
-    db.close();
-    cat.close();
-  }
-}
-
-/**
- * `ccs approve <selector> [--off]` — record Milad's +1 on whatever the selector resolves to (a PR
- * `#123`, a session id, etc.). Resolves via the shared selector, then sets `milad_review` on each
- * matched session. `.`/no-arg approves the current session (the common in-session case).
- */
-function approveSelector(args: string[]): number {
-  const token = args.find((a) => !a.startsWith("--"));
-  const flags = args.filter((a) => a.startsWith("--"));
-  // No token or "." → the current session (in-session self-approve / direct id path).
-  if (!token || token === "." || token === "self") return approve(token, flags);
-  // A bare UUID is a session id — approve it directly (no catalogue lookup needed).
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(token)) return approve(token, flags);
-  // Otherwise resolve the selector (PR/gus/role/…) to session ids and approve each.
-  const db = openIndex(DB_PATH());
-  const cat = openCatalogue(CATALOGUE_PATH());
-  try {
-    const sel = resolveSelector(cat, db, token);
-    if (!sel || sel.sessionIds.length === 0) {
-      console.error(`ccs: "${token}" didn't match any session to approve`);
-      return 1;
-    }
-    let rc = 0;
-    for (const sid of sel.sessionIds) rc = approve(sid, flags) || rc;
-    console.log(`ccs: ${sel.label} — +1 applied to ${sel.sessionIds.length} session(s)`);
-    return rc;
   } finally {
     db.close();
     cat.close();

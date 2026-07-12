@@ -237,30 +237,10 @@ export function activity(sessionArg: string | undefined, value: string | undefin
 }
 
 /**
- * `ccs ready [<id>|.]` — the worker declares its build DONE and ready for Milad's review. Latches
- * the stage forward to `milad-review` (monotonic; the build stage is sealed behind it) and clears
- * any transient activity back to `working`. The one stage move a worker may make itself (L1).
- */
-export function ready(sessionArg: string | undefined): number {
-  const id = resolveSessionId(sessionArg);
-  if (!id) return notInSession();
-  ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH());
-  try {
-    setStage(db, id, "milad-review", now());
-    setActivity(db, id, null, now()); // clear to dormant — awaiting Milad's review
-    console.log(`ready → milad-review (${id.slice(0, 8)}…)`);
-  } finally {
-    db.close();
-  }
-  return 0;
-}
-
-/**
  * `ccs stage [<id>|.] <value> | --off` — the GENERIC stage setter (ADR-0064). The tool stores the
- * string; the cluster's state machine defines the vocabulary + transitions (ccs doesn't validate the
- * value here — that's the role.toml schema's job, a follow-up). pr-watch's `ccs ready` is a thin
- * wrapper over this (stage → milad-review). Vocabulary-agnostic by design (ADR-0061).
+ * string + enforces the role's declared schema (vocabulary + monotonic); the cluster OWNS the
+ * vocabulary. This is THE stage primitive — pr-watch's old `ccs ready` wrapper was evicted (a
+ * worker now runs `ccs stage . milad-review` directly). Vocabulary-agnostic by design (ADR-0061).
  */
 export function stage(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
   const id = resolveSessionId(sessionArg);
@@ -323,27 +303,6 @@ export function metaSet(sessionArg: string | undefined, key: string | undefined,
   try {
     setMeta(db, id, key.trim(), off ? null : parsed, now());
     console.log(off ? `cleared meta.${key.trim()} on ${id.slice(0, 8)}…` : `meta.${key.trim()} = ${value} → ${id.slice(0, 8)}…`);
-  } finally {
-    db.close();
-  }
-  return 0;
-}
-
-/**
- * `ccs approve [<id>|.] [--off]` — record Milad's +1 on a PR (the submitter-review signal). Sets
- * the `milad_review` meta key to "approved" (or clears with --off). This is ONE of several writers to
- * that one field (a sensed Slack/GitHub "looks good" or a self-report can set it too); the gate
- * reads the field, and a worker's `milad-review` phase advances to `in-review` once it's set.
- */
-export function approve(sessionArg: string | undefined, flags: string[]): number {
-  const id = resolveSessionId(sessionArg);
-  if (!id) return notInSession();
-  const off = flags.includes("--off");
-  ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH());
-  try {
-    setMeta(db, id, "milad_review", off ? null : "approved", now());
-    console.log(off ? `cleared your +1 on ${id.slice(0, 8)}…` : `approved (your +1) → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
   }

@@ -32,7 +32,7 @@ export interface MetaField {
 /** The known meta-update fields. Adding a field means declaring its writer here. */
 export const META_FIELDS: Readonly<Record<string, MetaField>> = {
   updated_at: { field: "updated_at", source: "timestamp", column: true, note: "the heartbeat — the Stop hook stamps it" },
-  stage: { field: "stage", source: "sensor", column: true, note: "pr-agent pipeline stage (catalogue_sync); worker declares milad-review via ccs ready" },
+  stage: { field: "stage", source: "sensor", column: true, note: "pr-agent pipeline stage (catalogue_sync); worker declares milad-review via `ccs stage . milad-review`" },
   activity: { field: "activity", source: "artifact", column: true, note: "within-stage activity; worker self-reports needs-you, engine senses fixing" },
   pr_state: { field: "pr_state", source: "sensor", column: true, note: "git/GitHub sense (catalogue_sync)" },
   pr_number: { field: "pr_number", source: "sensor", column: true, note: "git sense at spawn / catalogue_sync" },
