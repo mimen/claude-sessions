@@ -244,6 +244,67 @@ export function ready(sessionArg: string | undefined): number {
 }
 
 /**
+ * `ccs stage [<id>|.] <value> | --off` — the GENERIC stage setter (ADR-0064). The tool stores the
+ * string; the cluster's state machine defines the vocabulary + transitions (ccs doesn't validate the
+ * value here — that's the role.toml schema's job, a follow-up). pr-watch's `ccs ready` is a thin
+ * wrapper over this (stage → milad-review). Vocabulary-agnostic by design (ADR-0061).
+ */
+export function stage(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  const v = value?.trim();
+  if (!off && !v) {
+    console.error("usage: ccs stage [<id>|.] <value> | --off");
+    return 1;
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH());
+  try {
+    setStage(db, id, off ? null : v!, now());
+    console.log(off ? `cleared stage on ${id.slice(0, 8)}…` : `stage ${v} → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/**
+ * `ccs meta [<id>|.] <key> <value> | <key> --off` — the GENERIC per-session metadata setter (ADR-0064).
+ * Writes a key into the row's `meta` JSON map (ADR-0060). ccs stores + stamps it but does NOT interpret
+ * it — the cluster/role decides what keys mean (miladReview, build_complete, locks, …). `--off` clears
+ * the key. Distinct from the `meta` READ command (`ccs meta <id>` with no key). Value is JSON-parsed if
+ * it looks like JSON (true/false/number/null), else stored as a string.
+ */
+export function metaSet(sessionArg: string | undefined, key: string | undefined, value: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!key || !key.trim()) {
+    console.error("usage: ccs meta-set [<id>|.] <key> <value> | <key> --off");
+    return 1;
+  }
+  if (!off && (value === undefined || value === "")) {
+    console.error("usage: ccs meta-set [<id>|.] <key> <value> | <key> --off");
+    return 1;
+  }
+  // Parse JSON-ish scalars (true/false/123/null/"..."); else keep the raw string.
+  let parsed: unknown = value;
+  if (!off && value !== undefined) {
+    try { parsed = JSON.parse(value); } catch { parsed = value; }
+  }
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH());
+  try {
+    setMeta(db, id, key.trim(), off ? null : parsed, now());
+    console.log(off ? `cleared meta.${key.trim()} on ${id.slice(0, 8)}…` : `meta.${key.trim()} = ${value} → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/**
  * `ccs approve [<id>|.] [--off]` — record Milad's +1 on a PR (the submitter-review signal). Sets
  * the `milad_review` meta key to "approved" (or clears with --off). This is ONE of several writers to
  * that one field (a sensed Slack/GitHub "looks good" or a self-report can set it too); the gate

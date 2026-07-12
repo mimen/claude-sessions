@@ -11,7 +11,7 @@ import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf,
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, key, parent, role, resumeCommand, gusWork, sessionEpic, project, setClusterCmd, status, approve, activity, ready, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, key, parent, role, resumeCommand, gusWork, sessionEpic, project, setClusterCmd, status, approve, activity, ready, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { backfillTitles } from "./titler/queue.ts";
@@ -52,6 +52,8 @@ Usage:
   ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab
   ccs activity [<id>|.] needs-you [--off]   A pr-agent self-reports being stuck (--off = back to dormant)
   ccs ready [<id>|.]    A pr-agent declares its build done → latches stage to milad-review
+  ccs stage [<id>|.] <value> [--off]   Generic stage setter (cluster defines the vocabulary)
+  ccs meta-set [<id>|.] <key> <value> [--off]   Set a key in the session's generic meta map (ADR-0060/0064)
   ccs approve <selector> [--off]   Record Milad's +1 on a PR (the submitter-review signal)
   ccs new-session [flags]   Mint a session id, tag its metadata AT BIRTH, then launch \`claude --session-id\`
                             flags: --cluster --role --kind loop|session --project --key
@@ -134,6 +136,12 @@ export async function main(argv: string[]): Promise<number> {
       return activity(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "ready":
       return ready(args[1]);
+    case "stage":
+      return stage(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "meta-set": {
+      const pos = args.slice(2).filter((a) => !a.startsWith("--"));
+      return metaSet(args[1], pos[0], pos[1], args.slice(2).filter((a) => a.startsWith("--")));
+    }
     case "new-session":
     case "new":
       return newSession(args.slice(1));
