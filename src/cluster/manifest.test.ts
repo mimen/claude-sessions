@@ -48,7 +48,7 @@ test("parseCcsRequirement accepts >=X.Y.Z and rejects other shapes", () => {
 test("readClusterManifest resolves engine/sense to absolute paths under the cluster dir", () => {
   const root = writeCluster(
     "pr-watch",
-    'name = "pr-watch"\nengine = "engine"\nsense = "engine/scripts/sense.sh"\nversion = 3\nrequires_ccs = ">=0.1.0"\n',
+    'name = "pr-watch"\nengine = "engine"\nsense = "engine/scripts/sense.sh"\nversion = 3\nrequires_ccs = ">=0.1.0"\ngrouping_type = "epic"\n',
   );
   const res = readClusterManifest("pr-watch", root);
   expect(res.ok).toBe(true);
@@ -59,6 +59,15 @@ test("readClusterManifest resolves engine/sense to absolute paths under the clus
   expect(m.sensePath).toBe(join(root, "clusters", "pr-watch", "engine", "scripts", "sense.sh"));
   expect(m.version).toBe("3"); // a numeric version normalizes to a string
   expect(m.requiresCcs).toBe(">=0.1.0");
+  expect(m.groupingType).toBe("epic"); // ADR-0070 declared grouping type
+});
+
+test("grouping_type defaults to 'epic' when a manifest doesn't declare it", () => {
+  const root = writeCluster("legacy", 'name = "legacy"\n');
+  const res = readClusterManifest("legacy", root);
+  expect(res.ok).toBe(true);
+  if (!res.ok) return;
+  expect(res.value.groupingType).toBe("epic");
 });
 
 test("readClusterManifest errs on a missing manifest", () => {
@@ -91,7 +100,7 @@ test("a manifest with no engine/version/requires_ccs parses with nulls (legacy c
 });
 
 const manifest = (over: Partial<ClusterManifest> = {}): ClusterManifest => ({
-  name: "c", engineDir: null, sensePath: null, version: null, requiresCcs: null, ...over,
+  name: "c", engineDir: null, sensePath: null, version: null, requiresCcs: null, groupingType: "epic", ...over,
 });
 
 test("gate: no requirement → ok", () => {

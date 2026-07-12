@@ -66,6 +66,9 @@ const ManifestSchema = z.object({
   version: z.union([z.string(), z.number()]).optional(),
   /** Semver range the cluster depends on, e.g. ">=0.1.0". Optional (legacy clusters lack it). */
   requires_ccs: z.string().optional(),
+  /** ADR-0070: the cluster's mid-level GROUPING TYPE (pr-watch = "epic"). A display label + a
+   * sensing/render hint, NOT storage — the grouping entity stays generic (ADR-0051/0059). */
+  grouping_type: z.string().optional(),
 });
 
 /** The typed cluster manifest, as the tool sees it. Absolute `engineDir`/`sensePath` are resolved. */
@@ -80,6 +83,10 @@ export interface ClusterManifest {
   version: string | null;
   /** The raw `requires_ccs` string as authored, or null. */
   requiresCcs: string | null;
+  /** The cluster's declared grouping type (ADR-0070), e.g. "epic". A label + sensing/render hint;
+   * defaults to "epic" when undeclared (the historical assumption), never null so callers can
+   * always show a word. The generic grouping entity is unchanged — this only types the label. */
+  groupingType: string;
 }
 
 /**
@@ -110,6 +117,7 @@ export function readClusterManifest(cluster: string, configRoot = ccsConfigRoot(
     sensePath: m.sense ? join(dir, m.sense) : null,
     version: m.version === undefined ? null : String(m.version),
     requiresCcs: m.requires_ccs ?? null,
+    groupingType: m.grouping_type ?? "epic",
   });
 }
 
