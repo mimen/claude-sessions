@@ -32,7 +32,7 @@ export interface InferenceEngine {
 
 /** Whether an executable is resolvable on PATH. Bun.spawn ignores shell aliases, so this
  *  mirrors what the engine will actually find when it spawns. */
-export function binaryExists(binary: string): boolean {
+function binaryExists(binary: string): boolean {
   try {
     return Bun.spawnSync(["which", binary], { stdout: "ignore", stderr: "ignore" }).exitCode === 0;
   } catch {
@@ -54,7 +54,7 @@ function lazyAvailability(binary: string): () => boolean {
  * config/rules ignored) with `--output-schema` forcing the response and
  * `--output-last-message` capturing it to a temp file.
  */
-export function createCodexEngine(opts: {
+function createCodexEngine(opts: {
   binary: string;
   model: string;
   reasoningEffort: string;
@@ -109,7 +109,7 @@ export function createCodexEngine(opts: {
  * the JSON, not a path). `--strict-mcp-config` keeps the call cheap and hermetic by loading
  * no MCP servers. The parsed object comes back on the result envelope's `structured_output`.
  */
-export function createClaudeEngine(opts: {
+function createClaudeEngine(opts: {
   binary: string;
   model: string;
 }): InferenceEngine {
@@ -169,7 +169,7 @@ export function buildEngine(name: EngineName, config: Config): InferenceEngine {
 const AUTO_ORDER: readonly EngineName[] = ["codex", "claude"];
 
 /** Which engines are actually installed on this host, in preference order. */
-export function detectAvailable(config: Config): EngineName[] {
+function detectAvailable(config: Config): EngineName[] {
   return AUTO_ORDER.filter((name) => buildEngine(name, config).available());
 }
 

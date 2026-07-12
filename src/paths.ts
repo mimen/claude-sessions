@@ -14,7 +14,7 @@ export function runtimeRoot(): string {
   return join(process.env.HOME ?? homedir(), ".ccs");
 }
 /** The tool's own data dir under the runtime root. `cache/` holds the SQLite (state + caches). */
-export const DATA_DIR = () => join(runtimeRoot(), "cache");
+const DATA_DIR = () => join(runtimeRoot(), "cache");
 export const CONFIG_PATH = () => join(runtimeRoot(), "config.toml");
 export const DB_PATH = () => join(DATA_DIR(), "index.db");
 /**
