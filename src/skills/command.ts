@@ -3,7 +3,8 @@ import { ensureDataDir, SKILLS_DB_PATH } from "../paths.ts";
 import { discoverSkills, isInLinkedWorktree, type SkillRecord } from "./scan.ts";
 import { shadowDuplicatePaths, accessIn, contextLabel, type SkillContext } from "./view.ts";
 import { homedir } from "node:os";
-import { openSkillsDb, saveSkills, loadSkills, usageTotals, tagsFor, addTag, removeTag, setCategory, categoriesFor } from "./db.ts";
+import { openSkillsDb, saveSkills, loadSkills, usageTotals, tagsFor, addTag, removeTag, categoriesFor } from "./db.ts";
+import { writeCategory, pruneCategoryRows } from "./category-write.ts";
 import { mineUsage } from "./usage.ts";
 
 const HELP = `ccs skills — every skill on this machine, with real usage numbers
@@ -115,7 +116,8 @@ async function list(opts: ListOpts): Promise<number> {
       }
       saveSkills(db, found.value);
       skills = found.value;
-      process.stderr.write(`${skills.length} found\n`);
+      const pruned = pruneCategoryRows(db, skills);
+      process.stderr.write(`${skills.length} found${pruned ? ` (${pruned} stale category rows pruned)` : ""}\n`);
     }
 
     // Usage join: every known skill dir (primary + aliases + realpath) maps to its slug.
@@ -248,13 +250,14 @@ function categoryCommand(args: string[]): number {
   ensureDataDir();
   const db = openSkillsDb(SKILLS_DB_PATH);
   try {
-    const known = new Set(loadSkills(db).map((s) => s.name));
-    if (!known.has(name)) {
+    const skills = loadSkills(db);
+    if (!skills.some((s) => s.name === name)) {
       console.error(`Unknown skill "${name}" — not in the registry (run \`ccs skills --rescan\` if it's new).`);
       return 1;
     }
-    setCategory(db, name, clear ? null : category!);
-    console.log(clear ? `Cleared category on ${name}` : `category(${name}) = ${category}`);
+    const result = writeCategory(db, skills, name, clear ? null : category!);
+    const where = result.mode === "frontmatter" ? `SKILL.md frontmatter (${result.path})` : "skills-db (foreign skill — no editable SKILL.md)";
+    console.log((clear ? `Cleared category on ${name}` : `category(${name}) = ${category}`) + ` → ${where}`);
     return 0;
   } finally {
     db.close();

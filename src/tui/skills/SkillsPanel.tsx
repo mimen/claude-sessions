@@ -14,7 +14,6 @@ import {
   usageTotals,
   tagsFor,
   categoriesFor,
-  setCategory,
   addTag,
   removeTag,
   usageFilesFor,
@@ -23,6 +22,7 @@ import {
 import { discoverSkills, isInLinkedWorktree, type SkillRecord } from "../../skills/scan.ts";
 import { mineUsage } from "../../skills/usage.ts";
 import { archiveSkill, archiveGuard } from "../../skills/archive.ts";
+import { writeCategory } from "../../skills/category-write.ts";
 import {
   accessIn,
   buildContextItems,
@@ -393,8 +393,12 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
         const value = mode.buffer.trim();
         if (selectedRow) {
           if (mode.kind === "category") {
-            setCategory(skillsDb, selectedRow.rec.name, value || null);
-            setStatus(value ? `category(${selectedRow.rec.name}) = ${value}` : `category cleared`);
+            const res = writeCategory(skillsDb, records, selectedRow.rec.name, value || null);
+            setRecords([...records]);
+            setStatus(
+              (value ? `category(${selectedRow.rec.name}) = ${value}` : `category cleared`) +
+                (res.mode === "frontmatter" ? " → frontmatter" : " → db (foreign skill)"),
+            );
           } else if (value) {
             const existing = tags.get(selectedRow.rec.name) ?? [];
             if (existing.includes(value)) {

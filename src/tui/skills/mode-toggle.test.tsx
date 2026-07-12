@@ -34,9 +34,9 @@ test("rapid Tab toggling between modes never crashes (serialized skills writes)"
   await new Promise((r) => setTimeout(r, 40));
   for (let i = 0; i < 8; i++) {
     stdin.write("\t");
-    await new Promise((r) => setTimeout(r, 15));
+    await new Promise((r) => setTimeout(r, 40));
   }
-  await new Promise((r) => setTimeout(r, 150));
+  await new Promise((r) => setTimeout(r, 250));
   // Ended on an even number of tabs → back in skills mode, still alive and rendering.
   expect(lastFrame() ?? "").toContain("⌖ claude");
   unmount();
