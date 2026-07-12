@@ -81,7 +81,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 28;
+const CATALOGUE_VERSION = 29;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -419,6 +419,14 @@ function migrate(db: Database): void {
       db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_grouping ON catalogue(grouping_id);");
     }
   }
+  if (v < 29) {
+    // ADR-0062: drop the `kind` + `resume_command` columns. Both are DERIVED from the role now
+    // (role.toml is files-are-truth): a role re-arms iff it declares a resume_command ⇒ it's a
+    // "loop". No backfill — the derivation (rowFrom → roleResumeCommand) replaces the stored values.
+    // Guard on presence (older binary can reset version, re-run). SQLite 3.35+ DROP COLUMN.
+    if (hasColumn(db, "catalogue", "kind")) db.exec("ALTER TABLE catalogue DROP COLUMN kind;");
+    if (hasColumn(db, "catalogue", "resume_command")) db.exec("ALTER TABLE catalogue DROP COLUMN resume_command;");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -428,20 +436,49 @@ function hasColumn(db: Database, table: string, column: string): boolean {
   return cols.some((c) => c.name === column);
 }
 
+/** role → its resume_command (or null), memoized (ADR-0062). `kind`/`resumeCommand` are DERIVED
+ * from the role's role.toml now, not stored columns: a role re-arms iff it declares a resume_command
+ * ⇒ it's a "loop". Cached because rowFrom runs per-row in getAll (hot path); role defs are static
+ * within a process. A lazy require avoids a load-time cycle (role-files only type-imports db). */
+let roleResumeCache: Map<string, string | null> | null = null;
+/** Reset the role→resume_command memo. For tests that swap CCS_CONFIG_ROOT between cases (the
+ * cache is keyed by role NAME, so a stale entry would leak across roots). */
+export function _resetRoleResumeCache(): void {
+  roleResumeCache = null;
+}
+function roleResumeCommand(role: string | null): string | null {
+  if (!role) return null;
+  if (!roleResumeCache) roleResumeCache = new Map();
+  if (roleResumeCache.has(role)) return roleResumeCache.get(role)!;
+  let rc: string | null = null;
+  try {
+    // Lazy import to keep db.ts free of a load-time dependency on role-files.
+    rc = (require("../roles/role-files.ts") as typeof import("../roles/role-files.ts")).resolveRole(role)?.resumeCommand ?? null;
+  } catch {
+    rc = null;
+  }
+  roleResumeCache.set(role, rc);
+  return rc;
+}
+
 function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
   if (!r) return null;
+  const role = (r.role as string) ?? null;
+  // ADR-0062: kind + resumeCommand are DERIVED from the role, not stored columns (both dropped
+  // in v29). A role with a resume_command is a "loop"; otherwise a "session".
+  const resumeCommand = roleResumeCommand(role);
   return {
     sessionId: r.session_id as string,
     resumeId: (r.resume_id as string) ?? null,
     customTitle: (r.custom_title as string) ?? null,
-    kind: (r.kind as Kind) ?? "session",
+    kind: resumeCommand ? "loop" : "session",
     completed: !!r.completed,
     archived: !!r.archived,
     parkedTaskId: (r.parked_task_id as string) ?? null,
     key: (r.key as string) ?? null,
     parentSessionId: (r.parent_session_id as string) ?? null,
-    role: (r.role as string) ?? null,
-    resumeCommand: (r.resume_command as string) ?? null,
+    role,
+    resumeCommand,
     project: (r.project as string) ?? null,
     cluster: (r.cluster as string) ?? null,
     gusWork: (r.gus_work as string) ?? null,
@@ -528,9 +565,6 @@ export function touch(db: Database, sessionId: string, now: string): void {
 export function setCustomTitle(db: Database, sessionId: string, title: string | null, now: string): void {
   set(db, sessionId, "custom_title", title, now);
 }
-export function setKind(db: Database, sessionId: string, kind: Kind, now: string): void {
-  set(db, sessionId, "kind", kind, now);
-}
 export function setCompleted(db: Database, sessionId: string, completed: boolean, now: string): void {
   set(db, sessionId, "completed", completed ? 1 : 0, now);
 }
@@ -552,10 +586,6 @@ export function setParent(db: Database, sessionId: string, parentId: string | nu
 /** Set the session's ROLE (ADR-0015) — the canonical identity axis. */
 export function setRole(db: Database, sessionId: string, role: string | null, now: string): void {
   set(db, sessionId, "role", role, now);
-}
-/** Set how a session is re-armed on resume (a loop's resume_command); null for non-loops. */
-export function setResumeCommand(db: Database, sessionId: string, cmd: string | null, now: string): void {
-  set(db, sessionId, "resume_command", cmd, now);
 }
 export function setProject(db: Database, sessionId: string, project: string | null, now: string): void {
   set(db, sessionId, "project", project, now);

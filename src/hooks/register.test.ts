@@ -1,8 +1,28 @@
-import { describe, expect, test } from "bun:test";
-import { openCatalogue, getRow, setRole, setResumeCommand } from "../catalogue/db.ts";
+import { describe, expect, test, afterEach } from "bun:test";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openCatalogue, getRow, setRole, _resetRoleResumeCache } from "../catalogue/db.ts";
 import { handleSessionStart } from "./register.ts";
 
 const NOW = "2026-07-09T00:00:00Z";
+
+// ADR-0062: resume_command derives from the role's role.toml (not a stored column). Tests that need
+// a loop declare a `control` role with a resume_command under a temp config root.
+const cfgs: string[] = [];
+afterEach(() => {
+  for (const d of cfgs.splice(0)) rmSync(d, { recursive: true, force: true });
+  delete process.env.CCS_CONFIG_ROOT;
+  _resetRoleResumeCache();
+});
+function withControlLoop(): void {
+  const root = mkdtempSync(join(tmpdir(), "ccs-reg-"));
+  cfgs.push(root);
+  const dir = join(root, "clusters", "pr-watch", "roles", "control");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "role.toml"), 'resume_command = "/loop 15m /pr-watch-control"\nwork_unit = "none"\n');
+  process.env.CCS_CONFIG_ROOT = root;
+}
 
 describe("handleSessionStart", () => {
   test("registered session: refreshed silently, no additionalContext", () => {
@@ -30,20 +50,20 @@ describe("handleSessionStart", () => {
     expect(getRow(db, "s1")!.updatedAt).toBe(NOW);
   });
 
-  test("re-arm: a resumed loop with a resume_command is flagged for re-arming", () => {
+  test("re-arm: a resumed loop (role declares resume_command) is flagged for re-arming", () => {
+    withControlLoop();
     const db = openCatalogue(":memory:");
     setRole(db, "loop", "control", NOW);
-    setResumeCommand(db, "loop", "/loop 15m /pr-watch-control", NOW);
     const out = handleSessionStart(db, { session_id: "loop", source: "resume", cwd: "/x" }, NOW);
     expect(out.reArm).toBe("/loop 15m /pr-watch-control");
     // re-arm surfaces the command as context (belt-and-suspenders, ADR-0017)
     expect(out.additionalContext).toContain("/loop 15m /pr-watch-control");
   });
 
-  test("no re-arm on a fresh (startup) start, even with a resume_command", () => {
+  test("no re-arm on a fresh (startup) start, even for a loop role", () => {
+    withControlLoop();
     const db = openCatalogue(":memory:");
     setRole(db, "loop", "control", NOW);
-    setResumeCommand(db, "loop", "/loop 15m /pr-watch-control", NOW);
     const out = handleSessionStart(db, { session_id: "loop", source: "startup", cwd: "/x" }, NOW);
     expect(out.reArm).toBeNull();
   });

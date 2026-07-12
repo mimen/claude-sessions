@@ -8,7 +8,6 @@ test("parseOpts: reads every flag, --role and --skill are synonyms", () => {
   const o = parseOpts([
     "--cluster", "pr-watch",
     "--role", "pr-agent",
-    "--kind", "loop",
     "--project", "metered-pricing",
     "--key", "heroku_dashboard-12080",
     "--title", "#12080 Fix navbar",
@@ -20,7 +19,6 @@ test("parseOpts: reads every flag, --role and --skill are synonyms", () => {
   ]);
   expect(o.cluster).toBe("pr-watch");
   expect(o.role).toBe("pr-agent");
-  expect(o.kind).toBe("loop");
   expect(o.project).toBe("metered-pricing");
   expect(o.key).toBe("heroku_dashboard-12080");
   expect(o.title).toBe("#12080 Fix navbar");
@@ -35,10 +33,6 @@ test("parseOpts: --skill is accepted as an alias for --role", () => {
   expect(parseOpts(["--skill", "pr-watch-eval"]).role).toBe("pr-watch-eval");
 });
 
-test("parseOpts: an unknown kind is left undefined (not coerced)", () => {
-  expect(parseOpts(["--kind", "banana"]).kind).toBeUndefined();
-});
-
 test("writeSessionMetadata: binds identity to a not-yet-indexed id (forward reference)", () => {
   const db = openCatalogue(":memory:");
   try {
@@ -46,7 +40,6 @@ test("writeSessionMetadata: binds identity to a not-yet-indexed id (forward refe
     writeSessionMetadata(db, id, parseOpts([
       "--cluster", "pr-watch",
       "--role", "pr-agent",
-      "--kind", "loop",
       "--key", "heroku_dashboard-12080",
       "--title", "#12080 Fix navbar",
     ]), NOW);
@@ -55,7 +48,8 @@ test("writeSessionMetadata: binds identity to a not-yet-indexed id (forward refe
     expect(row).not.toBeNull();
     expect(row!.cluster).toBe("pr-watch");
     expect(row!.role).toBe("pr-agent"); // canonical role axis (ADR-0015)
-    expect(row!.kind).toBe("loop");
+    // kind derives from the role (ADR-0062); pr-agent has no resume_command → "session".
+    expect(row!.kind).toBe("session");
     expect(identityKeyOf(row)).toBe("heroku_dashboard-12080");
     expect(row!.customTitle).toBe("#12080 Fix navbar");
     // The id is recorded as its own resume handle, so `ccs resume` can revive it pre-index.

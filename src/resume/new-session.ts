@@ -5,18 +5,15 @@ import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import {
   openCatalogue,
   setCustomTitle,
-  setKind,
   setKey,
   setParent,
   setRole,
-  setResumeCommand,
   setProject,
   setCluster,
   setResumeId,
   setGusWork,
   setWorkUnitId,
   stampPrFacts,
-  type Kind,
   type RoleDef,
 } from "../catalogue/db.ts";
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
@@ -53,9 +50,10 @@ export interface NewSessionOpts {
   cluster?: string;
   /** The session's role — the canonical identity axis (ADR-0015). */
   role?: string;
-  /** How a loop is re-armed on resume so it comes back running (e.g. `/loop 15m /pr-watch-control`). */
+  /** How a loop is re-armed on resume — DERIVED from the role's role.toml at launch (ADR-0062),
+   * not a per-session flag. Populated internally from roleDef; used only for launch (prompt +
+   * permission mode), never stored (kind/resume_command columns dropped v29). */
   resumeCommand?: string;
-  kind?: Kind;
   project?: string;
   key?: string;
   title?: string;
@@ -95,14 +93,12 @@ function flagValue(args: string[], flag: string): string | undefined {
 }
 
 export function parseOpts(args: string[]): NewSessionOpts {
-  const kindRaw = flagValue(args, "--kind");
   return {
     cluster: flagValue(args, "--cluster"),
-    // `--role` reads best for the fleet ("this is a pr-agent"); `--skill` is accepted as a
-    // synonym since both land in the catalogue `skill` column.
+    // `--role` reads best for the fleet ("this is a pr-agent"); `--skill` is accepted as a synonym.
+    // ADR-0062: --kind and --resume-command are retired — kind + re-arm derive from the role's
+    // role.toml now (a role with a resume_command IS a loop), not per-session flags/columns.
     role: flagValue(args, "--role") ?? flagValue(args, "--skill"),
-    resumeCommand: flagValue(args, "--resume-command"),
-    kind: kindRaw === "loop" ? "loop" : kindRaw === "session" ? "session" : undefined,
     project: flagValue(args, "--project"),
     key: flagValue(args, "--key"),
     title: flagValue(args, "--title"),
@@ -132,8 +128,8 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
     const role = opts.role.replace(/^\//, "");
     setRole(db, id, role, now);
   }
-  if (opts.resumeCommand) setResumeCommand(db, id, opts.resumeCommand, now);
-  if (opts.kind) setKind(db, id, opts.kind, now);
+  // ADR-0062: kind + resume_command are NOT stored — they derive from the session's role
+  // (role.toml). We still stamp `role` (above); rowFrom computes kind/resumeCommand from it.
   if (opts.project) setProject(db, id, opts.project, now);
   if (opts.key) setKey(db, id, opts.key, now);
   if (opts.title) setCustomTitle(db, id, opts.title, now);
@@ -267,9 +263,8 @@ export function newSession(args: string[]): number {
   // goes to stdout (so `ID=$(ccs new-session … --print-id)` works); notes go to stderr.
   if (opts.printId) {
     const tagged = [
-      opts.cluster && `system=${opts.cluster}`,
+      opts.cluster && `cluster=${opts.cluster}`,
       opts.role && `role=${opts.role}`,
-      opts.kind && `kind=${opts.kind}`,
     ]
       .filter(Boolean)
       .join(" ");

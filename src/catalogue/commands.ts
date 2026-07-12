@@ -3,13 +3,11 @@ import { ensureDataDir, CATALOGUE_PATH, DB_PATH } from "../paths.ts";
 import {
   openCatalogue,
   setCustomTitle,
-  setKind,
   setCompleted,
   setArchived,
   setKey,
   setParent,
   setRole,
-  setResumeCommand,
   setGusWork,
   setSessionEpic,
   setStage,
@@ -24,7 +22,6 @@ import {
   getRow,
   getTags,
   identityKeyOf,
-  type Kind,
 } from "./db.ts";
 import { openIndex } from "../index/schema.ts";
 import { titleOf, usageOf, subagentCostOf, type SessionUsage } from "../index/index.ts";
@@ -104,11 +101,8 @@ export function mark(sessionArg: string | undefined, flags: string[]): number {
   const db = openCatalogue(CATALOGUE_PATH());
   const changes: string[] = [];
   try {
-    if (flags.includes("--loop")) {
-      const kind: Kind = off ? "session" : "loop";
-      setKind(db, id, kind, now());
-      changes.push(`kind=${kind}`);
-    }
+    // ADR-0062: `--loop` (setKind) is retired — kind derives from the session's role now, not a
+    // per-session flag. `ccs mark` handles lifecycle (completed/archived) only.
     if (flags.includes("--completed") || flags.includes("--complete")) {
       setCompleted(db, id, !off, now());
       changes.push(`completed=${!off}`);
@@ -413,26 +407,6 @@ export function role(sessionArg: string | undefined, roleName: string | undefine
   try {
     setRole(db, id, off ? null : roleName!.trim().replace(/^\//, ""), now());
     console.log(off ? `cleared role on ${id.slice(0, 8)}…` : `role ${roleName!.trim()} → ${id.slice(0, 8)}…`);
-  } finally {
-    db.close();
-  }
-  return 0;
-}
-
-/** ccs resume-command [<id>|.] "<cmd>" [--off] — set how a loop re-arms on resume (ADR-0015). */
-export function resumeCommand(sessionArg: string | undefined, cmd: string | undefined, flags: string[]): number {
-  const id = resolveSessionId(sessionArg);
-  if (!id) return notInSession();
-  const off = flags.includes("--off");
-  if (!off && (!cmd || !cmd.trim())) {
-    console.error('usage: ccs resume-command [<session-id>|.] "<command>" [--off]');
-    return 1;
-  }
-  ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH());
-  try {
-    setResumeCommand(db, id, off ? null : cmd!.trim(), now());
-    console.log(off ? `cleared resume-command on ${id.slice(0, 8)}…` : `resume-command set → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
   }

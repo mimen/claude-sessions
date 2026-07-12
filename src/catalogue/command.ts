@@ -2,7 +2,6 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import type { InferenceEngine } from "../inference/engine.ts";
 import {
-  setKind,
   setKey,
   setParent,
   setProject,
@@ -37,7 +36,7 @@ export interface SessionMeta {
 
 export interface Mutation {
   readonly sessionId: string;
-  readonly op: "kind" | "key" | "event" | "skill" | "parent" | "project" | "completed" | "archived" | "title" | "tag" | "untag";
+  readonly op: "key" | "event" | "skill" | "parent" | "project" | "completed" | "archived" | "title" | "tag" | "untag";
   /** Resolved value: for `parent`, a target sessionId or null; booleans as "true"/"false". */
   readonly value: string | null;
 }
@@ -50,7 +49,7 @@ const PROMPT =
   "set of mutations that satisfies the instruction, referencing sessions by their NUMBER from the " +
   "list. Never invent numbers; never change anything not asked for. If a FOCUS number is given, " +
   "the instruction is primarily about that session (but you may reference others by number, e.g. " +
-  "for a parent). Ops and their value: kind→'loop'|'session'; event→a slug or 'none'; skill→a " +
+  "for a parent). Ops and their value: event→a slug or 'none'; skill→a " +
   "name or 'none'; project→a project/initiative name (lowercase slug) or 'none'; parent→the " +
   "target session NUMBER or 'none'; completed/archived→'true'|'false'; title→a short custom " +
   "title; tag/untag→an entity name. Respond using the provided JSON schema.";
@@ -131,9 +130,6 @@ export async function runMetadataCommand(
         case "archived":
           value = /^(true|yes|1|done)$/i.test(v ?? "") ? "true" : "false";
           break;
-        case "kind":
-          value = /loop/i.test(v ?? "") ? "loop" : "session";
-          break;
         case "tag":
         case "untag":
           if (cleared) continue;
@@ -155,9 +151,6 @@ export function applyMutations(catalogue: Database, mutations: readonly Mutation
   const counts = new Map<string, number>();
   for (const m of mutations) {
     switch (m.op) {
-      case "kind":
-        setKind(catalogue, m.sessionId, m.value === "loop" ? "loop" : "session", now);
-        break;
       case "key":
       case "event":
         setKey(catalogue, m.sessionId, m.value, now);

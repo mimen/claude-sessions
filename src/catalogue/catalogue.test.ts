@@ -12,7 +12,6 @@ import {
   setCompleted,
   setCustomTitle,
   setKey,
-  setKind,
   setParent,
   setParked,
   setProject,
@@ -51,10 +50,12 @@ test("lifecycle precedence: archived > completed > parked > idle", () => {
   expect(lifecycleOf(getRow(db, "x"))).toBe("archived");
 });
 
-test("kind toggles loop", () => {
+test("kind derives from the role (ADR-0062): no role → 'session'", () => {
+  // kind is no longer a stored column — it derives from the session's role.toml (a role with a
+  // resume_command is a 'loop'). A row with no role (or an unresolvable one) reads as 'session'.
   const db = openCatalogue(":memory:");
-  setKind(db, "s", "loop", NOW);
-  expect(getRow(db, "s")!.kind).toBe("loop");
+  setRole(db, "s", "no-such-role", NOW);
+  expect(getRow(db, "s")!.kind).toBe("session");
 });
 
 test("tags: add, list, reverse lookup", () => {

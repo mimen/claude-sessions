@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { openIndex } from "../index/schema.ts";
-import { openCatalogue, setCluster, setRole, setResumeCommand, setResumeId, setCompleted, setArchived } from "../catalogue/db.ts";
+import { openCatalogue, setCluster, setRole, setResumeId, setCompleted, setArchived } from "../catalogue/db.ts";
 import { resumeClusterEntry, planClusterMembers } from "./resume-cluster.ts";
 import type { CatalogueRow } from "../catalogue/db.ts";
 import type { Bridge } from "../cmux/bridge.ts";
@@ -37,7 +37,6 @@ test("resume-cluster fans out over members; dry-run resumes the closed ones", ()
       setCluster(cat, id, "pr-watch", NOW);
     }
     setRole(cat, "ctrl", "control", NOW);
-    setResumeCommand(cat, "ctrl", "/loop 15m /pr-watch-control", NOW);
     setRole(cat, "worker", "pr-agent", NOW);
 
     const summary = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true });

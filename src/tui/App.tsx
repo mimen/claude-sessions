@@ -31,7 +31,7 @@ import { SectionCard } from "./SectionCard.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
-import { getAll, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle, identityKeyOf } from "../catalogue/db.ts";
+import { getAll, lifecycleOf, setCompleted, setArchived, setCustomTitle, identityKeyOf } from "../catalogue/db.ts";
 import { allGroupingsAcrossClusters } from "../state/groupings.ts";
 import { describe as describeDisposition } from "../catalogue/disposition.ts";
 import { loadPrefs, savePrefs } from "./prefs.ts";
@@ -672,12 +672,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         cycleEngine();
         setStatus(`inference engine → ${next}`);
       }
-    } else if (input === "L")
-      applyMark(
-        (c, id, now) => setKind(c, id, catMap.get(id)?.kind === "loop" ? "session" : "loop", now),
-        "toggled loop",
-      );
-    else if (input === "C")
+    } else if (input === "C")
       applyMark((c, id, now) => setCompleted(c, id, !catMap.get(id)?.completed, now), "toggled completed");
     else if (input === "X")
       applyMark((c, id, now) => setArchived(c, id, !catMap.get(id)?.archived, now), "toggled archived");
