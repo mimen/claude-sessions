@@ -2,11 +2,9 @@ import { expect, test, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseChangelog, changelogSince, renderDelta, catchUp } from "./changelog.ts";
+import { parseChangelog, changelogSince, renderDelta, catchUp, validateChangelog } from "./changelog.ts";
 
 const SAMPLE = `# pr-watch CHANGELOG
-
-version: 3
 
 ## 2026-07-09 — screenshots auto-invalidate on UI change (version 3)
 requiresRestart: false
@@ -21,11 +19,18 @@ requiresRestart: false
 Adopt prBranch from the board instead of deriving it.
 `;
 
-test("parseChangelog reads the current version and every entry oldest-first", () => {
+test("parseChangelog: current version is the highest entry, entries oldest-first", () => {
   const log = parseChangelog(SAMPLE);
   expect(log.currentVersion).toBe(3);
   expect(log.entries.map((e) => e.version)).toEqual([1, 2, 3]);
   expect(log.entries[2]!.title).toContain("screenshots auto-invalidate");
+});
+
+test("parseChangelog: current version is derived from entries, NOT a drifting header", () => {
+  // An author added a (version 3) entry but forgot to bump a stale `version: 1` header.
+  // The version must follow the entries so the new entry is never silently skipped.
+  const drifted = `# c\nversion: 1\n\n## a (version 1)\nbody\n\n## b (version 2)\nbody\n\n## c (version 3)\nbody\n`;
+  expect(parseChangelog(drifted).currentVersion).toBe(3);
 });
 
 test("parseChangelog captures requiresRestart per entry", () => {
@@ -42,11 +47,12 @@ test("parseChangelog captures the entry body up to the next entry", () => {
   expect(log.entries[0]!.body).not.toContain("worktree relocated"); // stops at the next heading
 });
 
-test("empty / headerless text degrades to version 0 and no entries", () => {
+test("empty text → version 0 / no entries; a lone entry takes its own version", () => {
   expect(parseChangelog("")).toEqual({ currentVersion: 0, entries: [] });
-  const noHeader = parseChangelog("## a thing (version 2)\nrequiresRestart: false\nbody");
-  expect(noHeader.currentVersion).toBe(0);
-  expect(noHeader.entries).toHaveLength(1);
+  // A lone entry with no title header still parses; version comes from the entry itself.
+  const oneEntry = parseChangelog("## a thing (version 2)\nrequiresRestart: false\nbody");
+  expect(oneEntry.currentVersion).toBe(2);
+  expect(oneEntry.entries).toHaveLength(1);
 });
 
 test("changelogSince returns only entries newer than the seen version", () => {
@@ -79,6 +85,33 @@ test("renderDelta surfaces version transition, count, restart note, and each ent
   expect(text).toContain("[requiresRestart]");
   expect(text).toContain("screenshots auto-invalidate"); // v3 title present
   expect(text).not.toContain("prBranch"); // v1 is below the seen floor → excluded
+});
+
+// --- validateChangelog (authoring backstop, surfaced by `ccs hooks lint`) --------
+test("validateChangelog: a clean 1,2,3 run has no problems", () => {
+  expect(validateChangelog(parseChangelog(SAMPLE))).toEqual([]);
+});
+
+test("validateChangelog: a skipped number is flagged", () => {
+  const gap = parseChangelog("## a (version 1)\nbody\n\n## c (version 3)\nbody\n");
+  const probs = validateChangelog(gap);
+  expect(probs.length).toBe(1);
+  expect(probs[0]).toContain("out of sequence");
+});
+
+test("validateChangelog: a duplicate version is flagged", () => {
+  const dup = parseChangelog("## a (version 1)\nbody\n\n## b (version 2)\nbody\n\n## c (version 2)\nbody\n");
+  const probs = validateChangelog(dup);
+  expect(probs.some((p) => p.includes("duplicate version 2"))).toBe(true);
+});
+
+test("validateChangelog: a run that doesn't start at 1 is flagged", () => {
+  const probs = validateChangelog(parseChangelog("## a (version 2)\nbody\n"));
+  expect(probs[0]).toContain("expected 1");
+});
+
+test("validateChangelog: an empty changelog is valid", () => {
+  expect(validateChangelog(parseChangelog(""))).toEqual([]);
 });
 
 // --- catchUp core (shared by the start action + `ccs catch-up`) -------------------

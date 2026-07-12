@@ -18,6 +18,7 @@ import { resolveConfig } from "./resolve-config.ts";
 import { liveResolveCtx } from "./compose-claude-md.ts";
 import { knownHookTypes } from "./hook-types.ts";
 import { classifyFields } from "./meta-fields.ts";
+import { readClusterChangelog, validateChangelog } from "../cluster/changelog.ts";
 import { knownStartActions } from "./start-actions.ts";
 
 function resolveSessionId(raw: string | undefined): string | undefined {
@@ -127,6 +128,22 @@ function lint(): number {
   };
 
   for (const r of roots) walk(r, 0);
+
+  // Cluster CHANGELOG version sequences (ADR-0058): a dup/gap/non-positive version would break the
+  // catch-up stamp math silently, so surface it here where a misnamed hook file also surfaces.
+  const clustersDir = join(ccsConfigRoot(), "clusters");
+  if (existsSync(clustersDir)) {
+    let clusters: string[] = [];
+    try { clusters = readdirSync(clustersDir); } catch { clusters = []; }
+    for (const c of clusters) {
+      if (!existsSync(join(clustersDir, c, "CHANGELOG.md"))) continue;
+      const log = readClusterChangelog(c);
+      if (!log) continue;
+      checked++;
+      for (const p of validateChangelog(log)) problems.push(`clusters/${c}/CHANGELOG.md: ${p}`);
+    }
+  }
+
   if (problems.length === 0) {
     console.log(`ccs hooks lint: OK — ${checked} hook file(s), no problems`);
     return 0;

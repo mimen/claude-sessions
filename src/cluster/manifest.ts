@@ -60,7 +60,9 @@ const ManifestSchema = z.object({
   name: z.string(),
   engine: z.string().optional(),
   sense: z.string().optional(),
-  /** The cluster's own monotonic version (independent of ccs semver). Optional during rollout. */
+  /** ADVISORY / legacy only. The authoritative cluster version is the highest entry in the cluster
+   * CHANGELOG (see changelog.ts) — deriving it there means "add the next-numbered entry" is the one
+   * authoring action, with no second number to keep in sync. Parsed for tolerance, never gated on. */
   version: z.union([z.string(), z.number()]).optional(),
   /** Semver range the cluster depends on, e.g. ">=0.1.0". Optional (legacy clusters lack it). */
   requires_ccs: z.string().optional(),
@@ -73,7 +75,8 @@ export interface ClusterManifest {
   engineDir: string | null;
   /** Absolute path to the sense entry, or null. */
   sensePath: string | null;
-  /** The cluster's declared version as a string (normalized from a number), or null. */
+  /** Advisory/legacy manifest `version` if present (normalized to a string), else null. NOT the
+   * authoritative cluster version — that's the highest CHANGELOG entry. Kept only for tolerance. */
   version: string | null;
   /** The raw `requires_ccs` string as authored, or null. */
   requiresCcs: string | null;

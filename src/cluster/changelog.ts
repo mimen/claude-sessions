@@ -38,17 +38,22 @@ export interface Changelog {
   entries: ChangelogEntry[];
 }
 
-const HEADER_RE = /(?:^|\n)version:\s*(\d+)/i;
 // "## <anything> (version N)" — the trailing "(version N)" is the machine-read key; the rest of
 // the heading is the human title. Matches pr-watch's "## <date> — <title> (loopVersion N)" once
 // the cluster renames loopVersion→version.
 const ENTRY_RE = /^##\s+(.+?)\s*\(version\s+(\d+)\)\s*$/gim;
 
-/** Parse CHANGELOG text into a structured Changelog. Tolerant: no header → version 0, no entries → []. */
+/**
+ * Parse CHANGELOG text into a structured Changelog. Tolerant: no entries → version 0.
+ *
+ * The current version is the HIGHEST entry version, NOT a separate header line. This is
+ * deliberate (the authoring-safety fix): a hand-maintained `version:` header can drift from the
+ * entries — an author adds `## … (version 3)` but forgets to bump the header — and the delta math
+ * would then silently skip the new entry, the exact lost-propagation failure ADR-0058 exists to
+ * prevent. Deriving the version from the entries makes "add the next-numbered entry" the ONE and
+ * only authoring action; there is nothing to keep in sync.
+ */
 export function parseChangelog(text: string): Changelog {
-  const headerMatch = text.match(HEADER_RE);
-  const currentVersion = headerMatch && headerMatch[1] ? parseInt(headerMatch[1], 10) : 0;
-
   const entries: ChangelogEntry[] = [];
   const matches = [...text.matchAll(ENTRY_RE)];
   for (let i = 0; i < matches.length; i++) {
@@ -62,7 +67,32 @@ export function parseChangelog(text: string): Changelog {
     entries.push({ version, title, requiresRestart, body });
   }
   entries.sort((a, b) => a.version - b.version);
+  const currentVersion = entries.length > 0 ? entries[entries.length - 1]!.version : 0;
   return { currentVersion, entries };
+}
+
+/**
+ * Validate a parsed changelog's version sequence — the mechanical backstop that makes authoring
+ * unambiguous (surfaced by `ccs hooks lint`). Entry versions must be a strictly-increasing run of
+ * positive integers 1,2,3,… with none duplicated, skipped, or ≤0. A gap or dup would make an
+ * agent's stamp compare wrong (a skipped number is a version no one can ever "catch up past"; a
+ * dup means two entries share a key), so we refuse it loudly rather than propagate it silently.
+ * Returns a list of human-readable problems (empty = valid).
+ */
+export function validateChangelog(log: Changelog): string[] {
+  const problems: string[] = [];
+  const seen = new Set<number>();
+  let expected = 1;
+  for (const e of log.entries) {
+    if (e.version <= 0) { problems.push(`entry "${e.title}" has a non-positive version ${e.version}`); continue; }
+    if (seen.has(e.version)) { problems.push(`duplicate version ${e.version} ("${e.title}")`); continue; }
+    seen.add(e.version);
+    if (e.version !== expected) {
+      problems.push(`version ${e.version} ("${e.title}") is out of sequence — expected ${expected} (numbers must run 1,2,3,… with no gaps)`);
+    }
+    expected = Math.max(expected, e.version) + 1;
+  }
+  return problems;
 }
 
 /** Read a cluster's CHANGELOG.md. Returns null when the file is absent (nothing to catch up on). */
