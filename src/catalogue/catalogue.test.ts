@@ -17,6 +17,8 @@ import {
   setParked,
   setProject,
   setCluster,
+  setRole,
+  sessionsForRole,
   sessionsForKey,
   sessionsForProject,
   sessionsForCluster,
@@ -139,6 +141,19 @@ test("cluster: set, round-trip, clear, reverse lookup", () => {
   setCluster(db, "s1", null, NOW); // clear
   expect(getRow(db, "s1")!.cluster).toBeNull();
   expect(sessionsForCluster(db, "pr-watch")).toEqual(["s2"]);
+});
+
+test("MRU order (ADR-0073): identity→session lookups return most-recently-used first", () => {
+  const db = openCatalogue(":memory:");
+  // Three same-role sessions with ascending updated_at; newest must come first.
+  setRole(db, "old", "pr-agent", "2026-07-01T00:00:00Z");
+  setRole(db, "mid", "pr-agent", "2026-07-05T00:00:00Z");
+  setRole(db, "new", "pr-agent", "2026-07-10T00:00:00Z");
+  expect(sessionsForRole(db, "pr-agent")).toEqual(["new", "mid", "old"]);
+  // Same for the cluster resolver.
+  setCluster(db, "old", "pr-watch", "2026-07-01T00:00:00Z");
+  setCluster(db, "new", "pr-watch", "2026-07-10T00:00:00Z");
+  expect(sessionsForCluster(db, "pr-watch")).toEqual(["new", "old"]);
 });
 
 test("gusWork: set, round-trip, clear, reverse lookup (a work item may span sessions)", () => {

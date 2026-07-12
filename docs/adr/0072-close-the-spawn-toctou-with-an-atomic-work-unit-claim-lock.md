@@ -1,5 +1,12 @@
 # Close the spawn TOCTOU with an atomic work-unit claim (a lock), not just a re-check
 
+> **RETIRED / WON'T BUILD (superseded by ADR-0073, 2026-07-12).** This ADR closed a TOCTOU race in
+> the one-embodiment REFUSAL. ADR-0073 removed that refusal entirely: a second embodiment of a
+> work-unit is now tolerated (resume prefers the most-recently-used session and warns; the atomic
+> inbox drain keeps a transient twin harmless), so there is no refusal left to race against and no
+> lock to add. The lock's liveness/expiry/steal protocol is machinery for a guarantee we no longer
+> make. Kept for the design trail only.
+
 Decided with Milad 2026-07-11. The last genuine design decision in the production-readiness document: the
 one-embodiment check has a Time-Of-Check-to-Time-Of-Use race that ADR-0057 (stable work-unit id) and
 ADR-0054 (fail-closed liveness) don't close. Uses the lock-as-a-meta-field primitive from ADR-0064.

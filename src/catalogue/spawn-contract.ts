@@ -82,23 +82,22 @@ const PROTECTED_BRANCHES = new Set(["main", "master", "develop", "trunk"]);
 /**
  * The born-correct checks for a spawn. Returns an error string (caller errors out) or null.
  *
- *  - one-embodiment (ADR-0032): refuse if a live session already owns this work-unit.
  *  - correct-worktree (ADR-0047): a worker with PR facts and a cwd must launch in a git
  *    worktree that is NOT on a protected branch (it can't build a PR on main). We can't verify
  *    the exact PR branch from number+repo alone, so we assert "on a feature branch," not "the
  *    right one" — an honest guard, not an over-claim.
+ *
+ * NOTE (ADR-0073): the one-embodiment REFUSAL was removed. A second embodiment of a work-unit is
+ * no longer a spawn error — it's a tolerated, self-healing state: resume prefers the most-recently-
+ * used session (MRU) and warns on live duplicates, and the atomic inbox drain (ADR-0033) makes a
+ * transient twin harmless. Only born-WRONG configuration (bad worktree) is a hard error now.
  */
 export function spawnContractError(
   facts: SpawnFacts,
-  liveWorkUnits: ReadonlySet<string>,
   worktree: WorktreeState | null,
 ): string | null {
   const unit = spawnWorkUnit(facts);
   if (!unit) return null; // no work-unit → core role, contract N/A
-
-  if (liveWorkUnits.has(unit)) {
-    return `a live session already owns work-unit ${unit} (one responsibility, one embodiment — reuse it, don't spawn a second)`;
-  }
 
   // Worktree check only when a cwd is given AND this is a PR worker (a git worktree is expected).
   if (facts.cwd && facts.prNumber != null && worktree) {

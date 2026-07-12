@@ -3,7 +3,6 @@ import { spawnWorkUnit, rowWorkUnit, workUnitKey, workUnitPath, spawnContractErr
 import { workUnitOf } from "../hooks/resolve-levels.ts";
 import type { CatalogueRow } from "./db.ts";
 
-const NONE: ReadonlySet<string> = new Set();
 const gitFeature: WorktreeState = { isGitWorktree: true, branch: "feature/fix-navbar" };
 
 function row(over: Partial<CatalogueRow>): CatalogueRow {
@@ -49,38 +48,34 @@ test("DRIFT FIX (U4/P0): the hook-level dir key == the inbox dir key for a slash
 });
 
 test("core role (no work-unit) has no contract — always passes", () => {
-  expect(spawnContractError({ cwd: "/roles/control" }, NONE, null)).toBeNull();
+  expect(spawnContractError({ cwd: "/roles/control" }, null)).toBeNull();
 });
 
-test("one-embodiment: refuse when a live session already owns the work-unit", () => {
-  const facts: SpawnFacts = { prRepo: "heroku/dashboard", prNumber: 12080, cwd: "/wt", };
-  const live = new Set(["pr:heroku/dashboard#12080"]);
-  expect(spawnContractError(facts, live, gitFeature)).toContain("already owns");
-});
-
-test("one-embodiment: a DIFFERENT live work-unit doesn't block", () => {
+test("duplicate embodiment is ALLOWED (ADR-0073): a PR worker spawns even on a valid worktree", () => {
+  // The one-embodiment REFUSAL is gone — a second session for the same work-unit is tolerated
+  // (resume prefers the MRU session + warns; atomic drain keeps it harmless). Only worktree
+  // correctness is gated now, so a well-formed spawn passes regardless of any live twin.
   const facts: SpawnFacts = { prRepo: "heroku/dashboard", prNumber: 12080, cwd: "/wt" };
-  const live = new Set(["pr:heroku/dashboard#99999"]);
-  expect(spawnContractError(facts, live, gitFeature)).toBeNull();
+  expect(spawnContractError(facts, gitFeature)).toBeNull();
 });
 
 test("correct-worktree: refuse a PR worker whose cwd isn't a git worktree", () => {
   const facts: SpawnFacts = { prRepo: "a/b", prNumber: 1, cwd: "/not/git" };
-  expect(spawnContractError(facts, NONE, { isGitWorktree: false, branch: null })).toContain("not a git worktree");
+  expect(spawnContractError(facts, { isGitWorktree: false, branch: null })).toContain("not a git worktree");
 });
 
 test("correct-worktree: refuse a PR worker on a protected branch (main)", () => {
   const facts: SpawnFacts = { prRepo: "a/b", prNumber: 1, cwd: "/wt" };
-  expect(spawnContractError(facts, NONE, { isGitWorktree: true, branch: "main" })).toContain("protected branch");
+  expect(spawnContractError(facts, { isGitWorktree: true, branch: "main" })).toContain("protected branch");
 });
 
 test("correct-worktree: a feature branch passes", () => {
   const facts: SpawnFacts = { prRepo: "a/b", prNumber: 1, cwd: "/wt" };
-  expect(spawnContractError(facts, NONE, gitFeature)).toBeNull();
+  expect(spawnContractError(facts, gitFeature)).toBeNull();
 });
 
 test("a W-only worker (no PR) skips the worktree/branch check", () => {
   // gus-work without a PR number → no git-worktree expectation (may be pre-PR work).
   const facts: SpawnFacts = { gusWork: "W-1", cwd: "/anywhere" };
-  expect(spawnContractError(facts, NONE, null)).toBeNull();
+  expect(spawnContractError(facts, null)).toBeNull();
 });

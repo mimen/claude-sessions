@@ -624,9 +624,15 @@ export function sessionsForWorkUnit(db: Database, workUnitId: string): string[] 
 }
 
 /** Reverse lookup: sessions assigned to a role (the canonical identity axis, ADR-0015). */
+// MRU order (ADR-0073): identity→session lookups return most-recently-used first (updated_at
+// DESC, NULLs last, sessionId as a stable tiebreak) so resume deterministically reaches for the
+// FRESHEST embodiment of an identity, not an arbitrary one. This is what makes tolerating a
+// duplicate embodiment safe — the next resume collapses toward the active session.
+const MRU_ORDER = "ORDER BY updated_at DESC NULLS LAST, session_id";
+
 export function sessionsForRole(db: Database, role: string): string[] {
   return (
-    db.query("SELECT session_id FROM catalogue WHERE role = $r").all({ $r: role }) as {
+    db.query(`SELECT session_id FROM catalogue WHERE role = $r ${MRU_ORDER}`).all({ $r: role }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);
@@ -636,10 +642,10 @@ export function sessionsForRole(db: Database, role: string): string[] {
 export function sessionsForPr(db: Database, prNumber: number, prRepo?: string): string[] {
   const rows = prRepo
     ? (db
-        .query("SELECT session_id FROM catalogue WHERE pr_number = $n AND pr_repo = $repo")
+        .query(`SELECT session_id FROM catalogue WHERE pr_number = $n AND pr_repo = $repo ${MRU_ORDER}`)
         .all({ $n: prNumber, $repo: prRepo }) as { session_id: string }[])
     : (db
-        .query("SELECT session_id FROM catalogue WHERE pr_number = $n")
+        .query(`SELECT session_id FROM catalogue WHERE pr_number = $n ${MRU_ORDER}`)
         .all({ $n: prNumber }) as { session_id: string }[]);
   return rows.map((r) => r.session_id);
 }
@@ -741,7 +747,7 @@ export function sessionsForProject(db: Database, project: string): string[] {
 /** Reverse lookup: which sessions are assigned to this cluster grouping. */
 export function sessionsForCluster(db: Database, cluster: string): string[] {
   return (
-    db.query("SELECT session_id FROM catalogue WHERE cluster = $c").all({ $c: cluster }) as {
+    db.query(`SELECT session_id FROM catalogue WHERE cluster = $c ${MRU_ORDER}`).all({ $c: cluster }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);

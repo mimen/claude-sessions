@@ -12,7 +12,8 @@ import type { Database } from "bun:sqlite";
 import { sessionById, type SessionRow } from "../index/index.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import { liveBridge } from "../cmux/live.ts";
-import { getRow } from "../catalogue/db.ts";
+import { getRow, getAll, lifecycleOf } from "../catalogue/db.ts";
+import { identityKey } from "../catalogue/lineage.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
 import { pushRenderOps } from "../catalogue/sync-tabs.ts";
@@ -90,6 +91,10 @@ export function resumeSessionEntry(
 
   if (plan.action === "skip") return { status: "already-open" };
   if (plan.action === "fail") return { status: "cwd-unreadable", error: plan.error };
+  // ADR-0073: a second embodiment of an identity is TOLERATED, not refused — but surface it so the
+  // operator can close a stale twin if they want. Best-effort + non-blocking: we're about to open
+  // this (MRU) session; if OTHER live sessions share its identity-key, just warn.
+  if (cat) warnLiveSiblings(catalogueDb, bridge, cat.sessionId, identityKey(cat));
   if (opts.dryRun) return { status: "resumed", note: plan.note };
   return executeResumePlan(plan, { cmuxBin: opts.cmuxBin, focus: opts.focus })
     ? { status: "resumed", note: plan.note }
@@ -104,6 +109,36 @@ export function resumeSessionEntry(
  * hook remains the steady-state owner; this is just the first paint. Best-effort: a paint miss
  * (cmux may not have registered the new surface yet) is harmless — the hook repaints on boot.
  */
+/**
+ * Warn (never block) when OTHER live sessions share the identity we're about to resume (ADR-0073).
+ * Duplicate embodiment is tolerated — MRU resume + atomic drain make it harmless — but a lingering
+ * twin is worth flagging so the operator/control can close it. Best-effort: catalogue-only scan
+ * against the same liveness bridge; any error is swallowed (a warning must never fail a resume).
+ */
+function warnLiveSiblings(catalogueDb: Database, bridge: Bridge, selfId: string, key: string | null): void {
+  if (!key) return; // no identity-key (no role/work-unit) → nothing to compare
+  try {
+    const siblings: string[] = [];
+    for (const [sid, row] of getAll(catalogueDb)) {
+      if (sid === selfId) continue;
+      const lc = lifecycleOf(row);
+      if (lc === "completed" || lc === "archived") continue; // retired can't be a live twin
+      if (identityKey(row) !== key) continue;
+      if (bridge.isOpen(sid) || (row.resumeId && bridge.isOpen(row.resumeId))) siblings.push(sid);
+    }
+    if (siblings.length > 0) {
+      const shown = siblings.slice(0, 5).map((s) => s.slice(0, 8)).join(", ");
+      const more = siblings.length > 5 ? `, +${siblings.length - 5} more` : "";
+      console.warn(
+        `ccs: ${siblings.length} other live session(s) share identity "${key}" (${shown}${more}). ` +
+          `Resuming the most-recently-used one; close the stale twin(s) if unwanted (ccs won't).`,
+      );
+    }
+  } catch {
+    /* warning is best-effort — never let it block a resume */
+  }
+}
+
 export function executeResumePlan(
   plan: ResumePlan,
   opts: { cmuxBin?: string; focus?: boolean } = {},

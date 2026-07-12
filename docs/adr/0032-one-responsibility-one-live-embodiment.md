@@ -1,5 +1,12 @@
 # One responsibility = one live embodiment — best-effort detection + atomic drain, not a lease
 
+> **REFINED by ADR-0073 (2026-07-12).** This ADR's Mode-A posture (best-effort detection + atomic
+> drain, no lease) still holds. But it framed single-embodiment as an *invariant* ("we forbid it in
+> practice"), which hardened into a `new-session` refusal. ADR-0073 demotes that to a *preference*:
+> a second embodiment is tolerated, resume prefers the most-recently-used session and warns on live
+> duplicates, and the atomic drain (still load-bearing) keeps a twin harmless. Read 0073 for the
+> current rule.
+
 ADR-0024 allows multiple sessions per identity as a future possibility; ADR-0026
 explicitly punted the drain-coordination that would require. Both design reviews flagged
 this as the sharpest near-term risk: two live sessions sharing one responsibility share

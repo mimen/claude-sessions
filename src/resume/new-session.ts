@@ -22,12 +22,10 @@ import { resolveRole } from "../roles/role-files.ts";
 import { shellQuote } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
 import { execFileSync } from "node:child_process";
-import { spawnContractError, rowWorkUnit, type SpawnFacts, type WorktreeState } from "../catalogue/spawn-contract.ts";
+import { spawnContractError, type SpawnFacts, type WorktreeState } from "../catalogue/spawn-contract.ts";
 import { interpretSpawnLocation, syntheticRow, type SpawnLocationConfig } from "../catalogue/spawn-location.ts";
 import { resolveConfig } from "../hooks/resolve-config.ts";
 import { liveResolveCtx } from "../hooks/compose-claude-md.ts";
-import { openSessionIds } from "../cmux/liveness.ts";
-import { getAll, lifecycleOf } from "../catalogue/db.ts";
 
 /**
  * `ccs new-session` — mint a session id, bind its catalogue metadata AT BIRTH, then either
@@ -305,38 +303,16 @@ function resolveSpawnLocationCwd(
 }
 
 /**
- * Gather the impure spawn facts (live work-units + the cwd's git branch) and run the pure
- * contract (ADR-0047). Best-effort probes: a probe that THROWS returns "unknown" and never
- * blocks the spawn — only a positively-observed conflict (a live duplicate, a protected-branch
- * worktree) is a hard error. Returns an error string or null.
+ * Gather the impure spawn facts (the cwd's git branch) and run the pure contract (ADR-0047).
+ * Best-effort probe: a probe that THROWS returns "unknown" and never blocks the spawn — only a
+ * positively-observed born-WRONG configuration (a protected-branch worktree) is a hard error.
+ *
+ * NOTE (ADR-0073): this no longer gathers live work-units or refuses a second embodiment. A
+ * duplicate embodiment is tolerated (resume prefers the MRU session and warns; atomic drain keeps
+ * it harmless), so the contract only guards worktree correctness now. Returns an error or null.
  */
 function checkSpawnContract(opts: NewSessionOpts): string | null {
   const facts: SpawnFacts = { gusWork: opts.gusWork, prNumber: opts.prNumber, prRepo: opts.prRepo, cwd: opts.cwd };
-
-  // Live work-units: map every OPEN session's row to its work-unit key. A probe failure yields
-  // an empty set (don't block on it).
-  const live = new Set<string>();
-  try {
-    const openIds = openSessionIds();
-    if (openIds.size > 0) {
-      const db = openCatalogue(CATALOGUE_PATH());
-      try {
-        for (const [sid, row] of getAll(db)) {
-          if (!openIds.has(sid)) continue;
-          const lc = lifecycleOf(row);
-          if (lc === "completed" || lc === "archived") continue; // retired doesn't hold a unit
-          // TODO(ADR-0057): this uses the derived-string rowWorkUnit(). The canonical path is now
-          // the stable work-unit id (row.workUnitId). This will migrate to check workUnitId instead.
-          const u = rowWorkUnit(row);
-          if (u) live.add(u);
-        }
-      } finally {
-        db.close();
-      }
-    }
-  } catch {
-    /* liveness/catalogue unreadable — leave `live` empty, don't block */
-  }
 
   // Worktree state: only probed when a cwd + PR are given (a worker). A git failure → unknown.
   let worktree: WorktreeState | null = null;
@@ -344,7 +320,7 @@ function checkSpawnContract(opts: NewSessionOpts): string | null {
     worktree = probeWorktree(opts.cwd);
   }
 
-  return spawnContractError(facts, live, worktree);
+  return spawnContractError(facts, worktree);
 }
 
 /** Probe a cwd's git worktree state (best-effort). Never throws. */
