@@ -19,7 +19,7 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   system: null,
   gusWork: null,
   workUnitId: null,
-  epicId: null, phase: null, statusLine: null, meta: {}, stage: null, activity: null,
+  epicId: null, statusLine: null, meta: {}, stage: null, activity: null,
   notes: null,
   updatedAt: null,
   prNumber: null,
@@ -51,7 +51,7 @@ test("renderTab: session with key in description", () => {
     key: "Q1-planning",
     system: "pr-watch",
     gusWork: null,
-    epicId: null, phase: null, statusLine: null, meta: {}, stage: null, activity: null,
+    epicId: null, statusLine: null, meta: {}, stage: null, activity: null,
   });
   const ops = renderTab(r, "session");
   expect(ops.description).not.toContain("pr-watch"); // cluster name dropped as noise
@@ -105,13 +105,8 @@ test("renderTab: activity overlays the stage keeping the stage word (stage × ac
   expect(renderTab(row({ stage: "approved", activity: "fixing" }), "session").statusPill?.color).toBe("#ff6f22"); // fixing color wins
 });
 
-test("renderTab: legacy single-phase rows still render (pre-v19 fallback)", () => {
-  expect(renderTab(row({ phase: "building" }), "session").statusPill?.label).toBe("building");
-  expect(renderTab(row({ phase: "needs-you" }), "session").statusPill?.label).toBe("needs you");
-});
-
-test("renderTab: no phase → falls back to lifecycle pill (parked)", () => {
-  const r = row({ phase: null, parkedTaskId: "T-1" });
+test("renderTab: no stage → falls back to lifecycle pill (parked)", () => {
+  const r = row({ parkedTaskId: "T-1" });
   const ops = renderTab(r, "session");
   expect(ops.statusPill?.label).toBe("parked");
 });

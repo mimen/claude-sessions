@@ -12,7 +12,6 @@ import {
   setResumeCommand,
   setGusWork,
   setSessionEpic,
-  setPhase,
   setStage,
   setActivity,
   setStatusLine,
@@ -170,25 +169,6 @@ export function key(sessionArg: string | undefined, slug: string | undefined, fl
   return 0;
 }
 
-/** Set (or clear, with --off) the session's free-form PER-SYSTEM phase (current activity). */
-export function phase(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
-  const id = resolveSessionId(sessionArg);
-  if (!id) return notInSession();
-  const off = flags.includes("--off");
-  if (!off && (!value || !value.trim())) {
-    console.error("usage: ccs phase [<session-id>|.] <phase> | --off");
-    return 1;
-  }
-  ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH());
-  try {
-    setPhase(db, id, off ? null : value!.trim(), now());
-    console.log(off ? `cleared phase on ${id.slice(0, 8)}…` : `phase ${value!.trim()} → ${id.slice(0, 8)}…`);
-  } finally {
-    db.close();
-  }
-  return 0;
-}
 
 /**
  * `ccs status [<id>|.] "<freeform line>" | --off` — set a short freeform status a session writes
@@ -489,7 +469,6 @@ export function meta(sessionArg: string | undefined): number {
     );
     if (row?.system) console.log(`  system: ${row.system}`);
     if (row?.role) console.log(`  role: ${row.role}`);
-    if (row?.phase) console.log(`  phase: ${row.phase}`);
     if (row?.parentSessionId) console.log(`  parent: ${labelFor(row.parentSessionId)}`);
     if (children.length) {
       console.log(`  children: ${children.length}`);

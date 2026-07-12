@@ -9,7 +9,6 @@ test("parseOpts: reads every flag, --role and --skill are synonyms", () => {
     "--system", "pr-watch",
     "--role", "pr-agent",
     "--kind", "loop",
-    "--phase", "building",
     "--project", "metered-pricing",
     "--key", "heroku_dashboard-12080",
     "--title", "#12080 Fix navbar",
@@ -22,7 +21,6 @@ test("parseOpts: reads every flag, --role and --skill are synonyms", () => {
   expect(o.system).toBe("pr-watch");
   expect(o.role).toBe("pr-agent");
   expect(o.kind).toBe("loop");
-  expect(o.phase).toBe("building");
   expect(o.project).toBe("metered-pricing");
   expect(o.key).toBe("heroku_dashboard-12080");
   expect(o.title).toBe("#12080 Fix navbar");
@@ -49,7 +47,6 @@ test("writeSessionMetadata: binds identity to a not-yet-indexed id (forward refe
       "--system", "pr-watch",
       "--role", "pr-agent",
       "--kind", "loop",
-      "--phase", "building",
       "--key", "heroku_dashboard-12080",
       "--title", "#12080 Fix navbar",
     ]), NOW);
@@ -59,7 +56,6 @@ test("writeSessionMetadata: binds identity to a not-yet-indexed id (forward refe
     expect(row!.system).toBe("pr-watch");
     expect(row!.role).toBe("pr-agent"); // canonical role axis (ADR-0015)
     expect(row!.kind).toBe("loop");
-    expect(row!.phase).toBe("building");
     expect(identityKeyOf(row)).toBe("heroku_dashboard-12080");
     expect(row!.customTitle).toBe("#12080 Fix navbar");
     // The id is recorded as its own resume handle, so `ccs resume` can revive it pre-index.
@@ -126,7 +122,6 @@ test("writeSessionMetadata: only the provided fields are written (no clobber to 
     writeSessionMetadata(db, id, parseOpts(["--system", "pr-watch"]), NOW);
     const row = getRow(db, id)!;
     expect(row.system).toBe("pr-watch");
-    expect(row.phase).toBeNull();
     expect(row.customTitle).toBeNull();
     // A bare new session is idle by default (nothing set completed/archived/parked).
     expect(lifecycleOf(row)).toBe("idle");

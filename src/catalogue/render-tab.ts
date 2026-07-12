@@ -94,50 +94,11 @@ function renderLoop(row: CatalogueRow): TabRenderOps {
     row.customTitle || row.role || identityKeyOf(row) || row.sessionId.slice(0, 8);
   const description = buildLoopDescription(row);
   const color = "Purple";
-  // A loop's pill is its role-specific glanceable status (control health / concierge queue / eval
-  // grade), engine-sensed into `phase` (free-form per-system activity, ADR). Falls back to the
-  // generic lifecycle pill (parked/done) when the engine hasn't written a role status.
-  const statusPill = computeLoopPill(row) ?? computeLifecyclePill(row);
+  // A loop's pill is just the generic lifecycle pill (parked/done). The old role-specific
+  // "sensed status" pill (control health / eval grade) rode on the free-form `phase` column,
+  // which is retired (ADR-0059) — that pill wasn't intentional functionality, so it's gone.
+  const statusPill = computeLifecyclePill(row);
   return { title, description, color, statusPill };
-}
-
-/**
- * A core-role (loop) pill: the engine senses a short status into `phase` and this interprets it
- * per-role for color + icon. The LABEL is whatever the engine wrote (dynamic: "3 dead", "B+ ↑",
- * "4 decisions"); this only decides how it's colored. Returns null when phase is empty (caller
- * falls back to lifecycle). Same `ccs_lifecycle` key as the other pills so they never stack.
- */
-function computeLoopPill(row: CatalogueRow): StatusPill | null {
-  const raw = row.phase?.trim();
-  if (!raw) return null;
-  const v = raw.toLowerCase();
-  let color = "#8e8e93"; // neutral default
-  let icon = "circle";
-  switch (row.role) {
-    case "control":
-      // driving = healthy; "N dead" = workers need reviving (you own that now); failed = degraded.
-      if (/fail|degrad|down/.test(v)) { color = "#ff3b30"; icon = "exclamationmark.triangle"; }
-      else if (/dead|stale/.test(v)) { color = "#ff9500"; icon = "moon.zzz"; }
-      else { color = "#34c759"; icon = "bolt.fill"; } // driving
-      break;
-    case "concierge":
-      // anything in the queue means you're the blocker → amber; the engine clears it when empty.
-      color = "#ff9500"; icon = "tray.full";
-      break;
-    case "eval": {
-      // grade band from the leading letter (A/B green, C amber, D–F red).
-      const g = v[0];
-      if (g === "a" || g === "b") { color = "#34c759"; }
-      else if (g === "c") { color = "#ff9500"; }
-      else { color = "#ff3b30"; }
-      icon = "chart.line.uptrend.xyaxis";
-      break;
-    }
-    default:
-      // any other loop (e.g. slack-scout) that writes a phase → neutral pill.
-      break;
-  }
-  return { key: "ccs_lifecycle", label: raw, icon, color, priority: 50 };
 }
 
 /** Strip any leading "#<num> " groups so the PR# is never baked into the name — the
@@ -208,27 +169,20 @@ const ACTIVITY_OVERLAY: Record<string, { label: string; icon: string; color: str
 /**
  * Compose the worker pill from STAGE × ACTIVITY. Stage gives the base (label + color); an urgent
  * activity (needs-you / fixing) overlays it, keeping the stage word so you still know WHERE it's
- * stuck (e.g. "in review · fixing"). `working` just shows the stage. Falls back to the legacy
- * single `phase` column for old rows. Null when there's no stage/phase (caller → lifecycle pill).
+ * stuck (e.g. "in review · fixing"). `working` just shows the stage. Null when there's no stage
+ * (caller → lifecycle pill). The legacy single `phase` column is gone (ADR-0059).
  */
 function computePhasePill(row: CatalogueRow): StatusPill | null {
   const stageKey = row.stage?.trim().toLowerCase();
-  if (stageKey && STAGE_PILL[stageKey]) {
-    const stage = STAGE_PILL[stageKey];
-    const act = row.activity?.trim().toLowerCase();
-    const overlay = act && ACTIVITY_OVERLAY[act];
-    if (overlay) {
-      // Keep the stage word so the pill says both: "your review · fixing", "in review · needs you".
-      return { key: "ccs_lifecycle", label: `${stage.label} · ${overlay.label}`, icon: overlay.icon, color: overlay.color, priority: 50 };
-    }
-    return { key: "ccs_lifecycle", label: stage.label, icon: stage.icon, color: stage.color, priority: 50 };
+  if (!stageKey || !STAGE_PILL[stageKey]) return null;
+  const stage = STAGE_PILL[stageKey];
+  const act = row.activity?.trim().toLowerCase();
+  const overlay = act && ACTIVITY_OVERLAY[act];
+  if (overlay) {
+    // Keep the stage word so the pill says both: "your review · fixing", "in review · needs you".
+    return { key: "ccs_lifecycle", label: `${stage.label} · ${overlay.label}`, icon: overlay.icon, color: overlay.color, priority: 50 };
   }
-  // Legacy fallback: a single `phase` value (pre-v19 rows / non-pr-watch).
-  const phase = row.phase?.trim().toLowerCase();
-  if (!phase) return null;
-  const legacy = STAGE_PILL[phase] ?? ACTIVITY_OVERLAY[phase];
-  if (!legacy) return null;
-  return { key: "ccs_lifecycle", label: legacy.label, icon: legacy.icon, color: legacy.color, priority: 50 };
+  return { key: "ccs_lifecycle", label: stage.label, icon: stage.icon, color: stage.color, priority: 50 };
 }
 
 function computeLifecyclePill(row: CatalogueRow): StatusPill | null {

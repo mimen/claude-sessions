@@ -73,7 +73,7 @@ test("lint: a meta-update field with no known writer is a dead contract (fails)"
 
 test("lint: a meta-update with only known fields passes", () => {
   withRoots((cfg) => {
-    writeHook(cfg, "clusters/pr-watch", "meta-update.json", JSON.stringify({ fields: ["updated_at", "phase", "pr_state"] }));
+    writeHook(cfg, "clusters/pr-watch", "meta-update.json", JSON.stringify({ fields: ["updated_at", "stage", "pr_state"] }));
     expect(hooksCommand(["lint"])).toBe(0);
   });
 });

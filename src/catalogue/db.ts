@@ -50,8 +50,6 @@ export interface CatalogueRow {
    * the name/url live once on the entity, not copied per session. Set by the fleet
    * orchestrator from its W->epic resolution. Nullable. */
   epicId: string | null;
-  /** @deprecated superseded by stage × activity (v19). Kept for old rows / non-pr-watch systems. */
-  phase: string | null;
   /** The pr-agent PR STAGE: building | milad-review | in-review | approved | merged. Monotonic,
    * forward-only, engine-latched (see roles/pr-agent/docs/phase-state-machine.md). */
   stage: string | null;
@@ -84,7 +82,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 25;
+const CATALOGUE_VERSION = 26;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -393,6 +391,14 @@ function migrate(db: Database): void {
       db.exec("ALTER TABLE catalogue DROP COLUMN skill;");
     }
   }
+  if (v < 26) {
+    // ADR-0059: remove the free-form `phase` column — superseded by stage × activity (v19). No
+    // backfill: `phase` was a legacy display string with no clean mapping to a stage; readers moved
+    // to `stage` (statusline dot / pill) and the loop-status pill that rode on it was retired.
+    if (hasColumn(db, "catalogue", "phase")) {
+      db.exec("ALTER TABLE catalogue DROP COLUMN phase;");
+    }
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -421,7 +427,6 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     gusWork: (r.gus_work as string) ?? null,
     workUnitId: (r.work_unit_id as string) ?? null,
     epicId: (r.epic_id as string) ?? null,
-    phase: (r.phase as string) ?? null,
     stage: (r.stage as string) ?? null,
     activity: (r.activity as string) ?? null,
     statusLine: (r.status_line as string) ?? null,
@@ -545,10 +550,6 @@ export function setGusWork(db: Database, sessionId: string, gusWork: string | nu
 export function setWorkUnitId(db: Database, sessionId: string, workUnitId: string | null, now: string): void {
   set(db, sessionId, "work_unit_id", workUnitId, now);
 }
-export function setPhase(db: Database, sessionId: string, phase: string | null, now: string): void {
-  set(db, sessionId, "phase", phase, now);
-}
-
 /** The PR stage (building|milad-review|in-review|approved|merged). Engine-latched; forward-only. */
 export function setStage(db: Database, sessionId: string, stage: string | null, now: string): void {
   set(db, sessionId, "stage", stage, now);

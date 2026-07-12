@@ -10,7 +10,6 @@ import {
   setParent,
   setRole,
   setResumeCommand,
-  setPhase,
   setProject,
   setSystem,
   setResumeId,
@@ -57,7 +56,6 @@ export interface NewSessionOpts {
   /** How a loop is re-armed on resume so it comes back running (e.g. `/loop 15m /pr-watch-control`). */
   resumeCommand?: string;
   kind?: Kind;
-  phase?: string;
   project?: string;
   key?: string;
   title?: string;
@@ -105,7 +103,6 @@ export function parseOpts(args: string[]): NewSessionOpts {
     role: flagValue(args, "--role") ?? flagValue(args, "--skill"),
     resumeCommand: flagValue(args, "--resume-command"),
     kind: kindRaw === "loop" ? "loop" : kindRaw === "session" ? "session" : undefined,
-    phase: flagValue(args, "--phase"),
     project: flagValue(args, "--project"),
     key: flagValue(args, "--key"),
     title: flagValue(args, "--title"),
@@ -137,7 +134,6 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
   }
   if (opts.resumeCommand) setResumeCommand(db, id, opts.resumeCommand, now);
   if (opts.kind) setKind(db, id, opts.kind, now);
-  if (opts.phase) setPhase(db, id, opts.phase, now);
   if (opts.project) setProject(db, id, opts.project, now);
   if (opts.key) setKey(db, id, opts.key, now);
   if (opts.title) setCustomTitle(db, id, opts.title, now);
@@ -252,7 +248,6 @@ export function newSession(args: string[]): number {
       opts.system && `system=${opts.system}`,
       opts.role && `role=${opts.role}`,
       opts.kind && `kind=${opts.kind}`,
-      opts.phase && `phase=${opts.phase}`,
     ]
       .filter(Boolean)
       .join(" ");

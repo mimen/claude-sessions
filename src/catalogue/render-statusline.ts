@@ -19,17 +19,14 @@ export function osc8(url: string, text: string): string {
   return url ? `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\` : text;
 }
 
-/** Phase -> a status dot. The vocabulary is shared with the tab/board (pr-watch phases plus
- * the generic ones); an unknown phase renders no dot rather than a wrong one. */
-const PHASE_DOT: Record<string, string> = {
-  merged: "🟢",
-  blocked: "🔴",
-  milad: "🟠",
-  ready: "🔵",
-  review: "🟣",
+/** Stage -> a status dot (the monotonic pr-agent pipeline; the free-form `phase` column is gone,
+ * ADR-0059). An unknown/absent stage renders no dot rather than a wrong one. */
+const STAGE_DOT: Record<string, string> = {
   building: "⚪",
-  validating: "⚪",
-  reviewing: "🟣",
+  "milad-review": "🟠",
+  "in-review": "🟣",
+  approved: "🔵",
+  merged: "🟢",
   unknown: "⚫",
 };
 
@@ -73,12 +70,12 @@ function workLabel(row: CatalogueRow): string {
 
 /**
  * Render the statusline for a session row. Returns a single line (no trailing newline).
- * Order: phase dot · linked PR/work · grouping label · W-number.
+ * Order: stage dot · linked PR/work · grouping label · W-number.
  */
 export function renderStatusline(row: CatalogueRow, ctx: StatuslineCtx): string {
   const stale = phaseIsStale(row, ctx.nowMs, ctx.stalenessMs ?? DEFAULT_STALENESS_MS);
-  const phase = stale ? "unknown" : (row.phase ?? "").toLowerCase();
-  const dot = PHASE_DOT[phase] ?? "";
+  const stage = stale ? "unknown" : (row.stage ?? "").toLowerCase();
+  const dot = STAGE_DOT[stage] ?? "";
 
   const url = row.prNumber && row.prRepo ? `https://github.com/${row.prRepo}/pull/${row.prNumber}` : "";
   const linked = osc8(url, workLabel(row));

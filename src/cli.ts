@@ -11,7 +11,7 @@ import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf,
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, key, parent, role, resumeCommand, gusWork, sessionEpic, project, system, phase, status, approve, activity, ready, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, key, parent, role, resumeCommand, gusWork, sessionEpic, project, system, status, approve, activity, ready, meta } from "./catalogue/commands.ts";
 import { newSession } from "./catalogue/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { backfillTitles } from "./titler/queue.ts";
@@ -54,7 +54,7 @@ Usage:
   ccs ready [<id>|.]    A pr-agent declares its build done → latches stage to milad-review
   ccs approve <selector> [--off]   Record Milad's +1 on a PR (the submitter-review signal)
   ccs new-session [flags]   Mint a session id, tag its metadata AT BIRTH, then launch \`claude --session-id\`
-                            flags: --system --role --kind loop|session --phase --project --key
+                            flags: --system --role --kind loop|session --project --key
                                    --title --parent <id> --cwd <dir> --prompt "<text>"
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<selector>|.|--all]   Paint cmux tabs from catalogue metadata (. | id | #pr | role | cluster | --all)
@@ -124,8 +124,6 @@ export async function main(argv: string[]): Promise<number> {
       return gusWork(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "epic":
       return sessionEpic(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
-    case "phase":
-      return phase(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "status":
       // status takes a full freeform LINE, so join all non-flag args (not just the first token).
       return status(args[1], args.slice(2).filter((a) => !a.startsWith("--")).join(" ") || undefined, args.slice(2).filter((a) => a.startsWith("--")));

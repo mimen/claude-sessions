@@ -60,7 +60,7 @@ export function syntheticRow(facts: {
     archived: false, parkedTaskId: null, key: null, parentSessionId: null,
     role: facts.role ?? null, resumeCommand: null, project: null,
     system: facts.system ?? null, gusWork: facts.gusWork ?? null, workUnitId: null, epicId: facts.epicId ?? null,
-    phase: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null, prNumber: facts.prNumber ?? null,
+    statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null, prNumber: facts.prNumber ?? null,
     prRepo: facts.prRepo ?? null, prBranch: null, prState: null, prHeadSha: null,
   };
 }
