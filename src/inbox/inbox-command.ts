@@ -91,7 +91,7 @@ export function inboxCommand(args: string[]): number {
           if (!row) continue;
           const matches =
             (row.role ?? undefined) === resp.role &&
-            (resp.cluster == null || row.system === resp.cluster) &&
+            (resp.cluster == null || row.cluster === resp.cluster) &&
             (resp.workUnit == null || row.gusWork === resp.workUnit);
           if (matches) {
             const plan = planBump(bridge, info.sessionId);

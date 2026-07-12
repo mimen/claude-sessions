@@ -17,7 +17,7 @@ import {
   setStatusLine,
   setMeta,
   setProject,
-  setSystem,
+  setCluster,
   addTag,
   removeTag,
   childrenOf,
@@ -334,20 +334,20 @@ export function project(sessionArg: string | undefined, label: string | undefine
   return 0;
 }
 
-/** Set (or clear, with --off) the system grouping for this session. */
-export function system(sessionArg: string | undefined, slug: string | undefined, flags: string[]): number {
+/** Set (or clear, with --off) the cluster grouping for this session. */
+export function setClusterCmd(sessionArg: string | undefined, slug: string | undefined, flags: string[]): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
   const off = flags.includes("--off");
   if (!off && (!slug || !slug.trim())) {
-    console.error('usage: ccs system [<session-id>|.] <slug> [--off]');
+    console.error('usage: ccs set-cluster [<session-id>|.] <slug> [--off]');
     return 1;
   }
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
-    setSystem(db, id, off ? null : slug!.trim(), now());
-    console.log(off ? `cleared system on ${id.slice(0, 8)}…` : `system ${slug!.trim()} → ${id.slice(0, 8)}…`);
+    setCluster(db, id, off ? null : slug!.trim(), now());
+    console.log(off ? `cleared cluster on ${id.slice(0, 8)}…` : `cluster ${slug!.trim()} → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
   }
@@ -467,7 +467,7 @@ export function meta(sessionArg: string | undefined): number {
     console.log(
       `  lifecycle: ${row?.archived ? "archived" : row?.completed ? "completed" : row?.parkedTaskId ? "parked" : "idle"}`,
     );
-    if (row?.system) console.log(`  system: ${row.system}`);
+    if (row?.cluster) console.log(`  cluster: ${row.cluster}`);
     if (row?.role) console.log(`  role: ${row.role}`);
     if (row?.parentSessionId) console.log(`  parent: ${labelFor(row.parentSessionId)}`);
     if (children.length) {

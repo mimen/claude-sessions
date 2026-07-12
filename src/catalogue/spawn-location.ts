@@ -52,14 +52,14 @@ export function interpretSpawnLocation(
 
 /** Build a synthetic row from launch facts so the row-keyed resolver can resolve pre-row config. */
 export function syntheticRow(facts: {
-  system?: string; role?: string; epicId?: string;
+  cluster?: string; role?: string; epicId?: string;
   prNumber?: number; prRepo?: string; gusWork?: string;
 }): CatalogueRow {
   return {
     sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
     archived: false, parkedTaskId: null, key: null, parentSessionId: null,
     role: facts.role ?? null, resumeCommand: null, project: null,
-    system: facts.system ?? null, gusWork: facts.gusWork ?? null, workUnitId: null, epicId: facts.epicId ?? null,
+    cluster: facts.cluster ?? null, gusWork: facts.gusWork ?? null, workUnitId: null, epicId: facts.epicId ?? null,
     statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null, prNumber: facts.prNumber ?? null,
     prRepo: facts.prRepo ?? null, prBranch: null, prState: null, prHeadSha: null,
   };

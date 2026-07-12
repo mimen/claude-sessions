@@ -42,8 +42,8 @@ export function buildEpicView(rows: readonly SessionRow[], ctx: EpicViewCtx): Di
   const byEpic = new Map<string, SessionRow[]>();
   for (const row of rows) {
     const cat = ctx.catMap.get(row.sessionId) ?? null;
-    if (!cat?.system) continue; // epic view is for cluster members
-    if (ctx.system && cat.system !== ctx.system) continue;
+    if (!cat?.cluster) continue; // epic view is for cluster members
+    if (ctx.system && cat.cluster !== ctx.system) continue;
     const epicId = cat.epicId ?? "";
     (byEpic.get(epicId) ?? byEpic.set(epicId, []).get(epicId)!).push(row);
   }

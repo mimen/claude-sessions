@@ -7,11 +7,11 @@ import { openIndex } from "./index/schema.ts";
 import type { Database } from "bun:sqlite";
 import { reindexStore, listByRecency, titleOf, costOf, subagentCosts } from "./index/index.ts";
 import { formatCost } from "./cost.ts";
-import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForSystem } from "./catalogue/db.ts";
+import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster } from "./catalogue/db.ts";
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, key, parent, role, resumeCommand, gusWork, sessionEpic, project, system, status, approve, activity, ready, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, key, parent, role, resumeCommand, gusWork, sessionEpic, project, setClusterCmd, status, approve, activity, ready, meta } from "./catalogue/commands.ts";
 import { newSession } from "./catalogue/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { backfillTitles } from "./titler/queue.ts";
@@ -48,13 +48,13 @@ Usage:
   ccs key [<id>|.] <slug> [--off]   Assign/clear the session's identity key (canonical)
   ccs parent [<id>|.] <parent-id|.> [--off]   Set/clear the spawning parent session
   ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
-  ccs system [<id>|.] <slug> [--off]   Set/clear the system grouping
+  ccs set-cluster [<id>|.] <slug> [--off]   Set/clear the cluster grouping
   ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab
   ccs activity [<id>|.] needs-you [--off]   A pr-agent self-reports being stuck (--off = back to dormant)
   ccs ready [<id>|.]    A pr-agent declares its build done → latches stage to milad-review
   ccs approve <selector> [--off]   Record Milad's +1 on a PR (the submitter-review signal)
   ccs new-session [flags]   Mint a session id, tag its metadata AT BIRTH, then launch \`claude --session-id\`
-                            flags: --system --role --kind loop|session --project --key
+                            flags: --cluster --role --kind loop|session --project --key
                                    --title --parent <id> --cwd <dir> --prompt "<text>"
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<selector>|.|--all]   Paint cmux tabs from catalogue metadata (. | id | #pr | role | cluster | --all)
@@ -114,8 +114,9 @@ export async function main(argv: string[]): Promise<number> {
       return parent(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "project":
       return project(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
-    case "system":
-      return system(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "set-cluster":
+    case "system": // back-compat alias
+      return setClusterCmd(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "role":
       return role(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "resume-command":
@@ -402,10 +403,10 @@ function tree(_opts: { all: boolean }): number {
   return 0;
 }
 
-/** Render the cluster map for a system: members grouped by role, liveness, how to reach each. */
-function clusterView(systemSlug: string | undefined, expand = false): number {
-  if (!systemSlug) {
-    console.error("ccs: missing system slug. Usage: ccs cluster <system>");
+/** Render the cluster map for a cluster: members grouped by role, liveness, how to reach each. */
+function clusterView(clusterSlug: string | undefined, expand = false): number {
+  if (!clusterSlug) {
+    console.error("ccs: missing cluster slug. Usage: ccs cluster <cluster>");
     return 1;
   }
   const db = openIndex(DB_PATH());
@@ -414,7 +415,7 @@ function clusterView(systemSlug: string | undefined, expand = false): number {
     // Liveness is surface-keyed (exact) via the cmux bridge, not cwd-approximate: a session
     // is live iff its id or resumeId has a live surface (ADR-0014/0040).
     const open = openSessionIds();
-    const members = sessionsForSystem(cat, systemSlug).map((sid) => {
+    const members = sessionsForCluster(cat, clusterSlug).map((sid) => {
       const row = getRow(cat, sid)!;
       const ir = db
         .query("SELECT cwd, resume_id FROM sessions WHERE session_id = $id")
@@ -424,10 +425,10 @@ function clusterView(systemSlug: string | undefined, expand = false): number {
       return toMember(row, cwd, ir?.resume_id ?? null, live);
     });
     if (members.length === 0) {
-      console.log(`cluster ${systemSlug}: no members (nothing tagged system=${systemSlug}).`);
+      console.log(`cluster ${clusterSlug}: no members (nothing tagged cluster=${clusterSlug}).`);
       return 0;
     }
-    console.log(renderClusterMap(buildClusterMap(systemSlug, members), expand));
+    console.log(renderClusterMap(buildClusterMap(clusterSlug, members), expand));
     return 0;
   } finally {
     db.close();

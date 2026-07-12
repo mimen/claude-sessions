@@ -33,7 +33,7 @@ export interface CatalogueRow {
   /** User-assigned project/initiative label — groups otherwise-solo sessions (e.g. `ccs`). */
   project: string | null;
   /** Operation-level grouping (e.g. `pr-watch`) — sits between constellation and session. */
-  system: string | null;
+  cluster: string | null;
   /** Work-tracker id (e.g. a GUS W-number) this session is working — a structured,
    * stable identification layer (ADR-0013). Set when work starts, survives the whole
    * lifecycle, never renamed; an extra axis alongside pr_* (and better than the opaque
@@ -82,7 +82,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 26;
+const CATALOGUE_VERSION = 27;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -147,7 +147,7 @@ function migrate(db: Database): void {
   }
   if (v < 5) {
     // Additive: operation-level grouping (e.g. `pr-watch`) — sits between constellation and session.
-    // Nullable; no backfill.
+    // Nullable; no backfill. (Note: this was originally `system`; renamed to `cluster` in v27.)
     if (!hasColumn(db, "catalogue", "system")) {
       db.exec("ALTER TABLE catalogue ADD COLUMN system TEXT;");
     }
@@ -399,6 +399,16 @@ function migrate(db: Database): void {
       db.exec("ALTER TABLE catalogue DROP COLUMN phase;");
     }
   }
+  if (v < 27) {
+    // ADR-0059: rename the `system` column to `cluster` everywhere — the operation-level grouping
+    // is **cluster** in all UI/CLI/docs, so make the DB column match. SQLite 3.25+ supports RENAME COLUMN.
+    // Guard on column presence (older binary can reset version, re-run).
+    if (hasColumn(db, "catalogue", "system") && !hasColumn(db, "catalogue", "cluster")) {
+      db.exec("ALTER TABLE catalogue RENAME COLUMN system TO cluster;");
+      db.exec("DROP INDEX IF EXISTS idx_catalogue_system;");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_cluster ON catalogue(cluster);");
+    }
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -423,7 +433,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     role: (r.role as string) ?? null,
     resumeCommand: (r.resume_command as string) ?? null,
     project: (r.project as string) ?? null,
-    system: (r.system as string) ?? null,
+    cluster: (r.cluster as string) ?? null,
     gusWork: (r.gus_work as string) ?? null,
     workUnitId: (r.work_unit_id as string) ?? null,
     epicId: (r.epic_id as string) ?? null,
@@ -540,8 +550,8 @@ export function setResumeCommand(db: Database, sessionId: string, cmd: string | 
 export function setProject(db: Database, sessionId: string, project: string | null, now: string): void {
   set(db, sessionId, "project", project, now);
 }
-export function setSystem(db: Database, sessionId: string, system: string | null, now: string): void {
-  set(db, sessionId, "system", system, now);
+export function setCluster(db: Database, sessionId: string, cluster: string | null, now: string): void {
+  set(db, sessionId, "cluster", cluster, now);
 }
 export function setGusWork(db: Database, sessionId: string, gusWork: string | null, now: string): void {
   set(db, sessionId, "gus_work", gusWork, now);
@@ -728,10 +738,10 @@ export function sessionsForProject(db: Database, project: string): string[] {
   ).map((r) => r.session_id);
 }
 
-/** Reverse lookup: which sessions are assigned to this system grouping. */
-export function sessionsForSystem(db: Database, system: string): string[] {
+/** Reverse lookup: which sessions are assigned to this cluster grouping. */
+export function sessionsForCluster(db: Database, cluster: string): string[] {
   return (
-    db.query("SELECT session_id FROM catalogue WHERE system = $s").all({ $s: system }) as {
+    db.query("SELECT session_id FROM catalogue WHERE cluster = $c").all({ $c: cluster }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);

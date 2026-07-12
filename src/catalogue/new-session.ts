@@ -11,7 +11,7 @@ import {
   setRole,
   setResumeCommand,
   setProject,
-  setSystem,
+  setCluster,
   setResumeId,
   setGusWork,
   stampPrFacts,
@@ -97,7 +97,7 @@ function flagValue(args: string[], flag: string): string | undefined {
 export function parseOpts(args: string[]): NewSessionOpts {
   const kindRaw = flagValue(args, "--kind");
   return {
-    system: flagValue(args, "--system"),
+    system: flagValue(args, "--cluster"),
     // `--role` reads best for the fleet ("this is a pr-agent"); `--skill` is accepted as a
     // synonym since both land in the catalogue `skill` column.
     role: flagValue(args, "--role") ?? flagValue(args, "--skill"),
@@ -127,7 +127,7 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
   // The session id doubles as the resume handle when launched with `--session-id`, so record
   // it now — `ccs resume` can then revive the session even before it's indexed.
   setResumeId(db, id, id, now);
-  if (opts.system) setSystem(db, id, opts.system, now);
+  if (opts.system) setCluster(db, id, opts.system, now);
   if (opts.role) {
     const role = opts.role.replace(/^\//, "");
     setRole(db, id, role, now);
@@ -294,7 +294,7 @@ function resolveSpawnLocationCwd(
 ): { cwd: string | null; error?: string } {
   try {
     const row = syntheticRow({
-      system: opts.system, role: opts.role?.replace(/^\//, ""), gusWork: opts.gusWork,
+      cluster: opts.system, role: opts.role?.replace(/^\//, ""), gusWork: opts.gusWork,
       prNumber: opts.prNumber, prRepo: opts.prRepo,
     });
     const config = resolveConfig(row, "spawn-location", liveResolveCtx()).effective as SpawnLocationConfig | null;

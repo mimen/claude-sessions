@@ -63,7 +63,7 @@ export function resolveLevels(row: CatalogueRow, ctx: ResolveCtx): ResolvedLevel
   // user / global — the floor, always present.
   out.push({ level: "user", dir: ctx.configRoot });
 
-  const cluster = row.system;
+  const cluster = row.cluster;
   if (cluster) {
     out.push({ level: "cluster", dir: join(ctx.configRoot, "clusters", seg(cluster)) });
   }
@@ -96,8 +96,8 @@ export function resolveLevels(row: CatalogueRow, ctx: ResolveCtx): ResolvedLevel
 /** The identity level's base dir (runtime). Mirrors inbox/identity-path.identityDir's layout. */
 function identityBaseDir(row: CatalogueRow, runtimeRoot: string): string {
   const role = seg(row.role ?? "unknown");
-  let dir = row.system
-    ? join(runtimeRoot, "clusters", seg(row.system), "identities", role)
+  let dir = row.cluster
+    ? join(runtimeRoot, "clusters", seg(row.cluster), "identities", role)
     : join(runtimeRoot, "roles", role, "identities", role);
   if (row.epicId) dir = join(dir, seg(row.epicId));
   const unit = workUnitOf(row);

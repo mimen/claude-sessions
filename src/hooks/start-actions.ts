@@ -36,7 +36,7 @@ export type ActionHandler = (action: Action, ctx: StartActionCtx) => ActionOutco
 /** The responsibility key for a row (for locating its inbox). Mirrors the identity resolver. */
 function responsibilityOf(row: CatalogueRow): Responsibility {
   return {
-    cluster: row.system ?? null,
+    cluster: row.cluster ?? null,
     role: row.role ?? "unknown",
     epic: row.epicId ?? null,
     // canonical filesystem-safe key — MUST match the hook-level dir (resolve-levels.workUnitOf)
