@@ -14,7 +14,6 @@ const cat = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   parkedTaskId: null,
   key: null,
   parentSessionId: null,
-  skill: null,
   role: null,
   resumeCommand: null,
   project: null,

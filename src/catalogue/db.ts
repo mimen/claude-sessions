@@ -24,11 +24,7 @@ export interface CatalogueRow {
   key: string | null;
   /** The session that spawned/owns this one (a sessionId). Children are a reverse lookup. */
   parentSessionId: string | null;
-  /** DEPRECATED (ADR-0015): the old "backing skill/slash-command" axis, overloaded as role.
-   * Kept for migration safety (additive-only, never dropped); superseded by `role`. */
-  skill: string | null;
-  /** The session's ROLE — first-class identity axis (control, concierge, scout, pr-agent…).
-   * Replaces `skill`. Reads fall back to `skill` when unset (pre-migration rows). */
+  /** The session's ROLE — first-class identity axis (control, concierge, scout, pr-agent…). */
   role: string | null;
   /** How this session is re-armed on resume so it comes back RUNNING (e.g. a loop's
    * `/loop 15m /pr-watch-control`). Null for non-looping roles (a worker gets a bare resume,
@@ -88,7 +84,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 24;
+const CATALOGUE_VERSION = 25;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -389,6 +385,14 @@ function migrate(db: Database): void {
       db.exec("ALTER TABLE catalogue DROP COLUMN event;");
     }
   }
+  if (v < 25) {
+    // ADR-0059: remove `skill` (canonical is `role`). Backfill role from skill, then drop skill.
+    // Guard on column presence (older binary can reset version, re-run).
+    if (hasColumn(db, "catalogue", "skill")) {
+      db.exec("UPDATE catalogue SET role = skill WHERE role IS NULL AND skill IS NOT NULL;");
+      db.exec("ALTER TABLE catalogue DROP COLUMN skill;");
+    }
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -410,9 +414,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     parkedTaskId: (r.parked_task_id as string) ?? null,
     key: (r.key as string) ?? null,
     parentSessionId: (r.parent_session_id as string) ?? null,
-    skill: (r.skill as string) ?? null,
-    // role is canonical; fall back to the legacy skill for rows written before v12
-    role: (r.role as string) ?? (r.skill as string) ?? null,
+    role: (r.role as string) ?? null,
     resumeCommand: (r.resume_command as string) ?? null,
     project: (r.project as string) ?? null,
     system: (r.system as string) ?? null,
@@ -522,10 +524,7 @@ export function setKey(db: Database, sessionId: string, key: string | null, now:
 export function setParent(db: Database, sessionId: string, parentId: string | null, now: string): void {
   set(db, sessionId, "parent_session_id", parentId, now);
 }
-export function setSkill(db: Database, sessionId: string, skill: string | null, now: string): void {
-  set(db, sessionId, "skill", skill, now);
-}
-/** Set the session's ROLE (ADR-0015) — the canonical identity axis replacing `skill`. */
+/** Set the session's ROLE (ADR-0015) — the canonical identity axis. */
 export function setRole(db: Database, sessionId: string, role: string | null, now: string): void {
   set(db, sessionId, "role", role, now);
 }

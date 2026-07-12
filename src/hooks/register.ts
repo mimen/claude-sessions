@@ -51,7 +51,7 @@ export function handleSessionStart(
 
   const row = getRow(db, id);
 
-  if (!row || (!row.role && !row.skill && !row.system)) {
+  if (!row || (!row.role && !row.system)) {
     // Unregistered: the hook can't ask the human, so instruct the agent to self-register.
     return {
       registered: false,

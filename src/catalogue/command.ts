@@ -4,7 +4,6 @@ import type { InferenceEngine } from "../inference/engine.ts";
 import {
   setKind,
   setKey,
-  setSkill,
   setParent,
   setProject,
   setCompleted,
@@ -26,7 +25,6 @@ export interface SessionMeta {
   readonly sessionId: string;
   readonly title: string;
   readonly kind: Kind;
-  readonly skill: string | null;
   readonly key: string | null;
   readonly parentSessionId: string | null;
   readonly completed: boolean;
@@ -71,7 +69,6 @@ function renderSessions(sessions: readonly SessionMeta[]): string {
       const parent = s.parentSessionId ? `#${titleById.get(s.parentSessionId) ?? "?"}` : "none";
       const flags = [
         `kind=${s.kind}`,
-        `skill=${s.skill ?? "none"}`,
         `key=${s.key ?? "none"}`,
         `project=${s.project ?? "none"}`,
         `parent=${parent}`,
@@ -164,9 +161,6 @@ export function applyMutations(catalogue: Database, mutations: readonly Mutation
       case "key":
       case "event":
         setKey(catalogue, m.sessionId, m.value, now);
-        break;
-      case "skill":
-        setSkill(catalogue, m.sessionId, m.value, now);
         break;
       case "project":
         setProject(catalogue, m.sessionId, m.value, now);

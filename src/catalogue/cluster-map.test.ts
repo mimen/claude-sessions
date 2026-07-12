@@ -4,9 +4,8 @@ import type { CatalogueRow } from "./db.ts";
 
 const row = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,
-  archived: false, parkedTaskId: null, key: null, parentSessionId: null,
-  skill: null, role: null, resumeCommand: null, project: null, system: "pr-watch", gusWork: null, workUnitId: null, epicId: null, phase: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
-  prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...o,
+  archived: false, parkedTaskId: null, key: null, parentSessionId: null, role: null, resumeCommand: null, project: null,
+  system: null, gusWork: null, workUnitId: null, epicId: null, phase: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...o,
 });
 
 test("isCoreRole: control/concierge/eval/designer are core; pr-agent is not", () => {
