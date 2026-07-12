@@ -8,13 +8,14 @@
  *
  * Liveness is surface-keyed via the cmux bridge (ADR-0014/0040) — exact, no cwd/title guess.
  */
-import { execFileSync } from "node:child_process";
 import type { Database } from "bun:sqlite";
 import { sessionById, type SessionRow } from "../index/index.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import { liveBridge } from "../cmux/live.ts";
 import { getRow } from "../catalogue/db.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "./command.ts";
+import { spawnCmux } from "./spawn-cmux.ts";
+import { pushRenderOps } from "../catalogue/sync-tabs.ts";
 
 /** Just the catalogue bits resume needs (kept narrow so the planner is easy to test). */
 export interface ResumeMeta {
@@ -23,7 +24,7 @@ export interface ResumeMeta {
 
 export type ResumePlan =
   | { action: "skip"; reason: "already-open" }
-  | { action: "resume"; command: ResumeCommand; name: string; note: string | null };
+  | { action: "resume"; sessionId: string; command: ResumeCommand; name: string; note: string | null };
 
 /** Is this session currently embodied? Check both the filename id and the resume id, since
  * cmux records the live Claude sessionId and either may match depending on how it was born. */
@@ -47,14 +48,16 @@ export function planResumeSession(
     resumeCommand: meta?.resumeCommand ?? null,
   });
   const name = row.title || row.sessionId;
-  return { action: "resume", command, name, note };
+  return { action: "resume", sessionId: row.sessionId, command, name, note };
 }
 
 export type ResumeSessionResult =
   | { status: "resumed"; note: string | null }
   | { status: "already-open" }
   | { status: "not-indexed" }
-  | { status: "spawn-failed" };
+  | { status: "spawn-failed" }
+  /** liveness sources were unreadable — we fail closed and spawn nothing (ADR-0054) */
+  | { status: "liveness-unreadable" };
 
 /**
  * The full `ccs resume-session <id>` entry: resolve the row + its resume_command, plan, and
@@ -64,43 +67,53 @@ export function resumeSessionEntry(
   indexDb: Database,
   catalogueDb: Database,
   sessionId: string,
-  opts: { dryRun?: boolean; cmuxBin?: string; bridge?: Bridge } = {},
+  opts: { dryRun?: boolean; cmuxBin?: string; bridge?: Bridge; focus?: boolean } = {},
 ): ResumeSessionResult {
   const row = sessionById(indexDb, sessionId);
   if (!row) return { status: "not-indexed" };
 
   const cat = getRow(catalogueDb, sessionId);
   const bridge = opts.bridge ?? liveBridge();
+  // FAIL CLOSED: if we can't read liveness we can't tell "already open" from "closed". Treating
+  // unreadable as closed would re-spawn a session that's actually running → duplicate-fleet
+  // runaway (ADR-0054). Abort instead — spawn nothing, report the reason.
+  if (!bridge.readable) return { status: "liveness-unreadable" };
   const plan = planResumeSession(bridge, row, { resumeCommand: cat?.resumeCommand ?? null });
 
   if (plan.action === "skip") return { status: "already-open" };
   if (opts.dryRun) return { status: "resumed", note: plan.note };
-  return executeResumePlan(plan, opts.cmuxBin)
+  return executeResumePlan(plan, { cmuxBin: opts.cmuxBin, focus: opts.focus })
     ? { status: "resumed", note: plan.note }
     : { status: "spawn-failed" };
 }
 
-/** Execute a resume plan: spawn a new cmux workspace running the resume command. */
-export function executeResumePlan(plan: ResumePlan, cmuxBin = "cmux"): boolean {
+/**
+ * Execute a resume plan: spawn a new detached cmux workspace running the resume command (via the
+ * shared spawnCmux primitive — same env-scrub as new-session, ADR-0042), then EAGERLY paint the
+ * tab from the session's ccs metadata so it renders correct immediately, without waiting for the
+ * spawned session's own SessionStart hook to boot and fire (the cluster-resume tab-lag fix). The
+ * hook remains the steady-state owner; this is just the first paint. Best-effort: a paint miss
+ * (cmux may not have registered the new surface yet) is harmless — the hook repaints on boot.
+ */
+export function executeResumePlan(
+  plan: ResumePlan,
+  opts: { cmuxBin?: string; focus?: boolean } = {},
+): boolean {
   if (plan.action === "skip") return false;
+  const ref = spawnCmux({
+    argv: plan.command.argv,
+    cwd: plan.command.cwd,
+    name: plan.name,
+    focus: opts.focus,
+    cmuxBin: opts.cmuxBin,
+  });
+  if (ref === null) return false;
   try {
-    execFileSync(
-      cmuxBin,
-      [
-        "new-workspace",
-        "--name",
-        plan.name,
-        "--cwd",
-        plan.command.cwd,
-        "--command",
-        plan.command.shell,
-        "--focus",
-        "true",
-      ],
-      { timeout: 5000, stdio: "ignore" },
-    );
-    return true;
+    // Paint the JUST-CREATED workspace by its ref — cmux hasn't bound surface→sessionId yet, so a
+    // by-session lookup would miss (the eager-paint race). The hook repaints on boot regardless.
+    pushRenderOps(plan.sessionId, opts.cmuxBin, ref);
   } catch {
-    return false;
+    /* eager paint is best-effort; the SessionStart hook repaints on boot */
   }
+  return true;
 }

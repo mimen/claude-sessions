@@ -1,0 +1,305 @@
+{
+  "version": 1,
+  "sessions": {
+    "aea5bc4f-04dc-4c3d-92d3-2d1b2e9b0a78": {
+      "sessionId": "aea5bc4f-04dc-4c3d-92d3-2d1b2e9b0a78",
+      "surfaceId": "8D67E236-F2BB-481E-813A-83A2AC3672A4",
+      "workspaceId": "944E33C6-08F0-4AFE-A66F-B846F5BDF634",
+      "cwd": "/Users/mimen",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "50175490-a91e-4212-b751-ed7f25ae9c42": {
+      "sessionId": "50175490-a91e-4212-b751-ed7f25ae9c42",
+      "surfaceId": "84F4AAE7-A347-4922-A3FD-56ED5DC0CCB7",
+      "workspaceId": "2E7F216E-18B7-4D11-B0C2-FC50951BC9F0",
+      "cwd": "/Users/mimen/Documents/pr-watch-2",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "62cf5173-1237-46ad-b83f-489f9fea48ed": {
+      "sessionId": "62cf5173-1237-46ad-b83f-489f9fea48ed",
+      "surfaceId": "4170B68A-D99A-4B97-8A93-CA8DBE0D7256",
+      "workspaceId": "ACA73EA7-72A4-488F-A71E-958B830C66E4",
+      "cwd": "/Users/mimen",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "0a3ad125-1851-4c1f-9638-7e289df2c34d": {
+      "sessionId": "0a3ad125-1851-4c1f-9638-7e289df2c34d",
+      "surfaceId": "91382E0B-F82B-42EF-9630-8E01CF15E498",
+      "workspaceId": "87780ACA-6A07-4B00-95DB-7B647F66CC53",
+      "cwd": "/Users/mimen/Documents/pr-watch-2",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "2a3c4ec5-6ab0-4640-986d-fc868000c425": {
+      "sessionId": "2a3c4ec5-6ab0-4640-986d-fc868000c425",
+      "surfaceId": "C110B8F6-4287-48EF-B63B-99695044E727",
+      "workspaceId": "9F5C6F8C-B647-46FF-9D67-CD366F919042",
+      "cwd": "/Users/mimen/.claude/pr-watch-2",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "e0d648eb-a80c-499d-b566-137c3366809d": {
+      "sessionId": "e0d648eb-a80c-499d-b566-137c3366809d",
+      "surfaceId": "6EEECF1A-DEA2-40A6-9A91-0907F9C31DDE",
+      "workspaceId": "7140619A-6185-46E4-BAEE-7D619E463763",
+      "cwd": "/Users/mimen/.claude/pr-watch-2",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "f4d1e512-693f-4bb7-8ceb-f44d2cb3bc90": {
+      "sessionId": "f4d1e512-693f-4bb7-8ceb-f44d2cb3bc90",
+      "surfaceId": "991282B9-76F8-4691-BCCF-16BE50E955CC",
+      "workspaceId": "3A5E420C-45EC-496A-8AFA-469517E868D2",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/display-price-migration",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "daaca1b5-cc46-4fc8-ba44-63687d1db1de": {
+      "sessionId": "daaca1b5-cc46-4fc8-ba44-63687d1db1de",
+      "surfaceId": "2E3EE3BA-F468-43C8-B46C-049F9AA00413",
+      "workspaceId": "1E60E433-4DB4-4F9C-8B07-95FC49F2F375",
+      "cwd": "/Users/mimen/.claude/pr-watch-2",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "2305108f-c882-4bef-ba39-6f33f7d9c4b5": {
+      "sessionId": "2305108f-c882-4bef-ba39-6f33f7d9c4b5",
+      "surfaceId": "A31ED762-7FEB-4C4E-BEDA-5D91F7698C46",
+      "workspaceId": "7563AE6E-FCE7-43F4-9FEA-515EC902C4EE",
+      "cwd": "/Users/mimen/Downloads/heroku/core-identity/.worktrees/tt-consent-selector",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "62becec7-0e86-47dc-9a55-d2eeabdb1869": {
+      "sessionId": "62becec7-0e86-47dc-9a55-d2eeabdb1869",
+      "surfaceId": "36C5DC98-EECF-4EAC-B626-42713D69870D",
+      "workspaceId": "A2896A9C-D1FD-4CF5-A7AE-5187E6EFC2F0",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/team-tokens-consolidated",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "c9fb37b6-3553-4d4e-80b4-cafcf7f3b99e": {
+      "sessionId": "c9fb37b6-3553-4d4e-80b4-cafcf7f3b99e",
+      "surfaceId": "186372E4-67B6-430A-95DF-4F2E0F6E42DA",
+      "workspaceId": "E758F2C6-8E0E-4076-86CB-130B7C8BF3EE",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/p3-3c-buildpacks-publish",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "a6765222-f6ea-4508-98c4-019a46e75ad0": {
+      "sessionId": "a6765222-f6ea-4508-98c4-019a46e75ad0",
+      "surfaceId": "3122A984-6F33-462E-A691-3792AE9B1697",
+      "workspaceId": "6DCE0757-2C79-435E-AF5A-2303383AB651",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/p3-3c-buildpacks-publish",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "253e0caa-d4bf-4b93-a96c-3a1046eb8f53": {
+      "sessionId": "253e0caa-d4bf-4b93-a96c-3a1046eb8f53",
+      "surfaceId": "DFCBE438-2E79-4BEB-A46C-576BE2E99D85",
+      "workspaceId": "DF1915D4-15F5-49FB-A22B-066744483A75",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/p2-13-tos-flow",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "5ce9180a-3eaa-43d1-a7da-44aac644a8ff": {
+      "sessionId": "5ce9180a-3eaa-43d1-a7da-44aac644a8ff",
+      "surfaceId": "2C6DFA12-F1C4-40E8-8D60-EA6566148FE1",
+      "workspaceId": "BCC54DD4-A704-4BF7-A30D-8B3E502D66E4",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/p2-8-next-steps",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "905af9f7-8ce6-49e9-bb0d-964a7b2c8a68": {
+      "sessionId": "905af9f7-8ce6-49e9-bb0d-964a7b2c8a68",
+      "surfaceId": "92E55300-7EED-4AB2-8A23-A8670ACD97E4",
+      "workspaceId": "B3EFCF3B-FD9E-4AEF-BFE0-29521BAA88EB",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/p2-12-settings",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "2aeb6ba1-6c1b-4f8b-a0db-679090bc7eb1": {
+      "sessionId": "2aeb6ba1-6c1b-4f8b-a0db-679090bc7eb1",
+      "surfaceId": "920AF95E-79D9-4C0D-B894-EE968598821A",
+      "workspaceId": "A175A863-6D97-41AE-9BF2-61D7CDC33C8A",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/p2-3b-plans-crud",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "a30aa01a-fc79-4b09-bc54-52145b64a2a9": {
+      "sessionId": "a30aa01a-fc79-4b09-bc54-52145b64a2a9",
+      "surfaceId": "62AA0D19-210A-4CD1-BBAF-2A1F69831B2C",
+      "workspaceId": "CC240ACA-A9DE-4FF2-BDB4-33BF9E822075",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/p2-9-company",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "1daafb4f-9699-4adc-964c-a106ba3201c8": {
+      "sessionId": "1daafb4f-9699-4adc-964c-a106ba3201c8",
+      "surfaceId": "A5231378-1CDB-4716-980A-9DD021D4D511",
+      "workspaceId": "5103BD23-58E3-487A-BD2B-08DEED8F3932",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/p2-5-marketplace-listing",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "e775e9ce-7ef3-4ea9-8d53-901b35012601": {
+      "sessionId": "e775e9ce-7ef3-4ea9-8d53-901b35012601",
+      "surfaceId": "27DAF5B7-4B9C-4808-ACD2-74A6B3F26BFF",
+      "workspaceId": "F0060429-C994-436D-8448-CA3C306C553E",
+      "cwd": "/Users/mimen/.claude/pr-watch-2",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "104b6777-776a-42e3-8926-6148aaa8f7e1": {
+      "sessionId": "104b6777-776a-42e3-8926-6148aaa8f7e1",
+      "surfaceId": "1A99E1BC-E0B5-47B0-B940-7767284A7425",
+      "workspaceId": "EB777D79-2C2B-4AF0-8631-77B6CC2305AE",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/p3-3b-buildpacks-crud",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "444ff7ae-5153-4fc0-86ca-63cfa178bc45": {
+      "sessionId": "444ff7ae-5153-4fc0-86ca-63cfa178bc45",
+      "surfaceId": "72F427AA-A20C-453D-9D23-10814CF8AAC7",
+      "workspaceId": "67C20466-D992-4575-996F-F78E7118845C",
+      "cwd": "/Users/mimen/Documents/heroku/dashboard/.claude/worktrees/w-23054823-metered-callout",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "25768d51-61a8-41dd-9e1f-5b42698b9214": {
+      "sessionId": "25768d51-61a8-41dd-9e1f-5b42698b9214",
+      "surfaceId": "01C3E30C-12B1-4CEF-97DE-1496EC57130C",
+      "workspaceId": "7BB1147F-5C99-45EF-B6A2-4AF3CF37A425",
+      "cwd": "/Users/mimen/projects/claude-sessions",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "9f6bda9c-2af6-466c-8ffc-8571fcb299ce": {
+      "sessionId": "9f6bda9c-2af6-466c-8ffc-8571fcb299ce",
+      "surfaceId": "CCA6487F-9208-47FD-BFB6-2FA798E93F75",
+      "workspaceId": "41A73C79-4FA2-48A6-B8B6-75A47BC72C8B",
+      "cwd": "/Users/mimen/projects/claude-sessions",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "f7dd1d16-9e3e-4245-b00d-db080f43180f": {
+      "sessionId": "f7dd1d16-9e3e-4245-b00d-db080f43180f",
+      "surfaceId": "F661CB80-99E8-4AC5-8C2C-39429AF4D11B",
+      "workspaceId": "C32C4264-9181-4434-95B6-7CE9238B9C76",
+      "cwd": "/Users/mimen",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "8992536f-a586-4ffd-b6e7-d4ecbbd7216e": {
+      "sessionId": "8992536f-a586-4ffd-b6e7-d4ecbbd7216e",
+      "surfaceId": "6CD6C0A6-58B5-4D00-96BE-6FB474756F3F",
+      "workspaceId": "EA746D0B-9C32-48F5-A703-A91B8D56E998",
+      "cwd": "/Users/mimen",
+      "agentLifecycle": "running",
+      "isRestorable": true
+    },
+    "dead-1111-1111-1111-111111111111": {
+      "sessionId": "dead-1111-1111-1111-111111111111",
+      "surfaceId": "00000000-DEAD-0000-0000-000000000001",
+      "workspaceId": null,
+      "cwd": "/tmp/gone",
+      "agentLifecycle": null,
+      "isRestorable": true
+    },
+    "dead-2222-2222-2222-222222222222": {
+      "sessionId": "dead-2222-2222-2222-222222222222",
+      "surfaceId": "00000000-DEAD-0000-0000-000000000002",
+      "workspaceId": null,
+      "cwd": "/tmp/gone",
+      "agentLifecycle": null,
+      "isRestorable": true
+    }
+  },
+  "activeSessionsBySurface": {
+    "8D67E236-F2BB-481E-813A-83A2AC3672A4": {
+      "sessionId": "aea5bc4f-04dc-4c3d-92d3-2d1b2e9b0a78"
+    },
+    "84F4AAE7-A347-4922-A3FD-56ED5DC0CCB7": {
+      "sessionId": "50175490-a91e-4212-b751-ed7f25ae9c42"
+    },
+    "4170B68A-D99A-4B97-8A93-CA8DBE0D7256": {
+      "sessionId": "62cf5173-1237-46ad-b83f-489f9fea48ed"
+    },
+    "91382E0B-F82B-42EF-9630-8E01CF15E498": {
+      "sessionId": "0a3ad125-1851-4c1f-9638-7e289df2c34d"
+    },
+    "C110B8F6-4287-48EF-B63B-99695044E727": {
+      "sessionId": "2a3c4ec5-6ab0-4640-986d-fc868000c425"
+    },
+    "6EEECF1A-DEA2-40A6-9A91-0907F9C31DDE": {
+      "sessionId": "e0d648eb-a80c-499d-b566-137c3366809d"
+    },
+    "991282B9-76F8-4691-BCCF-16BE50E955CC": {
+      "sessionId": "f4d1e512-693f-4bb7-8ceb-f44d2cb3bc90"
+    },
+    "2E3EE3BA-F468-43C8-B46C-049F9AA00413": {
+      "sessionId": "daaca1b5-cc46-4fc8-ba44-63687d1db1de"
+    },
+    "A31ED762-7FEB-4C4E-BEDA-5D91F7698C46": {
+      "sessionId": "2305108f-c882-4bef-ba39-6f33f7d9c4b5"
+    },
+    "36C5DC98-EECF-4EAC-B626-42713D69870D": {
+      "sessionId": "62becec7-0e86-47dc-9a55-d2eeabdb1869"
+    },
+    "186372E4-67B6-430A-95DF-4F2E0F6E42DA": {
+      "sessionId": "c9fb37b6-3553-4d4e-80b4-cafcf7f3b99e"
+    },
+    "3122A984-6F33-462E-A691-3792AE9B1697": {
+      "sessionId": "a6765222-f6ea-4508-98c4-019a46e75ad0"
+    },
+    "DFCBE438-2E79-4BEB-A46C-576BE2E99D85": {
+      "sessionId": "253e0caa-d4bf-4b93-a96c-3a1046eb8f53"
+    },
+    "2C6DFA12-F1C4-40E8-8D60-EA6566148FE1": {
+      "sessionId": "5ce9180a-3eaa-43d1-a7da-44aac644a8ff"
+    },
+    "92E55300-7EED-4AB2-8A23-A8670ACD97E4": {
+      "sessionId": "905af9f7-8ce6-49e9-bb0d-964a7b2c8a68"
+    },
+    "920AF95E-79D9-4C0D-B894-EE968598821A": {
+      "sessionId": "2aeb6ba1-6c1b-4f8b-a0db-679090bc7eb1"
+    },
+    "62AA0D19-210A-4CD1-BBAF-2A1F69831B2C": {
+      "sessionId": "a30aa01a-fc79-4b09-bc54-52145b64a2a9"
+    },
+    "A5231378-1CDB-4716-980A-9DD021D4D511": {
+      "sessionId": "1daafb4f-9699-4adc-964c-a106ba3201c8"
+    },
+    "27DAF5B7-4B9C-4808-ACD2-74A6B3F26BFF": {
+      "sessionId": "e775e9ce-7ef3-4ea9-8d53-901b35012601"
+    },
+    "1A99E1BC-E0B5-47B0-B940-7767284A7425": {
+      "sessionId": "104b6777-776a-42e3-8926-6148aaa8f7e1"
+    },
+    "72F427AA-A20C-453D-9D23-10814CF8AAC7": {
+      "sessionId": "444ff7ae-5153-4fc0-86ca-63cfa178bc45"
+    },
+    "01C3E30C-12B1-4CEF-97DE-1496EC57130C": {
+      "sessionId": "25768d51-61a8-41dd-9e1f-5b42698b9214"
+    },
+    "CCA6487F-9208-47FD-BFB6-2FA798E93F75": {
+      "sessionId": "9f6bda9c-2af6-466c-8ffc-8571fcb299ce"
+    },
+    "F661CB80-99E8-4AC5-8C2C-39429AF4D11B": {
+      "sessionId": "f7dd1d16-9e3e-4245-b00d-db080f43180f"
+    },
+    "6CD6C0A6-58B5-4D00-96BE-6FB474756F3F": {
+      "sessionId": "8992536f-a586-4ffd-b6e7-d4ecbbd7216e"
+    },
+    "00000000-DEAD-0000-0000-000000000001": {
+      "sessionId": "dead-1111-1111-1111-111111111111"
+    },
+    "00000000-DEAD-0000-0000-000000000002": {
+      "sessionId": "dead-2222-2222-2222-222222222222"
+    }
+  },
+  "activeSessionsByWorkspace": {}
+}

@@ -3,13 +3,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   parseTree,
-  parsePersisted,
+  parseHookStore,
   buildBridge,
 } from "./bridge";
 
 const FIX = join(import.meta.dir, "__fixtures__");
 const tree = JSON.parse(readFileSync(join(FIX, "tree.json"), "utf8"));
-const persisted = JSON.parse(readFileSync(join(FIX, "persisted.json"), "utf8"));
+const store = JSON.parse(readFileSync(join(FIX, "hook-store.json"), "utf8"));
 
 describe("parseTree", () => {
   const surfaces = parseTree(tree);
@@ -37,10 +37,10 @@ describe("parseTree", () => {
   });
 });
 
-describe("parsePersisted", () => {
-  const agents = parsePersisted(persisted);
+describe("parseHookStore", () => {
+  const agents = parseHookStore(store);
 
-  test("keys claude agents by their surface (panel) UUID", () => {
+  test("keys the active surface→session binding by surface UUID", () => {
     expect(agents.size).toBeGreaterThan(0);
     for (const [surfaceId, agent] of agents) {
       expect(surfaceId).toBeTruthy();
@@ -48,27 +48,36 @@ describe("parsePersisted", () => {
     }
   });
 
-  test("carries the resume binding when present", () => {
-    const withResume = [...agents.values()].filter((a) => a.resumeCommand);
-    expect(withResume.length).toBeGreaterThan(0);
-    // the resume command is the exact `claude --resume <id>` cmux would run
-    expect(withResume[0]?.resumeCommand).toContain("--resume");
+  test("enriches each binding with the session detail (workspace, restorable)", () => {
+    const withWorkspace = [...agents.values()].filter((a) => a.workspaceId);
+    expect(withWorkspace.length).toBeGreaterThan(0);
+    expect([...agents.values()].some((a) => a.isRestorable)).toBe(true);
   });
 });
 
 describe("buildBridge", () => {
-  const bridge = buildBridge(tree, persisted);
+  const bridge = buildBridge(tree, store);
 
-  const agents = parsePersisted(persisted);
-  const firstEntry = [...agents][0];
-  if (!firstEntry) throw new Error("fixture has no claude agents");
-  const [firstSurfaceId, firstAgent] = firstEntry;
+  const agents = parseHookStore(store);
+  // pick a binding whose surface is actually live in the tree (the store also holds stale ones)
+  const liveEntry = [...agents].find(([surfaceId]) => bridge.surfaceToWorkspace.has(surfaceId));
+  if (!liveEntry) throw new Error("fixture has no live claude surface");
+  const [firstSurfaceId, firstAgent] = liveEntry;
 
-  test("every persisted claude surface UUID exists in the live tree (join is total)", () => {
-    // the audit found 25/25 overlap — the join key is real
-    for (const surfaceId of agents.keys()) {
-      expect(bridge.surfaceToWorkspace.has(surfaceId)).toBe(true);
-    }
+  test("bridge built from readable sources reports readable=true", () => {
+    expect(bridge.readable).toBe(true);
+    expect(buildBridge(tree, store, false).readable).toBe(false);
+  });
+
+  test("stale bindings (surface not in the tree) do NOT count as open", () => {
+    // the fixture seeds 2 bindings whose surfaces are gone; liveness must intersect the tree
+    const staleSessions = [...agents.values()]
+      .filter((a) => !bridge.surfaceToWorkspace.has(
+        [...agents].find(([, v]) => v.sessionId === a.sessionId)![0],
+      ))
+      .map((a) => a.sessionId);
+    expect(staleSessions.length).toBeGreaterThan(0);
+    for (const sid of staleSessions) expect(bridge.isOpen(sid)).toBe(false);
   });
 
   test("resolves a session id to its live surface + workspace", () => {

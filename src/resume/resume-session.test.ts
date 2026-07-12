@@ -1,5 +1,7 @@
 import { test, expect } from "bun:test";
-import { planResumeSession } from "./resume-session.ts";
+import { planResumeSession, resumeSessionEntry } from "./resume-session.ts";
+import { openIndex } from "../index/schema.ts";
+import { openCatalogue, setResumeId } from "../catalogue/db.ts";
 import type { SessionRow } from "../index/index.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 
@@ -15,7 +17,7 @@ function row(over: Partial<SessionRow> = {}): SessionRow {
 }
 
 /** A stub bridge that reports a fixed set of open session ids. */
-function stubBridge(openIds: string[]): Bridge {
+function stubBridge(openIds: string[], readable = true): Bridge {
   const open = new Set(openIds);
   return {
     surfaces: [],
@@ -26,6 +28,7 @@ function stubBridge(openIds: string[]): Bridge {
     locateSession: () => null,
     isOpen: (id: string) => open.has(id),
     primarySurface: () => null,
+    readable,
   };
 }
 
@@ -67,4 +70,25 @@ test("liveness keys on resumeId (the id claude --resume uses), not the filename 
     null,
   );
   expect(plan.action).toBe("skip");
+});
+
+test("resume FAILS CLOSED when liveness is unreadable — never spawns (ADR-0054)", () => {
+  const idx = openIndex(":memory:");
+  const cat = openCatalogue(":memory:");
+  const NOW = "2026-07-11T00:00:00Z";
+  try {
+    idx.query(
+      `INSERT INTO sessions (session_id, host, path, cwd, project_root, project_name,
+         fallback_label, first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id)
+       VALUES ('s1', 'h', '/store/s1.jsonl', '/tmp', '/tmp', 'p', 's1', $now, $now, 1, 0, 0, 0, 's1')`,
+    ).run({ $now: NOW });
+    setResumeId(cat, "s1", "s1", NOW);
+    // an UNREADABLE bridge (readable:false) must abort — even in dry-run, and even though the id
+    // isn't in the (empty) open set. Fail-open here would re-spawn a possibly-running session.
+    const res = resumeSessionEntry(idx, cat, "s1", { dryRun: true, bridge: stubBridge([], false) });
+    expect(res.status).toBe("liveness-unreadable");
+  } finally {
+    idx.close();
+    cat.close();
+  }
 });

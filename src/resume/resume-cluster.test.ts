@@ -3,13 +3,14 @@ import { openIndex } from "../index/schema.ts";
 import { openCatalogue, setSystem, setRole, setResumeCommand, setResumeId, setCompleted, setArchived } from "../catalogue/db.ts";
 import { resumeClusterEntry, planClusterMembers } from "./resume-cluster.ts";
 import type { CatalogueRow } from "../catalogue/db.ts";
+import type { Bridge } from "../cmux/bridge.ts";
 
 function catRow(over: Partial<CatalogueRow>): CatalogueRow {
   return {
     sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
     archived: false, parkedTaskId: null, event: null, key: null, parentSessionId: null,
     skill: null, role: "pr-agent", resumeCommand: null, project: null, system: "pr-watch",
-    gusWork: null, epicId: null, phase: null, notes: null, updatedAt: null,
+    gusWork: null, epicId: null, phase: null, statusLine: null, miladReview: null, buildComplete: false, stage: null, activity: null, notes: null, updatedAt: null,
     prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...over,
   };
 }
@@ -109,6 +110,32 @@ test("planClusterMembers: freshest dead session wins an unclaimed unit; older on
   const byId = new Map(plan.map((p) => [p.sessionId, p.disposition]));
   expect(byId.get("new")).toBe("resume-candidate");
   expect(byId.get("old")).toBe("superseded");
+});
+
+test("cluster resume ABORTS (spawns nothing) when liveness is unreadable (ADR-0054)", () => {
+  const idx = openIndex(":memory:");
+  const cat = openCatalogue(":memory:");
+  try {
+    for (const id of ["ctrl", "worker"]) {
+      seedIndex(idx, id, "/tmp");
+      setResumeId(cat, id, id, NOW);
+      setSystem(cat, id, "pr-watch", NOW);
+      setRole(cat, id, "pr-agent", NOW);
+    }
+    // an unreadable bridge: liveness can't be resolved → the whole pass must abort, not fan out
+    const unreadable: Bridge = {
+      surfaces: [], surfaceToWorkspace: new Map(), workspaceIds: () => [],
+      surfacesInWorkspace: () => [], surfaceInfo: () => null, locateSession: () => null,
+      isOpen: () => false, primarySurface: () => null, readable: false,
+    };
+    const s = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true, bridge: unreadable });
+    expect(s.abortedUnreadable).toBe(true);
+    expect(s.resumed).toBe(0);
+    expect(s.perSession.length).toBe(0); // nothing was even planned
+  } finally {
+    idx.close();
+    cat.close();
+  }
 });
 
 test("empty cluster is a clean no-op", () => {

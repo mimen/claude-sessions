@@ -1,20 +1,27 @@
 /**
  * cmux bridge — the surface-keyed link between a Claude session and its live cmux body.
  *
- * Established by the 2026-07-09 cmux capability audit (pr-watch docs/adr/0040):
+ * Established by the 2026-07-09 cmux capability audit (pr-watch docs/adr/0040), REPOINTED for
+ * cmux 0.64 (2026-07-11):
  *  - `cmux tree --all --json --id-format both` gives every window/workspace/pane/surface
  *    with a STABLE UUID. A surface resolves to exactly one workspace (1:1 up, no orphans);
- *    a workspace may hold many surfaces (1:many down).
- *  - cmux's persisted state (`session-com.cmuxterm.app.json`) records, per panel, the
- *    Claude `agent.sessionId` + `resumeBinding`. The panel's UUID EQUALS the surface UUID
- *    in `tree` (verified 25/25 overlap), so the two join on the surface UUID with no
- *    title/cwd guessing.
+ *    a workspace may hold many surfaces (1:many down). This is the ground truth for "what
+ *    surface exists RIGHT NOW".
+ *  - cmux 0.64 moved Claude session identity out of the app-state file
+ *    (`session-com.cmuxterm.app.json`, which no longer records `agent.sessionId`) into a
+ *    hook-populated store, `~/.cmuxterm/claude-hook-sessions.json`:
+ *      - `sessions[sessionId] = {surfaceId, workspaceId, cwd, transcriptPath, agentLifecycle,
+ *        isRestorable, pid, …}` — the per-session detail, ACCRETES history (dead + replaced).
+ *      - `activeSessionsBySurface[surfaceUUID] = {sessionId, …}` — the CURRENT binding of a
+ *        surface to its live session. This is the authoritative surface→session join.
+ *    Only cmux's claude hooks populate it, and only when claude is launched through cmux's
+ *    shim (a plain command in an integrated shell — NOT `exec`/env-scrubbed). See ADR-0054.
  *
- * Identity/liveness key on the SURFACE UUID. The workspace tab is owned by the workspace's
- * PRIMARY session = the earliest surface running a claude agent (pane index, then
+ * Liveness = `activeSessionsBySurface` INTERSECTED with the live tree: the store accretes stale
+ * bindings for surfaces long gone, so a binding only counts if its surface still exists in
+ * `cmux tree`. Identity/liveness key on the SURFACE UUID. The workspace tab is owned by the
+ * workspace's PRIMARY session = the earliest surface running a claude agent (pane index, then
  * index-in-pane) — a pure function of tree position, no lock (ADR-0027/0032/0040).
- *
- * This supersedes the title-join in open-state.ts, which predated exposing the surface UUID.
  */
 
 // --- shapes of the cmux JSON we consume (only the fields we need) ---------------
@@ -64,13 +71,17 @@ export interface SurfaceLocation {
   windowRef: string;
 }
 
-/** The claude agent cmux persisted for a surface (keyed by surface/panel UUID). */
-export interface PersistedAgent {
+/** The claude session cmux bound to a surface (keyed by surface UUID). */
+export interface SurfaceSession {
   sessionId: string;
-  workingDirectory: string | null;
-  /** the exact `cd … && claude --resume <id>` cmux would replay, if recorded */
-  resumeCommand: string | null;
-  resumeCwd: string | null;
+  /** the workspace cmux recorded for the session, if any */
+  workspaceId: string | null;
+  /** the session's cwd as cmux recorded it, if any */
+  cwd: string | null;
+  /** cmux's agent lifecycle hint (running/needsInput/…), if recorded */
+  agentLifecycle: string | null;
+  /** whether cmux believes this session can be resumed */
+  isRestorable: boolean;
 }
 
 // --- parse `cmux tree --all --json --id-format both` ----------------------------
@@ -104,49 +115,49 @@ export function parseTree(tree: CmuxTree): SurfaceLocation[] {
   return out;
 }
 
-// --- parse the persisted state file --------------------------------------------
+// --- parse the cmux 0.64 hook store ---------------------------------------------
 
-interface PersistedTerminal {
-  agent?: {
-    kind?: string;
-    sessionId?: string;
-    workingDirectory?: string | null;
-  } | null;
-  resumeBinding?: {
-    command?: string | null;
-    cwd?: string | null;
-  } | null;
-  workingDirectory?: string | null;
+/** One entry in `sessions[sessionId]` — the per-session detail cmux's hooks record. */
+interface HookSessionEntry {
+  sessionId?: string;
+  surfaceId?: string | null;
+  workspaceId?: string | null;
+  cwd?: string | null;
+  agentLifecycle?: string | null;
+  isRestorable?: boolean;
 }
-interface PersistedPanel {
-  id?: string;
-  terminal?: PersistedTerminal | null;
+/** One entry in `activeSessionsBySurface[surfaceUUID]` — the CURRENT surface→session binding. */
+interface ActiveSurfaceBinding {
+  sessionId?: string;
 }
-interface PersistedWorkspace {
-  panels?: PersistedPanel[];
-}
-export interface CmuxPersisted {
-  windows?: { tabManager?: { workspaces?: PersistedWorkspace[] } }[];
+/** The shape of `~/.cmuxterm/claude-hook-sessions.json` (only the fields we consume). */
+export interface CmuxHookStore {
+  sessions?: Record<string, HookSessionEntry>;
+  activeSessionsBySurface?: Record<string, ActiveSurfaceBinding>;
 }
 
-/** surface (panel) UUID -> the claude agent cmux persisted for it. */
-export function parsePersisted(data: CmuxPersisted): Map<string, PersistedAgent> {
-  const map = new Map<string, PersistedAgent>();
-  for (const win of data.windows ?? []) {
-    for (const ws of win.tabManager?.workspaces ?? []) {
-      for (const panel of ws.panels ?? []) {
-        const agent = panel.terminal?.agent;
-        if (!panel.id || !agent?.sessionId || agent.kind !== "claude") continue;
-        const rb = panel.terminal?.resumeBinding ?? null;
-        map.set(panel.id, {
-          sessionId: agent.sessionId,
-          workingDirectory:
-            agent.workingDirectory ?? panel.terminal?.workingDirectory ?? null,
-          resumeCommand: rb?.command ?? null,
-          resumeCwd: rb?.cwd ?? null,
-        });
-      }
-    }
+/**
+ * surface UUID -> the claude session cmux currently binds to it.
+ *
+ * `activeSessionsBySurface` is authoritative for the current binding; `sessions` is the detail
+ * lookup (and accretes history). We take the binding and enrich it from the matching session
+ * entry. Surfaces whose binding names a session with no detail entry still map (the sessionId
+ * alone is enough for liveness) — detail fields just come back null.
+ */
+export function parseHookStore(store: CmuxHookStore): Map<string, SurfaceSession> {
+  const map = new Map<string, SurfaceSession>();
+  const sessions = store.sessions ?? {};
+  for (const [surfaceId, binding] of Object.entries(store.activeSessionsBySurface ?? {})) {
+    const sessionId = binding?.sessionId;
+    if (!surfaceId || !sessionId) continue;
+    const detail = sessions[sessionId] ?? {};
+    map.set(surfaceId, {
+      sessionId,
+      workspaceId: detail.workspaceId ?? null,
+      cwd: detail.cwd ?? null,
+      agentLifecycle: detail.agentLifecycle ?? null,
+      isRestorable: detail.isRestorable ?? false,
+    });
   }
   return map;
 }
@@ -162,8 +173,14 @@ export interface Bridge {
   workspaceIds(): string[];
   /** every live surface in a workspace, tree-ordered (pane, then index-in-pane) */
   surfacesInWorkspace(workspaceId: string): SurfaceLocation[];
-  /** the claude agent persisted for a surface, or null */
-  surfaceInfo(surfaceId: string): PersistedAgent | null;
+  /** the claude session cmux currently binds to a surface, or null */
+  surfaceInfo(surfaceId: string): SurfaceSession | null;
+  /**
+   * Whether the underlying liveness sources were READABLE this snapshot. False means the tree
+   * and/or hook store couldn't be read (cmux down, socket unauthed, store missing) — callers that
+   * spawn (resume) MUST fail closed on this rather than treat it as "nothing open" (ADR-0054).
+   */
+  readable: boolean;
   /** locate a session by its Claude session id: its live surface + workspace, or null if closed */
   locateSession(sessionId: string): SurfaceLocation | null;
   /** is this session id currently open (has a live surface)? */
@@ -172,9 +189,13 @@ export interface Bridge {
   primarySurface(workspaceId: string): SurfaceLocation | null;
 }
 
-export function buildBridge(tree: CmuxTree, persisted: CmuxPersisted): Bridge {
+export function buildBridge(
+  tree: CmuxTree,
+  store: CmuxHookStore,
+  readable = true,
+): Bridge {
   const surfaces = parseTree(tree);
-  const agents = parsePersisted(persisted);
+  const agents = parseHookStore(store);
 
   const surfaceToWorkspace = new Map<string, SurfaceLocation>();
   for (const s of surfaces) surfaceToWorkspace.set(s.surfaceId, s);
@@ -194,7 +215,7 @@ export function buildBridge(tree: CmuxTree, persisted: CmuxPersisted): Bridge {
     byWorkspace.set(s.workspaceId, list);
   }
 
-  const surfaceInfo = (surfaceId: string): PersistedAgent | null =>
+  const surfaceInfo = (surfaceId: string): SurfaceSession | null =>
     agents.get(surfaceId) ?? null;
 
   const surfacesInWorkspace = (workspaceId: string): SurfaceLocation[] =>
@@ -223,5 +244,6 @@ export function buildBridge(tree: CmuxTree, persisted: CmuxPersisted): Bridge {
     locateSession,
     isOpen: (sessionId) => sessionToSurface.has(sessionId),
     primarySurface,
+    readable,
   };
 }

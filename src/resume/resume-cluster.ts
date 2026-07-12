@@ -27,6 +27,8 @@ export interface ClusterResumeSummary {
   superseded: number;
   notIndexed: number;
   failed: number;
+  /** true iff the pass ABORTED because cmux liveness was unreadable — nothing was spawned (ADR-0054) */
+  abortedUnreadable: boolean;
   perSession: { sessionId: string; result: MemberDisposition }[];
 }
 
@@ -101,20 +103,45 @@ export function resumeClusterEntry(
   indexDb: Database,
   catalogueDb: Database,
   cluster: string,
-  opts: { dryRun?: boolean; cmuxBin?: string; bridge?: Bridge } = {},
+  opts: { dryRun?: boolean; cmuxBin?: string; bridge?: Bridge; focus?: boolean } = {},
 ): ClusterResumeSummary {
-  const sessionIds = sessionsForSystem(catalogueDb, cluster);
+  return resumeMany(indexDb, catalogueDb, sessionsForSystem(catalogueDb, cluster), opts);
+}
+
+/**
+ * Resume a SET of session ids — the shared core behind `ccs resume-cluster`, `ccs resume
+ * <selector>`, and the TUI. Applies the two cluster-level guards (retired-skip, one-live-worker-
+ * per-work-unit supersede-dedup) then delegates each survivor to resumeSessionEntry (the single
+ * per-session resume core). A single-id set naturally resolves to plain resume-session behavior.
+ */
+export function resumeMany(
+  indexDb: Database,
+  catalogueDb: Database,
+  sessionIds: string[],
+  opts: { dryRun?: boolean; cmuxBin?: string; bridge?: Bridge; focus?: boolean } = {},
+): ClusterResumeSummary {
   const bridge = opts.bridge ?? liveBridge();
+  const emptySummary = (): ClusterResumeSummary => ({
+    resumed: 0, alreadyOpen: 0, retired: 0, superseded: 0, notIndexed: 0, failed: 0,
+    abortedUnreadable: false, perSession: [],
+  });
+
+  // FAIL CLOSED: without readable liveness the supersede-dedup can't tell which units are already
+  // live, so a whole-cluster resume would re-spawn every running worker → duplicate fleet. Abort
+  // the ENTIRE pass (spawn nothing) rather than fan out blind (ADR-0054).
+  if (!bridge.readable) return { ...emptySummary(), abortedUnreadable: true };
+
   const openIds = openSessionIdsFrom(bridge);
   const isLive = (sessionId: string, resumeId: string | null) =>
     openIds.has(sessionId) || (resumeId != null && openIds.has(resumeId));
 
-  const members = sessionIds.map((sessionId) => ({ sessionId, row: getRow(catalogueDb, sessionId) }));
+  // A selector can return the same id via >1 axis (e.g. role + cluster); dedupe so the planner
+  // sees each session once and we never double-spawn.
+  const uniqueIds = [...new Set(sessionIds)];
+  const members = uniqueIds.map((sessionId) => ({ sessionId, row: getRow(catalogueDb, sessionId) }));
   const planned = planClusterMembers(members, isLive);
 
-  const summary: ClusterResumeSummary = {
-    resumed: 0, alreadyOpen: 0, retired: 0, superseded: 0, notIndexed: 0, failed: 0, perSession: [],
-  };
+  const summary = emptySummary();
 
   for (const p of planned) {
     if (p.disposition === "retired") {
@@ -131,6 +158,7 @@ export function resumeClusterEntry(
       dryRun: opts.dryRun,
       cmuxBin: opts.cmuxBin,
       bridge,
+      focus: opts.focus,
     });
     summary.perSession.push({ sessionId: p.sessionId, result: res.status });
     switch (res.status) {
@@ -138,6 +166,9 @@ export function resumeClusterEntry(
       case "already-open": summary.alreadyOpen++; break;
       case "not-indexed": summary.notIndexed++; break;
       case "spawn-failed": summary.failed++; break;
+      // the shared-bridge gate above already aborts on this, but keep the pass fail-closed if a
+      // per-session bridge ever comes back unreadable: count it as a failure, never a spawn.
+      case "liveness-unreadable": summary.failed++; break;
     }
   }
   return summary;

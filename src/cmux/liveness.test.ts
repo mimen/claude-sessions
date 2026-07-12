@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildBridge, parsePersisted } from "./bridge";
+import { buildBridge, parseHookStore } from "./bridge";
 import {
   openSessionIdsFrom,
   workspaceForSessionFrom,
@@ -10,21 +10,23 @@ import {
 
 const FIX = join(import.meta.dir, "__fixtures__");
 const tree = JSON.parse(readFileSync(join(FIX, "tree.json"), "utf8"));
-const persisted = JSON.parse(readFileSync(join(FIX, "persisted.json"), "utf8"));
-const bridge = buildBridge(tree, persisted);
+const store = JSON.parse(readFileSync(join(FIX, "hook-store.json"), "utf8"));
+const bridge = buildBridge(tree, store);
 
-const agents = parsePersisted(persisted);
-const firstEntry = [...agents][0];
-if (!firstEntry) throw new Error("fixture has no claude agents");
-const [firstSurfaceId, firstAgent] = firstEntry;
+const agents = parseHookStore(store);
+// pick a binding whose surface is actually live in the tree (the store also holds stale ones)
+const liveEntry = [...agents].find(([surfaceId]) => bridge.surfaceToWorkspace.has(surfaceId));
+if (!liveEntry) throw new Error("fixture has no live claude surface");
+const [firstSurfaceId, firstAgent] = liveEntry;
 
 describe("openSessionIdsFrom", () => {
   const open = openSessionIdsFrom(bridge);
 
-  test("every persisted claude session with a live surface is reported open", () => {
-    // in the fixture, all persisted claude surfaces exist in the tree (25/25), so all are open
-    for (const agent of agents.values()) {
-      expect(open.has(agent.sessionId)).toBe(true);
+  test("every active binding whose surface is live in the tree is reported open", () => {
+    for (const [surfaceId, agent] of agents) {
+      if (bridge.surfaceToWorkspace.has(surfaceId)) {
+        expect(open.has(agent.sessionId)).toBe(true);
+      }
     }
   });
 
