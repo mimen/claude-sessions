@@ -5,6 +5,12 @@ import { resolveConfig } from "./resolve-config.ts";
 import { liveResolveCtx } from "./compose-claude-md.ts";
 import type { Action } from "./merge.ts";
 import { workUnitPath } from "../catalogue/spawn-contract.ts";
+import { readClusterChangelog, changelogSince, renderDelta } from "../cluster/changelog.ts";
+import { readIdentityDoc, mergeIdentityDoc } from "../state/cluster-state.ts";
+
+/** The identity state doc + field where each identity records the cluster version it last saw. */
+const CATCH_UP_DOC = "catch-up";
+const SEEN_FIELD = "last_seen_cluster_version";
 
 /**
  * The `start` hook action runner (ADR-0044, execute-deterministically): a session's resolved
@@ -64,6 +70,32 @@ export const BUILTIN_ACTIONS: Record<string, ActionHandler> = {
     if (msgs.length === 0) return { context: null };
     const body = msgs.map((m) => `— from ${m.sender}:\n${m.body}`).join("\n\n");
     return { context: `You have ${msgs.length} inbox message(s) (drained just now):\n\n${body}` };
+  },
+
+  // catch-up: on SessionStart (startup OR resume), surface the cluster CHANGELOG entries this
+  // identity hasn't seen, then advance its last-seen stamp (ADR-0058). This is the deterministic
+  // replacement for "read the changelog each tick" — a hook the agent can't skip. The stamp only
+  // advances AFTER the delta is added to context, so a session killed before its next turn
+  // re-surfaces the same entries next start (idempotent, same contract as move-on-drain).
+  "catch-up": (_action, ctx) => {
+    const cluster = ctx.row.cluster;
+    if (!cluster) return { context: null }; // no cluster → no changelog to catch up on
+    const log = readClusterChangelog(cluster);
+    if (!log) return { context: null }; // cluster ships no CHANGELOG
+    const root = ccsRuntimeRoot();
+    const r = responsibilityOf(ctx.row);
+    // A fresh embodiment has no stamp → seen 0, so it sees the full window (ADR-0058: a
+    // just-spawned worker is never behind). readIdentityDoc returns the enveloped doc.
+    const doc = readIdentityDoc<{ [SEEN_FIELD]?: number }>(root, r, CATCH_UP_DOC);
+    const seen = typeof doc?.data?.[SEEN_FIELD] === "number" ? doc!.data[SEEN_FIELD]! : 0;
+    const delta = changelogSince(log, seen);
+    if (delta.entries.length === 0) return { context: null }; // up to date → silent no-op
+    const context = renderDelta(cluster, delta);
+    // Advance the stamp ONLY after composing the surfaced context (single-writer = this action).
+    // Clock at the side-effect boundary (mirrors register-command / worker-stop-command).
+    const nowIso = new Date().toISOString();
+    mergeIdentityDoc(root, r, CATCH_UP_DOC, { [SEEN_FIELD]: delta.currentVersion }, { source: "catch-up", now: nowIso });
+    return { context };
   },
 };
 

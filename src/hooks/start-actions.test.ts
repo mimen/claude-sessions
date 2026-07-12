@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { CatalogueRow } from "../catalogue/db.ts";
 import { runStartActions, BUILTIN_ACTIONS, type ActionHandler, type StartActionCtx } from "./start-actions.ts";
 import { writeMessage } from "../inbox/inbox.ts";
+import { readIdentityDoc } from "../state/cluster-state.ts";
 
 const NOW = "2026-07-10T00:00:00Z";
 
@@ -105,5 +106,97 @@ test("built-in drain-inbox: empty inbox -> null context", () => {
   withTree(() => {
     const out = BUILTIN_ACTIONS["drain-inbox"]!({ name: "drain-inbox" }, ctx({ role: "pr-agent" }));
     expect(out.context).toBeNull();
+  });
+});
+
+// --- catch-up (ADR-0058) ---------------------------------------------------------
+
+const CHANGELOG = `# pr-watch CHANGELOG
+version: 2
+
+## adopt prBranch (version 1)
+requiresRestart: false
+Use the board's prBranch.
+
+## worktree moved (version 2)
+requiresRestart: true
+cwd relocated; orchestrator restarts you.
+`;
+const writeChangelog = (cfg: string, cluster: string, text: string) => {
+  const d = join(cfg, "clusters", cluster);
+  mkdirSync(d, { recursive: true });
+  writeFileSync(join(d, "CHANGELOG.md"), text);
+};
+const seenVersion = (rt: string, cluster: string, role: string): unknown => {
+  const doc = readIdentityDoc<{ last_seen_cluster_version?: number }>(
+    rt, { cluster, role }, "catch-up",
+  );
+  return doc?.data?.last_seen_cluster_version;
+};
+
+test("catch-up: a fresh identity sees the full changelog window and the stamp advances to current", () => {
+  withTree((cfg, rt) => {
+    writeChangelog(cfg, "pr-watch", CHANGELOG);
+    const out = BUILTIN_ACTIONS["catch-up"]!({ name: "catch-up" }, ctx({ role: "control" }));
+    expect(out.context).toContain("v0 → v2");
+    expect(out.context).toContain("adopt prBranch");
+    expect(out.context).toContain("worktree moved");
+    expect(out.context).toContain("restart"); // v2 requiresRestart
+    expect(seenVersion(rt, "pr-watch", "control")).toBe(2); // stamp advanced only after surfacing
+  });
+});
+
+test("catch-up: an up-to-date identity is a silent no-op", () => {
+  withTree((cfg) => {
+    writeChangelog(cfg, "pr-watch", CHANGELOG);
+    const c = ctx({ role: "control" });
+    BUILTIN_ACTIONS["catch-up"]!({ name: "catch-up" }, c); // first run: advances to 2
+    const second = BUILTIN_ACTIONS["catch-up"]!({ name: "catch-up" }, c); // already current
+    expect(second.context).toBeNull();
+  });
+});
+
+test("catch-up: idempotent across re-runs at the same version (killed session re-surfaces nothing new)", () => {
+  withTree((cfg, rt) => {
+    writeChangelog(cfg, "pr-watch", CHANGELOG);
+    const c = ctx({ role: "control" });
+    const first = BUILTIN_ACTIONS["catch-up"]!({ name: "catch-up" }, c);
+    expect(first.context).toContain("v0 → v2");
+    // stamp is now 2; a fresh start at the same cluster version surfaces nothing
+    const again = BUILTIN_ACTIONS["catch-up"]!({ name: "catch-up" }, c);
+    expect(again.context).toBeNull();
+    expect(seenVersion(rt, "pr-watch", "control")).toBe(2);
+  });
+});
+
+test("catch-up: no cluster on the row → null (nothing to catch up on)", () => {
+  withTree((cfg) => {
+    writeChangelog(cfg, "pr-watch", CHANGELOG);
+    const out = BUILTIN_ACTIONS["catch-up"]!({ name: "catch-up" }, ctx({ role: "control", cluster: null }));
+    expect(out.context).toBeNull();
+  });
+});
+
+test("catch-up: cluster ships no CHANGELOG → null", () => {
+  withTree(() => {
+    const out = BUILTIN_ACTIONS["catch-up"]!({ name: "catch-up" }, ctx({ role: "control" }));
+    expect(out.context).toBeNull();
+  });
+});
+
+test("catch-up: after seeing v1, only the newer entry surfaces on a bump to v2", () => {
+  withTree((cfg, rt) => {
+    // start with a v1-only changelog, catch up (stamp → 1)
+    writeChangelog(cfg, "pr-watch", "# c\nversion: 1\n\n## adopt prBranch (version 1)\nrequiresRestart: false\nUse prBranch.\n");
+    const c = ctx({ role: "control" });
+    BUILTIN_ACTIONS["catch-up"]!({ name: "catch-up" }, c);
+    expect(seenVersion(rt, "pr-watch", "control")).toBe(1);
+    // bump to v2; only v2 should surface
+    writeChangelog(cfg, "pr-watch", CHANGELOG);
+    const out = BUILTIN_ACTIONS["catch-up"]!({ name: "catch-up" }, c);
+    expect(out.context).toContain("worktree moved");
+    expect(out.context).not.toContain("adopt prBranch");
+    expect(out.context).toContain("v1 → v2");
+    expect(seenVersion(rt, "pr-watch", "control")).toBe(2);
   });
 });
