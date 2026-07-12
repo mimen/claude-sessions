@@ -21,6 +21,7 @@ import { handoffInline } from "./resume/inline.ts";
 import type { ResumeCommand } from "./resume/command.ts";
 import { resumeSessionEntry } from "./resume/resume-session.ts";
 import { resumeClusterEntry, resumeMany } from "./resume/resume-cluster.ts";
+import { checkClusterGate } from "./cluster/manifest.ts";
 import { resolveSelector, type SelectorKind } from "./resume/selector.ts";
 import { syncRoles } from "./roles/sync-roles.ts";
 import { rolesCommand } from "./catalogue/roles-command.ts";
@@ -503,6 +504,15 @@ function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
     console.error("ccs: missing cluster. Usage: ccs resume-cluster <cluster> [--dry-run]");
     return 1;
   }
+  // ADR-0058 inter-layer version gate: refuse to bring a cluster online whose config declares a
+  // ccs version we can't honor (major-version gap); warn-and-proceed on a minor gap or a bad
+  // manifest. This is the loud failure that a silent tool↔config schema skew otherwise lacks.
+  const gate = checkClusterGate(cluster, pkg.version);
+  if (gate.status === "refuse") {
+    console.error(`ccs: ${gate.message}. Upgrade ccs (or relax requires_ccs). Nothing spawned.`);
+    return 1;
+  }
+  if (gate.status === "warn") console.warn(`ccs: ${gate.message}`);
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
   try {
