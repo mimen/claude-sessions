@@ -478,6 +478,9 @@ function resumeSession(sessionId: string | undefined, dryRun: boolean): number {
             "aborting to avoid duplicating a session that may be running. Nothing spawned.",
         );
         return 1;
+      case "cwd-unreadable":
+        console.error(`ccs: cannot resume ${sessionId}: ${res.error}`);
+        return 1;
     }
   } finally {
     db.close();

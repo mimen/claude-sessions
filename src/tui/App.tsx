@@ -441,7 +441,12 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       setStatus(focused ? `switched to → ${r.title}` : `already open, but couldn't switch to ${r.title}`);
       return;
     }
-    const { cwd, note } = resolveResumeCwd(r);
+    const cwdResult = resolveResumeCwd(r);
+    if ("error" in cwdResult) {
+      setStatus(`can't resume: ${cwdResult.error}`);
+      return;
+    }
+    const { cwd, note } = cwdResult;
     const cmd = buildResumeCommand(r, { fork, cwd });
     const target = resolveTarget(config.resume.target, reachable, forceOther);
     const prefix = note ? `${note} · ` : "";

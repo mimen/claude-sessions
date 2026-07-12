@@ -19,14 +19,21 @@ test("decodeStorageFolder walks the filesystem back to the real dir (lossy-safe)
   mkdirSync(dir, { recursive: true });
 
   const folder = encodePath(dir);
-  expect(decodeStorageFolder(folder)).toBe(dir);
+  const result = decodeStorageFolder(folder);
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.value).toBe(dir);
 
   rmSync(base, { recursive: true, force: true });
 });
 
-test("decodeStorageFolder returns null for non-folders and missing dirs", () => {
-  expect(decodeStorageFolder("not-a-real-leading-dash" /* no leading - */)).toBeNull();
-  expect(decodeStorageFolder("-Users-nope-nonexistent-xyz123")).toBeNull();
+test("decodeStorageFolder returns Ok(null) for non-folders and missing dirs", () => {
+  const noLeadingDash = decodeStorageFolder("not-a-real-leading-dash" /* no leading - */);
+  expect(noLeadingDash.ok).toBe(true);
+  if (noLeadingDash.ok) expect(noLeadingDash.value).toBeNull();
+
+  const missing = decodeStorageFolder("-Users-nope-nonexistent-xyz123");
+  expect(missing.ok).toBe(true);
+  if (missing.ok) expect(missing.value).toBeNull();
 });
 
 test("locateLaunchDir resolves a session file path to its launch dir", () => {
@@ -34,6 +41,8 @@ test("locateLaunchDir resolves a session file path to its launch dir", () => {
   const proj = join(base, "Some Project");
   mkdirSync(proj, { recursive: true });
   const path = join(base, ".projects", encodePath(proj), "id.jsonl");
-  expect(locateLaunchDir(path)).toBe(proj);
+  const result = locateLaunchDir(path);
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.value).toBe(proj);
   rmSync(base, { recursive: true, force: true });
 });
