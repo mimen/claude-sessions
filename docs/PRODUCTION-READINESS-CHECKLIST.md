@@ -4,6 +4,15 @@ The whole platform broken into **testable units**. Each unit is a thing you can 
 and prove. Burn this down to reach production. Seeded 2026-07-11 from the discovery sweep (7 parallel
 audits — see FINDINGS-production-readiness.md for the raw findings each row cites).
 
+**Implementation status (updated as the ADR chain lands):** DONE — ADR-0054 (cmux 0.64 liveness),
+0056 (sync-tabs selector paint), 0060 (meta map + milad/build→meta drop), 0066/0071 (error-handling +
+Result + logger), 0067 (dead-code + legacy-liveness deletion), 0059 event/skill/phase drops, work-unit
+key consolidation (U4), D2 tie-break (CI-1), cmux version guard (task #6). Live catalogue migrated
+v19→v26 cleanly. IN FLIGHT — 0059 system→cluster rename. QUEUED — 0057-deep (re-key dedup onto the
+work-unit entity id), 0072 (spawn claim lock), 0062 (role props / kill kind), 0063 (evict phase-rubric),
+0064 (generic meta commands), 0065 (circular-dep move), 0068 (db.ts split), 0069/0070 (typed variants),
+0058 (changelog catch-up), + live-fleet verification (tasks #7/#8) and the settings.json hook de-dup (#33/U11).
+
 ## How to read the columns
 Per unit, an honest status on six axes. `✅` done · `🟡` partial · `❌` missing/unknown · `—` n/a.
 
@@ -26,8 +35,8 @@ Live ✅ · Unit 🟡 (search only) · Integ ❌ · Det. 🟡 · Hard 🟡 · Do
   (native→codex→fallback), usage/subagent cost rollup all untested.
 - TODO: write file→reindex→row; change→update; delete→remove. Cost-rollup assertion. [P1]
 
-### U2. Catalogue DB + migrations  — `src/catalogue/db.ts` (693 LOC)
-Live ✅ · Unit 🟡 (accessors only) · Integ ❌ · Det. 🟡 · Hard ❌ · Doc 🟡
+### U2. Catalogue DB + migrations  — `src/catalogue/db.ts`
+Live ✅ · Unit 🟡 (accessors + drop/backfill migrations tested) · Integ ❌ · Det. 🟡 · Hard 🟡 · Doc 🟡 — migrations exercised: live catalogue cleanly migrated v19→v26 this arc (meta add, milad/build→meta, event/skill/phase drops), no data loss. Remaining: a full v1→v19 chain test on :memory:.
 - **CRITICAL:** migrations v1→v19 have ZERO tests; v16–v19 were hand-patched on the live db. v14/v15
   are deliberate DROPs (roles, epics) guarded only by version check. Idempotence (hasColumn) untested.
 - TODO: full migrate() chain on :memory:, assert version=19 + all columns; re-run = idempotent;
@@ -39,7 +48,7 @@ Live ✅ · Unit 🟡 · Integ ❌ · Det. ✅ · Hard ✅ · Doc 🟡
 - TODO: glossary entry (task #10); confirm identityDir derivation is the single source. [P1]
 
 ### U4. Work-unit key  — `pr:repo#n | gus:W | sid:x`
-Live ✅ · Unit 🟡 · Integ ❌ · Det. ❌ · Hard 🟡 · Doc ❌
+Live ✅ · Unit ✅ · Integ ❌ · Det. ✅ · Hard 🟡 · Doc ✅ — DONE: 6 copies → 1 home (spawn-contract workUnitKey/workUnitPath), inbox-path drift fixed, regression-tested (ADR-0057 consolidation). Remaining: re-key dedup onto the work-unit ENTITY id (0057 deep) + the claim lock (0072).
 - **HIGH:** 6 implementations, 2 DRIFTED (resolve-levels.ts:48 filesystem-safe `-` form; start-actions.ts:36
   no-prefix form) — they CANNOT join against each other → inbox-routing / identity mismatch.
 - TODO: one canonical `workUnitKey()` in spawn-contract.ts; inline the 4 dupes; rename the fs-safe one
@@ -53,7 +62,7 @@ Live ✅ (proven this session) · Unit ✅ (bridge, fixtures) · Integ ❌ · De
   drift from real cmux (static). [P1]
 
 ### U6. Spawn primitive  — `src/resume/spawn-cmux.ts`
-Live ✅ (scout resume this session) · Unit ❌ · Integ ❌ · Det. 🟡 · Hard 🟡 (no timeout) · Doc ✅
+Live ✅ (scout resume this session) · Unit ✅ (argv construction + JSON/regex ref parse) · Integ ❌ · Det. ✅ · Hard ✅ (timeout:10000 added) · Doc ✅ — hardened this arc.
 - **HIGH:** zero tests on the ONE spawn primitive. new-workspace ref via bare regex; Bun.spawnSync has
   NO explicit timeout. No-scrub fix (ADR-0054/0042) was a live experiment, not a test.
 - TODO: mock spawnSync, assert argv shape + focus flag; add `timeout: 10000`; JSON-first ref parse. [P0]
@@ -89,7 +98,7 @@ Live 🟡 · Unit ✅ · Integ ❌ · Det. ✅ · Hard 🟡 · Doc 🟡
   document guard as future or remove. [P0 for de-dup, P1 rest]
 
 ### U12. Tab painting / sync-tabs  — `src/catalogue/sync-tabs.ts`
-Live ✅ · Unit ❌ · Integ ❌ · Det. 🟡 · Hard 🟡 (best-effort, no retry) · Doc 🟡
+Live ✅ (selector-driven, verified) · Unit 🟡 · Integ ❌ · Det. 🟡 · Hard 🟡 (best-effort, no retry) · Doc ✅ — DONE: `ccs sync-tabs <selector>` shares S18 with resume, plural loops the single-paint primitive (ADR-0056).
 - Paint race (refOverride) + config overlay untested; ops fail silently with no retry.
 - TODO: assert resume passes refOverride; add 2×/500ms retry; render→push handoff test. [P1/P2]
 
@@ -213,12 +222,11 @@ Live ✅ · Unit ❌ · Integ ❌ · Det. 🟡 · Hard 🟡 · Doc 🟡
 ---
 
 ## Cross-cutting invariants (prove these hold across units)
-- **CI-1 Determinism:** every sort has a stable final tie-break (D2 hole: lineage.ts:68 returns 0 on both-null →
-  add sessionId localeCompare). Same row+config → same behavior (ADR-0045). [P0 for D2]
-- **CI-2 Fail-closed everywhere it spawns:** resume ✅. But legacy open-state.ts fail-OPEN path remains (U21). [P0]
-- **CI-3 No duplicate embodiment:** work-unit dedup (U4) + spawn TOCTOU (U9) + completeness cross-check (task #9). [P0/P1]
-- **CI-4 Runtime state under ~/.ccs, never cwd-relative** (ADR-0041): honored; $HOME-before-homedir fix — VERIFY landed. [P1]
-- **CI-5 Hooks fire once, in the right role/cwd:** BLOCKED by double-registration (U11). [P0]
+- **CI-1 Determinism:** ✅ D2 FIXED — lineage.ts sort now has a stable sessionId tie-break (regression-tested). Same row+config → same behavior (ADR-0045).
+- **CI-2 Fail-closed everywhere it spawns:** resume ✅; legacy open-state.ts fail-OPEN path ✅ DELETED (ADR-0067). Closed.
+- **CI-3 No duplicate embodiment:** work-unit key drift ✅ FIXED (U4); still open: spawn TOCTOU (U9→0072 claim lock) + completeness cross-check (task #9, runbook-only). [P1]
+- **CI-4 Runtime state under ~/.ccs, never cwd-relative** (ADR-0041): ✅ honored; $HOME-before-homedir fix VERIFIED landed (paths.ts:14 `process.env.HOME ?? homedir()`).
+- **CI-5 Hooks fire once, in the right role/cwd:** still BLOCKED by SessionStart/Stop double-registration in settings.json (U11, task #33). [P0]
 
 ---
 
