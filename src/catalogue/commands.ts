@@ -17,7 +17,7 @@ import {
   setStage,
   setActivity,
   setStatusLine,
-  setMiladReview,
+  setMeta,
   setProject,
   setSystem,
   addTag,
@@ -273,7 +273,7 @@ export function ready(sessionArg: string | undefined): number {
 
 /**
  * `ccs approve [<id>|.] [--off]` — record Milad's +1 on a PR (the submitter-review signal). Sets
- * the `milad_review` field to "approved" (or clears with --off). This is ONE of several writers to
+ * the `milad_review` meta key to "approved" (or clears with --off). This is ONE of several writers to
  * that one field (a sensed Slack/GitHub "looks good" or a self-report can set it too); the gate
  * reads the field, and a worker's `milad-review` phase advances to `in-review` once it's set.
  */
@@ -284,7 +284,7 @@ export function approve(sessionArg: string | undefined, flags: string[]): number
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
-    setMiladReview(db, id, off ? null : "approved", now());
+    setMeta(db, id, "milad_review", off ? null : "approved", now());
     console.log(off ? `cleared your +1 on ${id.slice(0, 8)}…` : `approved (your +1) → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
