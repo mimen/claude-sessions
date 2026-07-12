@@ -8,15 +8,15 @@ const row = (id: string): SessionRow => ({ sessionId: id, lastTs: "2026-07-08" }
 const cat = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
   archived: false, parkedTaskId: null, key: null, parentSessionId: null, role: null, resumeCommand: null, project: null,
-  system: null, gusWork: null, workUnitId: null, epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...o,
+  cluster: null, gusWork: null, workUnitId: null, epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...o,
 });
 
 test("buildClusterView: core tier first (★), then WORKERS grouped by epic short-name, no-system last", () => {
   const catMap = new Map<string, CatalogueRow>([
-    ["eval", cat({ sessionId: "eval", system: "pr-watch", role: "pr-watch-eval" })],
-    ["w1", cat({ sessionId: "w1", system: "pr-watch", role: "pr-agent", epicId: "E1" })],
-    ["w2", cat({ sessionId: "w2", system: "pr-watch", role: "pr-agent", epicId: "E1" })],
-    ["w3", cat({ sessionId: "w3", system: "pr-watch", role: "pr-agent", epicId: null })], // no epic
+    ["eval", cat({ sessionId: "eval", cluster: "pr-watch", role: "pr-watch-eval" })],
+    ["w1", cat({ sessionId: "w1", cluster: "pr-watch", role: "pr-agent", epicId: "E1" })],
+    ["w2", cat({ sessionId: "w2", cluster: "pr-watch", role: "pr-agent", epicId: "E1" })],
+    ["w3", cat({ sessionId: "w3", cluster: "pr-watch", role: "pr-agent", epicId: null })], // no epic
     ["stray", cat({ sessionId: "stray" })], // no system
   ]);
   const epicMap = new Map<string, EpicDisplay>([

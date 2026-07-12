@@ -16,10 +16,10 @@ import {
   setParent,
   setParked,
   setProject,
-  setSystem,
+  setCluster,
   sessionsForKey,
   sessionsForProject,
-  sessionsForSystem,
+  sessionsForCluster,
   setGusWork,
   sessionsForGusWork,
   stampPrFacts,
@@ -128,17 +128,17 @@ test("project: set, round-trip, clear, reverse lookup", () => {
   expect(sessionsForProject(db, "ccs")).toEqual(["s2"]);
 });
 
-test("system: set, round-trip, clear, reverse lookup", () => {
+test("cluster: set, round-trip, clear, reverse lookup", () => {
   const db = openCatalogue(":memory:");
-  expect(getRow(db, "s1")?.system ?? null).toBeNull();
-  setSystem(db, "s1", "pr-watch", NOW);
-  setSystem(db, "s2", "pr-watch", NOW);
-  setSystem(db, "s3", "event-loop", NOW);
-  expect(getRow(db, "s1")!.system).toBe("pr-watch");
-  expect(sessionsForSystem(db, "pr-watch").sort()).toEqual(["s1", "s2"]);
-  setSystem(db, "s1", null, NOW); // clear
-  expect(getRow(db, "s1")!.system).toBeNull();
-  expect(sessionsForSystem(db, "pr-watch")).toEqual(["s2"]);
+  expect(getRow(db, "s1")?.cluster ?? null).toBeNull();
+  setCluster(db, "s1", "pr-watch", NOW);
+  setCluster(db, "s2", "pr-watch", NOW);
+  setCluster(db, "s3", "event-loop", NOW);
+  expect(getRow(db, "s1")!.cluster).toBe("pr-watch");
+  expect(sessionsForCluster(db, "pr-watch").sort()).toEqual(["s1", "s2"]);
+  setCluster(db, "s1", null, NOW); // clear
+  expect(getRow(db, "s1")!.cluster).toBeNull();
+  expect(sessionsForCluster(db, "pr-watch")).toEqual(["s2"]);
 });
 
 test("gusWork: set, round-trip, clear, reverse lookup (a work item may span sessions)", () => {

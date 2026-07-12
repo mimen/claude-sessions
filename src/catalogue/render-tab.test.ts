@@ -16,7 +16,7 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   role: null,
   resumeCommand: null,
   project: null,
-  system: null,
+  cluster: null,
   gusWork: null,
   workUnitId: null,
   epicId: null, statusLine: null, meta: {}, stage: null, activity: null,
@@ -49,7 +49,7 @@ test("renderTab: session without PR falls back to custom title", () => {
 test("renderTab: session with key in description", () => {
   const r = row({
     key: "Q1-planning",
-    system: "pr-watch",
+    cluster: "pr-watch",
     gusWork: null,
     epicId: null, statusLine: null, meta: {}, stage: null, activity: null,
   });
@@ -65,19 +65,19 @@ test("renderTab: session with project in description", () => {
 });
 
 test("renderTab: worker description shows the grouping (epic) label", () => {
-  const r = row({ system: "pr-watch", gusWork: "W-1234567", prNumber: 123, prRepo: "a/b" });
+  const r = row({ cluster: "pr-watch", gusWork: "W-1234567", prNumber: 123, prRepo: "a/b" });
   const ops = renderTab(r, "session", { grouping: { label: "Metered Pricing", url: "https://gus/e1" } });
   expect(ops.description).toContain("Metered Pricing");
 });
 
 test("renderTab: worker description falls back to W-number when no grouping label", () => {
-  const r = row({ system: "pr-watch", gusWork: "W-7654321" });
+  const r = row({ cluster: "pr-watch", gusWork: "W-7654321" });
   const ops = renderTab(r, "session", {});
   expect(ops.description).toContain("W-7654321");
 });
 
 test("renderTab: grouping label has its [tag] prefix stripped", () => {
-  const r = row({ system: "pr-watch" });
+  const r = row({ cluster: "pr-watch" });
   const ops = renderTab(r, "session", { grouping: { label: "[FE] Metered Pricing" } });
   expect(ops.description).toContain("Metered Pricing");
   expect(ops.description).not.toContain("[FE]");
@@ -112,7 +112,7 @@ test("renderTab: no stage → falls back to lifecycle pill (parked)", () => {
 });
 
 test("renderTab: loop description drops the redundant system (title carries the cluster now)", () => {
-  const r = row({ kind: "loop", role: "control", system: "pr-watch" });
+  const r = row({ kind: "loop", role: "control", cluster: "pr-watch" });
   const ops = renderTab(r, "loop");
   expect(ops.description).toBeNull(); // was "pr-watch"; now empty (no distinguishing key)
 });
@@ -166,7 +166,7 @@ test("renderTab: workers carry NO sidebar color (the phase pill owns state)", ()
 });
 
 test("renderTab: worker description drops the redundant cluster name (system)", () => {
-  const r = row({ system: "pr-watch", gusWork: "W-1", prNumber: 1 });
+  const r = row({ cluster: "pr-watch", gusWork: "W-1", prNumber: 1 });
   const ops = renderTab(r, "session");
   expect(ops.description).not.toContain("pr-watch"); // cluster is noise; epic/W is the anchor
 });
@@ -178,19 +178,19 @@ test("renderTab: loop kind gets distinct color (Purple)", () => {
 });
 
 test("renderTab: a freeform status line takes the description slot (loop)", () => {
-  const r = row({ kind: "loop", role: "slack-scout", system: "pr-watch", statusLine: "@kenya asked about the token PR; no reply yet" });
+  const r = row({ kind: "loop", role: "slack-scout", cluster: "pr-watch", statusLine: "@kenya asked about the token PR; no reply yet" });
   const ops = renderTab(r, "loop");
   expect(ops.description).toBe("@kenya asked about the token PR; no reply yet");
 });
 
 test("renderTab: a freeform status line overrides the worker's computed description", () => {
-  const r = row({ system: "pr-watch", gusWork: "W-1", prNumber: 1, statusLine: "waiting on CI to go green" });
+  const r = row({ cluster: "pr-watch", gusWork: "W-1", prNumber: 1, statusLine: "waiting on CI to go green" });
   const ops = renderTab(r, "session", { grouping: { label: "Metered Pricing" } });
   expect(ops.description).toBe("waiting on CI to go green"); // status wins over "Metered Pricing"
 });
 
 test("renderTab: empty/blank status line leaves the computed description", () => {
-  const r = row({ kind: "loop", role: "control", system: "pr-watch", statusLine: "   " });
+  const r = row({ kind: "loop", role: "control", cluster: "pr-watch", statusLine: "   " });
   const ops = renderTab(r, "loop");
   expect(ops.description).toBeNull(); // blank status ignored → computed (empty) description
 });

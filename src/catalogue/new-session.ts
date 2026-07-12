@@ -50,7 +50,7 @@ import { getAll, lifecycleOf } from "./db.ts";
  */
 
 export interface NewSessionOpts {
-  system?: string;
+  cluster?: string;
   /** The session's role — the canonical identity axis (ADR-0015). */
   role?: string;
   /** How a loop is re-armed on resume so it comes back running (e.g. `/loop 15m /pr-watch-control`). */
@@ -97,7 +97,7 @@ function flagValue(args: string[], flag: string): string | undefined {
 export function parseOpts(args: string[]): NewSessionOpts {
   const kindRaw = flagValue(args, "--kind");
   return {
-    system: flagValue(args, "--cluster"),
+    cluster: flagValue(args, "--cluster"),
     // `--role` reads best for the fleet ("this is a pr-agent"); `--skill` is accepted as a
     // synonym since both land in the catalogue `skill` column.
     role: flagValue(args, "--role") ?? flagValue(args, "--skill"),
@@ -127,7 +127,7 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
   // The session id doubles as the resume handle when launched with `--session-id`, so record
   // it now — `ccs resume` can then revive the session even before it's indexed.
   setResumeId(db, id, id, now);
-  if (opts.system) setCluster(db, id, opts.system, now);
+  if (opts.cluster) setCluster(db, id, opts.cluster, now);
   if (opts.role) {
     const role = opts.role.replace(/^\//, "");
     setRole(db, id, role, now);
@@ -186,7 +186,7 @@ export function newSession(args: string[]): number {
   let roleDef: RoleDef | null = opts.role ? resolveRole(opts.role.replace(/^\//, "")) : null;
   let spawnLocationErr: string | null = null;
   if (roleDef) {
-    if (!opts.system && roleDef.cluster) opts.system = roleDef.cluster; // cluster from the definition
+    if (!opts.cluster && roleDef.cluster) opts.cluster = roleDef.cluster; // cluster from the definition
     // spawn-location config (ADR-0046) resolves the launch cwd from the LAUNCH REQUEST
     // (pre-row): "role-dir" → home_dir, "worktree" → the passed --cwd, or an abs path.
     // Config wins; the role's home_dir stays the fallback when no config resolves.
@@ -245,7 +245,7 @@ export function newSession(args: string[]): number {
   // goes to stdout (so `ID=$(ccs new-session … --print-id)` works); notes go to stderr.
   if (opts.printId) {
     const tagged = [
-      opts.system && `system=${opts.system}`,
+      opts.cluster && `system=${opts.cluster}`,
       opts.role && `role=${opts.role}`,
       opts.kind && `kind=${opts.kind}`,
     ]
@@ -294,7 +294,7 @@ function resolveSpawnLocationCwd(
 ): { cwd: string | null; error?: string } {
   try {
     const row = syntheticRow({
-      cluster: opts.system, role: opts.role?.replace(/^\//, ""), gusWork: opts.gusWork,
+      cluster: opts.cluster, role: opts.role?.replace(/^\//, ""), gusWork: opts.gusWork,
       prNumber: opts.prNumber, prRepo: opts.prRepo,
     });
     const config = resolveConfig(row, "spawn-location", liveResolveCtx()).effective as SpawnLocationConfig | null;

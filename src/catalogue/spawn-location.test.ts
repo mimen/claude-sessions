@@ -39,8 +39,8 @@ test("an unknown mode is an error", () => {
 });
 
 test("syntheticRow carries the launch facts the resolver keys on", () => {
-  const row = syntheticRow({ system: "pr-watch", role: "pr-agent", epicId: "e1", prNumber: 5, prRepo: "a/b" });
-  expect(row.system).toBe("pr-watch");
+  const row = syntheticRow({ cluster: "pr-watch", role: "pr-agent", epicId: "e1", prNumber: 5, prRepo: "a/b" });
+  expect(row.cluster).toBe("pr-watch");
   expect(row.role).toBe("pr-agent");
   expect(row.epicId).toBe("e1");
   expect(row.prNumber).toBe(5);

@@ -35,7 +35,7 @@ function row(over: Partial<CatalogueRow>): CatalogueRow {
   return {
     sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,
     archived: false, parkedTaskId: null, key: null, parentSessionId: null,
-    role: null, resumeCommand: null, project: null, system: null, gusWork: null, workUnitId: null,
+    role: null, resumeCommand: null, project: null, cluster: null, gusWork: null, workUnitId: null,
     epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null, prNumber: null, prRepo: null,
     prBranch: null, prState: null, prHeadSha: null, ...over,
   };
@@ -49,7 +49,7 @@ test("composes cluster + role sections into one context block", () => {
     writeFileSync(join(roleHome, "role.toml"), 'kind = "session"\n');
     writeMd(cfg, "clusters/pr-watch", "## constitution\n<!-- ccs:floor -->\npush != post");
     writeMd(roleHome, "", "## role-brief\nown one PR");
-    const out = composeClaudeMd(row({ system: "pr-watch", role: "pr-agent" }));
+    const out = composeClaudeMd(row({ cluster: "pr-watch", role: "pr-agent" }));
     expect(out.context).toContain("## constitution");
     expect(out.context).toContain("push != post");
     expect(out.context).toContain("## role-brief");
@@ -60,7 +60,7 @@ test("composes cluster + role sections into one context block", () => {
 
 test("no config tree -> null context, not degraded", () => {
   withTree(() => {
-    const out = composeClaudeMd(row({ system: "pr-watch", role: "pr-agent" }));
+    const out = composeClaudeMd(row({ cluster: "pr-watch", role: "pr-agent" }));
     expect(out.context).toBeNull();
     expect(out.degraded).toBe(false);
   });

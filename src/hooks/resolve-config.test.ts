@@ -11,7 +11,7 @@ function row(over: Partial<CatalogueRow>): CatalogueRow {
     sessionId: "s1", resumeId: null, customTitle: null, kind: "session",
     completed: false, archived: false, parkedTaskId: null, key: null,
     parentSessionId: null, role: null, resumeCommand: null, project: null,
-    system: null, gusWork: null, workUnitId: null, epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
+    cluster: null, gusWork: null, workUnitId: null, epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
     prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null,
     ...over,
   };
@@ -42,7 +42,7 @@ test("meta-update: unions field sets across user + cluster + role layers", () =>
     f.write(f.cfg, "meta-update", "json", JSON.stringify({ fields: ["updated_at", "phase"] }));
     f.write(f.clusterDir, "meta-update", "json", JSON.stringify({ fields: ["phase", "pr_state"] }));
     f.write(f.roleHome, "meta-update", "json", JSON.stringify({ fields: ["result"] }));
-    const r = resolveConfig(row({ system: "pr-watch", role: "pr-agent" }), "meta-update", f.ctx);
+    const r = resolveConfig(row({ cluster: "pr-watch", role: "pr-agent" }), "meta-update", f.ctx);
     expect(r.effective).toEqual(["updated_at", "phase", "pr_state", "result"]);
     expect(r.degraded).toBe(false);
   } finally { f.cleanup(); }
@@ -52,7 +52,7 @@ test("absent files contribute nothing (no error, not degraded)", () => {
   const f = fixture();
   try {
     f.write(f.cfg, "meta-update", "json", JSON.stringify({ fields: ["updated_at"] }));
-    const r = resolveConfig(row({ system: "pr-watch", role: "pr-agent" }), "meta-update", f.ctx);
+    const r = resolveConfig(row({ cluster: "pr-watch", role: "pr-agent" }), "meta-update", f.ctx);
     expect(r.effective).toEqual(["updated_at"]); // only the user level had a file
     expect(r.degraded).toBe(false);
   } finally { f.cleanup(); }
@@ -63,7 +63,7 @@ test("a corrupt layer fails THAT layer closed — valid layers still merge, sess
   try {
     f.write(f.cfg, "meta-update", "json", JSON.stringify({ fields: ["updated_at"] }));
     f.write(f.roleHome, "meta-update", "json", "{ this is not json");
-    const r = resolveConfig(row({ system: "pr-watch", role: "pr-agent" }), "meta-update", f.ctx);
+    const r = resolveConfig(row({ cluster: "pr-watch", role: "pr-agent" }), "meta-update", f.ctx);
     expect(r.effective).toEqual(["updated_at"]); // valid user layer survives
     expect(r.degraded).toBe(true);
     expect(r.errors[0]).toContain("unparseable");
@@ -75,7 +75,7 @@ test("two formats for the same slot is an error (one format per slot, ADR-0045)"
   try {
     f.write(f.roleHome, "meta-update", "json", JSON.stringify({ fields: ["a"] }));
     f.write(f.roleHome, "meta-update", "md", "## x\nbody");
-    const r = resolveConfig(row({ system: "pr-watch", role: "pr-agent" }), "meta-update", f.ctx);
+    const r = resolveConfig(row({ cluster: "pr-watch", role: "pr-agent" }), "meta-update", f.ctx);
     expect(r.degraded).toBe(true);
     expect(r.errors[0]).toContain("multiple formats");
   } finally { f.cleanup(); }
@@ -86,7 +86,7 @@ test("claude-md: sections merge across levels with floor protection", () => {
   try {
     f.write(f.clusterDir, "claude-md", "md", "## constitution\n<!-- ccs:floor -->\npush != post");
     f.write(f.roleHome, "claude-md", "md", "## constitution\n<!-- ccs:op=replace -->\nsneaky\n\n## role-brief\nown one PR");
-    const r = resolveConfig(row({ system: "pr-watch", role: "pr-agent" }), "claude-md", f.ctx);
+    const r = resolveConfig(row({ cluster: "pr-watch", role: "pr-agent" }), "claude-md", f.ctx);
     const secs = r.effective as Array<{ id: string; body: string }>;
     const constitution = secs.find((s) => s.id === "constitution")!;
     expect(constitution.body).toContain("push != post"); // floor survived
@@ -100,7 +100,7 @@ test("most-specific: role's config wins over cluster's", () => {
   try {
     f.write(f.clusterDir, "cmux-paint", "json", JSON.stringify({ tab: "generic" }));
     f.write(f.roleHome, "cmux-paint", "json", JSON.stringify({ tab: "worker" }));
-    const r = resolveConfig(row({ system: "pr-watch", role: "pr-agent" }), "cmux-paint", f.ctx);
+    const r = resolveConfig(row({ cluster: "pr-watch", role: "pr-agent" }), "cmux-paint", f.ctx);
     expect(r.effective).toEqual({ tab: "worker" });
   } finally { f.cleanup(); }
 });
@@ -108,7 +108,7 @@ test("most-specific: role's config wins over cluster's", () => {
 test("unknown hook type yields a clean error, not a throw", () => {
   const f = fixture();
   try {
-    const r = resolveConfig(row({ system: "pr-watch" }), "not-a-type", f.ctx);
+    const r = resolveConfig(row({ cluster: "pr-watch" }), "not-a-type", f.ctx);
     expect(r.effective).toBeNull();
     expect(r.errors[0]).toContain("unknown hook type");
   } finally { f.cleanup(); }

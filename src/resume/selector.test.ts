@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { openCatalogue, setRole, setSystem, stampPrFacts, setGusWork, setSessionEpic } from "../catalogue/db.ts";
+import { openCatalogue, setRole, setCluster, stampPrFacts, setGusWork, setSessionEpic } from "../catalogue/db.ts";
 import { resolveSelector } from "./selector.ts";
 
 const NOW = "2026-07-10T00:00:00Z";
@@ -50,7 +50,7 @@ test("role selector (inferred from a bare word not matching a cluster)", () => {
 
 test("cluster wins over role when a bare word is a known cluster (fixed probe order)", () => {
   const { cat, idx } = seed();
-  setSystem(cat, "s1", "pr-watch", NOW);
+  setCluster(cat, "s1", "pr-watch", NOW);
   setRole(cat, "s2", "pr-watch", NOW); // pathological: a role named like the cluster
   const r = resolveSelector(cat, idx, "pr-watch")!;
   expect(r.kind).toBe("cluster");
@@ -59,7 +59,7 @@ test("cluster wins over role when a bare word is a known cluster (fixed probe or
 
 test("--role pin skips inference even when the token also names a cluster", () => {
   const { cat, idx } = seed();
-  setSystem(cat, "s1", "pr-watch", NOW);
+  setCluster(cat, "s1", "pr-watch", NOW);
   setRole(cat, "s2", "pr-watch", NOW);
   const r = resolveSelector(cat, idx, "pr-watch", { pin: "role" })!;
   expect(r.kind).toBe("role");
@@ -89,7 +89,7 @@ test("epic selector resolves a shortname to its grouping's sessions", () => {
   try {
     const { upsertGrouping } = require("./../state/groupings.ts");
     const { cat, idx } = seed();
-    setSystem(cat, "s1", "pr-watch", NOW);
+    setCluster(cat, "s1", "pr-watch", NOW);
     setSessionEpic(cat, "s1", "e-42", NOW);
     upsertGrouping("pr-watch", "e-42", { label: "FY27 Metered Pricing", shortName: "Metered" }, NOW);
     const r = resolveSelector(cat, idx, "Metered", { cluster: "pr-watch" })!;

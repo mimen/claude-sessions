@@ -28,7 +28,7 @@ export interface ClusterMember {
 }
 
 export interface ClusterMap {
-  readonly system: string;
+  readonly cluster: string;
   readonly counts: { total: number; core: number; fleet: number; live: number; retired: number };
   /** Members grouped: "core" (the star/support roles) then per-role fleet groups. Each
    * group shows one primary per work-unit; `folded` maps a primary's sessionId to the
@@ -73,7 +73,7 @@ export function toMember(
 }
 
 /** Group members into the cluster map: core roles first, then fleet roles, each sorted. */
-export function buildClusterMap(system: string, members: ClusterMember[]): ClusterMap {
+export function buildClusterMap(cluster: string, members: ClusterMember[]): ClusterMap {
   const byRole = new Map<string, ClusterMember[]>();
   for (const m of members) {
     const list = byRole.get(m.role) ?? [];
@@ -107,7 +107,7 @@ export function buildClusterMap(system: string, members: ClusterMember[]): Clust
     live: members.filter((m) => m.live).length,
     retired: members.filter((m) => m.lifecycle === "completed" || m.lifecycle === "archived").length,
   };
-  return { system, counts, groups };
+  return { cluster, counts, groups };
 }
 
 /** Live first, then by PR number / title for a stable, skimmable order. */
@@ -164,7 +164,7 @@ export function renderClusterMap(map: ClusterMap, expand = false): string {
   const lines: string[] = [];
   const c = map.counts;
   lines.push(
-    `cluster: ${map.system}  —  ${c.total} members (${c.core} core · ${c.fleet} fleet) · ${c.live} live · ${c.retired} retired`,
+    `cluster: ${map.cluster}  —  ${c.total} members (${c.core} core · ${c.fleet} fleet) · ${c.live} live · ${c.retired} retired`,
   );
   lines.push(`  ● live   ○ idle/not-open   ✔ completed   ▪ archived`);
   for (const g of map.groups) {

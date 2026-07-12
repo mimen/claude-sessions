@@ -6,7 +6,7 @@ function row(over: Partial<CatalogueRow>): CatalogueRow {
   return {
     sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,
     archived: false, parkedTaskId: null, key: null, parentSessionId: null,
-    role: null, resumeCommand: null, project: null, system: "pr-watch", gusWork: null, workUnitId: null,
+    role: null, resumeCommand: null, project: null, cluster: "pr-watch", gusWork: null, workUnitId: null,
     epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null, prNumber: null, prRepo: null,
     prBranch: null, prState: null, prHeadSha: null, ...over,
   };
@@ -52,7 +52,7 @@ test("predecessorsOf: a work-unit identity groups its PR embodiments", () => {
 });
 
 test("predecessorsOf: an unkeyed row has no lineage", () => {
-  const rows = new Map<string, CatalogueRow>([["u", row({ sessionId: "u", role: null, system: null })]]);
+  const rows = new Map<string, CatalogueRow>([["u", row({ sessionId: "u", role: null, cluster: null })]]);
   expect(predecessorsOf(rows, "u", paths({}))).toEqual([]);
 });
 

@@ -23,7 +23,7 @@ export interface EpicViewCtx {
   sort?: SortMode;
   costOf?: (row: SessionRow) => number;
   /** Only include sessions in this system (default: any session that has a system). */
-  system?: string;
+  cluster?: string;
 }
 
 /** Trim the "[Front End] " team prefix + "FY27 " filler for a compact section label. */
@@ -43,7 +43,7 @@ export function buildEpicView(rows: readonly SessionRow[], ctx: EpicViewCtx): Di
   for (const row of rows) {
     const cat = ctx.catMap.get(row.sessionId) ?? null;
     if (!cat?.cluster) continue; // epic view is for cluster members
-    if (ctx.system && cat.cluster !== ctx.system) continue;
+    if (ctx.cluster && cat.cluster !== ctx.cluster) continue;
     const epicId = cat.epicId ?? "";
     (byEpic.get(epicId) ?? byEpic.set(epicId, []).get(epicId)!).push(row);
   }

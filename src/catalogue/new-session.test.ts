@@ -6,7 +6,7 @@ const NOW = "2026-07-08T00:00:00.000Z";
 
 test("parseOpts: reads every flag, --role and --skill are synonyms", () => {
   const o = parseOpts([
-    "--system", "pr-watch",
+    "--cluster", "pr-watch",
     "--role", "pr-agent",
     "--kind", "loop",
     "--project", "metered-pricing",
@@ -18,7 +18,7 @@ test("parseOpts: reads every flag, --role and --skill are synonyms", () => {
     "--permission-mode", "acceptEdits",
     "--print-id",
   ]);
-  expect(o.system).toBe("pr-watch");
+  expect(o.cluster).toBe("pr-watch");
   expect(o.role).toBe("pr-agent");
   expect(o.kind).toBe("loop");
   expect(o.project).toBe("metered-pricing");
@@ -44,7 +44,7 @@ test("writeSessionMetadata: binds identity to a not-yet-indexed id (forward refe
   try {
     const id = "11111111-2222-3333-4444-555555555555";
     writeSessionMetadata(db, id, parseOpts([
-      "--system", "pr-watch",
+      "--cluster", "pr-watch",
       "--role", "pr-agent",
       "--kind", "loop",
       "--key", "heroku_dashboard-12080",
@@ -53,7 +53,7 @@ test("writeSessionMetadata: binds identity to a not-yet-indexed id (forward refe
 
     const row = getRow(db, id);
     expect(row).not.toBeNull();
-    expect(row!.system).toBe("pr-watch");
+    expect(row!.cluster).toBe("pr-watch");
     expect(row!.role).toBe("pr-agent"); // canonical role axis (ADR-0015)
     expect(row!.kind).toBe("loop");
     expect(identityKeyOf(row)).toBe("heroku_dashboard-12080");
@@ -119,9 +119,9 @@ test("writeSessionMetadata: only the provided fields are written (no clobber to 
   const db = openCatalogue(":memory:");
   try {
     const id = "99999999-8888-7777-6666-555555555555";
-    writeSessionMetadata(db, id, parseOpts(["--system", "pr-watch"]), NOW);
+    writeSessionMetadata(db, id, parseOpts(["--cluster", "pr-watch"]), NOW);
     const row = getRow(db, id)!;
-    expect(row.system).toBe("pr-watch");
+    expect(row.cluster).toBe("pr-watch");
     expect(row.customTitle).toBeNull();
     // A bare new session is idle by default (nothing set completed/archived/parked).
     expect(lifecycleOf(row)).toBe("idle");

@@ -14,7 +14,7 @@ function row(over: Partial<CatalogueRow>): CatalogueRow {
     sessionId: "s1", resumeId: null, customTitle: null, kind: "session",
     completed: false, archived: false, parkedTaskId: null, key: null,
     parentSessionId: null, role: null, resumeCommand: null, project: null,
-    system: null, gusWork: null, workUnitId: null, epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
+    cluster: null, gusWork: null, workUnitId: null, epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
     prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null,
     ...over,
   };
@@ -32,32 +32,32 @@ test("user level is always the config root", () => {
 });
 
 test("a cluster row adds the cluster level under configRoot/clusters/<c>", () => {
-  const r = row({ system: "pr-watch" });
+  const r = row({ cluster: "pr-watch" });
   expect(levels(r)).toEqual(["user", "cluster", "identity"]);
   expect(dirOf(r, "cluster")).toBe("/cfg/clusters/pr-watch");
 });
 
 test("a known role adds the role level at its registered home_dir", () => {
-  const r = row({ system: "pr-watch", role: "control" });
+  const r = row({ cluster: "pr-watch", role: "control" });
   expect(levels(r)).toEqual(["user", "cluster", "role", "identity"]);
   expect(dirOf(r, "role")).toBe("/cfg/clusters/pr-watch/roles/control");
 });
 
 test("an UNKNOWN role contributes no role level (fail-open, not fail-loud)", () => {
-  const r = row({ system: "pr-watch", role: "ghost" });
+  const r = row({ cluster: "pr-watch", role: "ghost" });
   expect(levels(r)).toEqual(["user", "cluster", "identity"]); // no role level
 });
 
 test("a full fleet worker resolves all six levels in order", () => {
   const r = row({
-    system: "pr-watch", role: "pr-agent", epicId: "e123",
+    cluster: "pr-watch", role: "pr-agent", epicId: "e123",
     prNumber: 12080, prRepo: "heroku/dashboard",
   });
   expect(levels(r)).toEqual(["user", "cluster", "role", "epic", "work-unit", "identity"]);
 });
 
 test("epic level nests under the cluster's epics dir", () => {
-  const r = row({ system: "pr-watch", role: "pr-agent", epicId: "e123" });
+  const r = row({ cluster: "pr-watch", role: "pr-agent", epicId: "e123" });
   expect(dirOf(r, "epic")).toBe("/cfg/clusters/pr-watch/epics/e123");
 });
 
@@ -74,12 +74,12 @@ test("work-unit prefers PR (repo#num) over gus-work", () => {
 });
 
 test("work-unit level dir uses the composed unit key under the cluster", () => {
-  const r = row({ system: "pr-watch", role: "pr-agent", prNumber: 12080, prRepo: "heroku/dashboard" });
+  const r = row({ cluster: "pr-watch", role: "pr-agent", prNumber: 12080, prRepo: "heroku/dashboard" });
   expect(dirOf(r, "work-unit")).toBe("/cfg/clusters/pr-watch/work-units/heroku-dashboard-12080");
 });
 
 test("identity level lives under the RUNTIME root (never config/git)", () => {
-  const r = row({ system: "pr-watch", role: "pr-agent", epicId: "e1", prNumber: 5, prRepo: "a/b" });
+  const r = row({ cluster: "pr-watch", role: "pr-agent", epicId: "e1", prNumber: 5, prRepo: "a/b" });
   expect(dirOf(r, "identity")).toBe("/rt/clusters/pr-watch/identities/pr-agent/e1/a-b-5");
 });
 
@@ -89,15 +89,15 @@ test("a standalone (no-cluster) identity uses the roles/<role> runtime layout", 
 });
 
 test("resolution is deterministic — same row resolves identically twice", () => {
-  const r = row({ system: "pr-watch", role: "pr-agent", prNumber: 1, prRepo: "a/b" });
+  const r = row({ cluster: "pr-watch", role: "pr-agent", prNumber: 1, prRepo: "a/b" });
   expect(JSON.stringify(resolveLevels(r, ctx))).toBe(JSON.stringify(resolveLevels(r, ctx)));
 });
 
 test("path components are sanitized (traversal + separators fully stripped)", () => {
-  const r = row({ system: "../evil", role: null });
+  const r = row({ cluster: "../evil", role: null });
   // `..` and `/` both collapse to nothing meaningful — no traversal escapes configRoot.
   expect(dirOf(r, "cluster")).toBe("/cfg/clusters/evil");
-  const r2 = row({ system: "a/b/../../etc" });
+  const r2 = row({ cluster: "a/b/../../etc" });
   expect(dirOf(r2, "cluster")?.startsWith("/cfg/clusters/")).toBe(true);
   expect(dirOf(r2, "cluster")).not.toContain("..");
 });

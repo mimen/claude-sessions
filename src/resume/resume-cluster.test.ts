@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { openIndex } from "../index/schema.ts";
-import { openCatalogue, setSystem, setRole, setResumeCommand, setResumeId, setCompleted, setArchived } from "../catalogue/db.ts";
+import { openCatalogue, setCluster, setRole, setResumeCommand, setResumeId, setCompleted, setArchived } from "../catalogue/db.ts";
 import { resumeClusterEntry, planClusterMembers } from "./resume-cluster.ts";
 import type { CatalogueRow } from "../catalogue/db.ts";
 import type { Bridge } from "../cmux/bridge.ts";
@@ -9,7 +9,7 @@ function catRow(over: Partial<CatalogueRow>): CatalogueRow {
   return {
     sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
     archived: false, parkedTaskId: null, key: null, parentSessionId: null,
-    role: "pr-agent", resumeCommand: null, project: null, system: "pr-watch",
+    role: "pr-agent", resumeCommand: null, project: null, cluster: "pr-watch",
     gusWork: null, workUnitId: null, epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
     prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...over,
   };
@@ -34,7 +34,7 @@ test("resume-cluster fans out over members; dry-run resumes the closed ones", ()
     for (const id of ["ctrl", "worker"]) {
       seedIndex(idx, id, "/tmp");
       setResumeId(cat, id, id, NOW);
-      setSystem(cat, id, "pr-watch", NOW);
+      setCluster(cat, id, "pr-watch", NOW);
     }
     setRole(cat, "ctrl", "control", NOW);
     setResumeCommand(cat, "ctrl", "/loop 15m /pr-watch-control", NOW);
@@ -56,7 +56,7 @@ test("a member that isn't indexed is counted, not fatal", () => {
   const cat = openCatalogue(":memory:");
   try {
     setResumeId(cat, "ghost", "ghost", NOW);
-    setSystem(cat, "ghost", "pr-watch", NOW); // in catalogue, never indexed
+    setCluster(cat, "ghost", "pr-watch", NOW); // in catalogue, never indexed
     const summary = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true });
     expect(summary.notIndexed).toBe(1);
     expect(summary.resumed).toBe(0);
@@ -73,7 +73,7 @@ test("completed + archived members are retired, never resumed (ADR-0010)", () =>
     for (const id of ["live", "merged", "closed"]) {
       seedIndex(idx, id, "/tmp");
       setResumeId(cat, id, id, NOW);
-      setSystem(cat, id, "pr-watch", NOW);
+      setCluster(cat, id, "pr-watch", NOW);
       setRole(cat, id, "pr-agent", NOW);
     }
     setCompleted(cat, "merged", true, NOW); // a merged PR
@@ -119,7 +119,7 @@ test("cluster resume ABORTS (spawns nothing) when liveness is unreadable (ADR-00
     for (const id of ["ctrl", "worker"]) {
       seedIndex(idx, id, "/tmp");
       setResumeId(cat, id, id, NOW);
-      setSystem(cat, id, "pr-watch", NOW);
+      setCluster(cat, id, "pr-watch", NOW);
       setRole(cat, id, "pr-agent", NOW);
     }
     // an unreadable bridge: liveness can't be resolved → the whole pass must abort, not fan out

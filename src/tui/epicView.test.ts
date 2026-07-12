@@ -8,15 +8,15 @@ const row = (id: string): SessionRow => ({ sessionId: id, lastTs: "2026-07-08" }
 const cat = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
   archived: false, parkedTaskId: null, key: null, parentSessionId: null,
-  role: null, resumeCommand: null, project: null, system: null, gusWork: null, workUnitId: null, epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null,
+  role: null, resumeCommand: null, project: null, cluster: null, gusWork: null, workUnitId: null, epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null,
   updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...o,
 });
 
 test("buildEpicView: groups system members by epic, strips team prefix, no-epic last, excludes no-system", () => {
   const catMap = new Map<string, CatalogueRow>([
-    ["a", cat({ sessionId: "a", system: "pr-watch", epicId: "E1" })],
-    ["b", cat({ sessionId: "b", system: "pr-watch", epicId: "E1" })],
-    ["c", cat({ sessionId: "c", system: "pr-watch", epicId: null })], // no epic
+    ["a", cat({ sessionId: "a", cluster: "pr-watch", epicId: "E1" })],
+    ["b", cat({ sessionId: "b", cluster: "pr-watch", epicId: "E1" })],
+    ["c", cat({ sessionId: "c", cluster: "pr-watch", epicId: null })], // no epic
     ["x", cat({ sessionId: "x" })], // no system -> excluded
   ]);
   const epicMap = new Map<string, EpicDisplay>([
