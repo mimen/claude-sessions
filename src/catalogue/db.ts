@@ -42,14 +42,13 @@ export interface CatalogueRow {
   gusWork: string | null;
   /** Reference to the work-unit ENTITY this session belongs to (ADR-0057). A work-unit
    * is a first-class entity with a stable id; PR/GUS/cwd are attributes, not identity.
-   * Sessions reference it by FK (mirrors epicId). Nullable (session may not belong to
+   * Sessions reference it by FK (mirrors groupingId). Nullable (session may not belong to
    * a work-unit, or work-unit not yet created). */
   workUnitId: string | null;
-  /** Reference to the epic ENTITY this session's work belongs to (a FK into the
-   * `epics` table, which holds the epic's name + url). A session points at one epic;
-   * the name/url live once on the entity, not copied per session. Set by the fleet
-   * orchestrator from its W->epic resolution. Nullable. */
-  epicId: string | null;
+  /** Reference to the GROUPING entity this session's work belongs to (ADR-0070): an opaque FK to a
+   * grouping of the cluster's declared type (pr-watch = epic). Display metadata (label/url/notes)
+   * lives in cluster state (groupings.ts), not here. Set by the cluster's sensor. Nullable. */
+  groupingId: string | null;
   /** The pr-agent PR STAGE: building | milad-review | in-review | approved | merged. Monotonic,
    * forward-only, engine-latched (see roles/pr-agent/docs/phase-state-machine.md). */
   stage: string | null;
@@ -82,7 +81,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 27;
+const CATALOGUE_VERSION = 28;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -409,6 +408,17 @@ function migrate(db: Database): void {
       db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_cluster ON catalogue(cluster);");
     }
   }
+  if (v < 28) {
+    // ADR-0070: rename the `epic_id` FK column to `grouping_id` — "grouping" is the generic
+    // platform concept and "epic" is pr-watch's declared grouping TYPE (cluster.toml grouping_type),
+    // so the column shouldn't hardcode the type. SQLite 3.25+ supports RENAME COLUMN. Guard on
+    // column presence (older binary can reset version, re-run). Same shape as the v27 rename.
+    if (hasColumn(db, "catalogue", "epic_id") && !hasColumn(db, "catalogue", "grouping_id")) {
+      db.exec("ALTER TABLE catalogue RENAME COLUMN epic_id TO grouping_id;");
+      db.exec("DROP INDEX IF EXISTS idx_catalogue_epic;");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_grouping ON catalogue(grouping_id);");
+    }
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -436,7 +446,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     cluster: (r.cluster as string) ?? null,
     gusWork: (r.gus_work as string) ?? null,
     workUnitId: (r.work_unit_id as string) ?? null,
-    epicId: (r.epic_id as string) ?? null,
+    groupingId: (r.grouping_id as string) ?? null,
     stage: (r.stage as string) ?? null,
     activity: (r.activity as string) ?? null,
     statusLine: (r.status_line as string) ?? null,
@@ -650,21 +660,22 @@ export function sessionsForPr(db: Database, prNumber: number, prRepo?: string): 
   return rows.map((r) => r.session_id);
 }
 
-// ---- Grouping axis (epic) ------------------------------------------------------
-// `epic_id` on a session is a GENERIC grouping axis (ADR-0051). The grouping's DISPLAY metadata
-// (name/link/shortname) + notes are CLUSTER RUNTIME state (src/state/groupings.ts), written by
-// the cluster's adapter — NOT a hardcoded platform `epics` table (which was dropped, v15). GUS
-// is one adapter behind that seam, not a platform concept. Only the row-FK operations live here.
+// ---- Grouping axis ------------------------------------------------------
+// `grouping_id` on a session is a GENERIC grouping FK (ADR-0051/0070). The grouping's DISPLAY
+// metadata (name/link/shortname) + notes are CLUSTER RUNTIME state (src/state/groupings.ts),
+// written by the cluster's adapter — NOT a hardcoded platform `epics` table (dropped, v15). The
+// grouping TYPE (epic/milestone/…) is the cluster's declared vocabulary (ADR-0070), not the
+// column's. `epic` remains pr-watch's grouping-type word at the CLI surface (ccs epic / --epic).
 
-/** Point a session at its grouping (the epic_id axis). null clears it. */
-export function setSessionEpic(db: Database, sessionId: string, epicId: string | null, now: string): void {
-  set(db, sessionId, "epic_id", epicId, now);
+/** Point a session at its grouping (the grouping_id FK). null clears it. */
+export function setSessionEpic(db: Database, sessionId: string, groupingId: string | null, now: string): void {
+  set(db, sessionId, "grouping_id", groupingId, now);
 }
 
 /** Reverse lookup: sessions belonging to a grouping. */
-export function sessionsForEpic(db: Database, epicId: string): string[] {
+export function sessionsForEpic(db: Database, groupingId: string): string[] {
   return (
-    db.query("SELECT session_id FROM catalogue WHERE epic_id = $e").all({ $e: epicId }) as {
+    db.query("SELECT session_id FROM catalogue WHERE grouping_id = $g").all({ $g: groupingId }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);

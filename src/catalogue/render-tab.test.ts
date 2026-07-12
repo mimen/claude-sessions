@@ -19,7 +19,7 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   cluster: null,
   gusWork: null,
   workUnitId: null,
-  epicId: null, statusLine: null, meta: {}, stage: null, activity: null,
+  groupingId: null, statusLine: null, meta: {}, stage: null, activity: null,
   notes: null,
   updatedAt: null,
   prNumber: null,
@@ -51,7 +51,7 @@ test("renderTab: session with key in description", () => {
     key: "Q1-planning",
     cluster: "pr-watch",
     gusWork: null,
-    epicId: null, statusLine: null, meta: {}, stage: null, activity: null,
+    groupingId: null, statusLine: null, meta: {}, stage: null, activity: null,
   });
   const ops = renderTab(r, "session");
   expect(ops.description).not.toContain("pr-watch"); // cluster name dropped as noise

@@ -490,19 +490,19 @@ export function gusWork(sessionArg: string | undefined, w: string | undefined, f
 }
 
 /** ccs epic [<id>|.] <epic-id> [--off] — point a session at its epic entity (FK). */
-export function sessionEpic(sessionArg: string | undefined, epicId: string | undefined, flags: string[]): number {
+export function sessionEpic(sessionArg: string | undefined, groupingId: string | undefined, flags: string[]): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
   const off = flags.includes("--off");
-  if (!off && (!epicId || !epicId.trim())) {
+  if (!off && (!groupingId || !groupingId.trim())) {
     console.error("usage: ccs epic [<session-id>|.] <epic-id> [--off]");
     return 1;
   }
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
-    setSessionEpic(db, id, off ? null : epicId!.trim(), now());
-    console.log(off ? `cleared epic on ${id.slice(0, 8)}…` : `epic ${epicId!.trim()} → ${id.slice(0, 8)}…`);
+    setSessionEpic(db, id, off ? null : groupingId!.trim(), now());
+    console.log(off ? `cleared epic on ${id.slice(0, 8)}…` : `epic ${groupingId!.trim()} → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
   }

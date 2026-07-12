@@ -39,7 +39,7 @@ export function responsibilityOf(row: CatalogueRow): Responsibility {
   return {
     cluster: row.cluster ?? null,
     role: row.role ?? "unknown",
-    epic: row.epicId ?? null,
+    epic: row.groupingId ?? null,
     // canonical filesystem-safe key — MUST match the hook-level dir (resolve-levels.workUnitOf)
     // so a worker's inbox dir and its config dir resolve identically. Previously a no-seg
     // `repo-num` form that diverged for slash'd repos (the P0 inbox-routing bug).

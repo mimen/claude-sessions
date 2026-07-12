@@ -25,7 +25,7 @@ export interface StatusPill {
  * Different templates by kind: session (worker/leaf PR work) vs loop (infra/core).
  */
 /** A grouping's display bits (label + link) the cluster supplied (ADR-0051) — resolved by the
- * caller from `getGrouping(system, epicId)`, since renderTab stays a pure projection of its args. */
+ * caller from `getGrouping(system, groupingId)`, since renderTab stays a pure projection of its args. */
 export interface GroupingDisplay {
   label: string | null;
   url?: string | null;

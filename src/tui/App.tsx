@@ -731,8 +731,8 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       prNumber={catMap.get(selectedRow.sessionId)?.prNumber ?? null}
       prRepo={catMap.get(selectedRow.sessionId)?.prRepo ?? null}
       prState={catMap.get(selectedRow.sessionId)?.prState ?? null}
-      epicName={epicMap.get(catMap.get(selectedRow.sessionId)?.epicId ?? "")?.name ?? null}
-      epicUrl={epicMap.get(catMap.get(selectedRow.sessionId)?.epicId ?? "")?.url ?? null}
+      epicName={epicMap.get(catMap.get(selectedRow.sessionId)?.groupingId ?? "")?.name ?? null}
+      epicUrl={epicMap.get(catMap.get(selectedRow.sessionId)?.groupingId ?? "")?.url ?? null}
       height={previewHeight}
     />
   ) : selSection ? (

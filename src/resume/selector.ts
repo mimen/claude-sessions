@@ -52,7 +52,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * else across all known clusters. Shortname match is case-insensitive. Returns the epic_id used on
  * rows (the grouping key), or null if nothing matches.
  */
-function epicIdForShortName(db: Database, token: string, cluster?: string): string | null {
+function groupingIdForShortName(db: Database, token: string, cluster?: string): string | null {
   const clusters = cluster ? [cluster] : clustersInPlay(db);
   const lc = token.toLowerCase();
   for (const c of clusters) {
@@ -105,7 +105,7 @@ export function resolveSelector(
   if (pin === "gus-work") return { kind: "gus-work", label: `work item ${token}`, sessionIds: sessionsForGusWork(catalogueDb, token) };
   if (pin === "key") return { kind: "key", label: `key "${token}"`, sessionIds: sessionsForKey(catalogueDb, token) };
   if (pin === "epic") {
-    const id = epicIdForShortName(catalogueDb, token, opts.cluster);
+    const id = groupingIdForShortName(catalogueDb, token, opts.cluster);
     return { kind: "epic", label: `epic "${token}"`, sessionIds: id ? sessionsForEpic(catalogueDb, id) : [] };
   }
   if (pin === "pr") {
@@ -143,8 +143,8 @@ export function resolveSelector(
   }
   const byRole = sessionsForRole(catalogueDb, token);
   if (byRole.length > 0) return { kind: "role", label: `role "${token}"`, sessionIds: byRole };
-  const epicId = epicIdForShortName(catalogueDb, token, opts.cluster);
-  if (epicId) return { kind: "epic", label: `epic "${token}"`, sessionIds: sessionsForEpic(catalogueDb, epicId) };
+  const groupingId = groupingIdForShortName(catalogueDb, token, opts.cluster);
+  if (groupingId) return { kind: "epic", label: `epic "${token}"`, sessionIds: sessionsForEpic(catalogueDb, groupingId) };
 
   return null; // nothing matched any axis
 }

@@ -44,8 +44,8 @@ export function buildEpicView(rows: readonly SessionRow[], ctx: EpicViewCtx): Di
     const cat = ctx.catMap.get(row.sessionId) ?? null;
     if (!cat?.cluster) continue; // epic view is for cluster members
     if (ctx.cluster && cat.cluster !== ctx.cluster) continue;
-    const epicId = cat.epicId ?? "";
-    (byEpic.get(epicId) ?? byEpic.set(epicId, []).get(epicId)!).push(row);
+    const groupingId = cat.groupingId ?? "";
+    (byEpic.get(groupingId) ?? byEpic.set(groupingId, []).get(groupingId)!).push(row);
   }
 
   const items: DisplayItem[] = [];
@@ -67,12 +67,12 @@ export function buildEpicView(rows: readonly SessionRow[], ctx: EpicViewCtx): Di
     return a[0].localeCompare(b[0]);
   });
 
-  for (const [epicId, rowsIn] of entries) {
+  for (const [groupingId, rowsIn] of entries) {
     if (rowsIn.length === 0) continue;
-    const key = `epic:${epicId || "(none)"}`;
+    const key = `epic:${groupingId || "(none)"}`;
     const collapsed = ctx.collapsedSections.has(key);
-    const name = epicId ? (ctx.epicMap.get(epicId)?.name ?? epicId) : "(no epic)";
-    const section: SectionMeta = { key, name: epicId ? epicLabel(name) : "(no epic)", glyph: "◈" };
+    const name = groupingId ? (ctx.epicMap.get(groupingId)?.name ?? groupingId) : "(no epic)";
+    const section: SectionMeta = { key, name: groupingId ? epicLabel(name) : "(no epic)", glyph: "◈" };
     const cost = rowsIn.reduce((sum, r) => sum + costOf(r), 0);
     items.push({ kind: "section", section, count: rowsIn.length, collapsed, cost });
     if (!collapsed) for (const r of sortRows(rowsIn, sort, costOf)) pushSession(r, 0);

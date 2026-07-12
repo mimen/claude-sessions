@@ -14,7 +14,7 @@ function row(over: Partial<CatalogueRow>): CatalogueRow {
     sessionId: "s1", resumeId: null, customTitle: null, kind: "session",
     completed: false, archived: false, parkedTaskId: null, key: null,
     parentSessionId: null, role: null, resumeCommand: null, project: null,
-    cluster: null, gusWork: null, workUnitId: null, epicId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
+    cluster: null, gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
     prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null,
     ...over,
   };
@@ -50,19 +50,19 @@ test("an UNKNOWN role contributes no role level (fail-open, not fail-loud)", () 
 
 test("a full fleet worker resolves all six levels in order", () => {
   const r = row({
-    cluster: "pr-watch", role: "pr-agent", epicId: "e123",
+    cluster: "pr-watch", role: "pr-agent", groupingId: "e123",
     prNumber: 12080, prRepo: "heroku/dashboard",
   });
   expect(levels(r)).toEqual(["user", "cluster", "role", "epic", "work-unit", "identity"]);
 });
 
 test("epic level nests under the cluster's epics dir", () => {
-  const r = row({ cluster: "pr-watch", role: "pr-agent", epicId: "e123" });
+  const r = row({ cluster: "pr-watch", role: "pr-agent", groupingId: "e123" });
   expect(dirOf(r, "epic")).toBe("/cfg/clusters/pr-watch/epics/e123");
 });
 
 test("epic without a cluster does NOT resolve (epic nests under a cluster)", () => {
-  const r = row({ role: "pr-agent", epicId: "e123" });
+  const r = row({ role: "pr-agent", groupingId: "e123" });
   expect(levels(r)).not.toContain("epic");
 });
 
@@ -79,7 +79,7 @@ test("work-unit level dir uses the composed unit key under the cluster", () => {
 });
 
 test("identity level lives under the RUNTIME root (never config/git)", () => {
-  const r = row({ cluster: "pr-watch", role: "pr-agent", epicId: "e1", prNumber: 5, prRepo: "a/b" });
+  const r = row({ cluster: "pr-watch", role: "pr-agent", groupingId: "e1", prNumber: 5, prRepo: "a/b" });
   expect(dirOf(r, "identity")).toBe("/rt/clusters/pr-watch/identities/pr-agent/e1/a-b-5");
 });
 

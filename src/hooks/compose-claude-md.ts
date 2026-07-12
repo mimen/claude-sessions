@@ -44,8 +44,8 @@ export function composeClaudeMd(row: CatalogueRow): ComposedClaudeMd {
     const parts = [renderSections(sections)];
     // Grouping notes: project-level memory accumulated by agents (ADR-0051), injected after the
     // authored context. Runtime state, so it grows as the initiative is worked.
-    if (row.cluster && row.epicId) {
-      const g = getGrouping(row.cluster, row.epicId);
+    if (row.cluster && row.groupingId) {
+      const g = getGrouping(row.cluster, row.groupingId);
       if (g && g.notes.length > 0) {
         parts.push(`## grouping-notes\n${g.notes.map((n) => `- ${n}`).join("\n")}`);
       }

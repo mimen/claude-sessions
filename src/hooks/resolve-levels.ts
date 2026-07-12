@@ -76,8 +76,8 @@ export function resolveLevels(row: CatalogueRow, ctx: ResolveCtx): ResolvedLevel
   }
 
   // epic — only meaningful inside a cluster (its dir nests under the cluster).
-  if (cluster && row.epicId) {
-    out.push({ level: "epic", dir: join(ctx.configRoot, "clusters", seg(cluster), "epics", seg(row.epicId)) });
+  if (cluster && row.groupingId) {
+    out.push({ level: "epic", dir: join(ctx.configRoot, "clusters", seg(cluster), "epics", seg(row.groupingId)) });
   }
 
   // work-unit — the PR/ticket dir under the cluster (fleet only).
@@ -99,7 +99,7 @@ function identityBaseDir(row: CatalogueRow, runtimeRoot: string): string {
   let dir = row.cluster
     ? join(runtimeRoot, "clusters", seg(row.cluster), "identities", role)
     : join(runtimeRoot, "roles", role, "identities", role);
-  if (row.epicId) dir = join(dir, seg(row.epicId));
+  if (row.groupingId) dir = join(dir, seg(row.groupingId));
   const unit = workUnitOf(row);
   if (unit) dir = join(dir, unit);
   return dir;

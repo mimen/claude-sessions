@@ -57,7 +57,7 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
     if (isCoreRole(role)) {
       (b.core.get(role) ?? b.core.set(role, []).get(role)!).push(row);
     } else {
-      const epicKey = cat?.epicId ?? ""; // "" = no epic
+      const epicKey = cat?.groupingId ?? ""; // "" = no epic
       (b.workers.get(epicKey) ?? b.workers.set(epicKey, []).get(epicKey)!).push(row);
     }
   }
