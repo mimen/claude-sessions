@@ -23,6 +23,7 @@ import { discoverSkills, isInLinkedWorktree, type SkillRecord } from "../../skil
 import { mineUsage } from "../../skills/usage.ts";
 import { archiveSkill, archiveGuard } from "../../skills/archive.ts";
 import { writeCategory } from "../../skills/category-write.ts";
+import { debugLog } from "../../crashlog.ts";
 import {
   accessIn,
   buildContextItems,
@@ -136,6 +137,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
   useEffect(() => {
     let alive = true;
     const run = async () => {
+      debugLog("skills.mount", `${records.length} records`);
       let recs = records;
       if (recs.length === 0) {
         setBusy("scanning the machine for skills…");
@@ -161,6 +163,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
     };
     run().catch((e: unknown) => {
       // Never let a mount-effect rejection escape — it kills the whole Ink app.
+      debugLog("skills.mount.error", (e as Error).stack ?? String(e));
       if (!alive) return;
       setBusy(null);
       setStatus(`usage refresh failed: ${(e as Error).message}`);
@@ -304,6 +307,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
   };
 
   const doRescan = () => {
+    debugLog("skills.rescan");
     setBusy("rescanning the machine…");
     discoverSkills()
       .then(async (found) => {

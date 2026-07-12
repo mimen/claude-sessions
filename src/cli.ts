@@ -1,4 +1,5 @@
 import pkg from "../package.json" with { type: "json" };
+import { installCrashLog, debugLog } from "./crashlog.ts";
 import { loadConfig, type Config } from "./config.ts";
 import { scanStore, formatBytes, formatAge } from "./store.ts";
 import { existsSync } from "node:fs";
@@ -53,7 +54,9 @@ Usage:
 
 /** Entry point. Routes argv to a command; returns a process exit code. */
 export async function main(argv: string[]): Promise<number> {
+  installCrashLog();
   const args = argv.slice(2);
+  debugLog("main", args.join(" ") || "(tui)");
 
   if (args.includes("--version") || args.includes("-v")) {
     console.log(pkg.version);
@@ -214,6 +217,7 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
   if (!config) return 1;
   ensureDataDir();
 
+  debugLog("launchTui", initialMode);
   const firstRun = !existsSync(DB_PATH);
   if (firstRun) console.log("First run — indexing your sessions…");
 
