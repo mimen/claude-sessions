@@ -14,6 +14,7 @@ import type { Bridge } from "../cmux/bridge.ts";
 import { liveBridge } from "../cmux/live.ts";
 import { getRow, getAll, lifecycleOf } from "../catalogue/db.ts";
 import { identityKey } from "../catalogue/lineage.ts";
+import { resolveRole } from "../roles/role-files.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
 import { pushRenderOps } from "../catalogue/sync-tabs.ts";
@@ -87,7 +88,11 @@ export function resumeSessionEntry(
   // unreadable as closed would re-spawn a session that's actually running → duplicate-fleet
   // runaway (ADR-0054). Abort instead — spawn nothing, report the reason.
   if (!bridge.readable) return { status: "liveness-unreadable" };
-  const plan = planResumeSession(bridge, row, { resumeCommand: cat?.resumeCommand ?? null });
+  // ADR-0062: re-arm from the ROLE's authored resume_command (files-are-truth), not the session
+  // column copy that can drift from a config edit. Fall back to the session column for a row whose
+  // role isn't resolvable (unregistered/standalone) so nothing regresses.
+  const roleResume = cat?.role ? resolveRole(cat.role)?.resumeCommand ?? null : null;
+  const plan = planResumeSession(bridge, row, { resumeCommand: roleResume ?? cat?.resumeCommand ?? null });
 
   if (plan.action === "skip") return { status: "already-open" };
   if (plan.action === "fail") return { status: "cwd-unreadable", error: plan.error };
