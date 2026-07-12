@@ -332,6 +332,8 @@ function checkSpawnContract(opts: NewSessionOpts): string | null {
           if (!openIds.has(sid)) continue;
           const lc = lifecycleOf(row);
           if (lc === "completed" || lc === "archived") continue; // retired doesn't hold a unit
+          // TODO(ADR-0057): this uses the derived-string rowWorkUnit(). The canonical path is now
+          // the stable work-unit id (row.workUnitId). This will migrate to check workUnitId instead.
           const u = rowWorkUnit(row);
           if (u) live.add(u);
         }

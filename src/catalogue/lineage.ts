@@ -15,7 +15,10 @@ import { rowWorkUnit } from "./spawn-contract.ts";
  * responsibility is durable.
  */
 
-/** The responsibility key a row belongs to (work-unit for fleet, role for core). Null = unkeyed. */
+/** The responsibility key a row belongs to (work-unit for fleet, role for core). Null = unkeyed.
+ * TODO(ADR-0057): this uses the derived-string rowWorkUnit(). The canonical path is now the
+ * stable work-unit id (row.workUnitId), not the derived pr:/gus: string. This function will
+ * migrate to key on row.workUnitId when available, falling back to derived string for old rows. */
 export function identityKey(row: CatalogueRow): string | null {
   const unit = rowWorkUnit(row); // pr:repo#num | gus:W-… | null
   if (unit) return unit;
