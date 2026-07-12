@@ -8,10 +8,7 @@ import { openIndex } from "../../index/schema.ts";
 import { openSkillsDb, saveSkills } from "../../skills/db.ts";
 import { loadConfig } from "../../config.ts";
 import { Root } from "../Root.tsx";
-import type { Titler } from "../../titler/codex.ts";
 import type { ResumeCommand } from "../../resume/command.ts";
-
-const noopTitler: Titler = { available: () => false, async generate() { return null; } };
 
 test("rapid Tab toggling between modes never crashes (serialized skills writes)", async () => {
   const db = openIndex(":memory:");
@@ -29,7 +26,7 @@ test("rapid Tab toggling between modes never crashes (serialized skills writes)"
   const resumeRequest: { current: ResumeCommand | null } = { current: null };
 
   const { lastFrame, stdin, unmount } = render(
-    createElement(Root, { db, skillsDb, config, titler: noopTitler, resumeRequest, initialMode: "skills" as const }),
+    createElement(Root, { db, skillsDb, config, resumeRequest, initialMode: "skills" as const }),
   );
   await new Promise((r) => setTimeout(r, 40));
   for (let i = 0; i < 8; i++) {

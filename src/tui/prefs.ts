@@ -9,6 +9,8 @@ import { PREFS_PATH } from "../paths.ts";
  */
 export interface Prefs {
   view?: string;
+  /** Last inference engine the user toggled to ("codex" | "claude"). */
+  engine?: string;
 }
 
 export function loadPrefs(): Prefs {
@@ -20,10 +22,11 @@ export function loadPrefs(): Prefs {
   }
 }
 
+/** Merge a partial update over existing prefs so unrelated keys (view, engine) survive. */
 export function savePrefs(prefs: Prefs): void {
   try {
     mkdirSync(dirname(PREFS_PATH()), { recursive: true });
-    writeFileSync(PREFS_PATH(), JSON.stringify(prefs, null, 2));
+    writeFileSync(PREFS_PATH(), JSON.stringify({ ...loadPrefs(), ...prefs }, null, 2));
   } catch {
     // best-effort — prefs are a nicety, never block the UI on a write failure.
   }

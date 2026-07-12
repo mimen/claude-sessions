@@ -48,8 +48,13 @@ export function groupingCommand(args: string[]): number {
     case "set": {
       const label = flag(args, "--label") ?? null;
       const url = flag(args, "--url") ?? null;
-      // shortName: explicit --short wins; else derive from the label (adapter convenience).
-      const shortName = flag(args, "--short") ?? deriveShortName(label);
+      // shortName precedence: explicit --short wins (a human display choice). Otherwise KEEP an
+      // existing shortName — a sensor re-running `set --label …` each tick must NOT clobber a
+      // manually-set short (the "PP→Dashboard reverts to the mangled derive every tick" bug). Only
+      // DERIVE from the label when there's no short yet (first sense of a new grouping).
+      const explicitShort = flag(args, "--short");
+      const existing = getGrouping(cluster, id)?.shortName ?? null;
+      const shortName = explicitShort ?? existing ?? deriveShortName(label);
       upsertGrouping(cluster, id, { label, url, shortName }, now(), source);
       console.log(JSON.stringify({ status: "OK", id, cluster }));
       return 0;

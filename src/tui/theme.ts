@@ -39,6 +39,24 @@ export const theme = {
   costHigh: "#e0876a", // > $500: soft coral (never pure red)
 } as const;
 
+/** Per-role accent for the role column — mirrors the cmux tab palette (control=Indigo …) so ccs
+ * and the cmux sidebar agree at a glance. Hex chosen to read on a dark terminal; falls back to
+ * faint for any role without an assignment (e.g. worker, which is the 20x-common default). */
+const ROLE_COLORS: Record<string, string> = {
+  control: "#7d7dff",     // Indigo
+  "slack-scout": "#2fd4c4", // Teal
+  scout: "#2fd4c4",       // legacy alias
+  eval: "#ffb020",        // Amber
+  concierge: "#ff6f9c",   // Rose
+  designer: "#e06ce0",    // Magenta
+};
+
+/** The role column's color for a given role, or faint when the role has no assigned accent. */
+export function roleColor(role: string | null | undefined): string {
+  if (!role) return theme.faint;
+  return ROLE_COLORS[role] ?? theme.faint;
+}
+
 /** Whether an age label (from formatAge) counts as "recent" for brighter coloring. */
 export function isRecentAge(age: string): boolean {
   return age === "now" || age.endsWith("m") || age.endsWith("h");

@@ -2,7 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
-import { theme, isRecentAge, costColor } from "./theme.ts";
+import { theme, isRecentAge, costColor, roleColor } from "./theme.ts";
 import { dominantModel, formatCostList, formatCompactUSD } from "./format.ts";
 import { CARET_W, GLYPH_W, PHASE_W, ROLE_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
 
@@ -192,9 +192,10 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                   </Text>
                 </Box>
                 <Box width={ROLE_W} flexShrink={0}>
-                  <Text color={sel ? theme.selFg : theme.faint} wrap="truncate-end">
+                  <Text color={sel ? theme.selFg : roleColor(badge?.role)} wrap="truncate-end">
                     {/* Only non-worker roles carry signal — "worker" is the default 20x over, so
-                        blank it. eval/designer/control/concierge stand out. */}
+                        blank it. eval/designer/control/concierge stand out, each in its own hue
+                        (matching the cmux tab palette) so the role reads at a glance. */}
                     {roleLabel(badge?.role) === "worker" ? "" : roleLabel(badge?.role)}
                   </Text>
                 </Box>

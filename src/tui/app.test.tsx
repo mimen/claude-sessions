@@ -6,6 +6,7 @@ import { openIndex } from "../index/schema.ts";
 import { loadConfig } from "../config.ts";
 import { App } from "./App.tsx";
 import type { Titler } from "../titler/codex.ts";
+import type { EngineState } from "./Root.tsx";
 
 function seed(db: Database): void {
   const ins = db.query(
@@ -25,6 +26,13 @@ function seed(db: Database): void {
 }
 
 const noopTitler: Titler = { available: () => true, async generate() { return null; } };
+const noopEngineState: EngineState = {
+  titler: noopTitler,
+  engine: null,
+  active: null,
+  available: [],
+  cycle() {},
+};
 
 function makeConfig() {
   const r = loadConfig("/nonexistent-ccs-test.toml");
@@ -42,7 +50,7 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
     createElement(App, {
       db: real,
       config: makeConfig(),
-      titler: noopTitler,
+      engineState: noopEngineState,
       resumeRequest: { current: null },
     }),
   );

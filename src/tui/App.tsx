@@ -3,7 +3,7 @@ import { Box, Text, useApp, useInput } from "ink";
 import { useTerminalSize } from "./useTerminalSize.ts";
 import type { Database } from "bun:sqlite";
 import type { Config } from "../config.ts";
-import type { Titler } from "../titler/codex.ts";
+import type { EngineState } from "./Root.tsx";
 import {
   listByRecency,
   ftsMatchIds,
@@ -16,6 +16,7 @@ import {
 } from "../index/index.ts";
 import { backfillTitles } from "../titler/queue.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "../resume/command.ts";
+import { resumeSessionEntry } from "../resume/resume-session.ts";
 import { resolveTarget, cmuxReachableAsync } from "../resume/target.ts";
 import { openInCmux } from "../resume/cmux.ts";
 import { focusSession } from "../cmux/liveness.ts";
@@ -69,7 +70,7 @@ export interface SessionBadge {
 interface AppProps {
   db: Database;
   config: Config;
-  titler: Titler;
+  engineState: EngineState;
   /** Durable user metadata. Optional so tests can mount without a catalogue (no cmux probe). */
   catalogue?: Database;
   /** Inline resume is handed back to the launcher here, after the app exits. */
@@ -83,7 +84,8 @@ interface AppProps {
 
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
-export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode, pinned, onClearPinned }: AppProps): React.ReactElement {
+export function App({ db, catalogue, config, engineState, resumeRequest, onSwitchMode, pinned, onClearPinned }: AppProps): React.ReactElement {
+  const { titler, engine, active: activeEngine, available: availableEngines, cycle: cycleEngine } = engineState;
   const { exit } = useApp();
   const { columns: cols, rows: termRows } = useTerminalSize();
 
@@ -445,8 +447,19 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
     const target = resolveTarget(config.resume.target, reachable, forceOther);
     const prefix = note ? `${note} · ` : "";
     if (target === "cmux") {
-      const ok = openInCmux(cmd, r.title);
-      setStatus(prefix + (ok ? `opened in cmux → ${r.title}${fork ? " (fork)" : ""}` : "cmux failed — press o to resume inline"));
+      // Route through the shared resume core (resumeSessionEntry) so the TUI gets the SAME
+      // behavior as `ccs resume`: resume_command replay (loops come back running), the
+      // ADR-0042 env-scrub, and EAGER tab paint — no divergent second spawn path. `focus:true`
+      // because an interactive resume wants to land in the pane. A fork has no catalogue
+      // resume_command to replay, and the core doesn't fork, so keep the direct path for forks.
+      if (catalogue && !fork) {
+        const res = resumeSessionEntry(db, catalogue, r.sessionId, { focus: true });
+        const ok = res.status === "resumed" || res.status === "already-open";
+        setStatus(prefix + (ok ? `opened in cmux → ${r.title}` : "cmux failed — press o to resume inline"));
+      } else {
+        const ok = openInCmux(cmd, r.title);
+        setStatus(prefix + (ok ? `opened in cmux → ${r.title}${fork ? " (fork)" : ""}` : "cmux failed — press o to resume inline"));
+      }
     } else {
       resumeRequest.current = cmd;
       exit();
@@ -515,13 +528,14 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         repo: r.projectName,
       };
     });
+    if (!engine) {
+      setCommand(null);
+      setStatus("no inference engine (codex/claude) found on PATH");
+      return;
+    }
     setCommand({ scope, buffer, busy: true });
-    setStatus(`${scope === "session" ? "editing session" : "reorganizing"} — asking codex…`);
-    void runMetadataCommand(buffer, sessions, focus, {
-      binary: config.titler.binary,
-      model: config.titler.model,
-      reasoningEffort: config.titler.reasoningEffort,
-    }).then((res) => {
+    setStatus(`${scope === "session" ? "editing session" : "reorganizing"} — asking ${engine.name}…`);
+    void runMetadataCommand(buffer, sessions, focus, engine).then((res) => {
       setCommand(null);
       if ("error" in res) {
         setStatus(`command failed (${res.error})`);
@@ -645,7 +659,16 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       setIncludeSubagents((v) => !v);
       setSelected(0);
     } else if (input === "t") retitle();
-    else if (input === "L")
+    else if (input === "i") {
+      // Swap the inference engine (only meaningful when both codex + claude are installed).
+      if (availableEngines.length < 2) {
+        setStatus(availableEngines.length === 1 ? `only ${availableEngines[0]} installed` : "no inference engine installed");
+      } else {
+        const next = availableEngines[(availableEngines.indexOf(activeEngine!) + 1) % availableEngines.length]!;
+        cycleEngine();
+        setStatus(`inference engine → ${next}`);
+      }
+    } else if (input === "L")
       applyMark(
         (c, id, now) => setKind(c, id, catMap.get(id)?.kind === "loop" ? "session" : "loop", now),
         "toggled loop",
@@ -808,6 +831,8 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
             ["v", "transcript"],
             ["g", `view:${view}`],
             ["Tab", "skills"],
+            // Only surface the engine key when there's actually another engine to swap to.
+            ...(availableEngines.length > 1 ? [["i", `ai:${activeEngine}`] as [string, string]] : []),
             ["?", "all keys"],
           ]}
         />

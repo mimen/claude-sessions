@@ -85,6 +85,19 @@ test("ccs grouping set + get + note via the command layer", () => {
   });
 });
 
+test("ccs grouping set: a manual --short is STICKY — a later sensor set --label doesn't clobber it", () => {
+  withRoot(() => {
+    // human sets a readable short
+    groupingCommand(["set", "--cluster", "pr-watch", "e5", "--short", "PP→Dashboard"]);
+    expect(getGrouping("pr-watch", "e5")!.shortName).toBe("PP→Dashboard");
+    // sensor re-runs each tick with just the (long) label — must NOT re-derive over the manual short
+    groupingCommand(["set", "--cluster", "pr-watch", "e5", "--label", "[Front End] FY27 Migrate Partner Portal into Dashboard", "--from", "catalogue-sync"]);
+    const g = getGrouping("pr-watch", "e5")!;
+    expect(g.shortName).toBe("PP→Dashboard"); // survived the sensor
+    expect(g.label).toBe("[Front End] FY27 Migrate Partner Portal into Dashboard"); // label still updated
+  });
+});
+
 test("ccs grouping: missing --cluster or id errors", () => {
   expect(groupingCommand(["set", "e1"])).toBe(1);            // no --cluster
   expect(groupingCommand(["set", "--cluster", "c"])).toBe(1); // no id
