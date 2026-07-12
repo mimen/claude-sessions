@@ -67,15 +67,10 @@ export interface CatalogueRow {
   /** A short freeform status a session writes about ITSELF (≤2 lines), shown on its tab.
    * Human-readable prose (vs `phase`'s controlled vocabulary). Set via `ccs status`. */
   statusLine: string | null;
-  /** Milad's +1 verdict on this PR (the submitter-review signal): "approved" or null. One field,
-   * many writers (ccs approve / sensed / self-report); the gate reads it. Set via `ccs approve`. */
-  miladReview: string | null;
-  /** The monotonic build→review latch: true once phase first hit `milad-review`. Once true the
-   * phase projection never returns `building` (see phase-state-machine.md). */
-  buildComplete: boolean;
   /** Generic per-session metadata map (ADR-0060): cluster/role-specific scratch state (latches,
    * flags, counters) that doesn't fit the blessed stage/activity columns. ccs stores + stamps it
-   * but does NOT interpret it — the cluster's state machine defines what keys exist and mean. */
+   * but does NOT interpret it — the cluster's state machine defines what keys exist and mean.
+   * pr-watch uses "milad_review" (submitter +1) and "build_complete" (build→review latch) keys. */
   meta: Record<string, unknown>;
   notes: string | null;
   updatedAt: string | null;
@@ -95,7 +90,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 21;
+const CATALOGUE_VERSION = 23;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -346,6 +341,47 @@ function migrate(db: Database): void {
       db.exec("ALTER TABLE catalogue ADD COLUMN meta TEXT;");
     }
   }
+  if (v < 22) {
+    // ADR-0060 backfill: migrate existing milad_review + build_complete column values into the
+    // meta JSON map. For each row where these columns are non-NULL/non-zero, copy the value into
+    // the meta map under "milad_review" / "build_complete" keys. After this, step 3 (v23) will
+    // drop the columns. Guard on column presence (older binary can reset version, re-run).
+    if (hasColumn(db, "catalogue", "milad_review") || hasColumn(db, "catalogue", "build_complete")) {
+      const rows = db.query("SELECT session_id, milad_review, build_complete, meta FROM catalogue").all() as Array<{
+        session_id: string;
+        milad_review: string | null;
+        build_complete: number | null;
+        meta: string | null;
+      }>;
+      const update = db.prepare("UPDATE catalogue SET meta = ? WHERE session_id = ?");
+      for (const r of rows) {
+        const meta = r.meta ? JSON.parse(r.meta) : {};
+        let changed = false;
+        if (r.milad_review !== null && meta.milad_review === undefined) {
+          meta.milad_review = r.milad_review;
+          changed = true;
+        }
+        if (r.build_complete === 1 && meta.build_complete === undefined) {
+          meta.build_complete = true;
+          changed = true;
+        }
+        if (changed) {
+          update.run(JSON.stringify(meta), r.session_id);
+        }
+      }
+    }
+  }
+  if (v < 23) {
+    // ADR-0060 final step: drop milad_review + build_complete columns now that data is backfilled
+    // into meta (v22) and readers use getMeta() (step 1). SQLite 3.35+ supports ALTER TABLE DROP COLUMN.
+    // Guard on column presence (older binary can reset version, re-run).
+    if (hasColumn(db, "catalogue", "milad_review")) {
+      db.exec("ALTER TABLE catalogue DROP COLUMN milad_review;");
+    }
+    if (hasColumn(db, "catalogue", "build_complete")) {
+      db.exec("ALTER TABLE catalogue DROP COLUMN build_complete;");
+    }
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -381,8 +417,6 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     stage: (r.stage as string) ?? null,
     activity: (r.activity as string) ?? null,
     statusLine: (r.status_line as string) ?? null,
-    miladReview: (r.milad_review as string) ?? null,
-    buildComplete: r.build_complete === 1,
     meta: r.meta ? JSON.parse(r.meta as string) : {},
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
@@ -531,11 +565,6 @@ export function setActivity(db: Database, sessionId: string, activity: string | 
 /** A short freeform status a session writes about itself (≤2 lines on its tab). null clears it. */
 export function setStatusLine(db: Database, sessionId: string, statusLine: string | null, now: string): void {
   set(db, sessionId, "status_line", statusLine, now);
-}
-
-/** Milad's +1 verdict on a PR (submitter-review signal): "approved" to grant, null to revoke. */
-export function setMiladReview(db: Database, sessionId: string, verdict: string | null, now: string): void {
-  set(db, sessionId, "milad_review", verdict, now);
 }
 
 /**
