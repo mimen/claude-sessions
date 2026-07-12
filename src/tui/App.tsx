@@ -19,7 +19,7 @@ import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "../res
 import { resumeSessionEntry } from "../resume/resume-session.ts";
 import { resolveTarget, cmuxReachableAsync } from "../resume/target.ts";
 import { openInCmux } from "../resume/cmux.ts";
-import { focusSession } from "../cmux/liveness.ts";
+import { focusSession, openSessionTitlesAsync } from "../cmux/liveness.ts";
 import { searchRows } from "./search.ts";
 import { buildDisplayItems, type SortMode } from "./groupByProject.ts";
 import { SessionList } from "./SessionList.tsx";
@@ -35,7 +35,6 @@ import { getAll, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle
 import { allGroupingsAcrossClusters } from "../state/groupings.ts";
 import { describe as describeDisposition } from "../catalogue/disposition.ts";
 import { loadPrefs, savePrefs } from "./prefs.ts";
-import { openSessionTitlesAsync } from "../catalogue/open-state.ts";
 import { runMetadataCommand, applyMutations, type SessionMeta } from "../catalogue/command.ts";
 import { buildStateItems, DEFAULT_COLLAPSED } from "./stateGroups.ts";
 import { buildTreeItems } from "./treeGroups.ts";

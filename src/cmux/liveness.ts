@@ -108,3 +108,32 @@ export function pushCmuxRename(sessionId: string, title: string, cmuxBin = "cmux
     return false;
   }
 }
+
+/** sessionId -> workspace title, derived from a bridge snapshot. */
+export function openSessionTitlesFrom(bridge: Bridge): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!bridge.readable) return out;
+  for (const s of bridge.surfaces) {
+    const info = bridge.surfaceInfo(s.surfaceId);
+    if (info && s.workspaceTitle) {
+      out.set(info.sessionId, s.workspaceTitle);
+    }
+  }
+  return out;
+}
+
+/**
+ * sessionId -> workspace title for every open session. Empty when bridge is unreadable.
+ * Used by TUI to display live workspace titles (source of truth while a session is open).
+ */
+export function openSessionTitles(): Map<string, string> {
+  return openSessionTitlesFrom(liveBridge());
+}
+
+/**
+ * Async variant for the TUI: load open session titles without blocking the event loop.
+ * The sync probe can block on wedged cmux, so this wraps it in Promise for useEffect.
+ */
+export async function openSessionTitlesAsync(): Promise<Map<string, string>> {
+  return Promise.resolve(openSessionTitles());
+}
