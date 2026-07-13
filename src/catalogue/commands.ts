@@ -168,7 +168,7 @@ export function key(sessionArg: string | undefined, slug: string | undefined, fl
 
 /**
  * `ccs status [<id>|.] "<freeform line>" | --off` — set a short freeform status a session writes
- * about ITSELF, shown on its tab (≤2 lines). Unlike `phase` (a controlled vocabulary → pill),
+ * about ITSELF, shown on its tab (ONE line). Unlike `phase` (a controlled vocabulary → pill),
  * this is human-readable prose the agent authors. `--off` clears it. `value` is the full line
  * (the CLI joins the non-flag args), so it can be a sentence, not a single token.
  */
@@ -180,8 +180,10 @@ export function status(sessionArg: string | undefined, value: string | undefined
     console.error('usage: ccs status [<session-id>|.] "<short freeform line>" | --off');
     return 1;
   }
-  // Keep tabs readable: clamp to a ~2-line budget so a runaway line can't blow out the sidebar.
-  const line = off ? null : value!.trim().replace(/\s+/g, " ").slice(0, 120);
+  // Keep tabs readable: clamp to ONE line so the sidebar description never wraps. Newlines are
+  // collapsed to spaces first so a two-line value truncates cleanly (rather than showing the first
+  // line only). 50 chars is the visible budget in the sidebar at typical widths.
+  const line = off ? null : value!.trim().replace(/\s+/g, " ").slice(0, 50);
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
@@ -197,17 +199,17 @@ export function status(sessionArg: string | undefined, value: string | undefined
  * `ccs name [<id>|.] "<short name>" | --off` — set a session's short DISPLAY name (`meta.shortname`),
  * the tab title's label after the "#<PR> " prefix. Kept separate from `custom_title` because the
  * cluster's catalogue_sync overwrites custom_title with the full PR title each tick; the shortname
- * is the worker's own stable label and must survive that. Clamped to 25ch so the tab stays readable.
+ * is the worker's own stable label and must survive that. Clamped to 35ch so the tab stays readable.
  */
 export function name(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
   const off = flags.includes("--off");
   if (!off && (!value || !value.trim())) {
-    console.error('usage: ccs name [<session-id>|.] "<short name (<=25ch)>" | --off');
+    console.error('usage: ccs name [<session-id>|.] "<short name (<=35ch)>" | --off');
     return 1;
   }
-  const short = off ? null : value!.trim().replace(/\s+/g, " ").slice(0, 25);
+  const short = off ? null : value!.trim().replace(/\s+/g, " ").slice(0, 35);
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
