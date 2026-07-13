@@ -36,6 +36,9 @@ interface RoleToml {
   stage?: { values?: unknown; monotonic?: unknown };
   /** ADR-0064 [activity] schema block: `values = [...]` (allowed non-dormant activities). */
   activity?: { values?: unknown };
+  /** Pin this role's cmux workspace on resume-cluster (core singletons pin to the top of the
+   * sidebar; fleet workers leave it unset). Default false. */
+  pin_on_resume?: unknown;
 }
 
 /** Read a role dir into a RoleDef. `dir` is the role's home; `cluster` is its grouping or null. */
@@ -79,6 +82,7 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
     resumeCommand: toml.resume_command ?? null,
     stageSchema,
     activityValues,
+    pinOnResume: toml.pin_on_resume === true,
     // ADR-0074: skills + commands read from PROJECT-LOCAL .claude/ (Claude Code discovers them
     // from the role's cwd), with a fallback to the legacy top-level locations (so nothing breaks
     // before the config-side file moves). Hooks remain in .ccs-hooks (never project-local).

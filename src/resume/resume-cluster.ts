@@ -12,12 +12,14 @@
  * "cluster" is the public word; members resolve via the `system` column (ADR-0037).
  */
 import type { Database } from "bun:sqlite";
+import { execFileSync } from "node:child_process";
 import { sessionsForCluster, getRow, lifecycleOf, type CatalogueRow } from "../catalogue/db.ts";
 import { liveBridge } from "../cmux/live.ts";
-import { openSessionIdsFrom } from "../cmux/liveness.ts";
+import { openSessionIdsFrom, workspaceForSessionFrom } from "../cmux/liveness.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import { resumeSessionEntry, type ResumeSessionResult } from "./resume-session.ts";
 import { workUnitKey } from "../catalogue/spawn-contract.ts";
+import { resolveRole } from "../roles/role-files.ts";
 
 export type MemberDisposition = ResumeSessionResult["status"] | "retired" | "superseded";
 
@@ -161,6 +163,31 @@ export function resumeMany(
     title: row?.customTitle ?? null,
     shortname: typeof row?.meta?.shortname === "string" ? row.meta.shortname : null,
   });
+  // Role-level opt-in `pin_on_resume` (role.toml). Memoized so a resume of 30 workers doesn't reread
+  // role.toml 30 times. resolveRole is I/O so we compute lazily on first sight of a role.
+  const pinCache = new Map<string, boolean>();
+  const shouldPin = (role: string | null): boolean => {
+    if (!role) return false;
+    const hit = pinCache.get(role);
+    if (hit !== undefined) return hit;
+    let flag = false;
+    try { flag = resolveRole(role)?.pinOnResume === true; } catch { flag = false; }
+    pinCache.set(role, flag);
+    return flag;
+  };
+  const cmuxBin = opts.cmuxBin ?? process.env.CMUX_BIN ?? "cmux";
+  const pinIfRequested = (sessionId: string, role: string | null): void => {
+    if (opts.dryRun || !shouldPin(role)) return;
+    const loc = workspaceForSessionFrom(bridge, sessionId);
+    if (!loc) return; // no live workspace to pin (yet) — best-effort, next sync-tabs will paint
+    try {
+      execFileSync(cmuxBin, ["workspace-action", "--workspace", loc.workspaceRef, "--action", "pin"], {
+        timeout: 4000, stdio: "ignore",
+      });
+    } catch {
+      /* best-effort — a wedged cmux never fails the pass */
+    }
+  };
   for (const p of planned) {
     if (p.disposition === "retired") {
       summary.retired++;
@@ -180,10 +207,10 @@ export function resumeMany(
     });
     summary.perSession.push({ sessionId: p.sessionId, result: res.status, ...rowFields(p.row) });
     switch (res.status) {
-      case "resumed": summary.resumed++; break;
-      case "already-open": summary.alreadyOpen++; break;
-      case "not-indexed": summary.notIndexed++; break;
-      case "spawn-failed": summary.failed++; break;
+      case "resumed":      summary.resumed++;     pinIfRequested(p.sessionId, p.row?.role ?? null); break;
+      case "already-open": summary.alreadyOpen++; pinIfRequested(p.sessionId, p.row?.role ?? null); break;
+      case "not-indexed":  summary.notIndexed++;  break;
+      case "spawn-failed": summary.failed++;      break;
       // the shared-bridge gate above already aborts on this, but keep the pass fail-closed if a
       // per-session bridge ever comes back unreadable: count it as a failure, never a spawn.
       case "liveness-unreadable": summary.failed++; break;

@@ -179,7 +179,7 @@ import type { RoleDef } from "../catalogue/db.ts";
 
 const loopDef: RoleDef = {
   role: "control", cluster: "pr-watch", kind: "loop", workUnit: "none", homeDir: "/tmp",
-  resumeCommand: "/loop 15m /pr-watch-control", stageSchema: null, activityValues: null, skills: [], commands: [], hooks: [], updatedAt: null,
+  resumeCommand: "/loop 15m /pr-watch-control", stageSchema: null, activityValues: null, pinOnResume: false, skills: [], commands: [], hooks: [], updatedAt: null,
 };
 
 test("validateSpawn: unknown role errors", () => {

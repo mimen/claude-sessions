@@ -748,6 +748,10 @@ export interface RoleDef {
   /** Role-declared allowed values for the `activity` column (ADR-0064). null/empty = unconstrained;
    * the resting/dormant baseline (cleared activity) is always allowed regardless. */
   activityValues: string[] | null;
+  /** When true, `ccs resume-cluster` pins this role's cmux workspace after resume — control-plane /
+   * concierge / eval / … stay put at the top of the sidebar even as fleet workers churn. Opt-in per
+   * role (role.toml `pin_on_resume = true`); default false (fleet workers stay unpinned). */
+  pinOnResume: boolean;
   /** Skills / commands / hooks to materialize into ~/.claude for this role (ADR-0034). */
   skills: string[];
   commands: string[];
