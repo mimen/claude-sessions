@@ -39,23 +39,35 @@ export const theme = {
   costHigh: "#e0876a", // > $500: soft coral (never pure red)
 } as const;
 
-/** Per-role accent for the role column — mirrors the cmux tab palette (control=Indigo …) so ccs
- * and the cmux sidebar agree at a glance. Hex chosen to read on a dark terminal; falls back to
- * faint for any role without an assignment (e.g. worker, which is the 20x-common default). */
-const ROLE_COLORS: Record<string, string> = {
-  control: "#7d7dff",     // Indigo
-  "slack-scout": "#2fd4c4", // Teal
-  scout: "#2fd4c4",       // legacy alias
-  eval: "#ffb020",        // Amber
-  concierge: "#ff6f9c",   // Rose
-  designer: "#e06ce0",    // Magenta
-};
+/** Per-role accent for the role column — pulled from `role.toml color = "#RRGGBB"` so ccs and the
+ * cmux tab paint from the SAME source of truth (the hex is passed through verbatim to both, no
+ * name→hex translation drift). Falls back to faint when the role declares no color, so any role
+ * without an assignment (e.g. worker) reads as neutral. Memoized: role reads aren't hot but they
+ * happen per row on every TUI render, so building the map once per process keeps the list snappy. */
+let roleColorMap: Map<string, string | null> | null = null;
+function loadRoleColors(): Map<string, string | null> {
+  if (roleColorMap) return roleColorMap;
+  const m = new Map<string, string | null>();
+  try {
+    // Lazy require to keep this file free of a config-tree read at import time.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { allRolesFromFiles } = require("../roles/role-files.ts") as typeof import("../roles/role-files.ts");
+    for (const [name, def] of allRolesFromFiles()) m.set(name, def.color);
+  } catch {
+    /* config unreadable → empty map, everything falls to faint (never throws) */
+  }
+  roleColorMap = m;
+  return m;
+}
 
-/** The role column's color for a given role, or faint when the role has no assigned accent. */
+/** The role column's color for a given role, or faint when the role declares no accent. */
 export function roleColor(role: string | null | undefined): string {
   if (!role) return theme.faint;
-  return ROLE_COLORS[role] ?? theme.faint;
+  return loadRoleColors().get(role) ?? theme.faint;
 }
+
+/** Reset the memoized role-color map (tests only; role reads are per-process in production). */
+export function _resetRoleColorCache(): void { roleColorMap = null; }
 
 /** Whether an age label (from formatAge) counts as "recent" for brighter coloring. */
 export function isRecentAge(age: string): boolean {

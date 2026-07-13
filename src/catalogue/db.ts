@@ -752,6 +752,11 @@ export interface RoleDef {
    * concierge / eval / … stay put at the top of the sidebar even as fleet workers churn. Opt-in per
    * role (role.toml `pin_on_resume = true`); default false (fleet workers stay unpinned). */
   pinOnResume: boolean;
+  /** Role's accent color as a 7-char hex string (`#RRGGBB`), the ONE source of truth that powers
+   * both the ccs role column (TUI) AND the cmux workspace tab color. Declared in role.toml
+   * (`color = "#7d7dff"`); null when no color is set (TUI falls back to faint, cmux-paint to
+   * whatever it declares). Kept as hex so ccs and cmux render literally identical bytes. */
+  color: string | null;
   /** Skills / commands / hooks to materialize into ~/.claude for this role (ADR-0034). */
   skills: string[];
   commands: string[];

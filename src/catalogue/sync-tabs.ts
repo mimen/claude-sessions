@@ -83,7 +83,22 @@ export function pushRenderOps(
     }
   }
 
-  const ops = applyPaintOverride(renderTab(row, row.kind, { grouping }), paint);
+  // Role-declared color is the ONE source of truth (role.toml `color = "#RRGGBB"`) so ccs's TUI
+  // role column and the cmux tab render identical bytes. cmux-paint.json's `color` still overrides
+  // when set (a per-cluster/per-worker paint override), but a role no longer has to double-declare.
+  // Lazy require: role-files reads the config tree, and we don't want a startup cost just to paint.
+  let paintWithRoleColor = paint;
+  if (row.role && !(paint && "color" in paint)) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { resolveRole } = require("../roles/role-files.ts") as typeof import("../roles/role-files.ts");
+      const roleColor = resolveRole(row.role)?.color ?? null;
+      if (roleColor) paintWithRoleColor = { ...(paint ?? {}), color: roleColor };
+    } catch {
+      /* config unreadable → whatever paint already set (or nothing) */
+    }
+  }
+  const ops = applyPaintOverride(renderTab(row, row.kind, { grouping }), paintWithRoleColor);
   try {
     execFileSync(cmuxBin, ["rename-workspace", "--workspace", ref, "--", ops.title], {
       timeout: 4000,

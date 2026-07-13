@@ -39,6 +39,9 @@ interface RoleToml {
   /** Pin this role's cmux workspace on resume-cluster (core singletons pin to the top of the
    * sidebar; fleet workers leave it unset). Default false. */
   pin_on_resume?: unknown;
+  /** Role accent color as `#RRGGBB` hex — ONE source of truth for both the ccs TUI role column
+   * and the cmux tab color (so they render identical bytes). Malformed → treated as absent. */
+  color?: unknown;
 }
 
 /** Read a role dir into a RoleDef. `dir` is the role's home; `cluster` is its grouping or null. */
@@ -83,6 +86,7 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
     stageSchema,
     activityValues,
     pinOnResume: toml.pin_on_resume === true,
+    color: typeof toml.color === "string" && /^#[0-9a-fA-F]{6}$/.test(toml.color) ? toml.color : null,
     // ADR-0074: skills + commands read from PROJECT-LOCAL .claude/ (Claude Code discovers them
     // from the role's cwd), with a fallback to the legacy top-level locations (so nothing breaks
     // before the config-side file moves). Hooks remain in .ccs-hooks (never project-local).
