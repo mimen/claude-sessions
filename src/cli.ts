@@ -111,8 +111,16 @@ export async function main(argv: string[]): Promise<number> {
       return tree({ all: args.includes("--all") });
     case "whoami":
       return whoami();
-    case "meta":
-      return meta(args[1]);
+    case "meta": {
+      const parsed = classifyMetaArgs(args.slice(1));
+      switch (parsed.mode) {
+        case "read":  return meta(parsed.id);
+        case "set":   return metaSet(parsed.id, parsed.key, parsed.value, parsed.flags);
+        case "error":
+          console.error(parsed.message);
+          return 1;
+      }
+    }
     case "rename":
       return rename(args[1], args.slice(2).filter((a) => !a.startsWith("--")).join(" "));
     case "mark":
@@ -702,6 +710,86 @@ function resumeSelector(args: string[]): number {
     db.close();
     cat.close();
   }
+}
+
+/**
+ * Classify `ccs meta …` arg-shape into READ / SET / ERROR. Kept as a pure exported helper so the
+ * routing contract is unit-testable (cli.ts's switch dispatch is otherwise private to main).
+ *
+ * The disambiguation problem: the help text has always advertised BOTH shapes on `ccs meta`
+ * (read: `ccs meta [<id>|.]`; set: `ccs meta [<id>|.] <key> <value>`), but the dispatch used to
+ * unconditionally call the READ handler and DROP any extra args. So `ccs meta . milad_review
+ * approved` silently no-op'd — no error, no write. Caught 2026-07-13 when a day of concierge
+ * "record Milad's approval" writes were quietly ignored.
+ *
+ * Rules:
+ *   - 0 positionals, no --off       → READ current session
+ *   - 1 positional, no --off        → READ that arg's session (or current if it looks like a key)
+ *   - >=3 positionals               → SET (first is id-hint, then key, then value)
+ *   - 2 positionals, first is id-hint (`.` or hex-id) → SET (id, key, value)
+ *   - 2 positionals, first is NOT an id-hint → SET (id=`.`, key=pos0, value=pos1)
+ *   - 1 positional + --off          → CLEAR (id=`.`, key=pos0)
+ *   - 2 positionals + --off, first is id-hint → CLEAR (id, key)
+ *   - anything ambiguous (e.g. >1 positional in a shape that doesn't match set) → ERROR
+ *
+ * "id-hint" = literally `.` OR a hex-run of >=8 chars (matches a session-id prefix or full uuid).
+ * Everything else is treated as a key name. This heuristic accepts `ccs meta abc12345 my_key val`
+ * as a set, and `ccs meta my_key val` as a set on the current session — matching what users type.
+ */
+export type MetaArgs =
+  | { mode: "read"; id: string | undefined }
+  | { mode: "set"; id: string; key: string; value: string | undefined; flags: string[] }
+  | { mode: "error"; message: string };
+
+const META_ID_HINT = /^[0-9a-f-]{8,}$/i;
+const isIdHint = (s: string): boolean => s === "." || META_ID_HINT.test(s);
+const USAGE = [
+  "usage:",
+  "  ccs meta [<id>|.]                          # read",
+  "  ccs meta [<id>|.] <key> <value>            # set (value JSON-parsed if scalar; else stored as string)",
+  "  ccs meta [<id>|.] <key> --off              # clear",
+].join("\n");
+
+export function classifyMetaArgs(argsAfterCommand: string[]): MetaArgs {
+  const pos = argsAfterCommand.filter((a) => !a.startsWith("--"));
+  const flags = argsAfterCommand.filter((a) => a.startsWith("--"));
+  const off = flags.includes("--off");
+
+  if (!off && pos.length === 0) return { mode: "read", id: undefined };
+  if (!off && pos.length === 1) return { mode: "read", id: pos[0] };
+
+  // set/clear paths
+  if (pos.length >= 3) {
+    const [id, key, value] = pos;
+    if (!isIdHint(id!)) {
+      return { mode: "error", message: `ccs meta: first arg "${id}" doesn't look like a session id or "."\n${USAGE}` };
+    }
+    return { mode: "set", id: id!, key: key!, value, flags };
+  }
+  if (pos.length === 2 && !off) {
+    // Ambiguous: `<id-hint> <key>` (missing value) vs `<key> <value>` (implicit id=`.`).
+    // Rule: if the first positional is an id-hint we STILL treat this as a set-missing-value and
+    // fail loudly via metaSet's usage error, rather than guessing. This catches the pr-agent
+    // typo `ccs meta abc12345 milad_review` (no value) instead of silently no-op'ing.
+    if (isIdHint(pos[0]!)) {
+      return { mode: "error", message: `ccs meta: value required (or use --off to clear)\n${USAGE}` };
+    }
+    // <key> <value> — implicit id=`.`
+    return { mode: "set", id: ".", key: pos[0]!, value: pos[1], flags };
+  }
+  if (pos.length === 2 && off) {
+    if (!isIdHint(pos[0]!)) {
+      return { mode: "error", message: `ccs meta: with --off, first arg must be an id or "."\n${USAGE}` };
+    }
+    return { mode: "set", id: pos[0]!, key: pos[1]!, value: undefined, flags };
+  }
+  if (pos.length === 1 && off) {
+    return { mode: "set", id: ".", key: pos[0]!, value: undefined, flags };
+  }
+  if (pos.length === 0 && off) {
+    return { mode: "error", message: `ccs meta: --off needs a key\n${USAGE}` };
+  }
+  return { mode: "error", message: `ccs meta: unrecognized args\n${USAGE}` };
 }
 
 /** Short, skimmable label for a session id: `1a2b3c4d… <title>`, degrading to the bare id when unindexed. */
