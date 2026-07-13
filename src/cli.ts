@@ -513,17 +513,23 @@ function syncRolesCmd(dryRun: boolean, hookFlag: boolean): number {
 
 /**
  * Print a per-session preview of a resume-cluster pass, split into CORE (singletons — control /
- * concierge / …) and FLEET (workers) sections. Only the sessions being ACTED ON are listed
- * (would-resume + superseded); already-open and retired are omitted since they aren't changing.
+ * concierge / …) and FLEET (workers) sections. Lists every non-retired member so you can see the
+ * full picture: sessions that will be resumed, ones already open (skipped, so you can tell which
+ * of the totals is already running), and superseded duplicates. Retired stays hidden — those are
+ * done and never revived. Each row uses a leading glyph so the disposition is scannable:
+ *   → resume (or ✓ resumed, live run)   ● already open   ⊘ superseded
  * The label prefers the AI shortname (meta.shortname) with the PR number, then the stored PR
  * title, then the role, then the sid — matching what a worker's tab renders.
  */
 function printResumeClusterPreview(verb: string, s: ClusterResumeSummary): void {
-  const acting = s.perSession.filter((m) => m.result === "resumed" || m.result === "superseded");
-  if (acting.length === 0) return;
-  const core: typeof acting = [], fleet: typeof acting = [];
-  for (const m of acting) (isCoreRole(m.role) ? core : fleet).push(m);
-  const label = (m: typeof acting[0]): string => {
+  const KEEP: ReadonlySet<ClusterResumeSummary["perSession"][number]["result"]> = new Set([
+    "resumed", "already-open", "superseded",
+  ]);
+  const shown = s.perSession.filter((m) => KEEP.has(m.result));
+  if (shown.length === 0) return;
+  const core: typeof shown = [], fleet: typeof shown = [];
+  for (const m of shown) (isCoreRole(m.role) ? core : fleet).push(m);
+  const label = (m: typeof shown[0]): string => {
     const clean = m.shortname?.trim() || m.title?.replace(/^(#\d+\s+)+/, "").trim() || null;
     if (m.prNumber && clean) return `#${m.prNumber} ${clean}`;
     if (m.prNumber) return `#${m.prNumber}`;
@@ -531,12 +537,25 @@ function printResumeClusterPreview(verb: string, s: ClusterResumeSummary): void 
     if (m.role) return m.role;
     return m.sessionId.slice(0, 8);
   };
-  const mark = (m: typeof acting[0]) => m.result === "superseded" ? " (superseded)" : "";
-  const section = (title: string, items: typeof acting) => {
+  const glyph = (m: typeof shown[0]): string => {
+    if (m.result === "already-open") return "●";
+    if (m.result === "superseded") return "⊘";
+    return verb === "resumed" ? "✓" : "→";
+  };
+  const suffix = (m: typeof shown[0]): string => {
+    if (m.result === "already-open") return " (already open)";
+    if (m.result === "superseded") return " (superseded)";
+    return "";
+  };
+  // Sort each section: resume-candidates first (the action), then already-open, then superseded —
+  // so "what will happen" reads before "what's already fine" reads before "what got deduped".
+  const rank: Record<string, number> = { "resumed": 0, "already-open": 1, "superseded": 2 };
+  const section = (title: string, items: typeof shown) => {
     if (items.length === 0) return;
+    const sorted = [...items].sort((a, b) => (rank[a.result] ?? 9) - (rank[b.result] ?? 9));
     console.log(`\n  [${title}] (${items.length})`);
-    for (const m of items) {
-      console.log(`    ${verb === "resumed" ? "✓" : "→"} ${m.sessionId.slice(0, 8)} · ${label(m)}${mark(m)}`);
+    for (const m of sorted) {
+      console.log(`    ${glyph(m)} ${m.sessionId.slice(0, 8)} · ${label(m)}${suffix(m)}`);
     }
   };
   section("core", core);
