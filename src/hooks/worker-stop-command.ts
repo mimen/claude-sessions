@@ -42,9 +42,17 @@ function metaUpdateFields(db: ReturnType<typeof openCatalogue>, row: NonNullable
 export async function workerStopCommand(): Promise<number> {
   try {
     const raw = await readStdin();
-    const payload = JSON.parse(raw) as { session_id?: string };
+    const payload = JSON.parse(raw) as { session_id?: string; stop_hook_active?: boolean };
     const id = payload?.session_id;
     if (!id) return 0;
+    // ADR-0063 loop guard: a Stop hook that emits `additionalContext` FORCES a continuation (the
+    // Claude Code contract treats it as feedback that continues the conversation, NOT a passive
+    // note). So injecting the self-check re-prompts the worker, whose reply ends the turn, firing
+    // Stop again → without a guard this loops until CLAUDE_CODE_STOP_HOOK_BLOCK_CAP trips. Claude
+    // Code sets `stop_hook_active: true` on exactly those continuation-Stops: inject the self-check
+    // on the NATURAL stop only, then let the worker's re-evaluation turn end for real. One nudge,
+    // one continuation — never a loop.
+    const isContinuationStop = payload?.stop_hook_active === true;
     ensureDataDir();
     const db = openCatalogue(CATALOGUE_PATH());
     let registered = false;
@@ -54,10 +62,11 @@ export async function workerStopCommand(): Promise<number> {
       const row = getRow(db, id);
       if (row?.role) {
         registered = true;
-        // ADR-0063: the turn-end self-check is a role-authored `stop-context` hook fragment now,
+        // ADR-0063: the turn-end self-check is a role-authored `stop-context` hook fragment,
         // resolved through the normal layering (file-presence keyed), NOT a hardcoded pr-agent
-        // rubric. Any role/cluster that authors one gets it; roles that don't, don't.
-        stopContext = composeStopContext(row);
+        // rubric. Any role/cluster that authors one gets it; roles that don't, don't. Skip it on a
+        // continuation-Stop (already nudged this stop) so it can never re-trigger itself.
+        if (!isContinuationStop) stopContext = composeStopContext(row);
         const fields = metaUpdateFields(db, row);
         // `updated_at` is the one field a stop hook can refresh on its own (the heartbeat).
         if (fields.includes("updated_at")) touch(db, id, now());
@@ -65,9 +74,9 @@ export async function workerStopCommand(): Promise<number> {
     } finally {
       db.close();
     }
-    // Inject the resolved stop-context at turn-end. Non-blocking additionalContext — the worker
-    // re-evaluates + self-sets its activity next turn; never forces an extra turn (no
-    // `decision: block`), so there's zero loop risk (verified against the Stop hook contract).
+    // Inject the resolved stop-context at turn-end. This forces ONE continuation (the worker
+    // re-evaluates + self-sets its activity), bounded by the stop_hook_active guard above so the
+    // follow-up Stop injects nothing and the turn ends.
     if (stopContext) {
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: "Stop", additionalContext: stopContext },
