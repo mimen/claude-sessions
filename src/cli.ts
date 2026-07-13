@@ -11,7 +11,7 @@ import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf,
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson, isCoreRole } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, activity, stage, metaSet, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { boardCommand } from "./catalogue/board-command.ts";
@@ -55,7 +55,6 @@ Usage:
   ccs set-cluster [<id>|.] <slug> [--off]   Set/clear the cluster grouping
   ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab (worker → summary pill)
   ccs name [<id>|.] "<short name>" [--off]   Set the session's short display name (<=35ch, aim to use most of it) — the tab title after "#<PR> "
-  ccs activity [<id>|.] <value> [--off]   Set the activity (cluster defines the vocabulary; --off = dormant)
   ccs stage [<id>|.] <value> [--off]   Generic stage setter (cluster defines + the tool enforces the vocabulary)
   ccs meta [<id>|.] <key> <value> [--off]   Set a key in the session's generic meta map (ADR-0060/0064)
   ccs new-session [flags]   Mint a session id, tag its metadata AT BIRTH, then launch \`claude --session-id\`
@@ -78,6 +77,10 @@ Usage:
                          (pin the axis with --role|--pr|--gus|--epic|--cluster|--key; --dry-run to preview)
   ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
   ccs catch-up [<id>|.]  Surface unseen cluster CHANGELOG entries + advance the seen stamp (exit 2 if a restart is needed)
+  ccs context-check [--json]  Peak-context guard for long loops: OK/WARN/CRITICAL + directive (autocompact is unreliable in headless)
+  ccs suppress <c> record|reopen|check|list ...   Decision-suppression ledger — decided items stop re-surfacing (ADR-cluster-decisions)
+  ccs bump-session <sid> [--note "..."]  Wake a specific session by id via the live cmux bridge (surface UUID, not workspace ref)
+  ccs reap-duplicates [--do]  Detect sessions with >1 live \`claude --resume <sid>\` process and close the duplicate cmux workspaces (dry-run by default)
   ccs --version       Print version
   ccs --help          Show this help
 `;
@@ -137,8 +140,6 @@ export async function main(argv: string[]): Promise<number> {
     case "name":
       // name takes a full short LINE (the display name), so join all non-flag args.
       return name(args[1], args.slice(2).filter((a) => !a.startsWith("--")).join(" ") || undefined, args.slice(2).filter((a) => a.startsWith("--")));
-    case "activity":
-      return activity(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "stage":
       return stage(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "meta-set": {
@@ -162,6 +163,25 @@ export async function main(argv: string[]): Promise<number> {
       // `ccs catch-up [<id>|.]` — surface unseen cluster CHANGELOG entries + advance the stamp
       // (ADR-0058). Per-tick companion to the catch-up start action, for long-lived loops.
       return catchUpCommand(args.slice(1));
+    case "context-check": {
+      const { contextCheckCommand } = await import("./hooks/context-check.ts");
+      return contextCheckCommand(args.slice(1));
+    }
+    case "suppress": {
+      const { suppressCommand } = await import("./state/suppress.ts");
+      return suppressCommand(args.slice(1));
+    }
+    case "bump-session": {
+      const { bumpSessionCommand } = await import("./inbox/bump-session-command.ts");
+      return bumpSessionCommand(args.slice(1));
+    }
+    case "reap-duplicates": {
+      // `ccs reap-duplicates [--do]` — find sessions with >1 live `claude --resume <sid>` proc
+      // and close the duplicate cmux workspaces (default is dry-run). Cleans up after a blind
+      // liveness pass spawned a second embodiment of a session that was already running.
+      const { reapCommand } = await import("./cmux/reap.ts");
+      return reapCommand(args.slice(1));
+    }
     case "register-session":
       return await registerSessionCommand(); // back-compat alias for `hook run session-start`
     case "statusline":
