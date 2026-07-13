@@ -3,14 +3,29 @@ import { lifecycleOf, identityKeyOf } from "./db.ts";
 
 /**
  * A tab's render ops: the full set of cmux workspace visual attrs we push.
- * Title/description/color/pill — a pure stateless projection of a catalogue row.
+ * Title/description/pills — a pure stateless projection of a catalogue row.
+ *
+ * cmux supports many sidebar pills keyed by tool (`set-status <key> …`), so a worker carries TWO
+ * orthogonal pills: the STATE pill (`statusPill`, key `ccs_lifecycle` — phase × activity or the
+ * lifecycle fallback) and the EPIC pill (`epicPill`, key `ccs_epic` — the worker's grouping label).
+ * They never merge because they answer different questions ("what's it doing" vs "what's it for").
  */
 export interface TabRenderOps {
   title: string;
   description: string | null;
   color: string | null;
   statusPill: StatusPill | null;
+  /** The worker's epic (grouping) label as its own quiet, always-on pill; null when ungrouped. */
+  epicPill: StatusPill | null;
 }
+
+/** The cmux pill key for the worker's epic (grouping) label — distinct from `ccs_lifecycle` so the
+ * epic and the state pill coexist rather than clobber each other. */
+export const EPIC_PILL_KEY = "ccs_epic";
+/** The epic pill is a quiet label, not a state signal: a muted gray, no icon, and a LOW priority so
+ * it sorts after the meaningful (colored) state pill. */
+const EPIC_PILL_COLOR = "#8e8e93"; // systemGray — deliberately dim so the state pill's color leads
+const EPIC_PILL_PRIORITY = 10;
 
 export interface StatusPill {
   key: string;
@@ -60,6 +75,7 @@ export interface CmuxPaintOverride {
   description?: string | null;
   color?: string | null;
   statusPill?: StatusPill | null;
+  epicPill?: StatusPill | null;
 }
 
 /** Overlay a resolved cmux-paint config onto the computed base ops. Pure. */
@@ -70,12 +86,13 @@ export function applyPaintOverride(base: TabRenderOps, over: CmuxPaintOverride |
     description: "description" in over ? over.description ?? null : base.description,
     color: "color" in over ? over.color ?? null : base.color,
     statusPill: "statusPill" in over ? over.statusPill ?? null : base.statusPill,
+    epicPill: "epicPill" in over ? over.epicPill ?? null : base.epicPill,
   };
 }
 
 function renderSession(row: CatalogueRow, ctx: RenderContext): TabRenderOps {
   const title = buildSessionTitle(row);
-  const description = buildSessionDescription(row, ctx);
+  const description = buildSessionDescription(row);
   // Workers carry NO sidebar color: the phase pill (below) already encodes state with its own
   // color, so a tab color would be redundant noise. State lives in the pill; the tab stays neutral.
   const color = null;
@@ -84,7 +101,10 @@ function renderSession(row: CatalogueRow, ctx: RenderContext): TabRenderOps {
   // there's no phase. This is what the retired cmux_label.py used to paint; it now lives in the
   // single ccs renderer, sourced from the row's `phase` (the engine senses it in).
   const statusPill = computePhasePill(row) ?? computeLifecyclePill(row);
-  return { title, description, color, statusPill };
+  // The worker's EPIC as its own quiet pill (orthogonal to the state pill). The description line
+  // stays free for the live status prose (ccs status), which is what a worker actually writes there.
+  const epicPill = computeEpicPill(ctx);
+  return { title, description, color, statusPill, epicPill };
 }
 
 function renderLoop(row: CatalogueRow): TabRenderOps {
@@ -98,7 +118,8 @@ function renderLoop(row: CatalogueRow): TabRenderOps {
   // "sensed status" pill (control health / eval grade) rode on the free-form `phase` column,
   // which is retired (ADR-0059) — that pill wasn't intentional functionality, so it's gone.
   const statusPill = computeLifecyclePill(row);
-  return { title, description, color, statusPill };
+  // Loops (core roles) belong to no epic — no epic pill.
+  return { title, description, color, statusPill, epicPill: null };
 }
 
 /** Strip any leading "#<num> " groups so the PR# is never baked into the name — the
@@ -122,14 +143,22 @@ function buildSessionTitle(row: CatalogueRow): string {
   return row.sessionId.slice(0, 8);
 }
 
-function buildSessionDescription(row: CatalogueRow, ctx: RenderContext): string | null {
-  // The worker's second line is JUST the epic — a worker belongs to an epic and that's what you
-  // scan the tab list by. Everything else is noise: the cluster is the same for every pr-watch
-  // worker, the identity key + project duplicate what the title already conveys. Prefer the
-  // cluster-supplied short label (stripped of any `[tag]` prefix); fall back to the W-number so
-  // there's always a grouping anchor.
-  const epicLabel = ctx.grouping?.label?.replace(/^\[[^\]]+\]\s*/, "") || null;
-  return epicLabel || row.gusWork || null;
+function buildSessionDescription(row: CatalogueRow): string | null {
+  // The description line is reserved for the worker's LIVE status prose (ccs status), which
+  // `renderTab` overlays when present. The epic now rides its own pill (`ccs_epic`), so it no
+  // longer competes for this slot. Absent a status line, fall back to the W-number as a minimal
+  // anchor — the epic pill carries the grouping label, so we don't repeat it here.
+  return row.gusWork || null;
+}
+
+/** The worker's epic → a quiet, always-on label pill (key `ccs_epic`). Muted gray, no icon, low
+ * priority so it sorts after the colored state pill. Null when the worker has no grouping label
+ * (ungrouped / not yet sensed) — the caller then clears any stale epic pill. Strips a leading
+ * `[tag]` prefix the same way the description used to. */
+function computeEpicPill(ctx: RenderContext): StatusPill | null {
+  const label = ctx.grouping?.label?.replace(/^\[[^\]]+\]\s*/, "").trim() || null;
+  if (!label) return null;
+  return { key: EPIC_PILL_KEY, label, color: EPIC_PILL_COLOR, priority: EPIC_PILL_PRIORITY };
 }
 
 function buildLoopDescription(row: CatalogueRow): string | null {

@@ -4,7 +4,7 @@ import { openCatalogue, getRow, getAll, lifecycleOf, type CatalogueRow } from ".
 import { openIndex } from "../index/schema.ts";
 import { resolveSelector, type SelectorKind } from "../resume/selector.ts";
 import { workspaceForSession } from "../cmux/liveness.ts";
-import { renderTab, applyPaintOverride, type CmuxPaintOverride } from "./render-tab.ts";
+import { renderTab, applyPaintOverride, EPIC_PILL_KEY, type CmuxPaintOverride, type StatusPill } from "./render-tab.ts";
 import { resolveConfig } from "../hooks/resolve-config.ts";
 import { liveResolveCtx } from "../hooks/compose-claude-md.ts";
 import { getGrouping } from "../state/groupings.ts";
@@ -134,19 +134,32 @@ export function pushRenderOps(
     }
   }
 
-  if (ops.statusPill) {
-    const args = ["set-status", ops.statusPill.key, ops.statusPill.label, "--workspace", ref];
-    if (ops.statusPill.icon) args.push("--icon", ops.statusPill.icon);
-    if (ops.statusPill.color) args.push("--color", ops.statusPill.color);
-    if (ops.statusPill.priority !== undefined) args.push("--priority", String(ops.statusPill.priority));
-    try {
-      execFileSync(cmuxBin, args, { timeout: 4000, stdio: "ignore" });
-    } catch {
-      // best-effort
-    }
-  }
+  pushPill(cmuxBin, ref, ops.statusPill, "ccs_lifecycle");
+  // The epic pill (key `ccs_epic`) is a SEPARATE cmux status entry, so it coexists with the state
+  // pill instead of clobbering it. Cleared explicitly when the worker has no epic, so a stale label
+  // never lingers after a worker leaves its grouping.
+  pushPill(cmuxBin, ref, ops.epicPill, EPIC_PILL_KEY);
 
   return true;
+}
+
+/** Push (or clear) one keyed cmux sidebar pill. A null pill clears the key so a stale entry never
+ * lingers; the key is passed explicitly so a cleared pill still knows which entry to remove.
+ * Best-effort — a wedged cmux never throws up the stack. */
+function pushPill(cmuxBin: string, ref: string, pill: StatusPill | null, key: string): void {
+  try {
+    if (pill) {
+      const args = ["set-status", pill.key, pill.label, "--workspace", ref];
+      if (pill.icon) args.push("--icon", pill.icon);
+      if (pill.color) args.push("--color", pill.color);
+      if (pill.priority !== undefined) args.push("--priority", String(pill.priority));
+      execFileSync(cmuxBin, args, { timeout: 4000, stdio: "ignore" });
+    } else {
+      execFileSync(cmuxBin, ["clear-status", key, "--workspace", ref], { timeout: 4000, stdio: "ignore" });
+    }
+  } catch {
+    // best-effort; cmux might be wedged
+  }
 }
 
 /** Paint a SET of sessionIds — the plural is a loop over the single-paint primitive (ADR-0056).
