@@ -14,6 +14,7 @@ import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, activity, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
+import { boardCommand } from "./catalogue/board-command.ts";
 import { backfillTitles } from "./titler/queue.ts";
 import { createTitler } from "./titler/codex.ts";
 import { buildEngine, resolveEngine } from "./inference/engine.ts";
@@ -53,7 +54,7 @@ Usage:
   ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
   ccs set-cluster [<id>|.] <slug> [--off]   Set/clear the cluster grouping
   ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab (worker → summary pill)
-  ccs name [<id>|.] "<short name>" [--off]   Set the session's short display name (<=25ch) — the tab title after "#<PR> "
+  ccs name [<id>|.] "<short name>" [--off]   Set the session's short display name (<=35ch, aim to use most of it) — the tab title after "#<PR> "
   ccs activity [<id>|.] <value> [--off]   Set the activity (cluster defines the vocabulary; --off = dormant)
   ccs stage [<id>|.] <value> [--off]   Generic stage setter (cluster defines + the tool enforces the vocabulary)
   ccs meta [<id>|.] <key> <value> [--off]   Set a key in the session's generic meta map (ADR-0060/0064)
@@ -63,9 +64,11 @@ Usage:
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<selector>|.|--all]   Paint cmux tabs from catalogue metadata (. | id | #pr | role | cluster | --all)
   ccs cluster <c> [--expand] [--json]   Cluster map: all members by role, live/lifecycle, work-unit (--json for agents)
+  ccs board <c> [--json|--text]         Cluster board: per-worker truth view composed by the cluster (concierge + control both read this)
   ccs inbox send|bump|drain|pending  Durable per-identity messaging; bump also wakes a live tab (ADR-0028)
   ccs state get|set|merge  Durable state store (--cluster <c> or --role <r> …) (ADR-0031)
   ccs hook run <name>   Run a named ccs hook (session-start | stop) from its stdin payload
+  ccs self-check <id>   Turn-end self-check sidecar: claude -p decides what state updates the session should have made this turn
   ccs register-session  (alias for 'ccs hook run session-start')
   ccs roles [ls|upsert|rm]  Manage the roles registry (definitions sync-roles/resume use)
   ccs sync-roles        Materialize the roles registry into ~/.claude (symlink reconcile)
@@ -181,12 +184,27 @@ export async function main(argv: string[]): Promise<number> {
       return backfillWorkUnits(args.slice(1));
     case "cluster":
       return clusterView(args[1], args.includes("--expand") || args.includes("--all"), args.includes("--json"));
+    case "board":
+      return boardCommand(args.slice(1));
     case "resume-session":
       return resumeSession(args[1], args.includes("--dry-run"));
     case "resume-cluster":
       return resumeCluster(args[1], args.includes("--dry-run"));
     case "resume":
       return resumeSelector(args.slice(1));
+    case "self-check": {
+      // `ccs self-check <session-id>` — the turn-end sidecar (ADR-0063 v2). Runs a cheap
+      // claude -p against the session's recent transcript + rubric, executes any `ccs` state
+      // updates the model decides on. Normally spawned detached by the worker Stop hook when
+      // CCS_SELF_CHECK_MODE=sidecar; runnable by hand for debugging.
+      const sid = args[1];
+      if (!sid) {
+        console.error("usage: ccs self-check <session-id>");
+        return 1;
+      }
+      const { runSelfCheck } = await import("./hooks/self-check-sidecar.ts");
+      return await runSelfCheck({ sessionId: sid });
+    }
     case "skills": {
       // Bare `ccs skills` on a terminal opens the TUI in skills mode; flags/subcommands
       // (or piped output) use the plain-table command path.
