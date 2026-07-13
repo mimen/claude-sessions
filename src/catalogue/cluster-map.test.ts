@@ -50,3 +50,19 @@ test("clusterMapToJson: flat roster + folds + closedWithWork roll-up (the agent-
   expect(j.closedWithWork.map((m) => m.sessionId)).toEqual(["w-closed"]);
   expect(j.closedWithWork[0]!.prNumber).toBe(2);
 });
+
+test("clusterMapToJson: metadataGaps flags non-retired fleet workers missing gusWork/groupingId", () => {
+  const members = [
+    // fully-tagged worker → no gap
+    toMember(row({ sessionId: "ok", role: "pr-agent", prRepo: "r", prNumber: 1, gusWork: "W-1", groupingId: "e1" }), "/w/1", "r1", true),
+    // fresh worker: PR facts but no W-number + no epic yet → both gaps
+    toMember(row({ sessionId: "fresh", role: "pr-agent", prRepo: "r", prNumber: 2 }), "/w/2", "r2", true),
+    // retired worker missing everything → NOT flagged (retired)
+    toMember(row({ sessionId: "done", role: "pr-agent", prRepo: "r", prNumber: 3, archived: true }), "/w/3", "r3", false),
+    // core role missing gus/epic → NOT flagged (core carries no work-unit)
+    toMember(row({ sessionId: "control", role: "control" }), "~/c", "rc", true),
+  ];
+  const j = clusterMapToJson(buildClusterMap("pr-watch", members));
+  expect(j.metadataGaps.map((m) => m.sessionId)).toEqual(["fresh"]);
+  expect(j.metadataGaps[0]!.missing.sort()).toEqual(["groupingId", "gusWork"]);
+});

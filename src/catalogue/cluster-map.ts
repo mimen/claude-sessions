@@ -22,6 +22,7 @@ export interface ClusterMember {
   readonly cwd: string | null;
   readonly resumeId: string | null;
   readonly gusWork: string | null;
+  readonly groupingId: string | null; // the epic/grouping FK — for metadata-gap detection
   readonly prNumber: number | null;
   readonly prRepo: string | null;
   readonly lifecycle: string; // idle | parked | completed | archived
@@ -88,6 +89,7 @@ export function toMember(
     cwd,
     resumeId,
     gusWork: row.gusWork,
+    groupingId: row.groupingId,
     prNumber: row.prNumber,
     prRepo: row.prRepo,
     lifecycle: lifecycleOf(row),
@@ -227,6 +229,7 @@ export interface ClusterMemberJson {
   prNumber: number | null;
   prRepo: string | null;
   gusWork: string | null;
+  groupingId: string | null;
   cwd: string | null;
   resumeId: string | null;
   /** True when this member is the shown PRIMARY for its work-unit and stands in for older
@@ -247,6 +250,10 @@ export function clusterMapToJson(map: ClusterMap): {
   members: ClusterMemberJson[];
   /** Fleet members that are NOT live and NOT retired — in-flight work with no running session. */
   closedWithWork: ClusterMemberJson[];
+  /** Non-retired fleet members MISSING metadata a sensor should have filled — no gusWork (the
+   * work-item) or no groupingId (the epic). A control loop surfaces/backfills these agentically
+   * (the born-with-PR-facts, epic-attached-later gap; ADR-0027/0076). */
+  metadataGaps: Array<ClusterMemberJson & { missing: string[] }>;
 } {
   const members: ClusterMemberJson[] = [];
   for (const g of map.groups) {
@@ -254,13 +261,22 @@ export function clusterMapToJson(map: ClusterMap): {
       members.push({
         sessionId: m.sessionId, role: m.role, kind: g.kind, title: m.title,
         live: m.live, lifecycle: m.lifecycle, prNumber: m.prNumber, prRepo: m.prRepo,
-        gusWork: m.gusWork, cwd: m.cwd, resumeId: m.resumeId,
+        gusWork: m.gusWork, groupingId: m.groupingId, cwd: m.cwd, resumeId: m.resumeId,
         folds: (g.folded.get(m.sessionId) ?? []).map((s) => s.sessionId),
       });
     }
   }
-  const closedWithWork = members.filter(
-    (m) => m.kind === "fleet" && !m.live && m.lifecycle !== "completed" && m.lifecycle !== "archived",
-  );
-  return { cluster: map.cluster, counts: map.counts, members, closedWithWork };
+  const active = (m: ClusterMemberJson) =>
+    m.kind === "fleet" && m.lifecycle !== "completed" && m.lifecycle !== "archived";
+  const closedWithWork = members.filter((m) => active(m) && !m.live);
+  const metadataGaps = members
+    .filter(active)
+    .map((m) => {
+      const missing: string[] = [];
+      if (!m.gusWork) missing.push("gusWork");
+      if (!m.groupingId) missing.push("groupingId");
+      return { ...m, missing };
+    })
+    .filter((m) => m.missing.length > 0);
+  return { cluster: map.cluster, counts: map.counts, members, closedWithWork, metadataGaps };
 }
