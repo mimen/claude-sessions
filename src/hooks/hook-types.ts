@@ -70,6 +70,10 @@ export const HOOK_TYPES: Readonly<Record<string, HookTypeDef>> = {
     type: "spawn-location", firesOn: "new-session", merge: "most-specific", formats: ["json"], rowResolved: false,
     note: "where a role's session launches — resolves pre-row from the launch request (ADR-0046)",
   },
+  spawn: {
+    type: "spawn", firesOn: "new-session", merge: "ordered-actions", formats: ["json"], rowResolved: true,
+    note: "role-declared BIRTH setup actions run at new-session (ADR-0075): grant-perms, seed-files, … — the deterministic, inspectable replacement for a cluster's bespoke spawn shell script.",
+  },
   guard: {
     type: "guard", firesOn: "PreToolUse", merge: "union-deny-wins", formats: ["json"], rowResolved: true,
     note: "per-level tool guards — all matching run, any deny wins (future)",

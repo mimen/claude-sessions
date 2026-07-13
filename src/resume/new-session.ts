@@ -30,6 +30,7 @@ import { spawnContractError, type SpawnFacts, type WorktreeState } from "../cata
 import { interpretSpawnLocation, syntheticRow, type SpawnLocationConfig } from "../catalogue/spawn-location.ts";
 import { resolveConfig } from "../hooks/resolve-config.ts";
 import { liveResolveCtx } from "../hooks/compose-claude-md.ts";
+import { runSpawnActions } from "../hooks/spawn-actions.ts";
 
 /**
  * `ccs new-session` — mint a session id, bind its catalogue metadata AT BIRTH, then either
@@ -286,6 +287,14 @@ export function newSession(args: string[]): number {
   const db = openCatalogue(CATALOGUE_PATH());
   try {
     writeSessionMetadata(db, id, opts, new Date().toISOString());
+    // ADR-0075: run the role's declared BIRTH setup (grant-perms, seed-files, …) in the launch
+    // cwd, now that the row exists (rowResolved). Runs for BOTH --print-id (reserve) and direct
+    // launch, so setup is done before the launcher (spawn-agent / this process) starts claude.
+    const row = getRow(db, id);
+    if (row) {
+      const spawnRes = runSpawnActions({ row, cwd });
+      for (const err of spawnRes.errors) console.error(`ccs new-session: spawn setup — ${err}`);
+    }
   } finally {
     db.close();
   }

@@ -20,6 +20,7 @@ import { knownHookTypes } from "./hook-types.ts";
 import { classifyFields } from "./meta-fields.ts";
 import { readClusterChangelog, validateChangelog } from "../cluster/changelog.ts";
 import { knownStartActions } from "./start-actions.ts";
+import { knownSpawnActions } from "./spawn-actions.ts";
 
 function resolveSessionId(raw: string | undefined): string | undefined {
   if (!raw || raw === ".") return process.env.CLAUDE_CODE_SESSION_ID;
@@ -67,6 +68,7 @@ function lint(): number {
   const roots = [ccsConfigRoot(), ccsRuntimeRoot()];
   const known = new Set(knownHookTypes());
   const knownActions = new Set(knownStartActions());
+  const knownSpawnActionSet = new Set(knownSpawnActions());
   const validExts = new Set(["md", "json"]);
   const problems: string[] = [];
   let checked = 0;
@@ -102,13 +104,14 @@ function lint(): number {
           for (const u of unknown) problems.push(`${join(dir, f)}: meta-update field "${u}" has no known writer (dead contract)`);
         } catch { /* parse errors are caught elsewhere (resolveConfig degraded path) */ }
       }
-      // A start file naming an action with no handler would silently no-op (ADR-0044).
-      if (base === "start" && ext === "json") {
+      // A start/spawn file naming an action with no handler would silently no-op (ADR-0044/0075).
+      if ((base === "start" || base === "spawn") && ext === "json") {
+        const known = base === "start" ? knownActions : knownSpawnActionSet;
         try {
           const parsed = JSON.parse(readFileSync(join(dir, f), "utf8")) as { actions?: Array<{ name?: string }> };
           for (const a of parsed.actions ?? []) {
-            if (a.name && !knownActions.has(a.name)) {
-              problems.push(`${join(dir, f)}: start action "${a.name}" has no handler (known: ${[...knownActions].join(", ")})`);
+            if (a.name && !known.has(a.name)) {
+              problems.push(`${join(dir, f)}: ${base} action "${a.name}" has no handler (known: ${[...known].join(", ")})`);
             }
           }
         } catch { /* parse errors caught elsewhere */ }
