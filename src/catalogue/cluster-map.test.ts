@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { toMember, buildClusterMap, isCoreRole } from "./cluster-map.ts";
+import { toMember, buildClusterMap, isCoreRole, clusterMapToJson } from "./cluster-map.ts";
 import type { CatalogueRow } from "./db.ts";
 
 const row = (o: Partial<CatalogueRow>): CatalogueRow => ({
@@ -32,4 +32,21 @@ test("buildClusterMap: core group first, fleet folds multi-session PRs to one pr
   const foldedSibs = fleet.folded.get("w-new");
   expect(foldedSibs).toHaveLength(1);              // 1 older folded
   expect(foldedSibs?.[0]?.sessionId).toBe("w-old");
+});
+
+test("clusterMapToJson: flat roster + folds + closedWithWork roll-up (the agent-facing view)", () => {
+  const members = [
+    toMember(row({ sessionId: "control", role: "control" }), "~/c", "rc", true), // core, live
+    toMember(row({ sessionId: "w-live", role: "pr-agent", prRepo: "r", prNumber: 1 }), "/wt/1", "r1", true),  // fleet, live
+    toMember(row({ sessionId: "w-closed", role: "pr-agent", prRepo: "r", prNumber: 2 }), "/wt/2", "r2", false), // fleet, closed + in-flight
+    toMember(row({ sessionId: "w-done", role: "pr-agent", prRepo: "r", prNumber: 3, completed: true }), "/wt/3", "r3", false), // fleet, retired
+  ];
+  const j = clusterMapToJson(buildClusterMap("pr-watch", members));
+  expect(j.cluster).toBe("pr-watch");
+  expect(j.members).toHaveLength(4);
+  expect(j.members.find((m) => m.sessionId === "control")!.kind).toBe("core");
+  expect(j.members.find((m) => m.sessionId === "w-live")!.kind).toBe("fleet");
+  // closedWithWork = fleet, not live, not retired → only w-closed (w-done is completed, w-live is live)
+  expect(j.closedWithWork.map((m) => m.sessionId)).toEqual(["w-closed"]);
+  expect(j.closedWithWork[0]!.prNumber).toBe(2);
 });

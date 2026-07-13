@@ -9,7 +9,7 @@ import { reindexStore, listByRecency, titleOf, costOf, subagentCosts } from "./i
 import { formatCost } from "./cost.ts";
 import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster } from "./catalogue/db.ts";
 import { openSessionIds } from "./cmux/liveness.ts";
-import { toMember, buildClusterMap, renderClusterMap } from "./catalogue/cluster-map.ts";
+import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, activity, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
@@ -61,7 +61,7 @@ Usage:
                                    --title --parent <id> --cwd <dir> --prompt "<text>"
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<selector>|.|--all]   Paint cmux tabs from catalogue metadata (. | id | #pr | role | cluster | --all)
-  ccs cluster <system>  Show the cluster map: members by role, liveness, how to reach each
+  ccs cluster <c> [--expand] [--json]   Cluster map: all members by role, live/lifecycle, work-unit (--json for agents)
   ccs inbox send|bump|drain|pending  Durable per-identity messaging; bump also wakes a live tab (ADR-0028)
   ccs state get|set|merge  Durable state store (--cluster <c> or --role <r> …) (ADR-0031)
   ccs hook run <name>   Run a named ccs hook (session-start | stop) from its stdin payload
@@ -176,7 +176,7 @@ export async function main(argv: string[]): Promise<number> {
       // one-time ADR-0057 migration: link existing anchored rows to a work-unit entity
       return backfillWorkUnits(args.slice(1));
     case "cluster":
-      return clusterView(args[1], args.includes("--expand") || args.includes("--all"));
+      return clusterView(args[1], args.includes("--expand") || args.includes("--all"), args.includes("--json"));
     case "resume-session":
       return resumeSession(args[1], args.includes("--dry-run"));
     case "resume-cluster":
@@ -415,9 +415,9 @@ function tree(_opts: { all: boolean }): number {
 }
 
 /** Render the cluster map for a cluster: members grouped by role, liveness, how to reach each. */
-function clusterView(clusterSlug: string | undefined, expand = false): number {
+function clusterView(clusterSlug: string | undefined, expand = false, asJson = false): number {
   if (!clusterSlug) {
-    console.error("ccs: missing cluster slug. Usage: ccs cluster <cluster>");
+    console.error("ccs: missing cluster slug. Usage: ccs cluster <cluster> [--expand] [--json]");
     return 1;
   }
   const db = openIndex(DB_PATH());
@@ -435,11 +435,18 @@ function clusterView(clusterSlug: string | undefined, expand = false): number {
       const live = open.has(sid) || (!!ir?.resume_id && open.has(ir.resume_id));
       return toMember(row, cwd, ir?.resume_id ?? null, live);
     });
+    const map = buildClusterMap(clusterSlug, members);
+    if (asJson) {
+      // Machine-readable roster for AGENTS to consume each tick (control/concierge/scout/…):
+      // all sessions, core + fleet, live/lifecycle, work-unit, + a closedWithWork roll-up.
+      console.log(JSON.stringify(clusterMapToJson(map)));
+      return 0;
+    }
     if (members.length === 0) {
       console.log(`cluster ${clusterSlug}: no members (nothing tagged cluster=${clusterSlug}).`);
       return 0;
     }
-    console.log(renderClusterMap(buildClusterMap(clusterSlug, members), expand));
+    console.log(renderClusterMap(map, expand));
     return 0;
   } finally {
     db.close();

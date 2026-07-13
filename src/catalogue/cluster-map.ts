@@ -215,3 +215,52 @@ export function renderClusterMap(map: ClusterMap, expand = false): string {
   }
   return lines.join("\n");
 }
+
+/** One member in the JSON projection — the agent-facing roster row. */
+export interface ClusterMemberJson {
+  sessionId: string;
+  role: string;
+  kind: "core" | "fleet";
+  title: string | null;
+  live: boolean;
+  lifecycle: string; // idle | parked | completed | archived
+  prNumber: number | null;
+  prRepo: string | null;
+  gusWork: string | null;
+  cwd: string | null;
+  resumeId: string | null;
+  /** True when this member is the shown PRIMARY for its work-unit and stands in for older
+   * siblings (their ids are in `folds`). */
+  folds: string[];
+}
+
+/**
+ * Machine-readable projection of the cluster map (`ccs cluster <c> --json`), for AGENTS to consume
+ * their roster deterministically each tick instead of grep-parsing the rendered tree. Flattens the
+ * `folded` Map into per-member `folds[]`, and adds a `needsAttention` roll-up: closed sessions that
+ * hold IN-FLIGHT work (not retired, not live) — the "work won't get done unless reopened" signal a
+ * control loop can surface. Pure — same inputs as renderClusterMap.
+ */
+export function clusterMapToJson(map: ClusterMap): {
+  cluster: string;
+  counts: ClusterMap["counts"];
+  members: ClusterMemberJson[];
+  /** Fleet members that are NOT live and NOT retired — in-flight work with no running session. */
+  closedWithWork: ClusterMemberJson[];
+} {
+  const members: ClusterMemberJson[] = [];
+  for (const g of map.groups) {
+    for (const m of g.members) {
+      members.push({
+        sessionId: m.sessionId, role: m.role, kind: g.kind, title: m.title,
+        live: m.live, lifecycle: m.lifecycle, prNumber: m.prNumber, prRepo: m.prRepo,
+        gusWork: m.gusWork, cwd: m.cwd, resumeId: m.resumeId,
+        folds: (g.folded.get(m.sessionId) ?? []).map((s) => s.sessionId),
+      });
+    }
+  }
+  const closedWithWork = members.filter(
+    (m) => m.kind === "fleet" && !m.live && m.lifecycle !== "completed" && m.lifecycle !== "archived",
+  );
+  return { cluster: map.cluster, counts: map.counts, members, closedWithWork };
+}
