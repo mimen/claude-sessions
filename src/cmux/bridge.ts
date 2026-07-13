@@ -17,9 +17,16 @@
  *    Only cmux's claude hooks populate it, and only when claude is launched through cmux's
  *    shim (a plain command in an integrated shell — NOT `exec`/env-scrubbed). See ADR-0054.
  *
- * Liveness = `activeSessionsBySurface` INTERSECTED with the live tree: the store accretes stale
- * bindings for surfaces long gone, so a binding only counts if its surface still exists in
- * `cmux tree`. Identity/liveness key on the SURFACE UUID. The workspace tab is owned by the
+ * Liveness = (`activeSessionsBySurface` ∪ `sessions[sid].surfaceId`), pid-alive-filtered,
+ * INTERSECTED with the live tree. Three signals guard against three real failure modes cmux
+ * exhibits on 0.64.17:
+ *   - unioning both hook-store views handles reattach — `activeSessionsBySurface` goes stale
+ *     when a `--resume` binds to a new surface, `sessions[sid].surfaceId` is the fresher pointer.
+ *   - pid-alive (`process.kill(pid, 0)`) drops sessions whose claude process is actually dead
+ *     but whose stop hook never fired (crash, kill -9, cmux restart) — the store keeps them
+ *     as `agentLifecycle: running` forever otherwise.
+ *   - tree intersect drops anything whose surface is no longer visible.
+ * Identity/liveness key on the SURFACE UUID. The workspace tab is owned by the
  * workspace's PRIMARY session = the earliest surface running a claude agent (pane index, then
  * index-in-pane) — a pure function of tree position, no lock (ADR-0027/0032/0040).
  *
@@ -86,6 +93,11 @@ export interface SurfaceSession {
   agentLifecycle: string | null;
   /** whether cmux believes this session can be resumed */
   isRestorable: boolean;
+  /** the pid cmux's hooks last recorded for this session, if any. The ground-truth liveness
+   * check: we treat this session as live only if this pid is still an alive process. cmux can
+   * fail to fire the stop hook (crash, kill -9), leaving the store claiming a dead session is
+   * `agentLifecycle: running` — the pid check catches that. */
+  pid: number | null;
 }
 
 // --- parse `cmux tree --all --json --id-format both` ----------------------------
@@ -131,6 +143,7 @@ interface HookSessionEntry {
   cwd?: string | null;
   agentLifecycle?: string | null;
   isRestorable?: boolean;
+  pid?: number | null;
 }
 /** One entry in `activeSessionsBySurface[surfaceUUID]` — the CURRENT surface→session binding. */
 interface ActiveSurfaceBinding {
@@ -145,17 +158,30 @@ export interface CmuxHookStore {
 /**
  * surface UUID -> the claude session cmux currently binds to it.
  *
- * `activeSessionsBySurface` is authoritative for the current binding; `sessions` is the detail
- * lookup (and accretes history). We take the binding and enrich it from the matching session
- * entry. Surfaces whose binding names a session with no detail entry still map (the sessionId
- * alone is enough for liveness) — detail fields just come back null.
+ * We UNION two views the hook store exposes:
+ *   - `activeSessionsBySurface[surfaceId] = {sessionId}` — cmux's authoritative-for-a-current-
+ *     surface map, but empirically stale on 0.64.17: when a `--resume` reattaches a session onto
+ *     a new surface (fleet resumes), the OLD surface's binding is left in place and the new
+ *     surface never gets one. Sessions that ARE live disappear from this view.
+ *   - `sessions[sessionId].surfaceId` — per-session detail; cmux's hooks overwrite `.surfaceId`
+ *     with the current surface each time the session announces itself. This tends to be fresher
+ *     than the byMap for reattached sessions.
+ *
+ * Buildbridge intersects the resulting map with the live surface tree (surfaceToWorkspace) — so
+ * `activeSessionsBySurface` entries whose surface is gone drop out, and `sessions[sid].surfaceId`
+ * pointing at a stale surface drops out too. Only a binding whose surface is CURRENTLY in the
+ * tree survives, so unioning both views is safe: stale garbage in either is filtered downstream.
+ *
+ * Precedence: `activeSessionsBySurface` is inserted first (its `updatedAt` is the surface-side
+ * binding time); `sessions[sid].surfaceId` fills in any surface it doesn't already cover.
+ * Duplicate coverage of the same surface reconciles to the same sessionId in practice.
  */
 export function parseHookStore(store: CmuxHookStore): Map<string, SurfaceSession> {
   const map = new Map<string, SurfaceSession>();
   const sessions = store.sessions ?? {};
-  for (const [surfaceId, binding] of Object.entries(store.activeSessionsBySurface ?? {})) {
-    const sessionId = binding?.sessionId;
-    if (!surfaceId || !sessionId) continue;
+  const record = (surfaceId: string, sessionId: string): void => {
+    if (!surfaceId || !sessionId) return;
+    if (map.has(surfaceId)) return;
     const detail = sessions[sessionId] ?? {};
     map.set(surfaceId, {
       sessionId,
@@ -163,7 +189,18 @@ export function parseHookStore(store: CmuxHookStore): Map<string, SurfaceSession
       cwd: detail.cwd ?? null,
       agentLifecycle: detail.agentLifecycle ?? null,
       isRestorable: detail.isRestorable ?? false,
+      pid: typeof detail.pid === "number" ? detail.pid : null,
     });
+  };
+  for (const [surfaceId, binding] of Object.entries(store.activeSessionsBySurface ?? {})) {
+    if (binding?.sessionId) record(surfaceId, binding.sessionId);
+  }
+  // Fill in sessions whose current .surfaceId isn't covered by activeSessionsBySurface (0.64.17
+  // regression: reattached sessions leave the byMap stale). The buildBridge tree-intersect drops
+  // any that point at a surface that no longer exists.
+  for (const [sessionId, detail] of Object.entries(sessions)) {
+    const surfaceId = detail?.surfaceId;
+    if (surfaceId) record(surfaceId, sessionId);
   }
   return map;
 }
@@ -199,6 +236,16 @@ export function buildBridge(
   tree: CmuxTree,
   store: CmuxHookStore,
   readable = true,
+  /**
+   * pid liveness predicate: `pidAlive(pid) === false` drops a hook-store binding whose recorded
+   * claude pid is no longer running. cmux can fail to fire the stop hook (crash, kill -9, cmux
+   * restart), leaving `sessions[sid]` claiming a session is `agentLifecycle: running` while the
+   * process is long gone. Filtering by real pid liveness cleans those phantoms out. Default is
+   * "always alive" (pure/testable). Live callers pass a probe backed by `process.kill(pid, 0)`.
+   * A binding with no recorded pid is trusted (surface-in-tree check still applies) — cmux
+   * pre-hook-store sessions never had a pid to record, so refusing them would be too aggressive.
+   */
+  pidAlive: (pid: number) => boolean = () => true,
 ): Bridge {
   const surfaces = parseTree(tree);
   const agents = parseHookStore(store);
@@ -206,9 +253,17 @@ export function buildBridge(
   const surfaceToWorkspace = new Map<string, SurfaceLocation>();
   for (const s of surfaces) surfaceToWorkspace.set(s.surfaceId, s);
 
+  // Filter out bindings whose recorded pid is dead (see pidAlive comment above). Bindings with
+  // no pid pass through — the surface-in-tree check below is the only guard for them.
+  const livePidAgents = new Map<string, SurfaceSession>();
+  for (const [surfaceId, agent] of agents) {
+    if (agent.pid != null && !pidAlive(agent.pid)) continue;
+    livePidAgents.set(surfaceId, agent);
+  }
+
   // sessionId -> surfaceId, only for surfaces that are actually live in the tree
   const sessionToSurface = new Map<string, string>();
-  for (const [surfaceId, agent] of agents) {
+  for (const [surfaceId, agent] of livePidAgents) {
     if (surfaceToWorkspace.has(surfaceId)) {
       sessionToSurface.set(agent.sessionId, surfaceId);
     }
@@ -222,7 +277,7 @@ export function buildBridge(
   }
 
   const surfaceInfo = (surfaceId: string): SurfaceSession | null =>
-    agents.get(surfaceId) ?? null;
+    livePidAgents.get(surfaceId) ?? null;
 
   const surfacesInWorkspace = (workspaceId: string): SurfaceLocation[] =>
     [...(byWorkspace.get(workspaceId) ?? [])].sort(
@@ -231,7 +286,7 @@ export function buildBridge(
 
   const primarySurface = (workspaceId: string): SurfaceLocation | null => {
     for (const s of surfacesInWorkspace(workspaceId)) {
-      if (agents.has(s.surfaceId)) return s; // earliest claude-running surface wins the tab
+      if (livePidAgents.has(s.surfaceId)) return s; // earliest claude-running surface wins the tab
     }
     return null;
   };

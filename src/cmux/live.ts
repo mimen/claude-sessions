@@ -82,6 +82,21 @@ function readHookStore(): { store: CmuxHookStore; ok: boolean } {
   }
 }
 
+/** `process.kill(pid, 0)` is the standard POSIX "does this pid exist as a live process?" probe:
+ * it sends signal 0, which is delivered nowhere but performs all the normal permission + target
+ * checks, throwing ESRCH if the pid is gone. Node/Bun surfaces those as thrown errors. We treat
+ * EPERM (pid exists but we can't signal it) as alive too — the process is definitely there. */
+function pidIsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    // EPERM means the pid exists but is owned by someone we can't signal — still alive.
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 /** Build a bridge from the live cmux state on this machine. */
 export function liveBridge(): Bridge {
   const version = cmuxVersion();
@@ -111,5 +126,5 @@ export function liveBridge(): Bridge {
     );
   }
 
-  return buildBridge(tree, store, readable);
+  return buildBridge(tree, store, readable, pidIsAlive);
 }

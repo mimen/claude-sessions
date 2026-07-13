@@ -124,6 +124,111 @@ describe("buildBridge", () => {
     }
   });
 
+  test("session whose recorded pid is dead is NOT live, even when its surface is still in the tree", () => {
+    // Real failure mode observed: cmux workspace still open on ttys002 with the pre-restart
+    // control surface, `activeSessionsBySurface` still points at the session, but the actual
+    // claude process died without firing the stop hook. Only pid-liveness catches this.
+    const phantomTree = {
+      windows: [
+        {
+          id: "win-1",
+          ref: "window:1",
+          workspaces: [
+            {
+              id: "ws-still-open",
+              ref: "workspace:1",
+              panes: [
+                {
+                  id: "pane-1",
+                  ref: "pane:1",
+                  index: 0,
+                  surfaces: [
+                    { id: "surface-still-there", ref: "surface:1", type: "terminal", index_in_pane: 0 },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const phantomStore = {
+      sessions: {
+        "session-dead": { sessionId: "session-dead", surfaceId: "surface-still-there", pid: 999999, agentLifecycle: "running" },
+      },
+      activeSessionsBySurface: {
+        "surface-still-there": { sessionId: "session-dead" },
+      },
+    };
+    const deadPidBridge = buildBridge(phantomTree, phantomStore, true, () => false);
+    expect(deadPidBridge.isOpen("session-dead")).toBe(false);
+    expect(deadPidBridge.surfaceInfo("surface-still-there")).toBeNull();
+
+    // Sanity: if that same pid IS alive, the session is live (same inputs, only the predicate flips)
+    const alivePidBridge = buildBridge(phantomTree, phantomStore, true, () => true);
+    expect(alivePidBridge.isOpen("session-dead")).toBe(true);
+  });
+
+  test("bindings with no recorded pid pass through (backfill safety: not every session has a pid)", () => {
+    const tree2 = {
+      windows: [{ id: "w", ref: "window:1", workspaces: [{ id: "ws", ref: "workspace:1", panes: [{ id: "p", ref: "pane:1", index: 0, surfaces: [{ id: "s", ref: "surface:1", type: "terminal", index_in_pane: 0 }] }] }] }],
+    };
+    const store2 = {
+      sessions: { "sid-no-pid": { sessionId: "sid-no-pid", surfaceId: "s" } }, // no pid
+      activeSessionsBySurface: { s: { sessionId: "sid-no-pid" } },
+    };
+    // predicate says nothing is alive, but the binding has no pid → we trust surface-in-tree
+    const b = buildBridge(tree2, store2, true, () => false);
+    expect(b.isOpen("sid-no-pid")).toBe(true);
+  });
+
+  test("session with fresh sessions[sid].surfaceId is live even when activeSessionsBySurface is stale (0.64.17 reattach)", () => {
+    // Scenario reproduced from a real fleet resume: cmux `sessions[sid]` was overwritten with the
+    // new surface, but `activeSessionsBySurface` still points at the surface the session USED to
+    // occupy. The current tree has the new surface, not the old one.
+    const reattachTree = {
+      windows: [
+        {
+          id: "win-1",
+          ref: "window:1",
+          workspaces: [
+            {
+              id: "ws-new",
+              ref: "workspace:2",
+              panes: [
+                {
+                  id: "pane-new",
+                  ref: "pane:2",
+                  index: 0,
+                  surfaces: [
+                    { id: "surface-NEW", ref: "surface:2", type: "terminal", index_in_pane: 0 },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const reattachStore = {
+      sessions: {
+        "session-reattached": {
+          sessionId: "session-reattached",
+          surfaceId: "surface-NEW",
+          workspaceId: "ws-new",
+          isRestorable: true,
+        },
+      },
+      // Stale byMap: points at the surface the session USED to be on (no longer in the tree)
+      activeSessionsBySurface: {
+        "surface-OLD-gone": { sessionId: "session-reattached" },
+      },
+    };
+    const reattachBridge = buildBridge(reattachTree, reattachStore);
+    expect(reattachBridge.isOpen("session-reattached")).toBe(true);
+    expect(reattachBridge.locateSession("session-reattached")?.surfaceId).toBe("surface-NEW");
+  });
+
   test("surface present in tree but unmapped in hook-store is NOT counted as open (ADR-task #9)", () => {
     // Build a minimal fixture: tree with one surface, hook-store with zero bindings
     const unmappedTree = {
