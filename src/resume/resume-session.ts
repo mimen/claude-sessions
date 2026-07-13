@@ -60,7 +60,11 @@ export function planResumeSession(
 }
 
 export type ResumeSessionResult =
-  | { status: "resumed"; note: string | null }
+  /** `workspaceRef` is the cmux ref of the newly-spawned workspace (e.g. "workspace:44"); null
+   * only on dry-run. Callers use it to act on the workspace IMMEDIATELY (pin, paint, focus)
+   * without waiting for cmux to bind surface→sessionId — that binding happens later, once the
+   * child claude fires its SessionStart hook, so a by-session lookup right after spawn misses. */
+  | { status: "resumed"; note: string | null; workspaceRef: string | null }
   | { status: "already-open" }
   | { status: "not-indexed" }
   | { status: "spawn-failed" }
@@ -100,9 +104,10 @@ export function resumeSessionEntry(
   // operator can close a stale twin if they want. Best-effort + non-blocking: we're about to open
   // this (MRU) session; if OTHER live sessions share its identity-key, just warn.
   if (cat) warnLiveSiblings(catalogueDb, bridge, cat.sessionId, identityKey(cat));
-  if (opts.dryRun) return { status: "resumed", note: plan.note };
-  return executeResumePlan(plan, { cmuxBin: opts.cmuxBin, focus: opts.focus })
-    ? { status: "resumed", note: plan.note }
+  if (opts.dryRun) return { status: "resumed", note: plan.note, workspaceRef: null };
+  const ref = executeResumePlan(plan, { cmuxBin: opts.cmuxBin, focus: opts.focus });
+  return ref !== null
+    ? { status: "resumed", note: plan.note, workspaceRef: ref }
     : { status: "spawn-failed" };
 }
 
@@ -147,8 +152,8 @@ function warnLiveSiblings(catalogueDb: Database, bridge: Bridge, selfId: string,
 export function executeResumePlan(
   plan: ResumePlan,
   opts: { cmuxBin?: string; focus?: boolean } = {},
-): boolean {
-  if (plan.action === "skip" || plan.action === "fail") return false;
+): string | null {
+  if (plan.action === "skip" || plan.action === "fail") return null;
   const ref = spawnCmux({
     argv: plan.command.argv,
     cwd: plan.command.cwd,
@@ -156,7 +161,7 @@ export function executeResumePlan(
     focus: opts.focus,
     cmuxBin: opts.cmuxBin,
   });
-  if (ref === null) return false;
+  if (ref === null) return null;
   try {
     // Paint the JUST-CREATED workspace by its ref — cmux hasn't bound surface→sessionId yet, so a
     // by-session lookup would miss. The hook repaints on boot regardless.
@@ -164,5 +169,5 @@ export function executeResumePlan(
   } catch {
     /* eager paint is best-effort; the SessionStart hook repaints on boot */
   }
-  return true;
+  return ref;
 }

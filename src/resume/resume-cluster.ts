@@ -15,7 +15,7 @@ import type { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
 import { sessionsForCluster, getRow, lifecycleOf, type CatalogueRow } from "../catalogue/db.ts";
 import { liveBridge } from "../cmux/live.ts";
-import { openSessionIdsFrom, workspaceForSessionFrom, workspaceForSession } from "../cmux/liveness.ts";
+import { openSessionIdsFrom, workspaceForSessionFrom } from "../cmux/liveness.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import { resumeSessionEntry, type ResumeSessionResult } from "./resume-session.ts";
 import { workUnitKey } from "../catalogue/spawn-contract.ts";
@@ -122,6 +122,21 @@ export function resumeClusterEntry(
 }
 
 /**
+ * Pure decision helper: given a role's pin-on-resume flag and a workspace ref, return the ref to
+ * PIN or `null` for "do nothing". Extracted from resumeMany so the pin contract is unit-testable
+ * without spawning real cmux workspaces (the caller wires this to an actual `workspace-action`
+ * exec). Failure modes checked by the tests:
+ *   - role that doesn't opt in (`shouldPin=false`) → never pin, regardless of ref
+ *   - opted in but no ref (e.g. resumed with a spawn failure, or an already-open session whose
+ *     bridge lookup missed) → skip; the next resume tick catches it
+ *   - opted in with a ref → return the ref for pinning
+ */
+export function planPin(role: string | null, ref: string | null, shouldPin: (role: string | null) => boolean): string | null {
+  if (!shouldPin(role)) return null;
+  return ref ?? null;
+}
+
+/**
  * Resume a SET of session ids — the shared core behind `ccs resume-cluster`, `ccs resume
  * <selector>`, and the TUI. Applies the two cluster-level guards (retired-skip, one-live-worker-
  * per-work-unit supersede-dedup) then delegates each survivor to resumeSessionEntry (the single
@@ -176,21 +191,28 @@ export function resumeMany(
     return flag;
   };
   const cmuxBin = opts.cmuxBin ?? process.env.CMUX_BIN ?? "cmux";
-  /** Pin a resumed workspace when its role asks for it. `justSpawned` picks the liveness source:
-   * an `already-open` session was in our snapshot at the top of the pass; a `resumed` session was
-   * JUST spawned and isn't in that snapshot — take a fresh liveness read for it. Falling back to
-   * the stale snapshot lost 4 of 5 core pins on a cold resume. */
-  const pinIfRequested = (sessionId: string, role: string | null, justSpawned: boolean): void => {
-    if (opts.dryRun || !shouldPin(role)) return;
-    const loc = justSpawned ? workspaceForSession(sessionId) : workspaceForSessionFrom(bridge, sessionId);
-    if (!loc) return; // no live workspace to pin (yet) — best-effort; a next resume-cluster catches it
+  /** Pin a workspace when its role asks for it. For a JUST-spawned session, cmux hasn't yet bound
+   * surface→sessionId (that happens when the child claude fires its SessionStart hook), so a
+   * by-session lookup would miss. Callers pass the workspaceRef returned by resumeSessionEntry
+   * for the resumed case (mirrors the eager-paint pattern in executeResumePlan). For already-open
+   * sessions, we look up the ref from the bridge snapshot we already have. */
+  const pinByRef = (ref: string | null): void => {
+    if (opts.dryRun || !ref) return;
     try {
-      execFileSync(cmuxBin, ["workspace-action", "--workspace", loc.workspaceRef, "--action", "pin"], {
+      execFileSync(cmuxBin, ["workspace-action", "--workspace", ref, "--action", "pin"], {
         timeout: 4000, stdio: "ignore",
       });
     } catch {
       /* best-effort — a wedged cmux never fails the pass */
     }
+  };
+  const pinAlreadyOpen = (sessionId: string, role: string | null): void => {
+    if (opts.dryRun) return;
+    pinByRef(planPin(role, workspaceForSessionFrom(bridge, sessionId)?.workspaceRef ?? null, shouldPin));
+  };
+  const pinResumed = (ref: string | null, role: string | null): void => {
+    if (opts.dryRun) return;
+    pinByRef(planPin(role, ref, shouldPin));
   };
   for (const p of planned) {
     if (p.disposition === "retired") {
@@ -211,8 +233,8 @@ export function resumeMany(
     });
     summary.perSession.push({ sessionId: p.sessionId, result: res.status, ...rowFields(p.row) });
     switch (res.status) {
-      case "resumed":      summary.resumed++;     pinIfRequested(p.sessionId, p.row?.role ?? null, true); break;
-      case "already-open": summary.alreadyOpen++; pinIfRequested(p.sessionId, p.row?.role ?? null, false); break;
+      case "resumed":      summary.resumed++;     pinResumed(res.workspaceRef, p.row?.role ?? null); break;
+      case "already-open": summary.alreadyOpen++; pinAlreadyOpen(p.sessionId, p.row?.role ?? null); break;
       case "not-indexed":  summary.notIndexed++;  break;
       case "spawn-failed": summary.failed++;      break;
       // the shared-bridge gate above already aborts on this, but keep the pass fail-closed if a

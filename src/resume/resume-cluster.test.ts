@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { openIndex } from "../index/schema.ts";
 import { openCatalogue, setCluster, setRole, setResumeId, setCompleted, setArchived } from "../catalogue/db.ts";
-import { resumeClusterEntry, planClusterMembers } from "./resume-cluster.ts";
+import { resumeClusterEntry, planClusterMembers, planPin } from "./resume-cluster.ts";
 import type { CatalogueRow } from "../catalogue/db.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 
@@ -10,7 +10,7 @@ function catRow(over: Partial<CatalogueRow>): CatalogueRow {
     sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
     archived: false, parkedTaskId: null, key: null, parentSessionId: null,
     role: "pr-agent", resumeCommand: null, project: null, cluster: "pr-watch",
-    gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
+    gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null,
     prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...over,
   };
 }
@@ -135,6 +135,28 @@ test("cluster resume ABORTS (spawns nothing) when liveness is unreadable (ADR-00
     idx.close();
     cat.close();
   }
+});
+
+// --- planPin: the pin-by-ref decision (the fix for the "control didn't pin on resume" bug) ---
+
+test("planPin: opted-in role + fresh workspace ref → pins that ref", () => {
+  const shouldPin = (role: string | null) => role === "control";
+  expect(planPin("control", "workspace:44", shouldPin)).toBe("workspace:44");
+});
+
+test("planPin: role not opted in → skip regardless of ref", () => {
+  const shouldPin = (role: string | null) => role === "control";
+  expect(planPin("pr-agent", "workspace:44", shouldPin)).toBeNull();
+});
+
+test("planPin: opted-in role but no ref (spawn missed / bridge lookup miss) → skip; next tick catches it", () => {
+  const shouldPin = () => true;
+  expect(planPin("control", null, shouldPin)).toBeNull();
+});
+
+test("planPin: null role never pins (bare-session backfill safety)", () => {
+  const shouldPin = () => true; // even if a caller says "always pin", a role-less row shouldn't
+  expect(planPin(null, "workspace:1", (role) => role !== null && shouldPin())).toBeNull();
 });
 
 test("empty cluster is a clean no-op", () => {

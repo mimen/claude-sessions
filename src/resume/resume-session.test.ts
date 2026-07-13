@@ -72,6 +72,32 @@ test("liveness keys on resumeId (the id claude --resume uses), not the filename 
   expect(plan.action).toBe("skip");
 });
 
+test("resumed status carries workspaceRef so callers can act on the workspace pre-hook (pin/paint)", () => {
+  // Contract test: `pinIfRequested` for a JUST-spawned session used to look up the workspace by
+  // sessionId, which misses because cmux hasn't bound surface→session yet (the child claude's
+  // SessionStart hook hasn't fired). The result now carries the workspaceRef so the caller pins
+  // by ref directly, mirroring the eager-paint pattern in executeResumePlan.
+  const idx = openIndex(":memory:");
+  const cat = openCatalogue(":memory:");
+  const NOW = "2026-07-11T00:00:00Z";
+  try {
+    idx.query(
+      `INSERT INTO sessions (session_id, host, path, cwd, project_root, project_name,
+         fallback_label, first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id)
+       VALUES ('s2', 'h', '/store/s2.jsonl', '/tmp', '/tmp', 'p', 's2', $now, $now, 1, 0, 0, 0, 's2')`,
+    ).run({ $now: NOW });
+    setResumeId(cat, "s2", "s2", NOW);
+    const res = resumeSessionEntry(idx, cat, "s2", { dryRun: true, bridge: stubBridge([]) });
+    expect(res.status).toBe("resumed");
+    if (res.status !== "resumed") throw new Error("unreachable");
+    // dry-run doesn't spawn → no ref, but the field is present in the union
+    expect(res.workspaceRef).toBeNull();
+  } finally {
+    idx.close();
+    cat.close();
+  }
+});
+
 test("resume FAILS CLOSED when liveness is unreadable — never spawns (ADR-0054)", () => {
   const idx = openIndex(":memory:");
   const cat = openCatalogue(":memory:");
