@@ -194,6 +194,32 @@ export function status(sessionArg: string | undefined, value: string | undefined
 }
 
 /**
+ * `ccs name [<id>|.] "<short name>" | --off` — set a session's short DISPLAY name (`meta.shortname`),
+ * the tab title's label after the "#<PR> " prefix. Kept separate from `custom_title` because the
+ * cluster's catalogue_sync overwrites custom_title with the full PR title each tick; the shortname
+ * is the worker's own stable label and must survive that. Clamped to 25ch so the tab stays readable.
+ */
+export function name(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
+  const off = flags.includes("--off");
+  if (!off && (!value || !value.trim())) {
+    console.error('usage: ccs name [<session-id>|.] "<short name (<=25ch)>" | --off');
+    return 1;
+  }
+  const short = off ? null : value!.trim().replace(/\s+/g, " ").slice(0, 25);
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH());
+  try {
+    setMeta(db, id, "shortname", short, now());
+    console.log(off ? `cleared name on ${id.slice(0, 8)}…` : `name "${short}" → ${id.slice(0, 8)}…`);
+  } finally {
+    db.close();
+  }
+  return 0;
+}
+
+/**
  * `ccs activity [<id>|.] needs-you | --off` — the worker self-reports being STUCK on an ambiguous
  * fork (needs operator input). `--off` clears back to DORMANT (the bare stage — awaiting review /
  * merge / actively building). There is no "working" activity: a stage's resting state IS the bare

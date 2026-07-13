@@ -140,6 +140,21 @@ export function pushRenderOps(
   // never lingers after a worker leaves its grouping.
   pushPill(cmuxBin, ref, ops.epicPill, EPIC_PILL_KEY);
 
+  // Suppress cmux's own `claude_code` agent-lifecycle pill on a worker's turn-end paint. The cmux
+  // Claude wrapper sets it (Running / Needs input / Idle) on every hook boundary; on a sessions
+  // sidebar with tight pill budget (~3 before "Show more" kicks in), the ccs epic + state pills
+  // already convey what we need, and cmux's overlaps + overflows them. Clearing here makes the pill
+  // GO AWAY at end-of-turn (idle state, when you're scanning tabs); it FLICKERS BACK on the next
+  // interaction (SessionStart / prompt-submit / PreToolUse are separate cmux-owned hook chains we
+  // can't reorder). This is best-effort + a no-op if the pill isn't set. Workers only (not loops).
+  if (row.kind === "session") {
+    try {
+      execFileSync(cmuxBin, ["clear-status", "claude_code", "--workspace", ref], { timeout: 4000, stdio: "ignore" });
+    } catch {
+      // best-effort; a wedged cmux never throws up the stack
+    }
+  }
+
   return true;
 }
 

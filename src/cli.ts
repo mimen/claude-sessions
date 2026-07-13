@@ -11,7 +11,7 @@ import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf,
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, activity, stage, metaSet, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, activity, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { backfillTitles } from "./titler/queue.ts";
@@ -52,7 +52,8 @@ Usage:
   ccs parent [<id>|.] <parent-id|.> [--off]   Set/clear the spawning parent session
   ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
   ccs set-cluster [<id>|.] <slug> [--off]   Set/clear the cluster grouping
-  ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab
+  ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab (worker → summary pill)
+  ccs name [<id>|.] "<short name>" [--off]   Set the session's short display name (<=25ch) — the tab title after "#<PR> "
   ccs activity [<id>|.] <value> [--off]   Set the activity (cluster defines the vocabulary; --off = dormant)
   ccs stage [<id>|.] <value> [--off]   Generic stage setter (cluster defines + the tool enforces the vocabulary)
   ccs meta [<id>|.] <key> <value> [--off]   Set a key in the session's generic meta map (ADR-0060/0064)
@@ -130,6 +131,9 @@ export async function main(argv: string[]): Promise<number> {
     case "status":
       // status takes a full freeform LINE, so join all non-flag args (not just the first token).
       return status(args[1], args.slice(2).filter((a) => !a.startsWith("--")).join(" ") || undefined, args.slice(2).filter((a) => a.startsWith("--")));
+    case "name":
+      // name takes a full short LINE (the display name), so join all non-flag args.
+      return name(args[1], args.slice(2).filter((a) => !a.startsWith("--")).join(" ") || undefined, args.slice(2).filter((a) => a.startsWith("--")));
     case "activity":
       return activity(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "stage":

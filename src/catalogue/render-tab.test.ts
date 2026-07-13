@@ -68,11 +68,11 @@ test("renderTab: epic pill is a quiet gray label with no icon", () => {
   expect(ops.epicPill?.icon).toBeUndefined();
 });
 
-test("renderTab: epic pill sorts AFTER the state pill (lower priority)", () => {
+test("renderTab: epic pill LEADS the pill row (highest priority)", () => {
   const r = row({ stage: "building", cluster: "pr-watch" });
   const ops = renderTab(r, "session", { grouping: { label: "Metered Pricing" } });
-  // The colored state pill must lead; the quiet epic label follows.
-  expect(ops.epicPill!.priority!).toBeLessThan(ops.statusPill!.priority!);
+  // The epic sorts first (grouping is the primary scan axis); the state pill follows.
+  expect(ops.epicPill!.priority!).toBeGreaterThan(ops.statusPill!.priority!);
 });
 
 test("renderTab: no grouping → no epic pill (so sync-tabs clears any stale one)", () => {
@@ -88,10 +88,30 @@ test("renderTab: epic pill label has its [tag] prefix stripped", () => {
   expect(ops.epicPill?.label).not.toContain("[FE]");
 });
 
-test("renderTab: worker description falls back to W-number when no live status", () => {
+test("renderTab: a worker with no status_line has a BLANK description (epic pill carries grouping)", () => {
   const r = row({ cluster: "pr-watch", gusWork: "W-7654321" });
   const ops = renderTab(r, "session", {});
-  expect(ops.description).toContain("W-7654321");
+  expect(ops.description).toBeNull(); // no W-number fallback — the epic pill carries the grouping
+});
+
+test("renderTab: a worker's status_line takes the description slot; the epic pill is untouched", () => {
+  const r = row({ cluster: "pr-watch", prNumber: 1, statusLine: "waiting on CI to go green" });
+  const ops = renderTab(r, "session", { grouping: { label: "Metered Pricing" } });
+  expect(ops.description).toBe("waiting on CI to go green"); // status rides the description line
+  expect(ops.epicPill?.label).toBe("Metered Pricing");      // epic pill untouched
+});
+
+test("renderTab: meta.shortname drives the title after the #PR prefix", () => {
+  const r = row({ prNumber: 12137, customTitle: "Add Team API Authorizations cross-reference", meta: { shortname: "addons plan list" } });
+  const ops = renderTab(r, "session");
+  expect(ops.title).toBe("#12137 addons plan list"); // shortname wins over the long PR title
+});
+
+test("renderTab: shortname is clamped to 25ch", () => {
+  const r = row({ prNumber: 1, meta: { shortname: "x".repeat(40) } });
+  const ops = renderTab(r, "session");
+  // "#1 " + 25 chars
+  expect(ops.title).toBe("#1 " + "x".repeat(25));
 });
 
 test("renderTab: loops carry no epic pill", () => {
@@ -182,10 +202,10 @@ test("renderTab: workers carry NO sidebar color (the phase pill owns state)", ()
   expect(renderTab(row({ archived: true }), "session").color).toBeNull();
 });
 
-test("renderTab: worker description drops the redundant cluster name (system)", () => {
+test("renderTab: a worker's description is blank regardless of cluster/gusWork", () => {
   const r = row({ cluster: "pr-watch", gusWork: "W-1", prNumber: 1 });
   const ops = renderTab(r, "session");
-  expect(ops.description).not.toContain("pr-watch"); // cluster is noise; epic/W is the anchor
+  expect(ops.description).toBeNull(); // workers show nothing in the description slot
 });
 
 test("renderTab: loop kind gets distinct color (Purple)", () => {
@@ -198,13 +218,6 @@ test("renderTab: a freeform status line takes the description slot (loop)", () =
   const r = row({ kind: "loop", role: "slack-scout", cluster: "pr-watch", statusLine: "@kenya asked about the token PR; no reply yet" });
   const ops = renderTab(r, "loop");
   expect(ops.description).toBe("@kenya asked about the token PR; no reply yet");
-});
-
-test("renderTab: a freeform status line takes the description; the epic pill is untouched", () => {
-  const r = row({ cluster: "pr-watch", gusWork: "W-1", prNumber: 1, statusLine: "waiting on CI to go green" });
-  const ops = renderTab(r, "session", { grouping: { label: "Metered Pricing" } });
-  expect(ops.description).toBe("waiting on CI to go green"); // live status owns the description line
-  expect(ops.epicPill?.label).toBe("Metered Pricing"); // epic still shows on its own pill — no fight
 });
 
 test("renderTab: empty/blank status line leaves the computed description", () => {
