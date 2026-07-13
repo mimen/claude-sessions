@@ -4,7 +4,7 @@ import { parse as parseToml } from "smol-toml";
 import type { RoleDef, Kind, WorkUnitAnchorType, StageSchema } from "../catalogue/db.ts";
 
 /**
- * File-backed role definitions (ADR-0048/0050): a role is a directory in a cluster package;
+ * File-backed role definitions (ADR-0048/0050/0074): a role is a directory in a cluster package;
  * its definition is READ FROM FILES, not a sqlite table. This is the source of truth.
  *
  * A role dir holds only `role.toml` carrying the non-derivable metadata — `kind` +
@@ -12,8 +12,8 @@ import type { RoleDef, Kind, WorkUnitAnchorType, StageSchema } from "../catalogu
  *   - role name   = the directory name
  *   - cluster     = the parent path (clusters/<cluster>/roles/<role>) or null (standalone)
  *   - home_dir    = the directory itself (computed at load — NEVER a stored absolute path)
- *   - skills[]    = names present under <role>/skills/
- *   - commands[]  = base-names of *.md present under <role>/commands/
+ *   - skills[]    = names present under <role>/.claude/skills/ (ADR-0074), fallback <role>/skills/
+ *   - commands[]  = base-names of *.md under <role>/.claude/commands/ (ADR-0074), fallback <role>/commands/
  *   - hooks[]     = hook-type names present under <role>/.ccs-hooks/ (file-presence, ADR-0043)
  *
  * Pure w.r.t. logic; the only I/O is reading the config tree. No cache — role reads aren't hot
@@ -79,8 +79,15 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
     resumeCommand: toml.resume_command ?? null,
     stageSchema,
     activityValues,
-    skills: dirNames(join(dir, "skills")),
-    commands: commandNames(join(dir, "commands")),
+    // ADR-0074: skills + commands read from PROJECT-LOCAL .claude/ (Claude Code discovers them
+    // from the role's cwd), with a fallback to the legacy top-level locations (so nothing breaks
+    // before the config-side file moves). Hooks remain in .ccs-hooks (never project-local).
+    skills: dirNames(join(dir, ".claude", "skills")).length
+      ? dirNames(join(dir, ".claude", "skills"))
+      : dirNames(join(dir, "skills")),
+    commands: commandNames(join(dir, ".claude", "commands")).length
+      ? commandNames(join(dir, ".claude", "commands"))
+      : commandNames(join(dir, "commands")),
     hooks: hookNames(join(dir, ".ccs-hooks")),
     updatedAt: null,
   };

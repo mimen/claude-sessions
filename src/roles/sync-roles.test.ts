@@ -27,26 +27,23 @@ function writeRole(cfg: string, cluster: string, role: string, opts: { skills?: 
   for (const c of opts.commands ?? []) { mkdirSync(join(d, "commands"), { recursive: true }); writeFileSync(join(d, "commands", `${c}.md`), "x"); }
 }
 
-test("planSyncRoles: desired links for a role's skills + commands (read from files)", () => {
+test("ADR-0074: planSyncRoles creates no links (skills/commands no longer materialized)", () => {
   withConfig((cfg, claude) => {
     writeRole(cfg, "pr-watch", "control", { skills: ["pr-watch-control"], commands: ["pr-watch-control"] });
-    const created = planSyncRoles(claude).create.map((l) => l.linkPath).sort();
-    // Commands materialize with a `.md` extension; skills are directories, no extension.
-    expect(created).toEqual([
-      join(claude, "commands/pr-watch-control.md"),
-      join(claude, "skills/pr-watch-control"),
-    ]);
+    const plan = planSyncRoles(claude);
+    expect(plan.create).toEqual([]); // ADR-0074: project-level discovery, not user-level symlinks
+    expect(plan.collisions).toEqual([]); // nothing desired → no collisions
   });
 });
 
-test("planSyncRoles: a real user file at a desired path is a collision, not clobbered", () => {
+test("ADR-0074: user files in ~/.claude/skills are untouched (no collisions)", () => {
   withConfig((cfg, claude) => {
     writeRole(cfg, "c", "r", { skills: ["mine"] });
     mkdirSync(join(claude, "skills"), { recursive: true });
-    writeFileSync(join(claude, "skills/mine"), "hand-made"); // user's own file at the target
+    writeFileSync(join(claude, "skills/mine"), "hand-made"); // user's own file
     const plan = planSyncRoles(claude);
-    expect(plan.collisions).toEqual([join(claude, "skills/mine")]);
-    expect(plan.create).toEqual([]); // refused, not created
+    expect(plan.collisions).toEqual([]); // ADR-0074: no desired links → nothing to collide
+    expect(plan.create).toEqual([]);
   });
 });
 

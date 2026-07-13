@@ -10,19 +10,15 @@ function role(over: Partial<RoleDef>): RoleDef {
 }
 
 describe("desiredLinksForRoles", () => {
-  test("one link per skill and per command, pointing into the role's home dir", () => {
+  test("ADR-0074: returns empty (skills/commands no longer materialized)", () => {
     const links = desiredLinksForRoles(
       [role({ role: "control", homeDir: "/roles/control", skills: ["pr-watch-control"], commands: ["pr-watch-control"] })],
       "/home/.claude",
     );
-    const paths = links.map((l) => `${l.linkPath} -> ${l.target}`).sort();
-    expect(paths).toEqual([
-      "/home/.claude/commands/pr-watch-control.md -> /roles/control/commands/pr-watch-control.md",
-      "/home/.claude/skills/pr-watch-control -> /roles/control/skills/pr-watch-control",
-    ]);
+    expect(links).toEqual([]); // ADR-0074: project-level discovery, not user-level symlinks
   });
 
-  test("a role with no home dir contributes no links", () => {
+  test("ADR-0074: a role with no home dir also returns empty", () => {
     expect(desiredLinksForRoles([role({ homeDir: null, skills: ["x"] })], "/home/.claude")).toEqual([]);
   });
 });

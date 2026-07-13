@@ -1,11 +1,14 @@
 /**
- * Role materialization — the PURE reconcile planner (ADR-0022/0034).
+ * Role materialization — the PURE reconcile planner (ADR-0022/0034, revised by ADR-0074).
  *
- * `~/.claude` is a projection of the roles registry, reconciled by symlink:
- *  - compute the desired links (one per skill/command, into the role's home dir),
- *  - compare against the ccs-owned manifest (what we created last run) + what's on disk,
- *  - create missing/drifted links, prune manifest links no longer desired, and NEVER touch
- *    anything not in the manifest (the user's own files are invisible to prune).
+ * ADR-0074: per-role skills + commands are NO LONGER materialized into ~/.claude — they're
+ * discovered PROJECT-LEVEL from the role's cwd/.claude/ by Claude Code. Only GLOBAL hooks +
+ * statusline remain user-level (they fire everywhere, self-filter by role, and MUST be in
+ * ~/.claude/settings.json to be seen by all sessions).
+ *
+ * `desiredLinksForRoles` is retained for test compatibility but returns empty — role skills/
+ * commands are no longer symlinked. The reconcile planner (`planReconcile`) is unchanged and
+ * used to prune any EXISTING ccs-managed skill/command symlinks on this sync run (cleanup).
  *
  * This module has no I/O — the caller supplies an `onDisk` probe and applies the plan. That
  * keeps the reconcile logic (the risky part) fully testable.
@@ -34,28 +37,14 @@ export interface ReconcilePlan {
   nextManifest: string[];
 }
 
-/** Desired links for a set of roles: one per skill + per command, into each role's home dir. */
+/**
+ * ADR-0074: per-role skills + commands are NO LONGER materialized into ~/.claude — they're
+ * discovered project-level from the role's cwd/.claude/. This function now returns EMPTY
+ * (retained for test compatibility + to drive the prune of any existing ccs-managed symlinks
+ * from prior runs). Only GLOBAL hooks + statusline remain materialized into ~/.claude.
+ */
 export function desiredLinksForRoles(roles: RoleDef[], claudeDir: string): DesiredLink[] {
-  const links: DesiredLink[] = [];
-  for (const r of roles) {
-    if (!r.homeDir) continue; // no home dir -> nothing to materialize
-    for (const skill of r.skills) {
-      links.push({
-        linkPath: `${claudeDir}/skills/${skill}`,
-        target: `${r.homeDir}/skills/${skill}`,
-      });
-    }
-    for (const cmd of r.commands) {
-      // Claude Code discovers slash-commands as `<name>.md`; the registry stores the bare
-      // name, so we add the extension on both the link and its target.
-      const file = cmd.endsWith(".md") ? cmd : `${cmd}.md`;
-      links.push({
-        linkPath: `${claudeDir}/commands/${file}`,
-        target: `${r.homeDir}/commands/${file}`,
-      });
-    }
-  }
-  return links;
+  return []; // ADR-0074: no per-role skills/commands in ~/.claude — project-level discovery
 }
 
 /**

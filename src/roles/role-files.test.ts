@@ -102,3 +102,34 @@ test("malformed role.toml → fail-open (empty manifest), doesn't throw", () => 
     expect(def.kind).toBeNull();
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("ADR-0074: skills/commands read from .claude/ (project-local), with legacy fallback", () => {
+  const root = pkg((r) => {
+    const d = roleDir(r, "c", "modern");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "role.toml"), 'kind = "session"');
+    // Modern: .claude/skills + .claude/commands
+    mkdirSync(join(d, ".claude", "skills", "modern-skill"), { recursive: true });
+    mkdirSync(join(d, ".claude", "commands"), { recursive: true });
+    writeFileSync(join(d, ".claude", "commands", "modern-cmd.md"), "x");
+    // Legacy (should be ignored when .claude/ exists)
+    mkdirSync(join(d, "skills", "legacy-skill"), { recursive: true });
+    mkdirSync(join(d, "commands"), { recursive: true });
+    writeFileSync(join(d, "commands", "legacy-cmd.md"), "x");
+  });
+  try {
+    const def = readRoleDir(roleDir(root, "c", "modern"), "modern", "c")!;
+    expect(def.skills).toEqual(["modern-skill"]); // .claude/ wins, legacy ignored
+    expect(def.commands).toEqual(["modern-cmd"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("ADR-0074: falls back to legacy skills/commands when .claude/ is absent", () => {
+  const root = pkg((r) => writeRole(r, "c", "legacy", 'kind = "session"',
+    { skills: ["legacy-skill"], commands: ["legacy-cmd"] }));
+  try {
+    const def = readRoleDir(roleDir(root, "c", "legacy"), "legacy", "c")!;
+    expect(def.skills).toEqual(["legacy-skill"]); // fallback
+    expect(def.commands).toEqual(["legacy-cmd"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

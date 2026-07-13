@@ -1,5 +1,10 @@
 /**
- * `ccs sync-roles` — apply the materialization reconcile (ADR-0022/0034).
+ * `ccs sync-roles` — apply the materialization reconcile (ADR-0022/0034, revised by ADR-0074).
+ *
+ * ADR-0074: per-role skills + commands are NO LONGER materialized into ~/.claude (they're
+ * discovered project-level from the role's cwd/.claude/). Only GLOBAL hooks + statusline are
+ * materialized into ~/.claude/settings.json. This sync PRUNES any existing ccs-managed skill/
+ * command symlinks (cleanup of the old model), but creates NONE (desiredLinksForRoles → []).
  *
  * Thin I/O layer over the pure planner in materialize.ts: probe disk, read/write the ccs
  * manifest, create/prune symlinks. All the risky decisions live in the tested planner; this
@@ -121,7 +126,9 @@ export function planSyncRoles(claudeDir = CLAUDE_DIR): ReconcilePlan {
 }
 
 /** Apply the reconcile: create/prune symlinks + rewrite the manifest. Roles come from files
- * (ADR-0050); the GLOBAL hooks + statusline are materialized unconditionally (ADR-0048 model A). */
+ * (ADR-0050); the GLOBAL hooks + statusline are materialized unconditionally (ADR-0048 model A).
+ * ADR-0074: skills/commands are no longer created (desiredLinksForRoles → []), but we prune any
+ * EXISTING ccs-managed skill/command symlinks from the prior model (one-time cleanup). */
 export function syncRoles(opts: { dryRun?: boolean; hooks?: boolean } = {}): SyncResult {
   const plan = planSyncRoles();
   const hookEntries = desiredHooks();
@@ -143,6 +150,8 @@ export function syncRoles(opts: { dryRun?: boolean; hooks?: boolean } = {}): Syn
         /* leave for the next run; never throw mid-reconcile */
       }
     }
+    // Prune manifest entries (will include the legacy skill/command symlinks on this run —
+    // ADR-0074 one-time cleanup, since desiredLinksForRoles now returns empty).
     for (const stale of plan.prune) {
       try {
         rmSync(stale);
