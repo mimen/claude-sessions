@@ -13,6 +13,11 @@ import {
   setResumeId,
   setGusWork,
   setWorkUnitId,
+  setArchived,
+  setMeta,
+  getRow,
+  lifecycleOf,
+  sessionsForWorkUnit,
   stampPrFacts,
   type RoleDef,
 } from "../catalogue/db.ts";
@@ -158,10 +163,36 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
           "new-session",
         );
         setWorkUnitId(db, id, wuId, now);
+        // ADR-0073: a fresh worker becomes THE embodiment of its work-unit; expire prior siblings.
+        // This is the SPAWN-side of the prefer-newest rule (resume-cluster does the resume-side).
+        supersedeWorkUnitSiblings(db, wuId, id, now);
       }
     } catch {
       /* work-unit store unwritable → leave workUnitId null; sensing/backfill can attach it later */
     }
+  }
+}
+
+/**
+ * Expire the prior sessions of a work-unit when a fresh one takes it over (ADR-0073, spawn-side of
+ * prefer-newest). Every non-retired session sharing `workUnitId` (except the new `keepId`) is
+ * ARCHIVED — the "expired, not deleted" state: it drops out of live and is never revived, but stays
+ * for lineage/history. A `meta.superseded_by` pointer records WHY (superseded by the new session,
+ * not hand-archived), so the map/lineage can tell the two apart. Best-effort — never blocks a spawn.
+ */
+function supersedeWorkUnitSiblings(db: Database, workUnitId: string, keepId: string, now: string): void {
+  try {
+    for (const sid of sessionsForWorkUnit(db, workUnitId)) {
+      if (sid === keepId) continue;
+      const row = getRow(db, sid);
+      if (!row) continue;
+      const lc = lifecycleOf(row);
+      if (lc === "completed" || lc === "archived") continue; // already retired — leave it
+      setArchived(db, sid, true, now);
+      setMeta(db, sid, "superseded_by", keepId, now);
+    }
+  } catch {
+    /* best-effort — a supersede failure must never fail the spawn */
   }
 }
 

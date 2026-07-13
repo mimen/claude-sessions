@@ -1,8 +1,58 @@
-import { expect, test } from "bun:test";
-import { openCatalogue, getRow, lifecycleOf, identityKeyOf } from "../catalogue/db.ts";
+import { expect, test, afterEach } from "bun:test";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openCatalogue, getRow, lifecycleOf, identityKeyOf, setCluster, stampPrFacts, setWorkUnitId, getMeta } from "../catalogue/db.ts";
+import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import { parseOpts, writeSessionMetadata } from "./new-session.ts";
 
 const NOW = "2026-07-08T00:00:00.000Z";
+
+const roots: string[] = [];
+afterEach(() => {
+  for (const d of roots.splice(0)) rmSync(d, { recursive: true, force: true });
+  delete process.env.CCS_CONFIG_ROOT; delete process.env.CCS_ROOT;
+});
+/** Temp config+runtime roots with a pr-anchored role, for the work-unit spawn path. */
+function withPrRole(): void {
+  const cfg = mkdtempSync(join(tmpdir(), "ccs-ns-cfg-"));
+  const rt = mkdtempSync(join(tmpdir(), "ccs-ns-rt-"));
+  roots.push(cfg, rt);
+  const dir = join(cfg, "clusters", "pr-watch", "roles", "pr-agent");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "role.toml"), 'work_unit = "pr"\n');
+  process.env.CCS_CONFIG_ROOT = cfg; process.env.CCS_ROOT = rt;
+}
+
+test("supersede-on-spawn: a new worker archives prior sessions of the same work-unit (ADR-0073)", () => {
+  withPrRole();
+  const db = openCatalogue(":memory:");
+  try {
+    // an OLD worker already on PR heroku/dashboard#12080 (linked to the work-unit)
+    const oldId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    setCluster(db, oldId, "pr-watch", NOW);
+    stampPrFacts(db, oldId, { prNumber: 12080, prRepo: "heroku/dashboard", prBranch: "b", prState: "open", prHeadSha: "s" }, NOW);
+    const wu = resolveWorkUnit("pr-watch", { prRepo: "heroku/dashboard", prNumber: 12080 }, NOW);
+    setWorkUnitId(db, oldId, wu, NOW);
+    expect(lifecycleOf(getRow(db, oldId)!)).toBe("idle");
+
+    // spawn a FRESH worker for the same PR
+    const newId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    writeSessionMetadata(db, newId, parseOpts([
+      "--cluster", "pr-watch", "--role", "pr-agent",
+      "--pr-number", "12080", "--pr-repo", "heroku/dashboard",
+    ]), NOW);
+
+    // the old one is now archived (expired), with a pointer to who superseded it
+    expect(lifecycleOf(getRow(db, oldId)!)).toBe("archived");
+    expect(getMeta(getRow(db, oldId)!, "superseded_by")).toBe(newId);
+    // the new one is live/idle + linked to the SAME work-unit id (find-or-create)
+    expect(lifecycleOf(getRow(db, newId)!)).toBe("idle");
+    expect(getRow(db, newId)!.workUnitId).toBe(wu);
+  } finally {
+    db.close();
+  }
+});
 
 test("parseOpts: reads every flag, --role and --skill are synonyms", () => {
   const o = parseOpts([
