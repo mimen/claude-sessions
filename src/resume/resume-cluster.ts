@@ -15,7 +15,7 @@ import type { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
 import { sessionsForCluster, getRow, lifecycleOf, type CatalogueRow } from "../catalogue/db.ts";
 import { liveBridge } from "../cmux/live.ts";
-import { openSessionIdsFrom, workspaceForSessionFrom } from "../cmux/liveness.ts";
+import { openSessionIdsFrom, workspaceForSessionFrom, workspaceForSession } from "../cmux/liveness.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import { resumeSessionEntry, type ResumeSessionResult } from "./resume-session.ts";
 import { workUnitKey } from "../catalogue/spawn-contract.ts";
@@ -176,10 +176,14 @@ export function resumeMany(
     return flag;
   };
   const cmuxBin = opts.cmuxBin ?? process.env.CMUX_BIN ?? "cmux";
-  const pinIfRequested = (sessionId: string, role: string | null): void => {
+  /** Pin a resumed workspace when its role asks for it. `justSpawned` picks the liveness source:
+   * an `already-open` session was in our snapshot at the top of the pass; a `resumed` session was
+   * JUST spawned and isn't in that snapshot — take a fresh liveness read for it. Falling back to
+   * the stale snapshot lost 4 of 5 core pins on a cold resume. */
+  const pinIfRequested = (sessionId: string, role: string | null, justSpawned: boolean): void => {
     if (opts.dryRun || !shouldPin(role)) return;
-    const loc = workspaceForSessionFrom(bridge, sessionId);
-    if (!loc) return; // no live workspace to pin (yet) — best-effort, next sync-tabs will paint
+    const loc = justSpawned ? workspaceForSession(sessionId) : workspaceForSessionFrom(bridge, sessionId);
+    if (!loc) return; // no live workspace to pin (yet) — best-effort; a next resume-cluster catches it
     try {
       execFileSync(cmuxBin, ["workspace-action", "--workspace", loc.workspaceRef, "--action", "pin"], {
         timeout: 4000, stdio: "ignore",
@@ -207,8 +211,8 @@ export function resumeMany(
     });
     summary.perSession.push({ sessionId: p.sessionId, result: res.status, ...rowFields(p.row) });
     switch (res.status) {
-      case "resumed":      summary.resumed++;     pinIfRequested(p.sessionId, p.row?.role ?? null); break;
-      case "already-open": summary.alreadyOpen++; pinIfRequested(p.sessionId, p.row?.role ?? null); break;
+      case "resumed":      summary.resumed++;     pinIfRequested(p.sessionId, p.row?.role ?? null, true); break;
+      case "already-open": summary.alreadyOpen++; pinIfRequested(p.sessionId, p.row?.role ?? null, false); break;
       case "not-indexed":  summary.notIndexed++;  break;
       case "spawn-failed": summary.failed++;      break;
       // the shared-bridge gate above already aborts on this, but keep the pass fail-closed if a
