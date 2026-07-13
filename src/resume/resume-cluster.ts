@@ -30,7 +30,17 @@ export interface ClusterResumeSummary {
   failed: number;
   /** true iff the pass ABORTED because cmux liveness was unreadable — nothing was spawned (ADR-0054) */
   abortedUnreadable: boolean;
-  perSession: { sessionId: string; result: MemberDisposition }[];
+  /** Per-session outcome + enough row fields to render a useful preview (role/PR/title). The row
+   * fields are optional so an unindexed / row-less session still slots in. */
+  perSession: {
+    sessionId: string;
+    result: MemberDisposition;
+    role: string | null;
+    prNumber: number | null;
+    prRepo: string | null;
+    title: string | null;
+    shortname: string | null;
+  }[];
 }
 
 /** The work-unit a session belongs to (pr → gus → sid). The pr/gus tiers use the canonical
@@ -144,15 +154,22 @@ export function resumeMany(
 
   const summary = emptySummary();
 
+  const rowFields = (row: CatalogueRow | null) => ({
+    role: row?.role ?? null,
+    prNumber: row?.prNumber ?? null,
+    prRepo: row?.prRepo ?? null,
+    title: row?.customTitle ?? null,
+    shortname: typeof row?.meta?.shortname === "string" ? row.meta.shortname : null,
+  });
   for (const p of planned) {
     if (p.disposition === "retired") {
       summary.retired++;
-      summary.perSession.push({ sessionId: p.sessionId, result: "retired" });
+      summary.perSession.push({ sessionId: p.sessionId, result: "retired", ...rowFields(p.row) });
       continue;
     }
     if (p.disposition === "superseded") {
       summary.superseded++;
-      summary.perSession.push({ sessionId: p.sessionId, result: "superseded" });
+      summary.perSession.push({ sessionId: p.sessionId, result: "superseded", ...rowFields(p.row) });
       continue;
     }
     const res = resumeSessionEntry(indexDb, catalogueDb, p.sessionId, {
@@ -161,7 +178,7 @@ export function resumeMany(
       bridge,
       focus: opts.focus,
     });
-    summary.perSession.push({ sessionId: p.sessionId, result: res.status });
+    summary.perSession.push({ sessionId: p.sessionId, result: res.status, ...rowFields(p.row) });
     switch (res.status) {
       case "resumed": summary.resumed++; break;
       case "already-open": summary.alreadyOpen++; break;

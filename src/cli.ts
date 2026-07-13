@@ -9,7 +9,7 @@ import { reindexStore, listByRecency, titleOf, costOf, subagentCosts } from "./i
 import { formatCost } from "./cost.ts";
 import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster } from "./catalogue/db.ts";
 import { openSessionIds } from "./cmux/liveness.ts";
-import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson } from "./catalogue/cluster-map.ts";
+import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson, isCoreRole } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, activity, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
@@ -20,7 +20,7 @@ import { buildEngine, resolveEngine } from "./inference/engine.ts";
 import { handoffInline } from "./resume/inline.ts";
 import type { ResumeCommand } from "./resume/command.ts";
 import { resumeSessionEntry } from "./resume/resume-session.ts";
-import { resumeClusterEntry, resumeMany } from "./resume/resume-cluster.ts";
+import { resumeClusterEntry, resumeMany, type ClusterResumeSummary } from "./resume/resume-cluster.ts";
 import { checkClusterGate } from "./cluster/manifest.ts";
 import { resolveSelector, type SelectorKind } from "./resume/selector.ts";
 import { syncRoles } from "./roles/sync-roles.ts";
@@ -511,6 +511,38 @@ function syncRolesCmd(dryRun: boolean, hookFlag: boolean): number {
   return 0;
 }
 
+/**
+ * Print a per-session preview of a resume-cluster pass, split into CORE (singletons — control /
+ * concierge / …) and FLEET (workers) sections. Only the sessions being ACTED ON are listed
+ * (would-resume + superseded); already-open and retired are omitted since they aren't changing.
+ * The label prefers the AI shortname (meta.shortname) with the PR number, then the stored PR
+ * title, then the role, then the sid — matching what a worker's tab renders.
+ */
+function printResumeClusterPreview(verb: string, s: ClusterResumeSummary): void {
+  const acting = s.perSession.filter((m) => m.result === "resumed" || m.result === "superseded");
+  if (acting.length === 0) return;
+  const core: typeof acting = [], fleet: typeof acting = [];
+  for (const m of acting) (isCoreRole(m.role) ? core : fleet).push(m);
+  const label = (m: typeof acting[0]): string => {
+    const clean = m.shortname?.trim() || m.title?.replace(/^(#\d+\s+)+/, "").trim() || null;
+    if (m.prNumber && clean) return `#${m.prNumber} ${clean}`;
+    if (m.prNumber) return `#${m.prNumber}`;
+    if (clean) return clean;
+    if (m.role) return m.role;
+    return m.sessionId.slice(0, 8);
+  };
+  const mark = (m: typeof acting[0]) => m.result === "superseded" ? " (superseded)" : "";
+  const section = (title: string, items: typeof acting) => {
+    if (items.length === 0) return;
+    console.log(`\n  [${title}] (${items.length})`);
+    for (const m of items) {
+      console.log(`    ${verb === "resumed" ? "✓" : "→"} ${m.sessionId.slice(0, 8)} · ${label(m)}${mark(m)}`);
+    }
+  };
+  section("core", core);
+  section("fleet", fleet);
+}
+
 /** `ccs resume-cluster <cluster>` — a thin loop over resume-session (ADR-0015). */
 function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
   if (!cluster) {
@@ -538,8 +570,14 @@ function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
       return 1;
     }
     const verb = dryRun ? "would resume" : "resumed";
+    // A dry-run without a per-session preview is a black box — "would resume 18" doesn't say WHICH
+    // 18. Split by role topology (core singletons vs fleet workers, ADR-0069) and print each session
+    // being acted on with the label you'd recognize (PR + shortname / title / role / sid). Retired
+    // and already-open members are noise for the preview — they aren't being acted on — so we skip
+    // them; superseded stays visible so you see when a duplicate work-unit gets deduped.
+    printResumeClusterPreview(verb, s);
     console.log(
-      `ccs: cluster "${cluster}" — ${verb} ${s.resumed}, ${s.alreadyOpen} already open, ` +
+      `\nccs: cluster "${cluster}" — ${verb} ${s.resumed}, ${s.alreadyOpen} already open, ` +
         `${s.superseded} superseded, ${s.retired} retired, ${s.notIndexed} not indexed` +
         `${s.failed ? `, ${s.failed} failed` : ""}`,
     );
