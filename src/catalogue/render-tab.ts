@@ -123,18 +123,13 @@ function buildSessionTitle(row: CatalogueRow): string {
 }
 
 function buildSessionDescription(row: CatalogueRow, ctx: RenderContext): string | null {
-  const parts: string[] = [];
-  // The cluster name (system) is dropped: it's the same for every pr-watch worker, so it's noise.
-  // The grouping (epic) is the useful worker context — a worker belongs to an epic and that's what
-  // you scan by. Prefer the cluster-supplied short label, stripped of any `[tag]` prefix; fall back
-  // to the W-number so there's always a grouping anchor.
+  // The worker's second line is JUST the epic — a worker belongs to an epic and that's what you
+  // scan the tab list by. Everything else is noise: the cluster is the same for every pr-watch
+  // worker, the identity key + project duplicate what the title already conveys. Prefer the
+  // cluster-supplied short label (stripped of any `[tag]` prefix); fall back to the W-number so
+  // there's always a grouping anchor.
   const epicLabel = ctx.grouping?.label?.replace(/^\[[^\]]+\]\s*/, "") || null;
-  if (epicLabel) parts.push(epicLabel);
-  else if (row.gusWork) parts.push(row.gusWork);
-  const key = identityKeyOf(row);
-  if (key) parts.push(key);
-  if (row.project) parts.push(row.project);
-  return parts.length > 0 ? parts.join(" · ") : null;
+  return epicLabel || row.gusWork || null;
 }
 
 function buildLoopDescription(row: CatalogueRow): string | null {

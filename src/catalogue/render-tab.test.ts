@@ -46,22 +46,24 @@ test("renderTab: session without PR falls back to custom title", () => {
   expect(ops.title).toBe("Manual refactor");
 });
 
-test("renderTab: session with key in description", () => {
+test("renderTab: worker description is epic-only — the identity key is NOT shown", () => {
+  // The second line is JUST the epic; the key/project are noise the title already conveys.
   const r = row({
     key: "Q1-planning",
     cluster: "pr-watch",
-    gusWork: null,
+    gusWork: "W-1234567",
     groupingId: null, statusLine: null, meta: {}, stage: null, activity: null,
   });
-  const ops = renderTab(r, "session");
-  expect(ops.description).not.toContain("pr-watch"); // cluster name dropped as noise
-  expect(ops.description).toContain("Q1-planning"); // the identity key still shows
+  const ops = renderTab(r, "session", { grouping: { label: "Metered Pricing" } });
+  expect(ops.description).toBe("Metered Pricing"); // epic only — no key, no cluster
+  expect(ops.description).not.toContain("Q1-planning");
 });
 
-test("renderTab: session with project in description", () => {
-  const r = row({ project: "ccs" });
-  const ops = renderTab(r, "session");
-  expect(ops.description).toContain("ccs");
+test("renderTab: worker description does NOT include the project", () => {
+  const r = row({ project: "ccs", gusWork: "W-1234567" });
+  const ops = renderTab(r, "session", { grouping: { label: "Metered Pricing" } });
+  expect(ops.description).toBe("Metered Pricing");
+  expect(ops.description).not.toContain("ccs");
 });
 
 test("renderTab: worker description shows the grouping (epic) label", () => {
