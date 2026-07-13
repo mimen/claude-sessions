@@ -723,6 +723,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       kind={catMap.get(selectedRow.sessionId)?.kind}
       system={catMap.get(selectedRow.sessionId)?.system ?? null}
       gusWork={catMap.get(selectedRow.sessionId)?.gusWork ?? null}
+      gusWorkSfId={(catMap.get(selectedRow.sessionId)?.meta?.gus_work_sf_id as string | undefined) ?? null}
       prNumber={catMap.get(selectedRow.sessionId)?.prNumber ?? null}
       prRepo={catMap.get(selectedRow.sessionId)?.prRepo ?? null}
       prState={catMap.get(selectedRow.sessionId)?.prState ?? null}

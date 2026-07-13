@@ -68,6 +68,16 @@ function workLabel(row: CatalogueRow): string {
   return clean ? `${base} ${clean}` : base;
 }
 
+/** GUS deep link for a W-number. With the 18-char Salesforce record id (stamped on the row's
+ * meta by the cluster's sensor, e.g. pr-watch's catalogue_sync), we produce a proper record URL;
+ * without it, fall back to the object-search URL that resolves the W- by name. The search URL is
+ * uglier for the user but still lands them on the right work-item after one click. */
+export function gusWorkUrl(w: string, sfId: string | null | undefined): string {
+  return sfId
+    ? `https://gus.lightning.force.com/lightning/r/ADM_Work__c/${sfId}/view`
+    : `https://gus.lightning.force.com/lightning/o/ADM_Work__c/list?filterName=Recent&search=${encodeURIComponent(w)}`;
+}
+
 /**
  * Render the statusline for a session row. Returns a single line (no trailing newline).
  * Order: stage dot · linked PR/work · grouping label · W-number.
@@ -84,8 +94,10 @@ export function renderStatusline(row: CatalogueRow, ctx: StatuslineCtx): string 
   const gLabel = ctx.grouping?.label?.replace(/^\[[^\]]+\]\s*/, "") || null;
   const groupingBit = ctx.grouping?.url && gLabel ? osc8(ctx.grouping.url, gLabel) : gLabel;
 
-  // W-number only when it isn't already the primary label (avoid "W-123 … · W-123").
-  const wBit = row.gusWork && row.prNumber ? row.gusWork : null;
+  // W-number only when it isn't already the primary label (avoid "W-123 … · W-123"). Clickable
+  // via OSC-8 when we know the sfId (`meta.gus_work_sf_id`), else the object-search fallback URL.
+  const sfId = typeof row.meta?.gus_work_sf_id === "string" ? row.meta.gus_work_sf_id : null;
+  const wBit = row.gusWork && row.prNumber ? osc8(gusWorkUrl(row.gusWork, sfId), row.gusWork) : null;
 
   const bits = [dot, linked, groupingBit, wBit].filter((b): b is string => !!b);
   return bits.join(" · ");

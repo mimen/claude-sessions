@@ -21,6 +21,9 @@ interface PreviewProps {
   /** Cluster membership + PR/work-item identity (catalogue). */
   system?: string | null;
   gusWork?: string | null;
+  /** The work-item's Salesforce record id (`meta.gus_work_sf_id`), stamped by the cluster's
+   * sensor. Enables a proper `/ADM_Work__c/<sfId>/view` deep link; absent → search fallback. */
+  gusWorkSfId?: string | null;
   prNumber?: number | null;
   prRepo?: string | null;
   prState?: string | null;
@@ -47,10 +50,13 @@ function osc8(url: string, text: string): string {
   return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
 }
 
-/** GUS deep link for a W-number. Without the 18-char sfId we can't build the record
- * URL, so link to the object search that resolves the W-number by name. */
-function gusUrl(w: string): string {
-  return `https://gus.lightning.force.com/lightning/o/ADM_Work__c/list?filterName=Recent&search=${encodeURIComponent(w)}`;
+/** GUS deep link for a W-number. With the 18-char sfId (stamped on the row's meta by the
+ * cluster's sensor, e.g. pr-watch's catalogue_sync) we produce a proper record URL; without it,
+ * fall back to the object search that resolves the W-number by name. */
+function gusUrl(w: string, sfId: string | null | undefined): string {
+  return sfId
+    ? `https://gus.lightning.force.com/lightning/r/ADM_Work__c/${sfId}/view`
+    : `https://gus.lightning.force.com/lightning/o/ADM_Work__c/list?filterName=Recent&search=${encodeURIComponent(w)}`;
 }
 
 function Field({ label, value, color }: { label: string; value: string; color?: string }): React.ReactElement {
@@ -83,6 +89,7 @@ export function Preview({
   kind,
   system,
   gusWork,
+  gusWorkSfId,
   prNumber,
   prRepo,
   prState,
@@ -133,7 +140,7 @@ export function Preview({
         {gusWork ? (
           <Field
             label="work"
-            value={osc8(gusUrl(gusWork), gusWork)}
+            value={osc8(gusUrl(gusWork, gusWorkSfId), gusWork)}
             color={theme.header}
           />
         ) : null}
