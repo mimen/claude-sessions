@@ -10,10 +10,14 @@
  *
  * Reads the Stop payload (session_id) from stdin. ALWAYS exits 0 (fail-open, ADR-0035).
  */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { openCatalogue, getRow, touch } from "../catalogue/db.ts";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import { resolveConfig } from "./resolve-config.ts";
 import { liveResolveCtx, composeStopContext } from "./compose-claude-md.ts";
+import { identityDir, ccsRuntimeRoot } from "../inbox/identity-path.ts";
+import { responsibilityOf } from "./start-actions.ts";
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -56,7 +60,7 @@ export async function workerStopCommand(): Promise<number> {
     ensureDataDir();
     const db = openCatalogue(CATALOGUE_PATH());
     let registered = false;
-    let stopContext: string | null = null;
+    let pointerContext: string | null = null;
     try {
       // Only self-report for a registered session (has a role); a bare/foreign session is a no-op.
       const row = getRow(db, id);
@@ -66,7 +70,27 @@ export async function workerStopCommand(): Promise<number> {
         // resolved through the normal layering (file-presence keyed), NOT a hardcoded pr-agent
         // rubric. Any role/cluster that authors one gets it; roles that don't, don't. Skip it on a
         // continuation-Stop (already nudged this stop) so it can never re-trigger itself.
-        if (!isContinuationStop) stopContext = composeStopContext(row);
+        if (!isContinuationStop) {
+          const composed = composeStopContext(row);
+          if (composed) {
+            // Materialize the resolved fragment to the identity's runtime dir and inject only a
+            // pointer + silent-mode instruction. This keeps the visible tool-result block to one
+            // line instead of the full merged fragment, and tells the worker to execute any state
+            // updates via tool calls without emitting user-facing text on the continuation turn.
+            try {
+              const dir = identityDir(ccsRuntimeRoot(), responsibilityOf(row));
+              mkdirSync(dir, { recursive: true });
+              const path = join(dir, "stop-context.md");
+              writeFileSync(path, composed, "utf8");
+              pointerContext = `Silent turn-end self-check: read @${path} and run any \`ccs\` updates it warrants for state that changed this turn. Tool calls only — produce NO user-facing text on this continuation. If nothing changed, emit no tool calls and end the turn.`;
+            } catch {
+              // Materialization failed — fall back to injecting the composed text directly so the
+              // self-check still fires (the reason it exists is more important than the preview
+              // trim). One-off; not expected in practice.
+              pointerContext = composed;
+            }
+          }
+        }
         const fields = metaUpdateFields(db, row);
         // `updated_at` is the one field a stop hook can refresh on its own (the heartbeat).
         if (fields.includes("updated_at")) touch(db, id, now());
@@ -74,12 +98,12 @@ export async function workerStopCommand(): Promise<number> {
     } finally {
       db.close();
     }
-    // Inject the resolved stop-context at turn-end. This forces ONE continuation (the worker
-    // re-evaluates + self-sets its activity), bounded by the stop_hook_active guard above so the
-    // follow-up Stop injects nothing and the turn ends.
-    if (stopContext) {
+    // Inject the pointer (or, on materialization failure, the raw fragment) at turn-end. This
+    // forces ONE continuation (the worker re-evaluates + self-sets its activity), bounded by the
+    // stop_hook_active guard above so the follow-up Stop injects nothing and the turn ends.
+    if (pointerContext) {
       process.stdout.write(JSON.stringify({
-        hookSpecificOutput: { hookEventName: "Stop", additionalContext: stopContext },
+        hookSpecificOutput: { hookEventName: "Stop", additionalContext: pointerContext },
       }) + "\n");
     }
     // Repaint the tab on turn-end so it reflects whatever this turn changed (PR merged, parked,
