@@ -78,7 +78,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 30;
+const CATALOGUE_VERSION = 31;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -433,6 +433,43 @@ function migrate(db: Database): void {
     // "whose turn is it?"; no separate axis needed. Guard on presence + fail-open.
     if (hasColumn(db, "catalogue", "activity")) db.exec("ALTER TABLE catalogue DROP COLUMN activity;");
   }
+  if (v < 31) {
+    // ADR-D1 (2026-07-14): ccs is the single source of truth for the identity KEY. Historically
+    // `key` was populated only by explicit setKey() calls (new-session, key command), so many
+    // rows had a null key even though their pr_repo+pr_number/gus_work/role columns implied one.
+    // Cluster engines (compose_board.py) re-derived the key locally and drifted. Backfill:
+    // compute deriveKey() for every row that lacks a key, populate. From v31 forward every
+    // identity-affecting mutator calls refreshDerivedKey() so the column stays authoritative.
+    const rows = db.query(
+      `SELECT session_id, key, role, cluster, pr_repo, pr_number, gus_work, work_unit_id
+       FROM catalogue`,
+    ).all() as Array<{
+      session_id: string;
+      key: string | null;
+      role: string | null;
+      cluster: string | null;
+      pr_repo: string | null;
+      pr_number: number | null;
+      gus_work: string | null;
+      work_unit_id: string | null;
+    }>;
+    const nowIso = new Date().toISOString();
+    const upd = db.query(
+      "UPDATE catalogue SET key = $k, updated_at = $now WHERE session_id = $id",
+    );
+    for (const r of rows) {
+      const derived = deriveKey({
+        workUnitId: r.work_unit_id,
+        prRepo: r.pr_repo,
+        prNumber: r.pr_number,
+        gusWork: r.gus_work,
+        role: r.role,
+      });
+      if (derived && r.key !== derived) {
+        upd.run({ $k: derived, $now: nowIso, $id: r.session_id });
+      }
+    }
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -540,11 +577,57 @@ export function lifecycleOf(row: CatalogueRow | null): Lifecycle {
 }
 
 /**
- * Pure: the canonical identity key for system-level grouping.
+ * Pure: the canonical identity key for system-level grouping. ADR-D1 (2026-07-14): ccs is the
+ * SINGLE SOURCE OF TRUTH — the `key` column is auto-derived on every mutation that touches an
+ * identity-relevant field (see `deriveKey`), so `row.key` is authoritative and no consumer (TS
+ * or Python engine) ever re-derives. Historical bug: three parallel implementations (lineage.ts,
+ * db.ts, compose_board.py) drifted; centralizing derivation kills the drift class at the root.
  */
 export function identityKeyOf(row: CatalogueRow | null): string | null {
   if (!row) return null;
   return row.key;
+}
+
+/**
+ * Pure: derive the identity key from a row's identity-relevant columns. This is the ONE
+ * implementation — TS callers use this; the engine reads the stored `key` column. Priority
+ * mirrors `lineage.identityKey`: work-unit id → PR key → GUS key → role fallback → null.
+ * Exported for tests + the identity-resolve CLI.
+ */
+export function deriveKey(row: {
+  workUnitId?: string | null;
+  prRepo?: string | null;
+  prNumber?: number | null;
+  gusWork?: string | null;
+  role?: string | null;
+}): string | null {
+  if (row.workUnitId) return `wu:${row.workUnitId}`;
+  if (row.prRepo && row.prNumber != null) return `pr:${row.prRepo}#${row.prNumber}`;
+  if (row.gusWork) return `gus:${row.gusWork}`;
+  if (row.role) return `role:${row.role}`;
+  return null;
+}
+
+/**
+ * Re-derive and persist the `key` column from the row's current identity-relevant columns.
+ * Called after every mutation that touches role / cluster / prRepo / prNumber / gusWork /
+ * workUnitId. If the derived key differs from the stored one, updates in place; otherwise
+ * a no-op. Never blanks a key set by an explicit `setKey` (freeform anchor) — those are
+ * preserved when nothing else derives.
+ */
+function refreshDerivedKey(db: Database, sessionId: string, now: string): void {
+  const row = getRow(db, sessionId);
+  if (!row) return;
+  const derived = deriveKey(row);
+  // If derivation yields null (no identity-relevant fields set yet), leave whatever's there —
+  // an explicit setKey caller may have populated it (freeform anchor per ADR-0069).
+  if (derived === null) return;
+  if (row.key === derived) return;
+  db.query("UPDATE catalogue SET key = $k, updated_at = $now WHERE session_id = $id").run({
+    $k: derived,
+    $now: now,
+    $id: sessionId,
+  });
 }
 
 // ---- mutations (all stamp updated_at; all upsert the row) ----
@@ -591,6 +674,7 @@ export function setParent(db: Database, sessionId: string, parentId: string | nu
 /** Set the session's ROLE (ADR-0015) — the canonical identity axis. */
 export function setRole(db: Database, sessionId: string, role: string | null, now: string): void {
   set(db, sessionId, "role", role, now);
+  refreshDerivedKey(db, sessionId, now);
 }
 export function setProject(db: Database, sessionId: string, project: string | null, now: string): void {
   set(db, sessionId, "project", project, now);
@@ -600,10 +684,12 @@ export function setCluster(db: Database, sessionId: string, cluster: string | nu
 }
 export function setGusWork(db: Database, sessionId: string, gusWork: string | null, now: string): void {
   set(db, sessionId, "gus_work", gusWork, now);
+  refreshDerivedKey(db, sessionId, now);
 }
 /** Set the session's work-unit FK (ADR-0057) — the work-unit entity it belongs to. */
 export function setWorkUnitId(db: Database, sessionId: string, workUnitId: string | null, now: string): void {
   set(db, sessionId, "work_unit_id", workUnitId, now);
+  refreshDerivedKey(db, sessionId, now);
 }
 /** The PR stage (building|milad-review|in-review|approved|merged). Engine-latched; forward-only. */
 export function setStage(db: Database, sessionId: string, stage: string | null, now: string): void {
@@ -796,6 +882,7 @@ export function stampPrFacts(
       $id: sessionId,
     });
   }
+  refreshDerivedKey(db, sessionId, now);
 }
 
 /** Reverse lookup: which sessions are assigned to this key. */

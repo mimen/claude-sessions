@@ -1,7 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { CatalogueRow } from "./db.ts";
-import { getAll } from "./db.ts";
-import { rowWorkUnit } from "./spawn-contract.ts";
+import { getAll, deriveKey } from "./db.ts";
 
 /**
  * Identity lineage (ADR-0038): a durable identity (responsibility) may have had SEVERAL session
@@ -15,17 +14,12 @@ import { rowWorkUnit } from "./spawn-contract.ts";
  * responsibility is durable.
  */
 
-/** The responsibility key a row belongs to (work-unit for fleet, role for core). Null = unkeyed.
- * ADR-0057: prefer the STABLE work-unit id (the entity's identity) when the row carries one; fall
- * back to the derived pr:/gus: string for older rows not yet backfilled, then to the role for a
- * core singleton. Keying on the id means two sessions of the same work-unit group even if their
- * derived strings drifted, and a work-unit whose PR was attached later still matches its lineage. */
+/** The responsibility key a row belongs to. ADR-D1 (2026-07-14): ccs is the single source of
+ * truth. On stored rows the `key` column is authoritative (auto-derived on every mutation via
+ * `refreshDerivedKey`); this function falls back to computing from the row's identity-relevant
+ * columns for callers that pass a pure/synthetic row without persistence. */
 export function identityKey(row: CatalogueRow): string | null {
-  if (row.workUnitId) return `wu:${row.workUnitId}`;
-  const unit = rowWorkUnit(row); // pr:repo#num | gus:W-… | null (legacy, pre-backfill)
-  if (unit) return unit;
-  if (row.role) return `role:${row.role}`;
-  return null;
+  return row.key ?? deriveKey(row);
 }
 
 export interface Embodiment {

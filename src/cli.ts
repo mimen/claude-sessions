@@ -35,6 +35,8 @@ import { catchUpCommand } from "./hooks/catch-up-command.ts";
 import { inboxCommand } from "./inbox/inbox-command.ts";
 import { stateCommand } from "./state/state-command.ts";
 import { groupingCommand } from "./state/grouping-command.ts";
+import { catalogueExportCommand } from "./catalogue/export-command.ts";
+import { identityResolveCommand } from "./catalogue/identity-command.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -63,6 +65,8 @@ Usage:
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<selector>|.|--all]   Paint cmux tabs from catalogue metadata (. | id | #pr | role | cluster | --all)
   ccs cluster <c> [--expand] [--json]   Cluster map: all members by role, live/lifecycle, work-unit (--json for agents)
+  ccs catalogue export --cluster <c> [--role <r>] [--json]  ADR-D1 machine-readable projection (cluster engines: use this, not sqlite)
+  ccs identity resolve --session <sid> [--json]  ADR-D1 resolve a session to its identity key + facts (single source of truth)
   ccs board <c> [--json|--text]         Cluster board: per-worker truth view composed by the cluster
   ccs board <c> --identity <key> [--text]   Read a single board row by identity
   ccs board <c> --session <sid> [--text]    Read a board row via session→identity resolve
@@ -216,6 +220,13 @@ export async function main(argv: string[]): Promise<number> {
       return backfillWorkUnits(args.slice(1));
     case "cluster":
       return clusterView(args[1], args.includes("--expand") || args.includes("--all"), args.includes("--json"));
+    case "catalogue":
+      // ADR-D1: `ccs catalogue export --cluster <c> ...` — the authorized read path for cluster
+      // engines (compose_board.py etc). Replaces direct sqlite3 access to catalogue.db.
+      return catalogueExportCommand(args.slice(1));
+    case "identity":
+      // ADR-D1: `ccs identity resolve --session <sid>` — single source of truth for identity key.
+      return identityResolveCommand(args.slice(1));
     case "board":
       return boardCommand(args.slice(1));
     case "resume-session":

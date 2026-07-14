@@ -268,3 +268,46 @@ test("identityKeyOf: returns key or null", () => {
   const emptyRow = getRow(db, "neither") ?? { key: null } as any;
   expect(identityKeyOf(emptyRow)).toBeNull();
 });
+
+test("D1: identity key auto-derives from PR facts on stampPrFacts", () => {
+  const db = openCatalogue(":memory:");
+  stampPrFacts(db, "s1", { prNumber: 12345, prRepo: "heroku/dashboard", prBranch: "feat/x", prState: "open", prHeadSha: "abc" }, NOW);
+  expect(getRow(db, "s1")!.key).toBe("pr:heroku/dashboard#12345");
+});
+
+test("D1: identity key auto-derives from role on setRole (no work-unit)", () => {
+  const db = openCatalogue(":memory:");
+  setRole(db, "s1", "control", NOW);
+  expect(getRow(db, "s1")!.key).toBe("role:control");
+});
+
+test("D1: work-unit id wins over PR facts once linked", () => {
+  const db = openCatalogue(":memory:");
+  const { setWorkUnitId } = require("./db.ts");
+  stampPrFacts(db, "s1", { prNumber: 12345, prRepo: "heroku/dashboard", prBranch: "feat/x", prState: "open", prHeadSha: "abc" }, NOW);
+  expect(getRow(db, "s1")!.key).toBe("pr:heroku/dashboard#12345");
+  setWorkUnitId(db, "s1", "wu_dashboard_12345", NOW);
+  expect(getRow(db, "s1")!.key).toBe("wu:wu_dashboard_12345");
+});
+
+test("D1: setGusWork derives gus: key", () => {
+  const db = openCatalogue(":memory:");
+  setGusWork(db, "s1", "W-19338247", NOW);
+  expect(getRow(db, "s1")!.key).toBe("gus:W-19338247");
+});
+
+test("D1: setRole after PR facts doesn't clobber pr: key (PR wins over role)", () => {
+  const db = openCatalogue(":memory:");
+  stampPrFacts(db, "s1", { prNumber: 100, prRepo: "o/r", prBranch: "b", prState: "open", prHeadSha: "s" }, NOW);
+  setRole(db, "s1", "pr-agent", NOW);
+  expect(getRow(db, "s1")!.key).toBe("pr:o/r#100");
+});
+
+test("D1: explicit setKey remains a hard override (freeform anchor)", () => {
+  const db = openCatalogue(":memory:");
+  setRole(db, "s1", "control", NOW);
+  expect(getRow(db, "s1")!.key).toBe("role:control");
+  // Explicit setKey wins (freeform anchor per ADR-0069)
+  setKey(db, "s1", "custom-key-xyz", NOW);
+  expect(getRow(db, "s1")!.key).toBe("custom-key-xyz");
+});
