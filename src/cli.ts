@@ -63,7 +63,11 @@ Usage:
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<selector>|.|--all]   Paint cmux tabs from catalogue metadata (. | id | #pr | role | cluster | --all)
   ccs cluster <c> [--expand] [--json]   Cluster map: all members by role, live/lifecycle, work-unit (--json for agents)
-  ccs board <c> [--json|--text]         Cluster board: per-worker truth view composed by the cluster (concierge + control both read this)
+  ccs board <c> [--json|--text]         Cluster board: per-worker truth view composed by the cluster
+  ccs board <c> --identity <key> [--text]   Read a single board row by identity
+  ccs board <c> --session <sid> [--text]    Read a board row via session→identity resolve
+  ccs board <c> --recompose <key>           Recompose one identity (sync); print the updated row
+  ccs board <c> --recompose-all             Recompose the whole board (sync)
   ccs inbox send|bump|drain|pending  Durable per-identity messaging; bump also wakes a live tab (ADR-0028)
   ccs state get|set|merge  Durable state store (--cluster <c> or --role <r> …) (ADR-0031)
   ccs hook run <name>   Run a named ccs hook (session-start | stop) from its stdin payload

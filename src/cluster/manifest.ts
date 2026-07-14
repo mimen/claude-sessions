@@ -60,6 +60,7 @@ const ManifestSchema = z.object({
   name: z.string(),
   engine: z.string().optional(),
   sense: z.string().optional(),
+  board: z.string().optional(),
   /** ADVISORY / legacy only. The authoritative cluster version is the highest entry in the cluster
    * CHANGELOG (see changelog.ts) — deriving it there means "add the next-numbered entry" is the one
    * authoring action, with no second number to keep in sync. Parsed for tolerance, never gated on. */
@@ -71,13 +72,15 @@ const ManifestSchema = z.object({
   grouping_type: z.string().optional(),
 });
 
-/** The typed cluster manifest, as the tool sees it. Absolute `engineDir`/`sensePath` are resolved. */
+/** The typed cluster manifest, as the tool sees it. Absolute `engineDir`/`sensePath`/`boardPath` are resolved. */
 export interface ClusterManifest {
   name: string;
   /** Absolute path to the engine dir, or null when the package declares none. */
   engineDir: string | null;
   /** Absolute path to the sense entry, or null. */
   sensePath: string | null;
+  /** Absolute path to the board composer, or null. */
+  boardPath: string | null;
   /** Advisory/legacy manifest `version` if present (normalized to a string), else null. NOT the
    * authoritative cluster version — that's the highest CHANGELOG entry. Kept only for tolerance. */
   version: string | null;
@@ -115,6 +118,7 @@ export function readClusterManifest(cluster: string, configRoot = ccsConfigRoot(
     name: m.name,
     engineDir: m.engine ? join(dir, m.engine) : null,
     sensePath: m.sense ? join(dir, m.sense) : null,
+    boardPath: m.board ? join(dir, m.board) : null,
     version: m.version === undefined ? null : String(m.version),
     requiresCcs: m.requires_ccs ?? null,
     groupingType: m.grouping_type ?? "epic",

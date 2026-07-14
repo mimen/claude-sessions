@@ -1,67 +1,167 @@
 /**
- * `ccs board <cluster> [--json|--text]` — cluster-composed per-worker truth view.
+ * `ccs board <cluster> [flags]` — cluster-composed per-worker truth view.
  *
- * The TOOL owns the *dispatch mechanism* (find the cluster's board composer, exec it, stream its
- * output). The CLUSTER owns the *policy* (what a "row" means, what checks compose into a truth
- * label, per-role vocabulary). Per ADR-0061: tool = mechanism, cluster = policy.
- *
- * Resolution: `<ccsConfigRoot>/clusters/<cluster>/board` (executable) is preferred; falls back to
- * `<ccsConfigRoot>/clusters/<cluster>/engine/scripts/board.py` invoked with python3 for the
- * pr-watch-shaped cluster. Composer is invoked with:
- *   argv[1] = cluster state dir ($HOME/.ccs/clusters/<cluster>/cluster)
- *   argv[2] = "--json" or "--text" (passed through from the CLI, default --text)
- * stdout streams to our stdout; exit code passes through. Everything else is best-effort.
- *
- * Determinism guarantee: this command is pure dispatch. If the composer is missing / non-exec /
- * exits non-zero, we surface a clear error and return the composer's exit code. We never invent
- * a row.
+ * The TOOL owns the *dispatch mechanism* (find the cluster's board composer, exec it, read/write
+ * board.json). The CLUSTER owns the *policy* (what a "row" means, what checks compose into a truth
+ * label, per-role vocabulary). Per ADR-0061/0077: tool = mechanism, cluster = policy.
  */
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { readClusterManifest } from "../cluster/manifest.ts";
 import { ccsConfigRoot } from "../roles/role-files.ts";
-
-interface Resolved {
-  argv0: string;
-  args: string[];
-}
-
-/** Find the composer for a cluster. Prefer a `board` executable at the cluster root; fall back
- * to `engine/scripts/board.py` invoked via python3 (the pr-watch shape). Returns null when no
- * composer exists — the caller surfaces a clear error rather than inventing a board. */
-function resolveComposer(cluster: string): Resolved | null {
-  const root = join(ccsConfigRoot(), "clusters", cluster);
-  const direct = join(root, "board");
-  if (existsSync(direct)) {
-    try {
-      const s = statSync(direct);
-      // eslint-disable-next-line no-bitwise
-      if (s.isFile() && (s.mode & 0o111) !== 0) return { argv0: direct, args: [] };
-    } catch { /* fall through */ }
-  }
-  const pyFallback = join(root, "engine", "scripts", "board.py");
-  if (existsSync(pyFallback)) return { argv0: "python3", args: [pyFallback] };
-  return null;
-}
+import { boardIndex } from "../board/indexer.ts";
+import { runDefaultComposer } from "../board/default-composer.ts";
+import { openCatalogue, identityKeyOf, getRow } from "./db.ts";
+import { CATALOGUE_PATH } from "../paths.ts";
 
 export function boardCommand(args: string[]): number {
   const cluster = args.find((a) => !a.startsWith("--"));
   if (!cluster) {
-    console.error("usage: ccs board <cluster> [--json|--text]");
+    console.error("usage: ccs board <cluster> [--json|--text|--identity <key>|--session <sid>|--recompose <key>|--recompose-all]");
     return 1;
   }
-  const format = args.includes("--json") ? "--json" : args.includes("--text") ? "--text" : "--text";
-  const composer = resolveComposer(cluster);
-  if (!composer) {
-    console.error(
-      `ccs board: cluster "${cluster}" has no board composer. ` +
-        `Expected an executable at \`clusters/${cluster}/board\` or a script at ` +
-        `\`clusters/${cluster}/engine/scripts/board.py\`.`,
-    );
+  if (args.includes("--identity")) {
+    const identity = args[args.indexOf("--identity") + 1];
+    if (!identity) {
+      console.error("--identity requires a key");
+      return 1;
+    }
+    return readIdentity(cluster, identity, args.includes("--text"));
+  }
+  if (args.includes("--session")) {
+    const sid = args[args.indexOf("--session") + 1];
+    if (!sid) {
+      console.error("--session requires a session id");
+      return 1;
+    }
+    return readSession(cluster, sid, args.includes("--text"));
+  }
+  if (args.includes("--recompose")) {
+    const identity = args[args.indexOf("--recompose") + 1];
+    if (!identity) {
+      console.error("--recompose requires a key");
+      return 1;
+    }
+    return recompose(cluster, identity);
+  }
+  if (args.includes("--recompose-all")) {
+    return recomposeAll(cluster);
+  }
+  const format = args.includes("--json") ? "--json" : "--text";
+  const idx = boardIndex(cluster);
+  const rows = idx.rows();
+  if (format === "--json") {
+    console.log(JSON.stringify({ rows }, null, 2));
+  } else {
+    for (const row of rows) {
+      const pills = row.pills.map((p) => p.label).join(" · ");
+      const alerts = row.alerts.length > 0 ? ` [${row.alerts.map((a) => a.name).join(", ")}]` : "";
+      console.log(`${row.identity}: ${pills}${alerts}`);
+      if (row.description) console.log(`  ${row.description}`);
+    }
+  }
+  return 0;
+}
+
+function readIdentity(cluster: string, identity: string, text: boolean): number {
+  const idx = boardIndex(cluster);
+  const row = idx.byIdentity(identity);
+  if (!row) {
+    console.error(`no row for identity "${identity}"`);
+    return 1;
+  }
+  if (text) {
+    const pills = row.pills.map((p) => p.label).join(" · ");
+    const alerts = row.alerts.length > 0 ? ` [${row.alerts.map((a) => a.name).join(", ")}]` : "";
+    console.log(`${row.identity}: ${pills}${alerts}`);
+    if (row.description) console.log(`  ${row.description}`);
+  } else {
+    console.log(JSON.stringify(row, null, 2));
+  }
+  return 0;
+}
+
+function readSession(cluster: string, sessionId: string, text: boolean): number {
+  const idx = boardIndex(cluster);
+  const hit = idx.bySession(sessionId);
+  if (!hit) {
+    console.error(`session "${sessionId}" has no identity or no board row`);
+    return 1;
+  }
+  const row = hit.row;
+  if (text) {
+    const pills = row.pills.map((p) => p.label).join(" · ");
+    const alerts = row.alerts.length > 0 ? ` [${row.alerts.map((a) => a.name).join(", ")}]` : "";
+    console.log(`${row.identity}: ${pills}${alerts}`);
+    if (row.description) console.log(`  ${row.description}`);
+  } else {
+    console.log(JSON.stringify(row, null, 2));
+  }
+  return 0;
+}
+
+function recompose(cluster: string, identity: string): number {
+  const manifest = readClusterManifest(cluster);
+  if (!manifest.ok) {
+    console.warn(`cluster manifest not found, falling back to default composer`);
+    runDefaultComposer(cluster, { identity });
+    boardIndex(cluster).refresh();
+    const row = boardIndex(cluster).byIdentity(identity);
+    if (!row) {
+      console.error(`default composer failed to produce row for "${identity}"`);
+      return 1;
+    }
+    console.log(JSON.stringify(row, null, 2));
+    return 0;
+  }
+  if (!manifest.value.boardPath) {
+    runDefaultComposer(cluster, { identity });
+    boardIndex(cluster).refresh();
+    const row = boardIndex(cluster).byIdentity(identity);
+    if (!row) {
+      console.error(`default composer failed to produce row for "${identity}"`);
+      return 1;
+    }
+    console.log(JSON.stringify(row, null, 2));
+    return 0;
+  }
+  if (!existsSync(manifest.value.boardPath)) {
+    console.error(`board composer at "${manifest.value.boardPath}" does not exist`);
     return 1;
   }
   const stateDir = join(process.env.HOME ?? "", ".ccs", "clusters", cluster, "cluster");
-  const r = spawnSync(composer.argv0, [...composer.args, stateDir, format], {
+  const r = spawnSync(manifest.value.boardPath, ["--identity", identity, "--write", stateDir], {
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  if (r.status !== 0) return r.status ?? 1;
+  boardIndex(cluster).refresh();
+  const row = boardIndex(cluster).byIdentity(identity);
+  if (!row) {
+    console.error(`composer succeeded but no row found for "${identity}"`);
+    return 1;
+  }
+  console.log(JSON.stringify(row, null, 2));
+  return 0;
+}
+
+function recomposeAll(cluster: string): number {
+  const manifest = readClusterManifest(cluster);
+  if (!manifest.ok) {
+    console.warn(`cluster manifest not found, falling back to default composer`);
+    runDefaultComposer(cluster);
+    return 0;
+  }
+  if (!manifest.value.boardPath) {
+    runDefaultComposer(cluster);
+    return 0;
+  }
+  if (!existsSync(manifest.value.boardPath)) {
+    console.error(`board composer at "${manifest.value.boardPath}" does not exist`);
+    return 1;
+  }
+  const stateDir = join(process.env.HOME ?? "", ".ccs", "clusters", cluster, "cluster");
+  const r = spawnSync(manifest.value.boardPath, ["--write", stateDir], {
     stdio: ["ignore", "inherit", "inherit"],
   });
   return r.status ?? 1;
