@@ -135,13 +135,10 @@ function renderSession(row: CatalogueRow, ctx: RenderContext): TabRenderOps {
   // Workers carry NO sidebar color: the phase pill (below) already encodes state with its own
   // color, so a tab color would be redundant noise. State lives in the pill; the tab stays neutral.
   const color = null;
-  // Preference order (ADR-0077 migration step 3): (a) the cluster's board.json composed pill —
-  // the composer applies business rules the catalogue can't see (GitHub-wins, alerts); (b) the
-  // catalogue.stage fallback for clusters that don't yet publish a board; (c) the lifecycle pill
-  // when neither is present. Board reads are cheap (mtime-cached indexer) and safe (falls back
-  // silently on missing/stale board).
-  const statusPill =
-    computePillFromBoard(row) ?? computePhasePill(row) ?? computeLifecyclePill(row);
+  // State pill comes from the cluster's board composer (ADR-0077). The tool doesn't know what
+  // "stage" means — that's cluster vocabulary. No board pill → fall back to the generic lifecycle
+  // pill (parked/completed/archived) which is a tool-level concept.
+  const statusPill = computePillFromBoard(row) ?? computeLifecyclePill(row);
   // The worker's EPIC as its own quiet pill (orthogonal to the state pill).
   const epicPill = computeEpicPill(ctx);
   // A cluster-emitted alert pill (composer's pills[1]) when present. Renders as a third status
@@ -265,28 +262,6 @@ function buildLoopDescription(row: CatalogueRow): string | null {
   // loop has a distinguishing one; otherwise the loop needs no second line at all.
   const key = identityKeyOf(row);
   return key || null;
-}
-
-/** A worker's pipeline STAGE → sidebar pill (label + icon + hex color). Sourced from the row's
- * `stage` column (the engine senses it in). Uses the same `ccs_lifecycle` key as the lifecycle
- * pill so a worker shows one status pill at a time — whichever applies. */
-const STAGE_PILL: Record<string, { label: string; icon: string; color: string }> = {
-  building:       { label: "building",    icon: "hammer",             color: "#32ade6" }, // cyan
-  "milad-review": { label: "your review", icon: "eye",                color: "#0a84ff" }, // blue — awaiting your +1
-  "in-review":    { label: "in review",   icon: "person.2",           color: "#bf5af2" }, // purple — external review
-  approved:       { label: "approved",    icon: "checkmark.circle",   color: "#30d158" }, // green
-  merged:         { label: "merged",      icon: "checkmark.seal",     color: "#34c759" }, // green
-};
-
-/**
- * Compute the worker pill from the row's stage. Activity is dead (2026-07-13); no overlay logic.
- * Returns null when there's no stage (caller → lifecycle pill).
- */
-function computePhasePill(row: CatalogueRow): StatusPill | null {
-  const stageKey = row.stage?.trim().toLowerCase();
-  if (!stageKey || !STAGE_PILL[stageKey]) return null;
-  const stage = STAGE_PILL[stageKey];
-  return { key: "ccs_lifecycle", label: stage.label, icon: stage.icon, color: stage.color, priority: 50 };
 }
 
 function computeLifecyclePill(row: CatalogueRow): StatusPill | null {

@@ -68,11 +68,13 @@ test("renderTab: epic pill is a quiet gray label with no icon", () => {
   expect(ops.epicPill?.icon).toBeUndefined();
 });
 
-test("renderTab: epic pill LEADS the pill row (highest priority)", () => {
-  const r = row({ stage: "building", cluster: "pr-watch" });
+test("renderTab: epic pill has priority above the state pill's slot", () => {
+  // The epic pill's priority (60) sorts above the state pill priority (50) so the epic reads
+  // first when both are set. State pills come from board.json now (ADR-0077) — this test just
+  // pins the epic pill's own priority number so the ordering contract can't drift silently.
+  const r = row({ cluster: "pr-watch" });
   const ops = renderTab(r, "session", { grouping: { label: "Metered Pricing" } });
-  // The epic sorts first (grouping is the primary scan axis); the state pill follows.
-  expect(ops.epicPill!.priority!).toBeGreaterThan(ops.statusPill!.priority!);
+  expect(ops.epicPill!.priority!).toBe(60);
 });
 
 test("renderTab: no grouping → no epic pill (so sync-tabs clears any stale one)", () => {
@@ -120,26 +122,15 @@ test("renderTab: loops carry no epic pill", () => {
   expect(ops.epicPill).toBeNull();
 });
 
-test("renderTab: stage pill shows the bare stage when dormant (no activity)", () => {
+test("renderTab: state pill comes from board.json (not row.stage) — no board, no pill", () => {
+  // ADR-0077: the tool doesn't hardcode a stage → pill mapping anymore. The cluster's board
+  // composer supplies pills; the tool renders whatever's there. A session with no matching
+  // board row falls through to the lifecycle pill (parked/completed/archived) or null.
   const r = row({ stage: "building", prNumber: 12136, prRepo: "heroku/dashboard" });
   const ops = renderTab(r, "session");
-  expect(ops.statusPill?.label).toBe("building");
-  expect(ops.statusPill?.icon).toBe("hammer");
-  expect(ops.statusPill?.key).toBe("ccs_lifecycle"); // shares the lifecycle key → never stacks
-});
-
-test("renderTab: stage pill maps every stage", () => {
-  expect(renderTab(row({ stage: "building" }), "session").statusPill?.label).toBe("building");
-  expect(renderTab(row({ stage: "milad-review" }), "session").statusPill?.label).toBe("your review");
-  expect(renderTab(row({ stage: "in-review" }), "session").statusPill?.label).toBe("in review");
-  expect(renderTab(row({ stage: "approved" }), "session").statusPill?.label).toBe("approved");
-  expect(renderTab(row({ stage: "merged" }), "session").statusPill?.label).toBe("merged");
-});
-
-test("renderTab: pill is pure stage — no activity overlay (activity retired 2026-07-13)", () => {
-  // Activity is dead: the pill reads exactly the stage label regardless of any other state.
-  expect(renderTab(row({ stage: "in-review" }), "session").statusPill?.label).toBe("in review");
-  expect(renderTab(row({ stage: "milad-review" }), "session").statusPill?.label).toBe("your review");
+  // No board.json fixture in this test → statusPill falls back to lifecycle (null for a plain
+  // idle row); the raw row.stage no longer produces a pill on its own.
+  expect(ops.statusPill).toBeNull();
 });
 
 test("renderTab: no stage → falls back to lifecycle pill (parked)", () => {

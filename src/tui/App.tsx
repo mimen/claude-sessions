@@ -44,25 +44,20 @@ import { buildClusterView } from "./clusterView.ts";
 import { buildEpicView } from "./epicView.ts";
 
 /**
- * Stage label for the TUI stage column. Preference order (ADR-0077 step 5):
- *   1. The composed pill label from the cluster's board.json (first pill's label — the state
- *      pill by cluster convention). Reflects business rules the catalogue.stage column can't see.
- *   2. catalogue.stage as the legacy fallback for clusters without a board composer.
- *   3. null when neither.
- * Board reads go through the mtime-cached indexer, so this is cheap enough to call per-row.
+ * State label + hex color for the TUI stage column (ADR-0077). Reads the first pill from the
+ * cluster's board.json via the mtime-cached indexer. Cluster vocabulary; the tool doesn't
+ * interpret. Missing cluster / missing board / no pill → null (column stays blank).
  */
-function stageLabelFor(cat: CatalogueRow | null, sessionId: string): string | null {
-  if (!cat) return null;
-  if (cat.cluster) {
-    try {
-      const hit = boardIndex(cat.cluster).bySession(sessionId);
-      const boardLabel = hit?.row.pills[0]?.label;
-      if (boardLabel) return boardLabel;
-    } catch {
-      // fall through to catalogue.stage
-    }
+function stagePillFor(cat: CatalogueRow | null, sessionId: string): { label: string; color?: string } | null {
+  if (!cat || !cat.cluster) return null;
+  try {
+    const hit = boardIndex(cat.cluster).bySession(sessionId);
+    const pill = hit?.row.pills[0];
+    if (!pill) return null;
+    return { label: pill.label, color: pill.color };
+  } catch {
+    return null;
   }
-  return cat.stage ?? null;
 }
 
 const SORT_CYCLE: SortMode[] = ["recent", "cost", "msgs"];
@@ -85,8 +80,10 @@ export interface SessionBadge {
   role?: string | null;
   /** Status label (lifecycle × live open-state), shown in the status column. */
   status?: string | null;
-  /** Per-system stage (catalogue.stage) — the worker's pipeline stage. */
+  /** Composed state pill label from the cluster's board.json (ADR-0077). */
   phase?: string | null;
+  /** Optional hex color matching the cmux tab pill — the TUI renders the label in this color. */
+  phaseColor?: string | null;
 }
 
 interface AppProps {
@@ -245,6 +242,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         color = Number.isNaN(ts) || nowMs - ts > STALE_MS ? theme.faint : theme.muted;
       }
       if (nudge) color = "yellowBright";
+      const pill = stagePillFor(c, r.sessionId);
       m.set(r.sessionId, {
         glyph, color, nudge,
         event: identityKeyOf(c),
@@ -252,7 +250,8 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         prState: c?.prState ?? null,
         role: c?.role ?? null,
         status: describeDisposition(lc, open).label,
-        phase: stageLabelFor(c, r.sessionId),
+        phase: pill?.label ?? null,
+        phaseColor: pill?.color ?? null,
       });
     }
     return m;

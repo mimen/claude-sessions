@@ -11,11 +11,13 @@ export function runDefaultComposer(cluster: string, opts: { identity?: string } 
     const identity = identityKeyOf(catRow);
     if (!identity) continue;
     if (opts.identity && identity !== opts.identity) continue;
+    // Default composer emits NO pills — the tool doesn't know any cluster's stage vocabulary.
+    // Clusters that want a pill provide their own composer via cluster.toml's `board` entry.
     rows.push({
       identity,
       workUnit: { kind: catRow.prNumber ? "pr" : "gus", ...catRow.workUnit },
       sessions: [{ sessionId: sid, isPrimary: true, lastActivity: catRow.updatedAt ?? "" }],
-      pills: catRow.stage ? [{ key: "ccs_lifecycle", label: catRow.stage, priority: 50 }] : [],
+      pills: [],
       description: catRow.statusLine ?? null,
       alerts: [],
       awaitingFrom: [],

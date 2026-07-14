@@ -19,17 +19,6 @@ export function osc8(url: string, text: string): string {
   return url ? `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\` : text;
 }
 
-/** Stage -> a status dot (the monotonic pr-agent pipeline; the free-form `phase` column is gone,
- * ADR-0059). An unknown/absent stage renders no dot rather than a wrong one. */
-const STAGE_DOT: Record<string, string> = {
-  building: "⚪",
-  "milad-review": "🟠",
-  "in-review": "🟣",
-  approved: "🔵",
-  merged: "🟢",
-  unknown: "⚫",
-};
-
 /** How stale (ms) a row's phase may be before we render it as `unknown` instead of asserting
  * it as current. The statusline re-runs every turn, so this only bites a truly abandoned row. */
 export const DEFAULT_STALENESS_MS = 6 * 60 * 60 * 1000; // 6h
@@ -48,10 +37,10 @@ export interface StatuslineCtx {
   nowMs: number;
   /** Override the staleness window (ms). */
   stalenessMs?: number;
-  /** The composed stage label from board.json (ADR-0077), when the caller resolved it. When
-   * present it wins over the row's raw `stage` column — the composer applies business rules
-   * (GitHub-wins) the catalogue alone can't see. Absent = fall back to row.stage. */
-  composedStage?: string | null;
+  /** The composed state pill from board.json (ADR-0077): label + optional hex color. Caller
+   * resolves it. When present, renders as colored text at the start of the line matching the
+   * cmux tab pill exactly (same label, same color). Absent → no leading pill. */
+  statePill?: { label: string; color?: string } | null;
 }
 
 /** True if the row's phase is too old to assert as current (ADR-0031). */
@@ -84,15 +73,17 @@ export function gusWorkUrl(w: string, sfId: string | null | undefined): string {
 
 /**
  * Render the statusline for a session row. Returns a single line (no trailing newline).
- * Order: stage dot · linked PR/work · grouping label · W-number.
+ * Order: state pill (colored) · linked PR/work · grouping label · W-number.
+ *
+ * The state pill is whatever the cluster's board composer emitted for this session — its label
+ * and hex color. The tool renders both as-is (24-bit ANSI on the label so the terminal shows the
+ * cmux tab's exact color). No cluster-specific vocabulary or emoji table in the tool.
  */
 export function renderStatusline(row: CatalogueRow, ctx: StatuslineCtx): string {
   const stale = phaseIsStale(row, ctx.nowMs, ctx.stalenessMs ?? DEFAULT_STALENESS_MS);
-  // Composed stage (ADR-0077) wins over row.stage when the caller supplied one — reflects the
-  // GitHub-wins rule + any cluster overlays that the raw catalogue column doesn't see.
-  const source = ctx.composedStage ?? row.stage ?? "";
-  const stage = stale ? "unknown" : source.toLowerCase();
-  const dot = STAGE_DOT[stage] ?? "";
+  // A stale row's pill would assert a value we can't vouch for — drop it rather than mislead.
+  const pill = stale ? null : (ctx.statePill ?? null);
+  const pillBit = pill ? colorize(pill.label, pill.color) : null;
 
   const url = row.prNumber && row.prRepo ? `https://github.com/${row.prRepo}/pull/${row.prNumber}` : "";
   const linked = osc8(url, workLabel(row));
@@ -106,8 +97,20 @@ export function renderStatusline(row: CatalogueRow, ctx: StatuslineCtx): string 
   const sfId = typeof row.meta?.gus_work_sf_id === "string" ? row.meta.gus_work_sf_id : null;
   const wBit = row.gusWork && row.prNumber ? osc8(gusWorkUrl(row.gusWork, sfId), row.gusWork) : null;
 
-  const bits = [dot, linked, groupingBit, wBit].filter((b): b is string => !!b);
+  const bits = [pillBit, linked, groupingBit, wBit].filter((b): b is string => !!b);
   return bits.join(" · ");
+}
+
+/** Wrap text in 24-bit ANSI foreground color (`#RRGGBB`), reset at the end. Skips coloring when
+ * the hex is missing or malformed — the label still renders, just uncolored. */
+function colorize(text: string, hex: string | undefined): string {
+  if (!hex) return text;
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  if (!m) return text;
+  const r = parseInt(m[1]!, 16);
+  const g = parseInt(m[2]!, 16);
+  const b = parseInt(m[3]!, 16);
+  return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
 }
 
 /** A minimal, unobtrusive line for a session that isn't a tracked worker (no row / no work). */

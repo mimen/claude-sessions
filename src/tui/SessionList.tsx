@@ -38,8 +38,10 @@ interface SessionBadge {
   role?: string | null;
   /** Status label (lifecycle × live open-state), shown in the status column. */
   status?: string | null;
-  /** Per-system stage (worker's pipeline stage), shown in the stage column. */
+  /** Composed state pill label (worker's pipeline state), shown in the stage column. */
   phase?: string | null;
+  /** Optional hex color for the stage-column text — matches the cmux tab pill. */
+  phaseColor?: string | null;
 }
 
 interface SessionListProps {
@@ -185,9 +187,12 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
             {showRoleStatus ? (
               <>
                 <Box width={PHASE_W} flexShrink={0}>
-                  {/* The worker's pipeline stage (building/milad-review/in-review/approved/merged).
-                      Blank when unset. More informative than the dot for pipeline position. */}
-                  <Text color={sel ? theme.selFg : theme.accent} wrap="truncate-end">
+                  {/* Composed state pill label from board.json, rendered in the pill's own color
+                      (matches the cmux tab pill exactly). No pill / no color → theme.accent. */}
+                  <Text
+                    color={sel ? theme.selFg : (badge?.phaseColor ?? theme.accent)}
+                    wrap="truncate-end"
+                  >
                     {badge?.phase ?? ""}
                   </Text>
                 </Box>

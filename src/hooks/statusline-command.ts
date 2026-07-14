@@ -62,23 +62,21 @@ export async function statuslineCommand(): Promise<number> {
           // epics table — the cluster's sensor filled it; we read the generic slot.
           const g = row.cluster && row.groupingId ? getGrouping(row.cluster, row.groupingId) : null;
           const grouping = g ? { label: g.shortName ?? g.label, url: g.url } : null;
-          // Composed stage from board.json (ADR-0077): the composer applies cluster business rules
-          // (GitHub-wins etc.) the catalogue.stage column can't see. Board indexer is mtime-cached,
-          // so this is cheap. We read `data.stage` (cluster-private field) rather than the pill
-          // label so the dot vocabulary keys are stable stage slugs, not human labels. Falls back
-          // to row.stage when there's no board row.
-          let composedStage: string | null = null;
+          // State pill from board.json (ADR-0077): the composer emits label + color for this
+          // session, matching the cmux tab exactly. One vocabulary + one color mapping across
+          // cmux sidebar, ccs TUI, and this statusline — they can never disagree.
+          let statePill: { label: string; color?: string } | null = null;
           if (row.cluster) {
             try {
               const { boardIndex } = await import("../board/indexer.ts");
               const hit = boardIndex(row.cluster).bySession(payload.session_id);
-              const dataStage = hit?.row.data?.["stage"];
-              if (typeof dataStage === "string") composedStage = dataStage;
+              const p = hit?.row.pills[0];
+              if (p) statePill = { label: p.label, color: p.color };
             } catch {
-              // fall through — row.stage still renders via renderStatusline's default path
+              // no board → no pill; renderStatusline just omits the leading bit
             }
           }
-          line = renderStatusline(row, { nowMs: Date.now(), grouping, composedStage });
+          line = renderStatusline(row, { nowMs: Date.now(), grouping, statePill });
         }
       } finally {
         db.close();

@@ -49,12 +49,12 @@ test("default composer produces board from catalogue", () => {
   expect(row1).toBeDefined();
   expect(row1?.sessions.length).toBe(1);
   expect(row1?.sessions[0]?.sessionId).toBe("aaa");
-  expect(row1?.pills.length).toBe(1);
-  expect(row1?.pills[0]?.label).toBe("building");
+  // Default composer emits NO pills (ADR-0077: tool doesn't know cluster stage vocabulary).
+  expect(row1?.pills.length).toBe(0);
   expect(row1?.description).toBe("running tests");
   const row2 = board?.rows.find((r) => r.identity === "pr-watch:pr-agent:heroku/dashboard#456");
   expect(row2).toBeDefined();
-  expect(row2?.pills[0]?.label).toBe("in review");
+  expect(row2?.pills.length).toBe(0);
 });
 
 test("default composer single-row mode merges into existing board", () => {
@@ -68,15 +68,18 @@ test("default composer single-row mode merges into existing board", () => {
   setCluster(db, "bbb", "test-cluster", "2026-07-13T00:00:00Z");
   setKey(db, "bbb", "pr-watch:pr-agent:heroku/dashboard#456", "2026-07-13T00:00:00Z");
   setStage(db, "bbb", "in review", "2026-07-13T00:00:00Z");
+  setStatusLine(db, "aaa", "initial", "2026-07-13T00:00:00Z");
+  setStatusLine(db, "bbb", "second", "2026-07-13T00:00:00Z");
   runDefaultComposer("test-cluster");
   let board = readBoard("test-cluster");
   expect(board?.rows.length).toBe(2);
-  setStage(db, "aaa", "approved", "2026-07-13T00:01:00Z");
+  // Change #123's status line, single-row recompose, assert only that row was updated.
+  setStatusLine(db, "aaa", "updated", "2026-07-13T00:01:00Z");
   runDefaultComposer("test-cluster", { identity: "pr-watch:pr-agent:heroku/dashboard#123" });
   board = readBoard("test-cluster");
   expect(board?.rows.length).toBe(2);
   const row1 = board?.rows.find((r) => r.identity === "pr-watch:pr-agent:heroku/dashboard#123");
-  expect(row1?.pills[0]?.label).toBe("approved");
+  expect(row1?.description).toBe("updated");
   const row2 = board?.rows.find((r) => r.identity === "pr-watch:pr-agent:heroku/dashboard#456");
-  expect(row2?.pills[0]?.label).toBe("in review");
+  expect(row2?.description).toBe("second");
 });
