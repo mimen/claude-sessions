@@ -9,6 +9,7 @@ import { resolveConfig } from "../hooks/resolve-config.ts";
 import { liveResolveCtx } from "../hooks/compose-claude-md.ts";
 import { getGrouping } from "../state/groupings.ts";
 import { execFileSync } from "node:child_process";
+import { recomposeForSession } from "../board/recompose.ts";
 
 /**
  * Sync a catalogue row's metadata to its live cmux workspace tab (title/description/color/pill).
@@ -230,6 +231,9 @@ export function syncTabs(args: string[]): number {
   if (!all && (!token || token === "." || token === "self")) {
     const sessionId = resolveSessionId(token);
     if (!sessionId) return notInSession();
+    // Freshness (ADR-0077): recompose this identity's row before painting so the tab reflects
+    // any pending state changes (e.g. a meta write in this same script) instead of last tick's.
+    recomposeForSession(sessionId);
     const pushed = pushRenderOps(sessionId, cmuxBin);
     console.log(pushed ? `synced tab for ${sessionId.slice(0, 8)}…` : `${sessionId.slice(0, 8)}… not open / not synced`);
     return 0;
@@ -253,6 +257,7 @@ export function syncTabs(args: string[]): number {
 
     // A bare UUID → paint that one directly (no selector lookup needed).
     if (token && /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(token)) {
+      recomposeForSession(token);
       const pushed = pushRenderOps(token, cmuxBin);
       console.log(pushed ? `synced tab for ${token.slice(0, 8)}…` : `${token.slice(0, 8)}… not open / not synced`);
       return 0;

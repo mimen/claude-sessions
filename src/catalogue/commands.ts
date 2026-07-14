@@ -28,6 +28,7 @@ import { formatCost, formatTokens } from "../cost.ts";
 import { pushCmuxRename } from "../cmux/liveness.ts";
 import { resolveRole } from "../roles/role-files.ts";
 import { validateStageTransition } from "./stage-schema.ts";
+import { recomposeForSession } from "../board/recompose.ts";
 
 /**
  * CLI surface for the catalogue. These are the primitives the in-session slash commands
@@ -191,6 +192,7 @@ export function status(sessionArg: string | undefined, value: string | undefined
   } finally {
     db.close();
   }
+  recomposeForSession(id);
   return 0;
 }
 
@@ -256,6 +258,7 @@ export function stage(sessionArg: string | undefined, value: string | undefined,
   } finally {
     db.close();
   }
+  recomposeForSession(id);
   return 0;
 }
 
@@ -291,6 +294,7 @@ export function metaSet(sessionArg: string | undefined, key: string | undefined,
   } finally {
     db.close();
   }
+  recomposeForSession(id);
   return 0;
 }
 
