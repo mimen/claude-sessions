@@ -56,9 +56,12 @@ test("a full fleet worker resolves all six levels in order", () => {
   expect(levels(r)).toEqual(["user", "cluster", "role", "epic", "work-unit", "identity"]);
 });
 
-test("epic level nests under the cluster's epics dir", () => {
+test("epic level nests under RUNTIME/clusters/<c>/epics/<id> (ADR-0087)", () => {
+  // ADR-0087 (2026-07-14): epic-level hook content is per-user work state, not shareable
+  // cluster shape — it lives in ~/.ccs (runtime), not ~/.ccs-config (git). Same layout,
+  // different base.
   const r = row({ cluster: "pr-watch", role: "pr-agent", groupingId: "e123" });
-  expect(dirOf(r, "epic")).toBe("/cfg/clusters/pr-watch/epics/e123");
+  expect(dirOf(r, "epic")).toBe("/rt/clusters/pr-watch/epics/e123");
 });
 
 test("epic without a cluster does NOT resolve (epic nests under a cluster)", () => {

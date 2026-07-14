@@ -75,9 +75,13 @@ export function resolveLevels(row: CatalogueRow, ctx: ResolveCtx): ResolvedLevel
     if (home) out.push({ level: "role", dir: home });
   }
 
-  // epic — only meaningful inside a cluster (its dir nests under the cluster).
+  // epic — only meaningful inside a cluster (its dir nests under the cluster). ADR-0087
+  // (2026-07-14): the epic level lives in RUNTIME state (~/.ccs), not the config repo.
+  // The concrete hook content is per-user work state ("W-...'s CX/Helen review is deferred"),
+  // not shareable cluster shape. Same layout as before, different base — no other resolver
+  // change needed.
   if (cluster && row.groupingId) {
-    out.push({ level: "epic", dir: join(ctx.configRoot, "clusters", seg(cluster), "epics", seg(row.groupingId)) });
+    out.push({ level: "epic", dir: join(ctx.runtimeRoot, "clusters", seg(cluster), "epics", seg(row.groupingId)) });
   }
 
   // work-unit — the PR/ticket dir under the cluster (fleet only).
