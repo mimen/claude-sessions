@@ -1,5 +1,7 @@
 import type { CatalogueRow, Kind } from "./db.ts";
 import { lifecycleOf, identityKeyOf } from "./db.ts";
+import { boardIndex } from "../board/indexer.ts";
+import type { BoardRow } from "../board/types.ts";
 
 /**
  * A tab's render ops: the full set of cmux workspace visual attrs we push.
@@ -104,14 +106,42 @@ function renderSession(row: CatalogueRow, ctx: RenderContext): TabRenderOps {
   // Workers carry NO sidebar color: the phase pill (below) already encodes state with its own
   // color, so a tab color would be redundant noise. State lives in the pill; the tab stays neutral.
   const color = null;
-  // A worker's pill prefers its pipeline PHASE (building/reviewing/…) — the one-glance position
-  // in the pr-watch pipeline — falling back to the lifecycle pill (parked/done/archived) when
-  // there's no phase. This is what the retired cmux_label.py used to paint; it now lives in the
-  // single ccs renderer, sourced from the row's `phase` (the engine senses it in).
-  const statusPill = computePhasePill(row) ?? computeLifecyclePill(row);
+  // Preference order (ADR-0077 migration step 3): (a) the cluster's board.json composed pill —
+  // the composer applies business rules the catalogue can't see (GitHub-wins, alerts); (b) the
+  // catalogue.stage fallback for clusters that don't yet publish a board; (c) the lifecycle pill
+  // when neither is present. Board reads are cheap (mtime-cached indexer) and safe (falls back
+  // silently on missing/stale board).
+  const statusPill =
+    computePillFromBoard(row) ?? computePhasePill(row) ?? computeLifecyclePill(row);
   // The worker's EPIC as its own quiet pill (orthogonal to the state pill).
   const epicPill = computeEpicPill(ctx);
   return { title, description, color, statusPill, epicPill };
+}
+
+/**
+ * Look up this session's composed board row and return its first pill (the state pill by
+ * cluster convention: pr-watch emits stage as pill index 0). Returns null when there's no
+ * cluster, no board row, or no pills — caller falls back to the legacy stage-column pill.
+ *
+ * Reads through the board indexer (mtime-cached); no direct filesystem work per call.
+ */
+function computePillFromBoard(row: CatalogueRow): StatusPill | null {
+  if (!row.cluster) return null;
+  let hit: { identity: string; row: BoardRow } | null;
+  try {
+    hit = boardIndex(row.cluster).bySession(row.sessionId);
+  } catch {
+    return null;
+  }
+  if (!hit || hit.row.pills.length === 0) return null;
+  const pill = hit.row.pills[0]!;
+  return {
+    key: pill.key,
+    label: pill.label,
+    icon: pill.icon,
+    color: pill.color,
+    priority: pill.priority ?? 50,
+  };
 }
 
 function renderLoop(row: CatalogueRow): TabRenderOps {
