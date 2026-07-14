@@ -4,14 +4,35 @@ The whole platform broken into **testable units**. Each unit is a thing you can 
 and prove. Burn this down to reach production. Seeded 2026-07-11 from the discovery sweep (7 parallel
 audits — see FINDINGS-production-readiness.md for the raw findings each row cites).
 
-**Implementation status (updated as the ADR chain lands):** DONE — ADR-0054 (cmux 0.64 liveness),
-0056 (sync-tabs selector paint), 0060 (meta map + milad/build→meta drop), 0066/0071 (error-handling +
-Result + logger), 0067 (dead-code + legacy-liveness deletion), 0059 event/skill/phase drops, work-unit
-key consolidation (U4), D2 tie-break (CI-1), cmux version guard (task #6). Live catalogue migrated
-v19→v26 cleanly. IN FLIGHT — 0059 system→cluster rename. QUEUED — 0057-deep (re-key dedup onto the
-work-unit entity id), 0072 (spawn claim lock), 0062 (role props / kill kind), 0063 (evict phase-rubric),
-0064 (generic meta commands), 0065 (circular-dep move), 0068 (db.ts split), 0069/0070 (typed variants),
-0058 (changelog catch-up), + live-fleet verification (tasks #7/#8) and the settings.json hook de-dup (#33/U11).
+**Implementation status (2026-07-14 hardening arc landed):**
+
+DONE:
+- ADR-0054 (cmux 0.64 liveness), 0056 (sync-tabs selector paint), 0057 (work-unit entity),
+  0058 (inter-layer version contract), 0059 (system→cluster rename), 0060 (meta map), 0061
+  (tool=mechanism / cluster=policy), 0062 (role props from role.toml), 0063 (evict
+  pr-sense from tool), 0064 (generic meta commands), 0065–0067 (circular-dep, error-
+  handling, dead-code), 0068 (db.ts split), 0069/0070 (anchor + grouping types), 0071
+  (Result<T> + structured logger), 0073 (one embodiment is a preference), 0074–0077
+  (project-level materialization + spawn hook + roster JSON + phase-first board).
+- 2026-07-14 hardening arc (this branch): **ADR-0078 D1 export boundary + identity key SoT**,
+  **ADR-0079 D5 stage sensor-only**, **ADR-0080 D3 (cluster, role) identity**, **ADR-0081
+  D4 singletons + state integrity (heartbeat + atomic claim + locked writes)**, **ADR-0082
+  D8 board recompose is serialized**, **ADR-0083 D2/B11 board schema versioned + gate on
+  every bring-online path**, **ADR-0084 wedged-control auto-recovery**, **ADR-0085 hook-
+  store contradictions resolve to the fresher signal (B14)**. All three review P0s (B1,
+  B2, B3) and every review P1 + P2 in scope are dead. B12 (activity docs sync) + B15
+  (migration postcondition) + B13 (atomic unique-per-turn events) all landed.
+- Live catalogue at v31 (identity-key backfill). e2e smoke test passing (12/12 gate
+  entries match a board row). Toy second cluster proves cluster-scoped role resolution.
+
+DEFERRED (Phase 2+):
+- Full "versioned executable protocol" in cluster.toml (argv + protocol + timeout) — big
+  refactor requiring every cluster to migrate.
+- Event-coalesced recompose (D8 half two) — perf optimization, not needed under current
+  cadence.
+- New-cluster / new-role bootstrap wizard (task #11).
+- D9 ADR consolidation + curated architecture doc + status front-matter on every ADR.
+- Auto-recovery for wedged fleet WORKERS (control-plane recovery is now live in ADR-0084).
 
 ## How to read the columns
 Per unit, an honest status on six axes. `✅` done · `🟡` partial · `❌` missing/unknown · `—` n/a.
