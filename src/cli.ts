@@ -23,6 +23,7 @@ import type { ResumeCommand } from "./resume/command.ts";
 import { resumeSessionEntry } from "./resume/resume-session.ts";
 import { resumeClusterEntry, resumeMany, type ClusterResumeSummary } from "./resume/resume-cluster.ts";
 import { checkClusterGate } from "./cluster/manifest.ts";
+import { clusterInitCommand } from "./cluster/init-command.ts";
 import { resolveSelector, type SelectorKind } from "./resume/selector.ts";
 import { syncRoles } from "./roles/sync-roles.ts";
 import { backfillWorkUnits } from "./catalogue/backfill-work-units.ts";
@@ -67,6 +68,7 @@ Usage:
                                    --permission-mode <mode> · --print-id (reserve only, don't launch)
   ccs sync-tabs [<selector>|.|--all]   Paint cmux tabs from catalogue metadata (. | id | #pr | role | cluster | --all)
   ccs cluster <c> [--expand] [--json]   Cluster map: all members by role, live/lifecycle, work-unit (--json for agents)
+  ccs cluster init <name> [--role <r>]  Scaffold a minimal cluster (cluster.toml + CHANGELOG + one role)
   ccs catalogue export --cluster <c> [--role <r>] [--json]  ADR-D1 machine-readable projection (cluster engines: use this, not sqlite)
   ccs identity resolve --session <sid> [--json]  ADR-D1 resolve a session to its identity key + facts (single source of truth)
   ccs session-fields <sid> --json '{...}' [--sensor <name>]  ADR-0078 atomic multi-field write for cluster hot-path composers
@@ -230,6 +232,7 @@ export async function main(argv: string[]): Promise<number> {
       // one-time ADR-0057 migration: link existing anchored rows to a work-unit entity
       return backfillWorkUnits(args.slice(1));
     case "cluster":
+      if (args[1] === "init") return clusterInitCommand(args.slice(2));
       return clusterView(args[1], args.includes("--expand") || args.includes("--all"), args.includes("--json"));
     case "catalogue":
       // ADR-D1: `ccs catalogue export --cluster <c> ...` — the authorized read path for cluster
