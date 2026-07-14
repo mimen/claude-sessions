@@ -37,6 +37,7 @@ import { stateCommand } from "./state/state-command.ts";
 import { groupingCommand } from "./state/grouping-command.ts";
 import { catalogueExportCommand } from "./catalogue/export-command.ts";
 import { identityResolveCommand } from "./catalogue/identity-command.ts";
+import { sessionFieldsCommand } from "./catalogue/session-fields-command.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -68,6 +69,7 @@ Usage:
   ccs cluster <c> [--expand] [--json]   Cluster map: all members by role, live/lifecycle, work-unit (--json for agents)
   ccs catalogue export --cluster <c> [--role <r>] [--json]  ADR-D1 machine-readable projection (cluster engines: use this, not sqlite)
   ccs identity resolve --session <sid> [--json]  ADR-D1 resolve a session to its identity key + facts (single source of truth)
+  ccs session-fields <sid> --json '{...}' [--sensor <name>]  ADR-0078 atomic multi-field write for cluster hot-path composers
   ccs board <c> [--json|--text]         Cluster board: per-worker truth view composed by the cluster
   ccs board <c> --identity <key> [--text]   Read a single board row by identity
   ccs board <c> --session <sid> [--text]    Read a board row via session→identity resolve
@@ -236,6 +238,10 @@ export async function main(argv: string[]): Promise<number> {
     case "identity":
       // ADR-D1: `ccs identity resolve --session <sid>` — single source of truth for identity key.
       return identityResolveCommand(args.slice(1));
+    case "session-fields":
+      // ADR-0078 finish-line: atomic multi-field write for cluster hot-path composers.
+      // `ccs session-fields <sid> --json '{...}' [--sensor <name>]`
+      return sessionFieldsCommand(args.slice(1));
     case "board":
       return boardCommand(args.slice(1));
     case "resume-session":

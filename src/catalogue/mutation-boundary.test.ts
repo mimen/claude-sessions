@@ -30,6 +30,7 @@ const MUTATION_FNS = [
 const ALLOWLIST: Record<string, string> = {
   "catalogue/commands.ts": "the command layer — the canonical mutation door (validation + stamping)",
   "catalogue/command.ts": "the natural-language catalogue editor — a command surface (applies inferred mutations)",
+  "catalogue/session-fields-command.ts": "the atomic multi-field CLI (ADR-0078 finish-line) — a batch of the same setters commands.ts uses",
   "catalogue/backfill-work-units.ts": "one-time ADR-0057 migration command (setWorkUnitId)",
   "resume/new-session.ts": "the spawn primitive — writes a session's birth metadata (ADR-0065)",
   "roles/materialize.ts": "touches updated_at when materializing role config",
