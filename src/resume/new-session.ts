@@ -21,8 +21,10 @@ import {
   stampPrFacts,
   type RoleDef,
 } from "../catalogue/db.ts";
+import pkg from "../../package.json" with { type: "json" };
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import { resolveRole } from "../roles/role-files.ts";
+import { checkClusterGate } from "../cluster/manifest.ts";
 import { shellQuote } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
 import { execFileSync } from "node:child_process";
@@ -283,6 +285,22 @@ export function newSession(args: string[]): number {
   if (contractErr) {
     console.error(`ccs new-session: ${contractErr}`);
     return 2;
+  }
+
+  // ADR-D2 (bug B11, 2026-07-14): the inter-layer version gate now runs on every bring-online
+  // path, not just `ccs resume-cluster`. new-session used to spawn a worker into a cluster
+  // whose requires_ccs declared a MAJOR shortfall (config expected v2, tool at v0) — the sensor
+  // and catalogue-sync would then quietly disagree in unpredictable ways. Now the spawn refuses
+  // loudly. Only runs when a cluster is known (a standalone spawn has no gate to run).
+  if (opts.cluster) {
+    const gate = checkClusterGate(opts.cluster, pkg.version);
+    if (gate.status === "refuse") {
+      console.error(`ccs new-session: ${gate.message}. Nothing spawned.`);
+      return 2;
+    }
+    if (gate.status === "warn") {
+      console.error(`ccs new-session: ${gate.message}`);
+    }
   }
 
   const cwd = opts.cwd ?? process.cwd();

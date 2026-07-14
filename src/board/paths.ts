@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
 import { runtimeRoot } from "../paths.ts";
 import type { Board } from "./types.ts";
+import { parseBoard } from "./schema.ts";
 
 /** ~/.ccs/clusters/<cluster>/cluster/board.json */
 export function boardPath(cluster: string): string {
@@ -18,22 +19,23 @@ export function writeBoard(cluster: string, board: Board): void {
   renameSync(temp, path);
 }
 
-/** Read board.json; returns null if missing. Throws on parse errors (loud).
+/** Read board.json; returns null if missing. ADR-D2 (2026-07-14): the raw JSON is zod-validated
+ * against `BoardSchema` on every read (bug B11 fix), so a malformed row from a second, less-
+ * dogfooded composer fails LOUDLY at the boundary instead of crashing deep in `buildMaps()` or
+ * the TUI paint code with a cryptic error. A validation failure logs to stderr and returns null
+ * (fail-open: a bad board is treated as no board, not a poisoned board).
  *
- * Tolerates the ccs state envelope (ADR-0031: `{schemaVersion, updatedAt, source, data: <payload>}`)
- * some clusters wrap their writes in. If the top-level object has that shape, unwrap `data`;
- * otherwise return the raw parse. Keeps the tool contract shape (Board at top level) while
- * letting clusters that write via the envelope pattern keep working unchanged. */
+ * Tolerates the ADR-0031 state envelope (`{schemaVersion, updatedAt, source, data: <payload>}`)
+ * — parseBoard() unwraps it automatically.
+ */
 export function readBoard(cluster: string): Board | null {
   const path = boardPath(cluster);
   if (!existsSync(path)) return null;
   const raw = readFileSync(path, "utf8");
-  const parsed = JSON.parse(raw) as unknown;
-  if (parsed && typeof parsed === "object") {
-    const obj = parsed as Record<string, unknown>;
-    if ("schemaVersion" in obj && "data" in obj && obj.data && typeof obj.data === "object") {
-      return obj.data as Board;
-    }
+  const result = parseBoard(raw);
+  if (!result.ok) {
+    console.error(`ccs: cluster "${cluster}" ${result.error}`);
+    return null;
   }
-  return parsed as Board;
+  return result.value as unknown as Board;
 }

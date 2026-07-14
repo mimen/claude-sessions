@@ -8,7 +8,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { readClusterManifest } from "../cluster/manifest.ts";
+import pkg from "../../package.json" with { type: "json" };
+import { readClusterManifest, checkClusterGate } from "../cluster/manifest.ts";
 import { ccsConfigRoot } from "../roles/role-files.ts";
 import { boardIndex } from "../board/indexer.ts";
 import { runDefaultComposer } from "../board/default-composer.ts";
@@ -20,6 +21,18 @@ export function boardCommand(args: string[]): number {
   if (!cluster) {
     console.error("usage: ccs board <cluster> [--json|--text|--identity <key>|--session <sid>|--recompose <key>|--recompose-all]");
     return 1;
+  }
+  // ADR-D2 (bug B11): gate on every bring-online / mutation path. Read-only board commands
+  // ARE safe to skip the gate (a stale-tool board render is still useful info), but any
+  // --recompose that would trigger the cluster's composer runs the gate first so a
+  // config-tool mismatch fails loudly.
+  if (args.includes("--recompose") || args.includes("--recompose-all")) {
+    const gate = checkClusterGate(cluster, pkg.version);
+    if (gate.status === "refuse") {
+      console.error(`ccs board: ${gate.message}. Recompose refused.`);
+      return 2;
+    }
+    if (gate.status === "warn") console.error(`ccs board: ${gate.message}`);
   }
   if (args.includes("--identity")) {
     const identity = args[args.indexOf("--identity") + 1];
