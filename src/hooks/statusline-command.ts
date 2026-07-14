@@ -62,7 +62,23 @@ export async function statuslineCommand(): Promise<number> {
           // epics table — the cluster's sensor filled it; we read the generic slot.
           const g = row.cluster && row.groupingId ? getGrouping(row.cluster, row.groupingId) : null;
           const grouping = g ? { label: g.shortName ?? g.label, url: g.url } : null;
-          line = renderStatusline(row, { nowMs: Date.now(), grouping });
+          // Composed stage from board.json (ADR-0077): the composer applies cluster business rules
+          // (GitHub-wins etc.) the catalogue.stage column can't see. Board indexer is mtime-cached,
+          // so this is cheap. We read `data.stage` (cluster-private field) rather than the pill
+          // label so the dot vocabulary keys are stable stage slugs, not human labels. Falls back
+          // to row.stage when there's no board row.
+          let composedStage: string | null = null;
+          if (row.cluster) {
+            try {
+              const { boardIndex } = await import("../board/indexer.ts");
+              const hit = boardIndex(row.cluster).bySession(payload.session_id);
+              const dataStage = hit?.row.data?.["stage"];
+              if (typeof dataStage === "string") composedStage = dataStage;
+            } catch {
+              // fall through — row.stage still renders via renderStatusline's default path
+            }
+          }
+          line = renderStatusline(row, { nowMs: Date.now(), grouping, composedStage });
         }
       } finally {
         db.close();

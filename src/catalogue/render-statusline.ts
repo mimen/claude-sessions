@@ -48,6 +48,10 @@ export interface StatuslineCtx {
   nowMs: number;
   /** Override the staleness window (ms). */
   stalenessMs?: number;
+  /** The composed stage label from board.json (ADR-0077), when the caller resolved it. When
+   * present it wins over the row's raw `stage` column — the composer applies business rules
+   * (GitHub-wins) the catalogue alone can't see. Absent = fall back to row.stage. */
+  composedStage?: string | null;
 }
 
 /** True if the row's phase is too old to assert as current (ADR-0031). */
@@ -84,7 +88,10 @@ export function gusWorkUrl(w: string, sfId: string | null | undefined): string {
  */
 export function renderStatusline(row: CatalogueRow, ctx: StatuslineCtx): string {
   const stale = phaseIsStale(row, ctx.nowMs, ctx.stalenessMs ?? DEFAULT_STALENESS_MS);
-  const stage = stale ? "unknown" : (row.stage ?? "").toLowerCase();
+  // Composed stage (ADR-0077) wins over row.stage when the caller supplied one — reflects the
+  // GitHub-wins rule + any cluster overlays that the raw catalogue column doesn't see.
+  const source = ctx.composedStage ?? row.stage ?? "";
+  const stage = stale ? "unknown" : source.toLowerCase();
   const dot = STAGE_DOT[stage] ?? "";
 
   const url = row.prNumber && row.prRepo ? `https://github.com/${row.prRepo}/pull/${row.prNumber}` : "";
