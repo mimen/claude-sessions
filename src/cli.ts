@@ -57,7 +57,8 @@ Usage:
   ccs set-cluster [<id>|.] <slug> [--off]   Set/clear the cluster grouping
   ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab (worker → summary pill)
   ccs name [<id>|.] "<short name>" [--off]   Set the session's short display name (<=35ch, aim to use most of it) — the tab title after "#<PR> "
-  ccs stage [<id>|.] <value> [--off]   Generic stage setter (cluster defines + the tool enforces the vocabulary)
+  ccs stage [<id>|.]                    Read cached stage (D5: cache of the board's data.stage; workers do not write)
+  ccs stage [<id>|.] <value> --sensor <name>   Sensor-only write (rejects worker writes)
   ccs meta [<id>|.] <key> <value> [--off]   Set a key in the session's generic meta map (ADR-0060/0064)
   ccs new-session [flags]   Mint a session id, tag its metadata AT BIRTH, then launch \`claude --session-id\`
                             flags: --cluster --role --kind loop|session --project --key
@@ -156,8 +157,14 @@ export async function main(argv: string[]): Promise<number> {
     case "name":
       // name takes a full short LINE (the display name), so join all non-flag args.
       return name(args[1], args.slice(2).filter((a) => !a.startsWith("--")).join(" ") || undefined, args.slice(2).filter((a) => a.startsWith("--")));
-    case "stage":
-      return stage(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "stage": {
+      // D5: --sensor <name> is a flag-value pair — pass the whole arg tail so stage() can find
+      // both the flag AND its value. The value token doesn't start with -- so it wouldn't survive
+      // the naive "flags = args starting with --" filter used elsewhere.
+      const tail = args.slice(2);
+      const value = tail.find((a, i) => !a.startsWith("--") && tail[i - 1] !== "--sensor");
+      return stage(args[1], value, tail);
+    }
     case "meta-set": {
       const pos = args.slice(2).filter((a) => !a.startsWith("--"));
       return metaSet(args[1], pos[0], pos[1], args.slice(2).filter((a) => a.startsWith("--")));

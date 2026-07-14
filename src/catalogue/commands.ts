@@ -224,27 +224,66 @@ export function name(sessionArg: string | undefined, value: string | undefined, 
 
 
 /**
- * `ccs stage [<id>|.] <value> | --off` — the GENERIC stage setter (ADR-0064). The tool stores the
- * string + enforces the role's declared schema (vocabulary + monotonic); the cluster OWNS the
- * vocabulary. This is THE stage primitive — pr-watch's old `ccs ready` wrapper was evicted (a
- * worker now runs `ccs stage . milad-review` directly). Vocabulary-agnostic by design (ADR-0061).
+ * `ccs stage` — the GENERIC stage setter. D5 (2026-07-14): after the phase-first board
+ * (ADR-0077) made the cluster's composed board the source of stage truth, the catalogue.stage
+ * column is a CACHE the sensor writes for rendering — not part of the state machine. This
+ * command therefore refuses writes without `--sensor <source>`, making the enforced discipline
+ * "stage is engine-computed, not self-declared" (the pr-watch constitution's "Lifecycle is
+ * control's, not yours" rule) into a mechanical guarantee.
+ *
+ * The old "worker runs ccs stage . milad-review" path is dead — a Milad approval is expressed
+ * via `meta.milad_review = "approved"` (which the sensor observes and latches into the board's
+ * effective stage). Workers never write stage directly.
+ *
+ * Usage:
+ *   ccs stage [<id>|.]                          # read (query-only, no flag)
+ *   ccs stage [<id>|.] <value> --sensor <name>  # sensor write (catalogue_sync, migrations)
+ *   ccs stage [<id>|.] --off --sensor <name>    # sensor clear
+ *
+ * A worker-side `ccs stage . <value>` returns exit 2 with a redirect message.
  */
 export function stage(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
   const off = flags.includes("--off");
   const v = value?.trim();
+  const sensorIdx = flags.indexOf("--sensor");
+  const sensor = sensorIdx >= 0 ? flags[sensorIdx + 1] : null;
+
+  // Read mode: no value + no --off + no --sensor → print the current cached stage. Useful for
+  // scripts + humans that just want to know "what does the catalogue think this session is at?".
+  if (!off && !v && !sensor) {
+    ensureDataDir();
+    const db = openCatalogue(CATALOGUE_PATH());
+    try {
+      const row = getRow(db, id);
+      console.log(row?.stage ?? "");
+    } finally {
+      db.close();
+    }
+    return 0;
+  }
+
+  // Write mode: --sensor is required. Workers/humans can no longer bump stage.
+  if (!sensor) {
+    console.error(
+      "ccs stage: writes require --sensor <name> (D5: stage is engine-computed).\n" +
+      "  Workers do not set their own stage. The board's data.stage (composed by the cluster) is\n" +
+      "  the source of truth; the catalogue column is a sensor-written render cache.\n" +
+      "  For a Milad approval, set meta.milad_review=approved via the cluster's approve flow.",
+    );
+    return 2;
+  }
   if (!off && !v) {
-    console.error("usage: ccs stage [<id>|.] <value> | --off");
+    console.error("usage: ccs stage [<id>|.] <value> --sensor <name>  (or --off --sensor <name>)");
     return 1;
   }
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
     if (!off) {
-      // ADR-0064: validate against the role-declared stage schema (vocabulary + monotonic). The
-      // cluster owns the vocabulary (role.toml); the tool enforces it. Unconstrained if the role
-      // declares no [stage] block or isn't resolvable.
+      // ADR-0064 vocabulary/monotonic validation still applies to sensor writes — a bogus value
+      // from a buggy sensor should fail loud, not silently poison the cache.
       const row = getRow(db, id);
       const schema = row?.role ? resolveRole(row.role)?.stageSchema ?? null : null;
       const err = validateStageTransition(schema, row?.stage ?? null, v!);
@@ -254,7 +293,11 @@ export function stage(sessionArg: string | undefined, value: string | undefined,
       }
     }
     setStage(db, id, off ? null : v!, now());
-    console.log(off ? `cleared stage on ${id.slice(0, 8)}…` : `stage ${v} → ${id.slice(0, 8)}…`);
+    console.log(
+      off
+        ? `cleared stage on ${id.slice(0, 8)}… (sensor=${sensor})`
+        : `stage ${v} → ${id.slice(0, 8)}… (sensor=${sensor})`,
+    );
   } finally {
     db.close();
   }
