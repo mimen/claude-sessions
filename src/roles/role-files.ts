@@ -190,7 +190,11 @@ function _resolveRole(role: string, cluster: string | null | undefined, configRo
   return readRoleDir(pick.dir, role, pick.cluster);
 }
 
-/** Every role across every cluster + standalone, as a name→RoleDef map. */
+/** Every role across every cluster + standalone, as a name→RoleDef map. NOTE (ADR-D3): keyed by
+ * role NAME alone, so two clusters with a role of the same name collide — the alphabetical-first
+ * cluster's role wins. Callers that need the full list without deduplication use `allRolesFlat`
+ * below. The name-keyed variant is preserved for callers (tui/theme, sync-roles) that only need
+ * one entry per name and can tolerate the collision on the current single-cluster machine. */
 export function allRolesFromFiles(configRoot = ccsConfigRoot()): Map<string, RoleDef> {
   const out = new Map<string, RoleDef>();
   const clustersRoot = join(configRoot, "clusters");
@@ -211,6 +215,35 @@ export function allRolesFromFiles(configRoot = ccsConfigRoot()): Map<string, Rol
       if (!isDir(join(standaloneRoot, role)) || out.has(role)) continue;
       const def = readRoleDir(join(standaloneRoot, role), role, null);
       if (def) out.set(role, def);
+    }
+  }
+  return out;
+}
+
+/** Every role across every cluster + standalone, as a flat list — NO deduplication by name.
+ * Two clusters both defining a role named `control` appear as TWO entries here. This is the
+ * correct shape for `ccs roles ls` under ADR-D3 (role identity is (cluster, role), not name).
+ * Order: cluster roles first (alphabetical by cluster then role), then standalone. */
+export function allRolesFlat(configRoot = ccsConfigRoot()): RoleDef[] {
+  const out: RoleDef[] = [];
+  const clustersRoot = join(configRoot, "clusters");
+  if (existsSync(clustersRoot)) {
+    for (const cluster of dirNames(clustersRoot)) {
+      const rolesDir = join(clustersRoot, cluster, "roles");
+      if (!existsSync(rolesDir)) continue;
+      for (const role of dirNames(rolesDir)) {
+        if (!isDir(join(rolesDir, role))) continue;
+        const def = readRoleDir(join(rolesDir, role), role, cluster);
+        if (def) out.push(def);
+      }
+    }
+  }
+  const standaloneRoot = join(configRoot, "roles");
+  if (existsSync(standaloneRoot)) {
+    for (const role of dirNames(standaloneRoot)) {
+      if (!isDir(join(standaloneRoot, role))) continue;
+      const def = readRoleDir(join(standaloneRoot, role), role, null);
+      if (def) out.push(def);
     }
   }
   return out;

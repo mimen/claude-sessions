@@ -7,7 +7,7 @@
  */
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { ccsConfigRoot, allRolesFromFiles, rolesForClusterFromFiles, resolveRole } from "../roles/role-files.ts";
+import { ccsConfigRoot, allRolesFlat, rolesForClusterFromFiles, resolveRole } from "../roles/role-files.ts";
 
 /** Read `--flag value`; undefined if absent or followed by another flag. */
 function flag(args: string[], name: string): string | undefined {
@@ -30,7 +30,10 @@ export function rolesCommand(args: string[]): number {
     case "ls":
     case "list": {
       const cluster = flag(args, "--cluster");
-      const roles = cluster ? rolesForClusterFromFiles(cluster) : [...allRolesFromFiles().values()];
+      // ADR-D3 (2026-07-14): `ccs roles ls` lists roles by (cluster, role), so two clusters
+      // with a role of the same name both appear. The old allRolesFromFiles() (name-keyed
+      // map) silently dropped the second one — a display bug the toy-second cluster surfaced.
+      const roles = cluster ? rolesForClusterFromFiles(cluster) : allRolesFlat();
       if (roles.length === 0) {
         console.log("no roles defined. Add one with `ccs roles upsert <role> [--cluster …] --kind loop|session`");
         return 0;
