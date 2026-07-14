@@ -311,3 +311,13 @@ test("D1: explicit setKey remains a hard override (freeform anchor)", () => {
   setKey(db, "s1", "custom-key-xyz", NOW);
   expect(getRow(db, "s1")!.key).toBe("custom-key-xyz");
 });
+
+test("B15: schema postcondition passes on a fresh migrated DB", () => {
+  // openCatalogue runs migrations + postcondition; a clean fresh DB must satisfy it.
+  const db = openCatalogue(":memory:");
+  // If we got a db back, the postcondition passed. Sanity-check a required column exists.
+  const cols = db.query("PRAGMA table_info(catalogue)").all() as { name: string }[];
+  const names = new Set(cols.map((c) => c.name));
+  expect(names.has("cluster")).toBe(true);
+  expect(names.has("key")).toBe(true);
+});

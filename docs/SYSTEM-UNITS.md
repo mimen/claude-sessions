@@ -250,16 +250,18 @@ Ground truth: extracted from `src/` on 2026-07-11. `⚠` marks a known issue.
 - **Code:** `hooks/register-command.ts`, `hooks/start-actions.ts`, `hooks/worker-stop-command.ts`.
 - **⚠ Status:** SessionStart & Stop are double-registered in `settings.json` → every hook fires 2× (P0).
 
-### S24 · phase model (stage × activity)  ·  [U28, P0]
-- **Definition:** a PR worker's status = a monotonic **stage** (`building→milad-review→in-review→approved→
-  merged`, engine-latched via **buildComplete**) crossed with a transient **activity** (`working`/
-  `needs-you`/`fixing`); surfaced as the **pill** (S16) and advanced by `ccs ready` / `ccs approve` /
-  `ccs activity`.
-- **Inputs:** worker self-reports (**activity**), engine sensing (**stage**, `fixing`), Milad (**ready**/
-  **approve**).
-- **Outputs:** **stage**/**activity**/**miladReview** on the **CatalogueRow**.
-- **Composes:** S6 (the columns), S16 (render).
-- **⚠ Status:** built, never verified live on a running worker (P0 flow proof).
+### S24 · phase model (engine-composed stage)  ·  [U28, P0]
+- **Definition:** a PR worker's stage is now 100% engine-composed on the board's `data.stage`
+  (ADR-0077 phase-first board + ADR-0079 D5): `building → milad-review → in-review → approved →
+  merged`, sensed from GitHub state + CI + `meta.milad_review`. The catalogue.stage column is a
+  sensor-written render cache (ADR-0079); workers never write stage. `activity` was retired in
+  v30 (2026-07-13). The one worker-authored escalation path is `result.decisionsNeeded`, which
+  the sensor's turn-end event surfaces via `drain_events.py`.
+- **Inputs:** engine sensing (GitHub, CI, `meta.milad_review`), Milad (`/prwatch:approve`).
+- **Outputs:** **data.stage** on the composed row; **catalogue.stage** cached from it.
+- **Composes:** S6 (the column, now a cache), S16 (render).
+- **Status:** built. Verified end-to-end 2026-07-14: 13 rows composed with a stage, 24
+  catalogue rows populated by `catalogue_sync`.
 
 ### S25 · the roles (control / concierge / slack-scout / eval / pr-agent / designer)  ·  [U22–U27]
 - **Definition:** the six **role**s of the **pr-watch** **cluster**, each a **loop** or **session** whose

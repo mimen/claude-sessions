@@ -85,7 +85,51 @@ export function openCatalogue(dbPath: string): Database {
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA busy_timeout = 5000;");
   migrate(db);
+  // ADR-D4 / B15 (2026-07-14): after migrations claim to have completed, sanity-check the
+  // schema shape before returning the db to callers. If a migration was presence-driven and
+  // its guard was false (e.g. both an old + new column present because the DB was
+  // hand-patched), we could stamp `user_version` current with a wrong shape. Catch it here.
+  const post = validateSchemaPostcondition(db);
+  if (!post.ok) {
+    // Loud + fatal: a corrupt schema surfaced this way is worse to hide. The caller (ccs cli)
+    // exits, the operator investigates. Fresh-DB path is guaranteed to pass because the v1
+    // migration creates every required column.
+    throw new Error(`catalogue schema postcondition failed: ${post.error}`);
+  }
   return db;
+}
+
+/** After migrate() has stamped user_version=CATALOGUE_VERSION, verify the actual schema
+ * matches. Presence-driven migrations can skip an ALTER when a hand-patched DB already has
+ * both old + new column names — the version stamp then lies. This function checks:
+ *   - required columns exist
+ *   - no known legacy column is present alongside its replacement (would indicate a skipped
+ *     rename)
+ * Returns ok on success or { ok: false, error } on any deviation. */
+function validateSchemaPostcondition(db: Database): { ok: true } | { ok: false; error: string } {
+  const required = [
+    "session_id", "role", "cluster", "key", "stage", "meta",
+    "pr_number", "pr_repo", "gus_work", "work_unit_id", "grouping_id",
+    "updated_at",
+  ];
+  const forbidden_pairs = [
+    // ADR-0059 renamed system → cluster; both should never coexist.
+    ["system", "cluster"],
+    // ADR-0070 renamed epic_id → grouping_id; both should never coexist.
+    ["epic_id", "grouping_id"],
+  ] as const;
+  const cols = (db.query("PRAGMA table_info(catalogue)").all() as { name: string }[]).map((c) => c.name);
+  const present = new Set(cols);
+  const missing = required.filter((c) => !present.has(c));
+  if (missing.length > 0) {
+    return { ok: false, error: `catalogue missing required column(s): ${missing.join(", ")}` };
+  }
+  for (const [legacy, current] of forbidden_pairs) {
+    if (present.has(legacy) && present.has(current)) {
+      return { ok: false, error: `catalogue has BOTH legacy "${legacy}" and current "${current}" — a rename migration was skipped` };
+    }
+  }
+  return { ok: true };
 }
 
 function migrate(db: Database): void {
