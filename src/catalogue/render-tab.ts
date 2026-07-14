@@ -68,14 +68,30 @@ export interface RenderContext {
 
 export function renderTab(row: CatalogueRow, kind: Kind, ctx: RenderContext = {}): TabRenderOps {
   const base = kind === "loop" ? renderLoop(row) : renderSession(row, ctx);
-  // A freeform status the session wrote about itself (ccs status) is the FRESHEST, human-authored
-  // signal — it takes the description slot when present (both loops and workers). Cleared → the
-  // computed description shows. Workers keep this on the description (not a pill) so it doesn't eat
-  // into cmux's ~3-pill budget; the epic + state pills carry the structured signals.
+  // Description preference (ADR-0077 step 6):
+  //   1. board.description — the composer's composed summary. Composers that want the freshest
+  //      worker-authored status_line simply include it in their own description output (pr-watch
+  //      does; see compose_board.py::compose_description).
+  //   2. row.statusLine — legacy fallback for clusters without a board composer, and for loop
+  //      sessions whose composer hasn't emitted a description yet.
+  const boardDesc = descriptionFromBoard(row);
+  if (boardDesc) return { ...base, description: boardDesc };
   if (row.statusLine && row.statusLine.trim()) {
     return { ...base, description: row.statusLine.trim() };
   }
   return base;
+}
+
+/** The composed description string from board.json, or null when no board / no description. */
+function descriptionFromBoard(row: CatalogueRow): string | null {
+  if (!row.cluster) return null;
+  try {
+    const hit = boardIndex(row.cluster).bySession(row.sessionId);
+    const desc = hit?.row.description;
+    return desc && desc.trim() ? desc.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
