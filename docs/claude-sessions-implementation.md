@@ -10,7 +10,7 @@
 **Started**: 2026-05-29
 **Status**: Planning Complete
 
-> Read `CONTEXT.md` (glossary) and `docs/adr/0001-codex-for-title-generation.md` before
+> Read `CONTEXT.md` (glossary) and `docs/adr/0000-codex-for-title-generation.md` before
 > writing code. The glossary terms (Session, Store, Host, Index, Title, Project, Resume,
 > Resume Target, Workspace) are canonical — use them exactly in code and comments.
 
@@ -456,7 +456,7 @@ expand, ←/h collapse; subagent rows guarded as non-resumable. typecheck clean,
 ## Key Technical Decisions
 
 ### Title generation via Codex, not Claude
-See `docs/adr/0001-codex-for-title-generation.md`. Avoids imminent Claude API credit cost; runs hermetically; behind a `Titler` interface for easy swap.
+See `docs/adr/0000-codex-for-title-generation.md`. Avoids imminent Claude API credit cost; runs hermetically; behind a `Titler` interface for easy swap.
 
 ### SQLite Index as a pure, rebuildable cache
 **Problem**: Re-reading 298 MB of JSONL every launch is too slow; the catalog phase needs somewhere to store Titles/tags.
@@ -532,7 +532,7 @@ Verified on 2026-05-29 (claude 2.1.156, codex-cli 0.130.0, cmux 0.64.3):
 
 **Key Files**:
 - `CONTEXT.md` — canonical glossary
-- `docs/adr/0001-codex-for-title-generation.md` — the Codex decision
+- `docs/adr/0000-codex-for-title-generation.md` — the Codex decision
 
 **Commands**:
 ```bash

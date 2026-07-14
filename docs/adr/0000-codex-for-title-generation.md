@@ -1,5 +1,11 @@
 # Use the Codex CLI (OpenAI) to generate Session titles (gap-fill only)
 
+**Renumbered 2026-07-14:** originally filed as ADR-0001, coexisting with the
+"split orchestrator into control + interaction planes" ADR-0001 (both dated
+before the design-arc renumber). This one was the older Milestone-2 titler
+decision; renumbered to 0000 (pre-arc / historical) to keep 0001 unique.
+Content and status unchanged.
+
 **Amended 2026-05-29 during Milestone 2:** Claude Code 2.1.156 already writes native
 `ai-title` lines into Session files (~59/172 Sessions on this Host). Native titles are
 therefore the *primary* source and cost nothing. Title resolution is:

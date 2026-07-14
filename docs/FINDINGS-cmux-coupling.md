@@ -50,12 +50,12 @@ Current behavior: cmux <0.64 → no store → "nothing open"; cmux 0.65 schema c
 - Timeout inventory: tree 2s, select/focus 3s, rename 4s, workspace-action/set-status 4s, send/send-key 3s,
   list-workspaces 2s. **spawn-cmux.ts:41 Bun.spawnSync = NO explicit timeout (Bun default).**
 
-## Findings ranked
-- **P0-1 No cmux version guard** → add cmuxVersion() probe (live.ts:58); require >=0.64, warn >=1.0. [→ task #6]
-- **P0-2 Hook store path hardcoded** → add CMUX_HOOK_STORE_PATH env override (live.ts:24). [→ #6/#9]
-- **P0-3 new-workspace ref via bare regex** → JSON-first parse, regex fallback; request upstream --json. [→ #9]
-- **P0-4 spawn-cmux missing timeout** → add timeout:10000. Small, do early. [→ #9]
-- **P1-5 Retire legacy open-state.ts title-join fail-OPEN path** → migrate to surface-UUID bridge. [→ #5/#9]
+## Findings ranked (status as of 2026-07-14)
+- **P0-1 cmux version guard** — ✅ LANDED. `cmuxVersion()` probe + `liveBridge` fail-closed on <0.64.0, warn on ≥1.0.0. `live.ts:100–127`, `version-guard.test.ts`.
+- **P0-2 Hook store path override** — ✅ LANDED. `CMUX_HOOK_STORE_PATH` env override at `live.ts:24–26`.
+- **P0-3 new-workspace ref parse** — ✅ LANDED. JSON-first parse with regex fallback at `spawn-cmux.ts:55–65`.
+- **P0-4 spawn-cmux timeout** — ✅ LANDED. `timeout: 10000` at `spawn-cmux.ts:44`.
+- **P1-5 Retire legacy open-state.ts title-join fail-OPEN path** — ✅ LANDED. File deleted; callers migrated to the surface-UUID bridge (`cmux/liveness.ts`).
 - **P1-6 list-workspaces 2 schema variants** fragile → retire with legacy path. [→ #13]
 - **P2-7 Tab-paint ops no retry** → 2×/500ms backoff. [→ #9]
 - **P2-8 wakeSurface no delivery confirm** (durable inbox covers). [→ #9]
