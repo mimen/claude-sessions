@@ -139,16 +139,16 @@
     <span class="pill p1">P1 needed for confidence</span>
     <span class="pill p2">P2 polish</span>
   </div>
-  <div class="meta">cmux 0.64.17 · bun test 414 pass / 0 fail · tsc clean · nothing committed this arc</div>
+  <div class="meta">cmux 0.64.17 · bun test 598 pass / 0 fail · tsc clean · phase-first board landed (ADR-0077)</div>
 </div>
 
 <div class="grid">
-  <div class="stat blu"><div class="n">32</div><div class="l">system units mapped</div></div>
-  <div class="stat red"><div class="n">7</div><div class="l">P0 correctness issues</div></div>
+  <div class="stat blu"><div class="n">41</div><div class="l">system units mapped</div></div>
+  <div class="stat grn"><div class="n">4</div><div class="l">P0 bugs fixed</div></div>
   <div class="stat yel"><div class="n">8</div><div class="l">parallel audits run</div></div>
   <div class="stat"><div class="n">84</div><div class="l">dead exports found</div></div>
   <div class="stat"><div class="n">67+</div><div class="l">silent catch blocks</div></div>
-  <div class="stat grn"><div class="n">414</div><div class="l">tests passing</div></div>
+  <div class="stat grn"><div class="n">598</div><div class="l">tests passing</div></div>
 </div>
 
 <h3>What this is</h3>
@@ -201,11 +201,28 @@ bottom sequences it.</p>
 <p><b>The good news:</b> zero dead files, near-zero commented-out code, strict typing, the cmux bridge is a
 model boundary, and the hooks pass their own linter. This is a maturity/hardening pass, not a rescue.</p>
 </div>
+
+<h3>Since last review: phase-first board + related fixes (2026-07-13)</h3>
+<div class="tldr">
+<p><b>Four significant bugs fixed</b> (27fe540, c00914b, b162915, 8451e51):</p>
+<ol>
+<li><b><code>ccs meta</code> silent no-op</b> — the dispatcher called READ unconditionally, dropping <code>&lt;key&gt; &lt;value&gt;</code> args with no error. Every <code>ccs meta . milad_review approved</code> silently wrote nothing. (27fe540)</li>
+<li><b>Dead-pid phantom liveness</b> — the bridge counted a surface as live even when its claude process was dead (e.g. after a cmux restart). Control stayed "live" with a dead proc, so resume-cluster skipped spawning it. (c00914b)</li>
+<li><b>Pin-by-ref regression on resume</b> — freshly-spawned sessions looked themselves up by-session to get the workspace ref, but cmux hasn't bound surface to sessionId yet (binding lands on the child's SessionStart hook). Pin was silently skipped for all just-spawned core roles. (b162915)</li>
+<li><b>Duplicate cmux embodiments</b> — twin claude procs for one session (stale hook-store byMap, reattach blind spots). Added <code>ccs reap-duplicates</code> to detect + close duplicates by ranking CPU time. (8451e51)</li>
+</ol>
+
+<p><b>Phase-first board publish surface (ADR-0077)</b> — 7-step migration, steps 1-6 landed. The tool now provides the render schema (<code>board.json</code> with <code>pills[]</code>, <code>alerts[]</code>, <code>description</code>, <code>awaitingFrom[]</code>), and every render surface (cmux tab, statusline, TUI) reads the cluster composer's output rather than baking pr-watch vocabulary into ccs. Step 7 (deleting <code>catalogue.stage</code>) intentionally NOT done — the column still has legitimate readers as INPUT to composers and as a write target for commands.</p>
+
+<p><b>Tool-vs-cluster split complete</b> — pr-watch vocabulary is gone from ccs code. <code>STAGE_PILL</code> and <code>STAGE_DOT</code> constants deleted. The default composer emits no synthetic pill. Three surfaces (cmux tab, statusline, TUI stage column) all render whatever the cluster's board composer publishes. Rows key on <b>identity</b> (<code>cluster:role:work-unit</code>), not sessionId, so twins share one row and can't diverge.</p>
+
+<p><b>Test posture:</b> 598 tests, 0 fail after all changes. New modules tested: <code>board/indexer</code> (mtime-cached lookup), <code>board/default-composer</code> (golden fixture), <code>cmux/bridge</code> (dead-pid predicate + stale-byMap handling), <code>resume/resume-cluster</code> (pin-by-ref contract), <code>cmux/reap</code> (CPU ranking + tie handling), <code>cli-meta-args</code> (shape classifier for meta read/set/clear).</p>
+</div>
 </section>
 
 <!-- ============ MATRIX ============ -->
 <section id="matrix">
-<h2>Burn-down matrix — 32 system units</h2>
+<h2>Burn-down matrix — 41 system units</h2>
 <p class="lead">Each row is one piece of the system. The six columns each ask one yes/no question about how
 production-ready that piece is. Read a row left-to-right: the more <span class="ax ok">✓</span> and the
 fewer <span class="ax no">✗</span>, the closer to production.</p>
@@ -257,18 +274,28 @@ fewer <span class="ax no">✗</span>, the closer to production.</p>
 <tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U18 Inference engine</td><td>src/inference/ (new)</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
 <tr class="unit" data-layer="platform" data-pri="p1" data-gap="1"><td>U19 CLI surface / ergonomics</td><td>src/cli.ts</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td><span class="pill p1">P1</span></td></tr>
 <tr class="unit" data-layer="platform" data-pri="p2" data-gap="1"><td>U20 TUI</td><td>src/tui/</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax no">✗</td><td><span class="pill p2">P2</span></td></tr>
-<tr class="unit" data-layer="platform" data-pri="p0" data-gap="1"><td>U21 cmux integration surface</td><td>cmux/, open-state.ts</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax pt">◑</td><td><span class="pill p0">P0</span></td></tr>
-<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U22 control role</td><td>loop: sense/route/advance</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
-<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U23 concierge role</td><td>liaison to Milad</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
-<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U24 slack-scout role</td><td>Slack sensor</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
-<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U25 eval role</td><td>outside observer</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
-<tr class="unit" data-layer="cluster" data-pri="p0" data-gap="1"><td>U26 pr-agent role (worker)</td><td>owns ONE PR</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p0">P0</span></td></tr>
-<tr class="unit" data-layer="cluster" data-pri="p2" data-gap="0"><td>U27 designer role</td><td>this role</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax na">—</td><td class="ax na">—</td><td class="ax na">—</td><td class="ax pt">◑</td><td><span class="pill p2">P2</span></td></tr>
-<tr class="unit" data-layer="cluster" data-pri="p0" data-gap="1"><td>U28 Phase state machine</td><td>stage × activity</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax ok">✓</td><td><span class="pill p0">P0</span></td></tr>
-<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U29 The gate</td><td>internal+Milad before public</td><td class="ax pt">◑</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
-<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U30 Lifecycle marks</td><td>ccs mark (control-owned)</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
-<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U31 Board/gate/pending sensing</td><td>engine + !-injection</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
-<tr class="unit" data-layer="cluster" data-pri="p2" data-gap="1"><td>U32 catalogue_sync engine</td><td>catalogue_sync.py</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p2">P2</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="0"><td>U21 Board types</td><td>board/types.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="0"><td>U22 Board paths + I/O</td><td>board/paths.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="0"><td>U23 Board indexer</td><td>board/indexer.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="0"><td>U24 Default composer</td><td>board/default-composer.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="0"><td>U25 Recompose freshness</td><td>board/recompose.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="0"><td>U26 Board CLI ops</td><td>cli.ts board dispatch</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="0"><td>U27 render-tab (pills from board)</td><td>render-tab.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="0"><td>U28 statusline (pill color)</td><td>render-statusline.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="0"><td>U29 TUI stage (from board)</td><td>tui/App.tsx</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p1" data-gap="0"><td>U30 reap-duplicates</td><td>cmux/reap.ts</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="platform" data-pri="p0" data-gap="1"><td>U31 cmux integration surface</td><td>cmux/, open-state.ts</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax no">✗</td><td class="ax pt">◑</td><td><span class="pill p0">P0</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U32 control role</td><td>loop: sense/route/advance</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U33 concierge role</td><td>liaison to Milad</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U34 slack-scout role</td><td>Slack sensor</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U35 eval role</td><td>outside observer</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p0" data-gap="1"><td>U36 pr-agent role (worker)</td><td>owns ONE PR</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p0">P0</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p2" data-gap="0"><td>U37 designer role</td><td>this role</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax na">—</td><td class="ax na">—</td><td class="ax na">—</td><td class="ax pt">◑</td><td><span class="pill p2">P2</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p0" data-gap="1"><td>U38 Phase state machine</td><td>stage × activity</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax ok">✓</td><td><span class="pill p0">P0</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U39 The gate</td><td>internal+Milad before public</td><td class="ax pt">◑</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U40 Lifecycle marks</td><td>ccs mark (control-owned)</td><td class="ax ok">✓</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax ok">✓</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p1" data-gap="1"><td>U41 Board/gate/pending sensing</td><td>engine + !-injection</td><td class="ax ok">✓</td><td class="ax na">—</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p1">P1</span></td></tr>
+<tr class="unit" data-layer="cluster" data-pri="p2" data-gap="1"><td>U42 catalogue_sync engine</td><td>catalogue_sync.py</td><td class="ax ok">✓</td><td class="ax no">✗</td><td class="ax no">✗</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td class="ax pt">◑</td><td><span class="pill p2">P2</span></td></tr>
 </tbody>
 </table>
 <p class="legend">Full per-unit TODOs + evidence in <code>docs/PRODUCTION-READINESS-CHECKLIST.md</code>.</p>
@@ -336,6 +363,17 @@ it indexes.</div>
 <div class="gdef"><p><span class="gterm">tab</span> — a workspace's rendered cmux tab <code>{title, description, color, statusPill}</code>, synced from the row each turn by <b>sync-tabs</b>. &nbsp; <span class="gterm">pill</span> — the tab/statusline status indicator. &nbsp; <span class="gterm">statusline</span> — the single rendered status line.</p>
 <p><span class="gterm">stage</span> — a PR's monotonic pipeline position (<code>building→milad-review→in-review→approved→merged</code>). &nbsp; <span class="gterm">activity</span> — the transient state within a stage (<code>working/needs-you/fixing</code>). <i>(these replaced the single <b>phase</b> column)</i> &nbsp; <span class="gterm">buildComplete</span> — the latch sealing the build stage once milad-review is hit.</p>
 <p><span class="gterm">gate</span> — the invariant that a PR clears internal + Milad review before public review. &nbsp; <span class="gterm">miladReview</span> — Milad's +1 verdict the gate reads. &nbsp; <span class="gterm">sense</span> — the engine step writing git/GitHub/Slack facts to cluster state. &nbsp; <span class="gterm">mark</span> — the control-owned completed/archived lifecycle transition.</p></div>
+
+<h3>Board publish surface (ADR-0077)</h3>
+<div class="gdef"><p><span class="gterm">board.json</span> — the cluster-provided publish surface: identity-keyed rows with render primitives (<b>pills</b>, <b>alerts</b>, <b>description</b>, <b>awaitingFrom</b>) plus opaque <code>data</code>. Tool defines schema, cluster owns vocabulary.</p>
+<p><span class="gterm">BoardRow</span> — one identity's composed state: <code>{identity, workUnit, sessions[], pills[], description, alerts[], awaitingFrom[], lastComposed, data}</code>. Keyed on <b>identity</b>, not sessionId, so twins share one row.</p>
+<p><span class="gterm">Pill</span> — a render primitive: <code>{key, label, icon?, color?, priority?}</code>. The tool paints as-is; cluster owns the label/color vocabulary (e.g. "in review", "#bf5af2").</p>
+<p><span class="gterm">Alert</span> — a named sensor-backed signal: <code>{name, severity, reason, owner, sinceTick?}</code>. Cluster emits; tool renders (as badge/pill); neither interprets the other's vocabulary.</p>
+<p><span class="gterm">awaitingFrom</span> — multiset of actor labels (cluster vocabulary, e.g. ["reviewers", "worker"]) — who must act next. Tool renders as text; doesn't parse.</p>
+<p><span class="gterm">identity</span> — the durable axis: <code>cluster:role:work-unit</code>. Board rows key on this; sessions resolve to it; survives respawn/twin churn.</p>
+<p><span class="gterm">freshness contract</span> — writes that change composed state trigger synchronous <b>recompose</b> before returning, so consumers see new state immediately. Enforced by <code>recomposeForSession</code> calls after meta-set / stage-set / sync-tabs.</p>
+<p><span class="gterm">pidAlive</span> — liveness predicate: <code>process.kill(pid, 0)</code> honest check. Filters hook-store bindings so dead-pid phantoms don't count as live.</p>
+<p><span class="gterm">reap-duplicates</span> — <code>ccs reap-duplicates</code>: find sessions with &gt;1 live claude proc (via ps), rank by CPU time, close duplicates. Dry-run default.</p></div>
 </section>
 
 <!-- ============ SYSTEM UNITS ============ -->
@@ -393,9 +431,21 @@ A <span class="fs" style="display:inline">⚠ line</span> inside a card is the s
 <p class="io"><b>In:</b> <span class="io-in">catalogue rows map + index paths map + sessionId</span> &nbsp; <b>Out:</b> <span class="io-out">an ordered Embodiment[]</span> &nbsp; <b>Composes:</b> S2, S6, S7 &nbsp; <span class="dep">catalogue/lineage.ts</span></p>
 <p class="fs">⚠ tie-break returns 0 when both timestamps null → nondeterministic order (D2, P0, one-line fix).</p></div>
 
+<div class="udef"><div class="uh">S9 · Board types <span class="dep">[U21]</span></div>
+<p>The tool's canonical board schema (ADR-0077): <code>Board</code>, <code>BoardRow</code>, <code>Pill</code>, <code>Alert</code>, <code>RowSession</code>. Pure types (no cluster vocabulary baked in).</p>
+<p class="io"><b>In:</b> <span class="io-in">—</span> &nbsp; <b>Out:</b> <span class="io-out">—</span> &nbsp; <b>Composes:</b> — (leaf types) &nbsp; <span class="dep">board/types.ts</span></p></div>
+
+<div class="udef"><div class="uh">S10 · Board paths + I/O <span class="dep">[U22]</span></div>
+<p>Canonical path <code>~/.ccs/clusters/&lt;c&gt;/cluster/board.json</code> plus atomic write/read helpers (temp+rename pattern).</p>
+<p class="io"><b>In:</b> <span class="io-in">cluster name; a Board object</span> &nbsp; <b>Out:</b> <span class="io-out">path string / void / Board | null</span> &nbsp; <b>Composes:</b> S9 &nbsp; <span class="dep">board/paths.ts</span></p></div>
+
+<div class="udef"><div class="uh">S11 · Board indexer <span class="dep">[U23]</span></div>
+<p>Mtime-cached in-memory indexer: parse board.json once per mtime change, expose O(1) lookups by identity or by session (session→identity via catalogue, identity→row via map). Invalidated by <code>refresh()</code>.</p>
+<p class="io"><b>In:</b> <span class="io-in">cluster name</span> &nbsp; <b>Out:</b> <span class="io-out">BoardIndex {byIdentity, bySession, rows, refresh}</span> &nbsp; <b>Composes:</b> S10, S6 (identityKeyOf) &nbsp; <span class="dep">board/indexer.ts</span></p></div>
+
 <h3>Tier 2 — cmux embodiment</h3>
 
-<div class="udef"><div class="uh">S9 · cmux tree + hook-store readers <span class="dep">[part of U5/U21]</span></div>
+<div class="udef"><div class="uh">S12 · cmux tree + hook-store readers <span class="dep">[part of U5/U31]</span></div>
 <p>The two side-effecting reads of <b>cmux</b> state — run <b>tree</b>, read the <b>hook store</b> — each returning data plus a <b>readable</b> <code>ok</code> flag.</p>
 <p class="io"><b>In:</b> <span class="io-in">none (shells out / reads a fixed path)</span> &nbsp; <b>Out:</b> <span class="io-out">{tree, ok} and {store, ok}</span> &nbsp; <b>Composes:</b> — (leaf I/O) &nbsp; <span class="dep">cmux/live.ts</span></p>
 <p class="fs">⚠ no cmux version guard; hook-store path hardcoded (U21, P0).</p></div>
