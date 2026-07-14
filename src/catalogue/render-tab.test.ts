@@ -19,7 +19,7 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   cluster: null,
   gusWork: null,
   workUnitId: null,
-  groupingId: null, statusLine: null, meta: {}, stage: null, activity: null,
+  groupingId: null, statusLine: null, meta: {}, stage: null,
   notes: null,
   updatedAt: null,
   prNumber: null,
@@ -51,7 +51,7 @@ test("renderTab: the epic rides its own pill (ccs_epic), not the description", (
     key: "Q1-planning",
     cluster: "pr-watch",
     gusWork: "W-1234567",
-    groupingId: null, statusLine: null, meta: {}, stage: null, activity: null,
+    groupingId: null, statusLine: null, meta: {}, stage: null,
   });
   const ops = renderTab(r, "session", { grouping: { label: "Metered Pricing" } });
   expect(ops.epicPill?.key).toBe(EPIC_PILL_KEY);
@@ -107,11 +107,11 @@ test("renderTab: meta.shortname drives the title after the #PR prefix", () => {
   expect(ops.title).toBe("#12137 addons plan list"); // shortname wins over the long PR title
 });
 
-test("renderTab: shortname is clamped to 25ch", () => {
-  const r = row({ prNumber: 1, meta: { shortname: "x".repeat(40) } });
+test("renderTab: shortname is clamped to 35ch", () => {
+  const r = row({ prNumber: 1, meta: { shortname: "x".repeat(50) } });
   const ops = renderTab(r, "session");
-  // "#1 " + 25 chars
-  expect(ops.title).toBe("#1 " + "x".repeat(25));
+  // "#1 " + 35 chars
+  expect(ops.title).toBe("#1 " + "x".repeat(35));
 });
 
 test("renderTab: loops carry no epic pill", () => {
@@ -121,7 +121,7 @@ test("renderTab: loops carry no epic pill", () => {
 });
 
 test("renderTab: stage pill shows the bare stage when dormant (no activity)", () => {
-  const r = row({ stage: "building", activity: null, prNumber: 12136, prRepo: "heroku/dashboard" });
+  const r = row({ stage: "building", prNumber: 12136, prRepo: "heroku/dashboard" });
   const ops = renderTab(r, "session");
   expect(ops.statusPill?.label).toBe("building");
   expect(ops.statusPill?.icon).toBe("hammer");
@@ -136,10 +136,10 @@ test("renderTab: stage pill maps every stage", () => {
   expect(renderTab(row({ stage: "merged" }), "session").statusPill?.label).toBe("merged");
 });
 
-test("renderTab: activity overlays the stage keeping the stage word (stage × activity)", () => {
-  expect(renderTab(row({ stage: "in-review", activity: "fixing" }), "session").statusPill?.label).toBe("in review · fixing");
-  expect(renderTab(row({ stage: "milad-review", activity: "needs-you" }), "session").statusPill?.label).toBe("your review · needs you");
-  expect(renderTab(row({ stage: "approved", activity: "fixing" }), "session").statusPill?.color).toBe("#ff6f22"); // fixing color wins
+test("renderTab: pill is pure stage — no activity overlay (activity retired 2026-07-13)", () => {
+  // Activity is dead: the pill reads exactly the stage label regardless of any other state.
+  expect(renderTab(row({ stage: "in-review" }), "session").statusPill?.label).toBe("in review");
+  expect(renderTab(row({ stage: "milad-review" }), "session").statusPill?.label).toBe("your review");
 });
 
 test("renderTab: no stage → falls back to lifecycle pill (parked)", () => {

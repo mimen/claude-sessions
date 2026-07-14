@@ -11,7 +11,7 @@ function row(over: Partial<CatalogueRow>): CatalogueRow {
     sessionId: "s1", resumeId: null, customTitle: null, kind: "session",
     completed: false, archived: false, parkedTaskId: null, key: null,
     parentSessionId: null, role: null, resumeCommand: null, project: null,
-    cluster: null, gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null, updatedAt: null,
+    cluster: null, gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null,
     prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null,
     ...over,
   };

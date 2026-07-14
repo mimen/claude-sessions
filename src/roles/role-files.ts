@@ -34,8 +34,6 @@ interface RoleToml {
   topology?: string;
   /** ADR-0064 [stage] schema block: `values = [...]`, `monotonic = true`. */
   stage?: { values?: unknown; monotonic?: unknown };
-  /** ADR-0064 [activity] schema block: `values = [...]` (allowed non-dormant activities). */
-  activity?: { values?: unknown };
   /** Pin this role's cmux workspace on resume-cluster (core singletons pin to the top of the
    * sidebar; fleet workers leave it unset). Default false. */
   pin_on_resume?: unknown;
@@ -73,9 +71,6 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
   if (Array.isArray(sv) && sv.every((v) => typeof v === "string")) {
     stageSchema = { values: sv as string[], monotonic: toml.stage?.monotonic === true };
   }
-  const av = toml.activity?.values;
-  const activityValues: string[] | null =
-    Array.isArray(av) && av.every((v) => typeof v === "string") ? (av as string[]) : null;
   return {
     role,
     cluster,
@@ -84,7 +79,6 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
     homeDir: dir, // computed at load — the portability breaker (stored absolute path) is gone
     resumeCommand: toml.resume_command ?? null,
     stageSchema,
-    activityValues,
     pinOnResume: toml.pin_on_resume === true,
     color: typeof toml.color === "string" && /^#[0-9a-fA-F]{6}$/.test(toml.color) ? toml.color : null,
     // ADR-0074: skills + commands read from PROJECT-LOCAL .claude/ (Claude Code discovers them

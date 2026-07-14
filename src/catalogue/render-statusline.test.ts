@@ -9,7 +9,7 @@ function row(over: Partial<CatalogueRow>): CatalogueRow {
     sessionId: "s1", resumeId: null, customTitle: null, kind: "session",
     completed: false, archived: false, parkedTaskId: null, key: null,
     parentSessionId: null, role: null, resumeCommand: null, project: null,
-    cluster: "pr-watch", gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, activity: null, notes: null,
+    cluster: "pr-watch", gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null,
     updatedAt: "2026-07-10T11:59:00Z", // fresh by default
     prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null,
     ...over,

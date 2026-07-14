@@ -11,7 +11,6 @@ import {
   setGusWork,
   setSessionEpic,
   setStage,
-  setActivity,
   setStatusLine,
   setMeta,
   setProject,
@@ -221,42 +220,6 @@ export function name(sessionArg: string | undefined, value: string | undefined, 
   return 0;
 }
 
-/**
- * `ccs activity [<id>|.] needs-you | --off` — the worker self-reports being STUCK on an ambiguous
- * fork (needs operator input). `--off` clears back to DORMANT (the bare stage — awaiting review /
- * merge / actively building). There is no "working" activity: a stage's resting state IS the bare
- * stage. `fixing` is engine-sensed (don't set it here). Orthogonal to stage (engine-latched).
- */
-export function activity(sessionArg: string | undefined, value: string | undefined, flags: string[]): number {
-  const id = resolveSessionId(sessionArg);
-  if (!id) return notInSession();
-  const off = flags.includes("--off");
-  const v = value?.trim();
-  ensureDataDir();
-  const db = openCatalogue(CATALOGUE_PATH());
-  try {
-    if (!off) {
-      if (!v) {
-        console.error("usage: ccs activity [<id>|.] <value> | --off   (--off = back to dormant)");
-        return 1;
-      }
-      // ADR-0064: validate against the role-declared activity vocabulary. A role that declares
-      // [activity] values constrains it; one that doesn't defaults to pr-watch's `needs-you`
-      // (the historical behavior — the worker's only self-set activity). `fixing` is engine-sensed.
-      const row = getRow(db, id);
-      const allowed = (row?.role ? resolveRole(row.role)?.activityValues : null) ?? ["needs-you"];
-      if (!allowed.includes(v)) {
-        console.error(`ccs activity: "${v}" not allowed (expected one of: ${allowed.join(" | ")}, or --off)`);
-        return 1;
-      }
-    }
-    setActivity(db, id, off ? null : v!, now());
-    console.log(off ? `cleared activity (dormant) on ${id.slice(0, 8)}…` : `activity ${v} → ${id.slice(0, 8)}…`);
-  } finally {
-    db.close();
-  }
-  return 0;
-}
 
 /**
  * `ccs stage [<id>|.] <value> | --off` — the GENERIC stage setter (ADR-0064). The tool stores the

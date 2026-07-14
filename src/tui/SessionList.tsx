@@ -38,7 +38,7 @@ interface SessionBadge {
   role?: string | null;
   /** Status label (lifecycle × live open-state), shown in the status column. */
   status?: string | null;
-  /** Per-system phase (worker's current activity), shown in the phase column. */
+  /** Per-system stage (worker's pipeline stage), shown in the stage column. */
   phase?: string | null;
 }
 
@@ -185,8 +185,8 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
             {showRoleStatus ? (
               <>
                 <Box width={PHASE_W} flexShrink={0}>
-                  {/* The worker's current activity (building/validating/blocked). Blank when
-                      unset. More informative than the dot for what's happening right now. */}
+                  {/* The worker's pipeline stage (building/milad-review/in-review/approved/merged).
+                      Blank when unset. More informative than the dot for pipeline position. */}
                   <Text color={sel ? theme.selFg : theme.accent} wrap="truncate-end">
                     {badge?.phase ?? ""}
                   </Text>

@@ -62,7 +62,7 @@ export interface SessionBadge {
   role?: string | null;
   /** Status label (lifecycle × live open-state), shown in the status column. */
   status?: string | null;
-  /** Per-system phase (catalogue.phase) — the worker's current activity. */
+  /** Per-system stage (catalogue.stage) — the worker's pipeline stage. */
   phase?: string | null;
 }
 

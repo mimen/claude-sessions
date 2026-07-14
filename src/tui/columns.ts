@@ -6,7 +6,7 @@ export const CARET_W = 1;
 export const GLYPH_W = 2;
 /** Status column (lifecycle × live open-state) — e.g. active/idle/parked/done. */
 export const STATUS_W = 8;
-/** Phase column (per-system worker activity) — building/validating/blocked. */
+/** Stage column (per-system worker pipeline stage) — building/milad-review/in-review/approved/merged. */
 export const PHASE_W = 10;
 /** Role column (catalogue.skill, abbreviated) — e.g. control/concierge/eval/worker. */
 export const ROLE_W = 10;

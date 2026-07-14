@@ -156,13 +156,13 @@ function buildSessionTitle(row: CatalogueRow): string {
   return row.sessionId.slice(0, 8);
 }
 
-/** The worker's short display name from `meta.shortname`, trimmed + clamped to 25ch. Null when
+/** The worker's short display name from `meta.shortname`, trimmed + clamped to 35ch. Null when
  * unset/blank so the title falls back to the cleaned PR title. */
 function shortnameOf(row: CatalogueRow): string | null {
   const raw = row.meta?.shortname;
   if (typeof raw !== "string") return null;
   const s = raw.trim().replace(/\s+/g, " ");
-  return s ? s.slice(0, 25) : null;
+  return s ? s.slice(0, 35) : null;
 }
 
 /** The worker's epic → a quiet, always-on label pill (key `ccs_epic`). Muted gray, no icon, low
@@ -183,13 +183,9 @@ function buildLoopDescription(row: CatalogueRow): string | null {
   return key || null;
 }
 
-/** A worker's pipeline PHASE → sidebar pill (label + icon + hex color). Mirrors the mapping the
- * retired cmux_label.py owned, now sourced from the row's `phase` (the engine senses it in). The
- * pill uses the SAME key as the lifecycle pill so the two never stack — a worker shows one status
- * pill, whichever applies. Returns null for an unknown/empty phase (caller falls back to lifecycle). */
-// The pr-agent phase = STAGE × ACTIVITY (see roles/pr-agent/docs/phase-state-machine.md).
-// STAGE (monotonic, forward-only) gives the base label + color; ACTIVITY overlays it (needs-you /
-// fixing recolor + relabel; working shows the stage as-is).
+/** A worker's pipeline STAGE → sidebar pill (label + icon + hex color). Sourced from the row's
+ * `stage` column (the engine senses it in). Uses the same `ccs_lifecycle` key as the lifecycle
+ * pill so a worker shows one status pill at a time — whichever applies. */
 const STAGE_PILL: Record<string, { label: string; icon: string; color: string }> = {
   building:       { label: "building",    icon: "hammer",             color: "#32ade6" }, // cyan
   "milad-review": { label: "your review", icon: "eye",                color: "#0a84ff" }, // blue — awaiting your +1
@@ -197,29 +193,15 @@ const STAGE_PILL: Record<string, { label: string; icon: string; color: string }>
   approved:       { label: "approved",    icon: "checkmark.circle",   color: "#30d158" }, // green
   merged:         { label: "merged",      icon: "checkmark.seal",     color: "#34c759" }, // green
 };
-// ACTIVITY overlay: needs-you and fixing take over the pill (they're the urgent within-stage
-// states); working defers to the stage's own pill. Legacy single-`phase` values map here too.
-const ACTIVITY_OVERLAY: Record<string, { label: string; icon: string; color: string }> = {
-  "needs-you": { label: "needs you", icon: "person.crop.circle",     color: "#ff9500" }, // amber
-  fixing:      { label: "fixing",    icon: "wrench.and.screwdriver", color: "#ff6f22" }, // orange
-};
 
 /**
- * Compose the worker pill from STAGE × ACTIVITY. Stage gives the base (label + color); an urgent
- * activity (needs-you / fixing) overlays it, keeping the stage word so you still know WHERE it's
- * stuck (e.g. "in review · fixing"). `working` just shows the stage. Null when there's no stage
- * (caller → lifecycle pill). The legacy single `phase` column is gone (ADR-0059).
+ * Compute the worker pill from the row's stage. Activity is dead (2026-07-13); no overlay logic.
+ * Returns null when there's no stage (caller → lifecycle pill).
  */
 function computePhasePill(row: CatalogueRow): StatusPill | null {
   const stageKey = row.stage?.trim().toLowerCase();
   if (!stageKey || !STAGE_PILL[stageKey]) return null;
   const stage = STAGE_PILL[stageKey];
-  const act = row.activity?.trim().toLowerCase();
-  const overlay = act && ACTIVITY_OVERLAY[act];
-  if (overlay) {
-    // Keep the stage word so the pill says both: "your review · fixing", "in review · needs you".
-    return { key: "ccs_lifecycle", label: `${stage.label} · ${overlay.label}`, icon: overlay.icon, color: overlay.color, priority: 50 };
-  }
   return { key: "ccs_lifecycle", label: stage.label, icon: stage.icon, color: stage.color, priority: 50 };
 }
 

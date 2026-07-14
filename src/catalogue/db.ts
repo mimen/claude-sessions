@@ -52,9 +52,6 @@ export interface CatalogueRow {
   /** The pr-agent PR STAGE: building | milad-review | in-review | approved | merged. Monotonic,
    * forward-only, engine-latched (see roles/pr-agent/docs/phase-state-machine.md). */
   stage: string | null;
-  /** The ACTIVITY within the current stage: working | needs-you | fixing. Worker self-reports
-   * working/needs-you; fixing is engine-sensed. Orthogonal to `stage`. */
-  activity: string | null;
   /** A short freeform status a session writes about ITSELF (≤2 lines), shown on its tab.
    * Human-readable prose (vs `phase`'s controlled vocabulary). Set via `ccs status`. */
   statusLine: string | null;
@@ -81,7 +78,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 29;
+const CATALOGUE_VERSION = 30;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -427,6 +424,15 @@ function migrate(db: Database): void {
     if (hasColumn(db, "catalogue", "kind")) db.exec("ALTER TABLE catalogue DROP COLUMN kind;");
     if (hasColumn(db, "catalogue", "resume_command")) db.exec("ALTER TABLE catalogue DROP COLUMN resume_command;");
   }
+  if (v < 30) {
+    // Drop the `activity` column entirely (2026-07-13). The stage × activity model was retired:
+    // the sensor-driven activity latches (fixing) never had a clean off-ramp, worker-set values
+    // (needs-you) fought stage transitions, and every "worker interaction" scheme we tried after
+    // (blocked_on_input from Notification, etc.) produced false positives. Stage alone — pure
+    // sensor-computed truth — is the state pill. `gate.route` on the composed board answers
+    // "whose turn is it?"; no separate axis needed. Guard on presence + fail-open.
+    if (hasColumn(db, "catalogue", "activity")) db.exec("ALTER TABLE catalogue DROP COLUMN activity;");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -485,7 +491,6 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     workUnitId: (r.work_unit_id as string) ?? null,
     groupingId: (r.grouping_id as string) ?? null,
     stage: (r.stage as string) ?? null,
-    activity: (r.activity as string) ?? null,
     statusLine: (r.status_line as string) ?? null,
     meta: r.meta ? JSON.parse(r.meta as string) : {},
     notes: (r.notes as string) ?? null,
@@ -603,11 +608,6 @@ export function setWorkUnitId(db: Database, sessionId: string, workUnitId: strin
 /** The PR stage (building|milad-review|in-review|approved|merged). Engine-latched; forward-only. */
 export function setStage(db: Database, sessionId: string, stage: string | null, now: string): void {
   set(db, sessionId, "stage", stage, now);
-}
-
-/** The activity within the current stage (working|needs-you|fixing). */
-export function setActivity(db: Database, sessionId: string, activity: string | null, now: string): void {
-  set(db, sessionId, "activity", activity, now);
 }
 
 /** A short freeform status a session writes about itself (≤2 lines on its tab). null clears it. */
@@ -745,9 +745,6 @@ export interface RoleDef {
   /** Role-declared schema for the `stage` column (ADR-0064): allowed values + monotonic guarantee.
    * null when role.toml declares no [stage] block (the setter stays unconstrained). */
   stageSchema: StageSchema | null;
-  /** Role-declared allowed values for the `activity` column (ADR-0064). null/empty = unconstrained;
-   * the resting/dormant baseline (cleared activity) is always allowed regardless. */
-  activityValues: string[] | null;
   /** When true, `ccs resume-cluster` pins this role's cmux workspace after resume — control-plane /
    * concierge / eval / … stay put at the top of the sidebar even as fleet workers churn. Opt-in per
    * role (role.toml `pin_on_resume = true`); default false (fleet workers stay unpinned). */
