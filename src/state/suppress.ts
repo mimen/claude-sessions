@@ -119,7 +119,7 @@ export function suppressCommand(args: string[]): number {
   const sub = pos[1];
   if (!cluster || !sub) {
     console.error(
-      "usage: ccs suppress <cluster> record|reopen|check|list ...",
+      "usage: ccs decide <cluster> record|reopen|check|list ...   (legacy alias: ccs suppress)",
     );
     return 2;
   }

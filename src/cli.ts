@@ -87,7 +87,8 @@ Usage:
   ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
   ccs catch-up [<id>|.]  Surface unseen cluster CHANGELOG entries + advance the seen stamp (exit 2 if a restart is needed)
   ccs context-check [--json]  Peak-context guard for long loops: OK/WARN/CRITICAL + directive (autocompact is unreliable in headless)
-  ccs suppress <c> record|reopen|check|list ...   Decision-suppression ledger — decided items stop re-surfacing (ADR-cluster-decisions)
+  ccs decide <c> record|reopen|check|list ...   Decision ledger — record an item's disposition (approve/hold/defer/clear) so it stops re-surfacing.
+                                                Alias: 'ccs suppress' (legacy name, still works)
   ccs bump-session <sid> [--note "..."]  Wake a specific session by id via the live cmux bridge (surface UUID, not workspace ref)
   ccs reap-duplicates [--do]  Detect sessions with >1 live \`claude --resume <sid>\` process and close the duplicate cmux workspaces (dry-run by default)
   ccs --version       Print version
@@ -190,7 +191,8 @@ export async function main(argv: string[]): Promise<number> {
       const { contextCheckCommand } = await import("./hooks/context-check.ts");
       return contextCheckCommand(args.slice(1));
     }
-    case "suppress": {
+    case "decide":  // preferred name (task #37): describes the user action, not the mechanism
+    case "suppress": {  // legacy alias — kept for one release, docs point at 'decide'
       const { suppressCommand } = await import("./state/suppress.ts");
       return suppressCommand(args.slice(1));
     }
