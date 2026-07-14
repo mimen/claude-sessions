@@ -31,7 +31,8 @@ import { SectionCard } from "./SectionCard.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
-import { getAll, lifecycleOf, setCompleted, setArchived, setCustomTitle, identityKeyOf } from "../catalogue/db.ts";
+import { getAll, lifecycleOf, setCompleted, setArchived, setCustomTitle, identityKeyOf, type CatalogueRow } from "../catalogue/db.ts";
+import { boardIndex } from "../board/indexer.ts";
 import { allGroupingsAcrossClusters } from "../state/groupings.ts";
 import { describe as describeDisposition } from "../catalogue/disposition.ts";
 import { loadPrefs, savePrefs } from "./prefs.ts";
@@ -41,6 +42,28 @@ import { buildTreeItems } from "./treeGroups.ts";
 import { buildGroupsView } from "./groupsView.ts";
 import { buildClusterView } from "./clusterView.ts";
 import { buildEpicView } from "./epicView.ts";
+
+/**
+ * Stage label for the TUI stage column. Preference order (ADR-0077 step 5):
+ *   1. The composed pill label from the cluster's board.json (first pill's label — the state
+ *      pill by cluster convention). Reflects business rules the catalogue.stage column can't see.
+ *   2. catalogue.stage as the legacy fallback for clusters without a board composer.
+ *   3. null when neither.
+ * Board reads go through the mtime-cached indexer, so this is cheap enough to call per-row.
+ */
+function stageLabelFor(cat: CatalogueRow | null, sessionId: string): string | null {
+  if (!cat) return null;
+  if (cat.cluster) {
+    try {
+      const hit = boardIndex(cat.cluster).bySession(sessionId);
+      const boardLabel = hit?.row.pills[0]?.label;
+      if (boardLabel) return boardLabel;
+    } catch {
+      // fall through to catalogue.stage
+    }
+  }
+  return cat.stage ?? null;
+}
 
 const SORT_CYCLE: SortMode[] = ["recent", "cost", "msgs"];
 type View = "groups" | "state" | "flat" | "tree" | "cluster" | "epic";
@@ -229,7 +252,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         prState: c?.prState ?? null,
         role: c?.role ?? null,
         status: describeDisposition(lc, open).label,
-        phase: c?.phase ?? null,
+        phase: stageLabelFor(c, r.sessionId),
       });
     }
     return m;
