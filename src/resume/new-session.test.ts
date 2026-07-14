@@ -147,10 +147,12 @@ test("writeSessionMetadata: --resume-command is stored for a loop (comes back ru
   const db = openCatalogue(":memory:");
   try {
     const id = "ffffffff-0000-1111-2222-333333333333";
+    // ADR-D3: role resolution is (cluster, role); pass --cluster so the derived resumeCommand
+    // finds the pr-watch/control role.toml on this developer machine.
     writeSessionMetadata(
       db,
       id,
-      parseOpts(["--role", "control", "--resume-command", "/loop 15m /pr-watch-control"]),
+      parseOpts(["--cluster", "pr-watch", "--role", "control", "--resume-command", "/loop 15m /pr-watch-control"]),
       NOW,
     );
     expect(getRow(db, id)!.resumeCommand).toBe("/loop 15m /pr-watch-control");

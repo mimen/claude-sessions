@@ -93,7 +93,7 @@ export function pushRenderOps(
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { resolveRole } = require("../roles/role-files.ts") as typeof import("../roles/role-files.ts");
-      const roleColor = resolveRole(row.role)?.color ?? null;
+      const roleColor = resolveRole(row.role, row.cluster)?.color ?? null;
       if (roleColor) paintWithRoleColor = { ...(paint ?? {}), color: roleColor };
     } catch {
       /* config unreadable → whatever paint already set (or nothing) */

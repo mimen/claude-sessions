@@ -6,6 +6,7 @@ import {
   openCatalogue,
   getRow,
   setRole,
+  setCluster,
   _resetRoleResumeCache,
 } from "./db.ts";
 
@@ -36,8 +37,10 @@ test("role is a first-class column, set + round-trips", () => {
 
 test("resume_command + kind DERIVE from the role's role.toml (ADR-0062), not a stored column", () => {
   // A role that declares a resume_command IS a loop; its sessions read that resumeCommand + kind.
+  // ADR-D3: rows must set BOTH cluster AND role for resume_command derivation to find the file.
   withRole("pr-watch", "control", 'resume_command = "/loop 15m /pr-watch-control"\nwork_unit = "none"\n');
   const db = openCatalogue(":memory:");
+  setCluster(db, "ctrl", "pr-watch", NOW);
   setRole(db, "ctrl", "control", NOW);
   const row = getRow(db, "ctrl")!;
   expect(row.resumeCommand).toBe("/loop 15m /pr-watch-control");
@@ -47,6 +50,7 @@ test("resume_command + kind DERIVE from the role's role.toml (ADR-0062), not a s
 test("a role with no resume_command derives kind 'session'", () => {
   withRole("pr-watch", "pr-agent", 'work_unit = "pr"\n');
   const db = openCatalogue(":memory:");
+  setCluster(db, "w", "pr-watch", NOW);
   setRole(db, "w", "pr-agent", NOW);
   const row = getRow(db, "w")!;
   expect(row.resumeCommand).toBeNull();

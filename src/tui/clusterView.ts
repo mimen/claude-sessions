@@ -18,8 +18,9 @@ import { sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./g
 
 /** Core/fleet membership is decided by isCoreRole (the single source of truth in
  * cluster-map.ts) so the TUI and `ccs cluster` never diverge. Clean labels (ADR-0015). */
-const CORE_ORDER = ["control", "concierge", "slack-scout", "eval", "designer", "loop-designer",
-  "scout", "pr-watch-control", "pr-watch-2", "pr-watch-eval", "pr-watch-scout"]; // legacy fallbacks
+// ADR-D3 (2026-07-14): the trailing legacy pr-watch-* aliases were dead code — they were
+// leftovers from an earlier naming pass and could misclassify a second cluster's sessions.
+const CORE_ORDER = ["control", "concierge", "slack-scout", "eval", "designer", "loop-designer", "scout"];
 
 export interface ClusterViewCtx {
   catMap: ReadonlyMap<string, CatalogueRow>;

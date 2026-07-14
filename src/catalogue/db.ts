@@ -479,37 +479,41 @@ function hasColumn(db: Database, table: string, column: string): boolean {
   return cols.some((c) => c.name === column);
 }
 
-/** role → its resume_command (or null), memoized (ADR-0062). `kind`/`resumeCommand` are DERIVED
- * from the role's role.toml now, not stored columns: a role re-arms iff it declares a resume_command
- * ⇒ it's a "loop". Cached because rowFrom runs per-row in getAll (hot path); role defs are static
- * within a process. A lazy require avoids a load-time cycle (role-files only type-imports db). */
+/** (cluster, role) → resume_command (or null), memoized. ADR-D3 (2026-07-14): key by
+ * (cluster,role), not just role — two clusters with the same role name would collide otherwise
+ * (a live P0 risk before this change). A null cluster is the standalone bucket.
+ * Cached because rowFrom runs per-row in getAll (hot path); role defs are static within a
+ * process. Lazy require avoids a load-time cycle. */
 let roleResumeCache: Map<string, string | null> | null = null;
-/** Reset the role→resume_command memo. For tests that swap CCS_CONFIG_ROOT between cases (the
- * cache is keyed by role NAME, so a stale entry would leak across roots). */
+/** Reset the memo. For tests that swap CCS_CONFIG_ROOT between cases. */
 export function _resetRoleResumeCache(): void {
   roleResumeCache = null;
 }
-function roleResumeCommand(role: string | null): string | null {
+function roleResumeCommand(role: string | null, cluster: string | null): string | null {
   if (!role) return null;
   if (!roleResumeCache) roleResumeCache = new Map();
-  if (roleResumeCache.has(role)) return roleResumeCache.get(role)!;
+  const cacheKey = `${cluster ?? ""}␟${role}`;
+  if (roleResumeCache.has(cacheKey)) return roleResumeCache.get(cacheKey)!;
   let rc: string | null = null;
   try {
     // Lazy import to keep db.ts free of a load-time dependency on role-files.
-    rc = (require("../roles/role-files.ts") as typeof import("../roles/role-files.ts")).resolveRole(role)?.resumeCommand ?? null;
+    rc = (require("../roles/role-files.ts") as typeof import("../roles/role-files.ts"))
+      .resolveRole(role, cluster)?.resumeCommand ?? null;
   } catch {
     rc = null;
   }
-  roleResumeCache.set(role, rc);
+  roleResumeCache.set(cacheKey, rc);
   return rc;
 }
 
 function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
   if (!r) return null;
   const role = (r.role as string) ?? null;
+  const cluster = (r.cluster as string) ?? null;
   // ADR-0062: kind + resumeCommand are DERIVED from the role, not stored columns (both dropped
   // in v29). A role with a resume_command is a "loop"; otherwise a "session".
-  const resumeCommand = roleResumeCommand(role);
+  // ADR-D3: resolve by (cluster, role) — two clusters can share role names.
+  const resumeCommand = roleResumeCommand(role, cluster);
   return {
     sessionId: r.session_id as string,
     resumeId: (r.resume_id as string) ?? null,

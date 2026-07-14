@@ -155,7 +155,7 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
     try {
       // ADR-0069: dispatch on the role's declared anchor type (a core role — work_unit "none" —
       // owns no work-unit, so skip). Undeclared roles infer PR-then-GUS (resolver default).
-      const anchorType = opts.role ? resolveRole(opts.role.replace(/^\//, ""))?.workUnit ?? undefined : undefined;
+      const anchorType = opts.role ? resolveRole(opts.role.replace(/^\//, ""), opts.cluster ?? null)?.workUnit ?? undefined : undefined;
       if (anchorType !== "none") {
         const wuId = resolveWorkUnit(
           opts.cluster,
@@ -233,7 +233,11 @@ export function newSession(args: string[]): number {
   // the cwd and its resume_command — so bringing up a core role is just `--role <name>`.
   // Explicit --cwd / --resume-command still win.
   // Role definitions come from config FILES now (ADR-0050) — no catalogue read for the registry.
-  let roleDef: RoleDef | null = opts.role ? resolveRole(opts.role.replace(/^\//, "")) : null;
+  // Resolve the role's definition. opts.cluster may not be set yet if the caller passes only
+  // --role (cluster gets defaulted from the role def below); pass `undefined` here so the
+  // legacy first-match scan resolves it, then re-anchor with an explicit cluster below when
+  // available. ADR-D3.
+  let roleDef: RoleDef | null = opts.role ? resolveRole(opts.role.replace(/^\//, ""), opts.cluster ?? undefined) : null;
   let spawnLocationErr: string | null = null;
   if (roleDef) {
     if (!opts.cluster && roleDef.cluster) opts.cluster = roleDef.cluster; // cluster from the definition

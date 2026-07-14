@@ -120,18 +120,74 @@ function hookNames(dir: string): string[] {
   return [...seen].sort();
 }
 
-/** Resolve ONE role by name across the config tree (cluster roles first, then standalone). */
-export function resolveRole(role: string, configRoot = ccsConfigRoot()): RoleDef | null {
+/**
+ * Resolve ONE role. ADR-D3 (2026-07-14): role identity is (cluster, role), not global-by-name.
+ *
+ * Signatures accepted:
+ *   resolveRole(role)                        → legacy first-match scan (warns on collision)
+ *   resolveRole(role, cluster)               → strict (cluster, role) — cluster="" or omitted falls back
+ *   resolveRole(role, cluster, configRoot)   → strict + custom root
+ *   resolveRole(role, configRoot)            → legacy overload used by tests that pass a path
+ *
+ * `configRoot` is detected by looking for a path separator; anything else is `cluster`. Null
+ * cluster = "standalone-only lookup".
+ */
+export function resolveRole(
+  role: string,
+  clusterOrConfigRoot?: string | null,
+  configRoot?: string,
+): RoleDef | null {
+  // Overload detection: if the second arg contains a path separator, treat it as configRoot.
+  // (No real cluster name should contain a "/" — cluster names are single directory basenames.)
+  let cluster: string | null | undefined;
+  let root: string;
+  if (typeof clusterOrConfigRoot === "string" && clusterOrConfigRoot.includes("/")) {
+    root = clusterOrConfigRoot;
+    cluster = undefined;
+  } else {
+    cluster = clusterOrConfigRoot;
+    root = configRoot ?? ccsConfigRoot();
+  }
+  return _resolveRole(role, cluster, root);
+}
+
+function _resolveRole(role: string, cluster: string | null | undefined, configRoot: string): RoleDef | null {
   const clustersRoot = join(configRoot, "clusters");
+  // Cluster-scoped lookup: look ONLY in the given cluster's roles/, no fall-through.
+  if (cluster) {
+    const dir = join(clustersRoot, cluster, "roles", role);
+    if (existsSync(dir)) return readRoleDir(dir, role, cluster);
+    return null;
+  }
+  // Explicit standalone lookup: cluster === null means "not attached to a cluster".
+  if (cluster === null) {
+    const standalone = join(configRoot, "roles", role);
+    if (existsSync(standalone)) return readRoleDir(standalone, role, null);
+    return null;
+  }
+  // Legacy path (cluster undefined). Warn if a second cluster ALSO defines this role — that's
+  // exactly the collision this ADR is designed to catch.
+  const hits: Array<{ dir: string; cluster: string | null }> = [];
   if (existsSync(clustersRoot)) {
-    for (const cluster of dirNames(clustersRoot)) {
-      const dir = join(clustersRoot, cluster, "roles", role);
-      if (existsSync(dir)) return readRoleDir(dir, role, cluster);
+    for (const c of dirNames(clustersRoot)) {
+      const dir = join(clustersRoot, c, "roles", role);
+      if (existsSync(dir)) hits.push({ dir, cluster: c });
     }
   }
   const standalone = join(configRoot, "roles", role);
-  if (existsSync(standalone)) return readRoleDir(standalone, role, null);
-  return null;
+  if (existsSync(standalone)) hits.push({ dir: standalone, cluster: null });
+  if (hits.length === 0) return null;
+  if (hits.length > 1) {
+    // Loud but non-fatal: this call site needs updating to pass a cluster.
+    // Kept warn-only for now so a partial migration doesn't blow up production.
+    console.error(
+      `ccs: resolveRole("${role}") is ambiguous — found in ${hits.length} places ` +
+      `(${hits.map((h) => h.cluster ?? "standalone").join(", ")}). ` +
+      `Pass cluster to disambiguate. Using the first match: ${hits[0]!.cluster ?? "standalone"}.`,
+    );
+  }
+  const pick = hits[0]!;
+  return readRoleDir(pick.dir, role, pick.cluster);
 }
 
 /** Every role across every cluster + standalone, as a name→RoleDef map. */

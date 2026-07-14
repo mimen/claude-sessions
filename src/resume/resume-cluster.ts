@@ -186,7 +186,7 @@ export function resumeMany(
     const hit = pinCache.get(role);
     if (hit !== undefined) return hit;
     let flag = false;
-    try { flag = resolveRole(role)?.pinOnResume === true; } catch { flag = false; }
+    try { flag = resolveRole(role, cluster)?.pinOnResume === true; } catch { flag = false; }
     pinCache.set(role, flag);
     return flag;
   };

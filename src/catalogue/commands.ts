@@ -285,7 +285,7 @@ export function stage(sessionArg: string | undefined, value: string | undefined,
       // ADR-0064 vocabulary/monotonic validation still applies to sensor writes — a bogus value
       // from a buggy sensor should fail loud, not silently poison the cache.
       const row = getRow(db, id);
-      const schema = row?.role ? resolveRole(row.role)?.stageSchema ?? null : null;
+      const schema = row?.role ? resolveRole(row.role, row.cluster)?.stageSchema ?? null : null;
       const err = validateStageTransition(schema, row?.stage ?? null, v!);
       if (err) {
         console.error(`ccs stage: ${err}`);

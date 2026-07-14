@@ -95,7 +95,7 @@ export function resumeSessionEntry(
   // ADR-0062: re-arm from the ROLE's authored resume_command (files-are-truth), not the session
   // column copy that can drift from a config edit. Fall back to the session column for a row whose
   // role isn't resolvable (unregistered/standalone) so nothing regresses.
-  const roleResume = cat?.role ? resolveRole(cat.role)?.resumeCommand ?? null : null;
+  const roleResume = cat?.role ? resolveRole(cat.role, cat.cluster)?.resumeCommand ?? null : null;
   const plan = planResumeSession(bridge, row, { resumeCommand: roleResume ?? cat?.resumeCommand ?? null });
 
   if (plan.action === "skip") return { status: "already-open" };

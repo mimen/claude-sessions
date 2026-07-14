@@ -2,7 +2,7 @@ import { describe, expect, test, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue, getRow, setRole, _resetRoleResumeCache } from "../catalogue/db.ts";
+import { openCatalogue, getRow, setRole, setCluster, _resetRoleResumeCache } from "../catalogue/db.ts";
 import { handleSessionStart } from "./register.ts";
 
 const NOW = "2026-07-09T00:00:00Z";
@@ -53,6 +53,8 @@ describe("handleSessionStart", () => {
   test("re-arm: a resumed loop (role declares resume_command) is flagged for re-arming", () => {
     withControlLoop();
     const db = openCatalogue(":memory:");
+    // ADR-D3: role resolution is (cluster, role) — set both.
+    setCluster(db, "loop", "pr-watch", NOW);
     setRole(db, "loop", "control", NOW);
     const out = handleSessionStart(db, { session_id: "loop", source: "resume", cwd: "/x" }, NOW);
     expect(out.reArm).toBe("/loop 15m /pr-watch-control");
@@ -63,6 +65,7 @@ describe("handleSessionStart", () => {
   test("no re-arm on a fresh (startup) start, even for a loop role", () => {
     withControlLoop();
     const db = openCatalogue(":memory:");
+    setCluster(db, "loop", "pr-watch", NOW);
     setRole(db, "loop", "control", NOW);
     const out = handleSessionStart(db, { session_id: "loop", source: "startup", cwd: "/x" }, NOW);
     expect(out.reArm).toBeNull();
