@@ -53,6 +53,61 @@ describe("parseHookStore", () => {
     expect(withWorkspace.length).toBeGreaterThan(0);
     expect([...agents.values()].some((a) => a.isRestorable)).toBe(true);
   });
+
+  test("B14: sessions[sid].surfaceId (fresher) wins over stale activeSessionsBySurface", () => {
+    // Reattach scenario: session-A used to be on surface-X and cmux left the old byMap binding
+    // in place. Session-B is now on surface-X per the fresher sessions[B].surfaceId. The map
+    // must resolve surface-X → B (fresh), not A (stale).
+    const staleStore = {
+      sessions: {
+        "session-B": { surfaceId: "surface-X", workspaceId: "ws-1" },
+      },
+      activeSessionsBySurface: {
+        "surface-X": { sessionId: "session-A" },
+      },
+    };
+    const m = parseHookStore(staleStore);
+    expect(m.get("surface-X")?.sessionId).toBe("session-B");
+  });
+
+  test("B14: contradictions log loudly; sessions view wins (fresher)", () => {
+    // The exact reattach shape: both views cover surface-X but with different sessions. The
+    // sessions view is the fresher signal (hook fires post-reattach and stamps .surfaceId
+    // first). We keep it AND log so operators see the drift. This is the sole difference
+    // from the old logic — which trusted activeSessionsBySurface as first-writer.
+    const errs: string[] = [];
+    const origErr = console.error;
+    console.error = (...args: unknown[]) => { errs.push(args.map(String).join(" ")); };
+    try {
+      const contradictoryStore = {
+        sessions: {
+          "session-A": { surfaceId: "surface-X" },  // fresh: A on X
+        },
+        activeSessionsBySurface: {
+          "surface-X": { sessionId: "session-B" },  // stale: B on X (pre-reattach)
+        },
+      };
+      const m = parseHookStore(contradictoryStore);
+      expect(m.get("surface-X")?.sessionId).toBe("session-A"); // fresher wins
+      expect(errs.some((e) => e.includes("contradictory hook-store binding"))).toBe(true);
+      expect(errs.some((e) => e.includes("session-A".slice(0, 8) + " (KEPT"))).toBe(true);
+    } finally {
+      console.error = origErr;
+    }
+  });
+
+  test("B14: activeSessionsBySurface fills in surfaces the sessions view doesn't cover", () => {
+    // Legitimate case: cmux knows surface-Y via activeSessionsBySurface but the sessions
+    // entry for session-C hasn't landed yet. The binding must still resolve.
+    const partialStore = {
+      sessions: {},
+      activeSessionsBySurface: {
+        "surface-Y": { sessionId: "session-C" },
+      },
+    };
+    const m = parseHookStore(partialStore);
+    expect(m.get("surface-Y")?.sessionId).toBe("session-C");
+  });
 });
 
 describe("buildBridge", () => {

@@ -159,29 +159,40 @@ export interface CmuxHookStore {
  * surface UUID -> the claude session cmux currently binds to it.
  *
  * We UNION two views the hook store exposes:
- *   - `activeSessionsBySurface[surfaceId] = {sessionId}` — cmux's authoritative-for-a-current-
- *     surface map, but empirically stale on 0.64.17: when a `--resume` reattaches a session onto
- *     a new surface (fleet resumes), the OLD surface's binding is left in place and the new
- *     surface never gets one. Sessions that ARE live disappear from this view.
  *   - `sessions[sessionId].surfaceId` — per-session detail; cmux's hooks overwrite `.surfaceId`
- *     with the current surface each time the session announces itself. This tends to be fresher
- *     than the byMap for reattached sessions.
+ *     with the current surface each time the session announces itself. On a reattach (fleet
+ *     resume), this is the FRESHER view: the new session's hook fires post-reattach and
+ *     stamps the new surface here first.
+ *   - `activeSessionsBySurface[surfaceId] = {sessionId}` — the surface-side binding. Empirically
+ *     STALE on 0.64.17 after a reattach: the old surface's binding is left in place and the new
+ *     surface never gets one. The Fleet resume runaway of 2026-07-10 traced back to trusting
+ *     this view over the fresher sessions[sid].surfaceId one.
  *
- * Buildbridge intersects the resulting map with the live surface tree (surfaceToWorkspace) — so
- * `activeSessionsBySurface` entries whose surface is gone drop out, and `sessions[sid].surfaceId`
- * pointing at a stale surface drops out too. Only a binding whose surface is CURRENTLY in the
- * tree survives, so unioning both views is safe: stale garbage in either is filtered downstream.
+ * B14 fix (ADR-0085, 2026-07-14 full-system review): the sessions view is inserted FIRST,
+ * then activeSessionsBySurface fills in any surface it didn't cover. When the two views
+ * disagree on the same surface, the sessions view WINS by insertion order — that's the
+ * reattach case, and it's the whole point of the reordering. A disagreement is logged so
+ * an operator can spot bookkeeping drift, but the fresher value is honored.
  *
- * Precedence: `activeSessionsBySurface` is inserted first (its `updatedAt` is the surface-side
- * binding time); `sessions[sid].surfaceId` fills in any surface it doesn't already cover.
- * Duplicate coverage of the same surface reconciles to the same sessionId in practice.
+ * buildBridge intersects the resulting map with the live surface tree (surfaceToWorkspace) — so
+ * stale entries whose surface is gone drop out. Only a binding whose surface is CURRENTLY in
+ * the tree survives.
  */
 export function parseHookStore(store: CmuxHookStore): Map<string, SurfaceSession> {
   const map = new Map<string, SurfaceSession>();
   const sessions = store.sessions ?? {};
+  const conflicts: Array<{ surfaceId: string; kept: string; discarded: string }> = [];
   const record = (surfaceId: string, sessionId: string): void => {
     if (!surfaceId || !sessionId) return;
-    if (map.has(surfaceId)) return;
+    const existing = map.get(surfaceId);
+    if (existing) {
+      if (existing.sessionId !== sessionId) {
+        // Two views disagree on the same surface. First writer (sessions view) wins by design;
+        // record the conflict for the operator log so ambiguous bookkeeping surfaces.
+        conflicts.push({ surfaceId, kept: existing.sessionId, discarded: sessionId });
+      }
+      return;
+    }
     const detail = sessions[sessionId] ?? {};
     map.set(surfaceId, {
       sessionId,
@@ -192,15 +203,25 @@ export function parseHookStore(store: CmuxHookStore): Map<string, SurfaceSession
       pid: typeof detail.pid === "number" ? detail.pid : null,
     });
   };
-  for (const [surfaceId, binding] of Object.entries(store.activeSessionsBySurface ?? {})) {
-    if (binding?.sessionId) record(surfaceId, binding.sessionId);
-  }
-  // Fill in sessions whose current .surfaceId isn't covered by activeSessionsBySurface (0.64.17
-  // regression: reattached sessions leave the byMap stale). The buildBridge tree-intersect drops
-  // any that point at a surface that no longer exists.
+  // FRESHER view first: sessions[sid].surfaceId is the per-session hook-stamped surface, which
+  // gets rewritten on every reattach. B14 fix: this used to be second, so a stale byMap won.
   for (const [sessionId, detail] of Object.entries(sessions)) {
     const surfaceId = detail?.surfaceId;
     if (surfaceId) record(surfaceId, sessionId);
+  }
+  // Fill in surfaces the sessions view didn't cover (a legitimate case: cmux knows about a
+  // surface via activeSessionsBySurface but the sessions[sid] entry hasn't been written yet).
+  for (const [surfaceId, binding] of Object.entries(store.activeSessionsBySurface ?? {})) {
+    if (binding?.sessionId) record(surfaceId, binding.sessionId);
+  }
+  if (conflicts.length > 0) {
+    for (const c of conflicts) {
+      console.error(
+        `ccs cmux: contradictory hook-store binding for surface ${c.surfaceId} — ` +
+        `sessions view claims ${c.kept.slice(0, 8)} (KEPT — fresher), ` +
+        `activeSessionsBySurface claims ${c.discarded.slice(0, 8)} (discarded, likely stale post-reattach).`,
+      );
+    }
   }
   return map;
 }
