@@ -68,7 +68,7 @@ current truth (ADR-0054 wins; the scrub was retired for the detached path).
 19. Collapse executeSystemResume onto resumeClusterEntry (partly done — file deleted; verify no
     reimplementation remains).
 20. Placeholder→real PR key migration (#36): migrate key + result-file names to canonical
-    heroku/dashboard/1234 when a placeholder session later maps to a real PR.
+    owner/repo/1234 when a placeholder session later maps to a real PR.
 21. Determinism harness for display bugs — read resolution code first, not repeated live-state
     archaeology (process lesson).
 22. Session-level metrics/observability (uptime, cycle count, error rate) to detect stuck/flaky

@@ -1,8 +1,9 @@
-# claude-sessions
+# claude-sessions — vocabulary (session layer)
 
-A single-machine TUI (`ccs`) for finding and resuming any Claude Code session on the
-current host, regardless of which directory it was started in. Foundation for a later
-session-cataloguing layer.
+The core vocabulary the ccs *session layer* uses. This is the narrow surface: browsing,
+indexing, and resuming individual Claude Code sessions on one host. For the platform-level
+concepts (clusters, roles, work-units, identities, hooks, catalogue), see `docs/CONTEXT.md`
+and `docs/GLOSSARY.md`; those layers were built on top of the primitives defined here.
 
 ## Language
 
