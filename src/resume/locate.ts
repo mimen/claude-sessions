@@ -83,9 +83,19 @@ export function locateLaunchDir(filePath: string): Result<string | null, Error> 
   if (!decodedResult.ok) return decodedResult; // propagate error
   const decoded = decodedResult.value;
   if (!decoded) return ok(null);
-  // Sanity: confirm it round-trips (guards against a lossy-encoding false match).
+  // Sanity: confirm it round-trips (guards against a lossy-encoding false match). Bug fix
+  // (2026-07-14 REVIEW.md top-5 #1): the old form was `? decoded : decoded` — a no-op
+  // tautology that let a false match through. Now: a non-round-tripping candidate returns
+  // null so the caller falls back to the recorded cwd or a safer default.
   try {
-    return ok(encodePath(realpathSync(decoded)) === folder ? decoded : decoded);
+    if (encodePath(realpathSync(decoded)) === folder) {
+      return ok(decoded);
+    }
+    log.warn("Storage folder walk found a candidate that does not round-trip", {
+      decoded,
+      folder,
+    });
+    return ok(null);
   } catch (error) {
     log.error("Failed to verify launch directory via realpath", {
       decoded,
