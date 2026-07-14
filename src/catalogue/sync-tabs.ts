@@ -4,7 +4,7 @@ import { openCatalogue, getRow, getAll, lifecycleOf, type CatalogueRow } from ".
 import { openIndex } from "../index/schema.ts";
 import { resolveSelector, type SelectorKind } from "../resume/selector.ts";
 import { workspaceForSession } from "../cmux/liveness.ts";
-import { renderTab, applyPaintOverride, EPIC_PILL_KEY, type CmuxPaintOverride, type StatusPill } from "./render-tab.ts";
+import { renderTab, applyPaintOverride, EPIC_PILL_KEY, ALERT_PILL_KEY, type CmuxPaintOverride, type StatusPill } from "./render-tab.ts";
 import { resolveConfig } from "../hooks/resolve-config.ts";
 import { liveResolveCtx } from "../hooks/compose-claude-md.ts";
 import { getGrouping } from "../state/groupings.ts";
@@ -155,6 +155,10 @@ export function pushRenderOps(
   // pill instead of clobbering it. Cleared explicitly when the worker has no epic, so a stale label
   // never lingers after a worker leaves its grouping.
   pushPill(cmuxBin, ref, ops.epicPill, EPIC_PILL_KEY);
+  // The alert pill (key `ccs_alert`) is a third cmux status entry, emitted by the cluster's
+  // composer only when there's a hard alert worth surfacing. Cleared explicitly when the composer
+  // stops emitting it, so a stale ci-red label doesn't linger after CI goes green.
+  pushPill(cmuxBin, ref, ops.alertPill ?? null, ALERT_PILL_KEY);
 
   // Suppress cmux's own `claude_code` agent-lifecycle pill on a worker's turn-end paint. The cmux
   // Claude wrapper sets it (Running / Needs input / Idle) on every hook boundary; on a sessions

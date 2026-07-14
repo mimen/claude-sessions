@@ -23,7 +23,14 @@ export interface TabRenderOps {
   statusPill: StatusPill | null;
   /** The worker's epic (grouping) label as its own quiet, always-on pill; null when ungrouped. */
   epicPill: StatusPill | null;
+  /** A cluster-emitted alert pill (composer's pills[1]+, when the composer wants one shown).
+   * Rendered as a third cmux status entry (key `ccs_alert`) — cluster owns whether it's set. */
+  alertPill?: StatusPill | null;
 }
+
+/** The cmux pill key for the cluster-emitted alert pill. Distinct from ccs_lifecycle + ccs_epic
+ * so alert renders alongside state + epic instead of clobbering either. */
+export const ALERT_PILL_KEY = "ccs_alert";
 
 /** The cmux pill key for the worker's epic (grouping) label — distinct from `ccs_lifecycle` so the
  * epic and the state pill coexist rather than clobber each other. */
@@ -84,18 +91,24 @@ export interface CmuxPaintOverride {
   color?: string | null;
   statusPill?: StatusPill | null;
   epicPill?: StatusPill | null;
+  alertPill?: StatusPill | null;
 }
 
 /** Overlay a resolved cmux-paint config onto the computed base ops. Pure. */
 export function applyPaintOverride(base: TabRenderOps, over: CmuxPaintOverride | null): TabRenderOps {
   if (!over) return base;
-  return {
+  const out: TabRenderOps = {
     title: over.title ?? base.title, // title never nulls (a tab must have a name)
     description: "description" in over ? over.description ?? null : base.description,
     color: "color" in over ? over.color ?? null : base.color,
     statusPill: "statusPill" in over ? over.statusPill ?? null : base.statusPill,
     epicPill: "epicPill" in over ? over.epicPill ?? null : base.epicPill,
   };
+  // alertPill is optional in the interface — only include the key when either side sets it, so
+  // {} override leaves base ops shape-identical (no synthetic null key).
+  if ("alertPill" in over) out.alertPill = over.alertPill ?? null;
+  else if (base.alertPill !== undefined) out.alertPill = base.alertPill;
+  return out;
 }
 
 function renderSession(row: CatalogueRow, ctx: RenderContext): TabRenderOps {
@@ -115,7 +128,12 @@ function renderSession(row: CatalogueRow, ctx: RenderContext): TabRenderOps {
     computePillFromBoard(row) ?? computePhasePill(row) ?? computeLifecyclePill(row);
   // The worker's EPIC as its own quiet pill (orthogonal to the state pill).
   const epicPill = computeEpicPill(ctx);
-  return { title, description, color, statusPill, epicPill };
+  // A cluster-emitted alert pill (composer's pills[1]) when present. Renders as a third status
+  // entry alongside state + epic. Cluster decides when to emit — the tool paints it as-is.
+  const alertPill = computeAlertPillFromBoard(row);
+  const ops: TabRenderOps = { title, description, color, statusPill, epicPill };
+  if (alertPill) ops.alertPill = alertPill;
+  return ops;
 }
 
 /**
@@ -126,15 +144,9 @@ function renderSession(row: CatalogueRow, ctx: RenderContext): TabRenderOps {
  * Reads through the board indexer (mtime-cached); no direct filesystem work per call.
  */
 function computePillFromBoard(row: CatalogueRow): StatusPill | null {
-  if (!row.cluster) return null;
-  let hit: { identity: string; row: BoardRow } | null;
-  try {
-    hit = boardIndex(row.cluster).bySession(row.sessionId);
-  } catch {
-    return null;
-  }
-  if (!hit || hit.row.pills.length === 0) return null;
-  const pill = hit.row.pills[0]!;
+  const hit = lookupBoardRow(row);
+  if (!hit || hit.pills.length === 0) return null;
+  const pill = hit.pills[0]!;
   return {
     key: pill.key,
     label: pill.label,
@@ -142,6 +154,32 @@ function computePillFromBoard(row: CatalogueRow): StatusPill | null {
     color: pill.color,
     priority: pill.priority ?? 50,
   };
+}
+
+/** Cluster-emitted alert pill: the composer's pills[1] (present iff the cluster wants an alert
+ * shown). Returns null when there's no cluster, no board row, or the composer emitted only one
+ * pill. Rendered as a distinct cmux status entry (ccs_alert), so it coexists with state + epic. */
+function computeAlertPillFromBoard(row: CatalogueRow): StatusPill | null {
+  const hit = lookupBoardRow(row);
+  if (!hit || hit.pills.length < 2) return null;
+  const pill = hit.pills[1]!;
+  return {
+    key: ALERT_PILL_KEY,
+    label: pill.label,
+    icon: pill.icon,
+    color: pill.color,
+    priority: pill.priority ?? 40,
+  };
+}
+
+/** Session → composed board row. null when the session isn't in any cluster or board is empty. */
+function lookupBoardRow(row: CatalogueRow): BoardRow | null {
+  if (!row.cluster) return null;
+  try {
+    return boardIndex(row.cluster).bySession(row.sessionId)?.row ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function renderLoop(row: CatalogueRow): TabRenderOps {
