@@ -18,6 +18,25 @@ import { resolveConfig } from "./resolve-config.ts";
 import { liveResolveCtx, composeStopContext } from "./compose-claude-md.ts";
 import { identityDir, ccsRuntimeRoot } from "../inbox/identity-path.ts";
 import { responsibilityOf } from "./start-actions.ts";
+import { spawnSelfCheckDetached, resolveCcsBinary } from "./spawn-self-check.ts";
+
+/**
+ * Self-check delivery mode. Default: "sidecar". Controlled by CCS_SELF_CHECK_MODE:
+ *   - "sidecar" (default): detach `ccs self-check <sid>` as a background process; main thread's
+ *     turn ends cleanly with NO additionalContext injection. The sidecar reads recent transcript,
+ *     asks a cheap Claude what to update, runs the resulting ccs commands. Deterministic,
+ *     decoupled from main-thread output behavior.
+ *   - "inline": legacy path — inject a pointer to the composed stop-context as additionalContext,
+ *     forcing one continuation turn where the main agent runs the updates itself. Kept as an
+ *     escape hatch in case sidecar wedges.
+ *   - "off": no self-check at all.
+ */
+type SelfCheckMode = "sidecar" | "inline" | "off";
+function selfCheckMode(): SelfCheckMode {
+  const v = (process.env.CCS_SELF_CHECK_MODE ?? "sidecar").toLowerCase();
+  if (v === "inline" || v === "off") return v;
+  return "sidecar";
+}
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -57,37 +76,42 @@ export async function workerStopCommand(): Promise<number> {
     // on the NATURAL stop only, then let the worker's re-evaluation turn end for real. One nudge,
     // one continuation — never a loop.
     const isContinuationStop = payload?.stop_hook_active === true;
+    const mode = selfCheckMode();
     ensureDataDir();
     const db = openCatalogue(CATALOGUE_PATH());
     let registered = false;
     let pointerContext: string | null = null;
+    let sidecarSessionId: string | null = null;
     try {
       // Only self-report for a registered session (has a role); a bare/foreign session is a no-op.
       const row = getRow(db, id);
       if (row?.role) {
         registered = true;
-        // ADR-0063: the turn-end self-check is a role-authored `stop-context` hook fragment,
-        // resolved through the normal layering (file-presence keyed), NOT a hardcoded pr-agent
-        // rubric. Any role/cluster that authors one gets it; roles that don't, don't. Skip it on a
-        // continuation-Stop (already nudged this stop) so it can never re-trigger itself.
-        if (!isContinuationStop) {
+        // The self-check is a role-authored `stop-context` hook fragment (file-presence keyed).
+        // A role that authors one gets a self-check; a role that doesn't, doesn't.
+        // Continuation-Stop guard applies only to `inline` mode (it's the mode that re-prompts
+        // via additionalContext). `sidecar` mode runs out-of-band; a continuation-Stop from an
+        // earlier inline nudge is not this mode's concern.
+        if (mode !== "off") {
           const composed = composeStopContext(row);
           if (composed) {
-            // Materialize the resolved fragment to the identity's runtime dir and inject only a
-            // pointer + silent-mode instruction. This keeps the visible tool-result block to one
-            // line instead of the full merged fragment, and tells the worker to execute any state
-            // updates via tool calls without emitting user-facing text on the continuation turn.
-            try {
-              const dir = identityDir(ccsRuntimeRoot(), responsibilityOf(row));
-              mkdirSync(dir, { recursive: true });
-              const path = join(dir, "stop-context.md");
-              writeFileSync(path, composed, "utf8");
-              pointerContext = `Silent turn-end self-check: read @${path} and run any \`ccs\` updates it warrants for state that changed this turn. Tool calls only — produce NO user-facing text on this continuation. If nothing changed, emit no tool calls and end the turn.`;
-            } catch {
-              // Materialization failed — fall back to injecting the composed text directly so the
-              // self-check still fires (the reason it exists is more important than the preview
-              // trim). One-off; not expected in practice.
-              pointerContext = composed;
+            if (mode === "sidecar") {
+              // Fork the sidecar detached. Main-thread turn ends normally — no additionalContext,
+              // no continuation. The sidecar runs a cheap claude -p out-of-band and executes any
+              // `ccs` updates it decides on directly against this session id.
+              sidecarSessionId = id;
+            } else if (mode === "inline" && !isContinuationStop) {
+              // Legacy inline path: materialize the fragment and inject a pointer as
+              // additionalContext, forcing one continuation where the main agent runs the updates.
+              try {
+                const dir = identityDir(ccsRuntimeRoot(), responsibilityOf(row));
+                mkdirSync(dir, { recursive: true });
+                const path = join(dir, "stop-context.md");
+                writeFileSync(path, composed, "utf8");
+                pointerContext = `Turn-end self-check: read @${path} and run any \`ccs\` updates it warrants for state that changed this turn. Then produce ONE short line (one sentence, no headers/bullets/preamble) summarizing what you updated, or "self-check: no updates." if nothing changed. Do NOT explain, elaborate, or restate context — one terse line only.`;
+              } catch {
+                pointerContext = composed;
+              }
             }
           }
         }
@@ -98,9 +122,12 @@ export async function workerStopCommand(): Promise<number> {
     } finally {
       db.close();
     }
-    // Inject the pointer (or, on materialization failure, the raw fragment) at turn-end. This
-    // forces ONE continuation (the worker re-evaluates + self-sets its activity), bounded by the
-    // stop_hook_active guard above so the follow-up Stop injects nothing and the turn ends.
+    // Sidecar fork: after db close, before any output. Detached, so this returns fast (<10ms).
+    if (sidecarSessionId) {
+      spawnSelfCheckDetached(sidecarSessionId, resolveCcsBinary());
+    }
+    // Inject the inline pointer (or, on materialization failure, the raw fragment). Only fires in
+    // `inline` mode; sidecar mode never writes to stdout so the Stop hook returns cleanly.
     if (pointerContext) {
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: "Stop", additionalContext: pointerContext },
