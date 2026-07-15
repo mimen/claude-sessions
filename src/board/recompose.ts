@@ -10,7 +10,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { openCatalogue, getRow, identityKeyOf } from "../catalogue/db.ts";
-import { CATALOGUE_PATH } from "../paths.ts";
+import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { readClusterManifest } from "../cluster/manifest.ts";
 import { boardIndex } from "./indexer.ts";
 import { runDefaultComposer } from "./default-composer.ts";
@@ -34,6 +34,7 @@ export function recomposeForSession(sessionId: string, opts: RecomposeOpts = {})
   let cluster: string | null = null;
   let identity: string | null = null;
   try {
+    ensureDataDir();
     const db = openCatalogue(CATALOGUE_PATH());
     try {
       const row = getRow(db, sessionId);

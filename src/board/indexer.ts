@@ -2,7 +2,7 @@ import { statSync } from "node:fs";
 import { boardPath, readBoard } from "./paths.ts";
 import type { Board, BoardRow } from "./types.ts";
 import { openCatalogue, identityKeyOf, getRow } from "../catalogue/db.ts";
-import { CATALOGUE_PATH } from "../paths.ts";
+import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 
 export interface BoardIndex {
   byIdentity(identity: string): BoardRow | null;
@@ -61,12 +61,17 @@ export function boardIndex(cluster: string): BoardIndex {
       if (!entry) return null;
       const identity = entry.sessionMap.get(sessionId);
       if (!identity) {
-        const db = openCatalogue(CATALOGUE_PATH());
-        const catRow = getRow(db, sessionId);
-        const resolvedIdentity = catRow ? identityKeyOf(catRow) : null;
-        if (!resolvedIdentity) return null;
-        const row = entry.identityMap.get(resolvedIdentity);
-        return row ? { identity: resolvedIdentity, row } : null;
+        try {
+          ensureDataDir();
+          const db = openCatalogue(CATALOGUE_PATH());
+          const catRow = getRow(db, sessionId);
+          const resolvedIdentity = catRow ? identityKeyOf(catRow) : null;
+          if (!resolvedIdentity) return null;
+          const row = entry.identityMap.get(resolvedIdentity);
+          return row ? { identity: resolvedIdentity, row } : null;
+        } catch {
+          return null;
+        }
       }
       const row = entry.identityMap.get(identity);
       return row ? { identity, row } : null;

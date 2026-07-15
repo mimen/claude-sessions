@@ -11,7 +11,7 @@
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { openCatalogue, getRow } from "../catalogue/db.ts";
-import { CATALOGUE_PATH } from "../paths.ts";
+import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { ccsRuntimeRoot } from "../inbox/identity-path.ts";
 import { ccsConfigRoot } from "../roles/role-files.ts";
 import { resolveConfig } from "./resolve-config.ts";
@@ -28,6 +28,7 @@ function resolveSessionId(raw: string | undefined): string | undefined {
 }
 
 function explain(sessionId: string, type: string): number {
+  ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
     const row = getRow(db, sessionId);

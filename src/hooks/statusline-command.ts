@@ -12,7 +12,7 @@
  */
 import { basename } from "node:path";
 import { openCatalogue, getRow } from "../catalogue/db.ts";
-import { CATALOGUE_PATH } from "../paths.ts";
+import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { renderStatusline } from "../catalogue/render-statusline.ts";
 import { getGrouping } from "../state/groupings.ts";
 
@@ -53,6 +53,7 @@ export async function statuslineCommand(): Promise<number> {
   let line = fallback(payload);
   try {
     if (payload.session_id) {
+      ensureDataDir();
       const db = openCatalogue(CATALOGUE_PATH());
       try {
         const row = getRow(db, payload.session_id);
