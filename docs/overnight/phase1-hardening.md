@@ -42,7 +42,7 @@ Check each on every tick; leave visible boxes here so the loop can see progress.
 
 Format: `- [ ] <one-line failure mode> — <where to look>`
 
-- [ ] `session complete <id>` where `id` isn't a UUID (e.g. `agent-abc…`) — does it 404 cleanly? — `src/catalogue/session-command.ts`
+- [x] `session complete <id>` where `id` isn't a UUID (e.g. `agent-abc…`) — does it 404 cleanly? — `src/catalogue/session-command.ts` — fixed in f269500: mark() now refuses unknown ids instead of creating a phantom row via ensureRow.
 - [ ] `identity set <key> --unknown_field=x` on a core identity — should error with a "no per-role table" message, not silently no-op — `src/catalogue/identities.ts:222`
 - [ ] `identity mint` called concurrently for the same key from 2 processes — do we get 2 rows or 1? — check UNIQUE constraint
 - [ ] `resume <selector>` with a selector that matches 0 sessions — exit code, error text
