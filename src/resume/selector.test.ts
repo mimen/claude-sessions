@@ -91,6 +91,23 @@ test("PR selector: bare `#123` matches the number across repos", () => {
   expect(r.sessionIds.sort()).toEqual(["s1", "s2"]);
 });
 
+// Ambiguous-selector guarantee: bare `#N` matching PRs from >1 repo returns
+// ALL matches (not a single arbitrary pick). The CLI wrapper surfaces the
+// count in its output ("(N sessions)") so the ambiguity is visible; the
+// per-work-unit supersede-dedup in resumeMany prevents duplicate spawns for
+// the same work unit. Callers who want a single repo scope must pass
+// `owner/repo#N` or a `--in <cluster>` pin.
+test("PR selector: bare `#N` with 2 matching repos → both ids + `#N` label (no arbitrary pick)", () => {
+  withPrAgentSchema();
+  const { cat, idx } = seed();
+  stampPr(cat, "s-a", "heroku/dashboard", 12080);
+  stampPr(cat, "s-b", "heroku/api", 12080);
+  const r = resolveSelector(cat, idx, "#12080")!;
+  expect(r.kind).toBe("pr");
+  expect(r.label).toBe("PR #12080");
+  expect(r.sessionIds.sort()).toEqual(["s-a", "s-b"]);
+});
+
 test("GUS work item selector (W-number, case-insensitive)", () => {
   withPrAgentSchema();
   const { cat, idx } = seed();
