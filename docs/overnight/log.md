@@ -22,3 +22,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T16:07Z | ruled-out | symlinked catalogue writes durably to real file (regression test); NFS/SMB documented as known WAL limitation | 9b59817
 2026-07-15T16:37Z | ruled-out | no local-tz APIs in src/; full suite passes under UTC+14 and UTC-11; lock-in test flips process.env.TZ | b36a8ec
 2026-07-15T17:07Z | ruled-out | --role without --cluster inherits cluster from role registry for cluster-scoped roles; standalone-role gap queued | 7415b90
+2026-07-15T17:37Z | ruled-out | cross-cluster role-name collision: cluster-scoped resolveRole is safe; legacy call warns loudly + picks first; 2 regression tests | 3ce3989
