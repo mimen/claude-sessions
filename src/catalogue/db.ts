@@ -554,12 +554,16 @@ function migrate(db: Database): void {
       }
     }
   }
-  if (v < 32) {
-    // ADR-0089: identity as a first-class entity. Introduces the universal tables that hold
-    // durable per-work-item state (identities, groupings, inboxes, identity_state,
-    // dispositions, schema_migrations). Sessions keep their columns FOR NOW — the drop of the
-    // now-redundant columns lives in a later step of the identity refactor once every caller
-    // reads through the new tables. This block only ADDS; nothing loses data.
+  // ADR-0089: identity as a first-class entity. Introduces the universal tables that hold
+  // durable per-work-item state (identities, groupings, inboxes, identity_state, dispositions,
+  // schema_migrations). Sessions keep their columns FOR NOW — the drop of the now-redundant
+  // columns lives in a later refactor step once every caller reads through the new tables.
+  //
+  // The DDL below runs on EVERY openCatalogue() (IF NOT EXISTS is idempotent) so a DB that
+  // got stamped v32 without the tables gets healed on next boot. The row-level backfill is
+  // guarded on `v < 32` so it only runs once — subsequent runs write through the normal
+  // mutation path.
+  {
     //
     // The catalogue → sessions rename also waits for a later step; renaming the table before
     // callers migrate would break every SELECT in-flight. Keeping the table name "catalogue"
@@ -648,7 +652,9 @@ function migrate(db: Database): void {
       db.exec("ALTER TABLE catalogue ADD COLUMN identity_key TEXT;");
     }
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_identity ON catalogue(identity_key);");
+  }
 
+  if (v < 32) {
     // Backfill identities from catalogue rows. For each row that has enough info to identify
     // a work item (fleet: cluster+role+work_ref; core: cluster+role), mint an identity row and
     // point the session at it. deriveIdentityKey mirrors deriveKey's structured shape so a
