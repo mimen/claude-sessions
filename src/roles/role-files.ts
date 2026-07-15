@@ -205,7 +205,16 @@ export function allRolesFromFiles(configRoot = ccsConfigRoot()): Map<string, Rol
       for (const role of dirNames(rolesDir)) {
         if (!isDir(join(rolesDir, role))) continue;
         const def = readRoleDir(join(rolesDir, role), role, cluster);
-        if (def) out.set(role, def);
+        if (!def) continue;
+        // Two clusters defining a role with the same NAME (e.g. `control` in both pr-watch and
+        // toy-second) collide in this name-keyed map. Prefer the entry that carries more
+        // information: keep the existing one if it has a color and the new one doesn't. This
+        // fixes the "control shows gray in the TUI" bug that appeared once a second cluster
+        // (with no color assigned) was onboarded. Callers that need per-cluster resolution
+        // should use `allRolesFlat` instead.
+        const prev = out.get(role);
+        if (prev && prev.color && !def.color) continue;
+        out.set(role, def);
       }
     }
   }
