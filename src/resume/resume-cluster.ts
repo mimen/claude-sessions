@@ -131,8 +131,13 @@ export function resumeClusterEntry(
  *     bridge lookup missed) → skip; the next resume tick catches it
  *   - opted in with a ref → return the ref for pinning
  */
-export function planPin(role: string | null, ref: string | null, shouldPin: (role: string | null) => boolean): string | null {
-  if (!shouldPin(role)) return null;
+export function planPin(
+  cluster: string | null,
+  role: string | null,
+  ref: string | null,
+  shouldPin: (cluster: string | null, role: string | null) => boolean,
+): string | null {
+  if (!shouldPin(cluster, role)) return null;
   return ref ?? null;
 }
 
@@ -178,16 +183,18 @@ export function resumeMany(
     title: row?.customTitle ?? null,
     shortname: typeof row?.meta?.shortname === "string" ? row.meta.shortname : null,
   });
-  // Role-level opt-in `pin_on_resume` (role.toml). Memoized so a resume of 30 workers doesn't reread
-  // role.toml 30 times. resolveRole is I/O so we compute lazily on first sight of a role.
+  // Role-level opt-in `pin_on_resume` (role.toml). Memoized on the (cluster, role)
+  // pair — post-ADR-0080 role identity is (cluster, role), not global-by-name.
+  // resolveRole is I/O so we compute lazily on first sight of a pair.
   const pinCache = new Map<string, boolean>();
-  const shouldPin = (role: string | null): boolean => {
+  const shouldPin = (cluster: string | null, role: string | null): boolean => {
     if (!role) return false;
-    const hit = pinCache.get(role);
+    const key = `${cluster ?? ""}:${role}`;
+    const hit = pinCache.get(key);
     if (hit !== undefined) return hit;
     let flag = false;
     try { flag = resolveRole(role, cluster)?.pinOnResume === true; } catch { flag = false; }
-    pinCache.set(role, flag);
+    pinCache.set(key, flag);
     return flag;
   };
   const cmuxBin = opts.cmuxBin ?? process.env.CMUX_BIN ?? "cmux";
@@ -206,13 +213,13 @@ export function resumeMany(
       /* best-effort — a wedged cmux never fails the pass */
     }
   };
-  const pinAlreadyOpen = (sessionId: string, role: string | null): void => {
+  const pinAlreadyOpen = (sessionId: string, cluster: string | null, role: string | null): void => {
     if (opts.dryRun) return;
-    pinByRef(planPin(role, workspaceForSessionFrom(bridge, sessionId)?.workspaceRef ?? null, shouldPin));
+    pinByRef(planPin(cluster, role, workspaceForSessionFrom(bridge, sessionId)?.workspaceRef ?? null, shouldPin));
   };
-  const pinResumed = (ref: string | null, role: string | null): void => {
+  const pinResumed = (ref: string | null, cluster: string | null, role: string | null): void => {
     if (opts.dryRun) return;
-    pinByRef(planPin(role, ref, shouldPin));
+    pinByRef(planPin(cluster, role, ref, shouldPin));
   };
   for (const p of planned) {
     if (p.disposition === "retired") {
@@ -233,8 +240,8 @@ export function resumeMany(
     });
     summary.perSession.push({ sessionId: p.sessionId, result: res.status, ...rowFields(p.row) });
     switch (res.status) {
-      case "resumed":      summary.resumed++;     pinResumed(res.workspaceRef, p.row?.role ?? null); break;
-      case "already-open": summary.alreadyOpen++; pinAlreadyOpen(p.sessionId, p.row?.role ?? null); break;
+      case "resumed":      summary.resumed++;     pinResumed(res.workspaceRef, p.row?.cluster ?? null, p.row?.role ?? null); break;
+      case "already-open": summary.alreadyOpen++; pinAlreadyOpen(p.sessionId, p.row?.cluster ?? null, p.row?.role ?? null); break;
       case "not-indexed":  summary.notIndexed++;  break;
       case "spawn-failed": summary.failed++;      break;
       // the shared-bridge gate above already aborts on this, but keep the pass fail-closed if a

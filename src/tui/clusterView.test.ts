@@ -8,7 +8,7 @@ const row = (id: string): SessionRow => ({ sessionId: id, lastTs: "2026-07-08" }
 const cat = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
   archived: false, parkedTaskId: null, key: null, parentSessionId: null, role: null, resumeCommand: null, project: null,
-  cluster: null, gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...o,
+  cluster: null, gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, identityKey: null, ...o,
 });
 
 test("buildClusterView: core tier first (★), then WORKERS grouped by epic short-name, no-system last", () => {

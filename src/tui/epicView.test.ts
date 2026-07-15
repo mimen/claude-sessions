@@ -9,7 +9,7 @@ const cat = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
   archived: false, parkedTaskId: null, key: null, parentSessionId: null,
   role: null, resumeCommand: null, project: null, cluster: null, gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null,
-  updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...o,
+  updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, identityKey: null, ...o,
 });
 
 test("buildEpicView: groups system members by epic, strips team prefix, no-epic last, excludes no-system", () => {

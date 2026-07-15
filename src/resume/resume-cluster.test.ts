@@ -13,7 +13,7 @@ function catRow(over: Partial<CatalogueRow>): CatalogueRow {
     archived: false, parkedTaskId: null, key: null, parentSessionId: null,
     role: "pr-agent", resumeCommand: null, project: null, cluster: "pr-watch",
     gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null,
-    prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, ...over,
+    prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, identityKey: null, ...over,
   };
 }
 
@@ -166,24 +166,24 @@ test("cluster resume ABORTS (spawns nothing) when liveness is unreadable (ADR-00
 
 // --- planPin: the pin-by-ref decision (the fix for the "control didn't pin on resume" bug) ---
 
-test("planPin: opted-in role + fresh workspace ref → pins that ref", () => {
-  const shouldPin = (role: string | null) => role === "control";
-  expect(planPin("control", "workspace:44", shouldPin)).toBe("workspace:44");
+test("planPin: opted-in (cluster, role) + fresh workspace ref → pins that ref", () => {
+  const shouldPin = (_c: string | null, role: string | null) => role === "control";
+  expect(planPin("pr-watch", "control", "workspace:44", shouldPin)).toBe("workspace:44");
 });
 
 test("planPin: role not opted in → skip regardless of ref", () => {
-  const shouldPin = (role: string | null) => role === "control";
-  expect(planPin("pr-agent", "workspace:44", shouldPin)).toBeNull();
+  const shouldPin = (_c: string | null, role: string | null) => role === "control";
+  expect(planPin("pr-watch", "pr-agent", "workspace:44", shouldPin)).toBeNull();
 });
 
 test("planPin: opted-in role but no ref (spawn missed / bridge lookup miss) → skip; next tick catches it", () => {
   const shouldPin = () => true;
-  expect(planPin("control", null, shouldPin)).toBeNull();
+  expect(planPin("pr-watch", "control", null, shouldPin)).toBeNull();
 });
 
 test("planPin: null role never pins (bare-session backfill safety)", () => {
-  const shouldPin = () => true; // even if a caller says "always pin", a role-less row shouldn't
-  expect(planPin(null, "workspace:1", (role) => role !== null && shouldPin())).toBeNull();
+  // even if a caller says "always pin", a role-less row shouldn't
+  expect(planPin(null, null, "workspace:1", (_c, role) => role !== null)).toBeNull();
 });
 
 test("empty cluster is a clean no-op", () => {

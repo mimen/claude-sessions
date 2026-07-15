@@ -27,6 +27,7 @@ const cat = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   prBranch: null,
   prState: null,
   prHeadSha: null,
+  identityKey: null,
   ...over,
 });
 const row = (id: string, lastTs: string): SessionRow =>
