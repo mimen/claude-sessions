@@ -56,6 +56,51 @@ test("resolveRole: a standalone role (no cluster) resolves with cluster=null", (
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("resolveRole: same role name in TWO clusters — cluster-scoped call disambiguates (no collision)", () => {
+  // Punch-list guarantee: `pr-agent` defined in both cluster-A and cluster-B
+  // must resolve to the correct one when the caller passes cluster. This is
+  // ADR-D3's whole point — role identity is (cluster, role), not global.
+  const root = pkg((r) => {
+    writeRole(r, "cluster-a", "pr-agent", 'kind = "session"\nresume_command = "/from-a"');
+    writeRole(r, "cluster-b", "pr-agent", 'kind = "loop"\nresume_command = "/from-b"');
+  });
+  try {
+    const a = resolveRole("pr-agent", "cluster-a", root)!;
+    expect(a.cluster).toBe("cluster-a");
+    expect(a.kind).toBe("session");
+    expect(a.resumeCommand).toBe("/from-a");
+    const b = resolveRole("pr-agent", "cluster-b", root)!;
+    expect(b.cluster).toBe("cluster-b");
+    expect(b.kind).toBe("loop");
+    expect(b.resumeCommand).toBe("/from-b");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("resolveRole: legacy no-cluster call on a collision → warns to stderr, returns alphabetically-first", () => {
+  // The legacy overload (no cluster passed) is warn-then-pick-first. Callers
+  // that hit the warning should be updated to pass cluster; the warning
+  // exists so partial migrations don't silently pick 'wrong' cluster.
+  const root = pkg((r) => {
+    writeRole(r, "cluster-b", "pr-agent", 'kind = "loop"');   // b < c alphabetically
+    writeRole(r, "cluster-c", "pr-agent", 'kind = "session"');
+  });
+  const origErr = console.error;
+  let stderr = "";
+  console.error = (...a: unknown[]) => { stderr += a.map((x) => String(x)).join(" ") + "\n"; };
+  try {
+    const def = resolveRole("pr-agent", root)!; // legacy: root passed via 2-arg overload
+    expect(def).not.toBeNull();
+    expect(def.cluster).toBe("cluster-b"); // first hit by dirNames() order
+    expect(stderr).toContain("ambiguous");
+    expect(stderr).toContain("pr-agent");
+    expect(stderr).toContain("cluster-b");
+    expect(stderr).toContain("cluster-c");
+  } finally {
+    console.error = origErr;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("resolveRole: unknown role → null", () => {
   const root = pkg(() => {});
   try {
