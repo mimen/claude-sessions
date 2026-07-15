@@ -35,3 +35,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T22:37Z | fixed | default-composer missing ensureDataDir on fresh CCS_ROOT — 3rd site in the systematic-sweep footgun family fixed; regression test | 0f64882
 2026-07-16T00:00Z | fixed | systematic sweep complete: 5 fresh-CCS_ROOT openCatalogue guards + standalone-role rejection (punch-list cleared) | a5be0cd + 990e473
 2026-07-16T00:30Z | added | acceptance #3 surface-coverage.md — 38 subcommand fresh-CCS_ROOT probe + static grep verification | 3144a4d
+2026-07-16T01:00Z | added | acceptance #12 sync-tabs paint-only guarantee — arch review + 2 subprocess regression tests | 0dcdce1
