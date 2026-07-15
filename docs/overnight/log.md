@@ -17,3 +17,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T13:37Z | ruled-out | `inbox drain <key>` on 0 messages exits clean at library + CLI layers; 2 regression tests | 69588c9
 2026-07-15T14:07Z | ruled-out | `cluster init` twice refuses cleanly and leaves existing files untouched; different --role also refused; 2 regression tests | e6cf405
 2026-07-15T14:37Z | ruled-out | `whoami` outside a session already exits 1 with clear stderr; added tests for both branches (env-set and env-unset) | 5eb2fec
+2026-07-15T15:07Z | fixed | mintIdentity accepted empty/whitespace/control-char identity_keys — real data-integrity bug; added `assertIdentityKeyOk` guard + 7 tests | 1a29d06
