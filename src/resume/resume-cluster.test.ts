@@ -198,3 +198,37 @@ test("empty cluster is a clean no-op", () => {
     cat.close();
   }
 });
+
+test("resume-cluster --dry-run skips null-identity orphan rows entirely (acceptance #5)", () => {
+  // Punch-list guarantee: null-identity catalogue rows must NEVER appear in
+  // a resume plan. sessionsForCluster joins through identities.cluster, so a
+  // row without an identity_key can't route back into the cluster's session
+  // set — even if it happens to have data that looks pr-watch-adjacent.
+  const idx = openIndex(":memory:");
+  const cat = openCatalogue(":memory:");
+  try {
+    // One legitimate member.
+    seedIndex(idx, "real-member", "/tmp");
+    attach(cat, "real-member", "pr-watch", "pr-agent");
+
+    // An ORPHAN row: exists in catalogue, exists in index, but has no
+    // identity_key attached. Simulates the corruption pattern acceptance
+    // criterion #6 explicitly guards against.
+    seedIndex(idx, "orphan", "/tmp");
+    cat.query("INSERT INTO catalogue (session_id, updated_at) VALUES ('orphan', $now)").run({ $now: NOW });
+
+    const summary = resumeClusterEntry(idx, cat, "pr-watch", {
+      dryRun: true,
+      bridge: EMPTY_READABLE_BRIDGE,
+    });
+
+    // Exactly ONE session in the plan — the legit member. The orphan is invisible.
+    expect(summary.perSession.length).toBe(1);
+    expect(summary.perSession[0]!.sessionId).toBe("real-member");
+    expect(summary.resumed).toBe(1);
+    expect(summary.perSession.find((p) => p.sessionId === "orphan")).toBeUndefined();
+  } finally {
+    idx.close();
+    cat.close();
+  }
+});
