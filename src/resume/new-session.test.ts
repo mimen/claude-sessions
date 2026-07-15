@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openCatalogue, getRow, lifecycleOf, identityKeyOf, setCluster, stampPrFacts, setWorkUnitId, getMeta } from "../catalogue/db.ts";
+import { getIdentity } from "../catalogue/identities.ts";
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import { parseOpts, writeSessionMetadata } from "./new-session.ts";
 
@@ -51,6 +52,48 @@ test("supersede-on-spawn: a new worker archives prior sessions of the same ident
     // the new one is idle + shares the identity_key
     expect(lifecycleOf(getRow(db, newId)!)).toBe("idle");
     expect(getRow(db, newId)!.identityKey).toBe("pr-watch:pr-agent:heroku/dashboard#12080");
+  } finally {
+    db.close();
+  }
+});
+
+test("supersede-on-spawn keeps the fleet identity alive (acceptance #9)", () => {
+  // The old session is archived (superseded) but the identity itself must
+  // stay active — the WORK UNIT (this PR) is still in flight, just being
+  // taken over by a fresh worker. If the identity flipped archived=1 here
+  // the whole PR would vanish from the board.
+  withPrRole();
+  const db = openCatalogue(":memory:");
+  try {
+    const key = "pr-watch:pr-agent:heroku/dashboard#12080";
+
+    // 1st worker
+    const oldId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    writeSessionMetadata(db, oldId, parseOpts([
+      "--cluster", "pr-watch", "--role", "pr-agent",
+      "--pr-number", "12080", "--pr-repo", "heroku/dashboard",
+    ]), NOW);
+
+    // 2nd worker on the same PR
+    const newId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    writeSessionMetadata(db, newId, parseOpts([
+      "--cluster", "pr-watch", "--role", "pr-agent",
+      "--pr-number", "12080", "--pr-repo", "heroku/dashboard",
+    ]), NOW);
+
+    // Old session is archived + points at the successor.
+    expect(lifecycleOf(getRow(db, oldId)!)).toBe("archived");
+    expect(getMeta(getRow(db, oldId)!, "superseded_by")).toBe(newId);
+    // New session is live and attached to the same identity.
+    expect(lifecycleOf(getRow(db, newId)!)).toBe("idle");
+    expect(getRow(db, newId)!.identityKey).toBe(key);
+
+    // THE ACCEPTANCE CHECK: the shared fleet identity itself stays
+    // active (archived=false, completed=false). If mintIdentity's idempotent
+    // no-op ever regressed into 'reset flags on re-mint', this would flip.
+    const id = getIdentity(db, key)!;
+    expect(id.archived).toBe(false);
+    expect(id.completed).toBe(false);
   } finally {
     db.close();
   }
