@@ -1,0 +1,557 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ccs Platform: Full System Review + Phased Plan (2026-07-14)</title>
+<style>
+:root {
+  --bg: #fbfaf8; --fg: #1e2126; --muted: #6b7280; --card: #ffffff; --border: #e4e2dd;
+  --accent: #4256c7; --code-bg: #f1efe9; --p0: #b91c1c; --p1: #c2620a; --p2: #a16207;
+  --ok: #15803d; --info: #4256c7; --chip-bg: #eef0fb;
+  --p0-bg: #fdf0f0; --p1-bg: #fdf6ec; --p2-bg: #fdfaec; --ok-bg: #f0f9f1; --info-bg: #eef0fb;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16181d; --fg: #e6e4df; --muted: #9aa0ab; --card: #1e2128; --border: #32363f;
+  --accent: #8fa0f0; --code-bg: #262a33; --p0: #f28b8b; --p1: #eeb26b; --p2: #e3cc6f;
+  --ok: #7fd39a; --info: #8fa0f0; --chip-bg: #262c44;
+  --p0-bg: #2c2022; --p1-bg: #2b251d; --p2-bg: #2b291d; --ok-bg: #1d2a20; --info-bg: #20243a; }
+}
+:root[data-theme="dark"] { --bg: #16181d; --fg: #e6e4df; --muted: #9aa0ab; --card: #1e2128; --border: #32363f;
+  --accent: #8fa0f0; --code-bg: #262a33; --p0: #f28b8b; --p1: #eeb26b; --p2: #e3cc6f;
+  --ok: #7fd39a; --info: #8fa0f0; --chip-bg: #262c44;
+  --p0-bg: #2c2022; --p1-bg: #2b251d; --p2-bg: #2b291d; --ok-bg: #1d2a20; --info-bg: #20243a; }
+:root[data-theme="light"] { --bg: #fbfaf8; --fg: #1e2126; --muted: #6b7280; --card: #ffffff; --border: #e4e2dd;
+  --accent: #4256c7; --code-bg: #f1efe9; --p0: #b91c1c; --p1: #c2620a; --p2: #a16207;
+  --ok: #15803d; --info: #4256c7; --chip-bg: #eef0fb;
+  --p0-bg: #fdf0f0; --p1-bg: #fdf6ec; --p2-bg: #fdfaec; --ok-bg: #f0f9f1; --info-bg: #eef0fb; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.65 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  margin: 0; padding: 0 16px 80px; }
+main { max-width: 920px; margin: 0 auto; }
+h1 { font-size: 1.9rem; line-height: 1.25; margin: 48px 0 4px; letter-spacing: -0.02em; }
+h2 { font-size: 1.45rem; margin: 56px 0 12px; padding-top: 16px; border-top: 2px solid var(--border); letter-spacing: -0.01em; }
+h3 { font-size: 1.12rem; margin: 32px 0 8px; }
+h4 { font-size: 1rem; margin: 22px 0 6px; }
+p, li { max-width: 76ch; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { background: var(--code-bg); border-radius: 4px; padding: 1px 5px; font-size: 0.86em;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+pre { background: var(--code-bg); border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
+pre code { background: none; padding: 0; }
+.sub { color: var(--muted); margin: 0 0 32px; }
+.toc { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 24px; margin: 24px 0; }
+.toc ol { margin: 6px 0; padding-left: 22px; }
+table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 0.93rem; }
+.tablewrap { overflow-x: auto; }
+th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: var(--code-bg); }
+.chip { display: inline-block; border-radius: 999px; padding: 1px 10px; font-size: 0.74rem; font-weight: 600;
+  letter-spacing: 0.03em; margin-right: 6px; vertical-align: 2px; }
+.chip.p0 { background: var(--p0-bg); color: var(--p0); }
+.chip.p1 { background: var(--p1-bg); color: var(--p1); }
+.chip.p2 { background: var(--p2-bg); color: var(--p2); }
+.chip.ok { background: var(--ok-bg); color: var(--ok); }
+.chip.info { background: var(--info-bg); color: var(--info); }
+.chip.seat { background: var(--chip-bg); color: var(--accent); }
+.finding { background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--border);
+  border-radius: 8px; padding: 14px 18px; margin: 14px 0; }
+.finding.p0 { border-left-color: var(--p0); }
+.finding.p1 { border-left-color: var(--p1); }
+.finding.p2 { border-left-color: var(--p2); }
+.finding.info { border-left-color: var(--info); }
+.finding h4 { margin: 0 0 6px; }
+.finding .meta { font-size: 0.8rem; color: var(--muted); margin-bottom: 8px; }
+.finding p { margin: 6px 0; }
+.callout { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin: 18px 0; }
+.callout.accent { border-left: 4px solid var(--accent); }
+.kicker { text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.1em; color: var(--muted); font-weight: 700; margin: 44px 0 -6px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+.small { font-size: 0.85rem; color: var(--muted); }
+hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+.phase { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin: 16px 0; }
+.phase h3 { margin-top: 0; }
+.exit { background: var(--code-bg); border-radius: 8px; padding: 10px 14px; margin-top: 10px; font-size: 0.92rem; }
+ul.tight li { margin: 3px 0; }
+.verdictband { display: flex; gap: 12px; flex-wrap: wrap; margin: 18px 0; }
+.verdictband .cell { flex: 1 1 200px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; }
+.verdictband .cell b { display: block; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+</style>
+
+<main>
+<h1>ccs Platform: Full System Review</h1>
+<p class="sub">claude-sessions <code>feat/catalogue-system-and-pr-sense</code> + ccs-config <code>feat/phase-machine-engine</code> &middot; reviewed 2026-07-13/14 &middot; five seats: Fable bug review, GPT-5.6 Sol bug review, wargamer (event-watch port), Fable design review, Sol design review, synthesized by Fable orchestrator with independent verification of the top finding.</p>
+
+<div class="verdictband">
+  <div class="cell"><b>Architecture</b>Sound. Keep it. No redesign needed. Sol overall design score: 7/10.</div>
+  <div class="cell"><b>Current branch</b>Mid-migration broken (board/gate pipeline seam) + 2 hard blockers for any second cluster.</div>
+  <div class="cell"><b>Path</b>Phase 1 on the work laptop hardens pr-watch and the platform seams; then this machine builds its own ccs-config starting with a light cluster, event-watch last.</div>
+</div>
+
+<div class="toc">
+<b>Contents</b>
+<ol>
+  <li><a href="#exec">Executive summary</a></li>
+  <li><a href="#bugs">Part I: Bug review (all findings, full detail)</a></li>
+  <li><a href="#design">Part II: Design review (both vendors, adjudicated)</a></li>
+  <li><a href="#wargame">Part III: Event-watch port wargame</a></li>
+  <li><a href="#decisions">Part IV: Decision log (steering + all 12 resolved)</a></li>
+  <li><a href="#plan">Part V: Phased plan</a></li>
+  <li><a href="#handoff">Part VI: Work-laptop handoff notes (Phase 1)</a></li>
+  <li><a href="#appendix">Appendix: sources, raw reports, already-tracked items</a></li>
+</ol>
+</div>
+
+<h2 id="exec">1. Executive summary</h2>
+<p>Both vendors independently reached the same overall verdict: <b>the core model is genuinely strong and durable</b>. The catalogue/index split, the responsibility&rarr;identity&rarr;embodiment&rarr;lineage model, the three-homes split (tool / git-tracked config / machine-local runtime), the identity-keyed board contract (ADR-0077), durable worker inboxes, the control/concierge plane split, and deterministic sensing feeding an inference layer are all called out as correct, deep design by both reviews. Sol: "a good core model wrapped in too much machinery." Fable: "the risks are not in the core architecture."</p>
+<p>The problems cluster in four places:</p>
+<ol>
+<li><b>The branch is mid-migration broken.</b> The ADR-0077 board rewrite landed the composer but not its consumers: catalogue sync fails every tick and gate results never reach the board. Verified directly in code, not just by the reviewers.</li>
+<li><b>Two hard blockers for any second cluster:</b> role resolution is global-by-name (not cluster-scoped), and the identity key has no single source of truth (3&ndash;4 independent implementations across TS and Python, with drift already logged internally).</li>
+<li><b>State integrity is convention, not mechanism:</b> unlocked read-modify-write on sessions.json and board.json, ownerless lock recovery, hollow watchdog liveness, singleton guarantees removed without replacement.</li>
+<li><b>The real tool&harr;cluster interface is the private SQLite schema</b>, because the Python engine reads ccs databases directly. Every tool migration is secretly a two-repo, two-language migration.</li>
+</ol>
+<p>None of these require rethinking the design. They define Phase 1: a hardening pass on the work laptop that leaves pr-watch provably correct and the platform seams enforced, after which this machine's ccs-config build-out starts from a solid contract.</p>
+
+<h2 id="bugs">2. Part I: Bug review, all findings</h2>
+<p class="small">Sources: Fable reviewer-A (code-traced), GPT-5.6 Sol reviewer-B (code-traced), orchestrator verification. CONFIRMED = the reviewer traced the failing path in code. PLAUSIBLE = strongly inferred, not fully traced. Old-layer findings already tracked in the repo's own <code>REVIEW.md</code> and <code>PRODUCTION-READINESS-CHECKLIST.md</code> are not repeated here; see <a href="#appendix">Appendix</a>.</p>
+
+<p class="kicker">P0: broken now or blocks everything</p>
+
+<div class="finding p0">
+<h4>B1. Two incompatible board/gate contracts are live in the same pipeline</h4>
+<div class="meta"><span class="chip p0">P0</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Sol</span><span class="chip seat">verified by orchestrator</span> ccs-config engine</div>
+<p><code>compose_board.py</code> (main(), ~line 599&ndash;620) now writes the ADR-0077 shape: top-level <code>{status, provenance, rows, today, sprints, senseHealth, counts, prs (legacy), ticketedNoPr}</code>. But <code>catalogue_sync.py:163&ndash;169</code> still requires the legacy nested shape: it checks <code>"board" in board</code> and reads <code>board["board"]["prs"]</code>. It therefore fails with "board.json missing" on <b>every tick</b> and returns before synchronizing stage, grouping, title, GUS metadata, or PR facts to the catalogue.</p>
+<p>Second split in the same pipeline: <code>compose_board.py:559</code> reads <code>gate_eval.json</code>, but <code>gate_eval.py:492</code> writes <code>gate.json</code>. Nothing writes <code>gate_eval.json</code>, so gate results (satisfiesTicket, scope-drift, visual-review-stale alerts) never reach the composed board. <code>catalogue_sync.py:170&ndash;175</code> also still reads <code>gate.json</code>.</p>
+<p><b>Why it persists silently:</b> <code>sense-scheduler.py:91&ndash;100, 203&ndash;211</code> runs catalogue_sync every tick and logs failures without halting. The board, catalogue, and rendered pills can disagree indefinitely while everything reports healthy. This is exactly the "engine-sensor desync" failure class the cluster.toml version gate was written to prevent; it slipped through because the seam is inside the engine where no gate exists.</p>
+<p><b>Fix shape:</b> one board shape, one gate artifact name, and an end-to-end tick test (sensor &rarr; gate &rarr; composer &rarr; catalogue_sync &rarr; rendered row) run against fixtures in CI.</p>
+</div>
+
+<div class="finding p0">
+<h4>B2. Role resolution is global by name, not (cluster, role): hard blocker for any second cluster</h4>
+<div class="meta"><span class="chip p0">P0</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Sol</span> ccs tool</div>
+<p><code>resolveRole(role)</code> scans cluster directories and returns the first match by role <i>name</i> (<code>src/roles/role-files.ts:123&ndash;134</code>). Used unscoped by: resume (<code>resume-session.ts:95&ndash;99</code>), cluster resume/pinOnResume (<code>resume-cluster.ts:181&ndash;191</code>), new-session cluster inference / work-unit semantics / cwd / resume command (<code>new-session.ts:154&ndash;169, 228&ndash;251</code>), stage validation (<code>catalogue/commands.ts:244&ndash;253</code>), and the resume-command cache keyed by role name alone (<code>catalogue/db.ts:445&ndash;467</code>).</p>
+<p><b>Failure scenario:</b> both pr-watch and a second cluster will have roles named control, concierge, scout, eval. Whichever cluster sorts first owns those names machine-wide: resuming <code>event-watch:control</code> can execute pr-watch's <code>/pr-watch-control</code> loop in pr-watch's cwd and validate against pr-watch's stage vocabulary.</p>
+<p><b>Related:</b> <code>ensure-control.sh:42&ndash;72</code> detects control liveness by searching cmux for the literal workspace title "CONTROL PLANE": a second cluster reusing the title false-positives both clusters' watchdogs. Also <code>src/tui/clusterView.ts:22</code> hardcodes legacy system-name fallbacks (<code>pr-watch-control</code>, <code>pr-watch-2</code>...) that could misclassify a second cluster's sessions (Fable; low risk, delete).</p>
+<p><b>Fix shape:</b> role identity is <code>(cluster, role)</code> everywhere including caches, hooks, colors, spawn, resume, pinning; watchdog discovery keys on ccs identity, never workspace title. Design note: Milad's future direction includes standalone/floating roles, so build the fix so cluster is a namespace, not a hard requirement baked deeper than it must be (a floating role can be modeled as a cluster-of-one).</p>
+</div>
+
+<div class="finding p0">
+<h4>B3. Identity key has no single source of truth (3&ndash;4 implementations, drift already logged)</h4>
+<div class="meta"><span class="chip p0">P0</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Fable</span> both repos</div>
+<p>The <code>cluster:role:work-unit</code> key, the keystone concept of the whole platform, is independently implemented in:</p>
+<ul class="tight">
+<li><code>src/catalogue/lineage.ts:23</code> <code>identityKey()</code>: priority workUnitId &gt; pr:/gus: derived &gt; role:</li>
+<li><code>src/catalogue/db.ts:545&ndash;548</code> <code>identityKeyOf()</code>: reads the stored <code>row.key</code> column, which is populated only by explicit <code>setKey()</code> calls (<code>new-session.ts:140</code>, <code>catalogue/commands.ts:160</code>), never auto-derived</li>
+<li><code>compose_board.py:128&ndash;136</code> <code>identity_key()</code>: a hand-rolled Python reimplementation of the same priority order</li>
+<li>The repo's own <code>docs/FINDINGS-dry-determinism.md:7</code> records "work-unit key logic implemented 6x, 2 drifted", rated P0 internally, still unfixed on this branch</li>
+</ul>
+<p><b>Failure scenario:</b> when the Python-derived board <code>identity</code> and the TS-derived <code>catalogue.key</code> disagree for the same work unit, <code>src/board/indexer.ts:59&ndash;73</code> <code>bySession()</code> falls back to <code>identityKeyOf(catRow)</code>; a mismatch silently returns null: the board row exists but the tool reports no board data. Every new cluster adds another reimplementation.</p>
+<p><b>Fix shape:</b> ccs derives and stores the key on every mutation and exposes it via CLI/JSON export; engines read it and never re-derive. (Subsumed by B10's export boundary.)</p>
+</div>
+
+<p class="kicker">P1: state integrity, singletons, watchdogs</p>
+
+<div class="finding p1">
+<h4>B4. Control watchdog can report a dead control plane as healthy forever</h4>
+<div class="meta"><span class="chip p1">P1</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Sol</span> ccs-config engine</div>
+<p>Health = "a titled workspace exists AND board.json is fresh" (<code>ensure-control.sh:30&ndash;36, 50&ndash;70</code>). But board.json is written by the independent launchd sensor pipeline (<code>sense-scheduler.py:194&ndash;211</code>; the pill-sweeper cadence alone makes composer runs near-continuous, <code>:70&ndash;80</code>). A wedged/dormant Claude control session keeps its workspace while launchd keeps the board fresh: the anti-dormancy watchdog reports "alive + ticking" while the system is permanently dormant. Additionally, when it does detect a titled-but-stale control it logs and refuses to recover, deliberately leaving the system wedged (Sol design review).</p>
+<p><b>Fix shape:</b> a control-owned monotonic heartbeat token (written only by the control session's own tick), watchdog logic = alive+fresh &rarr; no-op; dead &rarr; <code>ccs resume</code> the MRU control embodiment; alive-but-stale &rarr; mark degraded + one operator action. Recovery must go through <code>ccs resume control --cluster pr-watch</code>, never a raw cmux/claude command (current raw launch at <code>ensure-control.sh:74&ndash;88</code> bypasses identity, manifest, and hook contracts).</p>
+</div>
+
+<div class="finding p1">
+<h4>B5. Unlocked check-then-spawn: duplicate control planes</h4>
+<div class="meta"><span class="chip p1">P1</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Sol</span> ccs-config engine</div>
+<p><code>ensure-control.sh:59&ndash;81</code>: check and spawn are separate unlocked operations. Two overlapping invocations (launchd + manual, or clock skew) can both observe no control workspace and both call <code>cmux new-workspace</code>. No lock, CAS, lease, or post-create reconciliation. Two control loops then dispatch workers, drain events, and mutate catalogue state from different snapshots. Compounds with B7.</p>
+</div>
+
+<div class="finding p1">
+<h4>B6. One-embodiment guard removed without an atomic replacement (docs still promise it)</h4>
+<div class="meta"><span class="chip p1">P1</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Sol</span> ccs tool</div>
+<p><code>src/catalogue/spawn-contract.ts:80&ndash;109</code> tolerates duplicate embodiments; <code>docs/CONTEXT.md:81&ndash;88, 140&ndash;150</code> still promises one embodiment per work unit; sibling superseding is best-effort and decoupled from process launch (<code>new-session.ts:167&ndash;196</code>). Two concurrent spawns can both pass validation and launch; superseding doesn't stop already-started processes; atomic inbox drain doesn't protect a shared worktree from concurrent edits/commits/pushes.</p>
+<p><b>Nuance (Sol's design review, worth honoring):</b> MRU-preference over a hard invariant is arguably right for a single operator; the dangerous cases are same-session double-resume and the <i>control</i> singleton. Decision D6 below: pick which layer gets a hard atomic claim (control: yes; workers: preference + loud warning may be enough). Whatever the choice, docs and code must say the same thing.</p>
+</div>
+
+<div class="finding p1">
+<h4>B7. sessions.json: unlocked read-modify-write, multi-step partial states</h4>
+<div class="meta"><span class="chip p1">P1</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Sol</span> ccs-config engine</div>
+<p><code>spawn-agent.sh:42&ndash;50</code> <code>registry_set</code> rewrites the whole registry per field; a worker registration calls it three times (sessionId, cmuxWorkspace, cwd; <code>:137&ndash;157</code>). No lock: concurrent worker starts clobber each other; a crash mid-sequence leaves a valid-looking but incomplete record (sessionId with no cwd/workspace) &rarr; hooks stop recognizing the worker, dispatch concludes no session exists. <code>migrate_keys.py:83&ndash;105</code> is worse: mutates several entries and renames state files before persistence, then does a direct non-atomic overwrite; interruption detaches result/judgment files from registry identity.</p>
+</div>
+
+<div class="finding p1">
+<h4>B8. Stale sense-lock recovery can delete a newer run's active lock</h4>
+<div class="meta"><span class="chip p1">P1</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Sol</span> ccs-config engine</div>
+<p><code>sense-run.sh:22&ndash;25, 41&ndash;56</code>: one shared lockdir; any lock older than 30 minutes is removed on mtime alone; every owner unconditionally removes the same path on exit. Sequence: run A exceeds 30m &rarr; B deletes A's "stale" dir and recreates &rarr; A exits and deletes B's <i>active</i> lock &rarr; C starts concurrently with B. No owner token, PID validation, or ownership-safe cleanup. This also makes the fixed temp paths in <code>sense_common.py:42&ndash;56</code> and <code>sense-scheduler.py:118&ndash;122</code> unsafe under exactly the condition the lock exists to contain.</p>
+</div>
+
+<div class="finding p1">
+<h4>B9. Single-row board recompose is unlocked (dormant today, lost-update bug the day it's wired)</h4>
+<div class="meta"><span class="chip p1">P1</span><span class="chip ok">CONFIRMED (dormant)</span><span class="chip seat">Fable</span> ccs-config engine</div>
+<p><code>compose_board.py:628&ndash;659</code> <code>compose_single()</code> does read-prior &rarr; merge one row &rarr; atomic write, without taking <code>sense-run.sh</code>'s lock. Atomic rename protects readers from torn files, not writers from lost updates: an event-triggered single-row recompose racing a scheduled whole-board compose can silently revert <b>every other row</b> to the pre-tick snapshot. No callers exist yet (the <code>ccs board --identity/--recompose</code> tool-side PR is step 5 of the migration spec), so this must be fixed in the same PR that wires the callers, and called out in that PR's acceptance criteria.</p>
+</div>
+
+<div class="finding p1">
+<h4>B10. The engine reads ccs's private SQLite directly; the schema is the real interface</h4>
+<div class="meta"><span class="chip p1">P1</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Sol</span><span class="chip seat">both design reviews</span> both repos</div>
+<p><code>compose_board.py:39&ndash;42, 89&ndash;149</code> queries catalogue columns and reimplements identity precedence; <code>worker_activity.py:75&ndash;95</code> attaches both databases. This violates the platform's own "neither reaches into the other" rule: the compatibility interface is de facto the DB schema, not cluster.toml or the board contract, so every schema migration is a coordinated two-repo, two-language migration.</p>
+<p><b>Fix shape (both vendors, same answer):</b> stable machine-readable projections from the tool: <code>ccs cluster &lt;name&gt; --json</code>, <code>ccs catalogue export --cluster &lt;name&gt; --json</code>, <code>ccs identity resolve --session &lt;id&gt; --json</code> (the existing <code>src/catalogue/cluster-map.ts:240&ndash;281</code> projection is close; deepen it). Forbid direct DB reads from clusters. This single change also retires B3's drift class at the root.</p>
+</div>
+
+<p class="kicker">P2: contract enforcement, hooks, migrations, liveness edge cases</p>
+
+<div class="finding p2">
+<h4>B11. requires_ccs is barely enforced; board.json is never runtime-validated</h4>
+<div class="meta"><span class="chip p2">P2</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Sol</span><span class="chip seat">Fable</span> ccs tool</div>
+<p>Only <code>resume-cluster</code> calls <code>checkClusterGate</code> (<code>cli.ts:615&ndash;633</code>); new-session spawns without gating (<code>new-session.ts:228&ndash;251</code>); board compose/read paths parse the manifest but skip the gate (<code>recompose.ts:51&ndash;76</code>, <code>board-command.ts:104&ndash;167</code>); missing/malformed manifests and same-major shortfalls warn-and-continue (<code>manifest.ts:134&ndash;174, 154&ndash;160</code>), which is weak for a pre-1.0 tool where 0.1 vs 0.9 is a real gap.</p>
+<p>Separately (Fable): <code>src/board/paths.ts:27&ndash;38</code> <code>readBoard()</code> is <code>JSON.parse</code> + a bare <code>as Board</code> cast, while the manifest layer got a real zod schema (<code>manifest.ts:57&ndash;70</code>). A malformed row from a second, less-dogfooded composer parses fine and then crashes deep in <code>buildMaps()</code> (<code>indexer.ts:23&ndash;33</code>) or the TUI/cmux paint code with no "board malformed" signal at the boundary.</p>
+<p><b>Fix shape:</b> zod-validate board.json on read against a versioned schema; run the cluster gate on every bring-online path (new-session, board commands, resume).</p>
+</div>
+
+<div class="finding p2">
+<h4>B12. activity was dropped from storage/CLI (migration v30) but hooks and docs still depend on it</h4>
+<div class="meta"><span class="chip p2">P2</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Sol</span> both repos</div>
+<p><code>db.ts:427&ndash;435</code> drops the activity column; no CLI command remains; but the worker Stop hook still calls <code>ccs activity ...</code> and swallows every failure (<code>worker-stop-hook.sh:45&ndash;74</code>). A blocked worker's needs-you escalation now silently no-ops: the worker-owned escalation edge is gone, not just doc lag. <code>docs/CONTEXT.md:105&ndash;114, 169&ndash;187</code>, <code>phase-state-machine.md:1&ndash;56</code>, and <code>runbook.md:45&ndash;66</code> still teach stage x activity as current.</p>
+<p><b>Related design footgun (Fable):</b> as designed, activity had dual write-authority (engine senses "fixing", worker self-reports "needs-you") in one field with no precedence rule enforced at the write boundary. When re-introducing the escalation edge, either split sensed vs self-reported fields or enforce precedence in the ccs command.</p>
+</div>
+
+<div class="finding p2">
+<h4>B13. Worker stop-hook events: non-atomic write, one mutable filename per key</h4>
+<div class="meta"><span class="chip p2">P2</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Sol</span> ccs-config engine</div>
+<p><code>worker-stop-hook.sh:35&ndash;43</code> writes event JSON directly to the final path <code>events/&lt;key&gt;.json</code>: crash mid-write leaves malformed JSON; multiple turns before a drain overwrite each other. No sequence number, turn ID, journal, or temp+rename. If events are meant to be the return half of each worker turn (as comments state), the semantics are weaker than documented; if they are only a level-triggered "something changed" hint, document that and keep it.</p>
+</div>
+
+<div class="finding p2">
+<h4>B14. Contradictory-but-parseable liveness sources can resolve wrong</h4>
+<div class="meta"><span class="chip p2">P2</span><span class="chip info">PLAUSIBLE</span><span class="chip seat">Sol</span> ccs tool</div>
+<p><code>src/cmux/bridge.ts:160&ndash;168</code> acknowledges <code>activeSessionsBySurface</code> can be stale after reattachment, yet inserts that view first and refuses to replace an existing surface binding (<code>:175&ndash;203</code>). If the active map binds a live surface to an old session while <code>sessions[currentId].surfaceId</code> says otherwise, the stale value wins and the live-tree intersection can't resolve it (the surface itself is valid). ADR-0054's fail-closed guard covers unreadable sources, not contradictory-but-valid ones. Potential effect: resume skips the dead identity and relaunches the live one, or makes the wrong duplicate decision.</p>
+</div>
+
+<div class="finding p2">
+<h4>B15. Hand-patched live DB can be silently blessed as current by presence-driven migrations</h4>
+<div class="meta"><span class="chip p2">P2</span><span class="chip info">PLAUSIBLE</span><span class="chip seat">Sol</span> ccs tool</div>
+<p>v16&ndash;v19 migration guards check only column-name existence (<code>db.ts:273&ndash;311</code>); later renames/drops are also presence-driven (<code>:362&ndash;435</code>); the DB is stamped v30 with no post-migration schema validation (<code>:436</code>). Because the live DB was hand-patched during v16&ndash;v19, a column with the wrong type/default, or both old and new names present, can cause a migration block to skip its operation and still stamp current (e.g. if both <code>system</code> and <code>cluster</code> exist, v27 skips the copy and still records success). <b>Fix shape:</b> a startup schema postcondition validating required columns, forbidden legacy combinations, and data-transfer invariants before advancing <code>user_version</code>; plus migration smoke tests (fresh + fixture-of-live-shape).</p>
+</div>
+
+<div class="finding p2">
+<h4>B16. Operational papercuts (Fable)</h4>
+<div class="meta"><span class="chip p2">P2</span><span class="chip ok">CONFIRMED</span><span class="chip seat">Fable</span></div>
+<ul class="tight">
+<li>launchd plists are copy-paste with hardcoded absolute paths and labels (<code>engine/deploy/com.mimen.pr-watch-*.plist</code>); no generator. Every new cluster hand-authors 2&ndash;3 plists. Small templating script recommended.</li>
+<li><code>worker_activity.py</code> wedged-detection (git log + inbox mtimes off catalogue.cwd) was not fully traced by any seat; audit for timezone/off-by-one before reusing the "worker went quiet" pattern in another cluster.</li>
+<li>Engine test coverage: 2 test files under <code>engine/lib/</code> vs 30+ scripts under <code>engine/scripts/</code>, against near-total test coverage in the TS tool. Sensing is where truth drifts; it is the least-tested layer.</li>
+</ul>
+</div>
+
+<div class="callout accent"><b>Sol's design smell, worth keeping verbatim:</b> the deepest issue is not code volume but <i>partially overlapping control surfaces</i> that can disagree: catalogue stage vs composed board phase; sense.sh vs sense-scheduler.py; gate.json vs gate_eval.json; catalogue identity vs sessions.json routing identity; ccs lifecycle enforcement vs shell-level cmux checks; platform hooks vs legacy global hooks; documented stage x activity vs the v30 stage-only implementation. Atomic helpers, a manifest gate, a liveness bridge, and a board contract all exist, yet writers and entrypoints routinely bypass each one. Phase 1's real job is concentrating invariants at single boundaries.</div>
+
+<h2 id="design">3. Part II: Design review (Fable + Sol, adjudicated)</h2>
+<p class="small">Both seats reviewed the design assuming Part I gets fixed. Sol's full 800-line report and Fable's full report are preserved (see <a href="#appendix">Appendix</a>). Scores are Sol's; Fable concurred in prose without numbers.</p>
+
+<div class="tablewrap"><table>
+<tr><th>Area</th><th>Sol</th><th>Consensus verdict</th></tr>
+<tr><td>Tool/cluster boundary + compatibility</td><td>8/10</td><td>Right principle (ADR-0061), well applied in TS; the contract itself is under-specified (version string, no schema, python3 assumed, DB reached into)</td></tr>
+<tr><td>Maintainability (1 person + agents, years)</td><td>6/10</td><td>Maintainable only with a consolidation phase; ADR/doc drift is the top threat</td></tr>
+<tr><td>Part-by-part soundness</td><td>7/10</td><td>Identity/inbox/planes strong; hooks over-built; stage ownership contradictory; watchdog incomplete</td></tr>
+<tr><td>Operator UX</td><td>7/10</td><td>Right ambient hierarchy; too many TUI modes and CLI primitives; concierge over-dumps</td></tr>
+<tr><td>pr-watch role org</td><td>7/10</td><td>Core seats right; two too many standing seats</td></tr>
+<tr><td>Deterministic vs inference</td><td>7/10</td><td>Principle right; too much deterministic policy living in prompts</td></tr>
+<tr><td>Engine generalization path</td><td>8/10</td><td>Real path: protocol now, framework after cluster #2</td></tr>
+<tr><td><b>Overall</b></td><td><b>7/10</b></td><td>Sound core, self-inflicted complexity is the main threat</td></tr>
+</table></div>
+
+<h3>3.1 Tool/cluster boundaries</h3>
+<p><b>Agreed strong:</b> the ADR-0061 litmus test ("would a second cluster inherit it?") is honored in the TS core: stage/activity are blessed columns with cluster-declared values, work units and groupings are generic entities with cluster-typed display, <code>board/types.ts</code> keeps <code>workUnit.kind</code> and <code>owner</code> open strings. Three homes (tool / git config / runtime) map cleanly to change cadence and rebuild safety. Self-contained cluster packages with package-relative engine paths are right.</p>
+<p><b>Agreed weak:</b> the compatibility contract is a version range with no schema; the engine invocation is a shell-out whose real interface is "whatever fields pr-watch's Python happens to read/write"; and B10 (direct SQLite access) means the schema is the true contract. Sol's concrete proposals, endorsed:</p>
+<ul class="tight">
+<li><b>Versioned executable protocol in cluster.toml</b>: declare argv + protocol number + timeout for <code>board</code> and <code>sense</code> entries instead of assuming <code>python3 &lt;file&gt;</code>.</li>
+<li><b>Versioned board schema validated at publish and read.</b></li>
+<li><b>Runtime state classification</b>: <code>~/.ccs</code> currently conflates "not git-tracked" with "disposable". Split into durable operational state (inboxes, processed-message history, dispositions, judgments/results, watermarks) vs rebuildable derived state (index, boards, sensor snapshots, pills, caches). This drives backup, reset, migration, and repair-by-deletion, and it becomes the seed of the multi-machine state-home answer later.</li>
+<li><b>Board recompose semantics</b>: synchronous single-row recompose is becoming an orchestration protocol attached to every mutation (<code>catalogue/commands.ts:175&ndash;298</code>). Prefer: writes append an identity-scoped changed event; the composer coalesces; one bounded synchronous refresh operation exists for interactive commands; consumers display <code>lastComposed</code> honestly.</li>
+</ul>
+
+<h3>3.2 Maintainability</h3>
+<p><b>Agreed: maintainable if a consolidation phase happens now.</b> ~26k lines TS + ~8k Python/shell is fine for one person + agents. The entropy hot spots, in order:</p>
+<ol>
+<li><b>ADRs as chronological memory.</b> 78 ADRs with live contradictions: two ADR-0001 files; the ADR-0053 numbering collision (already known); CONTEXT.md says 8 hook types, registry has 10 (<code>hook-types.ts:39&ndash;80</code>); ADR-0032 (one-embodiment invariant) vs ADR-0073 (preference); ADR-0060 keeps catalogue stage while ADR-0077 authorizes deleting it; the config repo's CONTEXT.md is still written in pre-rename vocabulary (system/constellation/event, retired paths); the scout SKILL cites the retired <code>~/.claude-sessions/catalogue.db</code> path. Agents amplify doc drift: each session can find a locally plausible stale doc and perpetuate it. <b>Fix:</b> one curated current-architecture document; every ADR gets a status (active / superseded-by / partially-active / abandoned / migration-only); regenerate or delete stale prose docs (the tool repo's GLOSSARY/SYSTEM-UNITS "extracted from ground truth" pattern is the right one; apply it to cluster docs or delete them).</li>
+<li><b>Prompts becoming programs.</b> The control skill (230 lines) embeds a full dispatch algorithm, ownership matrix, and recovery policy as prose; the concierge skill (300+ lines) embeds board rendering, suppression bookkeeping, relay mechanics, and merge policy. Prose policy accumulates exceptions faster than code because appending a paragraph is free. See 3.6 for the extraction list.</li>
+<li><b>Cross-language duplication</b> (identity, paths, state envelopes): fixed by B10's export boundary + a tiny state SDK.</li>
+<li><b>Two repos:</b> correct split; it is expensive only because the seam is porous. Fix the protocol, not the repo count.</li>
+<li><b>Polyglot:</b> TS tool + Python engine is fine. Shell should shrink to launchd wrappers and env setup: <code>sense-run.sh</code> is appropriately thin; <code>ensure-control.sh</code> implements liveness/recovery policy in shell and talks to cmux directly, which belongs behind ccs or in Python.</li>
+<li><b>Engine tests:</b> bring the sensing layer up to the tool's test discipline (fixtures per sensor, golden-file composer tests, the e2e tick).</li>
+</ol>
+
+<h3>3.3 Part-by-part: will it work?</h3>
+<div class="tablewrap"><table>
+<tr><th>Part</th><th>Verdict</th><th>Notes</th></tr>
+<tr><td>Catalogue + index</td><td><span class="chip ok">STRONG</span></td><td>Durable identity vs rebuildable transcript cache, incremental reindex preserving title-owned fields (<code>index.ts:82&ndash;203</code>). Caveat: migrations undertested (B15); cwd only reachable via index join pushes clusters toward DB access, fix via export (B10).</td></tr>
+<tr><td>Identity / lifecycle / embodiment</td><td><span class="chip ok">STRONGEST</span></td><td>Session vs responsibility vs embodiment vs lineage will survive placement/transport changes. Lifecycle ownership split (ccs owns transitions, cluster owns policy, workers report) is right. Watch: too many identity-adjacent axes (key, project, grouping, tags, parent); prune before adding any new one.</td></tr>
+<tr><td>Spawn/resume via cmux</td><td><span class="chip p2">CONDITIONAL</span></td><td>Surface-UUID join + fail-closed is correct for the pinned cmux. But the "swappable bridge" does not exist yet: the watchdog shells to cmux and builds raw claude commands; the TUI knows cmux ops; new-workspace ref is regex-parsed; no version guard (repo's own cmux-coupling audit P0s). Given the stated direction (interface-bridge adapter, later t3code fork), enforce: every cmux touch goes through src/cmux/, one adapter interface (spawn / liveness / paint / send / attach), version-probed.</td></tr>
+<tr><td>Board pipeline</td><td><span class="chip ok">EXCELLENT DESIGN</span></td><td>Identity-keyed rows solve session churn and twins; two-pill budget right for the medium. Operational cleanups: delete legacy <code>prs</code> surface after migration; move to event-coalesced recompose; validate on read (B11).</td></tr>
+<tr><td>Hook system</td><td><span class="chip p1">OVER-BUILT</span></td><td>Both vendors flagged independently. 10 types x 6 levels x 5 merge strategies for 6 roles; "hook" conflates lifecycle actions, context composition, presentation, spawn config, permission policy. Sol: collapse to 4 domains (context, lifecycle, presentation, spawn); keep user/cluster/role/identity levels; drop work-unit-level configs until a second real use exists; keep guard deferred. The pure resolution/merge code itself is well-built and tested; this is scope reduction, not rewrite.</td></tr>
+<tr><td>Stage machine</td><td><span class="chip p1">DISPUTED &rarr; RESOLVED</span></td><td>Fable: right-sized. Sol: weakest seam: catalogue.stage (per-session, ccs-written, <code>commands.ts:226&ndash;262</code>) and board effective stage (per-identity, cluster-composed) are two overlapping state machines; ADR-0060 vs ADR-0077 contradict on which survives. <b>Adjudication: Sol is right</b>: the Part I board/catalogue desync was precisely this seam failing, and session-scoped stage is the wrong durability axis when twins/respawns are tolerated. See decision D5.</td></tr>
+<tr><td>Control/concierge split</td><td><span class="chip ok">RIGHT</span></td><td>Different clocks, different outputs; documented failure (mid-conversation nagging) justifies it. Execution blur: concierge is itself a 10-minute loop despite being "human-clock"; it can be board-read-on-demand + a narrow notification trigger.</td></tr>
+<tr><td>Worker inboxes</td><td><span class="chip ok">EXCELLENT</span></td><td>Durable, atomic move-on-drain, decoupled from the cmux nudge. Should become the default inter-role transport; retire parallel sessions.json routing semantics once redundant.</td></tr>
+<tr><td>Watchdogs</td><td><span class="chip p1">MIXED</span></td><td>Independent launchd sensing = genuinely good. Control watchdog is not a watchdog yet (B4).</td></tr>
+</table></div>
+
+<h3>3.4 UX</h3>
+<p><b>Agreed hierarchy, each surface one job:</b> cmux pills = ambient glance (two-pill budget praised by both) &middot; TUI = navigate/focus/resume &middot; board = complete operational truth &middot; concierge = interpretation + decisions &middot; CLI primitives = agent/machine interface.</p>
+<ul class="tight">
+<li><b>TUI is several products at once</b> (catalogue, cluster console, transcript reader, skill browser, cost dashboard, metadata editor, NL command line, titler, lifecycle editor; six views, many unlabeled single-key ops). Make cluster / recent / search the three primary modes; demote the rest behind a view picker; move mutations behind a command palette.</li>
+<li><b>CLI namespace flat-mixes operator verbs and internals.</b> Stable operator surface: <code>ccs</code>, <code>ccs cluster &lt;name&gt;</code>, <code>ccs board &lt;name&gt;</code>, <code>ccs resume &lt;selector&gt;</code>, <code>ccs new</code>, <code>ccs inbox</code>, <code>ccs doctor</code>. Everything else documented as the machine interface. Business verbs (ready/approve) stay cluster commands, not platform verbs.</li>
+<li><b>Help text under-represents ~a third of real commands</b> (role, resume-command, gus-work, epic, phase; many flags). Cheap, high-value fix given the surface IS one person's muscle memory.</li>
+<li><b>Add <code>ccs why &lt;session&gt;</code></b>: plain-language dump of identity, lineage, stage source, hook resolution, board row. Today debugging requires holding the full 15-term ontology; this one command absorbs most of that load.</li>
+<li><b>Concierge should not re-dump five tables per digest.</b> Unsolicited contact only for time-sensitive/blocking items; concise delta on re-entry; full board only when asked. (Matches the chosen hybrid speaking-rights model: funnel initiates, tabs converse.)</li>
+<li><b>Four channels render the same state</b> (pill, TUI, concierge, status line) with no built-in cross-check; drift reads as the system lying from multiple mouths. The board-as-single-source fix (D5) plus a periodic consistency assertion in the e2e test covers this.</li>
+</ul>
+
+<h3>3.5 pr-watch role boundaries</h3>
+<div class="tablewrap"><table>
+<tr><th>Seat</th><th>Verdict</th><th>Reasoning</th></tr>
+<tr><td>control</td><td><span class="chip ok">KEEP</span></td><td>Cross-PR routing/prioritization needs portfolio context. But it should not hand-execute a deterministic loop written as prompt pseudocode (see 3.6): it owns ambiguity, dependencies, exceptions, escalation.</td></tr>
+<tr><td>concierge</td><td><span class="chip ok">KEEP</span></td><td>The human-clock seat; the only conversational PR surface. Narrow to: answer questions, decide when to surface, collect decisions, hand structured decisions back. Mechanics move behind commands.</td></tr>
+<tr><td>pr-agent workers</td><td><span class="chip ok">KEEP</span></td><td>One warm session per PR is the right context partition; owns implementation judgment, not lifecycle or routing.</td></tr>
+<tr><td>slack-scout</td><td><span class="chip p2">CONDITIONAL</span></td><td>Fable: the docs justify it with the clock argument, which does not apply to a sensor; the real justification is "classification needs inference." Sol: keep the seat only while Slack access is session-bound; end state is deterministic enumerator/watermarks + rules for explicit references + an inference seam for ambiguous candidates, routing into ccs inboxes.</td></tr>
+<tr><td>eval</td><td><span class="chip p1">REVIEWERS: DEMOTE &middot; RULING D6: KEEP STANDING</span></td><td>Sol: an audit workflow, not production; a 2h standing cadence "invites expensive self-observation and architecture churn." Fable: its marginal job over gate_eval.py / eval_sense.py scripts must be judgment-only and is currently not legible. <b>Milad ruled to keep it standing</b> (D6); mitigations within the ruling: consider a longer cadence, and enforce that eval judges only what scripts cannot.</td></tr>
+<tr><td>designer</td><td><span class="chip p1">REVIEWERS: DEMOTE &middot; RULING D6: KEEP STANDING</span></td><td>Sol: "a system that includes its architect as a standing operational process is confusing the organization that builds the system with the system that performs work." <b>Milad ruled to keep it standing</b> (D6); it becomes the owner of the D9 ADR/doc consolidation duty.</td></tr>
+</table></div>
+<p><b>Reviewers' net was "two too many standing seats"; the D6 ruling keeps the 6-seat core.</b> Standing runtime = deterministic sensors + control + concierge + workers + scout + eval + designer. Also (Fable, unaffected by the ruling): the gate invariant (internal review AND Milad review before any public review) is enforced by convention across three roles; consolidate into one deterministic gate-check function all three call.</p>
+
+<h3>3.6 Deterministic vs inference boundary</h3>
+<p><b>Agreed principle, agreed gap:</b> "scripts prepare, agents decide" is right and sensing is correctly deterministic; the failure direction is deterministic coordination living in prompts as model-executed pseudocode. Concrete moves (Sol's list, endorsed, with Fable's additions):</p>
+<ol>
+<li><b>Dispatch loop &rarr; <code>plan_dispatch.py</code></b>. The control skill's algorithm (filter awaiting-worker rows, in-flight dedup, alert&rarr;task mapping, inbox write, dispatch bookkeeping) is already deterministic. Script emits <code>{dispatches, escalations, ambiguous}</code>; control reasons only over ambiguous + cross-PR conflicts.</li>
+<li><b>Alert&rarr;task templates as data</b> (ci-red &rarr; fix-and-push, conflicts &rarr; rebase), not prose the model re-executes faithfully.</li>
+<li><b>Concierge rendering &rarr; <code>prwatch operator-view --format json</code></b>; the model decides what to mention and when, never re-formats rows.</li>
+<li><b>Dispositions &rarr; <code>prwatch decide &lt;item&gt; &lt;disposition&gt;</code></b>: records suppression, writes inbox/control events, refreshes state atomically. The current suppression recipe in the concierge prompt is implementation leakage.</li>
+<li><b>Activity derived from observables</b> (commits, CI, inbox writes, state writes) via worker_activity; keep only <code>needs-decision</code>-class self-reports as inference; enforce write precedence at the command boundary (see B12).</li>
+<li><b>"Ready for review" stays inferential but gate-verified</b>: the worker proposes, the deterministic gate confirms before milad-review publishes.</li>
+<li><b>Moves the other way (mechanism &rarr; inference): almost nothing.</b> The one candidate is ambiguous chat classification with confidence thresholds and candidate fallback: precision over coverage, exactly as the scout skill already states. This is also the critical pattern for event-watch (see Part III).</li>
+</ol>
+
+<h3>3.7 Engine generalization</h3>
+<p><b>Near-verbatim agreement: extract the protocol now; extract the framework only after cluster #2 exists.</b></p>
+<div class="grid2">
+<div class="callout"><b>Genuinely generic (future <code>ccs-cluster-runtime</code> SDK)</b>
+<ul class="tight">
+<li>Scheduler skeleton: job manifest, cadences, due-calc, last-success, timeouts, non-blocking failure collection (<code>sense-scheduler.py</code> mechanism)</li>
+<li>Lock + run wrapper: portable lock, stale handling (fixed per B8), log rotation, launchd-safe env (<code>sense-run.sh</code>)</li>
+<li>Atomic state-envelope ops: write_state/read_state, provenance, loud failure (<code>sense_common.py</code>)</li>
+<li>Watermark mechanics: load, compare, advance atomically</li>
+<li>Board composer skeleton: roster consumption, row assembly envelope, atomic single-row replace, schema validation, provenance/freshness</li>
+<li>Registry ops: named sources, pins/priority, watermarks, enable/disable</li>
+</ul></div>
+<div class="callout"><b>Inherently per-cluster (never abstract)</b>
+<ul class="tight">
+<li>Sensors (GitHub/GUS/Slack/deploy/CI...)</li>
+<li>Alert vocabulary and severities</li>
+<li>Stage values + transition rules</li>
+<li>Gate semantics</li>
+<li>awaitingFrom actor vocabulary</li>
+<li>Completion conditions</li>
+<li>Task templates, board sections, approval policy</li>
+</ul></div>
+</div>
+<p><b>Both vendors' identical warning:</b> generalizing from n=1 yields a cluster-engine shaped exactly like pr-watch with extension points nobody needs (the hook system is the in-repo evidence of this failure mode). Do now: versioned board schema, executable protocol in cluster.toml, ccs JSON exports, tiny state SDK. Build cluster #2 by copy-and-diverge; extract only what turned out identical, using the real diff as the spec. The engine-optional decision (D-S4) makes this cheaper: cluster #2 can be board-only with almost no engine.</p>
+
+<h2 id="wargame">4. Part III: Event-watch port wargame</h2>
+<p class="small">Seat: wargamer (Fable). Full report preserved in the session; key content in full below since it drives Phases 2&ndash;4.</p>
+
+<h3>4.1 Hidden assumptions that break the port</h3>
+<ol>
+<li><b>Per-machine platform vs multi-machine fleet.</b> ADR-0041 scopes everything (catalogue, runtime, cmux socket, launchd with hardcoded HOME) to one machine; launchd does not fire during sleep; there is no multi-host story. <i>Resolved by steering decisions:</i> single machine (standing computer) first; per-session placement later; state-home question explicitly deferred. Design tax now: keep identity keys, inbox addressing, and the board contract machine-neutral; the catalogue's per-host tagging becomes load-bearing.</li>
+<li><b>The event-slug anchor is unbuilt.</b> ADR-0030 name-checks event-watch but ADR-0069 ships four anchor types (pr / gus / freeform / none) and freeform has no auto-reconnect across sessions. A real event-slug anchor with reconnect is a ccs tool change, not config.</li>
+<li><b>Monotonicity is load-bearing in three places</b> (role.toml declaration, catalogue_sync max-latch, composer STAGE_RANK) and no non-monotonic cluster has ever run; tool-side stage enforcement is queued, not landed. Event lifecycle is genuinely non-monotonic (postponements reopen promo). Mitigant: the skeleton (announce date, event date, settlement window) is clock/Airtable-deterministic; a mostly-deterministic stage with a small non-monotonic escape hatch is achievable.</li>
+<li><b>"Workers never speak" is pr-watch's constitution, not the platform's, but it is load-bearing</b>: board routing uses a PR-shaped awaitingFrom multiset; single-writer-per-field is the only safety on mergeFields. Event-watch has N+2 writers (coordinator, scout, every worker) and workers converse. Redesign the write topology, don't copy it. <i>Steering decision (hybrid speaking rights) is compatible:</i> workers converse but never initiate; flags go on the board; the concierge/assistant tier owns initiation.</li>
+<li><b>The tool still contains pr-watch literally:</b> CORE_ROLES hardcoded (ADR-0062 queued), phase-rubric gates on role=="pr-agent" (ADR-0063 queued), ready/approve are PR verbs in the platform command layer.</li>
+<li><b>Name collisions with the live system:</b> skills named event-watch / event-scout / event-worker / event-eval already exist and are running; install.sh symlinks by bare name into shared ~/.claude/skills/ and wires global settings.json hooks (where SessionStart/Stop double-registration is already a known P0). Side-by-side shadow migration requires renaming the new cluster's roles (e.g. ew-scout). The "CONTROL PLANE" title collision is B2's sibling.</li>
+</ol>
+
+<h3>4.2 Deterministic engine over LLM-classified inputs: where the pattern breaks and what holds</h3>
+<ul class="tight">
+<li><b>Confident-wrong beats fail-loud:</b> the FAILED-status safety net catches crashes, not hallucinations; a misclassified Granola note is a well-formed fact the engine will latch.</li>
+<li><b>The monotonic latch amplifies misclassification:</b> one wrong "settle" becomes permanent via max(sensed, stored) and monotonic=true rejects the correction.</li>
+<li><b>Reclassification churn</b> produces ghost deltas and re-surfaced items.</li>
+<li><b>Cadence economics:</b> API polls are free; LLM classification per tick is not, and Slack reads already rate-limit.</li>
+</ul>
+<div class="callout accent"><b>The port rule that holds (both the wargamer and Sol's design review converge on it):</b> LLM output may only write <i>candidates and routed artifacts</i>, never stages or lifecycle. The engine senses only deterministic facts (Airtable event records, dates, Shotgun sales, folder mtimes, session liveness); low-confidence classifications go into a candidates array the coordinator surfaces. The sanctioned maturation path is the eval skill's own doctrine: make every judgment yourself, then promote a stable pattern into a sense-helper.</div>
+
+<h3>4.3 Cross-cluster interference risks</h3>
+<ul class="tight">
+<li><b>Shared catalogue = blast radius:</b> one SQLite DB for all clusters, migrations untested (B15); a botched schema bump takes down every cluster on the machine. Catalogue backup + migration smoke tests are a Phase 1 item for this reason, not a nicety.</li>
+<li><b>Resume runaway doubles:</b> the 2026-07-10 duplicate-fleet incident is why agents never resume the cluster; two clusters double the liveness-read surface. ADR-0054 fail-closed + B4/B5 fixes are the mitigation.</li>
+<li><b>launchd/cmux contention:</b> two pill-sweepers at short cadence on one socket; label namespacing per cluster required (B16 templating).</li>
+<li><b>Dual supervision:</b> loop-manager already re-arms dead loops fleet-wide; ensure-control does the same per-cluster. Teach loop-manager a "ccs-managed: hands off" exclusion the same day any cluster goes live on this machine.</li>
+</ul>
+
+<h3>4.4 What the current skill-based event-watch does better (what a naive port loses)</h3>
+<ol>
+<li><b>Adaptive pacing:</b> /loop + ScheduleWakeup ticks minutes-fast on event day, hourly in the lull; ccs assumes cron cadence. Resolution: keep model pacing inside sessions, launchd ensure-alive as backstop (control is itself a /loop under a cron guardian, so the platform already permits this).</li>
+<li><b>Multi-machine span:</b> current fleet survives laptop sleep via the Mini; platform cannot express this yet (deferred by decision).</li>
+<li><b>Direct worker&harr;Milad channel:</b> each event tab is a live conversation surface. Preserved by the hybrid speaking-rights model.</li>
+<li><b>Iteration speed:</b> skills are markdown edited live; versioned cluster config is the right discipline once semantics are stable, drag while they are fluid.</li>
+<li><b>No tool&harr;engine seam to break</b> (pr-watch's docs call that seam "the risk surface").</li>
+</ol>
+<p>In exchange the platform buys: real anti-dormancy, born-correct spawn, durable exactly-once inboxes, identity-keyed boards, supersede-dedup: the things loop-manager currently approximates by hand.</p>
+
+<h3>4.5 Wargamer's ranked risks</h3>
+<ol>
+<li>Machine topology mismatch (now resolved by decision; residual: keep addressing machine-neutral)</li>
+<li>Shared-catalogue blast radius (untested migrations + resume-runaway now endanger other live loops)</li>
+<li>LLM output entering the deterministic core (quarantine rule above; monotonic=false path unbuilt)</li>
+<li>Live-system name collisions (skills, hooks, workspace titles)</li>
+<li>Tool changes required, not optional (CORE_ROLES, phase-rubric, event-slug anchor, awaitingFrom vocabulary)</li>
+<li>Dual supervision (loop-manager vs ensure-control)</li>
+<li>No sensed ground truth for "done" (settlement is a judgment; needs coordinator-proposed / Milad-confirmed completion policy)</li>
+<li>Multi-writer state without locks (fixed in Phase 1; event-watch must still design its write topology)</li>
+</ol>
+
+<h2 id="decisions">5. Part IV: Decisions</h2>
+
+<h3>5.1 Steering decisions already made (2026-07-14 grilling): direction, not commitments</h3>
+<div class="tablewrap"><table>
+<tr><th>#</th><th>Decision</th><th>Content</th></tr>
+<tr><td>S1</td><td>Scope</td><td>ccs is the OS for the whole agent ecosystem: fleets become clusters; domain/life roles become first-class; an assistant tier eventually orchestrates across everything via boards + inboxes (life-domain roles, scout-routed messages, an assistant that plans/prioritizes across work + life).</td></tr>
+<tr><td>S2</td><td>Role model</td><td>Cluster = team collaborating on one operation's shared state. Domain roles lean cluster-of-one so promotion to a full cluster is cheap. Cross-cluster relationships are read capabilities (boards) + inbox addressing, not new structural units. Left open deliberately: richer relationship mechanisms, the "life umbrella" concept.</td></tr>
+<tr><td>S3</td><td>Topology</td><td>Single machine (the standing computer) through cmux now. End state: per-session machine placement, independent of cluster (always-on roles like scouts move to the Mini). A cluster is NOT machine-bound. Where cluster state homes (one machine vs vault) is explicitly deferred to multi-machine day. Design tax now: machine-neutral identity keys, inbox addresses, board contract.</td></tr>
+<tr><td>S4</td><td>Engine</td><td>Optional capability per cluster. Cluster minimum = roles + identity + inboxes + a published board (LLM-composed boards allowed under the same contract). Sensors/launchd added only where deterministic facts exist.</td></tr>
+<tr><td>S5</td><td>Speaking rights</td><td>Hybrid, platform-wide: only the concierge/assistant tier initiates contact; every role/worker tab remains directly conversable; workers raise flags on the board and never ping.</td></tr>
+<tr><td>S6</td><td>Burn</td><td>Manual per-cluster tuning. Consequence accepted: no fleet-wide lever; therefore cadence + model per tick type must be declared in role.toml (greppable, sweepable), not buried in skills.</td></tr>
+<tr><td>S7</td><td>Interface</td><td>cmux + official Claude Code harness now (subscription constraint). cmux integration formalized as an interface-bridge adapter (spawn / liveness / paint / send / attach) so a t3code-fork bridge (remote/phone access) can be added later without touching callers.</td></tr>
+</table></div>
+
+<h3>5.2 Decision log (all 12 resolved with Milad, 2026-07-14)</h3>
+<p class="small">Grilled decision-by-decision. Rulings marked <span class="chip ok">RATIFIED</span> adopted the review recommendation; <span class="chip p1">RULED</span> means Milad chose differently and the accepted tradeoff is recorded. These rulings are binding for Phase 1 scope.</p>
+<div class="tablewrap"><table>
+<tr><th>#</th><th>Decision</th><th>Ruling</th><th>Consequences now in effect</th></tr>
+<tr><td>D1</td><td>Export boundary</td><td><span class="chip ok">RATIFIED</span> Phase 1</td><td>Clusters never read ccs SQLite. ccs ships versioned JSON exports (<code>catalogue export</code>, <code>cluster --json</code>, <code>identity resolve</code>) as the only cluster-facing read interface; ccs derives + stores the identity key on every mutation. compose_board.py and worker_activity.py port off sqlite3. Retires B3 + B10 at the root. Record as an ADR.</td></tr>
+<tr><td>D2</td><td>Cluster process protocol</td><td><span class="chip ok">RATIFIED</span> Phase 1</td><td>cluster.toml declares versioned executable entries (command argv + protocol number + timeout) for sense/board; no python3 assumption. Board schema versioned and validated on write and read (subsumes B11's zod fix). Makes engine-optional and non-Python clusters first-class.</td></tr>
+<tr><td>D3</td><td>Role namespace</td><td><span class="chip ok">RATIFIED</span></td><td>(cluster, role) scoping everywhere now, including caches, hooks, spawn, resume, stage validation, watchdog discovery. Floating/domain roles arrive later as clusters-of-one (sugar), so promotion is additive and identity keys/inboxes never rename. One addressing scheme forever.</td></tr>
+<tr><td>D4</td><td>Singleton policy</td><td><span class="chip ok">RATIFIED</span></td><td>Control plane: hard atomic claim + control-owned heartbeat token + recovery via <code>ccs resume</code> (fixes B4/B5 at the design level). Workers: ADR-0073 MRU-preference with loud sibling warnings (B6 resolved by making docs match this). Hard guarantees spent only where duplication is catastrophic.</td></tr>
+<tr><td>D5</td><td>Stage ownership</td><td><span class="chip ok">RATIFIED</span></td><td>Durable workflow latch moves to cluster-owned identity state; the board publishes effective stage; ccs renders pills and stores no stage semantics; <code>ccs stage</code> becomes a write-through to cluster state via the cluster's declared schema. Resolves the ADR-0060/0077 contradiction in 0077's favor; the B1 desync class becomes structurally impossible. ADR-0060 partially superseded: record it.</td></tr>
+<tr><td>D6</td><td>Standing seats</td><td><span class="chip p1">RULED: keep both standing</span></td><td>Against the review recommendation, eval AND designer remain standing seats in pr-watch (and by template in future clusters). Accepted tradeoffs, recorded: standing inference burn for both seats, and Sol's self-observation/architecture-churn risk for a 2h standing eval. Mitigations still available within the ruling: lengthen eval cadence, and keep the 3.6 rule that eval judges only what scripts cannot. Designer standing also makes D9 ownership natural.</td></tr>
+<tr><td>D7</td><td>Hook system reduction</td><td><span class="chip ok">RATIFIED</span></td><td>Collapse to 4 domains (context, lifecycle, presentation, spawn); keep user/cluster/role/identity levels; work-unit-level configs dropped until a second real use exists; guard stays deferred. Executed in the Phase 2 consolidation pass; resolution/merge code survives, scope shrinks.</td></tr>
+<tr><td>D8</td><td>Board recompose semantics</td><td><span class="chip ok">RATIFIED</span></td><td>Event-coalesced: writes append identity-scoped changed-markers; the composer batches; exactly one bounded synchronous-refresh operation exists for interactive read-your-write flows (approve). Consumers render <code>lastComposed</code> honestly. B9's race class disappears with the write topology; the remaining lock work shrinks accordingly.</td></tr>
+<tr><td>D9</td><td>ADR consolidation</td><td><span class="chip ok">RATIFIED</span></td><td>Every ADR gets status front-matter (active / superseded-by / partially-active / abandoned / migration-only); one curated current-architecture doc (8&ndash;12 chapters, regenerated-from-source style); stale prose docs regenerated or deleted. Owner: the standing designer seat (per D6). Includes fixing the two ADR-0001s and the 0053 collision.</td></tr>
+<tr><td>D10</td><td>Cluster sequencing</td><td><span class="chip ok">RATIFIED</span></td><td>ops-watch &rarr; label-submissions &rarr; event-watch (shadow scout, then per-event cutover), exactly as Part V phases them. Event-watch arrives with five of six port risks burned down.</td></tr>
+<tr><td>D11</td><td>Identity-axis pruning</td><td><span class="chip ok">RATIFIED</span></td><td>Rule in force now: no new identity/grouping concept without deleting or narrowing one. <code>key</code> and <code>project</code> get scrutinized in the Phase 2 consolidation pass once work units + groupings are settled.</td></tr>
+<tr><td>D12</td><td>Outward-action policy</td><td><span class="chip p1">RULED: per-cluster choice</span></td><td>No platform-level mandate. Each cluster's constitution declares its own outward policy. pr-watch and event-watch both stay draft-only (agents draft, Milad sends via claude-actions taps) by their own constitutions; a future cluster MAY define autonomous-send lanes without needing a platform exception. Consequence: outward policy must be an explicit, reviewable line in every cluster's constitution, since the platform no longer guarantees it.</td></tr>
+</table></div>
+
+<h2 id="plan">6. Part V: Phased plan</h2>
+<p class="small">Phase 1 is the work-laptop handoff target. Phases 2+ happen on this machine once Phase 1's exit criteria hold. Steering decisions S1&ndash;S7 guide shape but only Phase 1 is committed scope.</p>
+
+<div class="phase">
+<h3>Phase 1: Harden pr-watch + enforce the platform seams (work laptop)</h3>
+<p><b>Goal:</b> pr-watch provably correct end-to-end; the tool&harr;cluster contract enforced in code; the specific defects that block any second cluster fixed. Everything here is on the two existing feature branches' turf.</p>
+<h4>1A. Repair the pipeline (P0)</h4>
+<ul class="tight">
+<li>Fix B1: one board shape (finish ADR-0077 migration in catalogue_sync; then delete the legacy <code>prs</code> surface per the migration spec's own step 4), one gate artifact name.</li>
+<li>Execute D5 (stage ownership): move the durable workflow latch to cluster-owned identity state; board publishes effective stage; migrate catalogue.stage consumers (statusline, TUI, sync) to read the board; <code>ccs stage</code> becomes a write-through. Doing this WITH the B1 repair avoids migrating catalogue_sync onto a column that is about to lose ownership.</li>
+<li>Execute D8 (recompose semantics): changed-marker append + coalescing composer + one bounded sync-refresh op. This replaces most of B9's locking work; whatever locking remains rides the D2 protocol.</li>
+<li>Add the cross-repo e2e tick test: fixture catalogue + sensor JSONs &rarr; sense &rarr; gate &rarr; compose &rarr; catalogue_sync &rarr; assert board row, catalogue row, and rendered pill agree. This is the test that would have caught B1 and the desync class generally. Wire into CI for both repos.</li>
+</ul>
+<h4>1B. Kill the second-cluster blockers (P0)</h4>
+<ul class="tight">
+<li>Fix B2: (cluster, role) scoping everywhere (per D3); watchdog discovery via ccs identity, not workspace titles; delete clusterView legacy fallbacks; land queued ADR-0062 (CORE_ROLES from role.toml) and ADR-0063 (evict pr-sense/phase-rubric from generic paths) or consciously re-defer with a note.</li>
+<li>Fix B3 via D1: ccs derives + stores the identity key on every mutation; add <code>ccs catalogue export / cluster --json / identity resolve</code>; port compose_board.py + worker_activity.py off direct SQLite onto the exports.</li>
+</ul>
+<h4>1C. State integrity + singletons (P1)</h4>
+<ul class="tight">
+<li>One transactional write boundary: owner-tokened locks (fix B8), unique temp files, atomic replace, restart reconciliation; apply to sessions.json (B7), migrate_keys (B7), stop-hook events (B13: unique event IDs or documented level-trigger semantics).</li>
+<li>Singletons per D4: atomic control claim + control-owned heartbeat + ccs-resume-based recovery (B4/B5); worker embodiment policy documented to match code (B6).</li>
+<li>B9 is largely restructured away by D8 (event-coalesced recompose); if any synchronous single-row path survives as the bounded refresh op, it takes the sense lock in the same PR that lands its callers.</li>
+</ul>
+<h4>1D. Contract enforcement + escalation edge (P2)</h4>
+<ul class="tight">
+<li>zod-validate board.json on read; version the board schema; enforce the cluster gate on every bring-online path (B11, D2).</li>
+<li>Restore the worker escalation edge: either re-land activity as sensed+self-reported fields with enforced precedence, or replace the stop-hook call with the board-flag mechanism, and update the docs that still teach stage x activity (B12).</li>
+<li>Migration hygiene: startup schema postcondition + migration smoke tests (fresh DB + live-shape fixture) + a catalogue backup step (B15; prerequisite for multi-cluster).</li>
+<li>Liveness conflict rule for the hook store (B14): newest-wins or loud-conflict, decided and tested.</li>
+</ul>
+<h4>1E. Already-tracked items worth folding in (from the repos' own audits)</h4>
+<ul class="tight">
+<li>cmux coupling P0s (repo's FINDINGS-cmux-coupling.md): version probe/guard, hook-store path override, JSON-first new-workspace ref parse, spawn timeout. These become the start of the S7 bridge-adapter interface.</li>
+<li>REVIEW.md old-layer top 5 (resume cwd collisions, unbounded decoder walk, per-file reindex resilience, inline spawn errors, titler shutdown race): schedule within Phase 1 or explicitly defer; they are user-facing but not second-cluster blockers.</li>
+<li>ADR-0053 numbering collision + the two ADR-0001s: fix as part of D9's status pass.</li>
+</ul>
+<div class="exit"><b>Exit criteria:</b> e2e tick green in CI on fixtures &middot; pr-watch survives a reboot and a concurrency drill (parallel spawn, overlapping sense ticks, watchdog kill/recover) with no duplicate fleet and no lost state &middot; board/catalogue/pill agree on every row &middot; clusters read zero ccs SQLite &middot; a second toy cluster (a stub manifest + board-only composer) can be brought online next to pr-watch without name collisions. That last check is cheap and proves the multi-cluster claims before this machine depends on them.</div>
+</div>
+
+<div class="phase">
+<h3>Phase 2: Bootstrap this machine + cluster #2 = ops-watch</h3>
+<ul class="tight">
+<li>Stand up ccs + a new ccs-config repo on the standing computer (fresh catalogue, migrations run from scratch: also validates B15's fixes).</li>
+<li>Port ops-watch as the first real cluster (D10): deterministic API sensing (Heroku builds, live sites, syncs, tokens), a board, control + concierge, no fleet workers, no outward posting. It is pr-watch-shaped, so it exercises multi-cluster coexistence (catalogue, launchd labels, cmux namespace, board contract, requires_ccs gating) with near-zero blast radius and no LLM-classification question.</li>
+<li>Teach loop-manager the ccs-managed exclusion the same day ops-watch goes live (wargame risk 6).</li>
+<li>Templated plist/label generation lands here if not in Phase 1 (B16).</li>
+<li>Consolidation runs alongside, owned by the standing designer seat (D6/D9): D7 hook reduction, D9 ADR status pass + curated architecture doc, D11 axis scrutiny, prompt&rarr;command extractions (3.6) applied to pr-watch and inherited by ops-watch.</li>
+</ul>
+<div class="exit"><b>Exit criteria:</b> two clusters coexist for 2+ weeks with zero cross-cluster incidents; ops-watch's skill-based predecessor retired; the copy-and-diverge diff between pr-watch and ops-watch engines recorded (it becomes the SDK spec).</div>
+</div>
+
+<div class="phase">
+<h3>Phase 3: First fleet cluster = label-submissions</h3>
+<ul class="tight">
+<li>Work unit = submission; grouping is not epic; real per-unit workers; a regressable (non-monotonic) stage lifecycle: the first live test of monotonic=false and stage enforcement.</li>
+<li>This is where the anchor question gets answered with real stakes that are not a live show: does freeform anchor + reconnect suffice, or does the event-slug-style anchor need building (wargame assumption 2)?</li>
+<li>Proves: spawn contract, one-embodiment policy under a fleet, supersede-dedup, inbox topology with multiple writers (per the Phase 1 write boundary).</li>
+</ul>
+<div class="exit"><b>Exit criteria:</b> a submission traverses intake &rarr; review &rarr; decision with a stage regression handled correctly; fleet spawn/retire cycles clean; daily 9am pipeline replaced or wrapped.</div>
+</div>
+
+<div class="phase">
+<h3>Phase 4: event-watch, shadow first, then one event at a time</h3>
+<ul class="tight">
+<li><b>Shadow the LLM seam:</b> a renamed ccs-native scout (ew-scout, dodging the live-skill name collision) writes classifications as candidates/routed artifacts only (the quarantine rule) while the existing skill-based scout stays authoritative. Diff for 1&ndash;2 weeks; measure misclassification before anything consumes it.</li>
+<li><b>Board in shadow with no drivers</b>, composed from deterministic facts (Airtable, dates, Shotgun) + candidate routing.</li>
+<li><b>Cutover per NEW event:</b> new events get platform workers (model-paced /loop inside, launchd ensure-alive outside); in-flight events finish on the old system; retire old skills when the last legacy event settles.</li>
+<li>Completion policy per wargame risk 7: coordinator proposes settled, Milad confirms (claude-actions tap).</li>
+<li>Speaking rights per S5; outward drafts per D12.</li>
+</ul>
+<div class="exit"><b>Exit criteria:</b> one full event lifecycle (announce &rarr; promo &rarr; event &rarr; settle) run entirely on the platform with the old loop retired for that event and no missed-communication incidents.</div>
+</div>
+
+<div class="phase">
+<h3>Phase 5: Extraction + ecosystem growth</h3>
+<ul class="tight">
+<li>Extract <code>ccs-cluster-runtime</code> from the real pr-watch/ops-watch/label-submissions/event-watch diffs (3.7's generic list; nothing from the per-cluster list).</li>
+<li>Domain/life roles begin as cluster-of-one packages (S2); the assistant tier (S1) starts as a role whose sensors are every cluster's board + a cross-cluster inbox address book; notifier's job is absorbed here.</li>
+<li>Multi-machine (S3): per-session placement, starting with always-on roles to the Mini; the durable-vs-derived runtime classification from D2/3.1 becomes the state-home design input.</li>
+<li>Interface bridge #2 (t3code fork) implements the S7 adapter; remote/phone access.</li>
+</ul>
+</div>
+
+<h2 id="handoff">7. Part VI: Work-laptop handoff notes (Phase 1)</h2>
+<div class="callout">
+<p><b>Repos on the work machine</b> (per the repo's own BRIEF): tool at <code>~/projects/claude-sessions</code> (branch <code>feat/catalogue-system-and-pr-sense</code>), config at <code>~/.ccs-config</code> (branch <code>feat/phase-machine-engine</code>). Both branches were pushed 2026-07-13 late evening; this review ran against those pushes.</p>
+<ul class="tight">
+<li><b>Verify first:</b> the review was read-only against remote checkouts. Re-confirm B1 against the working tree there (grep <code>board\["board"\]</code> in catalogue_sync.py and <code>gate_eval.json</code> in compose_board.py): if a newer local fix exists uncommitted, several P0 line numbers shift.</li>
+<li><b>The repo's BRIEF-outstanding-work.md (2026-07-11) partially overlaps this report</b> (3 failing resume-cluster tests from the ADR-0054 stub-bridge issue, ADR-0053 collision, live-verification TODOs). Treat this report as the superset for Phase 1 scope; the BRIEF's live-verification items (stage pill, ready/approve latching, tab repaint) become part of the Phase 1 concurrency/e2e drill.</li>
+<li><b>Sequencing within Phase 1:</b> 1A before everything (the pipeline is broken now); 1B before any tool refactors that touch role/identity code paths; 1C/1D can interleave. The toy-second-cluster exit check last.</li>
+<li><b>All 12 decisions are RESOLVED (5.2 decision log, 2026-07-14) and binding for Phase 1:</b> D1/D2 (export boundary + versioned protocol) are in-scope Phase 1 work, D3 shapes the B2 fix, D4 shapes B4/B5/B6, D5 and D8 are executed alongside the B1 repair (see 1A), D6 means eval/designer stay standing (do NOT demote them), D12 means outward policy is per-cluster constitution (pr-watch stays draft-only by its own constitution). If the work session hits a fork the log doesn't cover, prefer the option that keeps the tool generic and the cluster typed (ADR-0061 test), and record it as a proposed-status ADR rather than silently deciding.</li>
+<li><b>Do not</b> start engine generalization/SDK extraction on the work laptop (explicitly Phase 5, post-cluster-#2 evidence), and do not add hook types/levels (Do-not-build list, 5.2 D7).</li>
+</ul>
+</div>
+
+<h2 id="appendix">8. Appendix</h2>
+<h3>8.1 Raw reports</h3>
+<ul class="tight">
+<li>Sol bug review (13 findings, full text): <code>/private/tmp/claude-501/-Users-mimen/7938a207-f5f1-40cf-9e2e-2f8b3dc17dee/scratchpad/sol-review.md</code> (session-temporary path; contents fully incorporated above)</li>
+<li>Sol design review (full 800 lines incl. recommendations + scorecard): <code>.../scratchpad/sol-design-review.md</code> (fully incorporated above)</li>
+<li>Fable reviewer-A, Fable design review, wargamer report: delivered in-conversation; all findings incorporated above at full detail</li>
+<li>Review targets: <code>mimen/claude-sessions@feat/catalogue-system-and-pr-sense</code> (4c3e5b7), <code>mimen/ccs-config@feat/phase-machine-engine</code> (4a67467)</li>
+</ul>
+<h3>8.2 Already tracked in-repo (not re-reported, folded into Phase 1E)</h3>
+<ul class="tight">
+<li><code>REVIEW.md</code>: old resume/index layer (locateLaunchDir collisions, unbounded root walk, reindex fragility, inline spawn crash, titler/DB shutdown race, plus test gaps)</li>
+<li><code>docs/FINDINGS-cmux-coupling.md</code>: version guard, hook-store path, regex ref parse, spawn timeout, legacy fail-open open-state.ts path</li>
+<li><code>docs/FINDINGS-dry-determinism.md</code>: work-unit key 6x duplication (elevated here as B3)</li>
+<li><code>docs/PRODUCTION-READINESS-CHECKLIST.md</code> + FINDINGS-production-readiness.md: the standing burn-down board; the Phase 1 items above should be merged into it rather than tracked separately</li>
+<li><code>BRIEF-outstanding-work.md</code>: 3 failing stub-bridge tests, ADR-0053 collision, live-verification TODOs, deferred ideas (CONTEXT rewrite, new-cluster wizard, ADR de-leak, D1&ndash;D3 determinism holes)</li>
+</ul>
+<h3>8.3 Method note</h3>
+<p class="small">Five seats: two independent bug reviews (Fable native, GPT-5.6 Sol via claude-gpt), one wargame on the event-watch port, two independent design reviews (same vendor pair), orchestrated and synthesized by Fable with direct code verification of the highest-severity claim (B1). Reviewers were instructed to skip findings already tracked in-repo. Where the vendors disagreed (stage machine ownership; scout seat justification; eval demotion severity) the disagreement and its adjudication are stated inline rather than averaged away.</p>
+
+<hr>
+<p class="small">Prepared 2026-07-14 &middot; ccs full system review &middot; Phase 1 handoff edition</p>
+</main>

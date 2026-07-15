@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ccs × pr-watch — the vision</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c232d;
+    --ink: #e6edf3; --dim: #9aa7b4; --faint: #6b7684;
+    --line: #2b3440;
+    --accent: #5eb1ff; --good: #3fb950; --warn: #d29922; --bad: #f85149;
+    --violet: #bc8cff; --teal: #39c5cf;
+    --mono: "SF Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, .mono { font-family: var(--mono); font-size: .9em; }
+
+  .deck { height: 100vh; overflow: hidden; position: relative; }
+  .slide {
+    position: absolute; inset: 0;
+    padding: 56px 80px 88px;
+    display: none; overflow: auto;
+  }
+  .slide.active { display: block; animation: fade 200ms ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  h1 { font-size: 48px; line-height: 1.1; margin: 0 0 16px; letter-spacing: -0.02em; }
+  h2 { font-size: 32px; line-height: 1.2; margin: 0 0 12px; letter-spacing: -0.01em; display: flex; align-items: baseline; gap: 14px; }
+  h2 .n {
+    font-family: var(--mono); font-size: 14px; color: var(--faint);
+    background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 2px 10px; font-weight: 400;
+  }
+  h3 { font-size: 17px; margin: 26px 0 10px; color: var(--ink); }
+  p { margin: 0 0 14px; }
+  .lead { color: var(--dim); font-size: 19px; max-width: 960px; margin-bottom: 18px; line-height: 1.55; }
+  .lead b { color: var(--ink); }
+  b { color: var(--ink); }
+  em { color: var(--ink); font-style: italic; }
+
+  .grid { display: grid; gap: 18px; margin-top: 10px; }
+  .g2 { grid-template-columns: 1fr 1fr; }
+  .g3 { grid-template-columns: repeat(3, 1fr); }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px 22px;
+  }
+  .card h4 { margin: 0 0 8px; font-size: 15.5px; color: var(--ink); }
+  .card p  { color: var(--dim); font-size: 14.5px; margin: 4px 0; line-height: 1.5; }
+  .card.northstar {
+    background: linear-gradient(135deg, rgba(188,140,255,0.10), rgba(94,177,255,0.06));
+    border-color: #2c3350;
+  }
+  .card.northstar h4 { color: var(--violet); }
+
+  .flag {
+    border-left: 3px solid var(--warn);
+    background: linear-gradient(90deg, rgba(210,153,34,.07), transparent);
+    padding: 14px 20px; border-radius: 0 8px 8px 0; margin: 18px 0;
+    font-size: 15px; color: var(--ink); line-height: 1.5;
+  }
+  .flag.good { border-color: var(--good); background: linear-gradient(90deg, rgba(63,185,80,.07), transparent); }
+  .flag .lbl {
+    font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--warn); margin-right: 10px;
+  }
+  .flag.good .lbl { color: var(--good); }
+
+  .tag { font-family: var(--mono); font-size: 11px; padding: 1px 8px; border-radius: 20px; border: 1px solid var(--line); color: var(--dim); }
+  .tag.durable { color: var(--good);  border-color: #1c3a24; }
+  .tag.fragile { color: var(--warn);  border-color: #4a3a15; }
+
+  figure { margin: 18px 0 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  figure svg { display: block; width: 100%; height: auto; }
+  figcaption { color: var(--faint); font-size: 13px; margin-top: 10px; text-align: center; font-family: var(--mono); }
+
+  .stage-flow { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 24px 0; font-family: var(--mono); font-size: 15px; }
+  .stage-flow .st { padding: 8px 16px; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; color: var(--teal); }
+  .stage-flow .st.first { color: #e6edf3; }
+  .stage-flow .st.last  { color: var(--good); border-color: #1c3a24; }
+  .stage-flow .st.milad { color: var(--warn); border-color: #4a3a15; }
+  .stage-flow .ar { color: var(--faint); font-size: 20px; }
+
+  /* nav */
+  .nav {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 48px; padding: 0 20px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: linear-gradient(180deg, rgba(14,17,22,0), rgba(14,17,22,.94));
+    color: var(--faint); font-size: 12.5px;
+    user-select: none;
+    z-index: 10;
+  }
+  .nav .center { display: flex; gap: 10px; align-items: center; }
+  .nav button {
+    background: transparent; border: 1px solid var(--line); color: var(--dim);
+    padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit;
+  }
+  .nav button:hover { color: var(--ink); border-color: #3d4653; }
+  .nav .counter { min-width: 68px; text-align: center; color: var(--ink); font-family: var(--mono); }
+  .nav .title { color: var(--faint); }
+  .nav .keys { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+
+  .title-slide.active {
+    display: flex; flex-direction: column; justify-content: center;
+    align-items: flex-start; padding-bottom: 140px;
+  }
+  .title-slide .kicker {
+    color: var(--teal); font-family: var(--mono); font-size: 13px;
+    letter-spacing: .2em; text-transform: uppercase; margin-bottom: 24px;
+  }
+  .title-slide h1 { font-size: 64px; margin-bottom: 24px; }
+  .title-slide .sub { color: var(--dim); font-size: 22px; max-width: 940px; line-height: 1.5; }
+  .title-slide .meta { color: var(--faint); font-size: 14px; margin-top: 32px; font-family: var(--mono); }
+
+  ul.tight { margin: .5em 0; padding-left: 22px; }
+  ul.tight li { margin: .35em 0; color: var(--dim); font-size: 15px; line-height: 1.55; }
+  ul.tight li b { color: var(--ink); }
+
+  .role-row {
+    display: grid; grid-template-columns: 160px 1fr;
+    gap: 24px; padding: 14px 0; border-bottom: 1px solid var(--line);
+  }
+  .role-row:last-child { border-bottom: 0; }
+  .role-row .name { color: var(--violet); font-weight: 600; font-size: 15px; }
+  .role-row .name .k { color: var(--faint); font-weight: 400; font-size: 12px; display: block; margin-top: 4px; font-family: var(--mono); }
+  .role-row.fleet .name { color: var(--teal); }
+  .role-row .desc { color: var(--dim); font-size: 15px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+<!-- 1: TITLE -->
+<section class="slide title-slide active" data-title="Vision">
+  <div class="kicker">ccs × pr-watch · vision &amp; design</div>
+  <h1>Direct a fleet of agents,<br>not a handful of tabs</h1>
+  <p class="sub">
+    <b>ccs</b> maps disposable Claude Code sessions onto durable <b>agent identities</b> — each with a role, a
+    lifecycle, a memory, and a mailbox. Making the management deterministic turns "how many agents can I keep track of"
+    from a bottleneck into a non-issue.
+  </p>
+  <div class="meta">Built on the <b>cmux</b> terminal · pr-watch is the first fleet.</div>
+</section>
+
+<!-- 2: THE PROBLEM -->
+<section class="slide" data-title="The problem">
+  <h2><span class="n">▸</span> The problem</h2>
+  <p class="lead">
+    We're in the age of loops and multi-agent workflows. The way to get more done, faster, at higher quality is to run
+    <em>many</em> agents at once — some you drive directly, some running autonomously. The work is there.
+    <b>The ergonomics are a mess.</b>
+  </p>
+  <p class="lead">
+    <b>Claude Code sessions have become Chrome tabs.</b> They sprawl. You can't tell which ones matter. You lose the
+    important ones in the noise. There's no lifecycle — no sense of a session being armed for a job, waiting on you,
+    done, or safe to archive. A restart wipes the board.
+  </p>
+  <p class="lead">
+    The root problem: <b>a Claude Code session is treated as disposable, but it's actually valuable</b> — it holds real
+    work and context. ccs flips that.
+  </p>
+</section>
+
+<!-- 3: WARM AGENTS -->
+<section class="slide" data-title="Warm agents">
+  <h2><span class="n">▸</span> Why warm agents, not subagents</h2>
+  <p class="lead">
+    Subagents are powerful, but they're <b>fire-and-forget</b>: dispatch, run, return, nothing warm afterward. That fits
+    a bounded task. It does <em>not</em> fit ongoing work.
+  </p>
+  <p class="lead">
+    Real work is more like a <b>project</b> than a task: a pull request that gets review comments days later, an
+    initiative that spans many turns. For those, a warm agent — persistent, holding its context, re-engageable when new
+    feedback lands — is far preferable.
+  </p>
+  <div class="grid g2">
+    <div class="card">
+      <h4>Subagent</h4>
+      <p>Cold start. Bounded task. Returns once. No inbox. No lifecycle.</p>
+      <p><b>Good for:</b> a lookup, a batch job.</p>
+    </div>
+    <div class="card northstar">
+      <h4>Warm agent — what ccs builds</h4>
+      <p>Persistent identity. Holds context across days. Has a mailbox. Re-engageable when new feedback arrives.</p>
+      <p><b>Good for:</b> a PR from open to merge; an ongoing watcher; anything project-shaped.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 4: WHAT CCS ADDS -->
+<section class="slide" data-title="What ccs adds">
+  <h2><span class="n">▸</span> What ccs adds to Claude Code</h2>
+  <p class="lead">
+    ccs is three things at once: a <b>TUI</b>, a <b>CLI</b> of verbs, and a <b>durable store</b>. Its goal is to provide
+    a <b>deterministic harness around the non-deterministic behavior of agents</b> — the agents can be creative; the
+    machinery around them cannot.
+  </p>
+  <div class="grid g3">
+    <div class="card northstar">
+      <h4>A lifecycle for sessions</h4>
+      <p>A session has states — armed, running, waiting on you, done, archived. You keep, resume, or discard deliberately, not by anxiety.</p>
+    </div>
+    <div class="card northstar">
+      <h4>Deterministic roles</h4>
+      <p>Each agent has a role with its own hooks and permissions. Agents of a role run the same way every time — that's what makes them trustworthy unattended.</p>
+    </div>
+    <div class="card northstar">
+      <h4>Close &amp; resume, losing nothing</h4>
+      <p>Close any agent (or reboot) and reopen it exactly where it was — same role, same work, same messages.</p>
+    </div>
+    <div class="card northstar">
+      <h4>A standard mailbox</h4>
+      <p>A durable inbox per agent. One channel for agents to hand each other context and tasks — works even when the recipient is closed.</p>
+    </div>
+    <div class="card northstar">
+      <h4>A legible terminal</h4>
+      <p>Workspace tabs that bubble up what each session <em>is</em> — PR#, phase, epic — rendered from ccs so nothing drifts.</p>
+    </div>
+    <div class="card northstar">
+      <h4>Fleets on autopilot</h4>
+      <p>Group agents into a <b>cluster</b> and run them as one operation. Bring the whole thing back armed with a single command.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 5: THE SUBSTRATE -->
+<section class="slide" data-title="The substrate">
+  <h2><span class="n">▸</span> The three pieces</h2>
+  <p class="lead">
+    ccs is the brain and the durable store. cmux is the terminal you actually look at. Claude Code is the runtime
+    inside each session. Each piece does one job.
+  </p>
+  <figure>
+  <svg viewBox="0 0 1000 360" font-family="SF Mono, ui-monospace, monospace" font-size="12">
+    <defs>
+      <marker id="aA" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#7d8896"/></marker>
+      <marker id="aAb" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#5eb1ff"/></marker>
+    </defs>
+    <text x="20" y="24" fill="#5eb1ff" font-size="12" font-weight="bold">THREE SYSTEMS — who does what</text>
+
+    <rect x="350" y="46" width="300" height="104" rx="12" fill="#161b22" stroke="#3a2d55"/>
+    <text x="370" y="72" fill="#bc8cff" font-size="14" font-weight="bold">ccs — the durable record</text>
+    <text x="370" y="94" fill="#9aa7b4" font-size="11">knows every identity + how to revive it</text>
+    <text x="370" y="112" fill="#9aa7b4" font-size="11">holds every inbox and every catalogue row</text>
+    <text x="370" y="130" fill="#9aa7b4" font-size="11">orchestrates: spawns sessions, drives cmux,</text>
+    <text x="370" y="146" fill="#9aa7b4" font-size="11">composes the board every tick</text>
+
+    <rect x="40" y="240" width="300" height="112" rx="12" fill="#161b22" stroke="#2b3440"/>
+    <text x="60" y="266" fill="#e6edf3" font-size="14" font-weight="bold">Claude Code — the runtime</text>
+    <text x="60" y="290" fill="#9aa7b4" font-size="11">a session = a transcript with an id</text>
+    <text x="60" y="308" fill="#9aa7b4" font-size="11">fires hooks: SessionStart, Stop, Notification…</text>
+    <text x="60" y="326" fill="#9aa7b4" font-size="11">the actual model turns happen here</text>
+
+    <rect x="660" y="240" width="300" height="112" rx="12" fill="#161b22" stroke="#164a4d"/>
+    <text x="680" y="266" fill="#39c5cf" font-size="14" font-weight="bold">cmux — the terminal</text>
+    <text x="680" y="290" fill="#9aa7b4" font-size="11">a tab (workspace) houses one session</text>
+    <text x="680" y="308" fill="#9aa7b4" font-size="11">tab title, phase pill, statusline are all</text>
+    <text x="680" y="326" fill="#9aa7b4" font-size="11">rendered from ccs metadata</text>
+
+    <path d="M400,150 L240,238" fill="none" stroke="#5eb1ff" stroke-width="1.6" marker-end="url(#aAb)"/>
+    <text x="150" y="196" fill="#5eb1ff" font-size="11">spawns + resumes</text>
+    <text x="150" y="212" fill="#5eb1ff" font-size="11">sessions →</text>
+    <path d="M600,150 L760,238" fill="none" stroke="#7d8896" stroke-width="1.5" marker-end="url(#aA)"/>
+    <text x="628" y="196" fill="#7d8896" font-size="11">paints tabs +</text>
+    <text x="628" y="212" fill="#7d8896" font-size="11">delivers nudges →</text>
+    <path d="M342,306 L658,306" fill="none" stroke="#7d8896" stroke-width="1.4" marker-end="url(#aA)"/>
+    <text x="430" y="298" fill="#7d8896" font-size="11">the session runs inside a cmux tab</text>
+  </svg>
+  <figcaption>ccs is the source of truth; Claude Code runs the model; cmux is where you look. Every arrow is one-way.</figcaption>
+  </figure>
+</section>
+
+<!-- 6: IDENTITY -->
+<section class="slide" data-title="Identity">
+  <h2><span class="n">1</span> Identity — the primitive</h2>
+  <p class="lead">
+    ccs assigns an <b>agent identity</b>. A Claude Code session is the <em>vessel</em> that carries it. The identity is
+    the durable thing — it persists whether or not any session is currently running it.
+  </p>
+  <p class="lead">
+    An identity's name is its <b>responsibility</b> — <code>cluster · role · work-unit</code>. For example,
+    <code>pr-watch · pr-agent · W-19338247</code>. Everything else — the inbox, the state, the memory — keys off that.
+  </p>
+  <div class="grid g2">
+    <div class="card">
+      <h4>durable <span class="tag durable">survives everything</span></h4>
+      <ul class="tight">
+        <li><b>identity key</b> — its stable name</li>
+        <li><b>mailbox</b> — what others have told it</li>
+        <li><b>state</b> — what it concluded</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>ephemeral <span class="tag fragile">comes and goes</span></h4>
+      <ul class="tight">
+        <li><b>current session</b> — the Claude session id right now</li>
+        <li><b>body</b> — the cmux tab, while open</li>
+        <li><b>cwd</b> — the role directory it runs in</li>
+      </ul>
+    </div>
+  </div>
+  <div class="flag good">
+    <span class="lbl">Why this matters</span>
+    Because the durable things don't depend on the ephemeral things, we can close an agent, re-open it under a new
+    session, and it still has the same name, the same mailbox, the same memory. Nothing is keyed on the vessel.
+  </div>
+</section>
+
+<!-- 7: ROLES -->
+<section class="slide" data-title="Roles">
+  <h2><span class="n">2</span> Roles — first-class</h2>
+  <p class="lead">
+    A <b>role</b> is a first-class ccs entity. Defining a role once means every agent of that role is spawned, armed,
+    resumed, and permissioned the same way — every time.
+  </p>
+  <p class="lead">
+    A role declares what it needs: its home directory, its permissions, its hooks, its skills and commands, and — for
+    autonomous loops — how to <em>arm</em> itself on resume so it comes back <b>running</b>, not dormant.
+  </p>
+  <div class="flag">
+    <span class="lbl">The determinism payoff</span>
+    A role's hooks live in its directory. Every session of that role picks them up automatically. When you say "the
+    control loop always drains its inbox and reads the board on start," that's not a convention — it's the hook that
+    fires on every SessionStart. Behavior is <b>the same every time</b>, which is what makes it safe to run unattended.
+  </div>
+</section>
+
+<!-- 8: CLUSTERS + PR-WATCH -->
+<section class="slide" data-title="Clusters + pr-watch">
+  <h2><span class="n">3</span> Clusters — a fleet that works as one</h2>
+  <p class="lead">
+    A single agent is useful. The real power is a <b>cluster</b>: a group of agents that together run an entire
+    operation. A cluster has a <b>core</b> (a few singleton roles that run the show) and a <b>fleet</b> (many workers of
+    one role, one per unit of work).
+  </p>
+  <p class="lead">
+    <b>pr-watch</b> is the first cluster. It runs a team's whole PR pipeline — coordinates the epics that group the work,
+    drives each open PR toward merge, runs agent code-reviews, answers reviewer feedback across GitHub and Slack — mostly
+    on its own, pulling a person in only when a real decision is needed.
+  </p>
+  <div style="margin-top: 24px;">
+    <div class="role-row">
+      <div class="name">control<span class="k">core · loop</span></div>
+      <div class="desc">The driver. Reads the board every tick, routes the next task to each worker, unblocks stalls, flips gates as PRs become ready. Never talks to you.</div>
+    </div>
+    <div class="role-row">
+      <div class="name">concierge<span class="k">core · loop</span></div>
+      <div class="desc">Your front door. Prioritizes everything in flight and brings you the most pressing thing — a decision, an approval, a review comment to answer. The only role that talks to you.</div>
+    </div>
+    <div class="role-row">
+      <div class="name">slack-scout<span class="k">core · loop</span></div>
+      <div class="desc">Reads Slack, classifies each message to a PR, drops it into that worker's inbox. Sensor only — never posts.</div>
+    </div>
+    <div class="role-row">
+      <div class="name">eval<span class="k">core · loop</span></div>
+      <div class="desc">Grades how the loop is running and proposes concrete improvements.</div>
+    </div>
+    <div class="role-row fleet">
+      <div class="name">pr-agent<span class="k">fleet · one per PR</span></div>
+      <div class="desc">The warm worker. Authors the PR, improves it, requests + acts on agent reviews, answers reviewer feedback — over days, staying warm the whole time. Identity keyed on the <b>work item, not the PR#</b>, so opening the PR never splits its mailbox.</div>
+    </div>
+    <div class="role-row fleet">
+      <div class="name">designer<span class="k">core</span></div>
+      <div class="desc">Shapes the loops themselves. Writes ADRs and specs. Not in the live PR flow.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 9: HOW THE ROLES TALK -->
+<section class="slide" data-title="How the roles talk">
+  <h2><span class="n">3</span> How the pr-watch roles talk</h2>
+  <p class="lead">
+    Sense runs on its own clock — a background loop that reads GitHub, CI, deploy, and Slack, then composes
+    <b>the board</b>. Every role reads from the same board. The concierge is your default channel; you can steer
+    control directly or drop into any worker.
+  </p>
+  <figure>
+  <svg viewBox="0 0 1000 460" font-family="SF Mono, ui-monospace, monospace" font-size="12">
+    <defs>
+      <marker id="rc"  markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#7d8896"/></marker>
+      <marker id="rcb" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5eb1ff"/></marker>
+      <marker id="rcv" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#bc8cff"/></marker>
+      <marker id="rcg" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#3fb950"/></marker>
+    </defs>
+
+    <!-- external world -->
+    <rect x="40" y="36" width="200" height="56" rx="10" fill="#12171e" stroke="#2b3440"/>
+    <text x="60" y="60" fill="#9aa7b4" font-size="13" font-weight="bold">the world</text>
+    <text x="60" y="78" fill="#6b7684" font-size="10.5">GitHub · CI · deploy · Slack</text>
+
+    <!-- sense loop -->
+    <rect x="300" y="36" width="220" height="56" rx="10" fill="#161b22" stroke="#1c3a24"/>
+    <text x="320" y="60" fill="#3fb950" font-size="13" font-weight="bold">sense loop</text>
+    <text x="320" y="78" fill="#9aa7b4" font-size="10.5">background scheduler · every tick</text>
+
+    <!-- the board -->
+    <rect x="580" y="36" width="320" height="56" rx="10" fill="#161b22" stroke="#3d4a5c"/>
+    <text x="600" y="60" fill="#e6edf3" font-size="13" font-weight="bold">the board</text>
+    <text x="600" y="78" fill="#9aa7b4" font-size="10.5">stage · awaitingFrom · alerts · dispatch</text>
+
+    <!-- you -->
+    <rect x="410" y="150" width="180" height="46" rx="10" fill="#161b22" stroke="#d29922"/>
+    <text x="470" y="178" fill="#d29922" font-size="14" font-weight="bold">you</text>
+
+    <!-- concierge -->
+    <rect x="380" y="240" width="240" height="52" rx="10" fill="#161b22" stroke="#3a2d55"/>
+    <text x="400" y="262" fill="#bc8cff" font-size="13" font-weight="bold">concierge</text>
+    <text x="400" y="280" fill="#9aa7b4" font-size="10.5">reads board · surfaces to you</text>
+
+    <!-- control -->
+    <rect x="60" y="240" width="240" height="52" rx="10" fill="#161b22" stroke="#3a2d55"/>
+    <text x="80" y="262" fill="#bc8cff" font-size="13" font-weight="bold">control</text>
+    <text x="80" y="280" fill="#9aa7b4" font-size="10.5">reads board · routes · unblocks</text>
+
+    <!-- slack-scout -->
+    <rect x="700" y="240" width="240" height="52" rx="10" fill="#161b22" stroke="#164a4d"/>
+    <text x="720" y="262" fill="#39c5cf" font-size="13" font-weight="bold">slack-scout</text>
+    <text x="720" y="280" fill="#9aa7b4" font-size="10.5">Slack → the right worker's inbox</text>
+
+    <!-- fleet -->
+    <rect x="200" y="356" width="600" height="70" rx="10" fill="#12171e" stroke="#2b3440"/>
+    <text x="220" y="380" fill="#9aa7b4" font-size="13" font-weight="bold">fleet — one warm pr-agent per PR</text>
+    <text x="220" y="400" fill="#9aa7b4" font-size="10.5">authors + improves the PR · answers reviewer feedback</text>
+    <text x="220" y="414" fill="#9aa7b4" font-size="10.5">each reachable directly for design feedback or hands-on work</text>
+
+    <!-- world -> sense -->
+    <path d="M240,64 L298,64" fill="none" stroke="#3fb950" stroke-width="1.4" marker-end="url(#rcg)"/>
+    <!-- sense -> board -->
+    <path d="M520,64 L578,64" fill="none" stroke="#3fb950" stroke-width="1.4" marker-end="url(#rcg)"/>
+
+    <!-- board -> control -->
+    <path d="M600,92 C420,110 200,180 180,238" fill="none" stroke="#7d8896" stroke-width="1.3" marker-end="url(#rc)"/>
+    <text x="330" y="140" fill="#7d8896" font-size="10">reads board ↓</text>
+    <!-- board -> concierge -->
+    <path d="M740,92 C640,140 540,200 510,238" fill="none" stroke="#7d8896" stroke-width="1.3" marker-end="url(#rc)"/>
+    <text x="640" y="180" fill="#7d8896" font-size="10">reads board ↓</text>
+    <!-- board -> fleet (workers self-check) -->
+    <path d="M880,92 C960,220 900,340 800,360" fill="none" stroke="#7d8896" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#rc)"/>
+    <text x="880" y="220" fill="#7d8896" font-size="10">workers self-check</text>
+    <text x="880" y="234" fill="#7d8896" font-size="10">every turn</text>
+
+    <!-- concierge <-> you (violet) -->
+    <path d="M495,240 L495,198" fill="none" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#rcv)"/>
+    <path d="M515,198 L515,238" fill="none" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#rcv)"/>
+    <text x="530" y="222" fill="#bc8cff" font-size="10.5">surfaces ↑ / you decide ↓</text>
+
+    <!-- you -> control (steer) -->
+    <path d="M410,180 C240,210 180,220 180,238" fill="none" stroke="#d29922" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#rc)"/>
+    <text x="220" y="212" fill="#d29922" font-size="10.5">you can steer it</text>
+
+    <!-- control -> concierge (share queue) -->
+    <path d="M300,258 L378,258" fill="none" stroke="#7d8896" stroke-width="1.3" marker-end="url(#rc)"/>
+    <text x="310" y="252" fill="#7d8896" font-size="10">keeps the queue fresh →</text>
+
+    <!-- control -> fleet -->
+    <path d="M180,292 C180,340 300,352 360,354" fill="none" stroke="#5eb1ff" stroke-width="1.5" marker-end="url(#rcb)"/>
+    <text x="90" y="330" fill="#5eb1ff" font-size="10.5">tasks → inbox + wake</text>
+
+    <!-- scout -> fleet -->
+    <path d="M820,292 C820,340 700,352 640,356" fill="none" stroke="#5eb1ff" stroke-width="1.5" marker-end="url(#rcb)"/>
+    <text x="720" y="330" fill="#5eb1ff" font-size="10.5">Slack → inbox + wake</text>
+
+    <!-- you -> fleet (drop in) -->
+    <path d="M560,180 C660,240 640,330 600,354" fill="none" stroke="#d29922" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#rc)"/>
+    <text x="640" y="270" fill="#d29922" font-size="10.5">drop into any worker</text>
+  </svg>
+  <figcaption>Green = sense loop feeding the board · blue = task delivery via inboxes · grey = board reads and status · amber dashed = your optional touchpoints.</figcaption>
+  </figure>
+</section>
+
+<!-- 10: STAGES + GATE -->
+<section class="slide" data-title="Stages &amp; the gate">
+  <h2><span class="n">4</span> Stages &amp; the gate</h2>
+  <p class="lead">
+    Every PR moves through a fixed set of <b>stages</b>. The stage is <em>sensed</em>, not self-declared — the engine
+    reads GitHub state and composes the stage. A worker cannot bump its own stage, and the machine is <b>monotonic</b>:
+    no flaky signal can drag a PR backwards.
+  </p>
+  <div class="stage-flow">
+    <span class="st first">building</span><span class="ar">→</span>
+    <span class="st milad">milad-review</span><span class="ar">→</span>
+    <span class="st">in-review</span><span class="ar">→</span>
+    <span class="st">approved</span><span class="ar">→</span>
+    <span class="st last">merged</span>
+  </div>
+  <p class="lead">
+    A worker's job is to move its PR through the <b>gate</b> — a small set of checks that must all pass before it's
+    handed to you. Control routes the worker each tick based on what the gate still needs:
+  </p>
+  <div class="grid g3">
+    <div class="card">
+      <h4>worker-fix</h4>
+      <p>CI red, conflicts, or reviewer changes requested. The worker knows what to do.</p>
+    </div>
+    <div class="card">
+      <h4>worker-assess</h4>
+      <p>A reviewer left feedback that needs triage. The worker decides how to answer.</p>
+    </div>
+    <div class="card">
+      <h4>wait</h4>
+      <p>CI running or an external review pending. Nobody owes work.</p>
+    </div>
+  </div>
+  <div class="flag good">
+    <span class="lbl">The Milad gate</span>
+    A PR clears agent reviews AND your own review before ANY public review is requested. That's why
+    <code>milad-review</code> is a stage, not just a flag. Your <code>/prwatch:approve</code> command un-drafts the
+    PR and lets CODEOWNERS auto-request review; you never have to un-draft by hand.
+  </div>
+</section>
+
+<!-- 11: THE BOARD -->
+<section class="slide" data-title="The board">
+  <h2><span class="n">5</span> The board — one truth, many readers</h2>
+  <p class="lead">
+    Everything the fleet does resolves to <b>the board</b> — one composed view of every PR and every session, rebuilt
+    every time a sensor ticks. It's the single source that the concierge, control, workers, and the TUI all read from.
+  </p>
+  <div class="grid g3">
+    <div class="card">
+      <h4>concierge reads</h4>
+      <p>Which PRs are at your review, which are approved-and-mergeable, which are in external review, which are merged and waiting to deploy.</p>
+    </div>
+    <div class="card">
+      <h4>control reads</h4>
+      <p>Which alerts are firing and who owns them. Composes a task per alert, dispatches to the right worker's inbox.</p>
+    </div>
+    <div class="card">
+      <h4>workers read</h4>
+      <p>Their own row at the top of every turn. Gate self-check — they don't wait to be told what's wrong.</p>
+    </div>
+  </div>
+  <p class="lead" style="margin-top: 24px;">
+    Each row carries the stage, who it's <b>awaiting</b> (worker, you, reviewers, CI, deploy), and any firing
+    <b>alerts</b> (CI red, changes requested, worker wedged, etc). Because everyone reads the same shape, the fleet
+    never disagrees with itself.
+  </p>
+</section>
+
+<!-- 12: STATE -->
+<section class="slide" data-title="State">
+  <h2><span class="n">6</span> State — everything durable, keyed by responsibility</h2>
+  <p class="lead">
+    An identity's durable state lives in ccs, keyed by its <b>responsibility</b> — so it outlives any one session.
+    Close an agent, re-open it a week later under a fresh session, and it still has everything: its mail, its memory,
+    the shared picture its cluster was working from.
+  </p>
+  <div class="grid g3">
+    <div class="card">
+      <h4>what others tell me</h4>
+      <p><b>Inbox.</b> Every identity has one. One inbound stream of everything sent TO it — a task from control, a Slack message from the scout, a note from you. Durable, ordered, works while closed.</p>
+    </div>
+    <div class="card">
+      <h4>what I concluded</h4>
+      <p><b>Identity state.</b> The agent's own memory — its stage, its phase, what it decided, what it's working on next. Written by the agent as it works; rehydrates on resume so a fresh embodiment never starts cold.</p>
+    </div>
+    <div class="card">
+      <h4>the shared picture</h4>
+      <p><b>Cluster state.</b> The board, gate verdicts, dispositions, sensor timestamps. What the whole cluster reads from every tick. Written by sense; read by everyone.</p>
+    </div>
+  </div>
+  <p class="lead" style="margin-top: 24px;">
+    All three key on the same address — the responsibility, not the session id. That's why continuity is of the
+    <em>identity</em>, not of any one running process.
+  </p>
+  <div class="flag good">
+    <span class="lbl">Deliver, then wake</span>
+    Loops notice new mail on their next tick. A worker doesn't loop, so a sender writes the mail then calls
+    <code>ccs bump-session</code>. The wake is best-effort; the delivery is durable. If the wake fails, nothing is
+    lost — the worker drains its inbox on its next start.
+  </div>
+</section>
+
+<!-- 13: THE DISPLAY -->
+<section class="slide" data-title="The display">
+  <h2><span class="n">7</span> The display — the terminal, made legible</h2>
+  <p class="lead">
+    The point of ccs holding rich metadata isn't bookkeeping — it's <b>ergonomics</b>. ccs holds each session's
+    meaningful facts (PR number, ticket, epic, phase) and projects them into three places you actually look.
+  </p>
+  <div class="grid g3">
+    <div class="card">
+      <h4>The ccs TUI</h4>
+      <p>The whole fleet at once, grouped by cluster and role. Open vs. closed, phase, dispatch state. Where you resume, archive, or tag sessions.</p>
+    </div>
+    <div class="card">
+      <h4>The cmux workspace tab</h4>
+      <p>A phase pill + the session's real title, PR#, epic, W-number. Scan a window and read the whole fleet without opening a single one.</p>
+    </div>
+    <div class="card">
+      <h4>The Claude Code statusline</h4>
+      <p>A clickable PR link + phase, always pinned in the pane. Same source as the tab — nothing to drift.</p>
+    </div>
+  </div>
+  <p class="lead" style="margin-top: 22px;">
+    All three are projections of the same metadata, one-way. Store it once; it shows up wherever you look.
+  </p>
+</section>
+
+<!-- 14: DETERMINISM -->
+<section class="slide" data-title="Determinism">
+  <h2><span class="n">▸</span> A deterministic harness around non-deterministic agents</h2>
+  <p class="lead">
+    Agents are creative — their outputs vary run to run. The machinery around them can't be. ccs's job is to provide a
+    <b>deterministic harness</b> so the non-determinism stays contained to the model turn itself, and everything
+    surrounding it — routing, delivery, stage, dispatch — behaves the same way every time.
+  </p>
+  <div class="grid g2">
+    <div class="card">
+      <h4>Sensed, not self-declared</h4>
+      <p>Stage is composed from GitHub facts — draft, review decision, merge status. A worker can't set its own stage. There's no escape hatch.</p>
+    </div>
+    <div class="card">
+      <h4>One clock, per-sensor cadences</h4>
+      <p>Every signal runs on a schedule you can inspect. The board is only as fresh as its slowest relevant sensor, and every value carries when it was written.</p>
+    </div>
+    <div class="card">
+      <h4>Delivery by identity, not by luck</h4>
+      <p>A nudge routes to the right worker's tab via its identity → surface UUID. Never to "whatever window happens to be focused."</p>
+    </div>
+    <div class="card">
+      <h4>Fail loud, not silent</h4>
+      <p>Every dispatch records its result. Un-confirmed deliveries surface as their own alert on the next tick. Nothing drops quietly.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 15: WHY A CLUSTER -->
+<section class="slide" data-title="Why a cluster">
+  <h2><span class="n">▸</span> Why a cluster, not a dozen loose sessions</h2>
+  <p class="lead">
+    Without ccs, pr-watch is a dozen-plus Claude tabs you'd hand-manage and lose on restart. As a cluster:
+  </p>
+  <div class="grid g2">
+    <div class="card northstar">
+      <h4>One command back up</h4>
+      <p>The whole operation returns armed. Every loop is ticking. Every worker knows what it owns.</p>
+    </div>
+    <div class="card northstar">
+      <h4>Control re-tasks the fleet</h4>
+      <p>The board recomposes. Each worker's next task lands in its inbox by the end of the first tick.</p>
+    </div>
+    <div class="card northstar">
+      <h4>Overnight Slack is already routed</h4>
+      <p>The scout's drops from the last 12 hours are already in the right worker mailboxes when you sit down.</p>
+    </div>
+    <div class="card northstar">
+      <h4>Concierge surfaces only what needs you</h4>
+      <p>The few things at your review or blocked. Everything else is running without you.</p>
+    </div>
+  </div>
+  <p class="lead" style="margin-top: 22px;">
+    Any worker is still one click away when you want to dive in. The fleet runs autonomously <em>and</em> stays open to you.
+  </p>
+</section>
+
+<!-- 16: DEMO / Q&A -->
+<section class="slide title-slide" data-title="Demo">
+  <div class="kicker">next up</div>
+  <h1>Let's see it running.</h1>
+  <p class="sub">
+    Same story, live: the board, the concierge, a PR through the gate, an approval that un-drafts.
+  </p>
+  <div class="meta">Questions welcome throughout.</div>
+</section>
+
+<div class="nav">
+  <div><span class="title" id="slideTitle"></span></div>
+  <div class="center">
+    <button id="prev">◀ Prev</button>
+    <span class="counter"><span id="cur">1</span> / <span id="total">1</span></span>
+    <button id="next">Next ▶</button>
+  </div>
+  <div class="keys">← → · Home · End</div>
+</div>
+
+</div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const total = slides.length;
+  document.getElementById('total').textContent = total;
+  let idx = 0;
+  function show(i) {
+    idx = Math.max(0, Math.min(total - 1, i));
+    slides.forEach((s, k) => s.classList.toggle('active', k === idx));
+    document.getElementById('cur').textContent = idx + 1;
+    document.getElementById('slideTitle').textContent = slides[idx].dataset.title || '';
+    slides[idx].scrollTop = 0;
+  }
+  document.getElementById('prev').onclick = () => show(idx - 1);
+  document.getElementById('next').onclick = () => show(idx + 1);
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); show(idx + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); show(idx - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); show(0); }
+    else if (e.key === 'End')  { e.preventDefault(); show(total - 1); }
+  });
+  show(0);
+</script>
+</body>
+</html>

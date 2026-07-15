@@ -1,0 +1,1146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ccs identity refactor — scoping doc</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root {
+      --bg: #0f1216;
+      --bg-soft: #171b21;
+      --bg-card: #1c2027;
+      --fg: #e8ecf1;
+      --fg-dim: #9aa4b1;
+      --border: #2a2f38;
+      --accent: #7cb7ff;
+      --accent-warm: #f4b860;
+      --accent-good: #7fd88f;
+      --accent-bad: #f47272;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.55; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 40px 32px 120px; }
+    h1 { font-size: 28px; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.01em; }
+    h2 { font-size: 20px; font-weight: 650; margin: 40px 0 10px; padding-top: 20px; border-top: 1px solid var(--border); letter-spacing: -0.005em; }
+    h3 { font-size: 16px; font-weight: 650; margin: 24px 0 8px; color: var(--accent); }
+    h4 { font-size: 14px; font-weight: 650; margin: 16px 0 6px; color: var(--fg); }
+    p { margin: 0 0 12px; color: var(--fg); }
+    p.sub { color: var(--fg-dim); font-size: 14px; margin-top: 4px; }
+    code { font-family: var(--mono); background: var(--bg-soft); padding: 1px 6px; border-radius: 3px; font-size: 13px; }
+    pre { font-family: var(--mono); background: var(--bg-soft); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+    pre code { background: transparent; padding: 0; }
+    ul, ol { margin: 6px 0 14px; padding-left: 22px; }
+    li { margin: 4px 0; }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0 18px; font-size: 13.5px; }
+    th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: var(--bg-soft); font-weight: 650; }
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 18px 22px; margin: 14px 0; }
+    .card.warn { border-color: #4a3820; background: #201811; }
+    .card.info { border-color: #1f3448; background: #12202f; }
+    .card.good { border-color: #1f4028; background: #112016; }
+    .card.risk { border-color: #4a2020; background: #211010; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: 600; margin-right: 6px; }
+    .tag.new  { background: #1f4028; color: #a8e6b3; }
+    .tag.mod  { background: #1f3448; color: #a8cae6; }
+    .tag.gone { background: #4a2020; color: #f0a0a0; }
+    .tag.risk { background: #4a3820; color: #f4c88a; }
+    hr { border: 0; border-top: 1px dashed var(--border); margin: 24px 0; }
+    .toc { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 6px; padding: 14px 22px; margin-bottom: 32px; }
+    .toc ol { columns: 2; column-gap: 24px; padding-left: 22px; }
+    .toc li { break-inside: avoid; margin: 3px 0; }
+    .toc a { color: var(--accent); text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
+    .cost-row { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+    .cost-row:last-child { border-bottom: 0; }
+    .cost-row .h { color: var(--fg-dim); }
+    .cost-row .v { color: var(--accent-warm); font-family: var(--mono); }
+    .arrow { color: var(--fg-dim); }
+    .kbd { font-family: var(--mono); background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 1px 6px; font-size: 12px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>ccs identity refactor — full scoping</h1>
+  <p class="sub">Written 2026-07-14. The plan for lifting <em>identity</em> to a first-class entity in the catalogue, splitting fleet/core roles, moving inboxes + state into the database, and shipping the CLI reorg atop the new shape. Ships as one atomic release across the tool + pr-watch cluster.</p>
+
+  <div class="card info">
+    <strong>Status:</strong> design accepted, not implemented. This doc is what we build against.<br>
+    <strong>Companion:</strong> the outstanding pre-existing work not covered by this refactor is listed at the end so nothing gets forgotten.
+  </div>
+
+  <div class="toc">
+    <strong>Contents</strong>
+    <ol>
+      <li><a href="#why">Why we're doing this</a></li>
+      <li><a href="#model">The model</a></li>
+      <li><a href="#schema">Database schema</a></li>
+      <li><a href="#role-config">Role config: role.toml + identity-schema.toml</a></li>
+      <li><a href="#materialization">Per-role table materialization</a></li>
+      <li><a href="#cli">The new CLI surface</a></li>
+      <li><a href="#deletions">Commands deleted, aliases killed</a></li>
+      <li><a href="#tui">TUI updates</a></li>
+      <li><a href="#state-files">State file cleanup</a></li>
+      <li><a href="#migration">Migration script</a></li>
+      <li><a href="#engine">Engine + hooks + skills rewrite</a></li>
+      <li><a href="#tests">Test plan</a></li>
+      <li><a href="#risks">Risks + mitigations</a></li>
+      <li><a href="#sequence">Implementation sequence</a></li>
+      <li><a href="#cost">Cost estimate</a></li>
+      <li><a href="#reimagined">pr-watch reimagined — how skills get simpler</a></li>
+      <li><a href="#outstanding">Outstanding work (not this refactor)</a></li>
+    </ol>
+  </div>
+
+  <!-- =========================================================== -->
+  <h2 id="why">1. Why we're doing this</h2>
+
+  <p>Today <code>catalogue</code> is a fat table where every session carries all the identity-relevant columns (<code>role</code>, <code>cluster</code>, <code>pr_repo</code>, <code>pr_number</code>, <code>gus_work</code>, <code>work_unit_id</code>, <code>grouping_id</code>, <code>stage</code>, <code>status_line</code>, <code>meta</code>) directly. "Identity" is a derived string (<code>key</code>) that <code>deriveKey(row)</code> re-computes on every mutation — a cache of a computed value, not a foreign key. Twin sessions for the same PR are two rows that happen to share identity columns; there's no entity that <em>is</em> "the pr-agent responsible for owner/repo#12345."</p>
+
+  <p>Because sessions <em>are</em> their identity, every consequence of that confusion has to be papered over: <code>deriveKey</code> drift between TS + Python (fixed once, could drift again), twin-detection logic in the board composer, <code>ccs stage</code>/<code>ccs mark</code>/<code>ccs status</code> writing per-session what should be per-identity, and a CLI surface that grew by accretion because there was no unifying entity to hang verbs on.</p>
+
+  <p>The refactor makes <strong>identity a real entity</strong>. A session points at an identity. Identities carry the durable attributes (role, cluster, grouping, work-ref, stage, status_line). Sessions carry only per-run state (title, resume_id, parent, meta scratch). Two claude sessions working the same PR share one identity row. The <code>key</code> cache dies; identity_key becomes a foreign key.</p>
+
+  <p>Concurrent wins this unlocks:</p>
+  <ul>
+    <li>The CLI collapses ~60% because <code>ccs identity set &lt;key&gt; --grouping=… --pr_state=…</code> replaces ~10 per-session command names.</li>
+    <li>Onboarding a new fleet role type = drop a folder with role.toml + identity-schema.toml. Ccs materializes the storage automatically.</li>
+    <li>Inboxes + state + dispositions collapse from filesystem primitives into SQL tables — one transactionality story, no more mkdir-locks.</li>
+    <li>Stage/status_line correctness across respawns: a new spawn inherits its identity's fields instead of re-sensing from scratch and briefly showing stale values.</li>
+    <li>Roll-ups ("how many identities per grouping", "how many pending inbox items per role") become one SQL query instead of ad-hoc file scans.</li>
+  </ul>
+
+  <p>The pr-watch cluster stays exactly one concrete cluster. The refactor's real payoff is <strong>the shape</strong>: any future cluster (issue-watch, sprint-tracker, whatever) inherits the model, ships as a folder, and works with zero ccs changes. That's the shareability story turned inside-out — clusters compose against a clean platform instead of tunneling their vocabulary into ccs.</p>
+
+  <!-- =========================================================== -->
+  <h2 id="model">2. The model</h2>
+
+  <div class="card">
+<pre>
+Session       ────►    Identity       ────►    Grouping
+(this claude           (the durable            (the WHAT-IT'S-
+ conversation)          work-item)              PART-OF, e.g. epic)
+
+sessions              identities              groupings
+├─ session_id  PK    ├─ identity_key PK      ├─ grouping_id PK
+├─ identity_key FK ──►                       ├─ label, url, notes
+├─ resume_id, title  ├─ cluster, role         ├─ closed
+├─ parent_session_id ├─ grouping_id FK ──────►
+└─ per-run scratch   ├─ stage, status_line
+                     └─ per-role attrs (join)
+                       ▲
+                       │
+                     identity_pr_agent
+                     ├─ identity_key PK/FK
+                     └─ pr_repo, pr_number,
+                        gus_work, pr_state, …
+</pre>
+  </div>
+
+  <h3>Core versus fleet roles</h3>
+
+  <p>Every role declares its <strong>kind</strong> in <code>role.toml</code>: <code>fleet</code> (many identities per cluster, one per work item) or <code>core</code> (exactly one identity per cluster, the tuple <code>(cluster, role)</code> IS the identity).</p>
+
+  <table>
+    <thead><tr><th>Kind</th><th>Identity count</th><th>Storage</th><th>Example</th></tr></thead>
+    <tbody>
+      <tr><td><code>core</code></td><td>1 per cluster</td><td>One <code>identities</code> row per (cluster,role)</td><td>concierge, control, designer, scout, eval</td></tr>
+      <tr><td><code>fleet</code></td><td>N per cluster</td><td>One <code>identities</code> row per work item + a matching per-role table row</td><td>pr-agent, review-agent</td></tr>
+    </tbody>
+  </table>
+
+  <p>The distinction matters because <strong>only fleet roles need a per-role attributes table</strong>. A concierge has no PR number, no epic; its state is just (cluster, role) + stage + status_line — all universal columns. A pr-agent has PR facts, GUS facts, screenshots — the per-role table holds those.</p>
+
+  <h3>Session ↔ identity link</h3>
+
+  <p>Sessions carry <code>identity_key</code> as a soft foreign key. A session with <code>identity_key = NULL</code> is a "loose" session — the designer scratch buffer, a one-off transcript, anything that doesn't fit a role. Loose sessions are still indexed and browsable; they just don't participate in the identity join.</p>
+
+  <p>Every mutation to a session's cluster/role reuses or mints the correct identity. <code>ccs new-session --identity &lt;key&gt;</code> becomes the primary spawn primitive; if the identity doesn't exist and the caller has role + cluster + work-ref, it's minted lazily.</p>
+
+  <h3>Identity_key format</h3>
+
+  <p>Structured, human-readable, deterministic:</p>
+  <pre>&lt;cluster&gt;:&lt;role&gt;:&lt;work_ref&gt;
+
+# fleet
+pr-watch:pr-agent:owner/repo#12345
+pr-watch:review-agent:owner/repo#12345
+
+# core (work_ref is elided — the tuple is the identity)
+pr-watch:concierge
+pr-watch:control</pre>
+
+  <p>The tool never parses these — they're opaque to ccs. But being structured makes them greppable, URL-safe, and easy to reason about in prompts and logs.</p>
+
+  <!-- =========================================================== -->
+  <h2 id="schema">3. Database schema</h2>
+
+  <p>The migration bumps <code>catalogue.db</code> from v31 to v32.</p>
+
+  <pre>-- ============================================================
+-- v32 additions
+-- ============================================================
+
+CREATE TABLE identities (
+  identity_key      TEXT PRIMARY KEY,     -- 'pr-watch:pr-agent:owner/repo#12345'
+  cluster           TEXT NOT NULL,
+  role              TEXT NOT NULL,
+  kind              TEXT NOT NULL,        -- 'fleet' | 'core'
+  grouping_id       TEXT,                 -- FK -&gt; groupings.grouping_id
+  stage             TEXT,                 -- opaque string; engine computes + writes
+  status_line       TEXT,                 -- worker's freeform pill
+  completed         INTEGER NOT NULL DEFAULT 0,
+  archived          INTEGER NOT NULL DEFAULT 0,
+  parked_task_id    TEXT,
+  meta              TEXT,                 -- JSON escape hatch
+  created_at        TEXT,
+  updated_at        TEXT
+);
+CREATE INDEX idx_identities_cluster ON identities(cluster);
+CREATE INDEX idx_identities_role ON identities(role);
+CREATE INDEX idx_identities_grouping ON identities(grouping_id);
+
+CREATE TABLE groupings (
+  grouping_id       TEXT PRIMARY KEY,     -- e.g. 'a3QEE000002SAsv2AG'
+  cluster           TEXT NOT NULL,
+  role              TEXT NOT NULL,        -- which fleet role uses this grouping
+  label             TEXT,                 -- 'Team Tokens UI'
+  url               TEXT,                 -- deep link
+  short_name        TEXT,                 -- column-friendly
+  notes             TEXT,                 -- JSON array of strings
+  context           TEXT,                 -- long-form authored context
+  closed            INTEGER NOT NULL DEFAULT 0,
+  meta              TEXT,
+  updated_at        TEXT
+);
+CREATE INDEX idx_groupings_cluster ON groupings(cluster);
+CREATE INDEX idx_groupings_role ON groupings(role);
+
+CREATE TABLE inboxes (
+  inbox_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  identity_key      TEXT NOT NULL,        -- FK -&gt; identities.identity_key
+  from_role         TEXT,
+  message           TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'drained'
+  created_at        TEXT NOT NULL,
+  drained_at        TEXT
+);
+CREATE INDEX idx_inboxes_identity_status ON inboxes(identity_key, status);
+
+CREATE TABLE identity_state (
+  identity_key      TEXT NOT NULL,        -- FK -&gt; identities.identity_key
+  key               TEXT NOT NULL,
+  value             TEXT NOT NULL,        -- JSON
+  updated_at        TEXT,
+  PRIMARY KEY (identity_key, key)
+);
+
+CREATE TABLE dispositions (
+  disposition_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  cluster           TEXT NOT NULL,
+  subject_key       TEXT NOT NULL,        -- what got decided (e.g. an identity_key or a work-ref)
+  verdict           TEXT NOT NULL,        -- 'approve' | 'hold' | 'defer' | 'clear'
+  reason            TEXT,
+  decided_by        TEXT,
+  decided_at        TEXT NOT NULL,
+  meta              TEXT
+);
+CREATE INDEX idx_dispositions_cluster_subject ON dispositions(cluster, subject_key);
+
+-- ============================================================
+-- catalogue TABLE RENAMED to `sessions`, stripped down
+-- ============================================================
+-- After migration, catalogue becomes:
+
+sessions (renamed from catalogue)
+├─ session_id            PK
+├─ identity_key          FK -&gt; identities.identity_key (nullable)
+├─ resume_id
+├─ custom_title
+├─ parent_session_id
+├─ meta                  JSON, session scratch only
+├─ completed             (drops — moves to identity)
+├─ archived              (drops — moves to identity)
+├─ parked_task_id        (drops — moves to identity)
+└─ updated_at
+
+DROPPED columns (moved to identities or its per-role table):
+  role, cluster, kind, project, event
+  pr_repo, pr_number, pr_branch, pr_state, pr_head_sha
+  gus_work, work_unit_id, grouping_id
+  key (was the derived cache — no longer needed)
+  stage, activity (activity was already dropped), status_line
+  milad_review, build_complete (already in meta JSON)
+  resume_command (moved to identity)</pre>
+
+  <p>Per-fleet-role tables (materialized at ccs boot from <code>identity-schema.toml</code>) look like:</p>
+
+  <pre>-- Materialized for pr-agent (from ~/.ccs-config/clusters/pr-watch/roles/pr-agent/identity-schema.toml)
+CREATE TABLE identity_pr_agent (
+  identity_key      TEXT PRIMARY KEY,     -- FK -&gt; identities.identity_key
+  pr_repo           TEXT,
+  pr_number         INTEGER,
+  pr_state          TEXT,
+  pr_head_sha       TEXT,
+  pr_branch         TEXT,
+  gus_work          TEXT,
+  gus_work_sf_id    TEXT,
+  updated_at        TEXT
+);
+CREATE INDEX idx_pr_agent_pr ON identity_pr_agent(pr_repo, pr_number);
+CREATE INDEX idx_pr_agent_gus ON identity_pr_agent(gus_work);</pre>
+
+  <!-- =========================================================== -->
+  <h2 id="role-config">4. Role config: role.toml + identity-schema.toml</h2>
+
+  <p>Every role's folder gains <code>role.toml</code>. Fleet roles additionally have <code>identity-schema.toml</code> declaring their per-role table columns.</p>
+
+  <h3>role.toml (universal)</h3>
+
+  <pre># ~/.ccs-config/clusters/pr-watch/roles/pr-agent/role.toml
+kind = "fleet"                # 'fleet' | 'core'
+
+[grouping]
+type = "epic"                 # display label for groupings of this role's work
+mint_policy = "external"      # 'external' = ids from tracker; 'internal' = ccs mints
+url_pattern = "https://gus.lightning.force.com/lightning/r/ADM_Work__c/{grouping_id}/view"</pre>
+
+  <pre># ~/.ccs-config/clusters/pr-watch/roles/concierge/role.toml
+kind = "core"                 # no [grouping], no per-role table, no identity_shape</pre>
+
+  <div class="card info">
+    <strong>Where's stage?</strong> Nowhere in role config. The <code>identities.stage</code> column is an <em>opaque string</em> as far as ccs is concerned — ccs stores it and returns it. The engine (e.g. <code>catalogue_sync.py</code>) owns the vocabulary, computes stage from its sensor inputs every tick, applies whatever ordering rule the cluster wants (pr-agent uses a monotonic clamp against a rank table), and writes through <code>ccs identity set --stage=…</code>. Ccs never reads role.toml to validate a stage write — it just stores whatever string it gets. This keeps cluster vocabulary out of the platform: a rogue write is a data race that the next sensor tick corrects, not a schema violation. Same treatment for anything else that felt like it needed platform validation.
+  </div>
+
+  <h3>identity-schema.toml (fleet only)</h3>
+
+  <pre># ~/.ccs-config/clusters/pr-watch/roles/pr-agent/identity-schema.toml
+# Declares the per-role identity table (identity_pr_agent).
+# Ccs materializes matching columns on boot; additive-only.
+
+[columns]
+pr_repo         = { type = "text", indexed = false }
+pr_number       = { type = "integer", indexed = true }
+pr_state        = { type = "text" }
+pr_head_sha     = { type = "text" }
+pr_branch       = { type = "text" }
+gus_work        = { type = "text", indexed = true }
+gus_work_sf_id  = { type = "text" }
+
+# composite index for fast PR lookup
+[indexes]
+pr_lookup = ["pr_repo", "pr_number"]
+
+[display]
+primary   = ["pr_repo", "pr_number"]      # what shows in "#12345 owner/repo" columns
+subtitle  = ["pr_state"]                  # dim secondary text
+short     = "pr_number"                   # narrow-column pick</pre>
+
+  <p>Type vocabulary is a fixed set: <code>text</code>, <code>integer</code>, <code>real</code>, <code>boolean</code>. Anything else is a validation error at boot.</p>
+
+  <p><strong>Change rules:</strong></p>
+  <ul>
+    <li><strong>Add a column</strong> — additive; ccs runs <code>ALTER TABLE ADD COLUMN</code> on next boot.</li>
+    <li><strong>Add an index</strong> — additive; <code>CREATE INDEX IF NOT EXISTS</code>.</li>
+    <li><strong>Rename a column</strong> — role authors a migration note under <code>[migrations]</code> in the schema; ccs runs <code>ALTER TABLE RENAME COLUMN</code> once per note (tracked by hash). Explicit, not inferred from diff.</li>
+    <li><strong>Drop a column</strong> — same as rename: explicit <code>[migrations]</code> entry.</li>
+    <li><strong>Change a column's type</strong> — not supported; author a new column, migrate values in role code, drop the old.</li>
+  </ul>
+
+  <!-- =========================================================== -->
+  <h2 id="materialization">5. Per-role table materialization</h2>
+
+  <p>At ccs boot (or when a role's schema changes), ccs walks every cluster in <code>~/.ccs-config/clusters/*</code>, reads each fleet role's <code>identity-schema.toml</code>, and reconciles the DB:</p>
+
+  <ol>
+    <li>Compute the target schema for <code>identity_&lt;role_slug&gt;</code> (dashes→underscores).</li>
+    <li>Read the current DB schema for that table.</li>
+    <li>Diff:
+      <ul>
+        <li>Missing table → <code>CREATE TABLE</code>.</li>
+        <li>Missing columns → <code>ALTER TABLE ADD COLUMN</code>.</li>
+        <li>Missing indexes → <code>CREATE INDEX IF NOT EXISTS</code>.</li>
+        <li>Migration entries in <code>[migrations]</code> whose hash hasn't been applied → run each, record hash in <code>schema_migrations</code> table.</li>
+      </ul>
+    </li>
+    <li>Fail loud if a column's declared type doesn't match the DB's existing type.</li>
+  </ol>
+
+  <p>Materialization is idempotent; running it twice does nothing on the second pass. Failure aborts boot with a clear message. The reconciler code is ~150 LOC + tests.</p>
+
+  <div class="card warn">
+    <strong>Guardrail:</strong> ccs never drops columns implicitly. A schema that removes a column silently would silently delete production state. All destructive changes go through <code>[migrations]</code> — the role owner has to declare intent.
+  </div>
+
+  <!-- =========================================================== -->
+  <h2 id="cli">6. The new CLI surface</h2>
+
+  <p>Six top-level nouns. Every mutation uses <code>--field=value</code> flags. Reads are the bare noun.</p>
+
+  <h3>ccs identity</h3>
+  <pre>ccs identity &lt;key&gt;                         Read one identity (joined with its per-role table)
+ccs identity list [--cluster c] [--role r] [--grouping g] [--closed]
+ccs identity mint &lt;key&gt; [--cluster=…] [--role=…]
+                                            Mint a new identity row
+ccs identity set &lt;key&gt; --grouping=&lt;gid&gt; --pr_repo=… --pr_number=… --stage=…
+                                            Set any identity or per-role attr in one atomic write
+ccs identity unset &lt;key&gt; --pr_state
+ccs identity path &lt;key&gt; [--new]            Print the identity's scratch dir (create if --new)
+ccs identity complete &lt;key&gt;                Lifecycle verbs (identity-level, not per-session)
+ccs identity archive &lt;key&gt;
+ccs identity resume &lt;key&gt;                  Spawn/resume the session(s) for this identity
+ccs identity bump &lt;key&gt; [--note "…"]       Wake the identity's live session via cmux bridge</pre>
+
+  <h3>ccs session</h3>
+  <pre>ccs session &lt;id|.&gt;                         Read one session (title, timestamps, identity_key)
+ccs session list                            Session browser (was: ccs ls — kept as alias briefly)
+ccs session set &lt;id&gt; --identity=&lt;key&gt; --title="…" --parent=&lt;id&gt;
+ccs session unset &lt;id&gt; --identity
+ccs session new --identity=&lt;key&gt; [--cwd=…] [--prompt="…"] [--print-id]
+                                            Replaces `ccs new-session`
+ccs session title &lt;id&gt; "text"              Sets custom_title + cmux tab sync (behavior beyond field write)
+ccs session bump &lt;id&gt; [--note "…"]         Wake a specific session (rare — prefer identity bump)</pre>
+
+  <h3>ccs cluster</h3>
+  <pre>ccs cluster &lt;c&gt;                            Cluster map (was: `ccs cluster c --expand`)
+ccs cluster list
+ccs cluster init &lt;name&gt; [--role=…]
+ccs cluster resume &lt;c&gt;                     (was: resume-cluster)
+ccs cluster board &lt;c&gt; [--json|--text|--identity=&lt;key&gt;|--recompose[=&lt;key&gt;]]
+                                            (was: ccs board)
+ccs cluster catch-up &lt;c&gt; [--session=&lt;id&gt;] (was: ccs catch-up)
+ccs cluster decide &lt;c&gt; record|reopen|check|list …</pre>
+
+  <h3>ccs grouping</h3>
+  <pre>ccs grouping &lt;id&gt;                          Read one grouping
+ccs grouping list [--cluster=c] [--role=r] [--closed]
+ccs grouping upsert &lt;id&gt; --cluster=&lt;c&gt; --role=&lt;r&gt; --label="…" --url="…"
+ccs grouping set &lt;id&gt; --short_name="…" --context=@file.md
+ccs grouping unset &lt;id&gt; --short_name
+ccs grouping note-add &lt;id&gt; "text"
+ccs grouping close &lt;id&gt;</pre>
+
+  <h3>ccs inbox</h3>
+  <pre>ccs inbox pending &lt;key&gt;                    List pending messages for an identity
+ccs inbox send --to=&lt;key&gt; --from=&lt;role&gt; --message="…"
+ccs inbox drain &lt;key&gt;                      Mark all pending as drained; return them
+ccs inbox bump &lt;key&gt; [--note "…"]          (routes to identity bump)</pre>
+
+  <h3>ccs state</h3>
+  <pre>ccs state get &lt;key&gt; &lt;statekey&gt;             (was: ccs state get)
+ccs state set &lt;key&gt; &lt;statekey&gt; &lt;value|@file&gt;
+ccs state merge &lt;key&gt; &lt;json&gt;
+ccs state list &lt;key&gt;                       All state keys for one identity</pre>
+
+  <h3>Top-level survivors</h3>
+  <pre>ccs                                        TUI
+ccs reindex [--titles]                     Refresh index from Store
+ccs sync-tabs [selector|--all]             Paint cmux tabs from catalogue
+ccs hook run &lt;name&gt;                        Hook dispatcher (settings.json wired)
+ccs statusline                             Sidecar (stdin-driven)
+ccs self-check &lt;id&gt;                        Turn-end sidecar
+ccs catalogue export --cluster=&lt;c&gt; [--role=&lt;r&gt;] [--json]
+                                           ADR-D1 read boundary (engine reads via this)
+ccs whoami
+ccs --help / --version</pre>
+
+  <!-- =========================================================== -->
+  <h2 id="deletions">7. Commands deleted, aliases killed</h2>
+
+  <p>Everything below <strong>disappears</strong>. No backward-compatible aliases. Callers move to the new shape in the same release.</p>
+
+  <table>
+    <thead><tr><th>Deleted</th><th>Replacement</th></tr></thead>
+    <tbody>
+      <tr><td><code>ccs meta [id] key value</code></td><td><code>ccs identity set &lt;key&gt; --meta.key=value</code> OR <code>ccs session set &lt;id&gt; --meta.key=value</code></td></tr>
+      <tr><td><code>ccs meta-set</code> (undocumented dup)</td><td>see above</td></tr>
+      <tr><td><code>ccs rename [id] "text"</code></td><td><code>ccs session title &lt;id&gt; "text"</code></td></tr>
+      <tr><td><code>ccs mark --completed/--archived</code></td><td><code>ccs identity complete/archive &lt;key&gt;</code></td></tr>
+      <tr><td><code>ccs tag</code> (legacy vocabulary)</td><td>deleted, no replacement</td></tr>
+      <tr><td><code>ccs key</code></td><td><code>ccs session set &lt;id&gt; --identity=&lt;key&gt;</code></td></tr>
+      <tr><td><code>ccs parent</code></td><td><code>ccs session set &lt;id&gt; --parent=&lt;id&gt;</code></td></tr>
+      <tr><td><code>ccs project</code></td><td>deleted — superseded by cluster/role</td></tr>
+      <tr><td><code>ccs set-cluster</code> / <code>ccs system</code></td><td><code>ccs identity set &lt;key&gt; --cluster=…</code> (rare — cluster set at mint)</td></tr>
+      <tr><td><code>ccs role</code></td><td><code>ccs identity set &lt;key&gt; --role=…</code> (rare)</td></tr>
+      <tr><td><code>ccs gus-work</code></td><td><code>ccs identity set &lt;key&gt; --gus_work=W-…</code></td></tr>
+      <tr><td><code>ccs epic</code></td><td><code>ccs identity set &lt;key&gt; --grouping=&lt;gid&gt;</code></td></tr>
+      <tr><td><code>ccs status</code></td><td><code>ccs identity set &lt;key&gt; --status_line="…"</code></td></tr>
+      <tr><td><code>ccs name</code></td><td><code>ccs session set &lt;id&gt; --short_name="…"</code></td></tr>
+      <tr><td><code>ccs stage</code></td><td><code>ccs identity set &lt;key&gt; --stage=…</code> (sensor auth check inside)</td></tr>
+      <tr><td><code>ccs session-fields</code></td><td>merges into <code>ccs identity set</code> (durable) + <code>ccs session set</code> (per-run)</td></tr>
+      <tr><td><code>ccs new-session</code> / <code>ccs new</code></td><td><code>ccs session new</code></td></tr>
+      <tr><td><code>ccs bump-session</code></td><td><code>ccs session bump &lt;id&gt;</code> or <code>ccs identity bump &lt;key&gt;</code></td></tr>
+      <tr><td><code>ccs cluster &lt;c&gt; --expand</code></td><td><code>ccs cluster &lt;c&gt;</code> (expand default)</td></tr>
+      <tr><td><code>ccs cluster &lt;c&gt; --json</code></td><td>same (kept)</td></tr>
+      <tr><td><code>ccs board</code></td><td><code>ccs cluster board</code></td></tr>
+      <tr><td><code>ccs catch-up</code></td><td><code>ccs cluster catch-up</code></td></tr>
+      <tr><td><code>ccs decide</code> / <code>ccs suppress</code></td><td><code>ccs cluster decide</code></td></tr>
+      <tr><td><code>ccs resume-session</code></td><td><code>ccs identity resume</code></td></tr>
+      <tr><td><code>ccs resume-cluster</code></td><td><code>ccs cluster resume</code></td></tr>
+      <tr><td><code>ccs identity resolve</code></td><td><code>ccs identity &lt;key&gt;</code> (read subsumes)</td></tr>
+      <tr><td><code>ccs register-session</code></td><td><code>ccs hook run session-start</code></td></tr>
+      <tr><td><code>ccs grouping</code> (was: state/grouping subcommand)</td><td>promoted to top-level <code>ccs grouping</code></td></tr>
+      <tr><td><code>ccs backfill-work-units</code></td><td>deleted — one-shot migration long done</td></tr>
+      <tr><td><code>ccs reap-duplicates</code></td><td>kept but moved under <code>ccs cluster reap-duplicates &lt;c&gt;</code></td></tr>
+      <tr><td><code>ccs hooks explain|lint</code></td><td><code>ccs hook explain|lint</code></td></tr>
+      <tr><td><code>ccs roles</code> / <code>ccs sync-roles</code></td><td><code>ccs cluster sync-roles &lt;c&gt;</code></td></tr>
+      <tr><td><code>ccs skills</code></td><td>kept (TUI + registry are their own concern)</td></tr>
+    </tbody>
+  </table>
+
+  <!-- =========================================================== -->
+  <h2 id="tui">8. TUI updates</h2>
+
+  <p>The TUI (<code>ccs</code> bare) gains an <strong>identity view</strong> mode alongside the current session view. Toggle with a key (probably <span class="kbd">i</span>).</p>
+
+  <table>
+    <thead><tr><th>View</th><th>Row shape</th><th>When useful</th></tr></thead>
+    <tbody>
+      <tr><td>Sessions (current default)</td><td>One row per session</td><td>Finding a specific transcript to resume</td></tr>
+      <tr><td>Identities (new)</td><td>One row per identity; sessions collapse under</td><td>Fleet operations — "which PRs are in milad-review"</td></tr>
+      <tr><td>Groupings (new)</td><td>One row per grouping; identities count as a column</td><td>Epic roll-ups</td></tr>
+    </tbody>
+  </table>
+
+  <p>Row schema for the identity view: identity_key, role, grouping short_name, stage, status_line, live-sessions count, updated_at. Per-role columns come from <code>identity-schema.toml</code>'s <code>[display]</code> section.</p>
+
+  <p>The natural-language command surface (<span class="kbd">e</span> for session, <span class="kbd">:</span> for all) needs updating too — its mutation vocabulary is the old command names. Post-refactor it emits <code>ccs identity set</code> etc.</p>
+
+  <!-- =========================================================== -->
+  <h2 id="state-files">9. State file cleanup</h2>
+
+  <p>The refactor tidies <code>~/.ccs/clusters/&lt;c&gt;/cluster/</code>. Everything in the "keep" list is sensor output regenerated every tick; the platform doesn't touch it. Everything in the "moved" list lifts into the DB.</p>
+
+  <h3>Keep (per-cluster sensor outputs + authored config)</h3>
+  <pre>cluster/
+├─ config.json                            engine bootstrap config
+├─ groupings.json                         DELETED — table now
+├─ slack_registry.json                    scout config (engine-owned)
+├─ learnings.md, reviewer-comms.md        authored prose
+├─ board.json                             compose_board output
+├─ gate.json                              gate_eval output
+├─ poll.json, review.json, github_review_state.json
+├─ convo.json, deploy.json, prod_deploy.json
+├─ drift.json, membership.json
+├─ mark_completed.json, retire_sweep.json
+├─ change_flags.json, epics_cache.json, gus_link_cache.json
+├─ screenshot_freshness.json, sprints.json
+├─ worker_activity.json, review_relay.json
+├─ catalogue_sync.json, ccs_facts.json
+├─ slack_scout.json, slack_watermarks.json
+└─ (sensor logs, .lock files)</pre>
+
+  <h3>Deleted (moved into DB or superseded)</h3>
+  <pre>inbox/                                     -&gt; inboxes table
+sessions.json                              -&gt; dispatch state on identities
+pending.json                               -&gt; identity_state (concierge's queue)
+dispositions.json                          -&gt; dispositions table
+groupings.json                             -&gt; groupings table
+epics.json, epic_fallback.json             legacy, deleted
+work-units.json                            data folded into identities
+_scout_enriched_membership.json            scratch, orphaned
+PRE_KILL_SNAPSHOT_*.txt, BOOTSTRAP_*.md    one-off historical artifacts</pre>
+
+  <h3>Added</h3>
+  <pre>identities/
+└─ pr-agent/
+   └─ owner_repo-12345/                    per-identity scratch dir (opaque blobs)
+      ├─ judgment.json                     hook-precreated
+      ├─ result.json                       hook-precreated
+      └─ screenshots/                      worker-authored</pre>
+
+  <!-- =========================================================== -->
+  <h2 id="migration">10. Migration script</h2>
+
+  <p>One migration bumps schema v31 → v32. It's a single transaction; if any step fails the entire migration rolls back and the tool refuses to boot until the state is investigated.</p>
+
+  <h3>Phase 1 — schema</h3>
+  <ol>
+    <li>Create <code>identities</code>, <code>groupings</code>, <code>inboxes</code>, <code>identity_state</code>, <code>dispositions</code>, <code>schema_migrations</code>.</li>
+    <li>Read every cluster's role folder; materialize per-role tables (<code>identity_pr_agent</code>, etc.).</li>
+  </ol>
+
+  <h3>Phase 2 — data migration</h3>
+  <ol>
+    <li>For each row in <code>catalogue</code>:
+      <ul>
+        <li>Compute <code>identity_key</code> via today's <code>deriveKey()</code> (unchanged logic).</li>
+        <li>If the row has enough info to identify a role + cluster + work-ref, UPSERT into <code>identities</code>.</li>
+        <li>If the row's role is fleet, UPSERT into the matching <code>identity_&lt;role&gt;</code> table with PR/GUS/work_unit_id columns.</li>
+        <li>Update <code>catalogue.identity_key</code> to the derived key.</li>
+      </ul>
+    </li>
+    <li>Load <code>~/.ccs/clusters/*/cluster/groupings.json</code>; for each entry, INSERT into <code>groupings</code>.</li>
+    <li>Walk <code>~/.ccs/identities/*/*/*/inbox/*.json</code>; INSERT each message into <code>inboxes</code>.</li>
+    <li>Walk <code>~/.ccs/state/**/*.json</code>; INSERT each key/value into <code>identity_state</code>.</li>
+    <li>Load <code>~/.ccs/clusters/*/cluster/dispositions.json</code>; INSERT into <code>dispositions</code>.</li>
+  </ol>
+
+  <h3>Phase 3 — sessions table</h3>
+  <ol>
+    <li>Rename <code>catalogue</code> → <code>sessions</code>.</li>
+    <li>Drop the columns now on identities: <code>role</code>, <code>cluster</code>, <code>kind</code>, <code>project</code>, <code>event</code>, <code>pr_repo</code>, <code>pr_number</code>, <code>pr_branch</code>, <code>pr_state</code>, <code>pr_head_sha</code>, <code>gus_work</code>, <code>work_unit_id</code>, <code>grouping_id</code>, <code>key</code>, <code>stage</code>, <code>status_line</code>, <code>resume_command</code>, <code>completed</code>, <code>archived</code>, <code>parked_task_id</code>.</li>
+    <li>SQLite drops columns via ALTER TABLE DROP COLUMN (3.35+); fallback to table rebuild if not available.</li>
+  </ol>
+
+  <h3>Phase 4 — file cleanup</h3>
+  <ol>
+    <li>Move each cluster's inbox files to <code>{cluster}/inbox.migrated/</code> (rename, don't delete — recoverable).</li>
+    <li>Same for <code>state/</code>, <code>groupings.json</code>, <code>dispositions.json</code>, <code>sessions.json</code>, <code>pending.json</code>, <code>work-units.json</code>.</li>
+    <li>User can delete <code>.migrated</code> directories manually once satisfied.</li>
+  </ol>
+
+  <h3>Rollback</h3>
+  <p>The migration keeps a <code>catalogue.db.v31.bak</code> copy before touching anything. If ccs boots on the migrated DB and detects a corrupted or half-migrated state, it refuses to boot and points at the backup. Rolling back to v31 is: replace catalogue.db with the backup, restore the <code>.migrated</code> dirs.</p>
+
+  <div class="card warn">
+    <strong>Warning:</strong> the migration is one-way. Going back to a pre-refactor ccs binary against a v32 DB will fail — the columns don't exist. Keep the backup until you're confident the new shape is stable.
+  </div>
+
+  <!-- =========================================================== -->
+  <h2 id="engine">11. Engine + hooks + skills rewrite</h2>
+
+  <p>Every subprocess call site + prose reference in the pr-watch cluster updates in the same release. Rough counts:</p>
+
+  <div class="grid">
+    <div class="card">
+      <h4>Engine subprocess call sites</h4>
+      <p><code>~88</code> <code>ccs</code> invocations in <code>engine/scripts/*.{py,sh}</code></p>
+      <p>Concentrated in: <code>spawn-agent.sh</code>, <code>catalogue_sync.py</code>, <code>approve.py</code>, <code>retire_sweep.py</code>, <code>mark_completed.py</code>, <code>gate_eval.py</code>, <code>compose_board.py</code>, <code>membership.py</code>.</p>
+    </div>
+    <div class="card">
+      <h4>Hook + skill prose refs</h4>
+      <p><code>~156</code> <code>ccs</code> command mentions across <code>roles/*/.ccs-hooks/*.md</code> and <code>.claude/skills/**/prompts/*.md</code></p>
+      <p>Concentrated in: pr-agent stop-context, concierge SKILL.md, control SKILL.md, reviewer skills.</p>
+    </div>
+  </div>
+
+  <h3>ccs_client.py — the single Python indirection</h3>
+  <p>Today wraps <code>ccs catalogue export</code>, <code>ccs identity resolve</code>, <code>ccs session-fields</code>. Post-refactor:</p>
+  <pre>catalogue_export(cluster, role=None)          # unchanged; still emits flat JSON envelope
+identity_resolve(session_id)                  # unchanged
+identity_set(identity_key, fields, sensor=None)  # replaces session_fields for durable attrs
+session_set(session_id, fields)               # per-run attrs only
+inbox_send(identity_key, from_role, message)
+inbox_drain(identity_key)
+grouping_upsert(grouping_id, cluster, role, label, url, ...)</pre>
+
+  <p>Each engine script rewires its calls. <code>catalogue_sync.py</code> is the biggest: currently emits a <code>ccs session-fields</code> call per PR with a blob of fields; splits into an <code>identity_set</code> for durable fields (pr_repo, pr_number, grouping_id, gus_work) and a <code>session_set</code> for per-run (customTitle, stage — actually stage lifts to identity so it drops from session_set).</p>
+
+  <h3>spawn-agent.sh — the spawn path</h3>
+  <p>The <code>ensure</code> command mints an identity if it doesn't exist, then spawns a session pinned to it:</p>
+  <pre># Before:
+ccs new-session --cluster pr-watch --role pr-agent --key owner_repo-12345 \
+  --pr-number 12345 --pr-repo owner/repo --title "…" --cwd "$wt"
+
+# After:
+key="pr-watch:pr-agent:owner/repo#12345"
+ccs identity mint "$key" --cluster=pr-watch --role=pr-agent 2>/dev/null || true
+ccs identity set "$key" --pr_repo=owner/repo --pr_number=12345
+ccs session new --identity="$key" --title="…" --cwd="$wt"</pre>
+
+  <h3>Hook + skill search-and-replace</h3>
+  <p>Systematic 1:1 replacement per the deletion table. Prose examples like "run <code>ccs mark $CCS_SESSION_ID --completed</code>" become "run <code>ccs identity complete $CCS_IDENTITY_KEY</code>" — which means hooks also need to know the identity_key of the current session. That's a new env var (<code>CCS_IDENTITY_KEY</code>) exported by the SessionStart hook, derived from <code>ccs identity resolve --session $CCS_SESSION_ID</code>.</p>
+
+  <!-- =========================================================== -->
+  <h2 id="tests">12. Test plan</h2>
+
+  <p>Test coverage lands with the refactor, not after. Every module gets tests that reflect the new shape.</p>
+
+  <h3>New test files</h3>
+  <pre>src/catalogue/identities.test.ts          identity CRUD, per-role table interaction
+src/catalogue/materialize.test.ts         schema materialization from role.toml
+src/catalogue/migration-v32.test.ts       migration correctness on a v31 fixture
+src/inbox/inbox-db.test.ts                inbox operations in the DB
+src/state/identity-state.test.ts          state operations
+src/state/groupings-db.test.ts            groupings CRUD
+src/state/dispositions.test.ts            decision ledger
+
+src/cli/identity-command.test.ts          all identity verbs
+src/cli/session-command.test.ts           all session verbs
+src/cli/grouping-command.test.ts          all grouping verbs
+
+src/tui/identity-view.test.ts             identity view rendering
+src/tui/mutations.test.ts                 (moved to shared module)</pre>
+
+  <h3>Migration fixture</h3>
+  <p>Check in a real v31 catalogue.db snapshot (sanitized), plus a matching cluster state dir with inbox/state/groupings files. The migration test loads the snapshot, runs the migration, and asserts:</p>
+  <ul>
+    <li>Row count invariant (session count preserved, identity count = distinct identity_keys).</li>
+    <li>Per-role table populated with correct PR/GUS values.</li>
+    <li>Inbox messages migrated (count matches, oldest-first order preserved).</li>
+    <li>Sessions still resolve to their identity via the FK.</li>
+    <li>Board recompose produces identical output before/after migration.</li>
+  </ul>
+
+  <h3>End-to-end</h3>
+  <p>One full loop test: spawn a pr-agent identity, spawn its session, send an inbox message, drain, set stage, mark completed. Every step exercises the new CLI + engine surface.</p>
+
+  <!-- =========================================================== -->
+  <h2 id="risks">13. Risks + mitigations</h2>
+
+  <div class="card risk">
+    <h4>Risk 1 — migration lands broken on the live fleet</h4>
+    <p>The pr-watch cluster runs 24/7 with real PRs. A broken migration takes the fleet offline until fixed.</p>
+    <p><strong>Mitigation:</strong> migration test with a real v31 fixture pinned in the repo. Explicit backup file (<code>catalogue.db.v31.bak</code>) created before any writes. Migration runs behind an env flag (<code>CCS_ALLOW_MIGRATE_V32=1</code>) on first run so the operator opts in. Rollback documented in the migration script's docstring.</p>
+  </div>
+
+  <div class="card risk">
+    <h4>Risk 2 — per-role table materialization has subtle bugs</h4>
+    <p>Type coercion, index creation ordering, column-add-then-index race conditions in SQLite.</p>
+    <p><strong>Mitigation:</strong> ~30 unit tests on the materializer alone. Boot-time reconciliation fails loud on any mismatch. Fixed type vocabulary (text/integer/real/boolean) — no user-defined SQL.</p>
+  </div>
+
+  <div class="card risk">
+    <h4>Risk 3 — prose search-and-replace misses a reference</h4>
+    <p>~156 mentions in hooks/skills. A missed one means a worker runs a nonexistent command mid-loop.</p>
+    <p><strong>Mitigation:</strong> a post-refactor lint script that greps every <code>.md</code> under <code>~/.ccs-config</code> for the deleted command names and fails CI. Runs as part of the mutation-boundary test.</p>
+  </div>
+
+  <div class="card risk">
+    <h4>Risk 4 — engine writes an unknown role's data and materialization hasn't run</h4>
+    <p>A new fleet role is declared in role.toml, but ccs hasn't booted since the change. Engine tries <code>identity_set</code> against a role whose table doesn't exist yet.</p>
+    <p><strong>Mitigation:</strong> <code>identity_set</code> runs materialization on-demand if the target table is missing. Materialization is idempotent + fast, so the extra check is free.</p>
+  </div>
+
+  <div class="card risk">
+    <h4>Risk 5 — TUI natural-language commands emit stale command names</h4>
+    <p>Codex/claude have been trained on prompts that mention the old CLI. They'll emit <code>ccs mark $id --completed</code> instead of <code>ccs identity complete</code>.</p>
+    <p><strong>Mitigation:</strong> the NL command prompt lists the current CLI explicitly, not from memory. Update the system prompt to match.</p>
+  </div>
+
+  <div class="card risk">
+    <h4>Risk 6 — no gradual rollout means "big bang" debugging</h4>
+    <p>Everything ships at once. If something's wrong, you can't isolate which piece.</p>
+    <p><strong>Mitigation:</strong> land in a feature branch, run the full test suite + a full pr-watch end-to-end simulation before merging. Merge on a low-activity day (weekend). Have the rollback plan rehearsed.</p>
+  </div>
+
+  <!-- =========================================================== -->
+  <h2 id="sequence">14. Implementation sequence</h2>
+
+  <p>Order chosen so each step is verifiable independently and later steps can't proceed without earlier ones landing.</p>
+
+  <ol>
+    <li><strong>ADR-0089 written and merged.</strong> This doc's contents distilled into an ADR — the durable record.</li>
+    <li><strong>Schema v32 migration + universal tables.</strong> Create identities, groupings, inboxes, identity_state, dispositions, schema_migrations. Migration script that populates identities from existing catalogue rows. Tests against a v31 fixture. Don't drop old columns yet — the tool works on both shapes for the length of this step.</li>
+    <li><strong>Per-role table materialization.</strong> Reader for role.toml + identity-schema.toml. Reconciler that runs on boot. Tests. Materialize identity_pr_agent, identity_review_agent from pr-watch's role folders.</li>
+    <li><strong>Grouping CLI + migration.</strong> Move groupings.json → groupings table. <code>ccs grouping</code> commands. Tests.</li>
+    <li><strong>Inbox CLI + migration.</strong> Same shape for inbox files → inboxes table. <code>ccs inbox</code> commands.</li>
+    <li><strong>Identity CLI.</strong> <code>ccs identity mint/set/unset/complete/archive/list/read/path</code>. Tests.</li>
+    <li><strong>Session CLI reshape.</strong> <code>ccs session set/new/title/list/read</code>. Tests. Kill the old command names — no aliases.</li>
+    <li><strong>Cluster + hook CLI reshape.</strong> <code>ccs cluster board/catch-up/decide/resume/…</code>, <code>ccs hook run/explain/lint</code>. Tests.</li>
+    <li><strong>ccs_client.py rewrite + engine subprocess call updates.</strong> Every Python script under <code>~/.ccs-config/clusters/pr-watch/engine/</code> that calls <code>ccs</code>. Compile tests still pass, engine unit tests still pass.</li>
+    <li><strong>spawn-agent.sh + hook prose updates.</strong> Every <code>.ccs-hooks/*.md</code> and every SKILL/prompt file updates to the new commands. Lint script verifies no stale references.</li>
+    <li><strong>TUI update.</strong> Identity view mode. NL command surface emits new command names.</li>
+    <li><strong>Drop old catalogue columns.</strong> Now that nothing reads them, run the final DROP COLUMN step of the migration. Ships in the same commit as the CLI final cleanup.</li>
+    <li><strong>End-to-end verification.</strong> Full pr-watch loop from spawn to retire on a live PR. Board renders. Every skill's prose references still resolve.</li>
+    <li><strong>Merge to master, cut a release.</strong> Both repos, coordinated commit.</li>
+  </ol>
+
+  <!-- =========================================================== -->
+  <h2 id="cost">15. Cost estimate</h2>
+
+  <div class="card">
+    <div class="cost-row"><span class="h">Schema + universal tables + migration</span><span class="v">~4h</span></div>
+    <div class="cost-row"><span class="h">Per-role table materialization</span><span class="v">~3h</span></div>
+    <div class="cost-row"><span class="h">Grouping CLI + migration</span><span class="v">~2h</span></div>
+    <div class="cost-row"><span class="h">Inbox CLI + migration</span><span class="v">~2h</span></div>
+    <div class="cost-row"><span class="h">Identity CLI</span><span class="v">~3h</span></div>
+    <div class="cost-row"><span class="h">Session CLI reshape</span><span class="v">~2h</span></div>
+    <div class="cost-row"><span class="h">Cluster/hook CLI reshape</span><span class="v">~2h</span></div>
+    <div class="cost-row"><span class="h">ccs_client.py + engine rewrite</span><span class="v">~4h</span></div>
+    <div class="cost-row"><span class="h">Hook/skill prose sweep</span><span class="v">~2h</span></div>
+    <div class="cost-row"><span class="h">TUI update</span><span class="v">~3h</span></div>
+    <div class="cost-row"><span class="h">Column drop + final cleanup</span><span class="v">~1h</span></div>
+    <div class="cost-row"><span class="h">End-to-end verification</span><span class="v">~2h</span></div>
+    <div class="cost-row"><span class="h">Buffer for bugs + surprises</span><span class="v">~5h</span></div>
+    <div class="cost-row"><span class="h" style="font-weight:600;color:var(--fg)">Total</span><span class="v" style="font-weight:600">~35h</span></div>
+  </div>
+
+  <p>That's ~3-4 focused days, or a long weekend. In line with the earlier decoupling research's 28-40h estimate. Bigger than any single phase of the 2026-07-14 hardening arc; smaller than the arc as a whole.</p>
+
+  <p><strong>Not included:</strong> ongoing prompt tuning after the fact (workers will need a few days to internalize the new CLI vocabulary in their outputs), any brand-new features. This is the refactor, only.</p>
+
+  <!-- =========================================================== -->
+  <h2 id="reimagined">16. pr-watch reimagined — skills, hooks, sense scripts</h2>
+
+  <p>The best test of whether this refactor is worth doing: pick each surface (skills, hooks, sense scripts), look at the mental gymnastics it does today because sessions carry identity, and show how it collapses when identity is first-class. Skills are prose that gets easier to write; hooks are shell that gets shorter; sense scripts are Python that stops re-deriving identity on every tick. All three simplify — sense scripts and hooks the most, because they do the mechanical work.</p>
+
+  <h3>Concierge — read the queue</h3>
+
+  <div class="card">
+    <p><strong>Today (SKILL.md, 315 lines).</strong> The skill spends 40+ lines explaining how <code>ccs board pr-watch --json</code> joins "catalogue + poll + review + github_review_state + gate + worker_activity" and emits "one row per IDENTITY (<code>cluster:role:work-unit</code> — the durable axis, unaffected by session churn/twins)." Then more lines on why <code>truth.audience</code> is legacy but still emitted, on how <code>data.stage</code> vs <code>meta.milad_review</code> interact, on which "reserved lane" concierge can write (dispositions).</p>
+    <p><strong>The reader has to know:</strong> what the board composer is, that sessions get de-duped into identities, that some fields are legacy, that some state files (<code>pending.json</code>, <code>convo.json</code>, <code>review_relay.json</code>) are still authoritative for their sub-domains, that concierge can only write dispositions.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> "Read the queue" is one command:</p>
+    <pre>ccs identity list --cluster=pr-watch --role=pr-agent --stage=milad-review</pre>
+    <p>Returns identity rows, each already carrying stage, status_line, grouping, pr_repo, pr_number, live-sessions count, last-updated. No "board composer" as a concept the skill has to explain — the board <em>is</em> the identity table, filterable directly. No legacy fields, no twin de-dup logic, no reserved lanes. The skill's queue-reading section drops from ~50 lines to ~5.</p>
+    <p>Every filter recipe collapses similarly:</p>
+    <ul>
+      <li>Milad's queue → <code>--stage=milad-review</code></li>
+      <li>Ready-to-merge → <code>--stage=approved</code></li>
+      <li>External review sitting → <code>--stage=in-review</code></li>
+      <li>Merged, deploy pending → <code>--stage=merged</code></li>
+    </ul>
+  </div>
+
+  <h3>Concierge — surface a decision</h3>
+
+  <div class="card">
+    <p><strong>Today.</strong> Milad approves <code>#12345</code>. The skill runs <code>/prwatch:approve</code>, which internally: resolves the current session's identity, updates <code>meta.milad_review</code>, invokes <code>compose_board.py</code> synchronously to force a fresh recompose, so the sidebar doesn't paint stale. The command wraps ~80 lines of Python.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> The identity IS the durable thing. Milad's approval writes to it directly:</p>
+    <pre>ccs identity set pr-watch:pr-agent:owner/repo#12345 --meta.milad_review=approved</pre>
+    <p>The board composer's job stays the same, but the identity row now reflects the write immediately — no "resolve session → identity → write" round-trip. The <code>/prwatch:approve</code> command shrinks to a one-liner. Sidebar reads live identity state; freshness is automatic.</p>
+  </div>
+
+  <h3>pr-agent (worker) — drain your inbox</h3>
+
+  <div class="card">
+    <p><strong>Today (pr-agent.md, 341 lines).</strong> The first mechanical step of every task:</p>
+    <pre>ccs inbox drain --cluster pr-watch --role pr-agent --work-unit &lt;your-key&gt;</pre>
+    <p>The worker has to know its "work-unit" (a repo_pr-flat-key like <code>owner_repo-12345</code>), plus the cluster + role slug, to construct the addressing tuple. The <code>subagent-briefing.md</code> stamps this key into every dispatched task so workers don't have to compute it, but the concept still exists in the skill and every drain call has three flags.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> The worker has one identity — its identity_key is in <code>$CCS_IDENTITY_KEY</code>, exported by the SessionStart hook. Drain is:</p>
+    <pre>ccs inbox drain $CCS_IDENTITY_KEY</pre>
+    <p>No cluster+role+work-unit tuple to remember or embed. Inboxes are indexed by identity_key directly — one flag, unambiguous. The briefing stamp for the inbox key can be deleted. The worker prompt gets shorter and less error-prone.</p>
+  </div>
+
+  <h3>pr-agent — record a verdict</h3>
+
+  <div class="card">
+    <p><strong>Today.</strong> The worker writes a verdict into <code>~/.ccs/clusters/pr-watch/cluster/pr-owner_repo-12345.judgment.json</code>. The file path is convention, not enforced. The <code>spawn.json</code> hook precreates it as <code>{}</code> so the worker's first write is an edit (not a create — which would prompt in acceptEdits mode). Fragile.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> Every identity has a canonical scratch directory:</p>
+    <pre>$(ccs identity path $CCS_IDENTITY_KEY)/judgment.json</pre>
+    <p>Which resolves deterministically to <code>~/.ccs/clusters/pr-watch/identities/pr-agent/owner_repo-12345/judgment.json</code>. The precreation lives in the identity's <code>path --new</code> flag, called once at spawn. No convention to memorize; no risk of workers writing to a slightly-wrong path and getting orphaned files.</p>
+  </div>
+
+  <h3>Control — dispatch a task</h3>
+
+  <div class="card">
+    <p><strong>Today (<code>spawn-agent.sh</code>, ~320 lines).</strong> Spawning a pr-agent for PR #12345 involves: computing the flat key <code>owner_repo-12345</code>, finding the W-number by parsing <code>board.json</code>, minting a session id via <code>ccs new-session</code> with 7 flags (<code>--cluster</code>, <code>--role</code>, <code>--key</code>, <code>--title</code>, <code>--pr-number</code>, <code>--pr-repo</code>, <code>--gus-work</code>, <code>--cwd</code>), spawning a cmux workspace to run <code>claude --session-id $sid</code>, then upserting the sessions.json registry with 3 fields atomically. The complexity is because identity is computed from session-scoped fields, and every spawn has to re-derive it.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> Identity is minted (or reused) first, session is pinned to it:</p>
+    <pre>key="pr-watch:pr-agent:owner/repo#12345"
+
+# Mint the identity if new (idempotent — no-op if exists)
+ccs identity mint "$key" --cluster=pr-watch --role=pr-agent
+
+# Set the PR attrs (or update them — engine does this every tick anyway)
+ccs identity set "$key" --pr_repo=owner/repo --pr_number=12345
+
+# Spawn a session pinned to it
+ccs session new --identity="$key" --cwd="$wt"</pre>
+    <p>No W-number lookup (the identity carries it, or doesn't — either way not needed at spawn). No sessions.json registry (dispatch state moves to <code>identity_state</code>). No atomic multi-field session write (identity set does it). <code>spawn-agent.sh</code> loses ~120 lines.</p>
+  </div>
+
+  <h3>Control — retire a worker</h3>
+
+  <div class="card">
+    <p><strong>Today (<code>retire_sweep.py</code>, ~140 lines).</strong> Walks every non-retired pr-agent session in the catalogue (via <code>ccs catalogue export</code>), fetches fresh PR merge state from GitHub for each, applies the <code>is_complete</code> predicate, and calls <code>ccs mark $sid --completed</code> to retire the session. A PR that spans multiple sessions (twins, respawns) gets marked per-session — retiring one twin doesn't retire the identity, so the sweep has to iterate.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> Retirement is per-identity, not per-session:</p>
+    <pre>for key in $(ccs identity list --cluster=pr-watch --role=pr-agent --json | jq -r '.[].identity_key'); do
+  merge=$(gh pr view ...)   # engine's fresh-merge-state fetch
+  if is_complete "$merge"; then
+    ccs identity complete "$key"    # one call retires ALL sessions for this identity
+  fi
+done</pre>
+    <p>The sweep iterates identities, not sessions. Retiring an identity cascades: its sessions all lifecycle-transition, its inbox stops accepting new messages, the board drops the row. Concept collapse: "worker retired" becomes a single fact, not N per-session facts.</p>
+  </div>
+
+  <h3>catalogue_sync — the hot-path composer</h3>
+
+  <div class="card">
+    <p><strong>Today (~350 lines).</strong> Every tick, for each pr-agent in the roster: read the full catalogue via <code>ccs catalogue export</code>, look up the session by identity key (built from pr_repo+pr_number), compute the stage, compute the epic id, build a payload of 5 fields (<code>customTitle</code>, <code>cluster</code>, <code>stage</code>, <code>gusWork</code>, <code>groupingId</code>, <code>meta.gus_work_sf_id</code>), call <code>ccs session-fields $sid --json '...' --sensor=catalogue-sync</code>. Repeats for every session, including twins.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> The sync writes to the identity, not the session. Twins share the write. Fewer subprocess calls:</p>
+    <pre>ccs identity set "$key" --stage=milad-review --grouping=$grouping_id \
+                        --pr_state=OPEN --pr_head_sha=$sha --sensor=catalogue-sync</pre>
+    <p>One call per identity (not per session). The customTitle stays a session-level attr — separate <code>ccs session set</code> if we want per-tab-name updates. And <code>stage</code> flows through the same call as PR attrs — no separate stage-write ceremony. The composer's per-tick loop drops ~30 lines and roughly halves its subprocess count.</p>
+  </div>
+
+  <h3>Board rendering (compose_board.py)</h3>
+
+  <div class="card">
+    <p><strong>Today (~700 lines).</strong> Composes the per-worker truth view by joining: catalogue rows (via <code>ccs catalogue export</code>) × gate.json × convo.json × sessions.json × groupings.json. Twins have to be de-duplicated by identity_key. The output writes to <code>board.json</code> keyed by <em>identity</em>, not session — the composer already discovered this abstraction, it just didn't have a name.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> The composer starts with identities and joins outward:</p>
+    <pre>SELECT i.identity_key, i.stage, i.status_line, i.grouping_id,
+       p.pr_repo, p.pr_number, p.pr_state,
+       g.label AS grouping_label, g.short_name,
+       (SELECT COUNT(*) FROM sessions s WHERE s.identity_key = i.identity_key) AS session_count
+FROM identities i
+LEFT JOIN identity_pr_agent p USING (identity_key)
+LEFT JOIN groupings g ON g.grouping_id = i.grouping_id
+WHERE i.cluster = 'pr-watch' AND i.role = 'pr-agent';</pre>
+    <p>One query, no twin logic (identities are unique by definition), no state-file joins for groupings (now a table). The gate.json + convo.json joins still exist — those are per-tick sensor outputs — but the twin/identity plumbing goes away. Composer shrinks by ~150 lines.</p>
+  </div>
+
+  <h3>Hooks — where the mechanical work lives</h3>
+
+  <p>Hooks are the least-glamorous surface but the one that touches every session on every event. Every start/stop/spawn/paint fires them; a fragile hook is a fleet-wide bug. Post-refactor they get materially simpler because they no longer have to compute identity from session-scoped fields.</p>
+
+  <h4>pr-agent stop-context (126 lines today)</h4>
+
+  <div class="card">
+    <p><strong>Today.</strong> Runs at the end of every worker turn to keep the tab pill current. Contains one particularly gnarly bit:</p>
+    <pre>jq -r --arg key "$(ccs meta . --json 2>/dev/null | jq -r '.prRepo + "#" + (.prNumber|tostring)')" \
+  '.data.prs[$key] | {route, pending: …}' \
+  ~/.ccs/clusters/pr-watch/cluster/gate.json</pre>
+    <p>What that does: read this session's catalogue meta, extract prRepo + prNumber, build a flat key, use it to look up the row in gate.json. Three concept hops (session → catalogue → key → gate row) to answer "what does the gate say about my PR?"</p>
+    <p>Also has a long section explaining "you do not set stage or activity" — because the old model made <code>ccs stage</code> writable, and every prompt tuning cycle had to remind workers to stop pushing stage manually.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> The worker's identity_key is in <code>$CCS_IDENTITY_KEY</code> at hook time. Gate lookup collapses to:</p>
+    <pre>ccs identity $CCS_IDENTITY_KEY --json | jq '.gate'</pre>
+    <p>The board composer emits gate.route as an attribute on the identity row; no gate.json shell join needed. The whole "you do not set stage" paragraph deletes — workers <em>can't</em> set stage cleanly because there's no per-session stage anymore; stage is on the identity and the sensor owns it.</p>
+    <p>Stop-context shrinks from 126 lines to ~70. What's left is the actual content the hook is FOR: shortname/status-line guidance, novel-context rules, forbidden phrases. All the plumbing goes away.</p>
+  </div>
+
+  <h4>SessionStart hook (across all roles)</h4>
+
+  <div class="card">
+    <p><strong>Today.</strong> When a session starts, the hook has to figure out the session's identity to set up env vars, tab pills, statuslines. It does this by reading the catalogue row for the current session id and pulling role/cluster/prRepo/prNumber/gusWork/workUnitId out. Every role's start hook has this same lookup boilerplate.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> The session row has <code>identity_key</code> as an FK; the hook resolves once:</p>
+    <pre>export CCS_IDENTITY_KEY=$(ccs identity resolve --session $CCS_SESSION_ID)
+export CCS_CLUSTER=$(echo "$CCS_IDENTITY_KEY" | cut -d: -f1)
+export CCS_ROLE=$(echo "$CCS_IDENTITY_KEY" | cut -d: -f2)</pre>
+    <p>Every hook downstream (statusline, cmux-paint, spawn) uses those env vars. The lookup boilerplate collapses to one line per hook. And because identity_key is stable across session churn (respawns share it), env-var caching works properly for the first time.</p>
+  </div>
+
+  <h4>spawn.json (pr-agent) — the perm-grant paths</h4>
+
+  <div class="card">
+    <p><strong>Today.</strong> The spawn hook grants Bash + Write perms scoped to specific paths — <code>Write({home}/.ccs/clusters/pr-watch/cluster/**)</code>, <code>Edit({home}/.ccs/clusters/pr-watch/cluster/**)</code>. But the per-worker judgment/result files live in that whole directory, so the grant is broader than needed — every pr-agent can write every other pr-agent's judgment file. Not a security issue in this trust model, but sloppy.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> Each identity has a dedicated scratch dir. The perm grant scopes exactly:</p>
+    <pre>"allow": [
+  "Write({home}/.ccs/clusters/pr-watch/identities/{role}/{identity_slug}/**)",
+  "Edit({home}/.ccs/clusters/pr-watch/identities/{role}/{identity_slug}/**)",
+  "Bash(ccs identity {identity_key}:*)",
+  …
+]</pre>
+    <p>The hook templating already supports variables like <code>{cwd}</code>; adding <code>{identity_slug}</code> is trivial. Now each worker's file-write blast radius is its own directory. Same shell surface, tighter scope.</p>
+  </div>
+
+  <h4>meta-update hook (pr-agent)</h4>
+
+  <div class="card">
+    <p><strong>Today.</strong> Fires when the catalogue writes a meta field on this session (e.g. sensor updates <code>meta.milad_review</code>). Uses this to update the cmux tab pill. But it fires per-session, so twin sessions each fire independently — and if they have different meta snapshots (race between two sensor writes), the tab flickers.</p>
+  </div>
+
+  <div class="card good">
+    <p><strong>Post-refactor.</strong> The meta is on the identity, not the session. Twins share one row; sensor writes update it once. The hook fires per-identity-change, not per-session-write. Flicker disappears; the hook simplifies from "diff my session's meta against last-seen" to "read my identity's current meta."</p>
+  </div>
+
+  <h3>Sense scripts — the biggest wins</h3>
+
+  <p>The 14 pr-watch sense scripts are ~8,100 lines total. Every one of them today has to bridge the "sessions carry identity" model to the "I want to know about the PR" reality. Post-refactor that bridge disappears — sensors read + write identities directly.</p>
+
+  <h4>catalogue_sync.py (341 lines)</h4>
+  <p>Covered above. The per-PR write loop iterates once per identity (not per session), calls one <code>ccs identity set</code> instead of a stapled <code>session-fields</code> blob. Twin sessions no longer produce duplicate writes.</p>
+  <p><strong>Est. savings: ~100 lines</strong> (per-session loop, session→identity resolution, epic-fallback map).</p>
+
+  <h4>compose_board.py (818 lines — the biggest single script)</h4>
+  <p>Covered above. Session-per-row → identity-per-row de-dup logic dies. gate.json + convo.json joins stay (per-tick sensor outputs), but the twin plumbing and the "keyed on identity, not sessionId" reconciliation both delete.</p>
+  <p><strong>Est. savings: ~180 lines.</strong></p>
+
+  <h4>gate_eval.py (503 lines)</h4>
+  <p><strong>Today.</strong> Reads catalogue rows via <code>ccs catalogue export</code>, groups by PR key, computes a gate verdict per PR. Group-by-PR-key is currently: extract prRepo + prNumber from each catalogue row, concat with #, deduplicate. Every session-per-row is scanned even though they resolve to the same PR.</p>
+  <p><strong>Post-refactor.</strong> Read identities directly:</p>
+  <pre>SELECT identity_key, pr_repo, pr_number FROM identity_pr_agent WHERE …</pre>
+  <p>Group-by is trivial (rows are already 1:1 with PRs). Session state is queried only when needed for a specific gate rule. The 40-line group-by-and-dedupe block deletes.</p>
+  <p><strong>Est. savings: ~60 lines.</strong></p>
+
+  <h4>worker_activity.py (264 lines)</h4>
+  <p><strong>Today.</strong> Detects wedged workers by joining catalogue rows to sessions.json (dispatch state) + inbox mtime + git log activity. Per-worker key derived from prRepo+prNumber; sessions.json keyed by flat key; inbox path built from cluster/role/work-unit tuple. Three parallel keying schemes, all pointing at the same identity but requiring per-source translation.</p>
+  <p><strong>Post-refactor.</strong> Everything is keyed by identity_key:</p>
+  <pre>SELECT i.identity_key,
+       (SELECT MAX(created_at) FROM inboxes WHERE identity_key = i.identity_key AND status='pending') AS oldest_pending,
+       (SELECT value FROM identity_state WHERE identity_key = i.identity_key AND key='last_dispatch') AS last_dispatch,
+       …
+FROM identities i
+WHERE i.role = 'pr-agent' AND i.completed = 0;</pre>
+  <p>Three lookups become one SQL query. The Python "correlate these three data sources by re-deriving the key" section deletes entirely.</p>
+  <p><strong>Est. savings: ~80 lines.</strong></p>
+
+  <h4>membership.py (272 lines)</h4>
+  <p><strong>Today.</strong> Fetches open PRs from GitHub, resolves each to a W-number via GUS, decides which are watched-vs-orphan. Writes membership.json + work-units.json (parallel files: the same PR appears as a "member" and a "work-unit"). Downstream sensors read both.</p>
+  <p><strong>Post-refactor.</strong> Membership <em>is</em> "which identities exist for this cluster+role, with pr_state != closed." The sensor upserts identities directly:</p>
+  <pre>for pr in open_prs:
+    key = f"pr-watch:pr-agent:{pr.repo}#{pr.number}"
+    ccs_identity_set(key, {"pr_state": pr.state, "pr_head_sha": pr.head_sha, ...})
+# retire identities whose PR disappeared
+for stale_key in identities_not_in_open_prs:
+    ccs_identity_archive(stale_key)</pre>
+  <p>membership.json + work-units.json both delete — the identities table IS membership. The 90-line "sync two parallel files" section goes away.</p>
+  <p><strong>Est. savings: ~120 lines + deletion of two state files.</strong></p>
+
+  <h4>retire_sweep.py (140 lines)</h4>
+  <p>Covered above. Per-identity retirement instead of per-session. The "walk every non-retired pr-agent session, group by PR, retire matching sessions" loop becomes "walk identities, retire matching ones." Sessions attached to retired identities lifecycle automatically.</p>
+  <p><strong>Est. savings: ~50 lines.</strong></p>
+
+  <h4>convo_sense.py, review_sense.py, github_review_state.py, screenshot_freshness.py</h4>
+  <p><strong>All follow the same pattern.</strong> Each senses one aspect of a PR (worker chat, external reviews, PR body state, screenshot freshness), joins to catalogue rows to know which PRs to sense, writes a JSON output keyed by PR-flat-key. Post-refactor: read the identities list (already keyed by PR), sense per-identity, write results in the same JSON files but keyed by identity_key.</p>
+  <p><strong>Est. savings: ~30 lines each, ~120 lines total.</strong> Not huge per-file, but the "translate identity to flat key to look up" idiom disappears everywhere.</p>
+
+  <h4>approve.py (247 lines)</h4>
+  <p><strong>Today.</strong> The <code>/prwatch:approve</code> command. Resolves the current session, extracts PR facts, updates <code>meta.milad_review = approved</code>, forces a synchronous compose_board recompose so the sidebar paints fresh.</p>
+  <p><strong>Post-refactor.</strong> Milad's approval writes to the identity directly:</p>
+  <pre>ccs identity set $CCS_IDENTITY_KEY --meta.milad_review=approved
+ccs cluster board pr-watch --recompose=$CCS_IDENTITY_KEY</pre>
+  <p>No session→identity resolution. No PR-facts extraction (identity already has them). The command shrinks to ~60 lines of validation + the two calls above.</p>
+  <p><strong>Est. savings: ~180 lines.</strong></p>
+
+  <h4>Sense-scripts summary</h4>
+  <div class="card">
+    <table>
+      <thead><tr><th>Script</th><th>Today</th><th>Est. post-refactor</th><th>Savings</th></tr></thead>
+      <tbody>
+        <tr><td><code>catalogue_sync.py</code></td><td>341</td><td>~240</td><td>-100</td></tr>
+        <tr><td><code>compose_board.py</code></td><td>818</td><td>~640</td><td>-180</td></tr>
+        <tr><td><code>gate_eval.py</code></td><td>503</td><td>~440</td><td>-60</td></tr>
+        <tr><td><code>worker_activity.py</code></td><td>264</td><td>~185</td><td>-80</td></tr>
+        <tr><td><code>membership.py</code></td><td>272</td><td>~150</td><td>-120</td></tr>
+        <tr><td><code>retire_sweep.py</code></td><td>140</td><td>~90</td><td>-50</td></tr>
+        <tr><td><code>approve.py</code></td><td>247</td><td>~70</td><td>-180</td></tr>
+        <tr><td>4× sense_*.py (convo, review, github, screenshot)</td><td>~900</td><td>~780</td><td>-120</td></tr>
+        <tr><td><code>spawn-agent.sh</code></td><td>318</td><td>~200</td><td>-120</td></tr>
+        <tr><td><strong>Rough total (engine)</strong></td><td><strong>~3800</strong></td><td><strong>~2800</strong></td><td><strong>-1010 (~27%)</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>New capabilities that were awkward before</h3>
+
+  <p>Beyond simplification, the model unlocks things pr-watch skills couldn't do cleanly today:</p>
+
+  <div class="card info">
+    <h4>"How many PRs per epic are in milad-review?"</h4>
+    <pre>SELECT g.label, COUNT(*) FROM identities i
+JOIN groupings g USING (grouping_id)
+WHERE i.stage = 'milad-review'
+GROUP BY g.grouping_id;</pre>
+    <p>Today: parse board.json, group by grouping_id in Python, join to groupings.json. Now: one query. The concierge can render epic-level rollups in the render step without ad-hoc code.</p>
+  </div>
+
+  <div class="card info">
+    <h4>"Which identities have unread messages older than an hour?"</h4>
+    <pre>SELECT i.identity_key, COUNT(inb.inbox_id) AS unread
+FROM identities i
+JOIN inboxes inb ON inb.identity_key = i.identity_key
+WHERE inb.status = 'pending' AND inb.created_at &lt; datetime('now', '-1 hour')
+GROUP BY i.identity_key
+HAVING unread &gt; 0;</pre>
+    <p>Today: walk the inbox filesystem, correlate with catalogue rows. Now: one query. Control can catch stuck-inbox scenarios trivially.</p>
+  </div>
+
+  <div class="card info">
+    <h4>"Show me every identity in this epic across all its sessions"</h4>
+    <p>An epic view in the TUI or CLI:</p>
+    <pre>ccs grouping a3QEE000002SAsv2AG --identities</pre>
+    <p>Renders every pr-agent working on Team Tokens, their stages, live sessions, last activity. This view didn't have a home in the old model — the closest was <code>ccs cluster pr-watch</code>, which showed everything undifferentiated. Now it's a first-class query.</p>
+  </div>
+
+  <div class="card info">
+    <h4>"Compare two clusters running the same shape"</h4>
+    <p>If pr-watch is joined by an <code>issue-watch</code> or <code>ticket-watch</code> cluster, cross-cluster queries land trivially because identity + inbox + state are shared universal tables:</p>
+    <pre>SELECT cluster, stage, COUNT(*) FROM identities
+WHERE role IN ('pr-agent', 'issue-agent')
+GROUP BY cluster, stage;</pre>
+    <p>Today: not possible without ad-hoc scripting. Post-refactor: one query. This is what "the platform stays generic, clusters compose" actually buys.</p>
+  </div>
+
+  <h3>Cluster-wide line-count guess</h3>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>Surface</th><th>Today</th><th>Est. post-refactor</th><th>Savings</th></tr></thead>
+      <tbody>
+        <tr><td>Skills (SKILL.md × 4 + concierge prompts × 3)</td><td>~1280</td><td>~950</td><td>-330 (~26%)</td></tr>
+        <tr><td>Hooks (.ccs-hooks/*.md + *.json across 6 roles)</td><td>~355</td><td>~270</td><td>-85 (~24%)</td></tr>
+        <tr><td>Engine (sense scripts + spawn-agent)</td><td>~3800</td><td>~2800</td><td>-1010 (~27%)</td></tr>
+        <tr><td><strong>pr-watch total</strong></td><td><strong>~5435</strong></td><td><strong>~4020</strong></td><td><strong>-1415 (~26%)</strong></td></tr>
+      </tbody>
+    </table>
+    <p class="sub">Line counts are approximate and only capture where the model reduction happens; new tests and boilerplate will land in the refactor itself. But the pr-watch cluster's <em>ongoing cost</em> — the surface future changes have to navigate — genuinely shrinks by a quarter across every layer. That's every future edit becoming easier to write, easier to review, easier to keep correct.</p>
+  </div>
+
+  <h3>The pattern behind all the wins</h3>
+
+  <p>Every simplification above is one of three shapes:</p>
+  <ol>
+    <li><strong>Eliminating "session → identity" indirection.</strong> Today: "look up this session's PR, find its identity by matching PR columns, act on it." Post-refactor: identity is right there, act directly.</li>
+    <li><strong>Replacing filesystem addressing with FK addressing.</strong> Inboxes, dispositions, scratch dirs — instead of "compute the path from role+cluster+key," it's "query by identity_key." One-flag calls, no path drift.</li>
+    <li><strong>Making rollups first-class.</strong> Group-by-epic, group-by-cluster, per-identity aggregates all become SQL queries because the data lives in joinable tables instead of parallel JSON files.</li>
+  </ol>
+
+  <p>None of these are new features. They're all things pr-watch already <em>does</em>, just done cleanly instead of via workarounds. The refactor's value shows up as "the workaround stops being needed" every time you touch one of these files.</p>
+
+  <!-- =========================================================== -->
+  <h2 id="outstanding">17. Outstanding work — NOT this refactor</h2>
+
+  <p>Items still open from earlier design/hardening arcs that this refactor doesn't touch. Keep this list live; things fall off it as they land.</p>
+
+  <h3>Bugs still outstanding</h3>
+  <ul>
+    <li><strong>REVIEW.md top-5 #2</strong> — unbounded synchronous decoder in <code>locateLaunchDir</code> can freeze the TUI. Only #1 has landed.</li>
+    <li><strong>REVIEW.md top-5 #3</strong> — <code>parseSessionFile</code> aborts the entire reindex on one bad file.</li>
+    <li><strong>REVIEW.md top-5 #4</strong> — inline resume can crash on a missing <code>claude</code> binary.</li>
+    <li><strong>REVIEW.md top-5 #5</strong> — background titling can write to a closed DB after TUI exit.</li>
+    <li><strong>Production-readiness review v2 P1 items</strong> in <code>docs/audits/production-readiness-review.html</code> that weren't addressed by phases 2A-2G. Re-audit after the identity refactor; some may become moot.</li>
+  </ul>
+
+  <h3>Deferred until after this refactor</h3>
+  <ul>
+    <li><strong>TUI mutations extraction</strong> — shared mutations module from the original Phase 2 plan. Deferred because the mutation surface changes with identities; revisit post-migration.</li>
+    <li><strong><code>ccs state</code> disposition</strong> — the CLI's write side (<code>set</code>/<code>merge</code>) has no callers; the read side is a debug convenience. Decide whether to narrow to <code>get</code>-only or delete entirely. Not blocking the refactor.</li>
+  </ul>
+
+  <h3>Investigations</h3>
+  <ul>
+    <li><strong><code>events/</code>, <code>journal/</code>, <code>tasks/</code>, <code>eval/</code></strong> subdirectories under <code>~/.ccs/clusters/pr-watch/cluster/</code> — status unknown. Grep for writers before deleting; some may still be live.</li>
+    <li><strong>Second cluster as forcing function</strong> — the fleet-role-schema abstraction is validated by exactly one real fleet role (pr-agent) plus the review-agent variant. Onboarding a genuinely different cluster (issue-watch, sprint-tracker) would prove or break the design. Not scheduled; noted so we look for the opportunity.</li>
+  </ul>
+
+  <h3>Shareability follow-through</h3>
+  <ul>
+    <li>Publish the sanitized <code>~/.ccs-config</code> as a public example repo.</li>
+    <li>Public README covering the three-tier model (post-refactor), install, quickstart for adding a cluster.</li>
+    <li>Screencast: from <code>ccs cluster init</code> to a running loop, under 5 minutes.</li>
+  </ul>
+
+  <!-- =========================================================== -->
+  <hr>
+  <p class="sub">This doc lives at <code>~/Desktop/ccs-identity-refactor-2026-07-14.html</code>. Companion ADR (to be written) will be <code>docs/adr/0089-identity-first-class-entity.md</code> in the ccs repo. Once we've read this together and you're happy, I'll draft the ADR, then start on step 1 of the implementation sequence.</p>
+
+</div>
+</body>
+</html>

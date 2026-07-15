@@ -29,4 +29,10 @@ If you're triggering a new audit, name it `AUDIT-<topic>-<yyyy-mm-dd>.md` and dr
 - `FINDINGS-hooks.md` — hook-system audit; lint status "OK" at capture.
 - `FINDINGS-production-readiness.md` — long-form readiness list (2026-07 arc).
 - `PRODUCTION-READINESS-CHECKLIST.md` — checklist form of the same arc.
-- `production-readiness-review.html` — rendered version of the 2026-07-14 v2 review.
+- `production-readiness-review-2026-07-14-v1.html` — first production-readiness
+  review (2026-07-14 morning). Drove the Phase 1 hardening arc.
+- `production-readiness-review-2026-07-14-v2.html` — refreshed v2 after Phase 1
+  landed (2026-07-14 afternoon). Includes the Cursor GPT-5.2 second-opinion pass
+  and the dependency taxonomy fix.
+
+For design docs / plans / presentations (not audits), see `../history/`.

@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ccs — Production Readiness Review v2 (2026-07-14)</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#30363d;
+    --ink:#e6edf3; --muted:#9aa7b4; --dim:#6e7b8a;
+    --p0:#f85149; --p1:#e3b341; --p2:#3fb950; --accent:#58a6ff; --accent2:#bc8cff;
+    --ok:#3fb950; --partial:#e3b341; --no:#f85149; --na:#4d5866;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  code,.mono{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86em;}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;color:#a5d6ff;border:1px solid var(--border);}
+  a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+  .wrap{display:flex;max-width:1500px;margin:0 auto;}
+  nav{position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;width:280px;
+    padding:20px 14px;border-right:1px solid var(--border);background:var(--panel);flex-shrink:0;}
+  nav h1{font-size:15px;margin:0 0 4px;letter-spacing:.3px}
+  nav .sub{color:var(--dim);font-size:12px;margin-bottom:16px}
+  nav a{display:block;color:var(--muted);padding:5px 10px;border-radius:6px;font-size:13px;margin:1px 0;}
+  nav a:hover{background:var(--panel2);color:var(--ink);text-decoration:none}
+  nav a.grp{color:var(--dim);text-transform:uppercase;font-size:10.5px;letter-spacing:.8px;margin-top:14px;padding-left:10px}
+  main{flex:1;padding:34px 44px;min-width:0;max-width:1230px}
+  h2{font-size:24px;margin:46px 0 6px;padding-top:10px;border-top:1px solid var(--border)}
+  h2:first-of-type{border-top:none;margin-top:8px}
+  h3{font-size:18px;margin:28px 0 8px;color:#d2dae2}
+  h4{font-size:15px;margin:18px 0 6px;color:var(--accent2)}
+  p{margin:8px 0}
+  .lead{color:var(--muted);font-size:15px}
+  .hero{background:linear-gradient(135deg,#161b22,#1c2330);border:1px solid var(--border);
+    border-radius:14px;padding:26px 30px;margin-bottom:10px}
+  .hero h1{margin:0 0 4px;font-size:30px}
+  .hero .meta{color:var(--dim);font-size:13px;margin-top:10px}
+  .badges{margin:14px 0 4px;display:flex;gap:8px;flex-wrap:wrap}
+  .pill{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid}
+  .pill.p0{color:var(--p0);border-color:var(--p0);background:rgba(248,81,73,.10)}
+  .pill.p1{color:var(--p1);border-color:var(--p1);background:rgba(227,179,65,.10)}
+  .pill.p2{color:var(--p2);border-color:var(--p2);background:rgba(63,185,80,.10)}
+  .pill.info{color:var(--accent);border-color:var(--accent);background:rgba(88,166,255,.10)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+  .stat .n{font-size:26px;font-weight:700}.stat .l{color:var(--dim);font-size:12px;margin-top:2px}
+  .stat.red .n{color:var(--p0)} .stat.yel .n{color:var(--p1)} .stat.grn .n{color:var(--p2)} .stat.blu .n{color:var(--accent)}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px}
+  th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:#cdd7e1;font-weight:600}
+  tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+  td.mono,th.mono{font-family:"SF Mono",ui-monospace,monospace;font-size:12px}
+  .ax{text-align:center;font-weight:700}
+  td.ax{width:40px}
+  .ax.ok{color:var(--ok)} .ax.pt{color:var(--partial)} .ax.no{color:var(--no)} .ax.na{color:var(--na)}
+  section{scroll-margin-top:12px}
+  details{background:var(--panel);border:1px solid var(--border);border-radius:10px;margin:12px 0;overflow:hidden}
+  details>summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:15px;list-style:none;background:var(--panel)}
+  details>summary::-webkit-details-marker{display:none}
+  details>summary::before{content:"▸ ";color:var(--dim);font-size:12px}
+  details[open]>summary::before{content:"▾ "}
+  .body{padding:4px 20px 16px}
+  .find{border-left:3px solid var(--border);padding:6px 0 6px 14px;margin:14px 0}
+  .find.p0{border-color:var(--p0)} .find.p1{border-color:var(--p1)} .find.p2{border-color:var(--p2)}
+  .find .t{font-weight:600}
+  .fs{color:var(--muted);font-size:13.5px;margin:3px 0}
+  .fix{color:var(--ok);font-size:13.5px}
+  ul{margin:8px 0 8px 0;padding-left:22px}li{margin:3px 0}
+  .tldr{background:var(--panel);border:1px solid var(--border);border-left:4px solid var(--accent);
+    border-radius:10px;padding:8px 22px 16px;margin:12px 0}
+  .tldr ol{margin:8px 0}.tldr li{margin:8px 0}
+  .rating{display:inline-block;padding:1px 8px;border-radius:12px;font-size:11px;font-weight:700;margin-left:6px;border:1px solid}
+  .rating.a{color:var(--ok);border-color:var(--ok);background:rgba(63,185,80,.10)}
+  .rating.b{color:var(--partial);border-color:var(--partial);background:rgba(227,179,65,.10)}
+  .rating.c{color:var(--p0);border-color:var(--p0);background:rgba(248,81,73,.10)}
+  .note{background:rgba(88,166,255,.07);border:1px solid rgba(88,166,255,.3);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13.5px}
+  .warn{background:rgba(248,81,73,.07);border:1px solid rgba(248,81,73,.3);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13.5px}
+  .good{background:rgba(63,185,80,.07);border:1px solid rgba(63,185,80,.3);border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13.5px}
+  footer{color:var(--dim);font-size:12px;margin:50px 0 20px;border-top:1px solid var(--border);padding-top:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h1>ccs · prod readiness v2</h1>
+  <div class="sub">post-hardening · 2026-07-14</div>
+  <a href="#top">Overview</a>
+  <a href="#tldr">TL;DR + verdict</a>
+  <a class="grp">Shared model</a>
+  <a href="#glossary">Glossary</a>
+  <a href="#homes">The three homes</a>
+  <a class="grp">Tool (ccs) audit</a>
+  <a href="#tool-summary">Summary + boundary ratings</a>
+  <a href="#tool-cli">CLI layer</a>
+  <a href="#tool-tui">TUI layer</a>
+  <a href="#tool-catalogue">Catalogue</a>
+  <a href="#tool-board">Board</a>
+  <a href="#tool-cmux">Cmux bridge</a>
+  <a href="#tool-hooks">Hooks</a>
+  <a href="#tool-resume">Resume/spawn</a>
+  <a href="#tool-state">State/inbox</a>
+  <a class="grp">pr-watch cluster audit</a>
+  <a href="#cluster-summary">Summary</a>
+  <a href="#cluster-roles">Roles (6)</a>
+  <a href="#cluster-sensors">Sensors (17)</a>
+  <a href="#cluster-composers">Composers (8)</a>
+  <a href="#cluster-shell">Shell wrappers</a>
+  <a href="#cluster-deploy">LaunchAgents</a>
+  <a href="#cluster-state">Runtime state</a>
+  <a href="#cluster-docs">Cluster docs</a>
+  <a class="grp">Shareability</a>
+  <a href="#dist-invoke">How ccs runs</a>
+  <a href="#dist-version">Version story</a>
+  <a href="#dist-config">Config portability</a>
+  <a href="#dist-install">Fresh-machine install</a>
+  <a class="grp">Findings</a>
+  <a href="#findings-p0">P0 findings</a>
+  <a href="#findings-p1">P1 findings</a>
+  <a href="#findings-p2">P2 findings</a>
+  <a class="grp">Path forward</a>
+  <a href="#decisions">Decisions to make</a>
+  <a href="#next-steps">Recommended next steps</a>
+</nav>
+<main>
+
+<section id="top">
+<div class="hero">
+  <h1>ccs — Production Readiness Review v2</h1>
+  <p class="lead">A fresh full audit after the 2026-07-14 hardening arc landed 8 new ADRs (0078–0085) and
+  closed every P0 from the previous review. This one focuses on <b>shareability</b>: what still stands
+  between us and putting ccs + pr-watch on another Mac.</p>
+  <div class="badges">
+    <span class="pill p0">P0 blocks shareability</span>
+    <span class="pill p1">P1 needed for confidence</span>
+    <span class="pill p2">P2 polish</span>
+    <span class="pill info">Info / decision</span>
+  </div>
+  <div class="meta">4 parallel research passes · 620 tool tests pass · run-from-source Bun · target: another Mac in one command</div>
+</div>
+
+<div class="grid">
+  <div class="stat grn"><div class="n">620</div><div class="l">tool tests pass</div></div>
+  <div class="stat grn"><div class="n">8</div><div class="l">ADRs landed this arc</div></div>
+  <div class="stat blu"><div class="n">A−</div><div class="l">tool boundary rating</div></div>
+  <div class="stat yel"><div class="n">7</div><div class="l">Python scripts still hit sqlite directly</div></div>
+  <div class="stat yel"><div class="n">0</div><div class="l">git tags on tool repo</div></div>
+  <div class="stat red"><div class="n">11+</div><div class="l">hardcoded /Users/mimen paths</div></div>
+</div>
+</section>
+
+<section id="tldr">
+<h2>TL;DR + verdict</h2>
+<div class="tldr">
+<p><b>Where we stand:</b> the <em>architecture</em> is production-grade. Every P0 from the previous
+full-system review (identity-key drift, role-name shadowing, broken sense pipeline, wedged control watchdog)
+is closed with tests + ADRs. Module boundaries in the tool are clean — the tool inventory audit scores it
+<b>A− overall</b>. The pr-watch cluster runs the whole PR pipeline reliably.</p>
+
+<p><b>Where we're NOT:</b> shareable. Moving to a second machine today means:</p>
+<ol>
+<li><b>Run-from-source Bun script</b> with a symlink to a working tree. No build, no versioned artifact, no
+<code>ccs update</code>. Ships whatever's committed on <code>feat/…</code>, not a numbered release.</li>
+<li><b>ADR-0078 half-done in the cluster:</b> we moved 2 Python scripts onto <code>ccs catalogue export</code>,
+but 6 more still <code>import sqlite3</code> and open <code>catalogue.db</code> directly. Exactly the
+schema-is-the-interface coupling the ADR promised to kill.</li>
+<li><b>CLI namespace is flat</b> — ~40 subcommands mix operator verbs, machine APIs, and internal plumbing.
+New users can't tell which surface is stable.</li>
+<li><b>TUI has direct DB mutations</b> that bypass the CLI's command layer (writes catalogue via
+<code>setCustomTitle</code>, <code>setCompleted</code>, <code>setArchived</code> directly), risking drift
+as invariants get added.</li>
+<li><b>No new-cluster wizard.</b> Every new cluster is hand-scaffolded from the toy-second template.</li>
+<li><b>Hardcoded absolute paths</b> in every LaunchAgent plist (<code>/Users/mimen/…</code>), no bootstrap
+script, no README that reflects reality on both repos.</li>
+</ol>
+
+<p><b>What "shareable" would look like:</b></p>
+<ul>
+<li><b>Build + version story.</b> <code>ccs</code> ships as either (a) an npm-published Bun-runnable package
+that <code>bunx</code> can run, OR (b) a compiled single binary via <code>bun build --compile</code>. Version
+in <code>package.json</code> gets bumped on each release, git tag matches, <code>ccs --version</code> matches.</li>
+<li><b>ADR-0078 finished.</b> Every Python script in the cluster reads the catalogue via
+<code>ccs catalogue export</code>. Zero <code>import sqlite3</code> in cluster code.</li>
+<li><b>CLI reorganized under nouns.</b> <code>ccs cluster …</code>, <code>ccs role …</code>,
+<code>ccs board …</code>, <code>ccs api …</code>, <code>ccs session …</code>. The flat namespace becomes a
+short list of operator verbs (<code>resume</code>, <code>new</code>, <code>ls</code>, <code>tree</code>) at
+top level.</li>
+<li><b>TUI mutations flow through the CLI's command layer.</b> Or the CLI's commands become thin wrappers
+around a shared mutation module the TUI also uses. Same invariants either way.</li>
+<li><b>New-cluster wizard.</b> <code>ccs cluster init &lt;name&gt;</code> scaffolds <code>cluster.toml</code>,
+<code>CHANGELOG.md</code>, one starter role, and (optionally) a LaunchAgent plist templated with
+<code>$HOME</code>.</li>
+<li><b>Portable LaunchAgent installer.</b> A script that sed-replaces <code>/Users/mimen</code> with
+<code>$HOME</code> and runs <code>launchctl bootstrap</code>.</li>
+</ul>
+
+<p><b>The good news:</b> the architectural work is done. The remaining work is <em>packaging, namespace
+hygiene, and finish work</em> on ADR-0078 — not new design. Realistically 2–4 focused days of work.</p>
+</div>
+</section>
+
+<section id="glossary">
+<h2>Glossary — the vocabulary this doc uses</h2>
+<table>
+<tr><th>Term</th><th>What it means</th></tr>
+<tr><td><b>ccs</b></td><td>The <b>tool</b>. Lives at <code>~/projects/claude-sessions</code>. Bun/TypeScript. Cluster-agnostic.</td></tr>
+<tr><td><b>Cluster</b></td><td>A self-contained package of roles + engine + manifest. Lives under <code>~/.ccs-config/clusters/&lt;name&gt;/</code>. <b>pr-watch</b> is one cluster; <b>toy-second</b> is a stub cluster used for multi-cluster testing.</td></tr>
+<tr><td><b>Role</b></td><td>A named agent kind within a cluster (<code>control</code>, <code>pr-agent</code>, etc.). Identity is <code>(cluster, role)</code> as of ADR-0080 — two clusters can share role names without colliding.</td></tr>
+<tr><td><b>Identity key</b></td><td>The durable name for one agent: <code>cluster·role·work-unit</code>. Auto-derived on every catalogue mutation (ADR-0078); stored in the <code>key</code> column.</td></tr>
+<tr><td><b>Work unit</b></td><td>The unit of work a fleet worker owns. In pr-watch = one PR (keyed on the GUS work item, not the PR number, per ADR-0030).</td></tr>
+<tr><td><b>Board</b></td><td>The cluster's composed truth view. JSON file at <code>~/.ccs/clusters/&lt;name&gt;/cluster/board.json</code>. Read by concierge, control, workers, TUI. Schema-versioned + zod-validated on read (ADR-0083).</td></tr>
+<tr><td><b>Sensor</b></td><td>A Python script in <code>engine/scripts/</code> that reads external state (GitHub, CI, GUS, Slack, the git worktree) and writes a JSON snapshot for the composer to consume.</td></tr>
+<tr><td><b>Composer</b></td><td>A Python script that reads sensor snapshots and produces a composed artifact — usually <code>board.json</code>, <code>gate.json</code>, or a catalogue-sync write.</td></tr>
+<tr><td><b>Stage</b></td><td>The pr-watch pipeline latch: <code>building → milad-review → in-review → approved → merged</code>. Engine-composed only; workers never write it (ADR-0079).</td></tr>
+<tr><td><b>Gate</b></td><td>The per-PR verdict list: CI, review-freshness, screenshots, flags, deploy. Composed by <code>gate_eval.py</code>; consumed by control's dispatch.</td></tr>
+<tr><td><b>Bridge</b></td><td>The cmux liveness/routing layer. Reads <code>cmux tree</code> + <code>~/.cmuxterm/claude-hook-sessions.json</code>, resolves surface UUID → sessionId (ADR-0054, ADR-0085 for contradiction resolution).</td></tr>
+<tr><td><b>Hook</b></td><td>A resolved-and-merged action layer that fires on Claude Code events. 10 hook types (claude-md, start, stop, stop-context, meta-update, cmux-paint, statusline, spawn-location, spawn, guard).</td></tr>
+</table>
+</section>
+
+<section id="homes">
+<h2>The three homes (the mental model)</h2>
+<p>ccs lives in three places. Same names as before, but now with distribution + versioning in mind:</p>
+
+<table>
+<tr><th>Home</th><th>Path</th><th>Owner</th><th>Portable?</th></tr>
+<tr><td><b>Tool</b></td><td><code>~/projects/claude-sessions</code></td><td>git repo (public/personal)</td><td>Yes — clone + <code>bun install</code> + <code>bun link</code></td></tr>
+<tr><td><b>Cluster config</b></td><td><code>~/.ccs-config</code></td><td>git repo (currently private, org-shared later)</td><td>Partly — plists have hardcoded paths (P0)</td></tr>
+<tr><td><b>Runtime state</b></td><td><code>~/.ccs</code></td><td>local, per-machine</td><td>Split: durable (identities, inboxes, cluster state) vs rebuildable (index, board, sensor snapshots)</td></tr>
+</table>
+
+<div class="note">
+<b>Key insight from this pass:</b> the three-homes model is <em>correct</em> but the current setup blurs the
+boundary between "install the tool" and "install the config" — every new machine has to install both. A
+future direction: ccs binary via <code>brew install</code> or npm publish; <code>~/.ccs-config</code> stays a
+per-user git clone (that's the right shape — it's the user's config, not the tool's code).
+</div>
+</section>
+
+<section id="tool-summary">
+<h2>Tool (ccs) audit — summary + boundary ratings</h2>
+<p class="lead">Every ccs module rated on <b>boundary clarity</b> (how well its interface is defined) and
+<b>testability</b>. Ratings from the tool inventory audit; details in each subsection below.</p>
+
+<table>
+<tr><th>Layer</th><th>Files</th><th>Boundary</th><th>Testability</th><th>One-line responsibility</th></tr>
+<tr><td>CLI</td><td>1 file, 838 lines</td><td><span class="rating b">B+</span></td><td><span class="rating b">B</span></td><td>Command router. Verbose switch, clean delegation. ~40 subcommands.</td></tr>
+<tr><td>TUI</td><td>21 files, ~3.8k lines</td><td><span class="rating b">B</span></td><td><span class="rating b">B+</span></td><td>Ink/React UI. 6 view modes + skills panel. Direct DB writes bypass CLI commands.</td></tr>
+<tr><td>Catalogue</td><td>18 files, ~4.2k lines</td><td><span class="rating a">A</span></td><td><span class="rating a">A</span></td><td>Durable session metadata. db.ts is sole writer. Migrations v1–v31 additive.</td></tr>
+<tr><td>Board</td><td>6 files, ~400 lines</td><td><span class="rating a">A+</span></td><td><span class="rating a">A</span></td><td>Cluster-published truth. Indexer mtime-cached. Schema versioned + zod-validated.</td></tr>
+<tr><td>Cmux bridge</td><td>4 files, ~900 lines</td><td><span class="rating a">A</span></td><td><span class="rating a">A−</span></td><td>Surface-keyed liveness. Version-guards cmux. Fresher-signal wins (ADR-0085).</td></tr>
+<tr><td>Hooks</td><td>19 files, ~2.6k lines</td><td><span class="rating a">A</span></td><td><span class="rating a">A−</span></td><td>Layered resolution + merge. Central registry (hook-types.ts). Self-check-sidecar untested.</td></tr>
+<tr><td>Roles</td><td>4 files, ~750 lines</td><td><span class="rating a">A</span></td><td><span class="rating a">A</span></td><td>File-discovered role registry. (cluster,role) scoped resolution.</td></tr>
+<tr><td>Resume/spawn</td><td>10 files, ~1.9k lines</td><td><span class="rating a">A+</span></td><td><span class="rating a">A</span></td><td>Single resume core. Cluster resume loops over it. Idempotent.</td></tr>
+<tr><td>State/inbox</td><td>13 files, ~1.5k lines</td><td><span class="rating a">A+</span></td><td><span class="rating a">A+</span></td><td>Pure file I/O. Atomic write + move-on-drain. No business logic.</td></tr>
+<tr><td>Index/parse</td><td>2 files + parse.ts</td><td><span class="rating a">A+</span></td><td><span class="rating a">A+</span></td><td>JSONLines transcript indexing. Cache-only. Rebuildable.</td></tr>
+</table>
+
+<p><b>Aggregate:</b> the tool is <b>A− overall</b>. Every module has a single writer, a clear seam,
+and testable interior. The two soft spots are the CLI (which is verbose but organized) and the TUI
+(which occasionally reaches past the CLI's command layer).</p>
+</section>
+
+<section id="tool-cli">
+<h3>CLI layer <span class="rating b">B+ boundary · B testability</span></h3>
+<p><code>src/cli.ts</code> — 838 lines, single <code>main(argv): Promise&lt;number&gt;</code> export. A
+switch statement over ~40 subcommands.</p>
+
+<h4>Command taxonomy (audit-derived)</h4>
+<table>
+<tr><th>Group</th><th>Commands</th></tr>
+<tr><td><b>Operator verbs</b> (humans type these)</td><td><code>ccs</code> (TUI), <code>reindex</code>, <code>ls</code>, <code>tree</code>, <code>resume</code>, <code>new-session</code>, <code>rename</code>, <code>mark</code>, <code>tag</code>, <code>project</code>, <code>role</code>, <code>set-cluster</code></td></tr>
+<tr><td><b>Machine-readable APIs</b></td><td><code>cluster --json</code>, <code>catalogue export</code>, <code>identity resolve</code>, <code>board --json</code></td></tr>
+<tr><td><b>State mutators</b> (both types)</td><td><code>stage</code>, <code>meta</code>, <code>meta-set</code>, <code>key</code>, <code>parent</code>, <code>gus-work</code>, <code>epic</code>, <code>status</code>, <code>name</code>, <code>decide</code>/<code>suppress</code></td></tr>
+<tr><td><b>Session lifecycle</b></td><td><code>resume-session</code>, <code>resume-cluster</code>, <code>bump-session</code>, <code>reap-duplicates</code></td></tr>
+<tr><td><b>Durable state / inbox</b></td><td><code>inbox</code>, <code>state</code>, <code>grouping</code></td></tr>
+<tr><td><b>Roles + hooks</b></td><td><code>roles</code>, <code>sync-roles</code>, <code>hook run</code>, <code>hooks</code>, <code>register-session</code>, <code>statusline</code></td></tr>
+<tr><td><b>Internal / agent-facing</b></td><td><code>catch-up</code>, <code>context-check</code>, <code>self-check</code>, <code>backfill-work-units</code></td></tr>
+<tr><td><b>Read-only queries</b></td><td><code>whoami</code>, <code>meta</code> (read shape), <code>skills</code></td></tr>
+</table>
+
+<h4>Problems (both audits flagged)</h4>
+<ul>
+<li><b>Flat namespace mixes audiences.</b> An agent-facing <code>ccs catalogue export</code> lives next to
+an operator-facing <code>ccs mark</code> next to internal-only <code>ccs hook run</code>. New users can't
+tell what's stable.</li>
+<li><b>Help text under-represents the surface.</b> The 96-line inline help lists ~30 commands; the actual
+switch covers ~40. <code>role</code>, <code>gus-work</code>, <code>epic</code>, several flags are missing.</li>
+<li><b>The switch is 112 cases</b> (Cursor's count includes fall-throughs and aliases). Scannable, but
+verbose.</li>
+</ul>
+
+<h4>Proposed reorg (both audits converge)</h4>
+<ul>
+<li><b>Root (top-level operator verbs):</b> <code>ccs</code> (TUI), <code>ccs resume &lt;selector&gt;</code>, <code>ccs new</code>, <code>ccs ls</code>, <code>ccs tree</code>, <code>ccs reindex</code>.</li>
+<li><b><code>ccs cluster …</code></b>: <code>ls</code>, <code>map</code>, <code>resume &lt;c&gt;</code>, <code>board &lt;c&gt;</code>, <code>gate &lt;c&gt;</code>, <code>init &lt;c&gt;</code> (wizard).</li>
+<li><b><code>ccs role …</code></b>: <code>ls</code>, <code>upsert</code>, <code>rm</code>, <code>sync</code>.</li>
+<li><b><code>ccs session …</code></b> (or keep at root): <code>rename</code>, <code>mark</code>, <code>tag</code>, <code>stage</code>, <code>meta</code>, etc.</li>
+<li><b><code>ccs api …</code></b> (machine surface, self-documenting): <code>catalogue export</code>, <code>identity resolve</code>, <code>cluster --json</code>, <code>board get</code>.</li>
+<li><b>Keep hidden</b>: <code>hook run</code>, <code>register-session</code>, <code>self-check</code>, <code>statusline</code>, <code>backfill-work-units</code>. Document as machine interface, not user surface.</li>
+</ul>
+</section>
+
+<section id="tool-tui">
+<h3>TUI layer <span class="rating b">B boundary · B+ testability</span></h3>
+<p><code>src/tui/</code> — 21 files, ~3.8k lines. React (Ink). Largest file <code>App.tsx</code> at 864 lines.</p>
+
+<h4>View modes (from App.tsx)</h4>
+<ul>
+<li><b>groups</b> — sessions by project (default)</li>
+<li><b>state</b> — grouped by cluster membership</li>
+<li><b>flat</b> — ungrouped recency list</li>
+<li><b>tree</b> — constellation (parent → child edges)</li>
+<li><b>cluster</b> — one cluster's roster (core + fleet)</li>
+<li><b>epic</b> — sessions grouped by epic/grouping</li>
+<li><b>skills mode</b> (parallel panel) — machine-wide skill registry with usage stats + cross-jumps</li>
+</ul>
+
+<h4>Key bindings (from App.tsx + Help.tsx)</h4>
+<table>
+<tr><th>Labeled (in Help)</th><th>Unlabeled</th></tr>
+<tr><td><code>?</code> help, <code>/</code> search, <code>c</code> completed, <code>a</code> archive, <code>t</code> toggle-title, <code>s</code> cycle-sort, <code>v</code> cycle-view, <code>g</code> cycle-engine, <code>Tab</code> skills toggle, <code>Enter</code> resume, <code>p</code> preview, <code>w</code> transcript, <code>f</code> focus-in-cmux, <code>o</code> open-in-cmux</td><td>Arrow keys, <code>j</code>/<code>k</code> nav, <code>Esc</code> exit-modal, <code>Ctrl+C</code> quit</td></tr>
+</table>
+
+<h4>The redundancy question (your framing)</h4>
+<p>You asked: does the TUI reimplement what the CLI already offers? <b>Answer: partially.</b></p>
+<ul>
+<li><b>Data reads are shared.</b> TUI + CLI both call <code>getAll()</code>, <code>lifecycleOf()</code>,
+<code>identityKeyOf()</code>, <code>boardIndex()</code>, <code>allGroupingsAcrossClusters()</code>. Both
+route resume through <code>resumeSessionEntry</code> — one shared core.</li>
+<li><b>Formatting is duplicated.</b> <code>SessionList.tsx</code> (236 lines) paints rows for the TUI;
+<code>ccs ls</code> (cli.ts:375–419) has its own formatter. Cluster view is rendered by
+<code>renderClusterMap</code> (CLI) vs <code>src/tui/clusterView.ts</code> (TUI). Independent presenters.</li>
+<li><b>Mutations partly bypass the CLI's command layer.</b> Cursor's audit called this out specifically:
+<code>App.tsx:199–214</code> writes titles via <code>setCustomTitle(catalogue, sid, title, now)</code>;
+<code>App.tsx:580–588</code> and <code>:697–704</code> toggle lifecycle bits via <code>setCompleted</code>
+/ <code>setArchived</code>. Meanwhile the CLI's <code>commands.ts</code> adds validation +
+<code>recomposeForSession(id)</code> after mutations. The TUI would miss those side effects if they became
+load-bearing.</li>
+</ul>
+
+<div class="warn">
+<b>Recommendation:</b> extract a <b>shared mutation module</b> that both the CLI's <code>commands.ts</code>
+and the TUI call. The db.ts setters stay as low-level primitives; a new <code>mutations.ts</code> wraps them
+with validation + recompose triggers + logging. Both surfaces call the wrapped versions. This is the correct
+answer to "which side is source of truth" — <b>neither</b>. The mutation invariants are the source of truth.
+</div>
+</section>
+
+<section id="tool-catalogue">
+<h3>Catalogue layer <span class="rating a">A boundary · A testability</span></h3>
+<p><code>src/catalogue/</code> — 18 files, ~4.2k lines. Owns the durable session metadata SQLite
+(<code>~/.ccs/cache/catalogue.db</code>).</p>
+
+<h4>Key files</h4>
+<ul>
+<li><code>db.ts</code> (1010 lines) — schema, 31 migrations (v1–v31 additive-only), all setters. <b>Sole writer of catalogue.db.</b></li>
+<li><code>commands.ts</code> (561 lines) — CLI-facing command implementations. Validate → call setter → recompose → print result.</li>
+<li><code>command.ts</code> (184 lines) — TUI-facing mutation dispatcher. Same setters, different UX.</li>
+<li><code>cluster-map.ts</code> (282 lines) — roster (core + fleet) rendering + JSON projection.</li>
+<li><code>board-command.ts</code>, <code>export-command.ts</code>, <code>identity-command.ts</code> — the D1 read boundary from ADR-0078.</li>
+<li><code>sync-tabs.ts</code>, <code>render-tab.ts</code>, <code>render-statusline.ts</code> — cmux tab painting.</li>
+<li><code>disposition.ts</code>, <code>lineage.ts</code>, <code>resolve-work-unit.ts</code>, <code>spawn-contract.ts</code>, <code>spawn-location.ts</code>, <code>stage-schema.ts</code> — focused helpers.</li>
+</ul>
+
+<h4>Boundary quality</h4>
+<div class="good">
+<b>Excellent.</b> Only db.ts touches the sqlite handle. Every setter stamps <code>updated_at</code>.
+Migrations are additive-only with a startup postcondition (ADR-0081 / B15). Identity key auto-derived on every
+mutation (ADR-0078). The mutation-boundary rule (ADR-0068) is enforced by convention — commands never do raw SQL.
+</div>
+
+<h4>Concurrency note</h4>
+<p>Each setter is a single <code>UPDATE</code>; no transaction wrapper. SQLite WAL + 5s busy_timeout mitigate,
+but two concurrent <code>ccs</code> invocations writing the same session's meta could race. In practice this
+only matters if we ever run multiple concurrent mutating writers on the same session — currently we don't
+(the sensor writes; workers read).</p>
+</section>
+
+<section id="tool-board">
+<h3>Board layer <span class="rating a">A+ boundary · A testability</span></h3>
+<p><code>src/board/</code> — 6 files, ~400 lines. Reads cluster-published <code>board.json</code>.</p>
+<ul>
+<li><code>schema.ts</code> (103 lines) — zod schema, versioned (<code>BOARD_SCHEMA_VERSION = 1</code>), passthrough on cluster-private fields (ADR-0083 / B11).</li>
+<li><code>indexer.ts</code> (110 lines) — mtime-cached in-memory index. Sole reader of board.json.</li>
+<li><code>default-composer.ts</code> — reference composer for clusters without their own.</li>
+<li><code>recompose.ts</code> — synchronous single-identity recompose via the cluster's composer.</li>
+</ul>
+<p>This layer is the model boundary in the whole codebase. Cluster writes; ccs reads. Schema at the gate. No
+redundancy, single responsibility per file.</p>
+</section>
+
+<section id="tool-cmux">
+<h3>Cmux bridge <span class="rating a">A boundary · A− testability</span></h3>
+<p><code>src/cmux/</code> — 4 files, ~900 lines.</p>
+<ul>
+<li><code>bridge.ts</code> (331 lines) — parses <code>cmux tree --all --json</code> + hook-store. Union view with fresher-wins on contradictions (ADR-0085 / B14).</li>
+<li><code>live.ts</code> (130 lines) — <code>liveBridge()</code> singleton factory. Version-guards cmux (requires ≥0.64, refuses ≥1.0 without an ADR).</li>
+<li><code>liveness.ts</code> (139 lines) — <code>openSessionIds()</code>, <code>focusSession()</code>. Used by CLI + TUI.</li>
+<li><code>reap.ts</code> (287 lines) — <code>ccs reap-duplicates</code>. CPU-time ranking to keep the freshest embodiment.</li>
+</ul>
+<p>Tight coupling to cmux 0.64 JSON shape by necessity. Version guard catches upgrades. The one weak spot is
+<code>reap.ts</code> has no unit test.</p>
+</section>
+
+<section id="tool-hooks">
+<h3>Hooks <span class="rating a">A boundary · A− testability</span></h3>
+<p><code>src/hooks/</code> — 19 files, ~2.6k lines. The layered-hook resolution + execution stack.</p>
+
+<h4>Registered hook types (from hook-types.ts)</h4>
+<ol>
+<li><code>claude-md</code> — context prepended to every session</li>
+<li><code>start</code> — SessionStart actions (arm, drain-inbox, catch-up)</li>
+<li><code>stop</code> — Stop event handler</li>
+<li><code>stop-context</code> — context injected at turn-end</li>
+<li><code>meta-update</code> — turn-end catalogue writes</li>
+<li><code>cmux-paint</code> — tab title/color/description</li>
+<li><code>statusline</code> — Claude Code statusLine</li>
+<li><code>spawn-location</code> — cwd for a spawn</li>
+<li><code>spawn</code> — birth actions (grant-perms, seed-files)</li>
+<li><code>guard</code> — deferred (not yet used)</li>
+</ol>
+
+<p>10 hook types × 4 resolution levels (identity, role, cluster, floor) × 5 merge strategies. Cursor's review
+suggested collapsing to 4 domains (context, lifecycle, presentation, spawn). The current shape works but is
+more than we need for one cluster. Consider revisiting when cluster #2 lands.</p>
+</section>
+
+<section id="tool-resume">
+<h3>Resume/spawn <span class="rating a">A+ boundary · A testability</span></h3>
+<p><code>src/resume/</code> — 10 files, ~1.9k lines. Session creation and resumption.</p>
+<ul>
+<li><code>new-session.ts</code> (445 lines) — <code>ccs new</code>. Mint id, stamp metadata at birth, launch <code>claude --session-id</code>.</li>
+<li><code>resume-session.ts</code> (173 lines) — the core op. Idempotent. Fail-closed on cmux unreadable (ADR-0054).</li>
+<li><code>resume-cluster.ts</code> (246 lines) — loop over the core op with cluster-level dedup + supersede.</li>
+<li><code>selector.ts</code> (150 lines) — <code>ccs resume &lt;anything&gt;</code>. Id, #PR, W-number, epic, role, cluster → session list.</li>
+<li><code>spawn-cmux.ts</code> (118 lines) — cmux workspace spawn primitive. JSON-first ref parse + regex fallback, 10s timeout.</li>
+</ul>
+<p>Reference-quality module. Every file has one job; every function is small; every side effect is at a
+single seam.</p>
+</section>
+
+<section id="tool-state">
+<h3>State/inbox <span class="rating a">A+ boundary · A+ testability</span></h3>
+<p><code>src/state/</code> (~1.1k lines) + <code>src/inbox/</code> (~400 lines).</p>
+<ul>
+<li><b>State store</b>: atomic file-backed K/V. <code>readDoc</code>, <code>writeDoc</code>, <code>mergeFields</code>. Corrupt files quarantined.</li>
+<li><b>Inbox</b>: durable per-identity messaging. Atomic write → move-on-drain → processed/. Pure file protocol.</li>
+<li><b><code>ccs decide</code></b> (was <code>suppress</code>): decision ledger for suppressing already-decided items.</li>
+</ul>
+<p>Both are pure I/O. Zero business logic. Perfect testability.</p>
+</section>
+
+<section id="cluster-summary">
+<h2>pr-watch cluster audit — summary</h2>
+<p class="lead">The cluster is <code>~/.ccs-config/clusters/pr-watch/</code>. 34 scripts + 7 shell wrappers +
+6 roles + 3 LaunchAgent plists. 7,105 lines of Python. Currently at v5 (phase-first board landed 2026-07-13).</p>
+
+<table>
+<tr><th>Component</th><th>Files</th><th>Clarity</th><th>Abstraction</th><th>Notes</th></tr>
+<tr><td>Manifest + CHANGELOG</td><td>2</td><td>4/5</td><td>5/5</td><td>Clean. Version = highest CHANGELOG entry, no drift.</td></tr>
+<tr><td>pr-agent role</td><td>role.toml + hooks</td><td>3/5</td><td>3/5</td><td>No SKILL.md — dispersed across hooks + spawn briefing template. Grab-bag.</td></tr>
+<tr><td>concierge role</td><td>role.toml + 315-line SKILL.md</td><td>4/5</td><td>4/5</td><td>Well-documented. Some board-row parsing in the skill that could defer to the composer.</td></tr>
+<tr><td>control role</td><td>role.toml + 229-line SKILL.md</td><td>3/5</td><td>3/5</td><td>Complexity creeping — dispatch + sense + un-draft + lifecycle. Grab-bag risk.</td></tr>
+<tr><td>slack-scout role</td><td>role.toml + 153-line SKILL.md</td><td>4/5</td><td>5/5</td><td>Narrow, focused sensor role.</td></tr>
+<tr><td>eval role</td><td>role.toml + 104-line SKILL.md</td><td>3/5</td><td>4/5</td><td>Outputs undefined — where do eval findings land?</td></tr>
+<tr><td>designer role</td><td>role.toml only</td><td>5/5</td><td>5/5</td><td>Non-operational; ADRs + specs. Correctly out of runtime loop.</td></tr>
+<tr><td>17 sensors</td><td>Python, 2867 LOC</td><td>3/5</td><td>4/5</td><td>Individual sensors clear. Cadence matrix dense but centralized.</td></tr>
+<tr><td>8 composers</td><td>Python, 2290 LOC</td><td>3/5</td><td>3/5</td><td>Ordered chain. Dep chain is fragile (mid-chain failure = inconsistent views).</td></tr>
+<tr><td>7 shell wrappers</td><td>bash, ~500 lines</td><td>4/5</td><td>4/5</td><td>Owner-tokened locks (ADR-0081). <code>sense.sh</code> may be dead.</td></tr>
+</table>
+
+<h3>Top cluster findings</h3>
+<div class="find p0">
+<div class="t">CLUSTER-P0: ADR-0078 not finished — 7 scripts still hit sqlite directly</div>
+<p class="fs">Only <code>compose_board.py</code> and <code>worker_activity.py</code> use the <code>ccs_client</code> module. These still <code>import sqlite3</code> and open <code>~/.ccs/cache/catalogue.db</code>:
+<code>approve.py</code>, <code>board.py</code>, <code>catalogue_sync.py</code>, <code>completion.py</code>,
+<code>mark_completed.py</code>, <code>pill_sweeper.py</code>, <code>retire_sweep.py</code>.</p>
+<p class="fix">Fix: migrate each to <code>ccs_client.catalogue_export()</code>. Small — each read is a few lines
+of SELECT that already have equivalents. Estimated 2–3 hours.</p>
+</div>
+
+<div class="find p1">
+<div class="t">CLUSTER-P1: board.py vs compose_board.py overlap</div>
+<p class="fs"><code>board.py</code> is the old "per-worker view" composer; <code>compose_board.py</code> is
+the phase-first (ADR-0077) replacement. One should be retired. Investigation needed to confirm nothing still
+reads board.py's output.</p>
+</div>
+
+<div class="find p1">
+<div class="t">CLUSTER-P1: sense.sh is likely dead code</div>
+<p class="fs">Replaced by <code>sense-scheduler.py</code>. Not called by any current LaunchAgent. Delete if
+verified.</p>
+</div>
+
+<div class="find p2">
+<div class="t">CLUSTER-P2: control role complexity creeping</div>
+<p class="fs">Dispatch + sense + un-draft + lifecycle + never-rest contract now all live in one 229-line skill.
+Consider splitting responsibilities before adding more.</p>
+</div>
+
+<div class="find p2">
+<div class="t">CLUSTER-P2: eval role output surface undefined</div>
+<p class="fs">Where do eval findings actually land? Concierge inbox? A dedicated file? Docs don't say.</p>
+</div>
+
+<div class="find p2">
+<div class="t">CLUSTER-P2: README.md says "not yet installed"</div>
+<p class="fs">Cluster is at v5, running in production. README is stale from the pre-install era.</p>
+</div>
+</section>
+
+<section id="cluster-roles">
+<h3>Roles (6) — detailed</h3>
+<p>Each role has <code>role.toml</code>, optional <code>.claude/skills/&lt;name&gt;/SKILL.md</code>, and
+<code>.ccs-hooks/*</code>. The shape is <em>mostly</em> consistent but two roles (pr-agent, designer) have
+no SKILL.md.</p>
+<table>
+<tr><th>Role</th><th>Kind</th><th>SKILL.md lines</th><th>Hooks</th><th>Notes</th></tr>
+<tr><td>pr-agent</td><td>fleet worker</td><td>none</td><td>6 hook files</td><td>Behavior lives entirely in hooks + spawn briefing template. Consider extracting an SKILL.md so a fresh agent has a single "read this first" file.</td></tr>
+<tr><td>concierge</td><td>core, loop</td><td>315</td><td>standard set</td><td>Only role that talks to Milad.</td></tr>
+<tr><td>control</td><td>core, loop</td><td>229</td><td>standard set + control-heartbeat</td><td>Cadence-driven driver.</td></tr>
+<tr><td>slack-scout</td><td>core, loop</td><td>153</td><td>standard set</td><td>Slack → worker inbox.</td></tr>
+<tr><td>eval</td><td>core, loop</td><td>104</td><td>standard set</td><td>Reads transcripts, grades loop.</td></tr>
+<tr><td>designer</td><td>core, session</td><td>none</td><td>standard set</td><td>ADRs + specs. Non-runtime.</td></tr>
+</table>
+</section>
+
+<section id="cluster-sensors">
+<h3>Sensors (17) — cadence table</h3>
+<table>
+<tr><th>Sensor</th><th>Cadence</th><th>What it reads</th><th>Writes</th></tr>
+<tr><td><code>poll.py</code></td><td>90s</td><td><code>gh pr view</code> — CI, mergeable, draft, head SHA</td><td>poll.json</td></tr>
+<tr><td><code>github_review_state.py</code></td><td>180s</td><td>Draft, review decision, mergeStateStatus</td><td>github_review_state.json</td></tr>
+<tr><td><code>worker_activity.py</code></td><td>90s</td><td>git log + inbox mtime + state mtime</td><td>worker_activity.json</td></tr>
+<tr><td><code>convo_sense.py</code></td><td>180s</td><td>Worker idle time, attention items</td><td>convo.json</td></tr>
+<tr><td><code>review_sense.py</code></td><td>300s</td><td>Top-level PR comments</td><td>review.json</td></tr>
+<tr><td><code>deploy_freshness.py</code></td><td>300s</td><td>Staging deploy SHA vs head</td><td>deploy.json</td></tr>
+<tr><td><code>completion.py</code></td><td>300s</td><td>Merge/deploy/live progression</td><td>completion.json</td></tr>
+<tr><td><code>pill_sweeper.py</code></td><td>60s</td><td>Cmux idle pills</td><td>(cmux writes)</td></tr>
+<tr><td><code>drift_detect.py</code></td><td>600s</td><td>PR body lint</td><td>drift.json</td></tr>
+<tr><td><code>screenshot_freshness.py</code></td><td>600s</td><td>Local git diff since screenshot SHA</td><td>screenshot_freshness.json</td></tr>
+<tr><td><code>prod_deploy.py</code></td><td>600s</td><td>Production deploy state</td><td>prod_deploy.json</td></tr>
+<tr><td><code>change_flags.py</code></td><td>1800s</td><td>Feature-flag decoration</td><td>change_flags.json</td></tr>
+<tr><td><code>sense_health.py</code></td><td>1800s</td><td>External reachability probes</td><td>sense_health.json</td></tr>
+<tr><td><code>membership.py</code></td><td>3600s</td><td>GUS epic query + repo search</td><td>membership.json</td></tr>
+<tr><td><code>resolve_sprints.py</code></td><td>3600s</td><td>Sprint boundaries</td><td>sprints.json</td></tr>
+<tr><td><code>control_wake.py</code></td><td>manual</td><td>Wake markers</td><td>control-wake.json</td></tr>
+<tr><td><code>control_heartbeat.py</code></td><td>each tick</td><td>Written by control loop</td><td>control-heartbeat.json</td></tr>
+</table>
+</section>
+
+<section id="cluster-composers">
+<h3>Composers (8) — the ordered pipeline</h3>
+<p>Runs after ANY sensor ticks (per <code>sense-scheduler.py</code>):</p>
+<ol>
+<li><code>migrate_keys.py</code> — assign real identity keys to fresh-PR rows</li>
+<li><code>compose_board.py</code> (415 lines) — the phase-first board (ADR-0077). Now serialized under <code>board_lock()</code> (ADR-0082)</li>
+<li><code>gate_eval.py</code> — internal-gate eligibility (writes <code>gate.json</code>)</li>
+<li><code>catalogue_sync.py</code> — writes stage cache to catalogue.stage</li>
+<li><code>mark_completed.py</code> — <code>ccs mark</code> on merged+deployed rows</li>
+<li><code>retire_sweep.py</code> — sweep completed+deployed → archived</li>
+<li><code>drain_events.py</code> — worker→control event queue</li>
+<li><code>review_relay.py</code> — relay review-request events</li>
+</ol>
+</section>
+
+<section id="cluster-shell">
+<h3>Shell wrappers</h3>
+<ul>
+<li><code>sense-run.sh</code> — LaunchAgent entrypoint for sense-scheduler. Owner-tokened lock (ADR-0081).</li>
+<li><code>pill-sweeper-run.sh</code> — LaunchAgent entrypoint for pill-sweeper. Same lock discipline.</li>
+<li><code>ensure-control.sh</code> — control watchdog with heartbeat + atomic claim + wedged auto-recovery (ADR-0081, 0084).</li>
+<li><code>spawn-agent.sh</code> — pr-agent spawn briefing. Owner-tokened registry writes (ADR-0081).</li>
+<li><code>worker-stop-hook.sh</code> — worker Stop hook. Atomic unique-per-turn event files.</li>
+<li><code>sense.sh</code> — legacy whole-pipeline runner. <b>Likely dead.</b></li>
+<li><code>resync-labels.sh</code> — purpose undocumented.</li>
+</ul>
+</section>
+
+<section id="cluster-deploy">
+<h3>LaunchAgents (3 plists)</h3>
+<ul>
+<li><code>com.mimen.pr-watch-sense.plist</code> — sense-scheduler every 60s</li>
+<li><code>com.mimen.pr-watch-ensure-control.plist</code> — control watchdog</li>
+<li><code>com.mimen.pr-watch-pill-sweeper.plist</code> — pill sweeper (may be redundant with sense-scheduler cadence entry)</li>
+</ul>
+<div class="warn">
+<b>Every plist hardcodes <code>/Users/mimen</code></b> in ProgramArguments, HOME, log paths. 11+ occurrences.
+Install instructions are XML comments inside the plists themselves. No installer script exists.
+</div>
+</section>
+
+<section id="cluster-state">
+<h3>Runtime state (~/.ccs/clusters/pr-watch/cluster/)</h3>
+<p>~137 files: sensor JSONs, composer outputs, locks, logs, per-PR judgment files.</p>
+<ul>
+<li><b>Durable:</b> <code>identities/&lt;role&gt;/&lt;key&gt;/</code> (inboxes + state.json), catalogue.db, cluster-shared state (dispositions, judgments, results, watermarks).</li>
+<li><b>Rebuildable:</b> <code>board.json</code>, <code>gate.json</code>, per-sensor snapshots, <code>index.db</code>, screenshot caches.</li>
+</ul>
+<p>The full-system review flagged the durable/rebuildable split as important for backup + reset + repair-by-
+deletion. Currently the split is implicit; no code enforces it.</p>
+</section>
+
+<section id="cluster-docs">
+<h3>Cluster docs</h3>
+<ul>
+<li><code>README.md</code> — stale ("not yet installed"). Fix.</li>
+<li><code>runbook.md</code>, <code>gotchas.md</code>, <code>tickets.md</code>, <code>learnings.md</code> — operational gold. Good.</li>
+<li><code>live-verification.md</code> — updated this arc for D5 + B12.</li>
+<li><code>docs/superpowers/specs/*</code> — 10 dated design specs. Well-organized.</li>
+<li><code>docs/*.html</code> — three older exports (architecture-intentions, hook-instantiation, hook-resolution). May be stale.</li>
+</ul>
+</section>
+
+<section id="dist-invoke">
+<h2>Shareability — How ccs runs today</h2>
+<p class="lead">This is the section that answers your "I don't even know how it works" question.</p>
+
+<h3>The invocation chain</h3>
+<pre style="background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:10px 14px;overflow-x:auto;color:var(--muted)">
+$ which ccs
+/Users/mimen/.bun/bin/ccs
+
+$ ls -la /Users/mimen/.bun/bin/ccs
+lrwxr-xr-x  ...  ccs -> ../install/global/node_modules/claude-sessions/bin/ccs
+
+$ cat /Users/mimen/.bun/install/global/node_modules/claude-sessions/bin/ccs
+#!/usr/bin/env bun
+import { main } from "../src/cli.ts";
+process.exit(await main(process.argv));
+</pre>
+
+<h3>What this means, in plain English</h3>
+<ol>
+<li>Your <code>ccs</code> command is a symlink into the Bun global-install area.</li>
+<li>That target is <em>another</em> symlink to <code>~/projects/claude-sessions/bin/ccs</code>.</li>
+<li>That file is a 4-line Bun script that imports <code>../src/cli.ts</code> and calls <code>main()</code>.</li>
+<li>Bun runs the TypeScript directly. <b>No compilation, no build, no dist/, no versioned artifact.</b></li>
+</ol>
+<p>Every time you invoke <code>ccs</code>, Bun reads your live source files. If you edit
+<code>src/cli.ts</code>, the very next <code>ccs</code> invocation reflects the change. There is no "install"
+that captures a version — the tool is <em>whatever's on disk right now</em>.</p>
+
+<h3>How the symlink got created</h3>
+<p><code>package.json</code> declares <code>"bin": {"ccs": "bin/ccs"}</code>. Running <code>bun link</code>
+from the project directory installs the symlink. That's what <code>bun run setup</code>
+(<code>scripts/setup.ts</code>) does — plus optional dep checks for claude/codex/cmux.</p>
+</section>
+
+<section id="dist-version">
+<h3>Version story (or lack of one)</h3>
+
+<table>
+<tr><th>What</th><th>State</th></tr>
+<tr><td><code>package.json</code> <code>"version"</code></td><td><code>"0.1.0"</code> — never bumped</td></tr>
+<tr><td>Git tags</td><td>zero — <code>git tag --list</code> returns nothing</td></tr>
+<tr><td><code>ccs --version</code></td><td>Prints <code>0.1.0</code> — same as package.json</td></tr>
+<tr><td>Cluster gate</td><td>Reads <code>package.json</code> version, compared against cluster's <code>requires_ccs</code></td></tr>
+<tr><td>Changelog</td><td>Per-cluster CHANGELOG.md exists (ADR-0058). Tool has no CHANGELOG.</td></tr>
+<tr><td>Release process</td><td>None documented.</td></tr>
+</table>
+
+<p>The <em>infrastructure</em> for versioning exists — cluster.toml can declare
+<code>requires_ccs = ">=0.2.0"</code>, and <code>checkClusterGate</code> enforces it. But the input to that
+gate (<code>pkg.version</code>) never changes, so the mechanism is inert.</p>
+
+<h4>Distribution paths — what could work</h4>
+<ol>
+<li><b>Publish to npm.</b> <code>npm publish</code> whenever we bump. Consumers <code>bunx claude-sessions</code>
+or <code>npm install -g</code>. Still requires Bun for <code>bun:sqlite</code> imports.</li>
+<li><b>Bun compile.</b> <code>bun build --compile src/cli.ts --outfile ccs</code> produces a single-file
+executable. Distribute via GitHub Releases per platform. No Bun required at runtime.</li>
+<li><b>Homebrew tap.</b> Wraps option 2 with <code>brew install mimen/ccs/ccs</code>.</li>
+</ol>
+<p><b>My recommendation:</b> option 2 (Bun compile) for the actual binary + option 3 (Homebrew) for the
+distribution channel. Bun compile is a single command, produces a native binary, and there's no npm-registry
+maintenance overhead.</p>
+</section>
+
+<section id="dist-config">
+<h3>~/.ccs-config portability</h3>
+
+<h4>What's portable</h4>
+<ul>
+<li>cluster.toml / role.toml / CHANGELOG.md — pure config, no absolute paths.</li>
+<li>Skills (SKILL.md), commands, hooks — all use relative refs.</li>
+<li>Python scripts — use <code>Path.home() / ".ccs" / ...</code> (portable).</li>
+</ul>
+
+<h4>What's NOT portable</h4>
+<div class="warn">
+Every LaunchAgent plist in <code>clusters/pr-watch/engine/deploy/</code> hardcodes
+<code>/Users/mimen</code>:
+<ul>
+<li><code>&lt;string&gt;/Users/mimen/.ccs-config/…/sense-run.sh&lt;/string&gt;</code></li>
+<li><code>&lt;key&gt;HOME&lt;/key&gt;&lt;string&gt;/Users/mimen&lt;/string&gt;</code></li>
+<li>Log paths, working directories, all absolute.</li>
+</ul>
+On a machine where <code>$HOME</code> is <code>/Users/alice</code>, launchd will fire the plist against a
+path that doesn't exist. Silent no-op.
+</div>
+
+<h4>Fix</h4>
+<p>Two options:</p>
+<ol>
+<li><b>Install-time templating:</b> ship the plists as <code>.plist.template</code> files with <code>__HOME__</code>
+placeholders. An <code>install.sh</code> substitutes at install time.</li>
+<li><b>Runtime resolution via <code>launchctl setenv</code>:</b> put <code>$HOME</code> in the plist, install a
+shim script that resolves. More complex, less portable.</li>
+</ol>
+<p>Option 1 is standard practice. ~30 lines of shell for the templater.</p>
+</section>
+
+<section id="dist-install">
+<h3>Fresh-machine install — the real story today</h3>
+
+<h4>What the docs say</h4>
+<ol>
+<li>Clone <code>~/projects/claude-sessions</code>, <code>bun install</code>, <code>bun run setup</code>.</li>
+<li>Clone <code>~/.ccs-config</code>.</li>
+<li>Run <code>ccs sync-roles</code> to materialize into <code>~/.claude/</code>.</li>
+</ol>
+
+<h4>What's actually missing from that plan</h4>
+<ul>
+<li><b>Prereqs split by layer.</b> Tool needs: <code>bun</code>, <code>claude</code>, <code>cmux</code>,
+<code>git</code>; optional <code>codex</code>. Cluster (pr-watch) needs: <code>python3</code>, <code>gh</code>,
+<code>sf</code>, <code>jq</code>. No unified install script + no per-layer check.</li>
+<li><b>Config path.</b> Docs assume <code>~/.ccs-config</code> but there's no <code>$CCS_CONFIG_ROOT</code> env var enforcement.</li>
+<li><b>LaunchAgent plists.</b> Copy from cluster engine/deploy/ → <code>~/Library/LaunchAgents/</code> → sed
+<code>/Users/mimen</code> → <code>$HOME</code> → <code>launchctl bootstrap</code>. Per plist. No script.</li>
+<li><b>Cluster engine dependency check.</b> setup.ts checks tool-level deps (claude/codex/cmux) but nothing
+verifies the cluster's own deps (gh/sf/jq/python3 for pr-watch). Should live under <code>ccs cluster doctor &lt;name&gt;</code>.</li>
+<li><b>Durable-state seed.</b> No path to bring an existing PR queue to the new machine (or start fresh).</li>
+<li><b>Version coherence.</b> If machine 2 clones tool 5 commits ahead of machine 1, the cluster gate might
+refuse. No <code>ccs doctor</code> to check.</li>
+</ul>
+
+<h4>Realistic time estimate</h4>
+<ul>
+<li><b>20 min</b> for you, knowing the whole shape.</li>
+<li><b>2 hours</b> for someone following the current README breadcrumb.</li>
+<li><b>1 command</b> post-fix (once we have <code>ccs install</code> + <code>ccs cluster install &lt;name&gt;</code>).</li>
+</ul>
+</section>
+
+<section id="findings-p0">
+<h2>P0 findings — block shareability</h2>
+
+<div class="find p0">
+<div class="t">P0-1: 7 pr-watch Python scripts still open catalogue.db directly (ADR-0078 half-done)</div>
+<p class="fs"><code>approve.py</code>, <code>board.py</code>, <code>catalogue_sync.py</code>,
+<code>completion.py</code>, <code>mark_completed.py</code>, <code>pill_sweeper.py</code>,
+<code>retire_sweep.py</code> all <code>import sqlite3</code>. Every catalogue schema change requires
+coordinating changes across two repos. Blocks ADR-0078's promise.</p>
+<p class="fix">Fix: migrate each to <code>ccs_client.catalogue_export()</code>. ~2–3 hours.</p>
+</div>
+
+<div class="find p0">
+<div class="t">P0-2: No versioned distribution artifact</div>
+<p class="fs">ccs runs from source via a Bun symlink. Version is <code>0.1.0</code> forever. No git tags,
+no <code>bun build --compile</code>, no npm publish, no Homebrew. Sharing to another machine means "clone this
+git branch" — the branch, not a release.</p>
+<p class="fix">Fix: add <code>bun build --compile</code> to release process. Bump <code>pkg.version</code>
+per release. Tag every release. Publish binaries to GitHub Releases. Optional: brew formula. ~1 day for the
+infrastructure, ~30 min per subsequent release.</p>
+</div>
+
+<div class="find p0">
+<div class="t">P0-3: 11+ hardcoded <code>/Users/mimen</code> paths in LaunchAgent plists</div>
+<p class="fs">Every plist under <code>clusters/pr-watch/engine/deploy/</code> hardcodes the absolute path.
+On a fresh machine with <code>$HOME=/Users/alice</code>, launchd silently no-ops.</p>
+<p class="fix">Fix: ship as <code>.plist.template</code> + <code>install-launch-agents.sh</code> that sed
+substitutes <code>$HOME</code> at install time. ~30 lines of shell + docs.</p>
+</div>
+
+<div class="find p0">
+<div class="t">P0-4: No <code>ccs cluster install</code> for LaunchAgents</div>
+<p class="fs">Installing the cluster's plists is a 3-step manual process (cp → sed → launchctl bootstrap)
+described only as XML comments inside each plist. No script does this.</p>
+<p class="fix">Fix: <code>ccs cluster install &lt;name&gt;</code> that discovers plists in the cluster's
+<code>engine/deploy/</code>, templates <code>$HOME</code>, copies to <code>~/Library/LaunchAgents/</code>,
+and bootstraps. Same command uninstalls on <code>--remove</code>.</p>
+</div>
+</section>
+
+<section id="findings-p1">
+<h2>P1 findings — needed for confidence</h2>
+
+<div class="find p1">
+<div class="t">P1-1: CLI namespace is flat</div>
+<p class="fs">~40 subcommands mix operator verbs, machine APIs, and internal plumbing. Cursor's audit
+suggested reorg under nouns: <code>ccs cluster …</code>, <code>ccs role …</code>, <code>ccs api …</code>.
+Backwards-compat via aliases is trivial.</p>
+<p class="fix">Fix: introduce noun-grouped commands. Keep flat aliases for one release. Help text calls out
+the nouns as primary, flat commands as legacy. ~1 day.</p>
+</div>
+
+<div class="find p1">
+<div class="t">P1-2: TUI bypasses the CLI's command layer</div>
+<p class="fs">TUI writes catalogue via <code>setCustomTitle</code>, <code>setCompleted</code>,
+<code>setArchived</code> directly, missing <code>recomposeForSession</code> + future invariants.</p>
+<p class="fix">Fix: extract <code>src/catalogue/mutations.ts</code> — shared wrapper around db.ts setters with
+validation + recompose + logging. Both CLI's commands.ts and TUI's App.tsx call the wrapped versions.
+db.ts setters become private-except-to-mutations.ts (enforce via TypeScript module boundary).</p>
+</div>
+
+<div class="find p1">
+<div class="t">P1-3: No new-cluster wizard</div>
+<p class="fs">The <code>toy-second</code> cluster we hand-scaffolded is the closest thing to a template.
+Every new cluster starts by copying it.</p>
+<p class="fix">Fix: <code>ccs cluster init &lt;name&gt;</code> that writes <code>cluster.toml</code>,
+<code>CHANGELOG.md</code>, <code>roles/control/role.toml</code>, and optionally an engine skeleton.
+Plus <code>ccs role add &lt;name&gt; --cluster &lt;c&gt;</code>. ~1 day.</p>
+</div>
+
+<div class="find p1">
+<div class="t">P1-4: Both READMEs are stale</div>
+<p class="fs">Tool README talks about install flow that no longer matches (references
+<code>~/Programming/Repos/</code> instead of <code>~/projects/</code>). Cluster README says "not yet
+installed" but is running in production at v5.</p>
+<p class="fix">Fix: rewrite both. Include the actual paths, actual dependencies, actual install steps.
+Add a "shareability" section explaining the run-from-source status until a versioned artifact ships.</p>
+</div>
+
+<div class="find p1">
+<div class="t">P1-5: <code>ccs doctor</code> doesn't exist</div>
+<p class="fs">No single command to check "is my environment set up correctly?" — no cmux version check
+surfaced, no <code>gh/sf/jq/python3</code> presence check, no cluster.toml validity check, no
+catalogue-schema-postcondition surface.</p>
+<p class="fix">Fix: <code>ccs doctor</code> command that runs every startup postcondition + dependency probe
++ cluster gate + prints a clean status report. Foundation for future auto-repair.</p>
+</div>
+
+<div class="find p1">
+<div class="t">P1-6: Cluster engine dep check missing</div>
+<p class="fs"><code>scripts/setup.ts</code> checks claude/codex/cmux but the cluster's Python needs
+<code>gh</code>, <code>sf</code>, <code>jq</code>, <code>python3</code>. Missing any of these gives silent no-ops.</p>
+<p class="fix">Fix: cluster.toml declares its runtime deps; <code>ccs cluster doctor &lt;name&gt;</code>
+verifies them. Move the setup.ts checks under <code>ccs doctor</code>.</p>
+</div>
+</section>
+
+<section id="findings-p2">
+<h2>P2 findings — polish</h2>
+
+<div class="find p2">
+<div class="t">P2-1: <code>sense.sh</code> likely dead</div>
+<p class="fs">Replaced by <code>sense-scheduler.py</code>. No live callers. Delete.</p>
+</div>
+
+<div class="find p2">
+<div class="t">P2-2: <code>board.py</code> vs <code>compose_board.py</code> overlap</div>
+<p class="fs">The old per-worker view vs the phase-first composer. One should retire.</p>
+</div>
+
+<div class="find p2">
+<div class="t">P2-3: <code>resync-labels.sh</code> purpose undocumented</div>
+<p class="fs">Document or delete.</p>
+</div>
+
+<div class="find p2">
+<div class="t">P2-4: 137 files in runtime state dir with no cleanup policy</div>
+<p class="fs">Per-PR judgment files accumulate. No retention rule. Adding a <code>ccs cluster gc</code> would
+sweep old judgments after retirement.</p>
+</div>
+
+<div class="find p2">
+<div class="t">P2-5: Hook system may be over-built</div>
+<p class="fs">10 hook types × 4 resolution levels × 5 merge strategies for one cluster + one role registered
+per hook. Cursor's review + the prior full-system review both flagged this. Consider collapsing to 4 domains
+(context, lifecycle, presentation, spawn) once cluster #2 clarifies real needs.</p>
+</div>
+
+<div class="find p2">
+<div class="t">P2-6: TUI's <code>App.tsx</code> is 864 lines</div>
+<p class="fs">Split modals (Preview, Transcript, Help), state (view mode, filters, selection), and list into
+separate files. No functional change, just readability.</p>
+</div>
+
+<div class="find p2">
+<div class="t">P2-7: Cluster docs — three .html exports may be stale</div>
+<p class="fs"><code>architecture-intentions.html</code>, <code>hook-instantiation-pr-watch.html</code>,
+<code>hook-resolution-draft.html</code>. Confirm current or delete.</p>
+</div>
+
+<div class="find p2">
+<div class="t">P2-8: Legacy <code>LEGACY_CORE_ROLES</code> in cluster-map.ts</div>
+<p class="fs"><code>src/catalogue/cluster-map.ts:41–51</code> hardcodes pr-watch role name aliases. Cursor's
+audit noted this as the only "pr-watch leakage in tool code." Move to declared config or delete once no rows
+carry the legacy names.</p>
+</div>
+</section>
+
+<section id="decisions">
+<h2>Decisions to make</h2>
+<p class="lead">Six calls that shape the next 2–4 days of work.</p>
+
+<h3>D1 — Distribution strategy</h3>
+<p><b>Options:</b></p>
+<ol>
+<li><b>Bun compile → single binary → GitHub Releases.</b> Preferred. Users don't need Bun; one file.</li>
+<li><b>npm publish + <code>bunx</code>.</b> Simpler infra, but consumers still need Bun.</li>
+<li><b>Stay run-from-source.</b> Acceptable only if the tool never leaves your machines.</li>
+</ol>
+<p><b>My recommendation:</b> option 1. It's a single <code>bun build --compile</code> line, and it produces
+a real versioned artifact you can point people at.</p>
+
+<h3>D2 — CLI reorganization scope</h3>
+<p><b>Options:</b></p>
+<ol>
+<li><b>Full noun-grouping now.</b> <code>ccs cluster/role/api/session/…</code>. Break existing muscle memory in one shot; add aliases for a release.</li>
+<li><b>Additive nouns, keep flat.</b> Add the nouns as new entry points; both work indefinitely. Slower discovery, but zero disruption.</li>
+</ol>
+<p><b>My recommendation:</b> option 1. Muscle memory heals; the flat namespace is a real usability tax on
+every new user.</p>
+
+<h3>D3 — TUI mutation strategy</h3>
+<p><b>Options:</b></p>
+<ol>
+<li><b>Shared mutations.ts.</b> Both CLI's commands.ts and TUI call it. Setters in db.ts become module-private.</li>
+<li><b>TUI shells out to CLI.</b> More disruptive; introduces subprocess overhead on every click.</li>
+<li><b>Status quo.</b> Rely on convention that mutations get invariants added to setters.</li>
+</ol>
+<p><b>My recommendation:</b> option 1. Small refactor, huge invariant guarantee.</p>
+
+<h3>D4 — LaunchAgent installer</h3>
+<p><b>Options:</b></p>
+<ol>
+<li><b>Template + install script.</b> Ship <code>.plist.template</code>, <code>ccs cluster install</code> does the sed + launchctl.</li>
+<li><b>Runtime <code>$HOME</code> resolution.</b> Use <code>launchctl setenv HOME "$HOME"</code> before bootstrap; plists reference <code>$HOME</code>. More clever, less portable across users.</li>
+</ol>
+<p><b>My recommendation:</b> option 1. Standard practice, dead simple.</p>
+
+<h3>D5 — New-cluster wizard depth</h3>
+<p><b>Options:</b></p>
+<ol>
+<li><b>Minimal.</b> <code>cluster.toml</code> + <code>CHANGELOG.md</code> only. User writes roles by hand.</li>
+<li><b>Standard.</b> Above + one starter <code>control</code> role.</li>
+<li><b>Opinionated.</b> Above + engine skeleton + LaunchAgent template + docs stubs.</li>
+</ol>
+<p><b>My recommendation:</b> option 2 initially, option 3 once ops-watch has clarified what a "real" cluster
+needs. Guard against baking pr-watch assumptions into the wizard prematurely.</p>
+
+<h3>D6 — Config repo separation</h3>
+<p><b>Question:</b> should <code>~/.ccs-config</code> stay a private per-user repo, or become a shared
+org-level repo with per-user overrides?</p>
+<p><b>My recommendation:</b> stay per-user for now. Sharing config is a separate problem from sharing the
+tool. Address after we have 2+ users.</p>
+</section>
+
+<section id="next-steps">
+<h2>Dependency taxonomy (tool vs cluster)</h2>
+<p>The tool itself has almost no external dependencies — a clean line between what ccs needs and what each
+cluster brings.</p>
+<table>
+<tr><th>Layer</th><th>Required</th><th>Optional</th><th>Notes</th></tr>
+<tr><td><b>Tool (ccs)</b></td><td><code>bun</code> · <code>git</code> · <code>cmux</code></td><td><code>claude</code> (for resume) · <code>codex</code> (titler alternate)</td><td>Cluster-agnostic. No <code>gh</code>, no <code>sf</code>, no <code>python3</code>.</td></tr>
+<tr><td><b>pr-watch cluster</b></td><td><code>python3</code> · <code>gh</code> · <code>sf</code> · <code>jq</code></td><td>—</td><td>gh for GitHub sensors, sf for GUS/Salesforce epic resolution, python3 for the engine, jq for shell composers.</td></tr>
+<tr><td><b>toy-second cluster</b></td><td>—</td><td>—</td><td>Stub. No engine.</td></tr>
+<tr><td><b>Future ops-watch</b></td><td>TBD — likely <code>python3</code>, maybe <code>heroku</code> CLI</td><td>—</td><td>Each new cluster declares its own.</td></tr>
+</table>
+<p>This is a design principle reinforcing ADR-0061: <b>the tool's dep list is universal; every cluster
+brings its own.</b> A future <code>cluster.toml</code> <code>[deps]</code> block + <code>ccs cluster doctor
+&lt;name&gt;</code> would enforce this at install time (see P1-6).</p>
+
+<h2>Recommended next steps — sequenced</h2>
+
+<h3>Phase 2A: Finish ADR-0078 (½ day)</h3>
+<ol>
+<li>Port the 7 remaining Python scripts to <code>ccs_client.catalogue_export()</code>.</li>
+<li>Grep confirms zero <code>import sqlite3</code> in cluster code.</li>
+<li>Update <code>ccs_client.py</code> with a doctest.</li>
+</ol>
+
+<h3>Phase 2B: Distribution foundations (1 day)</h3>
+<ol>
+<li>Add <code>bun build --compile</code> to a <code>scripts/release.ts</code>.</li>
+<li>Bump <code>pkg.version</code> → 0.2.0, tag <code>v0.2.0</code>, publish binary to GitHub Releases.</li>
+<li>Add <code>CHANGELOG.md</code> to the tool.</li>
+<li>Update tool README with the new install story (both dev + operator paths).</li>
+<li>Add <code>ccs doctor</code> — probes cmux + gh + sf + jq + python3 + config presence.</li>
+</ol>
+
+<h3>Phase 2C: Portable cluster install (½ day)</h3>
+<ol>
+<li>Rename plists to <code>.plist.template</code> with <code>__HOME__</code> markers.</li>
+<li>Add <code>ccs cluster install &lt;name&gt;</code> — sed substitute + <code>launchctl bootstrap</code> per plist.</li>
+<li>Add <code>ccs cluster uninstall &lt;name&gt;</code>.</li>
+<li>Update cluster README with the one-command install story.</li>
+</ol>
+
+<h3>Phase 2D: CLI namespace reorg (1 day)</h3>
+<ol>
+<li>Introduce <code>ccs cluster …</code>, <code>ccs role …</code>, <code>ccs api …</code>, <code>ccs session …</code>.</li>
+<li>Old flat commands become aliases with deprecation hints.</li>
+<li>Rewrite help text as noun-first.</li>
+<li>Update every doc that references CLI verbs.</li>
+</ol>
+
+<h3>Phase 2E: TUI mutation extraction (½ day)</h3>
+<ol>
+<li>Create <code>src/catalogue/mutations.ts</code> — wrapped setters with validation + recompose.</li>
+<li>Migrate CLI commands.ts calls to the wrapped versions.</li>
+<li>Migrate TUI's direct setter calls to the wrapped versions.</li>
+<li>Mark db.ts setters as internal (JSDoc @internal).</li>
+</ol>
+
+<h3>Phase 2F: New-cluster wizard (½ day)</h3>
+<ol>
+<li><code>ccs cluster init &lt;name&gt;</code> — scaffolds cluster.toml + CHANGELOG.md + roles/control/role.toml.</li>
+<li><code>ccs role add &lt;name&gt; --cluster &lt;c&gt;</code> — scaffolds a role dir.</li>
+<li>Both write templates from <code>src/scaffold/</code>.</li>
+</ol>
+
+<h3>Phase 2G: Doc cleanup (½ day)</h3>
+<ol>
+<li>Rewrite tool README.</li>
+<li>Rewrite cluster README.</li>
+<li>Delete <code>sense.sh</code> + <code>resync-labels.sh</code> if verified dead.</li>
+<li>Retire <code>board.py</code> if verified redundant.</li>
+<li>Consolidate stale .html docs.</li>
+</ol>
+
+<h3>Total: ~4 focused days</h3>
+<p>End state: <code>ccs</code> is a numbered release you can install with one command; <code>ccs cluster
+install pr-watch</code> stands up a full cluster on a fresh Mac in another command; the CLI is a clear
+noun-hierarchy; every mutation path is invariant-preserving; the wizard makes adding cluster #2 (ops-watch)
+a matter of minutes.</p>
+</section>
+
+<footer>
+Fresh production-readiness review · 2026-07-14 · sources: Claude tool inventory audit + Claude cluster
+inventory audit + Claude distribution audit + Cursor GPT-5.2 second opinion · previous review at
+<code>docs/production-readiness-review.html</code> (2026-07-11 discovery sweep + 2026-07-13 hardening pass)
+· hardening arc landed 2026-07-14 (ADRs 0078–0085).
+</footer>
+
+</main>
+</div>
+</body>
+</html>
