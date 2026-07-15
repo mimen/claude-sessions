@@ -12,3 +12,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T11:07Z | fixed | `session set --identity=` refused unknown key (FK-like guard); no more dangling identity refs from typos/retired keys | dd86f2d
 2026-07-15T11:37Z | ruled-out | `--parent=<self>` and `--parent=<non-uuid>` already rejected; `<uuid-nonexistent>` is intentional forward-ref; 3 regression tests | 9772edf
 2026-07-15T12:07Z | ruled-out | session-complete mirror uses setIdentityFields (explicit UPDATE), not completeIdentity — archived stays 1; regression test | b7f1afb
+2026-07-15T12:37Z | ruled-out | TUI empty groups omitted; retire-cascade groups show total + `✓ done · N` fold; 2 regression tests | c6d7051
