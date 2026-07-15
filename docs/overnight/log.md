@@ -37,3 +37,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-16T00:30Z | added | acceptance #3 surface-coverage.md — 38 subcommand fresh-CCS_ROOT probe + static grep verification | 3144a4d
 2026-07-16T01:00Z | added | acceptance #12 sync-tabs paint-only guarantee — arch review + 2 subprocess regression tests | 0dcdce1
 2026-07-16T01:30Z | fixed | exploration tick: 33 adversarial inputs + SQL-injection probe found `ccs identity ls` fell through to doRead (help says ls, dispatch only knew list); added ls alias + tests | 8090615
+2026-07-16T02:00Z | DONE | acceptance #13 satisfied (2 consecutive empty-punch-list ticks); PHASE1_DONE sentinel written; ready for handoff to phase 2 | (this tick)

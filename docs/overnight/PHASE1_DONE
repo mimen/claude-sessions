@@ -1,0 +1,45 @@
+Phase 1 hardening — DONE
+========================
+
+Exit criteria met: 2026-07-16T02:00Z
+
+Summary
+-------
+- All 13 acceptance criteria verified with tests or documented probes.
+- All 25 punch-list items closed (fixed or ruled-out with lock-in tests).
+- 734/734 tests green; `bun tsc --noEmit` clean.
+- Every fix ships with a regression test.
+
+Real bugs found and fixed this session
+--------------------------------------
+- `mark()` created phantom rows on unknown session ids  (f269500)
+- `mintIdentity` TOCTOU race between processes           (667475b)
+- `ccs resume <bogus>` crashed with SQLITE_CANTOPEN on fresh CCS_ROOT (24871e4)
+- `catalogue export` same fresh-CCS_ROOT crash            (1389b39)
+- `session set --identity=` allowed dangling FKs          (dd86f2d)
+- `mintIdentity` accepted empty / whitespace / control-char keys (1a29d06)
+- `resume-cluster shouldPin` referenced undefined `cluster` var (c40a9ed)
+- `default-composer` spread nonexistent `catRow.workUnit` (312b87f)
+- Stale `setParked` import (312b87f)
+- `dedup-sessions-per-identity` was NOT idempotent — flipped direction on run 2 (d06c4c0)
+- Fresh-CCS_ROOT footgun in 5 more sites (a5be0cd sweep)
+- Standalone-role spawns produced null-identity sessions (990e473)
+- `context-check` crashed on fresh CCS_ROOT (990e473)
+- `ls` and `tree` crashed on fresh CCS_ROOT (990e473)
+- `ccs identity ls` alias didn't dispatch (8090615)
+
+Coverage additions
+------------------
+- Full CLI-driven lifecycle round-trip test (1d132d6)
+- Core-vs-fleet mirror lock-in through session verbs (43f43d0)
+- Supersede-keeps-identity-alive assertion (9cb9b7a)
+- Cross-cluster role-name collision tests (3ce3989)
+- TZ safety test (Kiritimati + Midway) (b36a8ec)
+- Symlinked catalogue test (9b59817)
+- `PRAGMA integrity_check` after realistic write workload (39bdd4f)
+- Barrier-synced 2-process race test for mintIdentity (667475b)
+
+The paper trail: docs/overnight/log.md has one line per tick with the commit hash.
+Subcommand coverage matrix: docs/overnight/surface-coverage.md.
+
+Ready for phase 2 (dogfood).
