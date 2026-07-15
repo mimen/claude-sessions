@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync, symlinkSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   addTag,
   childrenOf,
@@ -111,6 +114,37 @@ test("catalogue survives reopen (durable file semantics)", () => {
   const again = openCatalogue(":memory:");
   expect(getRow(again, "s")).toBeNull();
   expect(getRow(db, "s")!.customTitle).toBe("keep");
+});
+
+test("opens through a symlink and writes durably to the real file", () => {
+  // Punch-list guarantee: users who point ~/.ccs/cache at a symlink (e.g.
+  // to relocate the cache to a separate disk) should get identical
+  // behavior — the DB writes must land on the real file and be visible
+  // when reopened directly. sqlite handles this transparently but the
+  // WAL sidecar files also need to be created next to the real target;
+  // if bun:sqlite ever regresses that (or refuses to follow symlinks),
+  // this test catches it before it hits users.
+  const root = mkdtempSync(join(tmpdir(), "ccs-symlink-cat-"));
+  try {
+    const realFile = join(root, "real.db");
+    const linkFile = join(root, "linked.db");
+    openCatalogue(realFile).close();
+    symlinkSync(realFile, linkFile);
+
+    // Write through the symlink.
+    const db = openCatalogue(linkFile);
+    const t = "2026-07-15T00:00:00Z";
+    db.query("INSERT INTO catalogue (session_id, updated_at) VALUES ('s-sym', $t)").run({ $t: t });
+    db.close();
+
+    // Re-open via the real path and verify the row lands there.
+    const db2 = openCatalogue(realFile);
+    const row = db2.query("SELECT session_id FROM catalogue WHERE session_id = 's-sym'").get();
+    expect(row).not.toBeNull();
+    db2.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("PRAGMA integrity_check reports 'ok' after a realistic write workload", () => {
