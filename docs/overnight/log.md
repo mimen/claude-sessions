@@ -8,3 +8,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T09:07Z | fixed | `ccs resume <bogus>` on fresh CCS_ROOT crashed with raw SQLITE_CANTOPEN before zero-match handling could run | 24871e4
 2026-07-15T09:37Z | ruled-out | ambiguous `#N` across repos is resolved-by-design; count surfaced in CLI, dedup in resumeMany; regression test added | 3640f05
 2026-07-15T10:07Z | ruled-out | board --recompose-all on fresh cluster already writes {status:'OK', rows:[]}; regression test added | 6b29d84
+2026-07-15T10:37Z | fixed | `catalogue export` on fresh CCS_ROOT crashed with SQLITE_CANTOPEN; added ensureDataDir() + subprocess regression + queued systematic sweep | 1389b39
