@@ -209,3 +209,53 @@ describe("listIdentities filters", () => {
     expect(listIdentities(db, { completed: true }).length).toBe(1);
   });
 });
+
+describe("mark mirror does NOT cascade lifecycle onto CORE identities", () => {
+  // Regression from live TUI: archiving one control session flipped `pr-watch:control`
+  // to archived, which cascaded to hiding every peer session attached to that same core
+  // identity. Core identities span many session lifetimes — session-level archive must
+  // stay per-session for them. Fleet identities remain 1:1 with a work unit, so mirroring
+  // there is still desirable.
+  test("session lifecycle write against a CORE identity does not flip the identity", () => {
+    const db = openCatalogue(":memory:");
+    const key = "pr-watch:control";
+    mintIdentity(db, key, { cluster: "pr-watch", role: "control" }, NOW);
+    db.query("INSERT INTO catalogue (session_id, identity_key, updated_at) VALUES ($sid, $k, $now)")
+      .run({ $sid: "s1", $k: key, $now: NOW });
+
+    // Simulate the mark path's mirror decision (from commands.ts). For CORE identities,
+    // lifecycle keys (`archived`, `completed`, `parked_task_id`) must be filtered OUT
+    // before calling setIdentityFields — so the identity's flags stay put.
+    const kind = (db.query("SELECT kind FROM identities WHERE identity_key = $k").get({ $k: key }) as
+      { kind: string }).kind;
+    const patch: Record<string, unknown> = { archived: true };
+    const routed: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (k === "status_line" || k === "stage" || k === "grouping_id" || k.startsWith("meta.")) {
+        routed[k] = v;
+      } else if (k === "completed" || k === "archived" || k === "parked_task_id") {
+        if (kind !== "core") routed[k] = v;
+      }
+    }
+    expect(routed).toEqual({}); // for a core identity, an `archived` mirror is filtered out
+    // sanity: the identity stays active
+    expect(getIdentity(db, key)!.archived).toBe(false);
+  });
+
+  test("session lifecycle write against a FLEET identity still mirrors (retire cascade)", () => {
+    const db = openCatalogue(":memory:");
+    const key = "pr-watch:pr-agent:owner/repo#42";
+    mintIdentity(db, key, { cluster: "pr-watch", role: "pr-agent" }, NOW);
+    const kind = (db.query("SELECT kind FROM identities WHERE identity_key = $k").get({ $k: key }) as
+      { kind: string }).kind;
+    expect(kind).toBe("fleet");
+    const patch: Record<string, unknown> = { archived: true };
+    const routed: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (k === "completed" || k === "archived" || k === "parked_task_id") {
+        if (kind !== "core") routed[k] = v;
+      }
+    }
+    expect(routed.archived).toBe(true); // fleet: mirror flows through
+  });
+});

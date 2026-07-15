@@ -41,57 +41,89 @@ import { sessionFieldsCommand } from "./catalogue/session-fields-command.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
+Post-ADR-0089 model: sessions are the ephemeral instances; IDENTITIES hold durable state.
+For durable per-work-unit writes (stage, status_line, meta.*, grouping, PR facts, review URL)
+use \`ccs identity …\`; for per-run session state (title, parent, lifecycle) use \`ccs session …\`.
+
 Usage:
   ccs                 Launch the session browser (TUI)
-  ccs reindex         Refresh the session index from the store
-  ccs reindex --titles   Also (re)generate titles, headless (cron-friendly)
+  ccs reindex [--titles]   Refresh the session index (--titles: also regenerate titles headless)
   ccs ls              Print indexed sessions (with catalogue badges)
   ccs tree            Constellation view: children grouped under their parent
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
-  ccs meta [<id>|.]   Show a session's catalogue metadata (. = current session)
-  ccs rename [<id>|.] "<name>"   Set a custom title (+ sync cmux workspace name)
-  ccs mark [<id>|.] --completed|--archived [--off]   Set lifecycle flags (control-owned)
-  ccs tag [<id>|.] "<Entity>" [--remove]   Add/remove an entity tag
-  ccs key [<id>|.] <slug> [--off]   Assign/clear the session's identity key (canonical)
-  ccs parent [<id>|.] <parent-id|.> [--off]   Set/clear the spawning parent session
-  ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
-  ccs set-cluster [<id>|.] <slug> [--off]   Set/clear the cluster grouping
-  ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab (worker → summary pill)
-  ccs name [<id>|.] "<short name>" [--off]   Set the session's short display name (<=35ch, aim to use most of it) — the tab title after "#<PR> "
-  ccs stage [<id>|.]                    Read cached stage (D5: cache of the board's data.stage; workers do not write)
-  ccs stage [<id>|.] <value> --sensor <name>   Sensor-only write (rejects worker writes)
-  ccs meta [<id>|.] <key> <value> [--off]   Set a key in the session's generic meta map (ADR-0060/0064)
-  ccs new-session [flags]   Mint a session id, tag its metadata AT BIRTH, then launch \`claude --session-id\`
-                            flags: --cluster --role --kind loop|session --project --key
-                                   --title --parent <id> --cwd <dir> --prompt "<text>"
-                                   --permission-mode <mode> · --print-id (reserve only, don't launch)
-  ccs sync-tabs [<selector>|.|--all]   Paint cmux tabs from catalogue metadata (. | id | #pr | role | cluster | --all)
-  ccs cluster <c> [--expand] [--json]   Cluster map: all members by role, live/lifecycle, work-unit (--json for agents)
-  ccs cluster init <name> [--role <r>]  Scaffold a minimal cluster (cluster.toml + CHANGELOG + one role)
-  ccs catalogue export --cluster <c> [--role <r>] [--json]  ADR-D1 machine-readable projection (cluster engines: use this, not sqlite)
-  ccs identity resolve --session <sid> [--json]  ADR-D1 resolve a session to its identity key + facts (single source of truth)
-  ccs session-fields <sid> --json '{...}' [--sensor <name>]  ADR-0078 atomic multi-field write for cluster hot-path composers
-  ccs board <c> [--json|--text]         Cluster board: per-worker truth view composed by the cluster
-  ccs board <c> --identity <key> [--text]   Read a single board row by identity
-  ccs board <c> --session <sid> [--text]    Read a board row via session→identity resolve
-  ccs board <c> --recompose <key>           Recompose one identity (sync); print the updated row
-  ccs board <c> --recompose-all             Recompose the whole board (sync)
-  ccs inbox send|bump|drain|pending  Durable per-identity messaging; bump also wakes a live tab (ADR-0028)
-  ccs state get         Read a sensor state doc (--cluster <c> or --role <r> …)
-  ccs hook run <name>   Run a named ccs hook (session-start | stop) from its stdin payload
-  ccs self-check <id>   Turn-end self-check sidecar: claude -p decides what state updates the session should have made this turn
-  ccs roles [ls|upsert|rm]  Manage the roles registry (definitions sync-roles/resume use)
-  ccs sync-roles        Materialize the roles registry into ~/.claude (symlink reconcile)
-  ccs resume-session <id>  Re-embody one identity (the core op; loops come back running)
-  ccs resume-cluster <c>   Resume every not-open identity in a cluster (loop over resume-session)
-  ccs resume <selector>  Resume by anything: id | #pr | owner/repo#pr | W-number | epic | role | cluster
-                         (pin the axis with --role|--pr|--gus|--epic|--cluster|--key; --dry-run to preview)
-  ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
-  ccs catch-up [<id>|.]  Surface unseen cluster CHANGELOG entries + advance the seen stamp (exit 2 if a restart is needed)
-  ccs context-check [--json]  Peak-context guard for long loops: OK/WARN/CRITICAL + directive (autocompact is unreliable in headless)
-  ccs decide <c> record|reopen|check|list ...   Decision ledger — record an item's disposition (approve/hold/defer/clear) so it stops re-surfacing.
-  ccs bump-session <sid> [--note "..."]  Wake a specific session by id via the live cmux bridge (surface UUID, not workspace ref)
-  ccs reap-duplicates [--do]  Detect sessions with >1 live \`claude --resume <sid>\` process and close the duplicate cmux workspaces (dry-run by default)
+
+Identities (durable, per-work-unit — ADR-0089):
+  ccs identity mint <key> --cluster=<c> --role=<r> [--grouping=<g>]
+  ccs identity set <key> --field=value [...]      Universal or per-role attrs (schema-routed)
+  ccs identity <key>                              Read one identity (+ per-role attrs join)
+  ccs identity ls [--cluster=<c>] [--role=<r>] [--kind=core|fleet] [--completed] [--archived]
+  ccs identity complete|archive|uncomplete <key>  Lifecycle (cascades to attached sessions)
+  ccs identity path <key> [--new]                 Deterministic scratch dir for the identity
+  ccs identity sessions <key>                     List sessions attached to this identity
+  ccs identity resolve --session <sid> [--json]   Session → identity key + facts (ADR-D1)
+
+Sessions (ephemeral, per-run):
+  ccs session <id|.>                              Read a session's row + linked identity
+  ccs session set <id> --identity=<key> [--title="..."] [--parent=<id>] [--parked=<task>]
+  ccs session unset <id> --identity|--title|--parent|--parked
+  ccs session title <id> "text"                   Custom title + cmux tab sync
+  ccs session complete|archive|uncomplete|unarchive <id>   Per-session lifecycle
+  ccs session new [flags]                         Mint id, tag AT BIRTH, launch \`claude --session-id\`
+    flags: --cluster --role --title --parent <id> --cwd <dir> --prompt "..." --permission-mode <mode>
+           --pr-repo owner/repo --pr-number 123 --gus-work W-... · --print-id (reserve only)
+  ccs session bump <id> [--note "..."]            Wake the session's cmux tab
+  ccs session-fields <sid> --json '{...}' [--sensor <name>]  Atomic multi-field write (ADR-0078)
+
+Legacy per-session verbs (still work; will migrate to \`ccs session …\` in a later sweep):
+  ccs meta [<id>|.]                               Show a session's row (identity join included)
+  ccs meta [<id>|.] <key> <value> [--off]         Set meta.<key> (mirrors to identity meta)
+  ccs rename [<id>|.] "<name>"                    Alias for \`ccs session title\`
+  ccs mark [<id>|.] --completed|--archived [--off]   Per-session lifecycle (core-identity safe)
+  ccs tag [<id>|.] "<Entity>" [--remove]          Add/remove an entity tag
+  ccs parent [<id>|.] <parent-id|.> [--off]       Set/clear the spawning parent
+  ccs status [<id>|.] "<line>" [--off]            Freeform status pill (mirrors to identity.status_line)
+  ccs name [<id>|.] "<short name>" [--off]        Short tab name (<=35 chars)
+  ccs stage [<id>|.] [<value> --sensor <name>]    Read/write pipeline stage (sensor-only write)
+  ccs new-session [flags]                         Legacy alias for \`ccs session new\`
+  ccs bump-session <sid> [--note "..."]           Legacy alias for \`ccs session bump\`
+
+Clusters & board:
+  ccs cluster <c> [--expand] [--json]             Cluster map: members by role, live/lifecycle
+  ccs cluster init <name> [--role <r>]            Scaffold a minimal cluster
+  ccs cluster resume <c>                          (see \`ccs resume-cluster\`)
+  ccs board <c> [--json|--text]                   Board: per-identity truth view
+  ccs board <c> --identity <key> [--text]         Read one row by identity
+  ccs board <c> --session <sid> [--text]          Read via session → identity resolve
+  ccs board <c> --recompose <key> | --recompose-all   Sync recompose
+  ccs catalogue export --cluster <c> [--role <r>] [--json]   Machine-readable projection (ADR-D1)
+  ccs grouping upsert <id> --cluster=<c> --role=<r> [--label="..."] [--url=...]
+  ccs decide <c> record|reopen|check|list ...     Decision ledger (dispositions)
+
+Resume & tabs:
+  ccs resume-session <id>                         Re-embody one identity (loops come back running)
+  ccs resume-cluster <c>                          Resume every not-open identity in a cluster
+  ccs resume <selector>                           id | #pr | owner/repo#pr | W-number | epic | role | cluster
+                                                  (pin axis with --role|--pr|--gus|--epic|--cluster|--key; --dry-run)
+  ccs sync-tabs [<selector>|.|--all]              Paint cmux tabs from catalogue metadata
+  ccs reap-duplicates [--do]                      Close cmux dupes for sessions with >1 live \`claude --resume\`
+
+Inbox & state:
+  ccs inbox send|bump|drain|pending               Durable per-identity messaging (ADR-0028)
+  ccs state get                                   Read a sensor state doc (--cluster <c> or --role <r> …)
+
+Hooks & health:
+  ccs hook run <name>                             Run a named ccs hook (session-start | stop) from stdin
+  ccs hooks explain|lint                          Inspect ccs hook wiring
+  ccs statusline                                  Print the statusline for the current session
+  ccs self-check <id>                             Turn-end self-check sidecar
+  ccs catch-up [<id>|.]                           Surface unseen cluster CHANGELOG entries
+  ccs context-check [--json]                      Peak-context guard for long loops
+
+Roles & skills:
+  ccs roles [ls|upsert|rm]                        Manage the roles registry
+  ccs sync-roles                                  Materialize roles into ~/.claude (symlink reconcile)
+  ccs skills                                      Machine-wide skill registry (\`ccs skills --help\`)
+
   ccs --version       Print version
   ccs --help          Show this help
 `;

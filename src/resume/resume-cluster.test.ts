@@ -1,9 +1,11 @@
 import { test, expect } from "bun:test";
 import { openIndex } from "../index/schema.ts";
-import { openCatalogue, setCluster, setRole, setResumeId, setCompleted, setArchived } from "../catalogue/db.ts";
+import { openCatalogue, setResumeId, setCompleted, setArchived } from "../catalogue/db.ts";
+import { mintIdentity, completeIdentity, archiveIdentity } from "../catalogue/identities.ts";
 import { resumeClusterEntry, planClusterMembers, planPin } from "./resume-cluster.ts";
 import type { CatalogueRow } from "../catalogue/db.ts";
 import type { Bridge } from "../cmux/bridge.ts";
+import type { Database } from "bun:sqlite";
 
 function catRow(over: Partial<CatalogueRow>): CatalogueRow {
   return {
@@ -26,22 +28,40 @@ function seedIndex(db: ReturnType<typeof openIndex>, id: string, cwd: string) {
   ).run({ $id: id, $path: `/store/${id}.jsonl`, $cwd: cwd, $now: NOW });
 }
 
+/** Post-ADR-0089: attach a session to a fresh identity and link the FK. */
+function attach(cat: Database, sid: string, cluster: string, role: string, now = NOW): string {
+  const key = `${cluster}:${role}`;
+  mintIdentity(cat, key, { cluster, role }, now);
+  setResumeId(cat, sid, sid, now);
+  cat.query("UPDATE catalogue SET identity_key = $k, updated_at = $now WHERE session_id = $sid").run({
+    $k: key,
+    $now: now,
+    $sid: sid,
+  });
+  return key;
+}
+
+/** An empty-but-READABLE bridge — the test environment has cmux with a contradictory
+ * hook store from a real dev session, which trips the live bridge into unreadable. Tests
+ * that want to exercise the resume flow supply their own empty bridge. */
+const EMPTY_READABLE_BRIDGE: Bridge = {
+  surfaces: [], surfaceToWorkspace: new Map(), workspaceIds: () => [],
+  surfacesInWorkspace: () => [], surfaceInfo: () => null, locateSession: () => null,
+  isOpen: () => false, primarySurface: () => null, readable: true,
+};
+
 test("resume-cluster fans out over members; dry-run resumes the closed ones", () => {
   const idx = openIndex(":memory:");
   const cat = openCatalogue(":memory:");
   try {
     // two cluster members, both closed (empty live bridge in dry-run env → nothing open)
-    for (const id of ["ctrl", "worker"]) {
-      seedIndex(idx, id, "/tmp");
-      setResumeId(cat, id, id, NOW);
-      setCluster(cat, id, "pr-watch", NOW);
-    }
-    setRole(cat, "ctrl", "control", NOW);
-    setRole(cat, "worker", "pr-agent", NOW);
+    seedIndex(idx, "ctrl", "/tmp");
+    seedIndex(idx, "worker", "/tmp");
+    attach(cat, "ctrl", "pr-watch", "control");
+    attach(cat, "worker", "pr-watch", "pr-agent");
 
-    const summary = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true });
+    const summary = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true, bridge: EMPTY_READABLE_BRIDGE });
     expect(summary.perSession.length).toBe(2);
-    // in a test env cmux isn't running, so the bridge is empty → both are "closed" → resumed
     expect(summary.resumed).toBe(2);
     expect(summary.alreadyOpen).toBe(0);
   } finally {
@@ -54,9 +74,9 @@ test("a member that isn't indexed is counted, not fatal", () => {
   const idx = openIndex(":memory:");
   const cat = openCatalogue(":memory:");
   try {
-    setResumeId(cat, "ghost", "ghost", NOW);
-    setCluster(cat, "ghost", "pr-watch", NOW); // in catalogue, never indexed
-    const summary = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true });
+    // Attach a session to pr-watch identity but DON'T seed the index for it.
+    attach(cat, "ghost", "pr-watch", "pr-agent");
+    const summary = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true, bridge: EMPTY_READABLE_BRIDGE });
     expect(summary.notIndexed).toBe(1);
     expect(summary.resumed).toBe(0);
   } finally {
@@ -69,17 +89,26 @@ test("completed + archived members are retired, never resumed (ADR-0010)", () =>
   const idx = openIndex(":memory:");
   const cat = openCatalogue(":memory:");
   try {
-    for (const id of ["live", "merged", "closed"]) {
-      seedIndex(idx, id, "/tmp");
-      setResumeId(cat, id, id, NOW);
-      setCluster(cat, id, "pr-watch", NOW);
-      setRole(cat, id, "pr-agent", NOW);
-    }
-    setCompleted(cat, "merged", true, NOW); // a merged PR
-    setArchived(cat, "closed", true, NOW); // a closed PR
-    const s = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true });
+    // Three sessions, each with its own identity so lifecycle flips don't cascade.
+    seedIndex(idx, "live", "/tmp");
+    seedIndex(idx, "merged", "/tmp");
+    seedIndex(idx, "closed", "/tmp");
+    attach(cat, "live", "pr-watch", "pr-agent");
+    // Use different identity keys per row so completing one doesn't affect the others.
+    const mergedKey = "pr-watch:pr-agent:merged-ref";
+    const closedKey = "pr-watch:pr-agent:closed-ref";
+    mintIdentity(cat, mergedKey, { cluster: "pr-watch", role: "pr-agent" }, NOW);
+    mintIdentity(cat, closedKey, { cluster: "pr-watch", role: "pr-agent" }, NOW);
+    setResumeId(cat, "merged", "merged", NOW);
+    setResumeId(cat, "closed", "closed", NOW);
+    cat.query("UPDATE catalogue SET identity_key = $k WHERE session_id = $sid").run({ $k: mergedKey, $sid: "merged" });
+    cat.query("UPDATE catalogue SET identity_key = $k WHERE session_id = $sid").run({ $k: closedKey, $sid: "closed" });
+    // Complete via identity (cascades to attached sessions via the read-side join).
+    completeIdentity(cat, mergedKey, NOW);
+    archiveIdentity(cat, closedKey, NOW);
+    const s = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true, bridge: EMPTY_READABLE_BRIDGE });
     expect(s.retired).toBe(2);
-    expect(s.resumed).toBe(1); // only "live"
+    expect(s.resumed).toBe(1);
     expect(s.perSession.find((p) => p.sessionId === "merged")!.result).toBe("retired");
   } finally {
     idx.close();
@@ -115,12 +144,10 @@ test("cluster resume ABORTS (spawns nothing) when liveness is unreadable (ADR-00
   const idx = openIndex(":memory:");
   const cat = openCatalogue(":memory:");
   try {
-    for (const id of ["ctrl", "worker"]) {
-      seedIndex(idx, id, "/tmp");
-      setResumeId(cat, id, id, NOW);
-      setCluster(cat, id, "pr-watch", NOW);
-      setRole(cat, id, "pr-agent", NOW);
-    }
+    seedIndex(idx, "ctrl", "/tmp");
+    seedIndex(idx, "worker", "/tmp");
+    attach(cat, "ctrl", "pr-watch", "pr-agent");
+    attach(cat, "worker", "pr-watch", "pr-agent");
     // an unreadable bridge: liveness can't be resolved → the whole pass must abort, not fan out
     const unreadable: Bridge = {
       surfaces: [], surfaceToWorkspace: new Map(), workspaceIds: () => [],

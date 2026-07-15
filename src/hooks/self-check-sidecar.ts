@@ -271,7 +271,7 @@ function tokenize(line: string): string[] {
  * `~/.claude/projects` entries pool in one predictable directory. Returns stdout on success. */
 async function askClaude(prompt: string, model: string): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   try {
-    const proc = Bun.spawn(["claude", "-p", "--model", model, prompt], {
+    const proc = Bun.spawn(["claude", "-p", "--no-session-persistence", "--model", model, prompt], {
       cwd: sidecarCwd(),
       stdin: "ignore",
       stdout: "pipe",

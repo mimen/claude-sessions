@@ -125,7 +125,7 @@ function createClaudeEngine(opts: {
       } catch {
         return null;
       }
-      const args = ["-p", "--strict-mcp-config", "--output-format", "json", "--json-schema", schemaInline];
+      const args = ["-p", "--no-session-persistence", "--strict-mcp-config", "--output-format", "json", "--json-schema", schemaInline];
       if (opts.model) args.push("--model", opts.model);
       args.push(prompt);
 

@@ -60,14 +60,20 @@ function mirrorToIdentity(
     }) as { identity_key: string | null } | null;
     const key = row?.identity_key;
     if (!key) return;
-    // Only mirror fields that actually live on identity rows. Universal columns first;
-    // meta.* keys route through as JSON merge (handled by identity_set). Everything else
-    // silently no-ops (per-role fields aren't written by these prose commands today).
+    // Look up the identity's kind so we can gate lifecycle mirrors. Core identities are shared
+    // across many session lifetimes (control, concierge, designer …), so per-session lifecycle
+    // must NOT bubble up to the identity — otherwise archiving one session hides every peer
+    // attached to the same core identity. Fleet identities are 1:1 with a work unit, so a
+    // session-lifecycle write there is safe to mirror (and desirable — retire cascades).
+    const identKind = (db.query("SELECT kind FROM identities WHERE identity_key = $k").get({ $k: key }) as
+      { kind: string } | null)?.kind;
     const identityFields: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(patch)) {
-      if (k === "status_line" || k === "stage" || k === "completed" || k === "archived" ||
-          k === "grouping_id" || k === "parked_task_id" || k.startsWith("meta.")) {
+      if (k === "status_line" || k === "stage" || k === "grouping_id" || k.startsWith("meta.")) {
         identityFields[k] = v;
+      } else if (k === "completed" || k === "archived" || k === "parked_task_id") {
+        // Lifecycle: only mirror for fleet identities. Core is per-session only.
+        if (identKind !== "core") identityFields[k] = v;
       }
     }
     if (Object.keys(identityFields).length === 0) return;
