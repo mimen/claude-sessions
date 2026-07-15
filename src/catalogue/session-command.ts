@@ -145,7 +145,19 @@ function doSet(rest: string[]): number {
   const changes: string[] = [];
   try {
     if (flags.identity !== undefined) {
-      // Attach the session to an identity.
+      // Attach the session to an identity. Refuse a key that hasn't been minted
+      // — otherwise we create a dangling FK that breaks export, board, and TUI
+      // joins downstream. `identity` is nullable, so the sole rule is: if you
+      // pass a key, it must exist.
+      const exists = db
+        .query("SELECT 1 FROM identities WHERE identity_key = $k")
+        .get({ $k: flags.identity });
+      if (!exists) {
+        console.error(
+          `ccs session set: identity '${flags.identity}' does not exist — mint it first with \`ccs identity mint\``,
+        );
+        return 1;
+      }
       db.query("UPDATE catalogue SET identity_key = $k, updated_at = $now WHERE session_id = $sid")
         .run({ $k: flags.identity, $now: now(), $sid: sid });
       changes.push(`identity=${flags.identity}`);

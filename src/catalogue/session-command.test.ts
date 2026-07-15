@@ -73,6 +73,29 @@ describe("session set", () => {
     });
   });
 
+  test("--identity= refuses an identity_key that hasn't been minted (no dangling FKs)", async () => {
+    // Regression: `ccs session set <sid> --identity=<key>` used to blindly
+    // write identity_key with no existence check, producing a dangling FK
+    // that breaks joins in `catalogue export`, board composers, TUI, etc.
+    await withRoot(async (root) => {
+      seedSession(root, "sess-fk-1");
+      // The identity is never minted — attempt to attach anyway.
+      const rc = await sessionCommand([
+        "set",
+        "sess-fk-1",
+        "--identity=pr-watch:pr-agent:owner/repo#never-minted",
+      ]);
+      expect(rc).toBe(1);
+      // The write must not have landed — the row's identity_key stays null.
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      const row = db
+        .query("SELECT identity_key FROM catalogue WHERE session_id = 'sess-fk-1'")
+        .get() as { identity_key: string | null };
+      expect(row.identity_key).toBeNull();
+      db.close();
+    });
+  });
+
   test("--title updates custom_title", async () => {
     await withRoot(async (root) => {
       seedSession(root, "sess-3");
