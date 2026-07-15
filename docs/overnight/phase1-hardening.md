@@ -25,7 +25,7 @@ Each tick you run:
 Check each on every tick; leave visible boxes here so the loop can see progress.
 
 - [ ] `bun test` reports **0 failures**, no `.skip`, no `.todo` newly added by this branch.
-- [ ] `bun run typecheck` (or `bun tsc --noEmit`) is clean.
+- [ ] `bun run typecheck` (or `bun tsc --noEmit`) is clean. — IN PROGRESS in c40a9ed: fixed 1 real code bug (resume-cluster.ts shouldPin used undefined cluster) + 4 test files (identityKey: null). ~13 more errors remain across mechanical `identityKey: null` misses in test helpers plus SQLite-binding type widenings in identities.ts / groupings-db.ts. Ticket for a dedicated typecheck-cleanup tick.
 - [ ] Every subcommand printed by `ccs --help` has been invoked at least once against a fresh `:memory:` or tmp-dir DB without a crash. Track this in `docs/overnight/surface-coverage.md`.
 - [ ] Round-trip lifecycle: `identity mint` → `session set --identity` → `session complete` → `session archive` → `session unarchive` → `identity ls` reflects each step. Add as a real test.
 - [ ] `resume-cluster pr-watch --dry-run` completes without spawning phantom sessions or leaving null-cluster orphans.
