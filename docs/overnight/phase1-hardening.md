@@ -32,7 +32,7 @@ Check each on every tick; leave visible boxes here so the loop can see progress.
 - [x] Zero rows where `catalogue.identity_key IS NULL` AND the session's `cwd LIKE '%.ccs-config/clusters/%'` (checked against a scratch copy of the live catalogue). — verified 39bdd4f (probe joined catalogue.db + index.db on scratch copies: COUNT = 0).
 - [x] `mark --archived` on a session attached to a **core** identity leaves the identity `archived=0` (regression test for tonight's fix — already added, keep green). — verified 43f43d0: CLI-driven test drives `sessionCommand(["archive", sid])` on a core-attached session and asserts identity.archived stays false (session-level only). Complements the pre-existing routing-decision test in identities.test.ts.
 - [x] `mark --completed` on a session attached to a **fleet** identity DOES cascade (retire path stays intact). — verified 43f43d0: companion CLI-driven test drives `sessionCommand(["complete", sid])` on a fleet-attached session and asserts identity.completed goes true.
-- [ ] `writeSessionMetadata` for the 2nd worker on a PR archives the 1st (supersede) AND keeps the fleet identity alive.
+- [x] `writeSessionMetadata` for the 2nd worker on a PR archives the 1st (supersede) AND keeps the fleet identity alive. — verified 9cb9b7a: existing ADR-0073 supersede test extended with `getIdentity(db, key).archived === false && .completed === false` assertions. Locks the split against a mint-that-resets-flags regression.
 - [ ] `dedup-sessions-per-identity.ts --apply` is idempotent (2nd run archives 0).
 - [ ] `backfill-identity-from-cwd.ts --apply` is idempotent.
 - [ ] `ccs sync-tabs --all` on the live catalogue completes without spawning duplicate cmux tabs (dry-run first).
