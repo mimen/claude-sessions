@@ -31,3 +31,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T20:37Z | added | acceptance #9 supersede-keeps-identity-alive test — 2nd worker archives 1st but shared fleet identity stays active | 9cb9b7a
 2026-07-15T21:07Z | fixed | dedup-sessions-per-identity was NOT idempotent — flipped direction on each run (setArchived bumps updated_at); real bug fixed with active-only keeper selection | d06c4c0
 2026-07-15T21:37Z | added | acceptance #11 backfill-identity-from-cwd idempotency test — script already correct, regression pinned via subprocess | 868a74b
+2026-07-15T22:07Z | added | acceptance #5 resume-cluster dry-run skips null-identity orphans — regression pins the sessionsForCluster join invariant | c0019d4
