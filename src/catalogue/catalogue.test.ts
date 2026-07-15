@@ -113,6 +113,32 @@ test("catalogue survives reopen (durable file semantics)", () => {
   expect(getRow(db, "s")!.customTitle).toBe("keep");
 });
 
+test("PRAGMA integrity_check reports 'ok' after a realistic write workload", () => {
+  // Punch-list guarantee: sqlite integrity_check should always return 'ok'
+  // for a DB written by the tool. This exercises a realistic sequence
+  // (mint, attach, lifecycle, tag) and verifies no page-level or logical
+  // corruption crept in. If a future migration desyncs indexes or drops a
+  // constraint mid-transaction, this fails.
+  const db = openCatalogue(":memory:");
+  const t = "2026-07-15T00:00:00Z";
+  db.query(
+    "INSERT INTO identities (identity_key, cluster, role, kind, meta, created_at, updated_at) VALUES ('c:r:x#1','c','r','fleet','{}',$n,$n)",
+  ).run({ $n: t });
+  db.query(
+    "INSERT INTO catalogue (session_id, identity_key, updated_at) VALUES ('s1','c:r:x#1',$n)",
+  ).run({ $n: t });
+  setCustomTitle(db, "s1", "hello", t);
+  setCompleted(db, "s1", true, t);
+  setArchived(db, "s1", true, t);
+  setParked(db, "s1", "task-1", t);
+  setParent(db, "s1", "s0-parent", t);
+  addTag(db, "s1", "Entity");
+
+  const rows = db.query("PRAGMA integrity_check").all() as { integrity_check: string }[];
+  expect(rows.length).toBe(1);
+  expect(rows[0]!.integrity_check).toBe("ok");
+});
+
 test("v33 schema postcondition passes on a fresh migrated DB", () => {
   const db = openCatalogue(":memory:");
   const cols = db.query("PRAGMA table_info(catalogue)").all() as { name: string }[];
