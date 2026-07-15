@@ -329,4 +329,30 @@ describe("mark mirror does NOT cascade lifecycle onto CORE identities", () => {
     }
     expect(routed.archived).toBe(true); // fleet: mirror flows through
   });
+
+  // Regression / policy pin: `ccs identity archive <key>` then
+  // `ccs session complete <sid>` on an attached fleet session must NOT
+  // un-archive the identity. The concern (from the punch list): the mirror
+  // path from mark() might route through `completeIdentity` (which resets
+  // archived=0). It doesn't — it calls setIdentityFields which only writes
+  // the columns explicitly in the patch. This test locks that in end-to-end.
+  test("session complete after identity archive: archived stays 1, completed also lands", () => {
+    const db = openCatalogue(":memory:");
+    const key = "pr-watch:pr-agent:owner/repo#77";
+    mintIdentity(db, key, { cluster: "pr-watch", role: "pr-agent" }, NOW);
+    // Archive the identity first.
+    archiveIdentity(db, key, NOW);
+    expect(getIdentity(db, key)!.archived).toBe(true);
+
+    // Attach a session and simulate the mark() mirror decision for
+    // `session complete <sid>`. Only `completed` is in the mirror patch;
+    // `archived` is NOT touched by session-level lifecycle writes.
+    db.query("INSERT INTO catalogue (session_id, identity_key, updated_at) VALUES ($sid, $k, $now)")
+      .run({ $sid: "s-complete-after-archive", $k: key, $now: NOW });
+    setIdentityFields(db, key, { completed: true }, NOW);
+
+    const id = getIdentity(db, key)!;
+    expect(id.archived).toBe(true); // ← the critical assertion: still archived
+    expect(id.completed).toBe(true); // completed flowed through as expected
+  });
 });
