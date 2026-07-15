@@ -293,6 +293,40 @@ describe("lifecycle + scratch dir + sessions link", () => {
     }
   });
 
+  test("ensureScratchDir is idempotent — deleting the dir + re-running recreates it (no state loss on user rm -rf)", () => {
+    // Punch-list guarantee: a user who manually deletes the scratch dir
+    // (perhaps to clear a big screenshot cache) must be able to rerun
+    // `ccs identity path <key> --new` and get a clean, empty dir back.
+    // Any subsequent write to it must succeed. This pins the mkdirSync
+    // recursive:true contract.
+    const { existsSync, rmSync: fsRmSync, writeFileSync, readFileSync } = require("node:fs");
+    const runtime = mkdtempSync(join(tmpdir(), "id-run-recreate-"));
+    try {
+      const key = "pr-watch:pr-agent:owner/repo#recreate";
+      const dir1 = ensureScratchDir(key, runtime);
+      expect(existsSync(dir1)).toBe(true);
+      writeFileSync(join(dir1, "canary.txt"), "before");
+
+      // Manual delete — mirrors the user running `rm -rf`.
+      fsRmSync(dir1, { recursive: true, force: true });
+      expect(existsSync(dir1)).toBe(false);
+
+      // Re-run: recreates the dir, empty.
+      const dir2 = ensureScratchDir(key, runtime);
+      expect(dir2).toBe(dir1); // deterministic path
+      expect(existsSync(dir2)).toBe(true);
+      expect(existsSync(join(dir2, "canary.txt"))).toBe(false); // fresh, no residue
+
+      // Third run on an existing dir is a no-op (idempotent).
+      const dir3 = ensureScratchDir(key, runtime);
+      expect(dir3).toBe(dir1);
+      writeFileSync(join(dir3, "canary.txt"), "after");
+      expect(readFileSync(join(dir3, "canary.txt"), "utf8")).toBe("after");
+    } finally {
+      rmSync(runtime, { recursive: true, force: true });
+    }
+  });
+
   test("sessionsForIdentity returns catalogue rows linked to this key", () => {
     const db = openCatalogue(":memory:");
     const key = "pr-watch:pr-agent:owner/repo#12345";
