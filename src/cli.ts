@@ -37,7 +37,7 @@ import { inboxCommand } from "./inbox/inbox-command.ts";
 import { stateCommand } from "./state/state-command.ts";
 import { groupingCommand } from "./state/grouping-command.ts";
 import { catalogueExportCommand } from "./catalogue/export-command.ts";
-import { identityResolveCommand } from "./catalogue/identity-command.ts";
+import { identityCommand, identityResolveCommand } from "./catalogue/identity-command.ts";
 import { sessionFieldsCommand } from "./catalogue/session-fields-command.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
@@ -239,8 +239,9 @@ export async function main(argv: string[]): Promise<number> {
       // engines (compose_board.py etc). Replaces direct sqlite3 access to catalogue.db.
       return catalogueExportCommand(args.slice(1));
     case "identity":
-      // ADR-D1: `ccs identity resolve --session <sid>` — single source of truth for identity key.
-      return identityResolveCommand(args.slice(1));
+      // ADR-0089 step 6: `ccs identity <verb>` — primary CLI surface for durable per-work-item
+      // state. `resolve` stays as a legacy verb for engines until step 9 rewrites them.
+      return identityCommand(args.slice(1));
     case "session-fields":
       // ADR-0078 finish-line: atomic multi-field write for cluster hot-path composers.
       // `ccs session-fields <sid> --json '{...}' [--sensor <name>]`
