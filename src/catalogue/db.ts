@@ -68,6 +68,8 @@ export interface CatalogueRow {
   prBranch: string | null;
   prState: PrState | null;
   prHeadSha: string | null;
+  /** ADR-0089: FK to identities.identity_key. Nullable for "loose" sessions with no cluster/role. */
+  identityKey: string | null;
 }
 
 export interface PrFacts {
@@ -790,6 +792,7 @@ function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
     prBranch: (r.pr_branch as string) ?? null,
     prState: (r.pr_state as PrState) ?? null,
     prHeadSha: (r.pr_head_sha as string) ?? null,
+    identityKey: (r.identity_key as string) ?? null,
   };
 }
 

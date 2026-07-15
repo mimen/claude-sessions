@@ -41,6 +41,46 @@ const now = (): string => new Date().toISOString();
 /** A Claude Code session id is a UUID; used to validate a `parent` edge before storing it. */
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * ADR-0089 step 10: mirror a session-scoped write onto the session's identity when one is
+ * attached. This lets legacy prose commands (`ccs status .`, `ccs stage .`, `ccs mark`) keep
+ * working while post-refactor readers query the identity table for durable fields. When step
+ * 12 drops the legacy session columns, callers will already have been writing to the identity
+ * via this mirror. Best-effort — a mirror failure never blocks the primary write.
+ */
+function mirrorToIdentity(
+  db: import("bun:sqlite").Database,
+  sessionId: string,
+  patch: Record<string, unknown>,
+  nowIso: string,
+): void {
+  try {
+    const row = db.query("SELECT identity_key FROM catalogue WHERE session_id = $sid").get({
+      $sid: sessionId,
+    }) as { identity_key: string | null } | null;
+    const key = row?.identity_key;
+    if (!key) return;
+    // Only mirror fields that actually live on identity rows. Universal columns first;
+    // meta.* keys route through as JSON merge (handled by identity_set). Everything else
+    // silently no-ops (per-role fields aren't written by these prose commands today).
+    const identityFields: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (k === "status_line" || k === "stage" || k === "completed" || k === "archived" ||
+          k === "grouping_id" || k === "parked_task_id" || k.startsWith("meta.")) {
+        identityFields[k] = v;
+      }
+    }
+    if (Object.keys(identityFields).length === 0) return;
+    // Route via the identity command layer so we get its validation + per-role routing.
+    // Import lazily to avoid a cycle (identities.ts → commands.ts indirectly).
+    const { setIdentityFields } = require("./identities.ts");
+    setIdentityFields(db, key, identityFields, nowIso);
+  } catch {
+    // Fail-open: the primary catalogue write already succeeded. A mirror failure is a
+    // transient issue (unknown field, no per-role table) that step 12 makes non-issues.
+  }
+}
+
 /** Resolve the target session id: explicit arg, or "." / "self" / omitted → current session. */
 function resolveSessionId(arg: string | undefined): string | null {
   if (!arg || arg === "." || arg === "self") return process.env.CLAUDE_CODE_SESSION_ID ?? null;
@@ -100,21 +140,28 @@ export function mark(sessionArg: string | undefined, flags: string[]): number {
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   const changes: string[] = [];
+  const nowIso = now();
+  const mirror: Record<string, unknown> = {};
   try {
     // ADR-0062: `--loop` (setKind) is retired — kind derives from the session's role now, not a
     // per-session flag. `ccs mark` handles lifecycle (completed/archived) only.
     if (flags.includes("--completed") || flags.includes("--complete")) {
-      setCompleted(db, id, !off, now());
+      setCompleted(db, id, !off, nowIso);
       changes.push(`completed=${!off}`);
+      mirror.completed = !off;
     }
     if (flags.includes("--archived") || flags.includes("--archive")) {
-      setArchived(db, id, !off, now());
+      setArchived(db, id, !off, nowIso);
       changes.push(`archived=${!off}`);
+      mirror.archived = !off;
     }
     if (changes.length === 0) {
       console.error("usage: ccs mark [<session-id>|.] --completed|--archived [--off]");
       return 1;
     }
+    // Mirror lifecycle onto the identity too (ADR-0089 step 10) so identity readers see the
+    // same state without waiting for a sensor tick.
+    if (Object.keys(mirror).length > 0) mirrorToIdentity(db, id, mirror, nowIso);
     console.log(`marked ${id.slice(0, 8)}… ${changes.join(" ")}`);
   } finally {
     db.close();
@@ -186,8 +233,10 @@ export function status(sessionArg: string | undefined, value: string | undefined
   const line = off ? null : value!.trim().replace(/\s+/g, " ").slice(0, 50);
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
+  const nowIso = now();
   try {
-    setStatusLine(db, id, line, now());
+    setStatusLine(db, id, line, nowIso);
+    mirrorToIdentity(db, id, { status_line: line }, nowIso);
     console.log(off ? `cleared status on ${id.slice(0, 8)}…` : `status "${line}" → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
@@ -292,7 +341,9 @@ export function stage(sessionArg: string | undefined, value: string | undefined,
         return 1;
       }
     }
-    setStage(db, id, off ? null : v!, now());
+    const nowIso = now();
+    setStage(db, id, off ? null : v!, nowIso);
+    mirrorToIdentity(db, id, { stage: off ? null : v! }, nowIso);
     console.log(
       off
         ? `cleared stage on ${id.slice(0, 8)}… (sensor=${sensor})`
@@ -331,9 +382,14 @@ export function metaSet(sessionArg: string | undefined, key: string | undefined,
   }
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
+  const nowIso = now();
+  const k = key.trim();
   try {
-    setMeta(db, id, key.trim(), off ? null : parsed, now());
-    console.log(off ? `cleared meta.${key.trim()} on ${id.slice(0, 8)}…` : `meta.${key.trim()} = ${value} → ${id.slice(0, 8)}…`);
+    setMeta(db, id, k, off ? null : parsed, nowIso);
+    // Mirror onto the identity's meta blob (ADR-0089 step 10) — durable per-work-item state
+    // lives on identity, so /prwatch:approve setting meta.milad_review reaches identity here.
+    mirrorToIdentity(db, id, { [`meta.${k}`]: off ? null : parsed }, nowIso);
+    console.log(off ? `cleared meta.${k} on ${id.slice(0, 8)}…` : `meta.${k} = ${value} → ${id.slice(0, 8)}…`);
   } finally {
     db.close();
   }

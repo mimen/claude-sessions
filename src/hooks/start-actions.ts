@@ -52,8 +52,18 @@ export const BUILTIN_ACTIONS: Record<string, ActionHandler> = {
   // hook can't run the slash-command itself, so it surfaces the exact command as context — but
   // ONLY on resume and ONLY for a row that has one (deterministic condition, not agent guesswork).
   arm: (_action, ctx) => {
-    if (ctx.source !== "resume" || !ctx.row.resumeCommand) return { context: null };
-    return { context: `Re-arm this loop if it isn't already running: ${ctx.row.resumeCommand}` };
+    // ADR-0089 step 10: always surface the identity_key when present so workers can address
+    // their own identity in `ccs identity …` / `ccs inbox …` calls. Independent of the
+    // resume-command arm behavior below.
+    const bits: string[] = [];
+    const identityKey = ctx.row.identityKey ?? null;
+    if (identityKey) {
+      bits.push(`Your identity_key: ${identityKey}`);
+    }
+    if (ctx.source === "resume" && ctx.row.resumeCommand) {
+      bits.push(`Re-arm this loop if it isn't already running: ${ctx.row.resumeCommand}`);
+    }
+    return { context: bits.length > 0 ? bits.join("\n") : null };
   },
 
   // drain-inbox: EXECUTE the drain (move-on-drain, ADR-0033) and hand the content to the agent.
