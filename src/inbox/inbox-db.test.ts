@@ -28,6 +28,18 @@ describe("inbox CRUD", () => {
     expect(rows[0]!.status).toBe("pending");
   });
 
+  test("drainForIdentity on an unknown identity with 0 messages → [] (no error)", () => {
+    // Punch-list guarantee: `ccs inbox drain <key>` when the key has never
+    // received a message must exit cleanly with count=0, not throw or
+    // insert a phantom row. The library layer returns [] via the early
+    // exit at pending.length === 0 in drainForIdentity.
+    const db = openCatalogue(":memory:");
+    const drained = drainForIdentity(db, "pr-watch:pr-agent:no/repo#never", LATER);
+    expect(drained).toEqual([]);
+    // A repeat drain still returns [] — idempotent.
+    expect(drainForIdentity(db, "pr-watch:pr-agent:no/repo#never", LATER)).toEqual([]);
+  });
+
   test("drainForIdentity atomically flips status; a second drain returns nothing", () => {
     const db = openCatalogue(":memory:");
     sendMessage(db, "k1", "a", "sender", NOW);
