@@ -96,6 +96,26 @@ export function openCatalogue(dbPath: string): Database {
     // migration creates every required column.
     throw new Error(`catalogue schema postcondition failed: ${post.error}`);
   }
+  // ADR-0089 step 3: materialize per-fleet-role identity tables from each role's
+  // identity-schema.toml under ~/.ccs-config/clusters/<c>/roles/<r>/. Additive-only,
+  // idempotent. Only fires when a config root is discoverable — tests using
+  // openCatalogue(":memory:") without a config-root env var get skipped materialization,
+  // which is what we want for isolated unit tests.
+  try {
+    // Lazy-import to avoid a cycle at module load — identity-schema.ts pulls role-files.ts,
+    // which imports from ../inbox/identity-path.ts, which in turn touches other subsystems.
+    // Keeping this lazy makes db.ts safe to import from anywhere.
+    const { materializeAllIdentityTables } = require("./identity-schema.ts");
+    materializeAllIdentityTables(db);
+  } catch (e) {
+    // Fail-open: if the config root isn't readable (fresh install, tests, permission issue),
+    // ccs still boots. Fleet-role writes will surface a friendly error later ("no
+    // identity_<role> table exists"). The alternative — hard-failing on missing config —
+    // makes ccs unusable during setup.
+    if (process.env.CCS_DEBUG_MATERIALIZE) {
+      console.error("ccs: identity-schema materialization skipped:", (e as Error).message);
+    }
+  }
   return db;
 }
 
