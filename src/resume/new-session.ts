@@ -131,21 +131,46 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
   // The session id doubles as the resume handle when launched with `--session-id`, so record
   // it now — `ccs resume` can then revive the session even before it's indexed.
   setResumeId(db, id, id, now);
-  if (opts.cluster) setCluster(db, id, opts.cluster, now);
-  if (opts.role) {
-    const role = opts.role.replace(/^\//, "");
-    setRole(db, id, role, now);
+  // ADR-0089 v33: mint the identity + link the session. Identity carries every identity-
+  // relevant field; the legacy per-session setters below are no-ops that stamp updated_at.
+  const role = opts.role ? opts.role.replace(/^\//, "") : null;
+  if (opts.cluster && role) {
+    const workRef =
+      opts.prRepo && opts.prNumber ? `${opts.prRepo}#${opts.prNumber}` :
+      opts.gusWork ? opts.gusWork : null;
+    const identityKey = workRef ? `${opts.cluster}:${role}:${workRef}` : `${opts.cluster}:${role}`;
+    // Lazy require to keep new-session lean at import time.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { mintIdentity, setIdentityFields } = require("../catalogue/identities.ts");
+    mintIdentity(db, identityKey, { cluster: opts.cluster, role }, now);
+    // Attach the session.
+    db.query("UPDATE catalogue SET identity_key = $k, updated_at = $now WHERE session_id = $id").run({
+      $k: identityKey,
+      $now: now,
+      $id: id,
+    });
+    // Fill in per-role attrs when known at spawn.
+    const attrs: Record<string, unknown> = {};
+    if (opts.prRepo) attrs.pr_repo = opts.prRepo;
+    if (opts.prNumber) attrs.pr_number = opts.prNumber;
+    if (opts.gusWork) attrs.gus_work = opts.gusWork;
+    if (Object.keys(attrs).length > 0) {
+      try {
+        setIdentityFields(db, identityKey, attrs, now);
+      } catch {
+        // Per-role table may not be materialized (test env without config root) — non-fatal.
+      }
+    }
   }
-  // ADR-0062: kind + resume_command are NOT stored — they derive from the session's role
-  // (role.toml). We still stamp `role` (above); rowFrom computes kind/resumeCommand from it.
+  // Legacy setters — no-ops on the dropped columns, but they still touch updated_at and
+  // remain called so any future non-dropped column extensions route through the same path.
+  if (opts.cluster) setCluster(db, id, opts.cluster, now);
+  if (role) setRole(db, id, role, now);
   if (opts.project) setProject(db, id, opts.project, now);
   if (opts.key) setKey(db, id, opts.key, now);
   if (opts.title) setCustomTitle(db, id, opts.title, now);
   if (opts.parent) setParent(db, id, opts.parent, now);
   if (opts.gusWork) setGusWork(db, id, opts.gusWork, now);
-  // Stamp PR facts at birth so the statusline links the PR immediately (ADR-0027). Only
-  // number + repo are known at spawn; branch/state/sha are git-sensed later. Default state
-  // to "open" (a freshly-spawned worker's PR) so the tab colors correctly until then.
   if (opts.prNumber && opts.prRepo) {
     stampPrFacts(db, id, { prNumber: opts.prNumber, prRepo: opts.prRepo, prBranch: "", prState: "open", prHeadSha: "" }, now);
   }
@@ -159,19 +184,19 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
       // owns no work-unit, so skip). Undeclared roles infer PR-then-GUS (resolver default).
       const anchorType = opts.role ? resolveRole(opts.role.replace(/^\//, ""), opts.cluster ?? null)?.workUnit ?? undefined : undefined;
       if (anchorType !== "none") {
-        const wuId = resolveWorkUnit(
-          opts.cluster,
-          { prRepo: opts.prRepo ?? null, prNumber: opts.prNumber ?? null, gusWork: opts.gusWork ?? null, anchorType: anchorType ?? undefined },
-          now,
-          "new-session",
-        );
-        setWorkUnitId(db, id, wuId, now);
-        // ADR-0073: a fresh worker becomes THE embodiment of its work-unit; expire prior siblings.
-        // This is the SPAWN-side of the prefer-newest rule (resume-cluster does the resume-side).
-        supersedeWorkUnitSiblings(db, wuId, id, now);
+        // ADR-0089 v33: identity_key IS the work-unit anchor now. Reuse the same structured
+        // key so supersede sees all siblings on the same PR.
+        const workRef =
+          opts.prRepo && opts.prNumber ? `${opts.prRepo}#${opts.prNumber}` :
+          opts.gusWork ? opts.gusWork : null;
+        const wuId = workRef ? `${opts.cluster}:${opts.role?.replace(/^\//, "")}:${workRef}` : null;
+        if (wuId) {
+          // ADR-0073: a fresh worker becomes THE embodiment of its identity; expire prior siblings.
+          supersedeWorkUnitSiblings(db, wuId, id, now);
+        }
       }
     } catch {
-      /* work-unit store unwritable → leave workUnitId null; sensing/backfill can attach it later */
+      /* store unwritable → best-effort */
     }
   }
 }

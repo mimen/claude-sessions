@@ -80,7 +80,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 32;
+const CATALOGUE_VERSION = 33;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -149,11 +149,9 @@ export function openCatalogue(dbPath: string): Database {
  *     rename)
  * Returns ok on success or { ok: false, error } on any deviation. */
 function validateSchemaPostcondition(db: Database): { ok: true } | { ok: false; error: string } {
-  const required = [
-    "session_id", "role", "cluster", "key", "stage", "meta",
-    "pr_number", "pr_repo", "gus_work", "work_unit_id", "grouping_id",
-    "updated_at",
-  ];
+  // ADR-0089 v33: identity attrs moved to identities + identity_<role> tables. Catalogue
+  // holds only per-run session state now.
+  const required = ["session_id", "identity_key", "meta", "updated_at"];
   const forbidden_pairs = [
     // ADR-0059 renamed system → cluster; both should never coexist.
     ["system", "cluster"],
@@ -720,6 +718,27 @@ function migrate(db: Database): void {
       linkSession.run({ $k: key, $id: r.session_id });
     }
   }
+  // ADR-0089 step 12: drop the legacy per-session identity columns whenever they're still
+  // present. Idempotent (DROP INDEX IF EXISTS + hasColumn guard) so a DB stamped v33 without
+  // the drop actually applied heals on next boot. Sqlite 3.35+ DROP COLUMN.
+  {
+    const legacyIndexes = [
+      "idx_catalogue_event", "idx_catalogue_project", "idx_catalogue_system",
+      "idx_catalogue_cluster", "idx_catalogue_pr_number", "idx_catalogue_pr_repo",
+      "idx_catalogue_key", "idx_catalogue_gus_work", "idx_catalogue_epic",
+      "idx_catalogue_grouping", "idx_catalogue_work_unit",
+    ];
+    for (const idx of legacyIndexes) db.exec(`DROP INDEX IF EXISTS ${idx};`);
+    const legacy = [
+      "role", "cluster", "project", "event",
+      "pr_number", "pr_repo", "pr_branch", "pr_state", "pr_head_sha",
+      "gus_work", "work_unit_id", "grouping_id",
+      "key", "stage", "status_line",
+    ];
+    for (const col of legacy) {
+      if (hasColumn(db, "catalogue", col)) db.exec(`ALTER TABLE catalogue DROP COLUMN ${col};`);
+    }
+  }
 
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
@@ -757,42 +776,80 @@ function roleResumeCommand(role: string | null, cluster: string | null): string 
   return rc;
 }
 
-function rowFrom(r: Record<string, unknown> | null): CatalogueRow | null {
+/**
+ * Build a CatalogueRow from a raw catalogue row. Post-ADR-0089 v33, the identity-relevant
+ * fields live on the `identities` table (universal) and `identity_<role>` (per-fleet-role
+ * attrs). We join them here so consumers see one flat row regardless of what's stored where.
+ *
+ * `db` is optional so pure-in-memory tests without an identity table still work — they get
+ * null for every identity field, which is the correct answer for a loose synthetic row.
+ */
+function rowFrom(r: Record<string, unknown> | null, db?: Database): CatalogueRow | null {
   if (!r) return null;
-  const role = (r.role as string) ?? null;
-  const cluster = (r.cluster as string) ?? null;
-  // ADR-0062: kind + resumeCommand are DERIVED from the role, not stored columns (both dropped
-  // in v29). A role with a resume_command is a "loop"; otherwise a "session".
-  // ADR-D3: resolve by (cluster, role) — two clusters can share role names.
+  const identityKey = (r.identity_key as string) ?? null;
+  let idRow: Record<string, unknown> | null = null;
+  let idAttrs: Record<string, unknown> = {};
+  if (identityKey && db) {
+    try {
+      idRow = db.query("SELECT * FROM identities WHERE identity_key = $k").get({
+        $k: identityKey,
+      }) as Record<string, unknown> | null;
+      if (idRow?.role) {
+        const table = `identity_${(idRow.role as string).replace(/-/g, "_")}`;
+        try {
+          const attrs = db.query(`SELECT * FROM ${table} WHERE identity_key = $k`).get({
+            $k: identityKey,
+          }) as Record<string, unknown> | null;
+          if (attrs) idAttrs = attrs;
+        } catch {
+          /* core identity has no per-role table */
+        }
+      }
+    } catch {
+      /* identities table not present (tests without full schema) — fall through */
+    }
+  }
+  const role = (idRow?.role as string) ?? null;
+  const cluster = (idRow?.cluster as string) ?? null;
   const resumeCommand = roleResumeCommand(role, cluster);
+  const idMeta =
+    typeof idRow?.meta === "string" ? (JSON.parse(idRow.meta) as Record<string, unknown>) : {};
+  const sessionMeta = r.meta ? JSON.parse(r.meta as string) : {};
   return {
     sessionId: r.session_id as string,
     resumeId: (r.resume_id as string) ?? null,
     customTitle: (r.custom_title as string) ?? null,
     kind: resumeCommand ? "loop" : "session",
-    completed: !!r.completed,
-    archived: !!r.archived,
-    parkedTaskId: (r.parked_task_id as string) ?? null,
-    key: (r.key as string) ?? null,
+    // Lifecycle lives on the identity (identity-level retirement cascades to all attached
+    // sessions). For loose sessions with no identity, the flags stayed on catalogue during
+    // migration; we look at both to be defensive.
+    // Prefer session-scoped catalogue value when non-default; falls back to identity for
+    // rows minted via `ccs identity complete/archive` where the catalogue row wasn't touched.
+    completed: !!(r.completed || idRow?.completed),
+    archived: !!(r.archived || idRow?.archived),
+    parkedTaskId: (r.parked_task_id as string) ?? (idRow?.parked_task_id as string) ?? null,
+    // Legacy `key` field — mapped to the same value as identityKey for API-stable consumers.
+    key: identityKey,
     parentSessionId: (r.parent_session_id as string) ?? null,
     role,
     resumeCommand,
-    project: (r.project as string) ?? null,
-    cluster: (r.cluster as string) ?? null,
-    gusWork: (r.gus_work as string) ?? null,
-    workUnitId: (r.work_unit_id as string) ?? null,
-    groupingId: (r.grouping_id as string) ?? null,
-    stage: (r.stage as string) ?? null,
-    statusLine: (r.status_line as string) ?? null,
-    meta: r.meta ? JSON.parse(r.meta as string) : {},
+    project: null,  // dropped in v33 (unused post-refactor)
+    cluster,
+    gusWork: (idAttrs.gus_work as string) ?? null,
+    workUnitId: null,  // dropped in v33 (identity_key supersedes it)
+    groupingId: (idRow?.grouping_id as string) ?? null,
+    stage: (idRow?.stage as string) ?? null,
+    statusLine: (idRow?.status_line as string) ?? null,
+    // Both meta maps flow through — identity meta first, session meta overlays.
+    meta: { ...idMeta, ...sessionMeta },
     notes: (r.notes as string) ?? null,
     updatedAt: (r.updated_at as string) ?? null,
-    prNumber: (r.pr_number as number) ?? null,
-    prRepo: (r.pr_repo as string) ?? null,
-    prBranch: (r.pr_branch as string) ?? null,
-    prState: (r.pr_state as PrState) ?? null,
-    prHeadSha: (r.pr_head_sha as string) ?? null,
-    identityKey: (r.identity_key as string) ?? null,
+    prNumber: (idAttrs.pr_number as number) ?? null,
+    prRepo: (idAttrs.pr_repo as string) ?? null,
+    prBranch: (idAttrs.pr_branch as string) ?? null,
+    prState: (idAttrs.pr_state as PrState) ?? null,
+    prHeadSha: (idAttrs.pr_head_sha as string) ?? null,
+    identityKey,
   };
 }
 
@@ -809,6 +866,7 @@ export function getRow(db: Database, sessionId: string): CatalogueRow | null {
       string,
       unknown
     > | null,
+    db,
   );
 }
 
@@ -817,7 +875,7 @@ export function getAll(db: Database): Map<string, CatalogueRow> {
   const rows = db.query("SELECT * FROM catalogue").all() as Record<string, unknown>[];
   const map = new Map<string, CatalogueRow>();
   for (const r of rows) {
-    const row = rowFrom(r);
+    const row = rowFrom(r, db);
     if (row) map.set(row.sessionId, row);
   }
   return map;
@@ -910,11 +968,13 @@ export function deriveIdentityKey(row: {
  * preserved when nothing else derives.
  */
 function refreshDerivedKey(db: Database, sessionId: string, now: string): void {
+  // ADR-0089 v33: legacy `key` column dropped. Callers that trailed this (setRole,
+  // setCluster, setGusWork, setWorkUnitId) now no-op — identity_key is set explicitly at
+  // spawn (ccs new-session) and by sensors, never derived from the session's row.
+  if (!hasColumn(db, "catalogue", "key")) return;
   const row = getRow(db, sessionId);
   if (!row) return;
   const derived = deriveKey(row);
-  // If derivation yields null (no identity-relevant fields set yet), leave whatever's there —
-  // an explicit setKey caller may have populated it (freeform anchor per ADR-0069).
   if (derived === null) return;
   if (row.key === derived) return;
   db.query("UPDATE catalogue SET key = $k, updated_at = $now WHERE session_id = $id").run({
@@ -928,6 +988,16 @@ function refreshDerivedKey(db: Database, sessionId: string, now: string): void {
 
 function set(db: Database, sessionId: string, col: string, value: unknown, now: string): void {
   ensureRow(db, sessionId, now);
+  // ADR-0089 v33: legacy per-session identity columns are gone. The mirror in commands.ts
+  // routes writes to the identity table (the authoritative store). Set-to-a-dropped-column
+  // becomes a no-op that still stamps updated_at.
+  if (!hasColumn(db, "catalogue", col)) {
+    db.query("UPDATE catalogue SET updated_at = $now WHERE session_id = $id").run({
+      $now: now,
+      $id: sessionId,
+    });
+    return;
+  }
   db.query(`UPDATE catalogue SET ${col} = $v, updated_at = $now WHERE session_id = $id`).run({
     $v: value as never,
     $now: now,
@@ -1025,19 +1095,24 @@ export function getMeta(row: CatalogueRow, key: string): unknown {
   return row.meta[key];
 }
 
-/** Reverse lookup: which sessions are working this GUS work item (a work-unit may span sessions). */
+/** Reverse lookup: which sessions are working this GUS work item.
+ * ADR-0089 v33: gus_work is a per-role identity attr; joins through identity_<role>. */
 export function sessionsForGusWork(db: Database, gusWork: string): string[] {
   return (
-    db.query("SELECT session_id FROM catalogue WHERE gus_work = $g").all({ $g: gusWork }) as {
-      session_id: string;
-    }[]
+    db.query(
+      `SELECT c.session_id FROM catalogue c
+       JOIN identity_pr_agent p ON p.identity_key = c.identity_key
+       WHERE p.gus_work = $g`,
+    ).all({ $g: gusWork }) as { session_id: string }[]
   ).map((r) => r.session_id);
 }
 
-/** Reverse lookup: which sessions belong to this work-unit (ADR-0057). */
+/** Reverse lookup: which sessions belong to this work-unit (ADR-0057).
+ * ADR-0089 v33: work_unit_id was folded into identity_key, so this returns sessions whose
+ * identity_key matches the passed value (callers should just pass identity_key directly). */
 export function sessionsForWorkUnit(db: Database, workUnitId: string): string[] {
   return (
-    db.query("SELECT session_id FROM catalogue WHERE work_unit_id = $wu").all({ $wu: workUnitId }) as {
+    db.query("SELECT session_id FROM catalogue WHERE identity_key = $k").all({ $k: workUnitId }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);
@@ -1052,20 +1127,31 @@ const MRU_ORDER = "ORDER BY updated_at DESC NULLS LAST, session_id";
 
 export function sessionsForRole(db: Database, role: string): string[] {
   return (
-    db.query(`SELECT session_id FROM catalogue WHERE role = $r ${MRU_ORDER}`).all({ $r: role }) as {
-      session_id: string;
-    }[]
+    db.query(
+      `SELECT c.session_id FROM catalogue c
+       JOIN identities i ON i.identity_key = c.identity_key
+       WHERE i.role = $r ${MRU_ORDER.replace("updated_at", "c.updated_at").replace("session_id", "c.session_id")}`,
+    ).all({ $r: role }) as { session_id: string }[]
   ).map((r) => r.session_id);
 }
 
 /** Reverse lookup: sessions on a PR. Repo optional — `#123` matches the number across repos. */
 export function sessionsForPr(db: Database, prNumber: number, prRepo?: string): string[] {
+  const order = MRU_ORDER.replace("updated_at", "c.updated_at").replace("session_id", "c.session_id");
   const rows = prRepo
     ? (db
-        .query(`SELECT session_id FROM catalogue WHERE pr_number = $n AND pr_repo = $repo ${MRU_ORDER}`)
+        .query(
+          `SELECT c.session_id FROM catalogue c
+           JOIN identity_pr_agent p ON p.identity_key = c.identity_key
+           WHERE p.pr_number = $n AND p.pr_repo = $repo ${order}`,
+        )
         .all({ $n: prNumber, $repo: prRepo }) as { session_id: string }[])
     : (db
-        .query(`SELECT session_id FROM catalogue WHERE pr_number = $n ${MRU_ORDER}`)
+        .query(
+          `SELECT c.session_id FROM catalogue c
+           JOIN identity_pr_agent p ON p.identity_key = c.identity_key
+           WHERE p.pr_number = $n ${order}`,
+        )
         .all({ $n: prNumber }) as { session_id: string }[]);
   return rows.map((r) => r.session_id);
 }
@@ -1082,12 +1168,14 @@ export function setSessionEpic(db: Database, sessionId: string, groupingId: stri
   set(db, sessionId, "grouping_id", groupingId, now);
 }
 
-/** Reverse lookup: sessions belonging to a grouping. */
+/** Reverse lookup: sessions belonging to a grouping. Joins through identities post-ADR-0089. */
 export function sessionsForEpic(db: Database, groupingId: string): string[] {
   return (
-    db.query("SELECT session_id FROM catalogue WHERE grouping_id = $g").all({ $g: groupingId }) as {
-      session_id: string;
-    }[]
+    db.query(
+      `SELECT c.session_id FROM catalogue c
+       JOIN identities i ON i.identity_key = c.identity_key
+       WHERE i.grouping_id = $g`,
+    ).all({ $g: groupingId }) as { session_id: string }[]
   ).map((r) => r.session_id);
 }
 
@@ -1145,7 +1233,10 @@ export interface RoleDef {
 // src/roles/role-files.ts. The `RoleDef` type stays (shared shape); the `roles` table + its
 // accessors were removed. The `roles` table is dropped in the migration below.
 
-/** Stamp PR facts sensed from the session's cwd git worktree (VCS-intrinsic only). */
+/** Stamp PR facts. ADR-0089 v33: the pr_* columns are gone from catalogue — this shim
+ * now routes to identity_pr_agent via the session's identity_key. If the session isn't
+ * yet attached to an identity, we can't stamp (no work-ref to derive one from); the
+ * caller must call this after linking. */
 export function stampPrFacts(
   db: Database,
   sessionId: string,
@@ -1153,56 +1244,103 @@ export function stampPrFacts(
   now: string,
 ): void {
   ensureRow(db, sessionId, now);
-  if (facts === null) {
-    db.query(
-      `UPDATE catalogue
-       SET pr_number = NULL, pr_repo = NULL, pr_branch = NULL, pr_state = NULL, pr_head_sha = NULL,
-           updated_at = $now
-       WHERE session_id = $id`,
-    ).run({ $now: now, $id: sessionId });
-  } else {
-    db.query(
-      `UPDATE catalogue
-       SET pr_number = $num, pr_repo = $repo, pr_branch = $branch, pr_state = $state,
-           pr_head_sha = $sha, updated_at = $now
-       WHERE session_id = $id`,
-    ).run({
-      $num: facts.prNumber,
-      $repo: facts.prRepo,
-      $branch: facts.prBranch,
-      $state: facts.prState,
-      $sha: facts.prHeadSha,
-      $now: now,
-      $id: sessionId,
-    });
+  // If catalogue still has the pr_* columns (pre-v33 test DB or transitional state), write
+  // there for backward compat. Otherwise route to identity_pr_agent.
+  if (hasColumn(db, "catalogue", "pr_number")) {
+    if (facts === null) {
+      db.query(
+        `UPDATE catalogue
+         SET pr_number = NULL, pr_repo = NULL, pr_branch = NULL, pr_state = NULL, pr_head_sha = NULL,
+             updated_at = $now
+         WHERE session_id = $id`,
+      ).run({ $now: now, $id: sessionId });
+    } else {
+      db.query(
+        `UPDATE catalogue
+         SET pr_number = $num, pr_repo = $repo, pr_branch = $branch, pr_state = $state,
+             pr_head_sha = $sha, updated_at = $now
+         WHERE session_id = $id`,
+      ).run({
+        $num: facts.prNumber,
+        $repo: facts.prRepo,
+        $branch: facts.prBranch,
+        $state: facts.prState,
+        $sha: facts.prHeadSha,
+        $now: now,
+        $id: sessionId,
+      });
+    }
+    refreshDerivedKey(db, sessionId, now);
+    return;
   }
-  refreshDerivedKey(db, sessionId, now);
+  // Post-v33: no pr_* columns on catalogue. Route to identity_pr_agent via the FK.
+  const row = db.query("SELECT identity_key FROM catalogue WHERE session_id = $sid").get({
+    $sid: sessionId,
+  }) as { identity_key: string | null } | null;
+  const identityKey = row?.identity_key;
+  if (!identityKey) return; // no identity → nowhere to stamp
+  try {
+    if (facts === null) {
+      db.query(
+        `UPDATE identity_pr_agent
+         SET pr_number = NULL, pr_repo = NULL, pr_branch = NULL, pr_state = NULL, pr_head_sha = NULL,
+             updated_at = $now
+         WHERE identity_key = $k`,
+      ).run({ $now: now, $k: identityKey });
+    } else {
+      db.query(
+        `INSERT INTO identity_pr_agent (identity_key, pr_number, pr_repo, pr_branch, pr_state, pr_head_sha, updated_at)
+         VALUES ($k, $num, $repo, $branch, $state, $sha, $now)
+         ON CONFLICT(identity_key) DO UPDATE SET
+           pr_number = excluded.pr_number,
+           pr_repo   = excluded.pr_repo,
+           pr_branch = excluded.pr_branch,
+           pr_state  = excluded.pr_state,
+           pr_head_sha = excluded.pr_head_sha,
+           updated_at = excluded.updated_at`,
+      ).run({
+        $k: identityKey,
+        $num: facts.prNumber,
+        $repo: facts.prRepo,
+        $branch: facts.prBranch,
+        $state: facts.prState,
+        $sha: facts.prHeadSha,
+        $now: now,
+      });
+    }
+    db.query("UPDATE catalogue SET updated_at = $now WHERE session_id = $sid").run({
+      $now: now,
+      $sid: sessionId,
+    });
+  } catch {
+    // identity_pr_agent absent (materialization skipped in isolated tests) — non-fatal
+  }
 }
 
-/** Reverse lookup: which sessions are assigned to this key. */
+/** Reverse lookup: which sessions are assigned to this identity_key. Post-ADR-0089 v33
+ * the legacy `key` column is gone; this now queries the FK directly. */
 export function sessionsForKey(db: Database, key: string): string[] {
   return (
-    db.query("SELECT session_id FROM catalogue WHERE key = $k").all({ $k: key }) as {
+    db.query("SELECT session_id FROM catalogue WHERE identity_key = $k").all({ $k: key }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);
 }
 
-/** Reverse lookup: which sessions are assigned to this project label. */
-export function sessionsForProject(db: Database, project: string): string[] {
-  return (
-    db.query("SELECT session_id FROM catalogue WHERE project = $p").all({ $p: project }) as {
-      session_id: string;
-    }[]
-  ).map((r) => r.session_id);
+/** Reverse lookup: which sessions are assigned to this project label.
+ * ADR-0089 v33: project column dropped; nothing tracks it anymore. Returns []. */
+export function sessionsForProject(_db: Database, _project: string): string[] {
+  return [];
 }
 
-/** Reverse lookup: which sessions are assigned to this cluster grouping. */
+/** Reverse lookup: which sessions belong to this cluster (via identity join). */
 export function sessionsForCluster(db: Database, cluster: string): string[] {
   return (
-    db.query(`SELECT session_id FROM catalogue WHERE cluster = $c ${MRU_ORDER}`).all({ $c: cluster }) as {
-      session_id: string;
-    }[]
+    db.query(
+      `SELECT c.session_id FROM catalogue c
+       JOIN identities i ON i.identity_key = c.identity_key
+       WHERE i.cluster = $c ${MRU_ORDER.replace("updated_at", "c.updated_at").replace("session_id", "c.session_id")}`,
+    ).all({ $c: cluster }) as { session_id: string }[]
   ).map((r) => r.session_id);
 }
 

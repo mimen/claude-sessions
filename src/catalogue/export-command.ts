@@ -36,6 +36,8 @@ export const EXPORT_SCHEMA_VERSION = 1;
 
 export interface CatalogueExportRow {
   sessionId: string;
+  /** ADR-0089 primary identity key. `key` is a legacy alias returning the same value. */
+  identityKey: string | null;
   key: string | null;
   role: string | null;
   cluster: string | null;
@@ -74,6 +76,7 @@ export interface CatalogueExport {
 function toExportRow(r: CatalogueRow): CatalogueExportRow {
   return {
     sessionId: r.sessionId,
+    identityKey: r.identityKey,
     key: r.key,
     role: r.role,
     cluster: r.cluster,

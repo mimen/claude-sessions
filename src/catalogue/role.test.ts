@@ -2,13 +2,8 @@ import { expect, test, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  openCatalogue,
-  getRow,
-  setRole,
-  setCluster,
-  _resetRoleResumeCache,
-} from "./db.ts";
+import { openCatalogue, getRow, _resetRoleResumeCache } from "./db.ts";
+import { mintIdentity } from "./identities.ts";
 
 const NOW = "2026-07-09T00:00:00Z";
 
@@ -16,7 +11,7 @@ const cfgs: string[] = [];
 afterEach(() => {
   for (const d of cfgs.splice(0)) rmSync(d, { recursive: true, force: true });
   delete process.env.CCS_CONFIG_ROOT;
-  _resetRoleResumeCache(); // cache is keyed by role name — clear between temp config roots
+  _resetRoleResumeCache();
 });
 
 /** Write a role.toml under a temp config root and point CCS_CONFIG_ROOT at it. */
@@ -29,19 +24,27 @@ function withRole(cluster: string, role: string, toml: string): void {
   process.env.CCS_CONFIG_ROOT = root;
 }
 
-test("role is a first-class column, set + round-trips", () => {
+/** Post-ADR-0089: attach a session to an identity via the identity table + FK. */
+function seed(db: import("bun:sqlite").Database, sid: string, cluster: string, role: string): string {
+  const key = `${cluster}:${role}`;
+  mintIdentity(db, key, { cluster, role }, NOW);
+  db.query(
+    `INSERT INTO catalogue (session_id, identity_key, updated_at) VALUES ($sid, $k, $now)
+     ON CONFLICT(session_id) DO UPDATE SET identity_key = $k, updated_at = $now`,
+  ).run({ $sid: sid, $k: key, $now: NOW });
+  return key;
+}
+
+test("role reflects the linked identity's role", () => {
   const db = openCatalogue(":memory:");
-  setRole(db, "s1", "pr-agent", NOW);
+  seed(db, "s1", "pr-watch", "pr-agent");
   expect(getRow(db, "s1")!.role).toBe("pr-agent");
 });
 
-test("resume_command + kind DERIVE from the role's role.toml (ADR-0062), not a stored column", () => {
-  // A role that declares a resume_command IS a loop; its sessions read that resumeCommand + kind.
-  // ADR-D3: rows must set BOTH cluster AND role for resume_command derivation to find the file.
+test("resume_command + kind DERIVE from the role's role.toml (ADR-0062)", () => {
   withRole("pr-watch", "control", 'resume_command = "/loop 15m /pr-watch-control"\nwork_unit = "none"\n');
   const db = openCatalogue(":memory:");
-  setCluster(db, "ctrl", "pr-watch", NOW);
-  setRole(db, "ctrl", "control", NOW);
+  seed(db, "ctrl", "pr-watch", "control");
   const row = getRow(db, "ctrl")!;
   expect(row.resumeCommand).toBe("/loop 15m /pr-watch-control");
   expect(row.kind).toBe("loop");
@@ -50,8 +53,7 @@ test("resume_command + kind DERIVE from the role's role.toml (ADR-0062), not a s
 test("a role with no resume_command derives kind 'session'", () => {
   withRole("pr-watch", "pr-agent", 'work_unit = "pr"\n');
   const db = openCatalogue(":memory:");
-  setCluster(db, "w", "pr-watch", NOW);
-  setRole(db, "w", "pr-agent", NOW);
+  seed(db, "w", "pr-watch", "pr-agent");
   const row = getRow(db, "w")!;
   expect(row.resumeCommand).toBeNull();
   expect(row.kind).toBe("session");

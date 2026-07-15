@@ -53,25 +53,32 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * rows (the grouping key), or null if nothing matches.
  */
 function groupingIdForShortName(db: Database, token: string, cluster?: string): string | null {
-  const clusters = cluster ? [cluster] : clustersInPlay(db);
   const lc = token.toLowerCase();
-  for (const c of clusters) {
-    const groupings = allGroupings(c);
-    for (const [id, g] of Object.entries(groupings)) {
-      if (id.toLowerCase() === lc) return id;
-      if (g.shortName && g.shortName.toLowerCase() === lc) return id;
-      if (g.label && g.label.toLowerCase() === lc) return id;
-    }
+  // ADR-0089 v33: read groupings directly from the passed db so in-memory tests work
+  // without a filesystem detour. Filter by cluster when provided.
+  const rows = cluster
+    ? (db.query("SELECT grouping_id, label, short_name FROM groupings WHERE cluster = $c").all({ $c: cluster }) as {
+        grouping_id: string;
+        label: string | null;
+        short_name: string | null;
+      }[])
+    : (db.query("SELECT grouping_id, label, short_name FROM groupings").all() as {
+        grouping_id: string;
+        label: string | null;
+        short_name: string | null;
+      }[]);
+  for (const r of rows) {
+    if (r.grouping_id.toLowerCase() === lc) return r.grouping_id;
+    if (r.short_name && r.short_name.toLowerCase() === lc) return r.grouping_id;
+    if (r.label && r.label.toLowerCase() === lc) return r.grouping_id;
   }
   return null;
 }
 
-/** Distinct clusters that appear on catalogue rows (so epic lookup needn't be told the cluster). */
+/** Distinct clusters — sourced from the identities table post-ADR-0089 v33. */
 function clustersInPlay(db: Database): string[] {
   return (
-    db.query("SELECT DISTINCT cluster FROM catalogue WHERE cluster IS NOT NULL").all() as {
-      cluster: string;
-    }[]
+    db.query("SELECT DISTINCT cluster FROM identities").all() as { cluster: string }[]
   ).map((r) => r.cluster);
 }
 

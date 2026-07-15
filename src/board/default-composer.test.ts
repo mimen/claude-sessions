@@ -2,9 +2,11 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import type { Database } from "bun:sqlite";
 import { runDefaultComposer } from "./default-composer.ts";
 import { readBoard } from "./paths.ts";
-import { openCatalogue, ensureRow, setCluster, setKey, setStage, setStatusLine } from "../catalogue/db.ts";
+import { openCatalogue, ensureRow } from "../catalogue/db.ts";
+import { mintIdentity, setIdentityFields } from "../catalogue/identities.ts";
 
 let tempRoot: string;
 let origCcsRoot: string | undefined;
@@ -27,32 +29,48 @@ afterEach(() => {
   rmSync(tempRoot, { recursive: true, force: true });
 });
 
+const NOW = "2026-07-13T00:00:00Z";
+
+/** Post-ADR-0089: attach a session to an identity + set stage/status_line on the identity. */
+function attach(db: Database, sid: string, identityKey: string, stage?: string, status?: string, now = NOW): void {
+  const [cluster, role] = identityKey.split(":");
+  mintIdentity(db, identityKey, { cluster: cluster!, role: role! }, now);
+  ensureRow(db, sid, now);
+  db.query("UPDATE catalogue SET identity_key = $k, updated_at = $now WHERE session_id = $sid").run({
+    $k: identityKey,
+    $now: now,
+    $sid: sid,
+  });
+  const attrs: Record<string, unknown> = {};
+  if (stage !== undefined) attrs.stage = stage;
+  if (status !== undefined) attrs.status_line = status;
+  if (Object.keys(attrs).length > 0) {
+    try {
+      setIdentityFields(db, identityKey, attrs, now);
+    } catch {
+      // per-role table absent for core roles — universal columns still land via setIdentityFields
+    }
+  }
+}
+
 test("default composer produces board from catalogue", () => {
   const cataloguePath = join(tempRoot, "cache", "catalogue.db");
   const db = openCatalogue(cataloguePath);
-  ensureRow(db, "aaa", "2026-07-13T00:00:00Z");
-  setCluster(db, "aaa", "test-cluster", "2026-07-13T00:00:00Z");
-  setKey(db, "aaa", "pr-watch:pr-agent:heroku/dashboard#123", "2026-07-13T00:00:00Z");
-  setStage(db, "aaa", "building", "2026-07-13T00:00:00Z");
-  setStatusLine(db, "aaa", "running tests", "2026-07-13T00:00:00Z");
-  ensureRow(db, "bbb", "2026-07-13T00:00:00Z");
-  setCluster(db, "bbb", "test-cluster", "2026-07-13T00:00:00Z");
-  setKey(db, "bbb", "pr-watch:pr-agent:heroku/dashboard#456", "2026-07-13T00:00:00Z");
-  setStage(db, "bbb", "in review", "2026-07-13T00:00:00Z");
+  attach(db, "aaa", "test-cluster:pr-agent:heroku/dashboard#123", "building", "running tests");
+  attach(db, "bbb", "test-cluster:pr-agent:heroku/dashboard#456", "in review");
   runDefaultComposer("test-cluster");
   const board = readBoard("test-cluster");
   expect(board).not.toBeNull();
   expect(board?.status).toBe("OK");
   expect(board?.provenance.source).toBe("ccs-default-composer");
   expect(board?.rows.length).toBe(2);
-  const row1 = board?.rows.find((r) => r.identity === "pr-watch:pr-agent:heroku/dashboard#123");
+  const row1 = board?.rows.find((r) => r.identity === "test-cluster:pr-agent:heroku/dashboard#123");
   expect(row1).toBeDefined();
   expect(row1?.sessions.length).toBe(1);
   expect(row1?.sessions[0]?.sessionId).toBe("aaa");
-  // Default composer emits NO pills (ADR-0077: tool doesn't know cluster stage vocabulary).
   expect(row1?.pills.length).toBe(0);
   expect(row1?.description).toBe("running tests");
-  const row2 = board?.rows.find((r) => r.identity === "pr-watch:pr-agent:heroku/dashboard#456");
+  const row2 = board?.rows.find((r) => r.identity === "test-cluster:pr-agent:heroku/dashboard#456");
   expect(row2).toBeDefined();
   expect(row2?.pills.length).toBe(0);
 });
@@ -60,26 +78,18 @@ test("default composer produces board from catalogue", () => {
 test("default composer single-row mode merges into existing board", () => {
   const cataloguePath = join(tempRoot, "cache", "catalogue.db");
   const db = openCatalogue(cataloguePath);
-  ensureRow(db, "aaa", "2026-07-13T00:00:00Z");
-  setCluster(db, "aaa", "test-cluster", "2026-07-13T00:00:00Z");
-  setKey(db, "aaa", "pr-watch:pr-agent:heroku/dashboard#123", "2026-07-13T00:00:00Z");
-  setStage(db, "aaa", "building", "2026-07-13T00:00:00Z");
-  ensureRow(db, "bbb", "2026-07-13T00:00:00Z");
-  setCluster(db, "bbb", "test-cluster", "2026-07-13T00:00:00Z");
-  setKey(db, "bbb", "pr-watch:pr-agent:heroku/dashboard#456", "2026-07-13T00:00:00Z");
-  setStage(db, "bbb", "in review", "2026-07-13T00:00:00Z");
-  setStatusLine(db, "aaa", "initial", "2026-07-13T00:00:00Z");
-  setStatusLine(db, "bbb", "second", "2026-07-13T00:00:00Z");
+  attach(db, "aaa", "test-cluster:pr-agent:heroku/dashboard#123", "building", "initial");
+  attach(db, "bbb", "test-cluster:pr-agent:heroku/dashboard#456", "in review", "second");
   runDefaultComposer("test-cluster");
   let board = readBoard("test-cluster");
   expect(board?.rows.length).toBe(2);
-  // Change #123's status line, single-row recompose, assert only that row was updated.
-  setStatusLine(db, "aaa", "updated", "2026-07-13T00:01:00Z");
-  runDefaultComposer("test-cluster", { identity: "pr-watch:pr-agent:heroku/dashboard#123" });
+  // Update #123's status_line, then single-row recompose.
+  setIdentityFields(db, "test-cluster:pr-agent:heroku/dashboard#123", { status_line: "updated" }, "2026-07-13T00:01:00Z");
+  runDefaultComposer("test-cluster", { identity: "test-cluster:pr-agent:heroku/dashboard#123" });
   board = readBoard("test-cluster");
   expect(board?.rows.length).toBe(2);
-  const row1 = board?.rows.find((r) => r.identity === "pr-watch:pr-agent:heroku/dashboard#123");
+  const row1 = board?.rows.find((r) => r.identity === "test-cluster:pr-agent:heroku/dashboard#123");
   expect(row1?.description).toBe("updated");
-  const row2 = board?.rows.find((r) => r.identity === "pr-watch:pr-agent:heroku/dashboard#456");
+  const row2 = board?.rows.find((r) => r.identity === "test-cluster:pr-agent:heroku/dashboard#456");
   expect(row2?.description).toBe("second");
 });

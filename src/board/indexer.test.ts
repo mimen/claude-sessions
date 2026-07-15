@@ -95,9 +95,16 @@ test("indexer bySession uses session map", () => {
 test("indexer bySession falls back to catalogue when session not in board", () => {
   const cataloguePath = join(tempRoot, "cache", "catalogue.db");
   const db = openCatalogue(cataloguePath);
+  // ADR-0089 v33: attach the session to the identity via FK, not via legacy setters.
+  const { mintIdentity } = require("../catalogue/identities.ts");
+  const key = "pr-watch:pr-agent:heroku/dashboard#789";
+  mintIdentity(db, key, { cluster: "test-cluster", role: "pr-agent" }, "2026-07-13T00:00:00Z");
   ensureRow(db, "ccc", "2026-07-13T00:00:00Z");
-  setCluster(db, "ccc", "test-cluster", "2026-07-13T00:00:00Z");
-  setKey(db, "ccc", "pr-watch:pr-agent:heroku/dashboard#789", "2026-07-13T00:00:00Z");
+  db.query("UPDATE catalogue SET identity_key = $k, updated_at = $now WHERE session_id = $sid").run({
+    $k: key,
+    $now: "2026-07-13T00:00:00Z",
+    $sid: "ccc",
+  });
   const board: Board = {
     status: "OK",
     provenance: { source: "test", at: "2026-07-13T00:00:00Z" },
