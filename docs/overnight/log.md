@@ -13,3 +13,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T11:37Z | ruled-out | `--parent=<self>` and `--parent=<non-uuid>` already rejected; `<uuid-nonexistent>` is intentional forward-ref; 3 regression tests | 9772edf
 2026-07-15T12:07Z | ruled-out | session-complete mirror uses setIdentityFields (explicit UPDATE), not completeIdentity — archived stays 1; regression test | b7f1afb
 2026-07-15T12:37Z | ruled-out | TUI empty groups omitted; retire-cascade groups show total + `✓ done · N` fold; 2 regression tests | c6d7051
+2026-07-15T13:07Z | ruled-out | TUI archive is session-driven; identity-active + all-sessions-archived → hidden (correct); regression test | a727dc9
