@@ -23,3 +23,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T16:37Z | ruled-out | no local-tz APIs in src/; full suite passes under UTC+14 and UTC-11; lock-in test flips process.env.TZ | b36a8ec
 2026-07-15T17:07Z | ruled-out | --role without --cluster inherits cluster from role registry for cluster-scoped roles; standalone-role gap queued | 7415b90
 2026-07-15T17:37Z | ruled-out | cross-cluster role-name collision: cluster-scoped resolveRole is safe; legacy call warns loudly + picks first; 2 regression tests | 3ce3989
+2026-07-15T18:07Z | ruled-out | identity scratch dir recreation idempotent — deterministic path survives user rm -rf; lifecycle regression test | 0270231
