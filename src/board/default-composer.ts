@@ -1,9 +1,10 @@
 import { openCatalogue, getAll, identityKeyOf } from "../catalogue/db.ts";
-import { CATALOGUE_PATH } from "../paths.ts";
+import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import type { Board, BoardRow } from "./types.ts";
 import { readBoard, writeBoard } from "./paths.ts";
 
 export function runDefaultComposer(cluster: string, opts: { identity?: string } = {}): void {
+  ensureDataDir();
   const catalogueDb = openCatalogue(CATALOGUE_PATH());
   const rows: BoardRow[] = [];
   for (const [sid, catRow] of getAll(catalogueDb)) {

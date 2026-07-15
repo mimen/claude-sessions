@@ -116,3 +116,17 @@ test("default composer single-row mode merges into existing board", () => {
   const row2 = board?.rows.find((r) => r.identity === "test-cluster:pr-agent:heroku/dashboard#456");
   expect(row2?.description).toBe("second");
 });
+
+test("default composer on fresh CCS_ROOT (no cache dir exists) should not crash", () => {
+  // Acceptance criterion #5 guard: runDefaultComposer must handle missing parent dirs gracefully.
+  // This can happen if a hook tries to compose before ensureDataDir() has run on the CCS_ROOT.
+  delete process.env.CCS_ROOT;
+  const freshRoot = mkdtempSync(join(tmpdir(), "fresh-ccs-root-"));
+  process.env.CCS_ROOT = freshRoot;
+
+  expect(() => runDefaultComposer("test-cluster")).not.toThrow();
+
+  // Cleanup
+  process.env.CCS_ROOT = tempRoot;
+  rmSync(freshRoot, { recursive: true, force: true });
+});
