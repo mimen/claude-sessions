@@ -11,3 +11,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T10:37Z | fixed | `catalogue export` on fresh CCS_ROOT crashed with SQLITE_CANTOPEN; added ensureDataDir() + subprocess regression + queued systematic sweep | 1389b39
 2026-07-15T11:07Z | fixed | `session set --identity=` refused unknown key (FK-like guard); no more dangling identity refs from typos/retired keys | dd86f2d
 2026-07-15T11:37Z | ruled-out | `--parent=<self>` and `--parent=<non-uuid>` already rejected; `<uuid-nonexistent>` is intentional forward-ref; 3 regression tests | 9772edf
+2026-07-15T12:07Z | ruled-out | session-complete mirror uses setIdentityFields (explicit UPDATE), not completeIdentity — archived stays 1; regression test | b7f1afb
