@@ -80,6 +80,31 @@ test("buildClusterView: group with ALL sessions retired — outer count is total
   expect(sections[done].count).toBe(2);
 });
 
+test("buildClusterView: identity active but all sessions archived → group hidden (matches session-driven archive filter)", () => {
+  // Punch-list check: the TUI's archive filtering is SESSION-driven
+  // (App.tsx `baseRows` filters on lifecycleOf(session)); identity.archived
+  // is never read by the view. If ALL sessions of a fleet or core identity
+  // are archived, the identity effectively vanishes from the view unless
+  // the user toggles showArchived (which is handled upstream of buildClusterView,
+  // so here we simulate that scenario by NOT passing the archived rows).
+  //
+  // This test locks the invariant: buildClusterView never invents a header
+  // for an identity that has zero visible rows, even if the identity is
+  // still "active" upstream. No zombie/phantom headers when the filter
+  // hides everything under a heading.
+  const catMap = new Map<string, CatalogueRow>([
+    // Two archived sessions under an active fleet identity; they are
+    // pre-filtered by the caller (baseRows), so we don't include them here.
+  ]);
+  const epicMap = new Map<string, EpicDisplay>([
+    ["E-active", { name: "Active Epic With All-Archived Members", shortName: "AllArchived", url: null }],
+  ]);
+  const items = buildClusterView([], { catMap, epicMap, openSet: new Set(), collapsedSections: new Set() });
+  const sections = items.filter((i) => i.kind === "section") as any[];
+  // No section for the identity's epic — nothing to show.
+  expect(sections.find((s) => s.section.name === "AllArchived")).toBeUndefined();
+});
+
 test("buildClusterView: empty groups are OMITTED entirely — no `(0)` phantom headers", () => {
   // An epic with zero attached sessions must not emit a group header at all.
   // The count-of-zero lie would confuse users into thinking the retire
