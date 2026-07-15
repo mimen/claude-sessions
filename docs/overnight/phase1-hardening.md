@@ -44,7 +44,7 @@ Format: `- [ ] <one-line failure mode> — <where to look>`
 
 - [x] `session complete <id>` where `id` isn't a UUID (e.g. `agent-abc…`) — does it 404 cleanly? — `src/catalogue/session-command.ts` — fixed in f269500: mark() now refuses unknown ids instead of creating a phantom row via ensureRow.
 - [x] `identity set <key> --unknown_field=x` on a core identity — should error with a "no per-role table" message, not silently no-op — `src/catalogue/identities.ts:222` — verified safe: `setIdentityFields` throws on unknown fields (identities.ts:222) and the CLI catches at identity-command.ts:213-216, returning exit 1 with a stderr message. Added CLI-level regression tests in `identity-command.test.ts` for core + fleet identities (plus a positive case for `meta.<anything>`).
-- [ ] `identity mint` called concurrently for the same key from 2 processes — do we get 2 rows or 1? — check UNIQUE constraint
+- [x] `identity mint` called concurrently for the same key from 2 processes — do we get 2 rows or 1? — check UNIQUE constraint — fixed in 667475b: `mintIdentity` was SELECT-then-INSERT and the losing INSERT hit a PRIMARY KEY conflict; now uses `INSERT ... ON CONFLICT DO NOTHING`. Barrier-synced 2-process race test reproduces the bug on the old code.
 - [ ] `resume <selector>` with a selector that matches 0 sessions — exit code, error text
 - [ ] `resume <selector>` with an ambiguous selector (`#12080` when 2 repos have PR 12080) — behavior + prompt
 - [ ] `board <cluster> --recompose-all` on a fresh cluster with no board.json yet — crash or clean empty?
