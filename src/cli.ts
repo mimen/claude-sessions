@@ -748,7 +748,7 @@ function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
  * `--key`) and skip shape inference. One match → resume-session semantics; many → cluster
  * semantics (one live worker per work-unit). All routes share the single resume core (resumeMany).
  */
-function resumeSelector(args: string[]): number {
+export function resumeSelector(args: string[]): number {
   const token = args.find((a) => !a.startsWith("--"));
   if (!token) {
     console.error(
@@ -767,6 +767,10 @@ function resumeSelector(args: string[]): number {
     : undefined;
   const cluster = flagValue(args, "--in") ?? flagValue(args, "--cluster-scope");
 
+  // On a fresh CCS_ROOT the cache dir doesn't exist yet; opening either DB
+  // without this would raise SQLITE_CANTOPEN and dump a raw stack trace
+  // instead of the intended zero-match error message.
+  ensureDataDir();
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
   try {

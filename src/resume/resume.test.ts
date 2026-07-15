@@ -76,6 +76,33 @@ test("resolveResumeCwd locates the launch dir from the storage folder, not the r
   rmSync(base, { recursive: true, force: true });
 });
 
+test("`ccs resume <bogus>` on a fresh CCS_ROOT exits 1 with a clean 'no match' message, not a SQLite stack trace", async () => {
+  // Regression: `resumeSelector` opened the Index and Catalogue DBs without
+  // calling ensureDataDir() first, so on any fresh CCS_ROOT (no ~/.ccs/cache
+  // yet) the SQLite driver threw SQLITE_CANTOPEN and dumped a raw stack
+  // instead of the intended "didn't match any session" error.
+  const root = mkdtempSync(join(tmpdir(), "ccs-resume-"));
+  const bin = join(process.cwd(), "bin", "ccs");
+  try {
+    const p = Bun.spawn([bin, "resume", "nothing-matches-this-token"], {
+      env: { ...process.env, CCS_ROOT: root },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [rc, stderr] = await Promise.all([
+      p.exited,
+      new Response(p.stderr).text(),
+    ]);
+    expect(rc).toBe(1);
+    // The intended user-facing message should appear; a raw SQLite stack must not.
+    expect(stderr).toContain("didn't match any session");
+    expect(stderr).not.toContain("SQLITE_CANTOPEN");
+    expect(stderr).not.toContain("SQLiteError");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("resolveTarget: pin, auto, and forceOther flip", () => {
   expect(resolveTarget("inline", true)).toBe("inline");
   expect(resolveTarget("cmux", false)).toBe("cmux");
