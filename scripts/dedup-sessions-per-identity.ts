@@ -51,14 +51,18 @@ function cmpNewestFirst(a: Row, b: Row): number {
 let kept = 0, planned = 0;
 const plan: Array<{ ident: string; keep: string; archive: string[] }> = [];
 for (const [ident, group] of byIdent) {
-  group.sort(cmpNewestFirst);
-  const [keeper, ...rest] = group;
-  if (!keeper) continue; // unreachable — Map values are non-empty arrays by construction
-  const toArchive = rest.filter((r) => r.archived === 0);
-  if (toArchive.length === 0) continue;
-  plan.push({ ident, keep: keeper.session_id, archive: toArchive.map((r) => r.session_id) });
+  // IDEMPOTENCY: pick the keeper from ACTIVE rows only. setArchived bumps
+  // updated_at, so a row archived on a previous run would look "newer" than
+  // active peers and would incorrectly become the next keeper — flipping the
+  // dedup direction and never converging.
+  const active = group.filter((r) => r.archived === 0);
+  if (active.length <= 1) continue; // 0 or 1 active row → nothing to dedup
+  active.sort(cmpNewestFirst);
+  const [keeper, ...rest] = active;
+  if (!keeper) continue; // unreachable — active.length > 1 above
+  plan.push({ ident, keep: keeper.session_id, archive: rest.map((r) => r.session_id) });
   kept++;
-  planned += toArchive.length;
+  planned += rest.length;
 }
 
 console.log(`\nDedup plan (${APPLY ? "APPLYING" : "DRY-RUN"}):`);
