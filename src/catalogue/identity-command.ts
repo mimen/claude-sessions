@@ -65,6 +65,7 @@ export function identityCommand(args: string[]): number {
   try {
     switch (sub) {
       case "list":       return doList(db, args.slice(1));
+      case "ls":         return doList(db, args.slice(1));
       case "mint":       return doMint(db, args.slice(1));
       case "set":        return doSet(db, args.slice(1));
       case "complete":   return doLifecycle(db, args.slice(1), "complete");
@@ -87,7 +88,7 @@ function usage(rc = 1): number {
   console.error("ccs identity: manage per-work-item identities.");
   console.error("");
   console.error("  ccs identity <key>                                 show identity (default)");
-  console.error("  ccs identity list [--cluster=…] [--role=…] [--grouping=…] [--kind=…]");
+  console.error("  ccs identity list|ls [--cluster=…] [--role=…] [--grouping=…] [--kind=…]");
   console.error("                    [--completed|--archived]");
   console.error("  ccs identity mint <key> --cluster=c --role=r [--grouping=g]");
   console.error("  ccs identity set <key> --field=value [--other=value …]");

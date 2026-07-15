@@ -72,3 +72,28 @@ describe("ccs identity set — unknown field handling", () => {
     });
   });
 });
+
+describe("ccs identity ls / list — both aliases work", () => {
+  // The top-level `ccs --help` advertises `ccs identity ls`, but the noun's
+  // dispatch only knew `list`. Users copying from the top-level help hit
+  // "no identity 'ls'" (fell through to doRead). Now both work.
+  test("`identity list` runs the list verb", async () => {
+    await withRoot(async (root) => {
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      mintIdentity(db, "pr-watch:pr-agent:o/r#1", { cluster: "pr-watch", role: "pr-agent" }, NOW);
+      db.close();
+      const rc = identityCommand(["list", "--cluster=pr-watch"]);
+      expect(rc).toBe(0);
+    });
+  });
+
+  test("`identity ls` is an alias for `identity list` (matches the ccs --help wording)", async () => {
+    await withRoot(async (root) => {
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      mintIdentity(db, "pr-watch:pr-agent:o/r#1", { cluster: "pr-watch", role: "pr-agent" }, NOW);
+      db.close();
+      const rc = identityCommand(["ls", "--cluster=pr-watch"]);
+      expect(rc).toBe(0);
+    });
+  });
+});
