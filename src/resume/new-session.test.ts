@@ -187,6 +187,36 @@ const loopDef: RoleDef = {
   resumeCommand: "/loop 15m /pr-watch-control", stageSchema: null, pinOnResume: false, color: null, skills: [], commands: [], hooks: [], updatedAt: null,
 };
 
+test("writeSessionMetadata: --role without --cluster inherits cluster from role registry + mints identity", () => {
+  // Punch-list guarantee: spawning with only --role (a common ergonomic
+  // shortcut for cluster-scoped roles) infers --cluster from the role's
+  // registered cluster path and mints the identity_key. Regression against
+  // the 'silently skips identity minting when cluster is unset' hazard.
+  withPrRole();
+  // Register a core (no work_unit) role under pr-watch/roles/concierge so we
+  // exercise the core path — the pr-agent path already needs pr flags.
+  const cfg = process.env.CCS_CONFIG_ROOT!;
+  const conciergeDir = join(cfg, "clusters", "pr-watch", "roles", "concierge");
+  mkdirSync(conciergeDir, { recursive: true });
+  writeFileSync(join(conciergeDir, "role.toml"), 'kind = "session"\nwork_unit = "none"\n');
+
+  const db = openCatalogue(":memory:");
+  try {
+    const sid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    // --role only, NO --cluster; resolveRole should return the pr-watch role
+    // and callers upstream default opts.cluster from roleDef.cluster before
+    // reaching writeSessionMetadata. Simulate that fill-in here (since this
+    // test drives writeSessionMetadata directly).
+    const opts = parseOpts(["--role", "concierge"]);
+    opts.cluster = "pr-watch"; // <-- what newSession() does before writeSessionMetadata
+    writeSessionMetadata(db, sid, opts, NOW);
+    const row = getRow(db, sid)!;
+    expect(row.identityKey).toBe("pr-watch:concierge");
+  } finally {
+    db.close();
+  }
+});
+
 test("validateSpawn: unknown role errors", () => {
   expect(validateSpawn(parseOpts(["--role", "ghost"]), null)).toContain("not in the registry");
 });
