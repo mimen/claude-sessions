@@ -127,6 +127,15 @@ export function openCatalogue(dbPath: string): Database {
       console.error("ccs: groupings migration skipped:", (e as Error).message);
     }
   }
+  // ADR-0089 step 5: migrate filesystem inboxes into the inboxes table.
+  try {
+    const { migrateFileInboxesToDb } = require("../inbox/inbox-migrate.ts");
+    migrateFileInboxesToDb(db);
+  } catch (e) {
+    if (process.env.CCS_DEBUG_MATERIALIZE) {
+      console.error("ccs: inbox migration skipped:", (e as Error).message);
+    }
+  }
   return db;
 }
 
