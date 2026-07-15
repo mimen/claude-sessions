@@ -115,4 +115,64 @@ describe("lifecycle round-trip (acceptance #4)", () => {
       }
     });
   });
+
+  // Acceptance #7: session-level `archive` on a CORE identity's session must NOT
+  // flip the identity itself. Core identities (concierge, control, …) are
+  // long-lived across many session lifetimes; archiving one session must stay
+  // per-session or every peer session attached to the same core identity gets
+  // hidden. The mirror at commands.ts:76 gates lifecycle on identity kind for
+  // this reason. This test drives the whole CLI verb through sessionCommand.
+  test("session archive on a CORE identity's session leaves identity.archived=0", async () => {
+    await withRoot(async (root) => {
+      const dbPath = join(root, "cache", "catalogue.db");
+      const setup = openCatalogue(dbPath);
+      const key = "pr-watch:control"; // 2-part key = core (per key-shape derivation)
+      expect(mintIdentity(setup, key, { cluster: "pr-watch", role: "control" }, NOW)).toBe(true);
+      const sid = "1e1e1e1e-1e1e-4e1e-8e1e-1e1e1e1e1e1e";
+      setup.query("INSERT INTO catalogue (session_id, identity_key, updated_at) VALUES ($sid, $k, $now)").run({
+        $sid: sid,
+        $k: key,
+        $now: NOW,
+      });
+      setup.close();
+
+      // session archive: flips the session's archived flag, but the mirror
+      // must skip lifecycle for core identities.
+      expect(await sessionCommand(["archive", sid])).toBe(0);
+      const db = openCatalogue(dbPath);
+      const srow = db
+        .query("SELECT archived FROM catalogue WHERE session_id = $sid")
+        .get({ $sid: sid }) as { archived: number };
+      expect(srow.archived).toBe(1); // session-level: archived
+      const id = getIdentity(db, key)!;
+      expect(id.archived).toBe(false); // identity: NOT archived — the load-bearing assertion
+      db.close();
+    });
+  });
+
+  // Companion to #7: on a FLEET identity the mirror DOES cascade — a fleet
+  // identity is 1:1 with its work unit, so a session-level completion (the
+  // retire path) is the right signal to also complete the identity. Locks
+  // the split against a future 'tidy up, mirror everything' change.
+  test("session complete on a FLEET identity's session cascades to identity.completed", async () => {
+    await withRoot(async (root) => {
+      const dbPath = join(root, "cache", "catalogue.db");
+      const setup = openCatalogue(dbPath);
+      const key = "pr-watch:pr-agent:owner/repo#42"; // 3-part = fleet
+      expect(mintIdentity(setup, key, { cluster: "pr-watch", role: "pr-agent" }, NOW)).toBe(true);
+      const sid = "2f2f2f2f-2f2f-4f2f-8f2f-2f2f2f2f2f2f";
+      setup.query("INSERT INTO catalogue (session_id, identity_key, updated_at) VALUES ($sid, $k, $now)").run({
+        $sid: sid,
+        $k: key,
+        $now: NOW,
+      });
+      setup.close();
+
+      expect(await sessionCommand(["complete", sid])).toBe(0);
+      const db = openCatalogue(dbPath);
+      const id = getIdentity(db, key)!;
+      expect(id.completed).toBe(true); // fleet cascade
+      db.close();
+    });
+  });
 });
