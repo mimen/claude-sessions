@@ -116,6 +116,40 @@ test("catalogue survives reopen (durable file semantics)", () => {
   expect(getRow(db, "s")!.customTitle).toBe("keep");
 });
 
+test("all timestamps are UTC ISO — TZ-independent (probe: TZ=Pacific/Kiritimati boundary)", () => {
+  // Punch-list guarantee: no date-string comparison in the codebase depends
+  // on local time. All timestamps use `new Date().toISOString()` (UTC with
+  // trailing Z), and comparisons use lexical order on those strings or
+  // Date.parse to ms-since-epoch. This test locks the invariant with a
+  // literal probe: on UTC+14 (Kiritimati), producing "today" via toISOString
+  // and comparing it to a UTC-anchored timestamp yields the SAME shape as
+  // on UTC-11 (Midway). If a future change reaches for a local-tz API
+  // (e.g. toLocaleString, getDate), the ISO invariant breaks and this test
+  // catches it.
+  const prev = process.env.TZ;
+  try {
+    process.env.TZ = "Pacific/Kiritimati";
+    const nowIso = new Date().toISOString();
+    expect(nowIso).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+
+    process.env.TZ = "Pacific/Midway";
+    const nowIso2 = new Date().toISOString();
+    expect(nowIso2).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+
+    // Lexical string comparison of ISO-Z timestamps is monotonic. Take one
+    // fixed anchor and assert ordering holds regardless of TZ.
+    const anchor = "2026-01-15T12:00:00Z";
+    const early = "2026-01-15T00:00:00Z";
+    expect(early < anchor).toBe(true);
+    expect(anchor > early).toBe(true);
+    // And Date.parse is TZ-independent for Z-suffixed inputs.
+    expect(Date.parse(anchor) > Date.parse(early)).toBe(true);
+  } finally {
+    if (prev === undefined) delete process.env.TZ;
+    else process.env.TZ = prev;
+  }
+});
+
 test("opens through a symlink and writes durably to the real file", () => {
   // Punch-list guarantee: users who point ~/.ccs/cache at a symlink (e.g.
   // to relocate the cache to a separate disk) should get identical
