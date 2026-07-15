@@ -38,6 +38,7 @@ import { stateCommand } from "./state/state-command.ts";
 import { groupingCommand } from "./state/grouping-command.ts";
 import { catalogueExportCommand } from "./catalogue/export-command.ts";
 import { identityCommand, identityResolveCommand } from "./catalogue/identity-command.ts";
+import { sessionCommand } from "./catalogue/session-command.ts";
 import { sessionFieldsCommand } from "./catalogue/session-fields-command.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
@@ -246,6 +247,9 @@ export async function main(argv: string[]): Promise<number> {
       // ADR-0078 finish-line: atomic multi-field write for cluster hot-path composers.
       // `ccs session-fields <sid> --json '{...}' [--sensor <name>]`
       return sessionFieldsCommand(args.slice(1));
+    case "session":
+      // ADR-0089 step 7: `ccs session <verb>` — per-session CLI noun. See session-command.ts.
+      return await sessionCommand(args.slice(1));
     case "board":
       return boardCommand(args.slice(1));
     case "resume-session":
