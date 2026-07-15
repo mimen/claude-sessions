@@ -168,6 +168,38 @@ describe("session lifecycle", () => {
       db.close();
     });
   });
+
+  // Regression: `ccs session complete <bogus-id>` used to silently create an
+  // empty phantom row via ensureRow(). It should refuse with a "no such session"
+  // error and leave the catalogue untouched.
+  test("complete on unknown id → error, no phantom row", async () => {
+    await withRoot(async (root) => {
+      // seed *some* row so the cache dir + DB exist, but not the id we'll target
+      seedSession(root, "sess-real");
+      const rc = await sessionCommand(["complete", "agent-does-not-exist"]);
+      expect(rc).toBe(1);
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      const row = db
+        .query("SELECT session_id FROM catalogue WHERE session_id = 'agent-does-not-exist'")
+        .get();
+      expect(row).toBeNull();
+      db.close();
+    });
+  });
+
+  test("archive on unknown id → error, no phantom row", async () => {
+    await withRoot(async (root) => {
+      seedSession(root, "sess-real");
+      const rc = await sessionCommand(["archive", "agent-does-not-exist"]);
+      expect(rc).toBe(1);
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      const row = db
+        .query("SELECT session_id FROM catalogue WHERE session_id = 'agent-does-not-exist'")
+        .get();
+      expect(row).toBeNull();
+      db.close();
+    });
+  });
 });
 
 describe("session help / errors", () => {

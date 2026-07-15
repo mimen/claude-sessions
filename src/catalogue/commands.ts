@@ -149,6 +149,16 @@ export function mark(sessionArg: string | undefined, flags: string[]): number {
   const nowIso = now();
   const mirror: Record<string, unknown> = {};
   try {
+    // Refuse lifecycle mutations on ids that aren't in the catalogue. Without this the
+    // set() → ensureRow() upsert silently creates an empty phantom row for typos like
+    // `ccs session complete agent-abc`.
+    const existing = db
+      .query("SELECT 1 FROM catalogue WHERE session_id = $id")
+      .get({ $id: id });
+    if (!existing) {
+      console.error(`ccs mark: no such session '${id}'`);
+      return 1;
+    }
     // ADR-0062: `--loop` (setKind) is retired — kind derives from the session's role now, not a
     // per-session flag. `ccs mark` handles lifecycle (completed/archived) only.
     if (flags.includes("--completed") || flags.includes("--complete")) {
