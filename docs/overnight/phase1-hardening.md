@@ -34,7 +34,7 @@ Check each on every tick; leave visible boxes here so the loop can see progress.
 - [x] `mark --completed` on a session attached to a **fleet** identity DOES cascade (retire path stays intact). — verified 43f43d0: companion CLI-driven test drives `sessionCommand(["complete", sid])` on a fleet-attached session and asserts identity.completed goes true.
 - [x] `writeSessionMetadata` for the 2nd worker on a PR archives the 1st (supersede) AND keeps the fleet identity alive. — verified 9cb9b7a: existing ADR-0073 supersede test extended with `getIdentity(db, key).archived === false && .completed === false` assertions. Locks the split against a mint-that-resets-flags regression.
 - [x] `dedup-sessions-per-identity.ts --apply` is idempotent (2nd run archives 0). — fixed in d06c4c0: real bug uncovered — setArchived's updated_at bump made previously-archived rows look 'newer' than the active keeper, so run-2 flipped the dedup direction and never converged. Fix filters keeper-selection to active rows only. Subprocess regression test seeds 3 dupes, runs twice, asserts run-2 archives 0.
-- [ ] `backfill-identity-from-cwd.ts --apply` is idempotent.
+- [x] `backfill-identity-from-cwd.ts --apply` is idempotent. — verified 868a74b: script filters candidates to `identity_key IS NULL` rows, so a 2nd run naturally finds none. Subprocess regression seeds a synthetic index+catalogue with a core-role-cwd session, runs the script twice, asserts run-1 attaches 1 and run-2 attaches 0.
 - [ ] `ccs sync-tabs --all` on the live catalogue completes without spawning duplicate cmux tabs (dry-run first).
 - [ ] Punch list has been empty at end-of-tick for 2 consecutive ticks.
 

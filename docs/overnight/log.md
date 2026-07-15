@@ -30,3 +30,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T20:07Z | added | acceptance #7 + #8 CLI-driven core-vs-fleet mirror tests — core session-archive stays per-session; fleet session-complete cascades | 43f43d0
 2026-07-15T20:37Z | added | acceptance #9 supersede-keeps-identity-alive test — 2nd worker archives 1st but shared fleet identity stays active | 9cb9b7a
 2026-07-15T21:07Z | fixed | dedup-sessions-per-identity was NOT idempotent — flipped direction on each run (setArchived bumps updated_at); real bug fixed with active-only keeper selection | d06c4c0
+2026-07-15T21:37Z | added | acceptance #11 backfill-identity-from-cwd idempotency test — script already correct, regression pinned via subprocess | 868a74b
