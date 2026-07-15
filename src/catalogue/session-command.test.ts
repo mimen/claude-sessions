@@ -96,6 +96,64 @@ describe("session set", () => {
     });
   });
 
+  test("--parent=<non-uuid> is rejected — likely wrong arg order or a title", async () => {
+    // Regression: parent() at commands.ts checks SESSION_ID_RE so a bare
+    // string that isn't a UUID (e.g. someone confusing --parent with --title)
+    // must not be silently stored as an id.
+    await withRoot(async (root) => {
+      const uuid = "2ed1df23-e1d3-4381-b285-bad39a4f5c00";
+      seedSession(root, uuid);
+      const rc = await sessionCommand(["set", uuid, "--parent=not-a-uuid"]);
+      expect(rc).toBe(1);
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      const row = db
+        .query("SELECT parent_session_id FROM catalogue WHERE session_id = $sid")
+        .get({ $sid: uuid }) as { parent_session_id: string | null };
+      expect(row.parent_session_id).toBeNull();
+      db.close();
+    });
+  });
+
+  test("--parent=<uuid-shaped but nonexistent> is accepted as a forward reference", async () => {
+    // Intentional: forward references are allowed because a hook may see the
+    // parent id before the parent session is indexed. parent() warns to stderr
+    // (via console.warn) but stores the reference. This test pins that
+    // policy so a future 'refuse all unknown parents' change has to explicitly
+    // update the test.
+    await withRoot(async (root) => {
+      const child = "2ed1df23-e1d3-4381-b285-bad39a4f5c00";
+      const orphanParent = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+      seedSession(root, child);
+      const rc = await sessionCommand(["set", child, `--parent=${orphanParent}`]);
+      expect(rc).toBe(0);
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      const row = db
+        .query("SELECT parent_session_id FROM catalogue WHERE session_id = $sid")
+        .get({ $sid: child }) as { parent_session_id: string | null };
+      expect(row.parent_session_id).toBe(orphanParent);
+      db.close();
+    });
+  });
+
+  test("--parent=<self> is rejected — a session can't be its own parent", async () => {
+    // Regression guarantee: the parent()-level check already rejects
+    // self-parent, and `session set --parent=` routes through it, so this
+    // pins the behavior end-to-end. Prevents cycles and infinite lineage
+    // walks in the TUI / board composers.
+    await withRoot(async (root) => {
+      const uuid = "2ed1df23-e1d3-4381-b285-bad39a4f5c00";
+      seedSession(root, uuid);
+      const rc = await sessionCommand(["set", uuid, `--parent=${uuid}`]);
+      expect(rc).toBe(1);
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      const row = db
+        .query("SELECT parent_session_id FROM catalogue WHERE session_id = $sid")
+        .get({ $sid: uuid }) as { parent_session_id: string | null };
+      expect(row.parent_session_id).toBeNull();
+      db.close();
+    });
+  });
+
   test("--title updates custom_title", async () => {
     await withRoot(async (root) => {
       seedSession(root, "sess-3");
