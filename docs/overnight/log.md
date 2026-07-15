@@ -25,3 +25,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T17:37Z | ruled-out | cross-cluster role-name collision: cluster-scoped resolveRole is safe; legacy call warns loudly + picks first; 2 regression tests | 3ce3989
 2026-07-15T18:07Z | ruled-out | identity scratch dir recreation idempotent — deterministic path survives user rm -rf; lifecycle regression test | 0270231
 2026-07-15T18:37Z | fixed | resume-cluster shouldPin called resolveRole(role, cluster) with cluster undef — real bug (silent runtime throw, TS error); 4/13 typecheck errors resolved | c40a9ed
+2026-07-15T19:07Z | fixed | remaining typecheck errors — 2 more real bugs (default-composer.workUnit, session-command stale setParked import) + mechanical fixes; ACCEPT #1+#2 now hold | 312b87f
