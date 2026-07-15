@@ -47,3 +47,55 @@ test("buildClusterView: core tier first (★), then WORKERS grouped by epic shor
   // (no system) trailing, level 0.
   expect(sections[sections.length - 1].section.name).toBe("(no system)");
 });
+
+test("buildClusterView: group with ALL sessions retired — outer count is total, inner 'done' fold has retired count", () => {
+  // Punch-list guarantee: after a retire cascade, sections don't lie about
+  // their contents. The outer group header shows TOTAL rows (live + retired)
+  // — this is the current, intentional behavior so the user can see there
+  // WAS work here even if it's all done. The nested "✓ done · N" fold then
+  // reveals the retired sessions.
+  const catMap = new Map<string, CatalogueRow>([
+    ["r1", cat({ sessionId: "r1", cluster: "pr-watch", role: "pr-agent", groupingId: "E9", completed: true })],
+    ["r2", cat({ sessionId: "r2", cluster: "pr-watch", role: "pr-agent", groupingId: "E9", archived: true })],
+  ]);
+  const epicMap = new Map<string, EpicDisplay>([
+    ["E9", { name: "All Done", shortName: "AllDone", url: null }],
+  ]);
+  const items = buildClusterView([row("r1"), row("r2")], {
+    catMap, epicMap, openSet: new Set(), collapsedSections: new Set(),
+  });
+  const sections = items.filter((i) => i.kind === "section") as any[];
+  const named = (n: string) => sections.findIndex((s) => s.section.name === n);
+
+  const allDone = named("AllDone");
+  expect(allDone).toBeGreaterThan(-1);
+  // Outer count = total = 2 (both retired).
+  expect(sections[allDone].count).toBe(2);
+
+  // A nested "done" fold appears below with count = 2.
+  const done = sections.findIndex(
+    (s, i) => i > allDone && s.section.name === "done" && s.section.glyph === "✓",
+  );
+  expect(done).toBeGreaterThan(-1);
+  expect(sections[done].count).toBe(2);
+});
+
+test("buildClusterView: empty groups are OMITTED entirely — no `(0)` phantom headers", () => {
+  // An epic with zero attached sessions must not emit a group header at all.
+  // The count-of-zero lie would confuse users into thinking the retire
+  // cascade left orphaned metadata.
+  const catMap = new Map<string, CatalogueRow>([
+    // Only one session in E1; E2 exists in epicMap but has no sessions.
+    ["w1", cat({ sessionId: "w1", cluster: "pr-watch", role: "pr-agent", groupingId: "E1" })],
+  ]);
+  const epicMap = new Map<string, EpicDisplay>([
+    ["E1", { name: "Active Epic", shortName: "Active", url: null }],
+    ["E2", { name: "Ghost Epic", shortName: "Ghost", url: null }],
+  ]);
+  const items = buildClusterView([row("w1")], {
+    catMap, epicMap, openSet: new Set(), collapsedSections: new Set(),
+  });
+  const sections = items.filter((i) => i.kind === "section") as any[];
+  expect(sections.find((s) => s.section.name === "Ghost")).toBeUndefined();
+  expect(sections.find((s) => s.section.name === "Active")).toBeDefined();
+});
