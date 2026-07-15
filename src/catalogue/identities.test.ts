@@ -59,6 +59,77 @@ describe("identity CRUD", () => {
     }
   });
 
+  test("concurrent mint from 2 processes → exactly one row, no throw (barrier-synced)", async () => {
+    // Two OS processes race on the same identity_key. The old code did a
+    // SELECT-then-INSERT; both processes saw "not there" during their SELECT
+    // and both attempted the raw INSERT — the loser hit `UNIQUE constraint
+    // failed: identities.identity_key`. The fix makes the INSERT atomic
+    // (`ON CONFLICT DO NOTHING`) so the loser silently no-ops and mintIdentity
+    // returns false.
+    //
+    // We use a filesystem barrier (both children spin until the barrier file
+    // exists) to make the race deterministically tight: sqlite serializes
+    // writes at the file lock, so even a few-millisecond stagger is enough for
+    // the loser's SELECT to observe the winner's INSERT and skip the write —
+    // masking the bug. The barrier ensures BOTH SELECTs run before EITHER
+    // INSERT commits. Retry 10 rounds to make an accidental serial ordering
+    // vanishingly unlikely.
+    const cfg = mkdtempSync(join(tmpdir(), "id-cfg-"));
+    seedRoles(cfg);
+    try {
+      for (let round = 0; round < 10; round++) {
+        const dbFile = join(cfg, `cat-${round}.db`);
+        const barrier = join(cfg, `barrier-${round}`);
+        openCatalogue(dbFile).close();
+
+        const key = `pr-watch:pr-agent:owner/repo#race-${round}`;
+        const child = `
+          import { existsSync } from "node:fs";
+          import { openCatalogue } from ${JSON.stringify(join(process.cwd(), "src/catalogue/db.ts"))};
+          import { mintIdentity } from ${JSON.stringify(join(process.cwd(), "src/catalogue/identities.ts"))};
+          const db = openCatalogue(${JSON.stringify(dbFile)});
+          // Busy-wait on the barrier file so both processes cross the line at
+          // nearly the same instant.
+          while (!existsSync(${JSON.stringify(barrier)})) {}
+          try {
+            const won = mintIdentity(db, ${JSON.stringify(key)}, { cluster: "pr-watch", role: "pr-agent" }, ${JSON.stringify(NOW)});
+            process.stdout.write(JSON.stringify({ ok: true, won }));
+          } catch (e) {
+            process.stdout.write(JSON.stringify({ ok: false, err: (e as Error).message }));
+          } finally {
+            db.close();
+          }
+        `;
+
+        const pA = Bun.spawn(["bun", "-e", child], { stdout: "pipe", stderr: "pipe" });
+        const pB = Bun.spawn(["bun", "-e", child], { stdout: "pipe", stderr: "pipe" });
+        // Give both processes ~50ms to boot + hit the barrier.
+        await Bun.sleep(50);
+        writeFileSync(barrier, "");
+
+        const [outA, outB] = await Promise.all([
+          new Response(pA.stdout).text(),
+          new Response(pB.stdout).text(),
+        ]);
+        const rA = JSON.parse(outA);
+        const rB = JSON.parse(outB);
+
+        expect(rA.ok).toBe(true);
+        expect(rB.ok).toBe(true);
+        expect([rA.won, rB.won].sort()).toEqual([false, true]);
+
+        const db = openCatalogue(dbFile);
+        const count = (db
+          .query("SELECT COUNT(*) AS n FROM identities WHERE identity_key = $k")
+          .get({ $k: key }) as { n: number }).n;
+        expect(count).toBe(1);
+        db.close();
+      }
+    } finally {
+      rmSync(cfg, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   test("mint a core identity — kind auto-derived from key shape", () => {
     const cfg = mkdtempSync(join(tmpdir(), "id-cfg-"));
     seedRoles(cfg);

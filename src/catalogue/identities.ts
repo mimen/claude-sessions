@@ -143,14 +143,18 @@ export interface MintFields {
  * false. The kind is auto-derived from the identity_key's shape if not explicitly given.
  */
 export function mintIdentity(db: Database, identityKey: string, fields: MintFields, now: string): boolean {
-  const existing = db.query("SELECT 1 FROM identities WHERE identity_key = $k").get({ $k: identityKey });
-  if (existing) return false;
   const kind = fields.kind ?? (identityKey.split(":").length > 2 ? "fleet" : "core");
-  db.query(
+  // Atomic insert-or-noop. The old SELECT-then-INSERT split had a TOCTOU race
+  // where two concurrent processes both saw "not there" during their SELECT
+  // and both attempted INSERT; the loser hit a PRIMARY KEY conflict and threw.
+  // `ON CONFLICT DO NOTHING` collapses the race — the loser's INSERT is a
+  // no-op and `changes` is 0. See identities.test.ts "concurrent mint".
+  const res = db.query(
     `INSERT INTO identities
        (identity_key, cluster, role, kind, grouping_id, stage, status_line,
         completed, archived, parked_task_id, meta, created_at, updated_at)
-     VALUES ($k, $c, $r, $kind, $g, NULL, NULL, 0, 0, NULL, $m, $now, $now)`,
+     VALUES ($k, $c, $r, $kind, $g, NULL, NULL, 0, 0, NULL, $m, $now, $now)
+     ON CONFLICT(identity_key) DO NOTHING`,
   ).run({
     $k: identityKey,
     $c: fields.cluster,
@@ -160,7 +164,7 @@ export function mintIdentity(db: Database, identityKey: string, fields: MintFiel
     $m: JSON.stringify({}),
     $now: now,
   });
-  return true;
+  return res.changes > 0;
 }
 
 /**
