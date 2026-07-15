@@ -26,3 +26,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T18:07Z | ruled-out | identity scratch dir recreation idempotent — deterministic path survives user rm -rf; lifecycle regression test | 0270231
 2026-07-15T18:37Z | fixed | resume-cluster shouldPin called resolveRole(role, cluster) with cluster undef — real bug (silent runtime throw, TS error); 4/13 typecheck errors resolved | c40a9ed
 2026-07-15T19:07Z | fixed | remaining typecheck errors — 2 more real bugs (default-composer.workUnit, session-command stale setParked import) + mechanical fixes; ACCEPT #1+#2 now hold | 312b87f
+2026-07-15T19:37Z | added | acceptance #4 lifecycle round-trip test — mint→attach→complete→archive→unarchive traced end-to-end | 1d132d6
