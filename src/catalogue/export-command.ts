@@ -30,7 +30,7 @@
  */
 import type { Database } from "bun:sqlite";
 import { openCatalogue, getAll, type CatalogueRow } from "./db.ts";
-import { CATALOGUE_PATH } from "../paths.ts";
+import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 
 export const EXPORT_SCHEMA_VERSION = 1;
 
@@ -156,6 +156,9 @@ export function catalogueExportCommand(args: string[]): number {
     return 1;
   }
 
+  // A fresh CCS_ROOT has no ~/.ccs/cache dir yet; opening the DB without this
+  // would crash with SQLITE_CANTOPEN instead of returning {rows: []}.
+  ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   const result = catalogueExport(db, { cluster, role });
   // --json is the default when piped; keep it explicit for future --text
