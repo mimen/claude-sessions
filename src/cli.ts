@@ -437,6 +437,7 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
 
 /** Table of indexed sessions, joined with catalogue metadata + live open-state. */
 function ls(opts: { all: boolean; loops: boolean }): number {
+  ensureDataDir();
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
   try {
@@ -489,6 +490,7 @@ function ls(opts: { all: boolean; loops: boolean }): number {
  * every parent as a root, and a seen-set guards the recursion so a cycle prints once, not forever.
  */
 function tree(_opts: { all: boolean }): number {
+  ensureDataDir();
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
   try {

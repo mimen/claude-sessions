@@ -276,3 +276,15 @@ test("validateSpawn: missing cwd errors", () => {
 test("validateSpawn: a well-formed loop role passes", () => {
   expect(validateSpawn({ printId: false, inline: false, role: "control", cwd: "/tmp", resumeCommand: "/loop 15m /x" }, loopDef)).toBeNull();
 });
+
+test("validateSpawn: standalone role (no cluster in role def, no --cluster arg) is rejected (ADR-0089 identity support)", () => {
+  // Standalone roles are not supported: they would create sessions with NULL identity_key.
+  // Rejection prevents latent data-integrity issues.
+  const standaloneRoleDef: RoleDef = {
+    role: "debug", kind: "session", cluster: null, workUnit: null, homeDir: "/tmp",
+    resumeCommand: null, stageSchema: null, pinOnResume: false, color: null, skills: [], commands: [], hooks: [], updatedAt: null,
+  };
+  const err = validateSpawn({ printId: false, inline: false, role: "debug" }, standaloneRoleDef);
+  expect(err).toContain("standalone role");
+  expect(err).toContain("not supported");
+});

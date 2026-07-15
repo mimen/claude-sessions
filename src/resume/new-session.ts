@@ -241,6 +241,12 @@ export function validateSpawn(opts: NewSessionOpts, roleDef: RoleDef | null): st
   if (opts.role && !roleDef) {
     return `role "${opts.role.replace(/^\//, "")}" is not in the registry — define it with \`ccs roles upsert\` first`;
   }
+  // Standalone roles (registered outside a cluster) are not yet supported — they would create
+  // sessions with NULL identity_key, violating system invariants (ADR-0089 step 33). Either
+  // move the role under a cluster, or use `--cluster <name> --role <role>` explicitly.
+  if (opts.role && roleDef && !opts.cluster && !roleDef.cluster) {
+    return `standalone role "${opts.role.replace(/^\//, "")}" is not supported yet — register it under a cluster instead`;
+  }
   // The cwd we'll launch in must exist (explicit --cwd or the role's home_dir).
   if (opts.cwd && !existsSync(opts.cwd)) {
     return `cwd does not exist: ${opts.cwd}`;
