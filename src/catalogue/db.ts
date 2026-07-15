@@ -841,7 +841,10 @@ export function lifecycleOf(row: CatalogueRow | null): Lifecycle {
  */
 export function identityKeyOf(row: CatalogueRow | null): string | null {
   if (!row) return null;
-  return row.key;
+  // ADR-0089: prefer the new structured identity_key (<cluster>:<role>:<work_ref>) when
+  // populated. Falls back to the legacy `key` column for rows that haven't been touched
+  // since the v32 backfill (rare — the backfill covered every row it could).
+  return row.identityKey ?? row.key;
 }
 
 /**
