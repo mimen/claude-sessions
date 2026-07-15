@@ -78,7 +78,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 31;
+const CATALOGUE_VERSION = 32;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -514,6 +514,165 @@ function migrate(db: Database): void {
       }
     }
   }
+  if (v < 32) {
+    // ADR-0089: identity as a first-class entity. Introduces the universal tables that hold
+    // durable per-work-item state (identities, groupings, inboxes, identity_state,
+    // dispositions, schema_migrations). Sessions keep their columns FOR NOW — the drop of the
+    // now-redundant columns lives in a later step of the identity refactor once every caller
+    // reads through the new tables. This block only ADDS; nothing loses data.
+    //
+    // The catalogue → sessions rename also waits for a later step; renaming the table before
+    // callers migrate would break every SELECT in-flight. Keeping the table name "catalogue"
+    // through the transition is a deliberate stability choice.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS identities (
+        identity_key   TEXT PRIMARY KEY,
+        cluster        TEXT NOT NULL,
+        role           TEXT NOT NULL,
+        kind           TEXT NOT NULL,
+        grouping_id    TEXT,
+        stage          TEXT,
+        status_line    TEXT,
+        completed      INTEGER NOT NULL DEFAULT 0,
+        archived       INTEGER NOT NULL DEFAULT 0,
+        parked_task_id TEXT,
+        meta           TEXT,
+        created_at     TEXT,
+        updated_at     TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_identities_cluster ON identities(cluster);
+      CREATE INDEX IF NOT EXISTS idx_identities_role ON identities(role);
+      CREATE INDEX IF NOT EXISTS idx_identities_grouping ON identities(grouping_id);
+
+      CREATE TABLE IF NOT EXISTS groupings (
+        grouping_id    TEXT PRIMARY KEY,
+        cluster        TEXT NOT NULL,
+        role           TEXT NOT NULL,
+        label          TEXT,
+        url            TEXT,
+        short_name     TEXT,
+        notes          TEXT,
+        context        TEXT,
+        closed         INTEGER NOT NULL DEFAULT 0,
+        meta           TEXT,
+        updated_at     TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_groupings_cluster ON groupings(cluster);
+      CREATE INDEX IF NOT EXISTS idx_groupings_role ON groupings(role);
+
+      CREATE TABLE IF NOT EXISTS inboxes (
+        inbox_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        identity_key   TEXT NOT NULL,
+        from_role      TEXT,
+        message        TEXT NOT NULL,
+        status         TEXT NOT NULL DEFAULT 'pending',
+        created_at     TEXT NOT NULL,
+        drained_at     TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_inboxes_identity_status ON inboxes(identity_key, status);
+
+      CREATE TABLE IF NOT EXISTS identity_state (
+        identity_key   TEXT NOT NULL,
+        key            TEXT NOT NULL,
+        value          TEXT NOT NULL,
+        updated_at     TEXT,
+        PRIMARY KEY (identity_key, key)
+      );
+
+      CREATE TABLE IF NOT EXISTS dispositions (
+        disposition_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cluster        TEXT NOT NULL,
+        subject_key    TEXT NOT NULL,
+        verdict        TEXT NOT NULL,
+        reason         TEXT,
+        decided_by     TEXT,
+        decided_at     TEXT NOT NULL,
+        meta           TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_dispositions_cluster_subject ON dispositions(cluster, subject_key);
+
+      -- Applied per-role-schema migrations, so ccs can tell what's already been done to a
+      -- per-fleet-role identity table (step 3 of the refactor materializes these).
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        role           TEXT NOT NULL,
+        migration_hash TEXT NOT NULL,
+        applied_at     TEXT NOT NULL,
+        PRIMARY KEY (role, migration_hash)
+      );
+
+      -- Add the FK column on catalogue so a session can point at its identity. Nullable for
+      -- loose sessions (no cluster/role — designer scratch, one-off transcripts). The column
+      -- STARTS null and gets populated by the backfill below.
+    `);
+    if (!hasColumn(db, "catalogue", "identity_key")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN identity_key TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_identity ON catalogue(identity_key);");
+
+    // Backfill identities from catalogue rows. For each row that has enough info to identify
+    // a work item (fleet: cluster+role+work_ref; core: cluster+role), mint an identity row and
+    // point the session at it. deriveIdentityKey mirrors deriveKey's structured shape so a
+    // catalogue row that already carries `key = "pr:owner/repo#12345"` maps predictably.
+    const rows = db.query(
+      `SELECT session_id, role, cluster, pr_repo, pr_number, gus_work, work_unit_id,
+              grouping_id, stage, status_line, completed, archived, parked_task_id, meta
+       FROM catalogue`,
+    ).all() as Array<{
+      session_id: string;
+      role: string | null;
+      cluster: string | null;
+      pr_repo: string | null;
+      pr_number: number | null;
+      gus_work: string | null;
+      work_unit_id: string | null;
+      grouping_id: string | null;
+      stage: string | null;
+      status_line: string | null;
+      completed: number;
+      archived: number;
+      parked_task_id: string | null;
+      meta: string | null;
+    }>;
+    const nowIso = new Date().toISOString();
+    const insertIdentity = db.query(
+      `INSERT OR IGNORE INTO identities
+         (identity_key, cluster, role, kind, grouping_id, stage, status_line,
+          completed, archived, parked_task_id, meta, created_at, updated_at)
+       VALUES ($k, $cluster, $role, $kind, $g, $stage, $sl, $c, $a, $p, $m, $now, $now)`,
+    );
+    const linkSession = db.query(
+      "UPDATE catalogue SET identity_key = $k WHERE session_id = $id",
+    );
+    for (const r of rows) {
+      const key = deriveIdentityKey({
+        cluster: r.cluster,
+        role: r.role,
+        prRepo: r.pr_repo,
+        prNumber: r.pr_number,
+        gusWork: r.gus_work,
+        workUnitId: r.work_unit_id,
+      });
+      if (!key) continue; // loose session — leave identity_key null
+      // Fleet vs core: any structured work-ref means fleet; a cluster+role-only tuple is core.
+      const kind = key.split(":").length > 2 ? "fleet" : "core";
+      insertIdentity.run({
+        $k: key,
+        $cluster: r.cluster,
+        $role: r.role,
+        $kind: kind,
+        $g: r.grouping_id,
+        $stage: r.stage,
+        $sl: r.status_line,
+        $c: r.completed,
+        $a: r.archived,
+        $p: r.parked_task_id,
+        $m: r.meta,
+        $now: nowIso,
+      });
+      linkSession.run({ $k: key, $id: r.session_id });
+    }
+  }
+
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -654,6 +813,40 @@ export function deriveKey(row: {
   if (row.gusWork) return `gus:${row.gusWork}`;
   if (row.role) return `role:${row.role}`;
   return null;
+}
+
+/**
+ * ADR-0089: derive the structured identity key `<cluster>:<role>:<work_ref>` for fleet, or
+ * `<cluster>:<role>` for core. Nullable if we don't have enough to pin an identity (e.g. a
+ * loose session with no role/cluster). This is a DIFFERENT SHAPE from deriveKey() — the old
+ * `pr:owner/repo#12345` was a "generic identity fingerprint" that ignored cluster/role; the
+ * new form makes cluster + role first-class so pr-agent on pr-watch and (hypothetical)
+ * pr-agent on another cluster never collide.
+ *
+ * Preferred work_ref shapes, in priority order:
+ *   1. PR (repo#number) — pr-watch's canonical worker
+ *   2. GUS work item — a ticketed-no-PR row
+ *   3. work_unit_id — an opaque work-unit entity
+ * Core roles (no work_ref) collapse to `<cluster>:<role>`.
+ */
+export function deriveIdentityKey(row: {
+  cluster?: string | null;
+  role?: string | null;
+  prRepo?: string | null;
+  prNumber?: number | null;
+  gusWork?: string | null;
+  workUnitId?: string | null;
+}): string | null {
+  if (!row.cluster || !row.role) return null;
+  const workRef =
+    row.prRepo && row.prNumber != null
+      ? `${row.prRepo}#${row.prNumber}`
+      : row.gusWork
+      ? row.gusWork
+      : row.workUnitId
+      ? row.workUnitId
+      : null;
+  return workRef ? `${row.cluster}:${row.role}:${workRef}` : `${row.cluster}:${row.role}`;
 }
 
 /**
