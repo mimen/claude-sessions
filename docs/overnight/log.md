@@ -15,3 +15,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T12:37Z | ruled-out | TUI empty groups omitted; retire-cascade groups show total + `✓ done · N` fold; 2 regression tests | c6d7051
 2026-07-15T13:07Z | ruled-out | TUI archive is session-driven; identity-active + all-sessions-archived → hidden (correct); regression test | a727dc9
 2026-07-15T13:37Z | ruled-out | `inbox drain <key>` on 0 messages exits clean at library + CLI layers; 2 regression tests | 69588c9
+2026-07-15T14:07Z | ruled-out | `cluster init` twice refuses cleanly and leaves existing files untouched; different --role also refused; 2 regression tests | e6cf405
