@@ -59,6 +59,47 @@ describe("identity CRUD", () => {
     }
   });
 
+  describe("mintIdentity rejects malformed identity_key values", () => {
+    // Punch-list guarantee: mintIdentity is the ONE authorized minter for
+    // rows in `identities`. Junk keys (empty, whitespace-only, newlines,
+    // control chars) would poison downstream joins — every "no identity"
+    // lookup could accidentally match a phantom "" row. Reject them at
+    // mint time so the invariant is a schema-level truth.
+    const rejects = [
+      { name: "empty string", key: "" },
+      { name: "whitespace only", key: "   " },
+      { name: "contains newline", key: "pr-watch:pr-agent:x\ny" },
+      { name: "contains null byte", key: "pr-watch:pr-agent:\x00" },
+      { name: "leading whitespace", key: " pr-watch:pr-agent:x" },
+      { name: "trailing whitespace", key: "pr-watch:pr-agent:x " },
+    ];
+    for (const { name, key } of rejects) {
+      test(`rejects: ${name}`, () => {
+        const db = openCatalogue(":memory:");
+        expect(() =>
+          mintIdentity(db, key, { cluster: "pr-watch", role: "pr-agent" }, NOW),
+        ).toThrow(/identity_key/i);
+        const count = (db.query("SELECT COUNT(*) AS n FROM identities").get() as { n: number }).n;
+        expect(count).toBe(0);
+      });
+    }
+
+    test("accepts the canonical shapes we actually use", () => {
+      const db = openCatalogue(":memory:");
+      // These are the real-world keys used across the codebase; all must
+      // continue to mint cleanly after the validation lands.
+      const okKeys = [
+        "pr-watch:pr-agent:heroku/dashboard#12080",
+        "pr-watch:concierge",
+        "pr-watch:pr-agent:W-1234567",
+        "signal-scout:scout:owner.name/repo-name#1",
+      ];
+      for (const k of okKeys) {
+        expect(mintIdentity(db, k, { cluster: k.split(":")[0]!, role: k.split(":")[1]! }, NOW)).toBe(true);
+      }
+    });
+  });
+
   test("concurrent mint from 2 processes → exactly one row, no throw (barrier-synced)", async () => {
     // Two OS processes race on the same identity_key. The old code did a
     // SELECT-then-INSERT; both processes saw "not there" during their SELECT

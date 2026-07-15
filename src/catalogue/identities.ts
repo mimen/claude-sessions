@@ -142,7 +142,27 @@ export interface MintFields {
  * Mint a new identity row. Idempotent — if the key already exists this is a no-op returning
  * false. The kind is auto-derived from the identity_key's shape if not explicitly given.
  */
+/**
+ * Reject identity_keys that would poison downstream joins:
+ *   - empty / whitespace-only (matches every "no identity" lookup by accident)
+ *   - contains any control char (\n, \0, \t, …) — makes debug output unparseable
+ *   - has leading/trailing whitespace — silently mismatches an "identical" key
+ * The canonical shape is `cluster:role[:work_ref]`. This function only guards
+ * against clearly-junk inputs; the cluster/role halves are already validated
+ * by their own slug regexes upstream.
+ */
+function assertIdentityKeyOk(key: string): void {
+  if (key !== key.trim() || key.length === 0) {
+    throw new Error(`identity_key '${key}' must be a non-empty trimmed string`);
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(key)) {
+    throw new Error(`identity_key '${key}' contains a control character`);
+  }
+}
+
 export function mintIdentity(db: Database, identityKey: string, fields: MintFields, now: string): boolean {
+  assertIdentityKeyOk(identityKey);
   const kind = fields.kind ?? (identityKey.split(":").length > 2 ? "fleet" : "core");
   // Atomic insert-or-noop. The old SELECT-then-INSERT split had a TOCTOU race
   // where two concurrent processes both saw "not there" during their SELECT
