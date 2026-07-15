@@ -116,6 +116,17 @@ export function openCatalogue(dbPath: string): Database {
       console.error("ccs: identity-schema materialization skipped:", (e as Error).message);
     }
   }
+  // ADR-0089 step 4: migrate any ~/.ccs/clusters/<c>/cluster/groupings.json files into the
+  // groupings table. Idempotent — rows already in the DB are skipped. Fails-open like the
+  // materialization above.
+  try {
+    const { migrateGroupingsJsonToDb } = require("../state/groupings-migrate.ts");
+    migrateGroupingsJsonToDb(db);
+  } catch (e) {
+    if (process.env.CCS_DEBUG_MATERIALIZE) {
+      console.error("ccs: groupings migration skipped:", (e as Error).message);
+    }
+  }
   return db;
 }
 
