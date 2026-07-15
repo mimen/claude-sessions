@@ -32,3 +32,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T21:07Z | fixed | dedup-sessions-per-identity was NOT idempotent — flipped direction on each run (setArchived bumps updated_at); real bug fixed with active-only keeper selection | d06c4c0
 2026-07-15T21:37Z | added | acceptance #11 backfill-identity-from-cwd idempotency test — script already correct, regression pinned via subprocess | 868a74b
 2026-07-15T22:07Z | added | acceptance #5 resume-cluster dry-run skips null-identity orphans — regression pins the sessionsForCluster join invariant | c0019d4
+2026-07-15T22:37Z | fixed | default-composer missing ensureDataDir on fresh CCS_ROOT — 3rd site in the systematic-sweep footgun family fixed; regression test | 0f64882
