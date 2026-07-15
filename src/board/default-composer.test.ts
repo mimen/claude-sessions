@@ -75,6 +75,29 @@ test("default composer produces board from catalogue", () => {
   expect(row2?.pills.length).toBe(0);
 });
 
+test("default composer on a fresh cluster (no sessions, no prior board.json) → clean empty board", () => {
+  // Punch-list guarantee: `ccs board <cluster> --recompose-all` on a cluster
+  // that has never composed before must not crash. It should write an empty
+  // board.json (creating the ~/.ccs/clusters/<cluster>/cluster/ directory as
+  // needed) and readBoard() should return the OK-with-no-rows shape.
+  const cataloguePath = join(tempRoot, "cache", "catalogue.db");
+  const db = openCatalogue(cataloguePath);
+  // Add some rows for a DIFFERENT cluster so the catalogue isn't literally
+  // empty — verifies the filter, not just the zero-row iteration.
+  attach(db, "sid-other", "other-cluster:pr-agent:o/r#1", "building");
+
+  // No prior board.json for "empty-cluster"; the directory doesn't exist yet.
+  expect(readBoard("empty-cluster")).toBeNull();
+
+  expect(() => runDefaultComposer("empty-cluster")).not.toThrow();
+
+  const board = readBoard("empty-cluster");
+  expect(board).not.toBeNull();
+  expect(board?.status).toBe("OK");
+  expect(board?.rows).toEqual([]);
+  expect(board?.provenance.source).toBe("ccs-default-composer");
+});
+
 test("default composer single-row mode merges into existing board", () => {
   const cataloguePath = join(tempRoot, "cache", "catalogue.db");
   const db = openCatalogue(cataloguePath);
