@@ -841,9 +841,10 @@ export function lifecycleOf(row: CatalogueRow | null): Lifecycle {
  */
 export function identityKeyOf(row: CatalogueRow | null): string | null {
   if (!row) return null;
-  // ADR-0089: prefer the new structured identity_key (<cluster>:<role>:<work_ref>) when
-  // populated. Falls back to the legacy `key` column for rows that haven't been touched
-  // since the v32 backfill (rare — the backfill covered every row it could).
+  // ADR-0089: prefer the new structured identity_key (<cluster>:<role>:<work_ref>) when the
+  // row carries one. The legacy `key` column (`pr:owner/repo#12345` shape) is kept as a
+  // fallback for synthetic rows built by tests or for pre-v32-backfill rows in unusual DB
+  // states. The fallback goes away when the legacy `key` column drops (step 12).
   return row.identityKey ?? row.key;
 }
 

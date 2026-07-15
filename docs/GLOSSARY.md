@@ -12,27 +12,35 @@ inside another definition (so you can always trace the vocabulary).
 
 ## Core identity
 
+Post-ADR-0089, identity is a first-class database row, not a computed tuple.
+
 - **session** — one Claude Code conversation: a transcript file plus its ccs metadata. Identified by a
-  **sessionId**. A session is a *vessel* — it can be closed and resumed; the **identity** it carries
-  outlives it. (`src/index`, `src/catalogue/db.ts`)
+  **sessionId**. A session is a *vessel* — it can be closed and resumed; the **identity** it embodies
+  outlives it. Every session carries an `identity_key` FK pointing at its identity row.
+  (`src/index`, `src/catalogue/db.ts`)
 - **sessionId** — the UUID that names a **session** (the transcript filename, the primary key everywhere).
   (`db.ts:15`)
 - **resumeId** — the UUID passed to `claude --resume`. For a freshly minted **session** it equals the
   **sessionId** (forward reference); for older indexed sessions it can differ. **Liveness** and resume
   check both. (`db.ts:16`, `resume-session.ts:31`)
-- **responsibility** — the durable AGENT-IDENTITY KEY: the tuple `{cluster?, role, epic?, workUnit?}`. It is
-  what a session is *responsible for*, and it survives resume. NOT the same as **identity** (this is the
-  key; identity is the context it indexes). (`inbox/identity-path.ts:22`)
-- **identity** — the runtime context a **responsibility** indexes: its **inbox** and **state**, under
-  `~/.ccs`. "This session's identity" = the durable thing; the session is just its current **embodiment**.
-  (`resolve-levels.ts`, `identity-path.ts:41`)
+- **identity** — a row in the `identities` table (ADR-0089). Carries durable per-work-item state (cluster,
+  role, kind, grouping_id, stage, status_line, lifecycle flags, meta). Two twin sessions on the same PR
+  share ONE identity row. (`catalogue/identities.ts`)
+- **identity_key** — the structured string that names an identity: `<cluster>:<role>:<work_ref>` for a
+  fleet identity, `<cluster>:<role>` for core. Used as PK on `identities` and FK on `sessions`. Human-
+  readable, greppable, URL-safe. (`db.ts:deriveIdentityKey`, `identities.ts`)
+- **per-role attributes** — fleet identities carry a matching row in `identity_<role_slug>` (e.g.
+  `identity_pr_agent`) with role-declared columns. The role's `identity-schema.toml` declares them; ccs
+  materializes the table at boot. Core identities have no such table.
+  (`catalogue/identity-schema.ts`, `roles/<r>/identity-schema.toml`)
+- **kind** — fleet vs core distinction, stored on `identities.kind`. Fleet = many identities per cluster,
+  one per work item (pr-agent). Core = exactly one identity per (cluster, role) tuple (concierge,
+  control). Declared per-role via `work_unit != "none"` in `role.toml`.
 - **embodiment** — a **session** actively running in a **surface**/**workspace** right now. **Liveness** is
   the presence of an embodiment. One identity has at most one live embodiment (see **one-embodiment rule**).
   (`catalogue/lineage.ts`)
-- **lineage** / **predecessors** — earlier **embodiments** of the same **identity** (matched by
-  **identity-key**), oldest→newest, so a fresh session can review prior attempts. (`lineage.ts:44`)
-- **identity-key** — the string form of a **responsibility** used to match **lineage**: `rowWorkUnit(row)`
-  (a **work-unit**) else `role:<role>`. (`lineage.ts:19`)
+- **lineage** / **predecessors** — earlier sessions with the same `identity_key`, oldest→newest, so a fresh
+  session can review prior attempts. (`lineage.ts:44`)
 
 ## Work grouping (the axes a session is filed under)
 

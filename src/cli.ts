@@ -26,9 +26,7 @@ import { checkClusterGate } from "./cluster/manifest.ts";
 import { clusterInitCommand } from "./cluster/init-command.ts";
 import { resolveSelector, type SelectorKind } from "./resume/selector.ts";
 import { syncRoles } from "./roles/sync-roles.ts";
-import { backfillWorkUnits } from "./catalogue/backfill-work-units.ts";
 import { rolesCommand } from "./catalogue/roles-command.ts";
-import { registerSessionCommand } from "./hooks/register-command.ts";
 import { hookRunCommand } from "./hooks/hook-run.ts";
 import { statuslineCommand } from "./hooks/statusline-command.ts";
 import { hooksCommand } from "./hooks/hooks-command.ts";
@@ -79,10 +77,9 @@ Usage:
   ccs board <c> --recompose <key>           Recompose one identity (sync); print the updated row
   ccs board <c> --recompose-all             Recompose the whole board (sync)
   ccs inbox send|bump|drain|pending  Durable per-identity messaging; bump also wakes a live tab (ADR-0028)
-  ccs state get|set|merge  Durable state store (--cluster <c> or --role <r> …) (ADR-0031)
+  ccs state get         Read a sensor state doc (--cluster <c> or --role <r> …)
   ccs hook run <name>   Run a named ccs hook (session-start | stop) from its stdin payload
   ccs self-check <id>   Turn-end self-check sidecar: claude -p decides what state updates the session should have made this turn
-  ccs register-session  (alias for 'ccs hook run session-start')
   ccs roles [ls|upsert|rm]  Manage the roles registry (definitions sync-roles/resume use)
   ccs sync-roles        Materialize the roles registry into ~/.claude (symlink reconcile)
   ccs resume-session <id>  Re-embody one identity (the core op; loops come back running)
@@ -93,7 +90,6 @@ Usage:
   ccs catch-up [<id>|.]  Surface unseen cluster CHANGELOG entries + advance the seen stamp (exit 2 if a restart is needed)
   ccs context-check [--json]  Peak-context guard for long loops: OK/WARN/CRITICAL + directive (autocompact is unreliable in headless)
   ccs decide <c> record|reopen|check|list ...   Decision ledger — record an item's disposition (approve/hold/defer/clear) so it stops re-surfacing.
-                                                Alias: 'ccs suppress' (legacy name, still works)
   ccs bump-session <sid> [--note "..."]  Wake a specific session by id via the live cmux bridge (surface UUID, not workspace ref)
   ccs reap-duplicates [--do]  Detect sessions with >1 live \`claude --resume <sid>\` process and close the duplicate cmux workspaces (dry-run by default)
   ccs --version       Print version
@@ -149,7 +145,6 @@ export async function main(argv: string[]): Promise<number> {
     case "project":
       return project(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "set-cluster":
-    case "system": // back-compat alias
       return setClusterCmd(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "role":
       return role(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
@@ -171,12 +166,7 @@ export async function main(argv: string[]): Promise<number> {
       const value = tail.find((a, i) => !a.startsWith("--") && tail[i - 1] !== "--sensor");
       return stage(args[1], value, tail);
     }
-    case "meta-set": {
-      const pos = args.slice(2).filter((a) => !a.startsWith("--"));
-      return metaSet(args[1], pos[0], pos[1], args.slice(2).filter((a) => a.startsWith("--")));
-    }
     case "new-session":
-    case "new":
       return newSession(args.slice(1));
     case "sync-tabs":
       return syncTabs(args.slice(1));
@@ -205,8 +195,7 @@ export async function main(argv: string[]): Promise<number> {
       const { contextCheckCommand } = await import("./hooks/context-check.ts");
       return contextCheckCommand(args.slice(1));
     }
-    case "decide":  // preferred name (task #37): describes the user action, not the mechanism
-    case "suppress": {  // legacy alias — kept for one release, docs point at 'decide'
+    case "decide": {
       const { suppressCommand } = await import("./state/suppress.ts");
       return suppressCommand(args.slice(1));
     }
@@ -221,8 +210,6 @@ export async function main(argv: string[]): Promise<number> {
       const { reapCommand } = await import("./cmux/reap.ts");
       return reapCommand(args.slice(1));
     }
-    case "register-session":
-      return await registerSessionCommand(); // back-compat alias for `hook run session-start`
     case "statusline":
       // The Claude Code statusLine command (ADR-0027): reads session context on stdin,
       // prints the one-line status from ccs metadata. sync-roles materializes this into
@@ -238,9 +225,6 @@ export async function main(argv: string[]): Promise<number> {
       return rolesCommand(args.slice(1));
     case "sync-roles":
       return syncRolesCmd(args.includes("--dry-run"), args.includes("--hooks"));
-    case "backfill-work-units":
-      // one-time ADR-0057 migration: link existing anchored rows to a work-unit entity
-      return backfillWorkUnits(args.slice(1));
     case "cluster": {
       // ADR-0089 step 8: `ccs cluster <verb>` — the cluster-scoped noun.
       const verb = args[1];

@@ -2,7 +2,19 @@
 
 **Status:** accepted (2026-07-14)
 **Scope:** ccs platform + all clusters that consume it (pr-watch first)
-**Companion scoping doc:** `~/Desktop/ccs-identity-refactor-2026-07-14.html` (transient — this ADR is the durable record)
+**Companion scoping doc:** `docs/history/ccs-identity-refactor-2026-07-14.html` (the source thinking; this ADR is the durable record)
+
+**Supersedes:**
+- **ADR-0011** — a neutral `key` field (this ADR replaces it with the structured `identity_key` FK).
+- **ADR-0013** — GUS+PR structured key (subsumed by `<cluster>:<role>:<work_ref>`).
+- **ADR-0023** — inbox keyed by responsibility (now: inbox rows FK to `identity_key`).
+- **ADR-0024** — identity primary / session embodiment split (now enforced by real FK, not convention).
+- **ADR-0025** — durable state two scopes (identity_state table replaces the filesystem store).
+- **ADR-0026** — agent identity key = responsibility (now: identity is a row, not a tuple).
+- **ADR-0031** — durable state store on the filesystem (moved to DB tables).
+- **ADR-0038** — identity lineage (now trivially "same identity_key"; the `lineage.ts` join keeps working but is a thin projection).
+- **ADR-0057** — work-unit as entity (the half-built promise; this ADR ships it).
+- **ADR-0060** — stage as string column on session (now a column on identities; sessions inherit via FK).
 
 ## Context
 

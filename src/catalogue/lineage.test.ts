@@ -1,15 +1,26 @@
 import { expect, test } from "bun:test";
 import { identityKey, predecessorsOf } from "./lineage.ts";
-import type { CatalogueRow } from "./db.ts";
+import { deriveKey, type CatalogueRow } from "./db.ts";
 
+/**
+ * Synthetic-row helper. Pre-ADR-0089 tests set `key: null` and relied on identityKey() to
+ * compute it via deriveKey(). Post-ADR-0089, identityKey() reads catalogue.key (stored) or
+ * catalogue.identity_key (new FK). This helper auto-populates BOTH shapes from the row's
+ * identity-relevant columns so the tests still exercise the join logic without needing a
+ * live catalogue behind them.
+ */
 function row(over: Partial<CatalogueRow>): CatalogueRow {
-  return {
+  const base: CatalogueRow = {
     sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,
     archived: false, parkedTaskId: null, key: null, parentSessionId: null,
     role: null, resumeCommand: null, project: null, cluster: "pr-watch", gusWork: null, workUnitId: null,
     groupingId: null, statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null, prNumber: null, prRepo: null,
-    prBranch: null, prState: null, prHeadSha: null, ...over,
+    prBranch: null, prState: null, prHeadSha: null, identityKey: null, ...over,
   };
+  // Auto-derive the legacy key (row.key) if the caller didn't set one — mirrors what
+  // refreshDerivedKey does on real writes.
+  if (base.key === null) base.key = deriveKey(base);
+  return base;
 }
 
 test("identityKey: work-unit id wins (ADR-0057), else derived PR, else gus, else role", () => {

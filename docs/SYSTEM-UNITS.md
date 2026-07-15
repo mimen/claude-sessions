@@ -65,17 +65,33 @@ Ground truth: extracted from `src/` on 2026-07-11. `⚠` marks a known issue.
 ## TIER 1 — records & parsing (build on Tier 0)
 
 ### S6 · CatalogueRow + catalogue store  ·  [U2, P0]
-- **Definition:** the durable **catalogue** — one **CatalogueRow** per **session**, with typed
-  QUERY/MUTATION accessors and a versioned **migration** chain. Every metadata axis (**role**, **cluster**/
-  cluster, **key**, **grouping**/epicId, gusWork, PR facts, **stage**, **activity**, **statusLine (field)**,
-  **miladReview**, **buildComplete**, lifecycle) lives here.
+- **Definition:** the durable **catalogue** — one **CatalogueRow** per **session**. Post-ADR-0089, the row
+  carries session-scoped state (custom_title, parent_session_id, resume_id) plus an `identity_key` FK
+  pointing at S6b (identities). Legacy identity-relevant columns (role, cluster, pr_*, gus_work,
+  work_unit_id, grouping_id, key, stage, status_line) still exist on the row for now — dropped in a later
+  refactor step. The mirror keeps them in sync with the identity table.
 - **Inputs:** a DB handle + sessionId; mutations also take a value + `now` timestamp.
-- **Outputs:** a **CatalogueRow** / lists of sessionIds (`sessionsForRole`, `sessionsForSystem`,
-  `sessionsForPr`, …) / void (mutations).
-- **Composes:** S2 (work-unit appears via `rowWorkUnit`).
-- **Code:** `catalogue/db.ts` (CatalogueRow `:15-79`; migrations v1–v19 `:99-321`).
-- **⚠ Status:** migrations v1→v19 have zero tests; v16–v19 were hand-patched on the live DB; v14/v15 DROP
-  tables. This is the single most under-tested high-blast-radius unit.
+- **Outputs:** a **CatalogueRow** (includes `identityKey`) / lists of sessionIds / void (mutations).
+- **Composes:** S6b (identity_key FK).
+- **Code:** `catalogue/db.ts` (CatalogueRow `:15-79`; migrations v1–v32 `:99-717`).
+
+### S6b · Identity + per-role attributes  ·  [U2, P0, ADR-0089]
+- **Definition:** the `identities` table — one row per durable work-item identity, keyed by the structured
+  `<cluster>:<role>:<work_ref>` string. Carries cluster, role, kind (fleet|core), grouping_id, stage,
+  status_line, lifecycle, meta. Fleet roles get a matching row in `identity_<role_slug>` (materialized
+  at boot from `role.toml + identity-schema.toml`) with role-declared attribute columns.
+- **Inputs:** a DB handle + identity_key; mutations take a fields patch (universal vs per-role routed
+  automatically by `setIdentityFields`).
+- **Outputs:** an `IdentityRow` (joined with per-role attrs).
+- **Composes:** S6 (sessions ← identity_key FK), S6c (groupings ← grouping_id FK).
+- **Code:** `catalogue/identities.ts`, `catalogue/identity-schema.ts`, `catalogue/identity-command.ts`.
+
+### S6c · Groupings + inboxes + identity_state  ·  [U2, P1, ADR-0089]
+- **Definition:** three universal tables that hold cross-identity data:
+  - `groupings` — display metadata (label, url, short_name, notes, context) for epics/sprints/etc.
+  - `inboxes` — durable per-identity messages, keyed by identity_key.
+  - `identity_state` — per-identity key/value scratch state.
+- **Code:** `state/groupings-db.ts`, `inbox/inbox-db.ts`, plus their CLI wrappers.
 
 ### S7 · SessionRow + index/reindex  ·  [U1, P1]
 - **Definition:** the ephemeral **index** — parse each transcript file into a **SessionRow** (cwd, project,

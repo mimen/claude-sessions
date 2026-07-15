@@ -32,12 +32,14 @@ The glossary defines every term precisely. Here's the map:
 
 ### Session identity (what a session IS)
 
-- **session** — one Claude Code conversation: a transcript file plus its ccs metadata. The *vessel* — it can close and resume. The **identity** it carries outlives the session.
+Post-ADR-0089, identity is a **first-class entity** with its own table — no longer a computed tuple.
+
+- **session** — one Claude Code conversation: a transcript file plus its ccs metadata. The *vessel* — it can close and resume. Sessions carry an **identity_key** FK pointing at the durable identity they embody.
 - **sessionId** — the UUID naming a session (the transcript filename, the PK everywhere).
-- **responsibility** — the durable agent-identity key: `{cluster?, role, epic?, workUnit?}`. What a session is *responsible for*. It survives resume.
-- **identity** — the runtime context a **responsibility** indexes: its **inbox** and **state**, under `~/.ccs`. "This session's identity" = the durable thing the session embodies.
+- **identity** — a row in the `identities` table (ADR-0089). Structured key `<cluster>:<role>:<work_ref>` for fleet, `<cluster>:<role>` for core. Carries durable per-work-item state: role, cluster, kind (`fleet` | `core`), stage, status_line, grouping_id, completed/archived flags, meta blob. Two twin sessions on the same PR share ONE identity row.
+- **per-role attributes** — fleet identities have an additional row in `identity_<role>` (e.g. `identity_pr_agent`) with role-declared columns (`pr_repo`, `pr_number`, `gus_work`, …). The role's `identity-schema.toml` declares the columns; ccs materializes the table at boot.
 - **embodiment** — a session actively running in a **surface** (cmux pane) right now. **Liveness** is the presence of an embodiment. One identity has at most one live embodiment (the **one-embodiment rule**).
-- **lineage** — earlier embodiments of the same identity, oldest→newest, so a fresh session can review prior attempts.
+- **lineage** — earlier sessions with the same identity_key, oldest→newest, so a fresh session can review prior attempts.
 
 ### Work grouping (how sessions are filed)
 
@@ -59,13 +61,21 @@ The glossary defines every term precisely. Here's the map:
 
 ### Stores (where state lives)
 
-- **catalogue** — the durable, user/agent-authored metadata store (SQLite, `~/.ccs/cache/catalogue.db`). One **row** per session (**CatalogueRow**). Survives **index** rebuilds.
-- **CatalogueRow** — the metadata record for a session: identity axes (role, cluster, key, epicId, gusWork), PR facts, **stage**/**activity**, **statusLine**, **meta** (generic metadata map per ADR-0060), lifecycle bits.
+The full backbone lives in one SQLite file (`~/.ccs/cache/catalogue.db`) as of ADR-0089. Only sensor outputs remain as JSON files.
+
+- **catalogue** — the SQLite file that holds the whole model:
+  - `sessions` (was `catalogue` — the table name stays for now) — one row per Claude Code session; carries `identity_key` FK, custom_title, parent, timestamps.
+  - `identities` — one row per durable work-item identity (universal columns: cluster, role, kind, grouping_id, stage, status_line, lifecycle flags, meta).
+  - `identity_<role>` — per-fleet-role attribute tables, materialized at boot from each role's `identity-schema.toml`.
+  - `groupings` — display metadata for epics/sprints/whatever the role's `grouping_type` calls them.
+  - `inboxes` — durable per-identity messages, keyed by `identity_key`.
+  - `identity_state` — per-identity key/value scratch state.
+  - `dispositions` — decision ledger.
 - **index** — the ephemeral cache of parsed transcripts (SQLite, `~/.ccs/cache/index.db`). Dropped and rebuilt on schema bump; pure cache, reconstructable from transcript files. One **SessionRow** per transcript.
 - **SessionRow** — the parsed-transcript record: cwd, project, timestamps, **resumeId**, cost/tokens, user-turns, tick cadence, resolved **title**.
-- **state doc** — a durable JSON file wrapped in an envelope `{schemaVersion, updatedAt, source, data}`, written atomically (temp+rename), corrupt files quarantined.
-- **cluster state** — **state docs** scoped to a cluster (`~/.ccs/clusters/<c>/cluster/*.json`), e.g. **board**/**gate**/**pending**, **grouping** display metadata.
-- **inbox** — a durable per-identity file mailbox. Delivery is independent of liveness; a **message** is written atomically, then **drained** move-on-drain into `processed/`.
+- **state doc** — a durable JSON file wrapped in an envelope `{schemaVersion, updatedAt, source, data}`, written atomically (temp+rename). Used for sensor outputs (board.json, gate.json, poll.json, etc.) — everything else moved to the DB.
+- **cluster state** — sensor-output JSON files under `~/.ccs/clusters/<c>/cluster/*.json`. Regenerated every tick; read-side only (writes are the engine's).
+- **identity scratch dir** — deterministic per-identity blob storage at `~/.ccs/clusters/<c>/identities/<role>/<slug>/`. Workers write judgment.json, screenshots, etc. here; ccs never inspects. `ccs identity path <key>` returns it.
 
 ### cmux embodiment (the terminal substrate)
 

@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readClusterDoc } from "./cluster-state.ts";
-
-// The CLI resolves the runtime root from HOME, so we point HOME at a temp dir per test.
 import { stateCommand } from "./state-command.ts";
+
+// ADR-0089 narrowed `ccs state` to `get` only — writes go through
+// ccs identity/session/inbox now. These tests cover the read path + arg-parsing regressions.
 
 function withHome<T>(fn: (root: string) => T): T {
   const home = mkdtempSync(join(tmpdir(), "ccs-cli-"));
@@ -19,30 +19,75 @@ function withHome<T>(fn: (root: string) => T): T {
   }
 }
 
-describe("ccs state CLI arg parsing", () => {
-  test("doc name is NOT confused with a flag's value (regression)", () => {
+function seedCluster(root: string, cluster: string, name: string, obj: unknown, source = "sensor"): void {
+  const dir = join(root, "clusters", cluster, "cluster");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `${name}.json`),
+    JSON.stringify({ schemaVersion: 1, updatedAt: "2026-07-14T00:00:00Z", source, data: obj }),
+  );
+}
+
+describe("ccs state get", () => {
+  test("reads a seeded cluster-scoped doc", () => {
     withHome((root) => {
-      // `--cluster pr-watch board`: 'board' is the name, 'pr-watch' is --cluster's value
-      const rc = stateCommand(["set", "--cluster", "pr-watch", "board", "--json", '{"tick":1}', "--source", "control"]);
-      expect(rc).toBe(0);
-      const doc = readClusterDoc(root, "pr-watch", "board");
-      expect(doc?.data).toEqual({ tick: 1 });
-      expect(doc?.source).toBe("control");
+      seedCluster(root, "pr-watch", "board", { tick: 1 });
+      const before = console.log;
+      const captured: string[] = [];
+      console.log = (m: string) => captured.push(m);
+      try {
+        const rc = stateCommand(["get", "--cluster", "pr-watch", "board"]);
+        expect(rc).toBe(0);
+        expect(JSON.parse(captured[0]!).data).toEqual({ tick: 1 });
+      } finally {
+        console.log = before;
+      }
     });
   });
 
-  test("name works regardless of flag order", () => {
-    withHome((root) => {
-      stateCommand(["set", "board", "--cluster", "pr-watch", "--json", '{"n":2}']);
-      expect(readClusterDoc(root, "pr-watch", "board")?.data).toEqual({ n: 2 });
+  test("prints null when the doc is absent", () => {
+    withHome(() => {
+      const before = console.log;
+      const captured: string[] = [];
+      console.log = (m: string) => captured.push(m);
+      try {
+        const rc = stateCommand(["get", "--cluster", "pr-watch", "no-such-doc"]);
+        expect(rc).toBe(0);
+        expect(captured[0]).toBe("null");
+      } finally {
+        console.log = before;
+      }
     });
   });
 
-  test("merge only touches given fields", () => {
+  test("name is not confused with a flag value regardless of order", () => {
     withHome((root) => {
-      stateCommand(["set", "--cluster", "pr-watch", "board", "--json", '{"a":1,"b":2}']);
-      stateCommand(["merge", "--cluster", "pr-watch", "board", "--json", '{"b":20}']);
-      expect(readClusterDoc(root, "pr-watch", "board")?.data).toEqual({ a: 1, b: 20 });
+      seedCluster(root, "pr-watch", "board", { tick: 2 });
+      const before = console.log;
+      const captured: string[] = [];
+      console.log = (m: string) => captured.push(m);
+      try {
+        stateCommand(["get", "board", "--cluster", "pr-watch"]);
+        expect(JSON.parse(captured[0]!).data).toEqual({ tick: 2 });
+      } finally {
+        console.log = before;
+      }
+    });
+  });
+});
+
+describe("ccs state — write verbs removed", () => {
+  test("set errors out (ADR-0089 removed it)", () => {
+    withHome(() => {
+      const rc = stateCommand(["set", "--cluster", "pr-watch", "board", "--json", '{"n":1}']);
+      expect(rc).toBe(1);
+    });
+  });
+
+  test("merge errors out (ADR-0089 removed it)", () => {
+    withHome(() => {
+      const rc = stateCommand(["merge", "--cluster", "pr-watch", "board", "--json", '{"n":1}']);
+      expect(rc).toBe(1);
     });
   });
 });

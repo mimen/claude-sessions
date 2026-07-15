@@ -1,25 +1,22 @@
 import type { Database } from "bun:sqlite";
 import type { CatalogueRow } from "./db.ts";
-import { getAll, deriveKey } from "./db.ts";
+import { getAll, identityKeyOf } from "./db.ts";
 
 /**
- * Identity lineage (ADR-0038): a durable identity (responsibility) may have had SEVERAL session
- * embodiments over time. A fresh embodiment rehydrates from its predecessors — reviewing what
- * past bodies did/tried/concluded — instead of rediscovering it. This resolves an identity to
- * its ordered prior embodiments + each one's transcript path.
+ * Identity lineage (ADR-0038): a durable identity may have had SEVERAL session embodiments over
+ * time. A fresh embodiment rehydrates from its predecessors — reviewing what past bodies did/
+ * tried/concluded — instead of rediscovering it. This resolves an identity to its ordered prior
+ * embodiments + each one's transcript path.
  *
- * The identity KEY is the responsibility (ADR-0026/0030): a fleet worker's work-unit
- * (pr:repo#num / gus:W-…), or a core role's role name. Grouping on that key is what makes the
- * lineage findable without a stored predecessor pointer — session id is disposable, the
- * responsibility is durable.
+ * ADR-0089 (2026-07-14): the identity key is stored as `catalogue.identity_key` — a real FK
+ * into the identities table. Callers here read it via `identityKeyOf(row)` from db.ts (which
+ * prefers the new structured key). The legacy `deriveKey` fallback is gone — a row without an
+ * identity_key is a loose session that has no lineage anyway.
  */
 
-/** The responsibility key a row belongs to. ADR-D1 (2026-07-14): ccs is the single source of
- * truth. On stored rows the `key` column is authoritative (auto-derived on every mutation via
- * `refreshDerivedKey`); this function falls back to computing from the row's identity-relevant
- * columns for callers that pass a pure/synthetic row without persistence. */
+/** The identity key a row belongs to (thin re-export so lineage callers keep a stable name). */
 export function identityKey(row: CatalogueRow): string | null {
-  return row.key ?? deriveKey(row);
+  return identityKeyOf(row);
 }
 
 export interface Embodiment {
