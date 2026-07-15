@@ -103,10 +103,9 @@ export function listGroupings(db: Database, filters: ListFilters = {}): Grouping
     params.$closed = filters.closed ? 1 : 0;
   }
   const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-  const rows = db.query(`SELECT * FROM groupings ${where} ORDER BY grouping_id`).all(params) as Record<
-    string,
-    unknown
-  >[];
+  const rows = db.query(`SELECT * FROM groupings ${where} ORDER BY grouping_id`).all(
+    params as never,
+  ) as Record<string, unknown>[];
   return rows.map(fromRow);
 }
 

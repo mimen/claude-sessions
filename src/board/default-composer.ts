@@ -15,7 +15,12 @@ export function runDefaultComposer(cluster: string, opts: { identity?: string } 
     // Clusters that want a pill provide their own composer via cluster.toml's `board` entry.
     rows.push({
       identity,
-      workUnit: { kind: catRow.prNumber ? "pr" : "gus", ...catRow.workUnit },
+      workUnit: {
+        kind: catRow.prNumber ? "pr" : "gus",
+        ...(catRow.prNumber ? { prNumber: catRow.prNumber, prRepo: catRow.prRepo } : {}),
+        ...(catRow.gusWork ? { gusWork: catRow.gusWork } : {}),
+        ...(catRow.workUnitId ? { workUnitId: catRow.workUnitId } : {}),
+      },
       sessions: [{ sessionId: sid, isPrimary: true, lastActivity: catRow.updatedAt ?? "" }],
       pills: [],
       description: catRow.statusLine ?? null,

@@ -11,7 +11,7 @@ function row(over: Partial<CatalogueRow>): CatalogueRow {
     parentSessionId: null, role: null, resumeCommand: null, project: null,
     cluster: "pr-watch", gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null,
     updatedAt: "2026-07-10T11:59:00Z", // fresh by default
-    prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null,
+    prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, identityKey: null,
     ...over,
   };
 }

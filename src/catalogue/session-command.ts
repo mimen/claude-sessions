@@ -21,7 +21,7 @@ import { openCatalogue, getRow } from "./db.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import type { Database } from "bun:sqlite";
 import { getIdentity } from "./identities.ts";
-import { rename, mark, parent, setClusterCmd, setParked as _sp } from "./commands.ts";
+import { rename, mark, parent, setClusterCmd } from "./commands.ts";
 import { newSession } from "../resume/new-session.ts";
 
 function now(): string {

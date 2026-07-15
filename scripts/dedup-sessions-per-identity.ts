@@ -53,6 +53,7 @@ const plan: Array<{ ident: string; keep: string; archive: string[] }> = [];
 for (const [ident, group] of byIdent) {
   group.sort(cmpNewestFirst);
   const [keeper, ...rest] = group;
+  if (!keeper) continue; // unreachable — Map values are non-empty arrays by construction
   const toArchive = rest.filter((r) => r.archived === 0);
   if (toArchive.length === 0) continue;
   plan.push({ ident, keep: keeper.session_id, archive: toArchive.map((r) => r.session_id) });

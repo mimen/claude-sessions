@@ -125,9 +125,9 @@ export function listIdentities(
   if (filters.completed !== undefined) { clauses.push("completed = $c"); params.$c = filters.completed ? 1 : 0; }
   if (filters.archived !== undefined)  { clauses.push("archived = $a");  params.$a = filters.archived ? 1 : 0; }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const rows = db.query(`SELECT identity_key FROM identities ${where} ORDER BY identity_key`).all(params) as {
-    identity_key: string;
-  }[];
+  const rows = db.query(`SELECT identity_key FROM identities ${where} ORDER BY identity_key`).all(
+    params as never,
+  ) as { identity_key: string }[];
   return rows.map((r) => getIdentity(db, r.identity_key, configRoot)!);
 }
 
@@ -260,7 +260,7 @@ export function setIdentityFields(
     for (const c of cols) {
       params[`$${c}`] = normalizeValue(c, universalPatch[c]);
     }
-    db.query(`UPDATE identities SET ${setClauses}, updated_at = $now WHERE identity_key = $k`).run(params);
+    db.query(`UPDATE identities SET ${setClauses}, updated_at = $now WHERE identity_key = $k`).run(params as never);
     changed += cols.length;
   }
 
@@ -296,7 +296,7 @@ export function setIdentityFields(
     }
     db.query(
       `UPDATE ${schema.tableName} SET ${setClauses}, updated_at = $now WHERE identity_key = $k`,
-    ).run(params);
+    ).run(params as never);
     changed += cols.length;
   }
 

@@ -100,7 +100,7 @@ test("a manifest with no engine/version/requires_ccs parses with nulls (legacy c
 });
 
 const manifest = (over: Partial<ClusterManifest> = {}): ClusterManifest => ({
-  name: "c", engineDir: null, sensePath: null, version: null, requiresCcs: null, groupingType: "epic", ...over,
+  name: "c", engineDir: null, sensePath: null, boardPath: null, version: null, requiresCcs: null, groupingType: "epic", ...over,
 });
 
 test("gate: no requirement → ok", () => {

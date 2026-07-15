@@ -27,6 +27,7 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   prBranch: null,
   prState: null,
   prHeadSha: null,
+  identityKey: null,
   ...over,
 });
 

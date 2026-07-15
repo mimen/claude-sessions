@@ -62,5 +62,6 @@ export function syntheticRow(facts: {
     cluster: facts.cluster ?? null, gusWork: facts.gusWork ?? null, workUnitId: null, groupingId: facts.groupingId ?? null,
     statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null, prNumber: facts.prNumber ?? null,
     prRepo: facts.prRepo ?? null, prBranch: null, prState: null, prHeadSha: null,
+    identityKey: null,
   };
 }
