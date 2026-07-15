@@ -29,7 +29,7 @@ Check each on every tick; leave visible boxes here so the loop can see progress.
 - [ ] Every subcommand printed by `ccs --help` has been invoked at least once against a fresh `:memory:` or tmp-dir DB without a crash. Track this in `docs/overnight/surface-coverage.md`.
 - [ ] Round-trip lifecycle: `identity mint` → `session set --identity` → `session complete` → `session archive` → `session unarchive` → `identity ls` reflects each step. Add as a real test.
 - [ ] `resume-cluster pr-watch --dry-run` completes without spawning phantom sessions or leaving null-cluster orphans.
-- [ ] Zero rows where `catalogue.identity_key IS NULL` AND the session's `cwd LIKE '%.ccs-config/clusters/%'` (checked against a scratch copy of the live catalogue).
+- [x] Zero rows where `catalogue.identity_key IS NULL` AND the session's `cwd LIKE '%.ccs-config/clusters/%'` (checked against a scratch copy of the live catalogue). — verified 39bdd4f (probe joined catalogue.db + index.db on scratch copies: COUNT = 0).
 - [ ] `mark --archived` on a session attached to a **core** identity leaves the identity `archived=0` (regression test for tonight's fix — already added, keep green).
 - [ ] `mark --completed` on a session attached to a **fleet** identity DOES cascade (retire path stays intact).
 - [ ] `writeSessionMetadata` for the 2nd worker on a PR archives the 1st (supersede) AND keeps the fleet identity alive.
@@ -60,7 +60,7 @@ Format: `- [ ] <one-line failure mode> — <where to look>`
 - [x] `ccs cluster init <name>` twice — second run refuses or overwrites? — verified safe in e6cf405: refuses with exit 2 at init-command.ts:40 (existsSync guard); regression tests now assert cluster.toml + CHANGELOG.md are byte-identical after the refused second run AND that a different `--role` doesn't sneak in a side-scaffold. Dir wins over flags.
 - [x] `ccs whoami` outside of a Claude session — exit code, error text — verified safe in 5eb2fec: exit 1 with stderr `Not inside a Claude Code session (CLAUDE_CODE_SESSION_ID unset).` — both env-unset and env-set branches now covered by regression tests.
 - [x] Long identity_key with special chars (`heroku/dashboard#12080` — the `#` is fine, what about spaces?) — mint accepts? — fixed in 1a29d06: probing revealed mint accepted empty, whitespace-only, newlines, null bytes, and leading/trailing whitespace. The empty-string case is the worst (phantom "" identity matched by every "no identity" join). Added `assertIdentityKeyOk` guard; 6 rejection tests + 1 positive test lock the invariant.
-- [ ] SQLite `PRAGMA integrity_check` on a live catalogue at start of every tick — no corruption
+- [x] SQLite `PRAGMA integrity_check` on a live catalogue at start of every tick — no corruption — verified safe in 39bdd4f: scratch-copy probe of all 3 live DBs (catalogue, index, skills) returns 'ok'; 0 dangling identity_key refs; 0 malformed identity_keys; acceptance-#6 also holds (0 null-key rows on cluster-config cwds). Added lock-in test that runs integrity_check after a realistic write workload.
 - [ ] `catalogue.db` file is a symlink or on a network mount — do transactions still work?
 - [ ] Test with `TZ=Pacific/Kiritimati` — any date-string comparisons that break at day boundaries?
 - [ ] What happens if you spawn a session with `--role=<role>` but no `--cluster`? — `writeSessionMetadata` — does it derive cluster from role registry?

@@ -18,3 +18,4 @@ One line per tick: `<iso> | <status> | <what> | <commit>`.
 2026-07-15T14:07Z | ruled-out | `cluster init` twice refuses cleanly and leaves existing files untouched; different --role also refused; 2 regression tests | e6cf405
 2026-07-15T14:37Z | ruled-out | `whoami` outside a session already exits 1 with clear stderr; added tests for both branches (env-set and env-unset) | 5eb2fec
 2026-07-15T15:07Z | fixed | mintIdentity accepted empty/whitespace/control-char identity_keys — real data-integrity bug; added `assertIdentityKeyOk` guard + 7 tests | 1a29d06
+2026-07-15T15:37Z | ruled-out | live DBs (catalogue+index+skills) integrity_check=ok; 0 dangling FKs; 0 malformed keys; acceptance-#6 also verified; lock-in test | 39bdd4f
