@@ -180,13 +180,22 @@ export async function main(argv: string[]): Promise<number> {
       return newSession(args.slice(1));
     case "sync-tabs":
       return syncTabs(args.slice(1));
-    case "hook":
-      // `ccs hook run <name>` — the named-hook dispatcher (settings.json wires these)
-      if (args[1] === "run") return await hookRunCommand(args.slice(2));
-      console.error("usage: ccs hook run <name>");
-      return 1;
+    case "hook": {
+      // ADR-0089 step 8: `ccs hook <verb>` — hook plumbing noun (run/explain/lint).
+      const verb = args[1];
+      switch (verb) {
+        case "run":
+          return await hookRunCommand(args.slice(2));
+        case "explain":
+        case "lint":
+          return hooksCommand([verb, ...args.slice(2)]);
+        default:
+          console.error("usage: ccs hook <run|explain|lint> ...");
+          return 1;
+      }
+    }
     case "hooks":
-      // `ccs hooks <explain|lint>` — layered-hook observability (ADR-0045)
+      // Legacy: `ccs hooks <explain|lint>` — kept until step 10 hook prose sweep.
       return hooksCommand(args.slice(1));
     case "catch-up":
       // `ccs catch-up [<id>|.]` — surface unseen cluster CHANGELOG entries + advance the stamp
@@ -232,9 +241,34 @@ export async function main(argv: string[]): Promise<number> {
     case "backfill-work-units":
       // one-time ADR-0057 migration: link existing anchored rows to a work-unit entity
       return backfillWorkUnits(args.slice(1));
-    case "cluster":
-      if (args[1] === "init") return clusterInitCommand(args.slice(2));
-      return clusterView(args[1], args.includes("--expand") || args.includes("--all"), args.includes("--json"));
+    case "cluster": {
+      // ADR-0089 step 8: `ccs cluster <verb>` — the cluster-scoped noun.
+      const verb = args[1];
+      switch (verb) {
+        case "init":
+          return clusterInitCommand(args.slice(2));
+        case "board":
+          // `ccs cluster board <c> [--json|--text|--identity=…|--recompose[=…]]`
+          return boardCommand(args.slice(2));
+        case "catch-up":
+          return catchUpCommand(args.slice(2));
+        case "decide": {
+          const { suppressCommand } = await import("./state/suppress.ts");
+          return suppressCommand(args.slice(2));
+        }
+        case "resume":
+          return resumeCluster(args[2], args.includes("--dry-run"));
+        case "reap-duplicates": {
+          const { reapCommand } = await import("./cmux/reap.ts");
+          return reapCommand(args.slice(2));
+        }
+        case "sync-roles":
+          return syncRolesCmd(args.includes("--dry-run"), args.includes("--hooks"));
+        default:
+          // Bare cluster slug — the map view (was: `ccs cluster <c>`).
+          return clusterView(verb, args.includes("--expand") || args.includes("--all"), args.includes("--json"));
+      }
+    }
     case "catalogue":
       // ADR-D1: `ccs catalogue export --cluster <c> ...` — the authorized read path for cluster
       // engines (compose_board.py etc). Replaces direct sqlite3 access to catalogue.db.
