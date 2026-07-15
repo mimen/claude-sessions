@@ -30,6 +30,8 @@ interface PreviewProps {
   /** Epic (resolved from the epics entity) — name + deep link. */
   epicName?: string | null;
   epicUrl?: string | null;
+  /** Review-app URL (fleet identity attr, per-role table). Clickable when present. */
+  reviewAppUrl?: string | null;
   /** Total height available to the pane (border included). */
   height: number;
 }
@@ -95,6 +97,7 @@ export function Preview({
   prState,
   epicName,
   epicUrl,
+  reviewAppUrl,
   height,
 }: PreviewProps): React.ReactElement {
   const models = modelBreakdown(row.costByModel);
@@ -150,6 +153,9 @@ export function Preview({
             value={epicUrl ? osc8(epicUrl, epicName.replace(/^\[[^\]]+\]\s*/, "")) : epicName.replace(/^\[[^\]]+\]\s*/, "")}
             color={theme.project}
           />
+        ) : null}
+        {reviewAppUrl ? (
+          <Field label="review" value={osc8(reviewAppUrl, "↗ open review-app")} color={theme.accent} />
         ) : null}
         {project ? <Field label="project" value={`▢ ${project}`} color={theme.header} /> : null}
         {event ? <Field label="event" value={`⊞ ${event}`} color={theme.project} /> : null}

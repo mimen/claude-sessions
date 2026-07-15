@@ -41,6 +41,8 @@ export interface StatuslineCtx {
    * resolves it. When present, renders as colored text at the start of the line matching the
    * cmux tab pill exactly (same label, same color). Absent → no leading pill. */
   statePill?: { label: string; color?: string } | null;
+  /** Optional review-app URL (fleet identity attr). Rendered as clickable `↗ review-app`. */
+  reviewAppUrl?: string | null;
 }
 
 /** True if the row's phase is too old to assert as current (ADR-0031). */
@@ -97,7 +99,12 @@ export function renderStatusline(row: CatalogueRow, ctx: StatuslineCtx): string 
   const sfId = typeof row.meta?.gus_work_sf_id === "string" ? row.meta.gus_work_sf_id : null;
   const wBit = row.gusWork && row.prNumber ? osc8(gusWorkUrl(row.gusWork, sfId), row.gusWork) : null;
 
-  const bits = [pillBit, linked, groupingBit, wBit].filter((b): b is string => !!b);
+  // Review-app URL — a clickable link that lets the reviewer jump straight to the deployed
+  // preview without hunting through GitHub's deployments tab. Absent (no PR / not deployed
+  // yet / non-review-app repo) → no bit.
+  const reviewBit = ctx.reviewAppUrl ? osc8(ctx.reviewAppUrl, "↗ review-app") : null;
+
+  const bits = [pillBit, linked, groupingBit, wBit, reviewBit].filter((b): b is string => !!b);
   return bits.join(" · ");
 }
 

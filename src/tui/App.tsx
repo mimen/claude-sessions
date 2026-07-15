@@ -166,6 +166,28 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
     }
     return out;
   }, [refreshTick]);
+  // ADR-0089: per-identity attrs (per-role table row). Keyed by identity_key so a row that
+  // shows up on multiple sessions doesn't re-query. Fail-open: empty map if the identity
+  // module isn't loadable (fresh install, tests).
+  const identityAttrsMap = useMemo(() => {
+    const out = new Map<string, Record<string, unknown>>();
+    if (!catalogue) return out;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getIdentity } = require("../catalogue/identities.ts") as typeof import("../catalogue/identities.ts");
+      const seen = new Set<string>();
+      for (const row of catMap.values() as IterableIterator<CatalogueRow>) {
+        const key = row.identityKey;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        const id = getIdentity(catalogue, key);
+        if (id) out.set(key, id.attrs);
+      }
+    } catch {
+      /* identity table not present or unreadable → empty; TUI degrades gracefully */
+    }
+    return out;
+  }, [catalogue, catMap, refreshTick]);
   // Live cmux workspace titles (source of truth for open sessions) — override the ccs Title while
   // open. Also gives us the open-set (its keys) so we probe cmux once, not twice.
   const [openTitles, setOpenTitles] = useState<Map<string, string>>(new Map());
@@ -751,6 +773,12 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       prState={catMap.get(selectedRow.sessionId)?.prState ?? null}
       epicName={epicMap.get(catMap.get(selectedRow.sessionId)?.groupingId ?? "")?.name ?? null}
       epicUrl={epicMap.get(catMap.get(selectedRow.sessionId)?.groupingId ?? "")?.url ?? null}
+      reviewAppUrl={(() => {
+        const key = catMap.get(selectedRow.sessionId)?.identityKey;
+        const attrs = key ? identityAttrsMap.get(key) : null;
+        const url = attrs?.review_app_url;
+        return typeof url === "string" && url.startsWith("http") ? url : null;
+      })()}
       height={previewHeight}
     />
   ) : selSection ? (

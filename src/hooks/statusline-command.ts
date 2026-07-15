@@ -76,7 +76,21 @@ export async function statuslineCommand(): Promise<number> {
               // no board → no pill; renderStatusline just omits the leading bit
             }
           }
-          line = renderStatusline(row, { nowMs: Date.now(), grouping, statePill });
+          // Review-app URL from the fleet identity's per-role attrs (post-ADR-0089). Read
+          // via the identities module so we get the join automatically; fail-open on any
+          // hiccup (loose sessions, missing table).
+          let reviewAppUrl: string | null = null;
+          if (row.identityKey) {
+            try {
+              const { getIdentity } = await import("../catalogue/identities.ts");
+              const identity = getIdentity(db, row.identityKey);
+              const url = identity?.attrs?.review_app_url;
+              if (typeof url === "string" && url.startsWith("http")) reviewAppUrl = url;
+            } catch {
+              // no identity table / not fleet → no bit
+            }
+          }
+          line = renderStatusline(row, { nowMs: Date.now(), grouping, statePill, reviewAppUrl });
         }
       } finally {
         db.close();
