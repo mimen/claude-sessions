@@ -43,10 +43,36 @@ describe("clusterInitCommand", () => {
     });
   });
 
-  test("refuses if the cluster dir already exists", () => {
+  test("refuses if the cluster dir already exists — leaves existing files untouched", () => {
+    // Punch-list guarantee: `ccs cluster init` twice on the same slug must
+    // refuse cleanly (exit 2) AND not touch the first run's files. A partial
+    // rewrite (e.g. clobbering cluster.toml but leaving CHANGELOG) would be
+    // worse than either full overwrite or full refusal — this pins the
+    // 'existsSync guard comes first' behavior.
     withTempRoot((root) => {
       expect(clusterInitCommand(["twice", "--config-root", root])).toBe(0);
+      const dir = join(root, "clusters", "twice");
+      const tomlBefore = readFileSync(join(dir, "cluster.toml"), "utf8");
+      const changelogBefore = readFileSync(join(dir, "CHANGELOG.md"), "utf8");
+
+      // Second run: refuses with exit 2.
       expect(clusterInitCommand(["twice", "--config-root", root])).toBe(2);
+
+      // Files are untouched (contents byte-identical).
+      expect(readFileSync(join(dir, "cluster.toml"), "utf8")).toBe(tomlBefore);
+      expect(readFileSync(join(dir, "CHANGELOG.md"), "utf8")).toBe(changelogBefore);
+    });
+  });
+
+  test("refuses even when --role differs from the existing role — dir wins over flags", () => {
+    // Guardrail: a user re-running with a DIFFERENT --role must not silently
+    // side-scaffold a second role inside an existing cluster. The dir check
+    // fires unconditionally.
+    withTempRoot((root) => {
+      expect(clusterInitCommand(["prod", "--role", "loop", "--config-root", root])).toBe(0);
+      expect(clusterInitCommand(["prod", "--role", "concierge", "--config-root", root])).toBe(2);
+      const conciergeDir = join(root, "clusters", "prod", "roles", "concierge");
+      expect(existsSync(conciergeDir)).toBe(false);
     });
   });
 
