@@ -76,11 +76,19 @@ export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string |
   }
   const located = locatedResult.value;
   if (located) {
-    const note =
-      row.cwd && located !== row.cwd
-        ? `launching from ${located} (recorded cwd ${row.cwd} no longer maps to this session's files)`
-        : null;
-    return { cwd: located, note };
+    const notes: string[] = [];
+    if (row.cwd && located.dir !== row.cwd) {
+      notes.push(`launching from ${located.dir} (recorded cwd ${row.cwd} no longer maps to this session's files)`);
+    }
+    if (located.ambiguousWith) {
+      // Two real dirs encode to the same storage folder (e.g. /a-b and /a/b). Resume works
+      // from either, but the working directory may be the wrong repo — surface it.
+      notes.push(`ambiguous encoding — also matches ${located.ambiguousWith}`);
+    }
+    if (located.exhausted) {
+      notes.push("filesystem walk exhausted its budget — a further match can't be ruled out");
+    }
+    return { cwd: located.dir, note: notes.length > 0 ? notes.join(" · ") : null };
   }
 
   // Last resort when nothing on disk matches: recorded cwd → project root → home.
