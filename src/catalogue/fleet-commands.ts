@@ -46,14 +46,14 @@ export function merge(): number {
     );
     return 1;
   }
-  const sources = discoverSources(DATA_DIR, localHostName(), config.merge.replicasRoot);
-  const stats = buildMerge(sources, MERGE_PATH, new Date().toISOString());
+  const sources = discoverSources(DATA_DIR(), localHostName(), config.merge.replicasRoot);
+  const stats = buildMerge(sources, MERGE_PATH(), new Date().toISOString());
   console.log(
     `merged ${stats.sessions} sessions (${stats.tags} tags) from ${stats.sources} host${stats.sources === 1 ? "" : "s"}: ` +
       sources.map((s) => s.host).join(", "),
   );
   for (const s of stats.skipped) console.error(`  skipped unreadable source — ${s}`);
-  console.log(`→ ${MERGE_PATH}`);
+  console.log(`→ ${MERGE_PATH()}`);
   return stats.skipped.length ? 1 : 0;
 }
 
@@ -64,7 +64,7 @@ export function mergePull(): number {
   ensureDataDir();
   const remote = `${config.merge.remote}:.claude-sessions/merge.db`;
   const proc = Bun.spawnSync(
-    ["rsync", "-a", "-e", "ssh -o BatchMode=yes -o ConnectTimeout=10", remote, MERGE_PATH],
+    ["rsync", "-a", "-e", "ssh -o BatchMode=yes -o ConnectTimeout=10", remote, MERGE_PATH()],
     { stdout: "pipe", stderr: "pipe" },
   );
   if (proc.exitCode !== 0) {
@@ -72,7 +72,7 @@ export function mergePull(): number {
     console.error(`merge pull failed (${config.merge.remote} unreachable or no merge built there): ${errText}`);
     return 1;
   }
-  const db = openMerge(MERGE_PATH);
+  const db = openMerge(MERGE_PATH());
   const at = db ? mergedAt(db) : null;
   db?.close();
   console.log(`pulled merged view from ${config.merge.remote} (built ${at ?? "?"})`);
@@ -81,7 +81,7 @@ export function mergePull(): number {
 
 /** Fleet-wide listing from the merged view: every Host's sessions, Host column first. */
 export function lsFleet(opts: { host?: string; role?: string; all?: boolean }): number {
-  const db = openMerge(MERGE_PATH);
+  const db = openMerge(MERGE_PATH());
   if (!db) {
     console.log("No merged view yet. Build it on the merge host (`ccs merge`) or fetch it (`ccs merge --pull`).");
     return 1;
@@ -175,9 +175,9 @@ export function intent(rest: string[]): number {
 export async function applyIntentsCommand(stateDir: string | undefined): Promise<number> {
   ensureDataDir();
   const local = localHostName();
-  const mergeDb = openMerge(MERGE_PATH);
+  const mergeDb = openMerge(MERGE_PATH());
   if (!mergeDb) console.error("note: no merged view here — per-row ownership refinement skipped");
-  const catalogue = openCatalogue(CATALOGUE_PATH);
+  const catalogue = openCatalogue(CATALOGUE_PATH());
   try {
     const opts = {
       localHost: local,

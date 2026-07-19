@@ -20,9 +20,15 @@ export interface ResumeCommand {
  * `claude --resume <id>` ourselves and run it in the Session's recorded cwd — this is what
  * sidesteps the cwd-scoped picker and the unreliable end-of-session hint (failure modes A/B/D).
  */
-export function buildResumeCommand(row: SessionRow, opts: { fork: boolean; cwd: string }): ResumeCommand {
+export function buildResumeCommand(
+  row: SessionRow,
+  opts: { fork: boolean; cwd: string; resumeCommand?: string | null },
+): ResumeCommand {
   const argv = ["claude", "--resume", row.resumeId];
   if (opts.fork) argv.push("--fork-session");
+  // ADR-0015: a loop's resume_command is replayed as the trailing prompt so it comes back
+  // RUNNING (`claude --resume <id> '<resume_command>'`). Workers have none → bare resume.
+  if (opts.resumeCommand) argv.push(opts.resumeCommand);
   return {
     argv,
     cwd: opts.cwd,
@@ -40,8 +46,10 @@ export function shellQuote(arg: string): string {
  * Pick the directory to resume in. The Session's recorded cwd is preferred; if it no longer
  * exists (repo moved/deleted), fall back to the Project root, then the home dir — and report
  * the substitution so the UI can warn instead of silently launching in the wrong place.
+ * FAILS CLOSED on filesystem errors per ADR-0066 — a transient I/O error must never look like
+ * "absent" and unblock a wrong-dir resume.
  */
-export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string | null } {
+export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string | null } | { error: string } {
   const folder = storageFolderOf(row.path);
 
   // Best case: the recorded cwd still exists AND its encoded realpath matches the file's
@@ -54,7 +62,12 @@ export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string |
   // Otherwise the recorded cwd has drifted (symlink changed, dir moved). Walk the filesystem
   // to find the dir whose encoded realpath matches the storage folder — the only dir claude
   // will actually find the session from. Bounded so it can never hang the resume path.
-  const located = locateLaunchDir(row.path);
+  const locatedResult = locateLaunchDir(row.path);
+  if (!locatedResult.ok) {
+    // FAIL CLOSED: filesystem error during walk — must not proceed with a guess.
+    return { error: `Cannot locate resume directory: ${locatedResult.error.message}` };
+  }
+  const located = locatedResult.value;
   if (located) {
     const notes: string[] = [];
     // A second verified match means the lossy encoding is genuinely ambiguous (/a-b vs /a/b):

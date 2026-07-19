@@ -8,12 +8,12 @@ import { DATA_DIR } from "./paths.ts";
  * alternate screen closes, so crashes look like "ccs just exited". Everything fatal lands in
  * ~/.claude-sessions/crash.log; breadcrumbs land in ccs-debug.log when CCS_DEBUG=1.
  */
-export const CRASH_LOG = join(DATA_DIR, "crash.log");
-export const DEBUG_LOG = join(DATA_DIR, "ccs-debug.log");
+export const CRASH_LOG = join(DATA_DIR(), "crash.log");
+export const DEBUG_LOG = join(DATA_DIR(), "ccs-debug.log");
 
 function append(file: string, text: string): void {
   try {
-    mkdirSync(DATA_DIR, { recursive: true });
+    mkdirSync(DATA_DIR(), { recursive: true });
     appendFileSync(file, text);
   } catch {
     // logging must never be the thing that crashes

@@ -28,6 +28,7 @@ test("resolveResumeCwd prefers a valid recorded cwd that matches the storage fol
   const path = join(base, ".projects", folder, "s.jsonl");
 
   const out = resolveResumeCwd(row({ path, cwd: real, projectRoot: real }));
+  if ("error" in out) throw new Error("should succeed");
   expect(out.cwd).toBe(real); // the real recorded cwd, not the same-encoding sibling
   expect(out.note).toBeNull();
 
@@ -42,15 +43,18 @@ test("resolveResumeCwd walks to the storage dir when the recorded cwd has drifte
   const path = join(base, ".projects", encodePath(real), "s.jsonl");
 
   const out = resolveResumeCwd(row({ path, cwd: "/gone/old/path", projectRoot: "/gone/old" }));
+  if ("error" in out) throw new Error("should succeed");
   expect(out.cwd).toBe(real);
   expect(out.note).toContain("no longer maps");
 
   rmSync(base, { recursive: true, force: true });
 });
 
-// C2: the decoder is bounded — a non-existent deep folder returns null without hanging.
-test("decodeStorageFolder returns null (bounded) for an unmatched folder", () => {
-  expect(decodeStorageFolder("-nonexistent-" + "x".repeat(50))).toBeNull();
+// C2: the decoder is bounded — a non-existent deep folder returns Ok(null) without hanging.
+test("decodeStorageFolder returns Ok(null) (bounded) for an unmatched folder", () => {
+  const result = decodeStorageFolder("-nonexistent-" + "x".repeat(50));
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.value).toBeNull();
 });
 
 // C2 cont.: a session whose real dir lies beyond the walk's depth bound still resumes
@@ -60,10 +64,13 @@ test("a deep session resumes via the recorded-cwd fast path, no walk needed", ()
   let deep = base;
   for (let i = 0; i < 30; i++) deep = join(deep, `d${i}`); // 30 levels under tmp > MAX_DEPTH total
   mkdirSync(deep, { recursive: true });
-  expect(decodeStorageFolder(encodePath(deep))).toBeNull(); // the walk can't reach it…
+  const decoded = decodeStorageFolder(encodePath(deep));
+  expect(decoded.ok).toBe(true);
+  if (decoded.ok) expect(decoded.value).toBeNull(); // the walk can't reach it…
 
   const path = join(base, ".projects", encodePath(deep), "s.jsonl");
   const out = resolveResumeCwd(row({ path, cwd: deep, projectRoot: deep }));
+  if ("error" in out) throw new Error(out.error);
   expect(out.cwd).toBe(deep); // …but the fast path resumes it fine
   expect(out.note).toBeNull();
 
@@ -81,6 +88,7 @@ test("ambiguous encodings are surfaced in the resume note, not silently resolved
 
   const path = join(base, ".projects", encodePath(flat), "s.jsonl");
   const out = resolveResumeCwd(row({ path, cwd: "/gone/old", projectRoot: "/gone" }));
+  if ("error" in out) throw new Error(out.error);
   expect([flat, nested]).toContain(out.cwd); // resume still works from either
   expect(out.note).toContain("ambiguous");
 

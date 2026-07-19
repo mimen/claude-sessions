@@ -30,6 +30,8 @@ export interface SectionMeta {
   readonly key: string;
   readonly name: string;
   readonly glyph: string;
+  /** Nesting depth for hierarchical headers (0 = top-level). Renderer indents by this. */
+  readonly level?: number;
 }
 
 /** List ordering within a section (and in the flat view). */

@@ -1,0 +1,1616 @@
+{
+  "active" : {
+    "is_browser_surface" : false,
+    "pane_id" : "5F919221-B7CF-495D-A920-E2F4976A5745",
+    "pane_ref" : "pane:62",
+    "surface_id" : "C110B8F6-4287-48EF-B63B-99695044E727",
+    "surface_ref" : "surface:69",
+    "surface_type" : "terminal",
+    "tab_id" : "C110B8F6-4287-48EF-B63B-99695044E727",
+    "tab_ref" : "tab:69",
+    "window_id" : "06B5A8EA-D3B3-41A3-BE2C-B968ED965700",
+    "window_ref" : "window:1",
+    "workspace_id" : "9F5C6F8C-B647-46FF-9D67-CD366F919042",
+    "workspace_ref" : "workspace:60"
+  },
+  "caller" : {
+    "is_browser_surface" : false,
+    "pane_id" : "797E16B2-FE4F-4418-99D2-5131688169F4",
+    "pane_ref" : "pane:1",
+    "surface_id" : "8D67E236-F2BB-481E-813A-83A2AC3672A4",
+    "surface_ref" : "surface:1",
+    "surface_type" : "terminal",
+    "tab_id" : "8D67E236-F2BB-481E-813A-83A2AC3672A4",
+    "tab_ref" : "tab:1",
+    "window_id" : "06B5A8EA-D3B3-41A3-BE2C-B968ED965700",
+    "window_ref" : "window:1",
+    "workspace_id" : "944E33C6-08F0-4AFE-A66F-B846F5BDF634",
+    "workspace_ref" : "workspace:1"
+  },
+  "windows" : [
+    {
+      "active" : true,
+      "current" : true,
+      "id" : "06B5A8EA-D3B3-41A3-BE2C-B968ED965700",
+      "index" : 0,
+      "key" : false,
+      "ref" : "window:1",
+      "selected_workspace_id" : "9F5C6F8C-B647-46FF-9D67-CD366F919042",
+      "selected_workspace_ref" : "workspace:60",
+      "visible" : true,
+      "workspace_count" : 23,
+      "workspaces" : [
+        {
+          "active" : false,
+          "description" : null,
+          "id" : "944E33C6-08F0-4AFE-A66F-B846F5BDF634",
+          "index" : 0,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "797E16B2-FE4F-4418-99D2-5131688169F4",
+              "index" : 0,
+              "ref" : "pane:1",
+              "selected_surface_id" : "8D67E236-F2BB-481E-813A-83A2AC3672A4",
+              "selected_surface_ref" : "surface:1",
+              "surface_count" : 4,
+              "surface_ids" : [
+                "8D67E236-F2BB-481E-813A-83A2AC3672A4",
+                "0E58CD4C-7D3D-44B1-A194-5AE41634D041",
+                "4AEF4EF1-CFBE-4051-A631-D550B9E9F988",
+                "26C701BF-84AF-44C8-ACD4-E0FBCB84F427"
+              ],
+              "surface_refs" : [
+                "surface:1",
+                "surface:76",
+                "surface:67",
+                "surface:66"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : true,
+                  "id" : "8D67E236-F2BB-481E-813A-83A2AC3672A4",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "797E16B2-FE4F-4418-99D2-5131688169F4",
+                  "pane_ref" : "pane:1",
+                  "ref" : "surface:1",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "⠐ Design agentic loops for PR workflows",
+                  "tty" : "ttys000",
+                  "type" : "terminal",
+                  "url" : null
+                },
+                {
+                  "active" : false,
+                  "focused" : false,
+                  "here" : false,
+                  "id" : "0E58CD4C-7D3D-44B1-A194-5AE41634D041",
+                  "index" : 1,
+                  "index_in_pane" : 1,
+                  "pane_id" : "797E16B2-FE4F-4418-99D2-5131688169F4",
+                  "pane_ref" : "pane:1",
+                  "ref" : "surface:76",
+                  "selected" : false,
+                  "selected_in_pane" : false,
+                  "title" : "~",
+                  "tty" : "ttys062",
+                  "type" : "terminal",
+                  "url" : null
+                },
+                {
+                  "active" : false,
+                  "focused" : false,
+                  "here" : false,
+                  "id" : "4AEF4EF1-CFBE-4051-A631-D550B9E9F988",
+                  "index" : 2,
+                  "index_in_pane" : 2,
+                  "pane_id" : "797E16B2-FE4F-4418-99D2-5131688169F4",
+                  "pane_ref" : "pane:1",
+                  "ref" : "surface:67",
+                  "selected" : false,
+                  "selected_in_pane" : false,
+                  "title" : "~",
+                  "tty" : "ttys049",
+                  "type" : "terminal",
+                  "url" : null
+                },
+                {
+                  "active" : false,
+                  "focused" : false,
+                  "here" : false,
+                  "id" : "26C701BF-84AF-44C8-ACD4-E0FBCB84F427",
+                  "index" : 3,
+                  "index_in_pane" : 3,
+                  "pane_id" : "797E16B2-FE4F-4418-99D2-5131688169F4",
+                  "pane_ref" : "pane:1",
+                  "ref" : "surface:66",
+                  "selected" : false,
+                  "selected_in_pane" : false,
+                  "title" : "ccs",
+                  "tty" : "ttys047",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : true,
+          "ref" : "workspace:1",
+          "selected" : false,
+          "title" : "aea5bc4f"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "2E7F216E-18B7-4D11-B0C2-FC50951BC9F0",
+          "index" : 1,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "378B3085-9B0F-440F-BD8C-31E8F84FEE4F",
+              "index" : 0,
+              "ref" : "pane:3",
+              "selected_surface_id" : "84F4AAE7-A347-4922-A3FD-56ED5DC0CCB7",
+              "selected_surface_ref" : "surface:4",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "84F4AAE7-A347-4922-A3FD-56ED5DC0CCB7"
+              ],
+              "surface_refs" : [
+                "surface:4"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "84F4AAE7-A347-4922-A3FD-56ED5DC0CCB7",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "378B3085-9B0F-440F-BD8C-31E8F84FEE4F",
+                  "pane_ref" : "pane:3",
+                  "ref" : "surface:4",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Run first pr-watch-2 eval sweep",
+                  "tty" : "ttys002",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : true,
+          "ref" : "workspace:3",
+          "selected" : false,
+          "title" : "pr-watch-eval"
+        },
+        {
+          "active" : false,
+          "description" : null,
+          "id" : "ACA73EA7-72A4-488F-A71E-958B830C66E4",
+          "index" : 2,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "FC2907CF-04FC-4D50-B0C9-FAF7D812F045",
+              "index" : 0,
+              "ref" : "pane:70",
+              "selected_surface_id" : "4170B68A-D99A-4B97-8A93-CA8DBE0D7256",
+              "selected_surface_ref" : "surface:79",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "4170B68A-D99A-4B97-8A93-CA8DBE0D7256"
+              ],
+              "surface_refs" : [
+                "surface:79"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "4170B68A-D99A-4B97-8A93-CA8DBE0D7256",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "FC2907CF-04FC-4D50-B0C9-FAF7D812F045",
+                  "pane_ref" : "pane:70",
+                  "ref" : "surface:79",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Approve render meter pricing PR",
+                  "tty" : "ttys068",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:66",
+          "selected" : false,
+          "title" : "pr-watch CONCIERGE"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "87780ACA-6A07-4B00-95DB-7B647F66CC53",
+          "index" : 3,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "D52AAC12-3B39-4A4B-9AEB-F781DF722F95",
+              "index" : 0,
+              "ref" : "pane:63",
+              "selected_surface_id" : "91382E0B-F82B-42EF-9630-8E01CF15E498",
+              "selected_surface_ref" : "surface:70",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "91382E0B-F82B-42EF-9630-8E01CF15E498"
+              ],
+              "surface_refs" : [
+                "surface:70"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "91382E0B-F82B-42EF-9630-8E01CF15E498",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "D52AAC12-3B39-4A4B-9AEB-F781DF722F95",
+                  "pane_ref" : "pane:63",
+                  "ref" : "surface:70",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Claude Code",
+                  "tty" : "ttys050",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:61",
+          "selected" : false,
+          "title" : "pr-watch-scout"
+        },
+        {
+          "active" : true,
+          "description" : "pr-watch",
+          "id" : "9F5C6F8C-B647-46FF-9D67-CD366F919042",
+          "index" : 4,
+          "panes" : [
+            {
+              "active" : true,
+              "focused" : true,
+              "id" : "5F919221-B7CF-495D-A920-E2F4976A5745",
+              "index" : 0,
+              "ref" : "pane:62",
+              "selected_surface_id" : "C110B8F6-4287-48EF-B63B-99695044E727",
+              "selected_surface_ref" : "surface:69",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "C110B8F6-4287-48EF-B63B-99695044E727"
+              ],
+              "surface_refs" : [
+                "surface:69"
+              ],
+              "surfaces" : [
+                {
+                  "active" : true,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "C110B8F6-4287-48EF-B63B-99695044E727",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "5F919221-B7CF-495D-A920-E2F4976A5745",
+                  "pane_ref" : "pane:62",
+                  "ref" : "surface:69",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Print CLAUDE_CODE_SESSION_ID variable",
+                  "tty" : "ttys040",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:60",
+          "selected" : true,
+          "title" : "pr-watch-control"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "7140619A-6185-46E4-BAEE-7D619E463763",
+          "index" : 5,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "AF2FF301-6C6C-4DA3-9AC9-62986F582E26",
+              "index" : 0,
+              "ref" : "pane:40",
+              "selected_surface_id" : "6EEECF1A-DEA2-40A6-9A91-0907F9C31DDE",
+              "selected_surface_ref" : "surface:45",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "6EEECF1A-DEA2-40A6-9A91-0907F9C31DDE"
+              ],
+              "surface_refs" : [
+                "surface:45"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "6EEECF1A-DEA2-40A6-9A91-0907F9C31DDE",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "AF2FF301-6C6C-4DA3-9AC9-62986F582E26",
+                  "pane_ref" : "pane:40",
+                  "ref" : "surface:45",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Add team API authorizations cross-reference to Account page",
+                  "tty" : "ttys029",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:38",
+          "selected" : false,
+          "title" : "#12127 Add Team API Authorizations cross-reference to Account page"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch · heroku/dashboard#display-price",
+          "id" : "3A5E420C-45EC-496A-8AFA-469517E868D2",
+          "index" : 6,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "D390212C-0B0C-4D39-8A2F-EEF3B999B2A1",
+              "index" : 0,
+              "ref" : "pane:69",
+              "selected_surface_id" : "991282B9-76F8-4691-BCCF-16BE50E955CC",
+              "selected_surface_ref" : "surface:77",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "991282B9-76F8-4691-BCCF-16BE50E955CC"
+              ],
+              "surface_refs" : [
+                "surface:77"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "991282B9-76F8-4691-BCCF-16BE50E955CC",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "D390212C-0B0C-4D39-8A2F-EEF3B999B2A1",
+                  "pane_ref" : "pane:69",
+                  "ref" : "surface:77",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Drain pr-watch inbox task",
+                  "tty" : "ttys063",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:65",
+          "selected" : false,
+          "title" : "display_price migration (W-23389704)"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "1E60E433-4DB4-4F9C-8B07-95FC49F2F375",
+          "index" : 7,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "62F280DE-2050-4F46-8EB3-4CB0EBE4F5B1",
+              "index" : 0,
+              "ref" : "pane:38",
+              "selected_surface_id" : "2E3EE3BA-F468-43C8-B46C-049F9AA00413",
+              "selected_surface_ref" : "surface:43",
+              "surface_count" : 2,
+              "surface_ids" : [
+                "2E3EE3BA-F468-43C8-B46C-049F9AA00413",
+                "C4348FD7-A8F8-4978-820E-921792BC4547"
+              ],
+              "surface_refs" : [
+                "surface:43",
+                "surface:78"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "2E3EE3BA-F468-43C8-B46C-049F9AA00413",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "62F280DE-2050-4F46-8EB3-4CB0EBE4F5B1",
+                  "pane_ref" : "pane:38",
+                  "ref" : "surface:43",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Add Authorized Applications section to Team Settings",
+                  "tty" : "ttys033",
+                  "type" : "terminal",
+                  "url" : null
+                },
+                {
+                  "active" : false,
+                  "focused" : false,
+                  "here" : false,
+                  "id" : "C4348FD7-A8F8-4978-820E-921792BC4547",
+                  "index" : 1,
+                  "index_in_pane" : 1,
+                  "pane_id" : "62F280DE-2050-4F46-8EB3-4CB0EBE4F5B1",
+                  "pane_ref" : "pane:38",
+                  "ref" : "surface:78",
+                  "selected" : false,
+                  "selected_in_pane" : false,
+                  "title" : "…/.claude/worktrees/tt-authorized-apps",
+                  "tty" : "ttys066",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            },
+            {
+              "active" : false,
+              "focused" : false,
+              "id" : "32325FEB-98AC-4FEF-8CF8-43E3FAD1C710",
+              "index" : 1,
+              "ref" : "pane:68",
+              "selected_surface_id" : "C08C854F-05AF-4FEF-9CDF-9DC0753A32D1",
+              "selected_surface_ref" : "surface:75",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "C08C854F-05AF-4FEF-9CDF-9DC0753A32D1"
+              ],
+              "surface_refs" : [
+                "surface:75"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : false,
+                  "here" : false,
+                  "id" : "C08C854F-05AF-4FEF-9CDF-9DC0753A32D1",
+                  "index" : 2,
+                  "index_in_pane" : 0,
+                  "pane_id" : "32325FEB-98AC-4FEF-8CF8-43E3FAD1C710",
+                  "pane_ref" : "pane:68",
+                  "ref" : "surface:75",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "addons-list-item-test.js",
+                  "tty" : null,
+                  "type" : "filepreview",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:36",
+          "selected" : false,
+          "title" : "#12126 Add Authorized Applications section to Team Settings"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "7563AE6E-FCE7-43F4-9FEA-515EC902C4EE",
+          "index" : 8,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "D8DE9678-1585-4808-A274-44C5106276E8",
+              "index" : 0,
+              "ref" : "pane:46",
+              "selected_surface_id" : "A31ED762-7FEB-4C4E-BEDA-5D91F7698C46",
+              "selected_surface_ref" : "surface:51",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "A31ED762-7FEB-4C4E-BEDA-5D91F7698C46"
+              ],
+              "surface_refs" : [
+                "surface:51"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "A31ED762-7FEB-4C4E-BEDA-5D91F7698C46",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "D8DE9678-1585-4808-A274-44C5106276E8",
+                  "pane_ref" : "pane:46",
+                  "ref" : "surface:51",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Finish OAuth consent-page team selector UI",
+                  "tty" : "ttys013",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:44",
+          "selected" : false,
+          "title" : "#998 Finish OAuth consent-page team selector UI"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "A2896A9C-D1FD-4CF5-A7AE-5187E6EFC2F0",
+          "index" : 9,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "70715FA5-DB38-409A-8B44-912F0FA5931C",
+              "index" : 0,
+              "ref" : "pane:47",
+              "selected_surface_id" : "36C5DC98-EECF-4EAC-B626-42713D69870D",
+              "selected_surface_ref" : "surface:52",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "36C5DC98-EECF-4EAC-B626-42713D69870D"
+              ],
+              "surface_refs" : [
+                "surface:52"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "36C5DC98-EECF-4EAC-B626-42713D69870D",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "70715FA5-DB38-409A-8B44-912F0FA5931C",
+                  "pane_ref" : "pane:47",
+                  "ref" : "surface:52",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Consolidate team tokens authorizations into single PR",
+                  "tty" : "ttys010",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:45",
+          "selected" : false,
+          "title" : "#12123 Add Authorizations section: list, create, revoke, regenerate"
+        },
+        {
+          "active" : false,
+          "description" : null,
+          "id" : "AC6DEACF-8D08-4E5D-8656-E40C81900F16",
+          "index" : 10,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "1A53483F-35FC-4D32-9794-E54A759C9007",
+              "index" : 0,
+              "ref" : "pane:66",
+              "selected_surface_id" : "97F23A42-B887-473E-A973-DB1B14FFA0DA",
+              "selected_surface_ref" : "surface:73",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "97F23A42-B887-473E-A973-DB1B14FFA0DA"
+              ],
+              "surface_refs" : [
+                "surface:73"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "97F23A42-B887-473E-A973-DB1B14FFA0DA",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "1A53483F-35FC-4D32-9794-E54A759C9007",
+                  "pane_ref" : "pane:66",
+                  "ref" : "surface:73",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "claude",
+                  "tty" : "ttys059",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:64",
+          "selected" : false,
+          "title" : "claude"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "E758F2C6-8E0E-4076-86CB-130B7C8BF3EE",
+          "index" : 11,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "FC866946-67A1-4A14-BA91-B2EDE167D0B7",
+              "index" : 0,
+              "ref" : "pane:65",
+              "selected_surface_id" : "186372E4-67B6-430A-95DF-4F2E0F6E42DA",
+              "selected_surface_ref" : "surface:72",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "186372E4-67B6-430A-95DF-4F2E0F6E42DA"
+              ],
+              "surface_refs" : [
+                "surface:72"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "186372E4-67B6-430A-95DF-4F2E0F6E42DA",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "FC866946-67A1-4A14-BA91-B2EDE167D0B7",
+                  "pane_ref" : "pane:65",
+                  "ref" : "surface:72",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Build buildpacks publish-from-GitHub flow",
+                  "tty" : "ttys058",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:63",
+          "selected" : false,
+          "title" : "/buildpacks/:id/publish — publish flow + success landing"
+        },
+        {
+          "active" : false,
+          "description" : null,
+          "id" : "6DCE0757-2C79-435E-AF5A-2303383AB651",
+          "index" : 12,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "B4970D28-5DA6-4C64-9ED8-639A9C2E6BFB",
+              "index" : 0,
+              "ref" : "pane:64",
+              "selected_surface_id" : "3122A984-6F33-462E-A691-3792AE9B1697",
+              "selected_surface_ref" : "surface:71",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "3122A984-6F33-462E-A691-3792AE9B1697"
+              ],
+              "surface_refs" : [
+                "surface:71"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "3122A984-6F33-462E-A691-3792AE9B1697",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "B4970D28-5DA6-4C64-9ED8-639A9C2E6BFB",
+                  "pane_ref" : "pane:64",
+                  "ref" : "surface:71",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Review GUS tickets across sprints",
+                  "tty" : "ttys056",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:62",
+          "selected" : false,
+          "title" : "✳ Review GUS tickets across sprints"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "DF1915D4-15F5-49FB-A22B-066744483A75",
+          "index" : 13,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : false,
+              "id" : "27901290-D260-4EBC-A6C6-644FB80C58EF",
+              "index" : 0,
+              "ref" : "pane:35",
+              "selected_surface_id" : "DFCBE438-2E79-4BEB-A46C-576BE2E99D85",
+              "selected_surface_ref" : "surface:40",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "DFCBE438-2E79-4BEB-A46C-576BE2E99D85"
+              ],
+              "surface_refs" : [
+                "surface:40"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : false,
+                  "here" : false,
+                  "id" : "DFCBE438-2E79-4BEB-A46C-576BE2E99D85",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "27901290-D260-4EBC-A6C6-644FB80C58EF",
+                  "pane_ref" : "pane:35",
+                  "ref" : "surface:40",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Port has-agreed-to-tos flow to Dashboard",
+                  "tty" : "ttys044",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            },
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "EE1843E2-2CE1-430E-98DA-AB996C3D8D0E",
+              "index" : 1,
+              "ref" : "pane:67",
+              "selected_surface_id" : "8C39B139-C6BE-4B2B-8043-D3B538631D8B",
+              "selected_surface_ref" : "surface:74",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "8C39B139-C6BE-4B2B-8043-D3B538631D8B"
+              ],
+              "surface_refs" : [
+                "surface:74"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "8C39B139-C6BE-4B2B-8043-D3B538631D8B",
+                  "index" : 1,
+                  "index_in_pane" : 0,
+                  "pane_id" : "EE1843E2-2CE1-430E-98DA-AB996C3D8D0E",
+                  "pane_ref" : "pane:67",
+                  "ref" : "surface:74",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "inbox.py",
+                  "tty" : null,
+                  "type" : "filepreview",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:33",
+          "selected" : false,
+          "title" : "#12133 /has-agreed-to-tos routes through existing TOS gate"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "BCC54DD4-A704-4BF7-A30D-8B3E502D66E4",
+          "index" : 14,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "3576FBB7-035F-4F8D-90BD-9CAE3DBBC9E3",
+              "index" : 0,
+              "ref" : "pane:43",
+              "selected_surface_id" : "2C6DFA12-F1C4-40E8-8D60-EA6566148FE1",
+              "selected_surface_ref" : "surface:48",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "2C6DFA12-F1C4-40E8-8D60-EA6566148FE1"
+              ],
+              "surface_refs" : [
+                "surface:48"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "2C6DFA12-F1C4-40E8-8D60-EA6566148FE1",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "3576FBB7-035F-4F8D-90BD-9CAE3DBBC9E3",
+                  "pane_ref" : "pane:43",
+                  "ref" : "surface:48",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Port addons next-steps route to Dashboard",
+                  "tty" : "ttys021",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:41",
+          "selected" : false,
+          "title" : "#12139 /addons/:slug/next-steps landing + approvals"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "B3EFCF3B-FD9E-4AEF-BFE0-29521BAA88EB",
+          "index" : 15,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "39FF68D6-89C2-49CA-9EBE-739CD32FBF3A",
+              "index" : 0,
+              "ref" : "pane:37",
+              "selected_surface_id" : "92E55300-7EED-4AB2-8A23-A8670ACD97E4",
+              "selected_surface_ref" : "surface:42",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "92E55300-7EED-4AB2-8A23-A8670ACD97E4"
+              ],
+              "surface_refs" : [
+                "surface:42"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "92E55300-7EED-4AB2-8A23-A8670ACD97E4",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "39FF68D6-89C2-49CA-9EBE-739CD32FBF3A",
+                  "pane_ref" : "pane:37",
+                  "ref" : "surface:42",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Port addon settings routes to Dashboard",
+                  "tty" : "ttys037",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:35",
+          "selected" : false,
+          "title" : "#12135 /addons/:slug/settings landing + edits + OAuth credentials"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "A175A863-6D97-41AE-9BF2-61D7CDC33C8A",
+          "index" : 16,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "C72989DE-0141-42F3-8812-8B340293A88C",
+              "index" : 0,
+              "ref" : "pane:39",
+              "selected_surface_id" : "920AF95E-79D9-4C0D-B894-EE968598821A",
+              "selected_surface_ref" : "surface:44",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "920AF95E-79D9-4C0D-B894-EE968598821A"
+              ],
+              "surface_refs" : [
+                "surface:44"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "920AF95E-79D9-4C0D-B894-EE968598821A",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "C72989DE-0141-42F3-8812-8B340293A88C",
+                  "pane_ref" : "pane:39",
+                  "ref" : "surface:44",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Build addon plan create/edit CRUD routes",
+                  "tty" : "ttys032",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:37",
+          "selected" : false,
+          "title" : "#12137 /addons/:slug/plans/new + :plan_id/edit — plan CRUD"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "CC240ACA-A9DE-4FF2-BDB4-33BF9E822075",
+          "index" : 17,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "B7EC681E-1DB1-480A-9329-7C9F40C542EA",
+              "index" : 0,
+              "ref" : "pane:36",
+              "selected_surface_id" : "62AA0D19-210A-4CD1-BBAF-2A1F69831B2C",
+              "selected_surface_ref" : "surface:41",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "62AA0D19-210A-4CD1-BBAF-2A1F69831B2C"
+              ],
+              "surface_refs" : [
+                "surface:41"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "62AA0D19-210A-4CD1-BBAF-2A1F69831B2C",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "B7EC681E-1DB1-480A-9329-7C9F40C542EA",
+                  "pane_ref" : "pane:36",
+                  "ref" : "surface:41",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Port addons company landing route to Dashboard",
+                  "tty" : "ttys041",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:34",
+          "selected" : false,
+          "title" : "#12138 /addons/:slug/company landing + general-information-edit"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "5103BD23-58E3-487A-BD2B-08DEED8F3932",
+          "index" : 18,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "96C669E0-5BB2-43D3-BD9A-6561CA13EF93",
+              "index" : 0,
+              "ref" : "pane:41",
+              "selected_surface_id" : "A5231378-1CDB-4716-980A-9DD021D4D511",
+              "selected_surface_ref" : "surface:46",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "A5231378-1CDB-4716-980A-9DD021D4D511"
+              ],
+              "surface_refs" : [
+                "surface:46"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "A5231378-1CDB-4716-980A-9DD021D4D511",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "96C669E0-5BB2-43D3-BD9A-6561CA13EF93",
+                  "pane_ref" : "pane:41",
+                  "ref" : "surface:46",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Port marketplace-listing addon route to Dashboard",
+                  "tty" : "ttys027",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:39",
+          "selected" : false,
+          "title" : "#12136 /addons/:slug marketplace-listing landing + general-informat"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "F0060429-C994-436D-8448-CA3C306C553E",
+          "index" : 19,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "1BBF2567-E093-44F1-BF2D-9920539130E9",
+              "index" : 0,
+              "ref" : "pane:44",
+              "selected_surface_id" : "27DAF5B7-4B9C-4808-ACD2-74A6B3F26BFF",
+              "selected_surface_ref" : "surface:49",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "27DAF5B7-4B9C-4808-ACD2-74A6B3F26BFF"
+              ],
+              "surface_refs" : [
+                "surface:49"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "27DAF5B7-4B9C-4808-ACD2-74A6B3F26BFF",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "1BBF2567-E093-44F1-BF2D-9920539130E9",
+                  "pane_ref" : "pane:44",
+                  "ref" : "surface:49",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Rebase P2-3a plans onto main after P2-1 merge",
+                  "tty" : "ttys016",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:42",
+          "selected" : false,
+          "title" : "#12121 /addons/:slug/plans plan list"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "EB777D79-2C2B-4AF0-8631-77B6CC2305AE",
+          "index" : 20,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "FDB452C9-EF1C-44BA-8DB3-7256B930BF0E",
+              "index" : 0,
+              "ref" : "pane:42",
+              "selected_surface_id" : "1A99E1BC-E0B5-47B0-B940-7767284A7425",
+              "selected_surface_ref" : "surface:47",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "1A99E1BC-E0B5-47B0-B940-7767284A7425"
+              ],
+              "surface_refs" : [
+                "surface:47"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "1A99E1BC-E0B5-47B0-B940-7767284A7425",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "FDB452C9-EF1C-44BA-8DB3-7256B930BF0E",
+                  "pane_ref" : "pane:42",
+                  "ref" : "surface:47",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Rebase buildpacks CRUD PR onto main after addons index merge",
+                  "tty" : "ttys023",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:40",
+          "selected" : false,
+          "title" : "#12120 /buildpacks new/edit CRUD + GitHub repo link"
+        },
+        {
+          "active" : false,
+          "description" : "pr-watch",
+          "id" : "67C20466-D992-4575-996F-F78E7118845C",
+          "index" : 21,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "79C85FA7-8E34-4BB2-8913-39127255BC37",
+              "index" : 0,
+              "ref" : "pane:45",
+              "selected_surface_id" : "72F427AA-A20C-453D-9D23-10814CF8AAC7",
+              "selected_surface_ref" : "surface:50",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "72F427AA-A20C-453D-9D23-10814CF8AAC7"
+              ],
+              "surface_refs" : [
+                "surface:50"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "72F427AA-A20C-453D-9D23-10814CF8AAC7",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "79C85FA7-8E34-4BB2-8913-39127255BC37",
+                  "pane_ref" : "pane:45",
+                  "ref" : "surface:50",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Re-evaluate MeteredAddonProvisionCallout banner redundancy",
+                  "tty" : "ttys014",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:43",
+          "selected" : false,
+          "title" : "#12113 Reword metered add-on provision callout to match shown prici"
+        },
+        {
+          "active" : false,
+          "description" : null,
+          "id" : "7BB1147F-5C99-45EF-B6A2-4AF3CF37A425",
+          "index" : 22,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "B81A9AB8-F64D-465B-8D18-D16AB487F51F",
+              "index" : 0,
+              "ref" : "pane:31",
+              "selected_surface_id" : "01C3E30C-12B1-4CEF-97DE-1496EC57130C",
+              "selected_surface_ref" : "surface:34",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "01C3E30C-12B1-4CEF-97DE-1496EC57130C"
+              ],
+              "surface_refs" : [
+                "surface:34"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "01C3E30C-12B1-4CEF-97DE-1496EC57130C",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "B81A9AB8-F64D-465B-8D18-D16AB487F51F",
+                  "pane_ref" : "pane:31",
+                  "ref" : "surface:34",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Fix agent fleet restart failures",
+                  "tty" : "ttys026",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:29",
+          "selected" : false,
+          "title" : "Fix agent fleet restart failures"
+        }
+      ]
+    },
+    {
+      "active" : false,
+      "current" : false,
+      "id" : "CD9322E5-2D19-4995-920F-AD80AF095F33",
+      "index" : 1,
+      "key" : false,
+      "ref" : "window:3",
+      "selected_workspace_id" : "41A73C79-4FA2-48A6-B8B6-75A47BC72C8B",
+      "selected_workspace_ref" : "workspace:59",
+      "visible" : true,
+      "workspace_count" : 4,
+      "workspaces" : [
+        {
+          "active" : false,
+          "description" : null,
+          "id" : "41A73C79-4FA2-48A6-B8B6-75A47BC72C8B",
+          "index" : 0,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "06CAD836-0CE8-4946-B833-D792D2368280",
+              "index" : 0,
+              "ref" : "pane:61",
+              "selected_surface_id" : "CCA6487F-9208-47FD-BFB6-2FA798E93F75",
+              "selected_surface_ref" : "surface:68",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "CCA6487F-9208-47FD-BFB6-2FA798E93F75"
+              ],
+              "surface_refs" : [
+                "surface:68"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "CCA6487F-9208-47FD-BFB6-2FA798E93F75",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "06CAD836-0CE8-4946-B833-D792D2368280",
+                  "pane_ref" : "pane:61",
+                  "ref" : "surface:68",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Debug cmux workspace renaming issue",
+                  "tty" : "ttys048",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:59",
+          "selected" : true,
+          "title" : "✳ Debug cmux workspace renaming issue"
+        },
+        {
+          "active" : false,
+          "description" : null,
+          "id" : "C32C4264-9181-4434-95B6-7CE9238B9C76",
+          "index" : 1,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "38622E4D-246F-4A0E-A7F6-7F106E714374",
+              "index" : 0,
+              "ref" : "pane:34",
+              "selected_surface_id" : "F661CB80-99E8-4AC5-8C2C-39429AF4D11B",
+              "selected_surface_ref" : "surface:38",
+              "surface_count" : 2,
+              "surface_ids" : [
+                "F661CB80-99E8-4AC5-8C2C-39429AF4D11B",
+                "094742C8-1973-44C8-8417-0714F09F6EB7"
+              ],
+              "surface_refs" : [
+                "surface:38",
+                "surface:39"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "F661CB80-99E8-4AC5-8C2C-39429AF4D11B",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "38622E4D-246F-4A0E-A7F6-7F106E714374",
+                  "pane_ref" : "pane:34",
+                  "ref" : "surface:38",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Configure Git for Eng360 contributions",
+                  "tty" : "ttys006",
+                  "type" : "terminal",
+                  "url" : null
+                },
+                {
+                  "active" : false,
+                  "focused" : false,
+                  "here" : false,
+                  "id" : "094742C8-1973-44C8-8417-0714F09F6EB7",
+                  "index" : 1,
+                  "index_in_pane" : 1,
+                  "pane_id" : "38622E4D-246F-4A0E-A7F6-7F106E714374",
+                  "pane_ref" : "pane:34",
+                  "ref" : "surface:39",
+                  "selected" : false,
+                  "selected_in_pane" : false,
+                  "title" : "~",
+                  "tty" : "ttys009",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:32",
+          "selected" : false,
+          "title" : "Configure Git for Eng360 contributions"
+        },
+        {
+          "active" : false,
+          "description" : null,
+          "id" : "EA746D0B-9C32-48F5-A703-A91B8D56E998",
+          "index" : 2,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "E101D4A3-BFB0-4878-A51D-2AA05B9E76A4",
+              "index" : 0,
+              "ref" : "pane:29",
+              "selected_surface_id" : "6CD6C0A6-58B5-4D00-96BE-6FB474756F3F",
+              "selected_surface_ref" : "surface:32",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "6CD6C0A6-58B5-4D00-96BE-6FB474756F3F"
+              ],
+              "surface_refs" : [
+                "surface:32"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "6CD6C0A6-58B5-4D00-96BE-6FB474756F3F",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "E101D4A3-BFB0-4878-A51D-2AA05B9E76A4",
+                  "pane_ref" : "pane:29",
+                  "ref" : "surface:32",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "✳ Install Matt Pocock skills installer",
+                  "tty" : "ttys001",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:27",
+          "selected" : false,
+          "title" : "Install Matt Pocock skills installer"
+        },
+        {
+          "active" : false,
+          "description" : null,
+          "id" : "1AA1175E-0520-4A46-95B9-EE4D90EDC6EC",
+          "index" : 3,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "F881B893-F8D2-4786-B712-9EEFBA519B69",
+              "index" : 0,
+              "ref" : "pane:32",
+              "selected_surface_id" : "9D71068C-64AD-4C05-9E95-D261948B5EE2",
+              "selected_surface_ref" : "surface:36",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "9D71068C-64AD-4C05-9E95-D261948B5EE2"
+              ],
+              "surface_refs" : [
+                "surface:36"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "9D71068C-64AD-4C05-9E95-D261948B5EE2",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "F881B893-F8D2-4786-B712-9EEFBA519B69",
+                  "pane_ref" : "pane:32",
+                  "ref" : "surface:36",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "ccs",
+                  "tty" : "ttys005",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:30",
+          "selected" : false,
+          "title" : "ccs"
+        }
+      ]
+    },
+    {
+      "active" : false,
+      "current" : false,
+      "id" : "4F10983D-76E3-4BAD-8457-AE9C9C9552E7",
+      "index" : 2,
+      "key" : false,
+      "ref" : "window:4",
+      "selected_workspace_id" : "603F6B3A-F81F-4B3B-A4DC-1FEB6BF56D1C",
+      "selected_workspace_ref" : "workspace:31",
+      "visible" : false,
+      "workspace_count" : 1,
+      "workspaces" : [
+        {
+          "active" : false,
+          "description" : null,
+          "id" : "603F6B3A-F81F-4B3B-A4DC-1FEB6BF56D1C",
+          "index" : 0,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "F56F1332-E3B2-4E7C-8ED1-B995152D36CE",
+              "index" : 0,
+              "ref" : "pane:33",
+              "selected_surface_id" : "1D157BA8-B58B-4057-A259-68FE4E7D24CC",
+              "selected_surface_ref" : "surface:37",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "1D157BA8-B58B-4057-A259-68FE4E7D24CC"
+              ],
+              "surface_refs" : [
+                "surface:37"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "1D157BA8-B58B-4057-A259-68FE4E7D24CC",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "F56F1332-E3B2-4E7C-8ED1-B995152D36CE",
+                  "pane_ref" : "pane:33",
+                  "ref" : "surface:37",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "mimen@mimen-ltmk9h6:~",
+                  "tty" : "ttys003",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:31",
+          "selected" : true,
+          "title" : "mimen@mimen-ltmk9h6:~"
+        }
+      ]
+    },
+    {
+      "active" : false,
+      "current" : false,
+      "id" : "A1D7A833-4CFA-48EB-B16C-4E09D5F37071",
+      "index" : 3,
+      "key" : false,
+      "ref" : "window:2",
+      "selected_workspace_id" : "DE8AA567-2845-4424-96EC-F5510D061568",
+      "selected_workspace_ref" : "workspace:24",
+      "visible" : false,
+      "workspace_count" : 1,
+      "workspaces" : [
+        {
+          "active" : false,
+          "description" : null,
+          "id" : "DE8AA567-2845-4424-96EC-F5510D061568",
+          "index" : 0,
+          "panes" : [
+            {
+              "active" : false,
+              "focused" : true,
+              "id" : "B2C442A2-48C2-4F4E-AB7A-235591053354",
+              "index" : 0,
+              "ref" : "pane:26",
+              "selected_surface_id" : "8BDE264F-3218-4529-988F-1CB3CC695EC3",
+              "selected_surface_ref" : "surface:29",
+              "surface_count" : 1,
+              "surface_ids" : [
+                "8BDE264F-3218-4529-988F-1CB3CC695EC3"
+              ],
+              "surface_refs" : [
+                "surface:29"
+              ],
+              "surfaces" : [
+                {
+                  "active" : false,
+                  "focused" : true,
+                  "here" : false,
+                  "id" : "8BDE264F-3218-4529-988F-1CB3CC695EC3",
+                  "index" : 0,
+                  "index_in_pane" : 0,
+                  "pane_id" : "B2C442A2-48C2-4F4E-AB7A-235591053354",
+                  "pane_ref" : "pane:26",
+                  "ref" : "surface:29",
+                  "selected" : true,
+                  "selected_in_pane" : true,
+                  "title" : "'/usr/bin/env' 'CMUX_PRESERVE_CLAUDE_AUTH_SELECTION_ENV=1'  '/bin/zsh' '-lc'",
+                  "tty" : "ttys019",
+                  "type" : "terminal",
+                  "url" : null
+                }
+              ]
+            }
+          ],
+          "pinned" : false,
+          "ref" : "workspace:24",
+          "selected" : true,
+          "title" : "'/usr/bin/env' 'CMUX_PRESERVE_CLAUDE_AUTH_SELECTION_ENV=1'  '/bin/zsh' '-lc'"
+        }
+      ]
+    }
+  ]
+}

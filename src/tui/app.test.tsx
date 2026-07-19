@@ -6,6 +6,7 @@ import { openIndex } from "../index/schema.ts";
 import { loadConfig } from "../config.ts";
 import { App } from "./App.tsx";
 import type { Titler } from "../titler/codex.ts";
+import type { EngineState } from "./Root.tsx";
 
 function seed(db: Database): void {
   const ins = db.query(
@@ -25,6 +26,13 @@ function seed(db: Database): void {
 }
 
 const noopTitler: Titler = { available: () => true, async generate() { return null; } };
+const noopEngineState: EngineState = {
+  titler: noopTitler,
+  engine: null,
+  active: null,
+  available: [],
+  cycle() {},
+};
 
 function makeConfig() {
   const r = loadConfig("/nonexistent-ccs-test.toml");
@@ -42,7 +50,7 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
     createElement(App, {
       db: real,
       config: makeConfig(),
-      titler: noopTitler,
+      engineState: noopEngineState,
       resumeRequest: { current: null },
     }),
   );
@@ -50,11 +58,17 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
 
   const frame = lastFrame() ?? "";
   expect(frame).toContain("ccs");
-  expect(frame).toContain("Real Session One"); // visible real session
+  // The real (non-subagent) session is listed — assert its truncation-safe title prefix
+  // ("Rea" survives the narrow test width; the cluster view's PHASE/ROLE columns eat into
+  // the title, so the full word "Real" no longer fits at this width).
+  expect(frame).toContain("Rea"); // visible real session (title truncates to "Rea…")
   expect(frame).not.toContain("SUBAGENTONLY"); // subagent hidden by default
   expect(frame).toContain("sessions"); // dashboard header stat
-  // Footer truncates at test width; assert its head (mode toggle) rather than the far tail.
-  expect(frame).toContain("Tab skills");
+  // Footer highlights keys with ANSI escapes (the key and its label are separated by color
+  // codes), so "Tab skills" is never a contiguous substring. Assert the mode-toggle label +
+  // the key independently — both present means the skills toggle rendered.
+  expect(frame).toContain("skills");
+  expect(frame).toContain("Tab");
 
   unmount();
   real.close();

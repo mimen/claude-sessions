@@ -1,41 +1,33 @@
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
-import { readFileSync, rmSync } from "node:fs";
 import type { Database } from "bun:sqlite";
+import type { InferenceEngine } from "../inference/engine.ts";
 import {
-  setKind,
-  setEvent,
-  setSkill,
+  setKey,
   setParent,
   setProject,
-  setRole,
-  setSubstrate,
   setCompleted,
   setArchived,
   setCustomTitle,
+  setRole,
+  setSubstrate,
+  setIdentity,
   addTag,
   removeTag,
   type Kind,
 } from "./db.ts";
 
 /**
- * Natural-language editor for session ORGANIZATION METADATA, backed by Codex. The user types an
- * instruction ("mark all glizzy sessions done", "this is a loop backed by ops-watch"); Codex maps
- * it to a set of metadata mutations against a numbered session list; we apply them to the
- * catalogue. It only ever touches metadata (kind/event/skill/parent/lifecycle/title/tags) — never
- * the sessions themselves or the TUI. Runs `codex exec` hermetically, riding the user's Codex auth.
+ * Natural-language editor for session ORGANIZATION METADATA, backed by an inference engine. The
+ * user types an instruction ("mark all glizzy sessions done", "this is a loop backed by
+ * ops-watch"); the engine maps it to a set of metadata mutations against a numbered session
+ * list; we apply them to the catalogue. It only ever touches metadata
+ * (kind/event/skill/parent/lifecycle/title/tags) — never the sessions themselves or the TUI.
  */
 export interface SessionMeta {
   readonly sessionId: string;
   readonly title: string;
   readonly kind: Kind;
-  readonly skill: string | null;
-  readonly event: string | null;
-  /** Fleet role this session is a body of (catalogue), if any. */
-  readonly role: string | null;
-  /** Agent runtime, when it isn't the claude-code default (catalogue stores default as unset). */
-  readonly substrate: string | null;
+  readonly key: string | null;
   readonly parentSessionId: string | null;
   readonly completed: boolean;
   readonly archived: boolean;
@@ -45,11 +37,8 @@ export interface SessionMeta {
   readonly repo: string;
 }
 
-/** The one mutation-op vocabulary — the NL editor, `ccs intent`, and `ccs apply-intents` all
- *  share it (an op added here reaches every mutation surface at once). */
 export const MUTATION_OPS = [
-  "kind", "event", "skill", "parent", "project", "role", "substrate",
-  "completed", "archived", "title", "tag", "untag",
+  "key", "parent", "project", "role", "substrate", "identity", "completed", "archived", "title", "tag", "untag",
 ] as const;
 
 export interface Mutation {
@@ -59,38 +48,23 @@ export interface Mutation {
   readonly value: string | null;
 }
 
-/**
- * Normalize a raw op value into Mutation form — the one place value spellings resolve
- * ("yes"/"1"/"done" → "true"; "none"/"clear" → null; kind coerced to loop|session). `skip`
- * marks combinations that must not become mutations (tag/untag with nothing to tag).
- */
+/** Normalize a raw mutation value at each command-surface boundary. */
 export function normalizeMutationValue(
   op: Mutation["op"],
   raw: string | null,
 ): { value: string | null } | { skip: true } {
-  const v = raw === null ? null : String(raw).trim();
-  const cleared = v === null || /^(none|null|clear|)$/i.test(v);
+  const value = raw === null ? null : raw.trim();
+  const cleared = value === null || /^(none|null|clear|)$/i.test(value);
   switch (op) {
     case "completed":
     case "archived":
-      return { value: /^(true|yes|1|done)$/i.test(v ?? "") ? "true" : "false" };
-    case "kind":
-      return { value: /loop/i.test(v ?? "") ? "loop" : "session" };
+      return { value: /^(true|yes|1|done)$/i.test(value ?? "") ? "true" : "false" };
     case "tag":
     case "untag":
-      return cleared ? { skip: true } : { value: v };
+      return cleared ? { skip: true } : { value };
     default:
-      // event / skill / title / project / role / substrate / parent (parent's NUMBER→id
-      // resolution happens before this, at each producer's boundary).
-      return { value: cleared ? null : v };
+      return { value: cleared ? null : value };
   }
-}
-
-export interface CodexConfig {
-  binary: string;
-  model: string;
-  reasoningEffort: string;
-  timeoutMs?: number;
 }
 
 const SCHEMA_PATH = join(import.meta.dir, "command-schema.json");
@@ -101,11 +75,9 @@ const PROMPT =
   "set of mutations that satisfies the instruction, referencing sessions by their NUMBER from the " +
   "list. Never invent numbers; never change anything not asked for. If a FOCUS number is given, " +
   "the instruction is primarily about that session (but you may reference others by number, e.g. " +
-  "for a parent). Ops and their value: kind→'loop'|'session'; event→a slug or 'none'; skill→a " +
-  "name or 'none'; project→a project/initiative name (lowercase slug) or 'none'; role→a fleet " +
-  "role name (lowercase slug) or 'none'; substrate→an agent runtime (claude-code, codex, engine) " +
-  "or 'none'; parent→the target session NUMBER or 'none'; completed/archived→'true'|'false'; " +
-  "title→a short custom title; tag/untag→an entity name. Respond using the provided JSON schema.";
+  "for a parent). Ops and their value: key/project/role/substrate/identity→text or 'none'; parent→the " +
+  "target session NUMBER or 'none'; completed/archived→'true'|'false'; title→a short custom " +
+  "title; tag/untag→an entity name. Respond using the provided JSON schema.";
 
 interface RawMutation {
   n?: number;
@@ -121,12 +93,8 @@ function renderSessions(sessions: readonly SessionMeta[]): string {
       const parent = s.parentSessionId ? `#${titleById.get(s.parentSessionId) ?? "?"}` : "none";
       const flags = [
         `kind=${s.kind}`,
-        `skill=${s.skill ?? "none"}`,
-        `event=${s.event ?? "none"}`,
+        `key=${s.key ?? "none"}`,
         `project=${s.project ?? "none"}`,
-        `role=${s.role ?? "none"}`,
-        // Default substrate is universal; only a non-default value is worth the model's tokens.
-        s.substrate ? `substrate=${s.substrate}` : "",
         `parent=${parent}`,
         s.completed ? "done" : "",
         s.archived ? "archived" : "",
@@ -137,12 +105,13 @@ function renderSessions(sessions: readonly SessionMeta[]): string {
     .join("\n");
 }
 
-/** Run the instruction through Codex and return resolved mutations (or an error message). */
+/** Run the instruction through the engine and return resolved mutations (or an error message). */
 export async function runMetadataCommand(
   instruction: string,
   sessions: readonly SessionMeta[],
   focusSessionId: string | null,
-  codex: CodexConfig,
+  engine: InferenceEngine,
+  timeoutMs = 90_000,
 ): Promise<{ mutations: Mutation[] } | { error: string }> {
   if (!instruction.trim()) return { mutations: [] };
   const focusN = focusSessionId ? sessions.findIndex((s) => s.sessionId === focusSessionId) + 1 : 0;
@@ -151,61 +120,55 @@ export async function runMetadataCommand(
     (focusN > 0 ? `FOCUS: #${focusN}\n` : "") +
     `\nSESSIONS:\n${renderSessions(sessions)}\n`;
 
-  const outPath = join(tmpdir(), `ccs-cmd-${randomUUID()}.json`);
-  const args = [
-    "exec",
-    "--ephemeral",
-    "--skip-git-repo-check",
-    "--sandbox",
-    "read-only",
-    "--ignore-rules",
-    "--ignore-user-config",
-    "-c",
-    `model_reasoning_effort="${codex.reasoningEffort}"`,
-    "--output-schema",
-    SCHEMA_PATH,
-    "--output-last-message",
-    outPath,
-  ];
-  if (codex.model) args.push("-m", codex.model);
-  args.push(PROMPT);
-
   try {
-    const proc = Bun.spawn([codex.binary, ...args], {
-      stdin: new TextEncoder().encode(stdin),
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-    const timer = setTimeout(() => proc.kill(), codex.timeoutMs ?? 90_000);
-    const code = await proc.exited;
-    clearTimeout(timer);
-    if (code !== 0) return { error: "codex failed" };
-
-    const parsed = JSON.parse(readFileSync(outPath, "utf8")) as { mutations?: RawMutation[] };
+    const parsed = (await engine.runStructured({
+      prompt: PROMPT,
+      stdin,
+      schemaPath: SCHEMA_PATH,
+      timeoutMs,
+    })) as { mutations?: RawMutation[] } | null;
+    if (!parsed) return { error: `${engine.name} failed` };
     const raw = Array.isArray(parsed.mutations) ? parsed.mutations : [];
     const mutations: Mutation[] = [];
     for (const m of raw) {
       const idx = typeof m.n === "number" ? m.n - 1 : -1;
       const subject = sessions[idx];
-      if (!subject || !m.op || !MUTATION_OPS.includes(m.op as Mutation["op"])) continue;
-      const op = m.op as Mutation["op"];
+      if (!subject || !m.op) continue;
       const v = m.value == null ? null : String(m.value).trim();
-      if (op === "parent") {
-        // value is a target NUMBER referencing another session (this producer's convention).
-        const cleared = v === null || /^(none|null|clear|)$/i.test(v);
-        const t = v && /^#?\d+$/.test(v) ? sessions[Number(v.replace("#", "")) - 1] : null;
-        mutations.push({ sessionId: subject.sessionId, op, value: cleared ? null : t?.sessionId ?? null });
-        continue;
+      const cleared = v === null || /^(none|null|clear|)$/i.test(v);
+      let value: string | null;
+      switch (m.op) {
+        case "parent": {
+          // value is a target NUMBER referencing another session.
+          const t = v && /^#?\d+$/.test(v) ? sessions[Number(v.replace("#", "")) - 1] : null;
+          value = cleared ? null : t?.sessionId ?? null;
+          break;
+        }
+        case "key":
+        case "title":
+        case "project":
+        case "role":
+        case "substrate":
+        case "identity":
+          value = cleared ? null : v;
+          break;
+        case "completed":
+        case "archived":
+          value = /^(true|yes|1|done)$/i.test(v ?? "") ? "true" : "false";
+          break;
+        case "tag":
+        case "untag":
+          if (cleared) continue;
+          value = v;
+          break;
+        default:
+          continue;
       }
-      const norm = normalizeMutationValue(op, v);
-      if ("skip" in norm) continue;
-      mutations.push({ sessionId: subject.sessionId, op, value: norm.value });
+      mutations.push({ sessionId: subject.sessionId, op: m.op as Mutation["op"], value });
     }
     return { mutations };
   } catch {
-    return { error: "codex error" };
-  } finally {
-    rmSync(outPath, { force: true });
+    return { error: `${engine.name} error` };
   }
 }
 
@@ -214,14 +177,8 @@ export function applyMutations(catalogue: Database, mutations: readonly Mutation
   const counts = new Map<string, number>();
   for (const m of mutations) {
     switch (m.op) {
-      case "kind":
-        setKind(catalogue, m.sessionId, m.value === "loop" ? "loop" : "session", now);
-        break;
-      case "event":
-        setEvent(catalogue, m.sessionId, m.value, now);
-        break;
-      case "skill":
-        setSkill(catalogue, m.sessionId, m.value, now);
+      case "key":
+        setKey(catalogue, m.sessionId, m.value, now);
         break;
       case "project":
         setProject(catalogue, m.sessionId, m.value, now);
@@ -231,6 +188,9 @@ export function applyMutations(catalogue: Database, mutations: readonly Mutation
         break;
       case "substrate":
         setSubstrate(catalogue, m.sessionId, m.value, now);
+        break;
+      case "identity":
+        setIdentity(catalogue, m.sessionId, m.value, now);
         break;
       case "parent":
         setParent(catalogue, m.sessionId, m.value, now);

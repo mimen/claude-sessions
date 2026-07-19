@@ -8,16 +8,39 @@ import { openIndex } from "./index/schema.ts";
 import type { Database } from "bun:sqlite";
 import { reindexStore, listByRecency, titleOf, costOf, subagentCosts } from "./index/index.ts";
 import { formatCost } from "./cost.ts";
-import { openCatalogue, getAll, lifecycleOf, parentEdges } from "./catalogue/db.ts";
-import { openSessionIds } from "./catalogue/open-state.ts";
+import { openCatalogue, getAll, getRow, getMeta, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster } from "./catalogue/db.ts";
+import { openSessionIds } from "./cmux/liveness.ts";
+import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson, isCoreRole } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
-import { whoami, rename, mark, tag, event, parent, skill, role, substrate, identity, meta, SESSION_ID_RE } from "./catalogue/commands.ts";
+import { SESSION_ID_RE, whoami, rename, mark, tag, event, skill, key, parent, role, substrate, identity, gusWork, sessionEpic, project, setClusterCmd, status, name, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { lineage } from "./catalogue/lineage.ts";
 import { merge, mergePull, lsFleet, intent, applyIntentsCommand } from "./catalogue/fleet-commands.ts";
+import { newSession } from "./resume/new-session.ts";
+import { syncTabs } from "./catalogue/sync-tabs.ts";
+import { boardCommand } from "./catalogue/board-command.ts";
 import { backfillTitles } from "./titler/queue.ts";
-import { createCodexTitler } from "./titler/codex.ts";
+import { createTitler } from "./titler/codex.ts";
+import { buildEngine, resolveEngine } from "./inference/engine.ts";
 import { handoffInline } from "./resume/inline.ts";
 import type { ResumeCommand } from "./resume/command.ts";
+import { resumeSessionEntry } from "./resume/resume-session.ts";
+import { resumeClusterEntry, resumeMany, type ClusterResumeSummary } from "./resume/resume-cluster.ts";
+import { checkClusterGate } from "./cluster/manifest.ts";
+import { resolveSelector, type SelectorKind } from "./resume/selector.ts";
+import { syncRoles } from "./roles/sync-roles.ts";
+import { backfillWorkUnits } from "./catalogue/backfill-work-units.ts";
+import { rolesCommand } from "./catalogue/roles-command.ts";
+import { registerSessionCommand } from "./hooks/register-command.ts";
+import { hookRunCommand } from "./hooks/hook-run.ts";
+import { statuslineCommand } from "./hooks/statusline-command.ts";
+import { hooksCommand } from "./hooks/hooks-command.ts";
+import { catchUpCommand } from "./hooks/catch-up-command.ts";
+import { inboxCommand } from "./inbox/inbox-command.ts";
+import { stateCommand } from "./state/state-command.ts";
+import { groupingCommand } from "./state/grouping-command.ts";
+import { catalogueExportCommand } from "./catalogue/export-command.ts";
+import { identityResolveCommand } from "./catalogue/identity-command.ts";
+import { sessionFieldsCommand } from "./catalogue/session-fields-command.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -39,15 +62,53 @@ Usage:
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
   ccs meta [<id>|.]   Show a session's catalogue metadata (. = current session)
   ccs rename [<id>|.] "<name>"   Set a custom title (+ sync cmux workspace name)
-  ccs mark [<id>|.] --loop|--completed|--archived [--off]   Set lifecycle/kind flags
+  ccs mark [<id>|.] --completed|--archived [--off]   Set lifecycle flags (control-owned)
   ccs tag [<id>|.] "<Entity>" [--remove]   Add/remove an entity tag
-  ccs event [<id>|.] <slug> [--off]   Assign/clear the session's event slug
+  ccs key [<id>|.] <slug> [--off]   Assign/clear the session's identity key (canonical)
   ccs parent [<id>|.] <parent-id|.> [--off]   Set/clear the spawning parent session
   ccs skill [<id>|.] <name> [--off]   Set/clear the backing skill or slash-command
   ccs role [<id>|.] <name> [--off]    Set/clear the fleet role this session is a body of
   ccs substrate [<id>|.] <value> [--off]   Set/clear the agent runtime (unset = claude-code)
   ccs identity [<id>|.] [<name>] [--off]   Record the launching identity (default: $CLAUDE_IDENTITY)
+  ccs project [<id>|.] <label> [--off]   Set/clear the project/initiative label
+  ccs set-cluster [<id>|.] <slug> [--off]   Set/clear the cluster grouping
+  ccs status [<id>|.] "<line>" [--off]   Set a short freeform status shown on the session's tab (worker → summary pill)
+  ccs name [<id>|.] "<short name>" [--off]   Set the session's short display name (<=35ch, aim to use most of it) — the tab title after "#<PR> "
+  ccs stage [<id>|.]                    Read cached stage (D5: cache of the board's data.stage; workers do not write)
+  ccs stage [<id>|.] <value> --sensor <name>   Sensor-only write (rejects worker writes)
+  ccs meta [<id>|.] <key> <value> [--off]   Set a key in the session's generic meta map (ADR-0060/0064)
+  ccs new-session [flags]   Mint a session id, tag its metadata AT BIRTH, then launch \`claude --session-id\`
+                            flags: --cluster --role --kind loop|session --project --key
+                                   --title --parent <id> --cwd <dir> --prompt "<text>"
+                                   --permission-mode <mode> · --print-id (reserve only, don't launch)
+  ccs sync-tabs [<selector>|.|--all]   Paint cmux tabs from catalogue metadata (. | id | #pr | role | cluster | --all)
+  ccs cluster <c> [--expand] [--json]   Cluster map: all members by role, live/lifecycle, work-unit (--json for agents)
+  ccs catalogue export --cluster <c> [--role <r>] [--json]  ADR-D1 machine-readable projection (cluster engines: use this, not sqlite)
+  ccs identity resolve --session <sid> [--json]  ADR-D1 resolve a session to its identity key + facts (single source of truth)
+  ccs session-fields <sid> --json '{...}' [--sensor <name>]  ADR-0078 atomic multi-field write for cluster hot-path composers
+  ccs board <c> [--json|--text]         Cluster board: per-worker truth view composed by the cluster
+  ccs board <c> --identity <key> [--text]   Read a single board row by identity
+  ccs board <c> --session <sid> [--text]    Read a board row via session→identity resolve
+  ccs board <c> --recompose <key>           Recompose one identity (sync); print the updated row
+  ccs board <c> --recompose-all             Recompose the whole board (sync)
+  ccs inbox send|bump|drain|pending  Durable per-identity messaging; bump also wakes a live tab (ADR-0028)
+  ccs state get|set|merge  Durable state store (--cluster <c> or --role <r> …) (ADR-0031)
+  ccs hook run <name>   Run a named ccs hook (session-start | stop) from its stdin payload
+  ccs self-check <id>   Turn-end self-check sidecar: claude -p decides what state updates the session should have made this turn
+  ccs register-session  (alias for 'ccs hook run session-start')
+  ccs roles [ls|upsert|rm]  Manage the roles registry (definitions sync-roles/resume use)
+  ccs sync-roles        Materialize the roles registry into ~/.claude (symlink reconcile)
+  ccs resume-session <id>  Re-embody one identity (the core op; loops come back running)
+  ccs resume-cluster <c>   Resume every not-open identity in a cluster (loop over resume-session)
+  ccs resume <selector>  Resume by anything: id | #pr | owner/repo#pr | W-number | epic | role | cluster
+                         (pin the axis with --role|--pr|--gus|--epic|--cluster|--key; --dry-run to preview)
   ccs skills          Machine-wide skill registry with usage data (ccs skills --help)
+  ccs catch-up [<id>|.]  Surface unseen cluster CHANGELOG entries + advance the seen stamp (exit 2 if a restart is needed)
+  ccs context-check [--json]  Peak-context guard for long loops: OK/WARN/CRITICAL + directive (autocompact is unreliable in headless)
+  ccs decide <c> record|reopen|check|list ...   Decision ledger — record an item's disposition (approve/hold/defer/clear) so it stops re-surfacing.
+                                                Alias: 'ccs suppress' (legacy name, still works)
+  ccs bump-session <sid> [--note "..."]  Wake a specific session by id via the live cmux bridge (surface UUID, not workspace ref)
+  ccs reap-duplicates [--do]  Detect sessions with >1 live \`claude --resume <sid>\` process and close the duplicate cmux workspaces (dry-run by default)
   ccs --version       Print version
   ccs --help          Show this help
 `;
@@ -114,8 +175,16 @@ export async function main(argv: string[]): Promise<number> {
     }
     case "whoami":
       return whoami();
-    case "meta":
-      return meta(args[1]);
+    case "meta": {
+      const parsed = classifyMetaArgs(args.slice(1));
+      switch (parsed.mode) {
+        case "read":  return meta(parsed.id);
+        case "set":   return metaSet(parsed.id, parsed.key, parsed.value, parsed.flags);
+        case "error":
+          console.error(parsed.message);
+          return 1;
+      }
+    }
     case "rename":
       return rename(args[1], args.slice(2).filter((a) => !a.startsWith("--")).join(" "));
     case "mark":
@@ -124,16 +193,135 @@ export async function main(argv: string[]): Promise<number> {
       return tag(...edgeArgs(args));
     case "event":
       return event(...edgeArgs(args));
-    case "parent":
-      return parent(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "skill":
       return skill(...edgeArgs(args));
+    case "key":
+      return key(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "parent":
+      return parent(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "project":
+      return project(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "set-cluster":
+    case "system": // back-compat alias
+      return setClusterCmd(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "role":
-      return role(...edgeArgs(args));
+      return role(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
     case "substrate":
       return substrate(...edgeArgs(args));
+    case "gus-work":
+      return gusWork(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "epic":
+      return sessionEpic(args[1], args.slice(2).find((a) => !a.startsWith("--")), args.slice(2).filter((a) => a.startsWith("--")));
+    case "status":
+      // status takes a full freeform LINE, so join all non-flag args (not just the first token).
+      return status(args[1], args.slice(2).filter((a) => !a.startsWith("--")).join(" ") || undefined, args.slice(2).filter((a) => a.startsWith("--")));
+    case "name":
+      // name takes a full short LINE (the display name), so join all non-flag args.
+      return name(args[1], args.slice(2).filter((a) => !a.startsWith("--")).join(" ") || undefined, args.slice(2).filter((a) => a.startsWith("--")));
+    case "stage": {
+      // D5: --sensor <name> is a flag-value pair — pass the whole arg tail so stage() can find
+      // both the flag AND its value. The value token doesn't start with -- so it wouldn't survive
+      // the naive "flags = args starting with --" filter used elsewhere.
+      const tail = args.slice(2);
+      const value = tail.find((a, i) => !a.startsWith("--") && tail[i - 1] !== "--sensor");
+      return stage(args[1], value, tail);
+    }
+    case "meta-set": {
+      const pos = args.slice(2).filter((a) => !a.startsWith("--"));
+      return metaSet(args[1], pos[0], pos[1], args.slice(2).filter((a) => a.startsWith("--")));
+    }
+    case "new-session":
+    case "new":
+      return newSession(args.slice(1));
+    case "sync-tabs":
+      return syncTabs(args.slice(1));
+    case "hook":
+      // `ccs hook run <name>` — the named-hook dispatcher (settings.json wires these)
+      if (args[1] === "run") return await hookRunCommand(args.slice(2));
+      console.error("usage: ccs hook run <name>");
+      return 1;
+    case "hooks":
+      // `ccs hooks <explain|lint>` — layered-hook observability (ADR-0045)
+      return hooksCommand(args.slice(1));
+    case "catch-up":
+      // `ccs catch-up [<id>|.]` — surface unseen cluster CHANGELOG entries + advance the stamp
+      // (ADR-0058). Per-tick companion to the catch-up start action, for long-lived loops.
+      return catchUpCommand(args.slice(1));
+    case "context-check": {
+      const { contextCheckCommand } = await import("./hooks/context-check.ts");
+      return contextCheckCommand(args.slice(1));
+    }
+    case "decide":  // preferred name (task #37): describes the user action, not the mechanism
+    case "suppress": {  // legacy alias — kept for one release, docs point at 'decide'
+      const { suppressCommand } = await import("./state/suppress.ts");
+      return suppressCommand(args.slice(1));
+    }
+    case "bump-session": {
+      const { bumpSessionCommand } = await import("./inbox/bump-session-command.ts");
+      return bumpSessionCommand(args.slice(1));
+    }
+    case "reap-duplicates": {
+      // `ccs reap-duplicates [--do]` — find sessions with >1 live `claude --resume <sid>` proc
+      // and close the duplicate cmux workspaces (default is dry-run). Cleans up after a blind
+      // liveness pass spawned a second embodiment of a session that was already running.
+      const { reapCommand } = await import("./cmux/reap.ts");
+      return reapCommand(args.slice(1));
+    }
+    case "register-session":
+      return await registerSessionCommand(); // back-compat alias for `hook run session-start`
+    case "statusline":
+      // The Claude Code statusLine command (ADR-0027): reads session context on stdin,
+      // prints the one-line status from ccs metadata. sync-roles materializes this into
+      // settings.json's statusLine slot.
+      return await statuslineCommand();
+    case "inbox":
+      return inboxCommand(args.slice(1));
+    case "state":
+      return stateCommand(args.slice(1));
+    case "grouping":
+      return groupingCommand(args.slice(1));
+    case "roles":
+      return rolesCommand(args.slice(1));
+    case "sync-roles":
+      return syncRolesCmd(args.includes("--dry-run"), args.includes("--hooks"));
+    case "backfill-work-units":
+      // one-time ADR-0057 migration: link existing anchored rows to a work-unit entity
+      return backfillWorkUnits(args.slice(1));
+    case "cluster":
+      return clusterView(args[1], args.includes("--expand") || args.includes("--all"), args.includes("--json"));
+    case "catalogue":
+      // ADR-D1: `ccs catalogue export --cluster <c> ...` — the authorized read path for cluster
+      // engines (compose_board.py etc). Replaces direct sqlite3 access to catalogue.db.
+      return catalogueExportCommand(args.slice(1));
     case "identity":
-      return identity(...edgeArgs(args));
+      // ADR-D1: `ccs identity resolve --session <sid>` resolves a canonical identity key;
+      // otherwise preserve the metadata command that records the launch identity.
+      return args[1] === "resolve" ? identityResolveCommand(args.slice(1)) : identity(...edgeArgs(args));
+    case "session-fields":
+      // ADR-0078 finish-line: atomic multi-field write for cluster hot-path composers.
+      // `ccs session-fields <sid> --json '{...}' [--sensor <name>]`
+      return sessionFieldsCommand(args.slice(1));
+    case "board":
+      return boardCommand(args.slice(1));
+    case "resume-session":
+      return resumeSession(args[1], args.includes("--dry-run"));
+    case "resume-cluster":
+      return resumeCluster(args[1], args.includes("--dry-run"));
+    case "resume":
+      return resumeSelector(args.slice(1));
+    case "self-check": {
+      // `ccs self-check <session-id>` — the turn-end sidecar (ADR-0063 v2). Runs a cheap
+      // claude -p against the session's recent transcript + rubric, executes any `ccs` state
+      // updates the model decides on. Normally spawned detached by the worker Stop hook when
+      // CCS_SELF_CHECK_MODE=sidecar; runnable by hand for debugging.
+      const sid = args[1];
+      if (!sid) {
+        console.error("usage: ccs self-check <session-id>");
+        return 1;
+      }
+      const { runSelfCheck } = await import("./hooks/self-check-sidecar.ts");
+      return await runSelfCheck({ sessionId: sid });
+    }
     case "skills": {
       // Bare `ccs skills` on a terminal opens the TUI in skills mode; flags/subcommands
       // (or piped output) use the plain-table command path.
@@ -172,7 +360,7 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
     return 1;
   }
 
-  const db = openIndex(DB_PATH);
+  const db = openIndex(DB_PATH());
   try {
     const totalBytes = scan.value.reduce((sum, f) => sum + f.sizeBytes, 0);
     const stats = await reindexStore(db, scan.value, config.host.label);
@@ -185,22 +373,22 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
     if (spend.usd) console.log(`  ${formatCost(spend.usd)} total API-equivalent spend across the store`);
 
     if (opts.titles) {
-      const titler = createCodexTitler({
-        binary: config.titler.binary,
-        model: config.titler.model,
-        reasoningEffort: config.titler.reasoningEffort,
-      });
+      const selection = resolveEngine(config);
+      const engine = selection.name ? buildEngine(selection.name, config) : null;
+      const titler = engine ? createTitler(engine) : null;
       process.stdout.write("Generating titles… ");
-      const title = await backfillTitles(db, titler, {
-        concurrency: config.titler.concurrency,
-        maxAttempts: config.titler.maxAttempts,
-        onProgress: (done, total) => {
-          process.stdout.write(`\rGenerating titles… ${done}/${total}   `);
-        },
-      });
+      const title = titler
+        ? await backfillTitles(db, titler, {
+            concurrency: config.titler.concurrency,
+            maxAttempts: config.titler.maxAttempts,
+            onProgress: (done, total) => {
+              process.stdout.write(`\rGenerating titles… ${done}/${total}   `);
+            },
+          })
+        : { generated: 0, failed: 0, skippedUnavailable: true };
       process.stdout.write("\n");
       if (title.skippedUnavailable) {
-        console.log(`  titling skipped — \`${config.titler.binary}\` not found on PATH`);
+        console.log("  titling skipped — no inference engine (codex/claude) found on PATH");
       } else {
         console.log(`  ${title.generated} generated, ${title.failed} failed`);
       }
@@ -218,14 +406,14 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
   ensureDataDir();
 
   debugLog("launchTui", initialMode);
-  const firstRun = !existsSync(DB_PATH);
+  const firstRun = !existsSync(DB_PATH());
   if (firstRun) console.log("First run — indexing your sessions…");
 
-  const db = openIndex(DB_PATH);
-  const catalogue = openCatalogue(CATALOGUE_PATH);
+  const db = openIndex(DB_PATH());
+  const catalogue = openCatalogue(CATALOGUE_PATH());
   const { openSkillsDb } = await import("./skills/db.ts");
   const { SKILLS_DB_PATH } = await import("./paths.ts");
-  const skillsDb = openSkillsDb(SKILLS_DB_PATH);
+  const skillsDb = openSkillsDb(SKILLS_DB_PATH());
   const resumeRequest: { current: ResumeCommand | null } = { current: null };
   try {
     const scan = scanStore(config.store.path);
@@ -240,14 +428,7 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
     const { render } = await import("ink");
     const { createElement } = await import("react");
     const { Root } = await import("./tui/Root.tsx");
-    const titler = createCodexTitler({
-      binary: config.titler.binary,
-      model: config.titler.model,
-      reasoningEffort: config.titler.reasoningEffort,
-    });
-    const app = render(
-      createElement(Root, { db, catalogue, skillsDb, config, titler, resumeRequest, initialMode, initialStatus: scanWarning }),
-    );
+    const app = render(createElement(Root, { db, catalogue, skillsDb, config, resumeRequest, initialMode, initialStatus: scanWarning }));
     await app.waitUntilExit();
     if (scanWarning) console.error(`ccs: ${scanWarning}`);
   } finally {
@@ -268,8 +449,8 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
 
 /** Table of indexed sessions, joined with catalogue metadata + live open-state. */
 function ls(opts: { all: boolean; loops: boolean; event?: string; role?: string }): number {
-  const db = openIndex(DB_PATH);
-  const cat = openCatalogue(CATALOGUE_PATH);
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
   try {
     const rows = listByRecency(db);
     if (rows.length === 0) {
@@ -285,8 +466,9 @@ function ls(opts: { all: boolean; loops: boolean; event?: string; role?: string 
     for (const r of rows) {
       const c = catalogue.get(r.sessionId) ?? null;
       const lifecycle = lifecycleOf(c);
-      if (opts.event && c?.event !== opts.event) continue;
+      if (opts.event && (!c || getMeta(c, "event") !== opts.event)) continue;
       if (opts.role && c?.role !== opts.role) continue;
+      const keyValue = identityKeyOf(c);
       if (!opts.all && lifecycle === "archived") continue;
       if (opts.loops && c?.kind !== "loop") continue;
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
@@ -294,20 +476,23 @@ function ls(opts: { all: boolean; loops: boolean; event?: string; role?: string 
       const childMark = c?.parentSessionId ? "↳ " : "";
       const title = pad(childMark + (c?.customTitle ?? r.title), 42);
       const badge = pad((c?.kind === "loop" ? "LOOP " : "") + d.label + (d.nudge ? "!" : ""), 16);
-      const sk = pad(c?.skill ? `⚙${c.skill}` : "", 14);
+      const skillValue = c ? getMeta(c, "skill") : null;
+      const sk = pad(typeof skillValue === "string" ? `⚙${skillValue}` : "", 14);
       // Filtered-on columns are redundant — only print role/event when not filtering to one.
       const rl = opts.role ? "" : pad(c?.role ? `◈${c.role}` : "", 14);
-      const evt = opts.event ? "" : pad(c?.event ? `⊞${c.event}` : "", 18);
+      const eventValue = c ? getMeta(c, "event") : null;
+      const evt = opts.event ? "" : pad(typeof eventValue === "string" ? `⊞${eventValue}` : "", 18);
+      const key = pad(keyValue ? `⌁${keyValue}` : "", 18);
       const project = pad(r.projectName, 16);
       const age = pad(formatAge(r.lastTs), 5);
       const subCost = subCosts.get(r.sessionId) ?? subCosts.get(r.resumeId) ?? 0;
       const cost = pad(formatCost(r.costUSD + subCost), 7);
-      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${rl}${evt}${project} ${age} ${cost} ${r.msgCount}m`);
+      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${rl}${evt}${key}${project} ${age} ${cost} ${r.msgCount}m`);
       shown++;
     }
     const hidden = rows.length - shown;
     console.log(
-      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⚙=skill · ◈=role · ↳=child · ⊞=event · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
+      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⚙=skill · ◈=role · ↳=child · ⊞=event · ⌁=key · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
         (opts.event ? ` · event=${opts.event}` : "") +
         (opts.role ? ` · role=${opts.role}` : "") +
         (hidden > 0 && !opts.all && !opts.event && !opts.role ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
@@ -325,8 +510,8 @@ function ls(opts: { all: boolean; loops: boolean; event?: string; role?: string 
  * every parent as a root, and a seen-set guards the recursion so a cycle prints once, not forever.
  */
 function tree(_opts: { all: boolean }): number {
-  const db = openIndex(DB_PATH);
-  const cat = openCatalogue(CATALOGUE_PATH);
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
   try {
     const edges = parentEdges(cat);
     if (edges.length === 0) {
@@ -344,7 +529,7 @@ function tree(_opts: { all: boolean }): number {
     for (const kids of childMap.values()) kids.sort();
     const catMap = getAll(cat);
     const skillOf = (id: string): string => {
-      const s = catMap.get(id)?.skill;
+      const s = catMap.get(id)?.role;
       return s ? `  ⚙${s}` : "";
     };
     // A node's own cost includes its index-level subagent runs (agent-*.jsonl files).
@@ -386,6 +571,334 @@ function tree(_opts: { all: boolean }): number {
     cat.close();
   }
   return 0;
+}
+
+/** Render the cluster map for a cluster: members grouped by role, liveness, how to reach each. */
+function clusterView(clusterSlug: string | undefined, expand = false, asJson = false): number {
+  if (!clusterSlug) {
+    console.error("ccs: missing cluster slug. Usage: ccs cluster <cluster> [--expand] [--json]");
+    return 1;
+  }
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
+  try {
+    // Liveness is surface-keyed (exact) via the cmux bridge, not cwd-approximate: a session
+    // is live iff its id or resumeId has a live surface (ADR-0014/0040).
+    const open = openSessionIds();
+    const members = sessionsForCluster(cat, clusterSlug).map((sid) => {
+      const row = getRow(cat, sid)!;
+      const ir = db
+        .query("SELECT cwd, resume_id FROM sessions WHERE session_id = $id")
+        .get({ $id: sid }) as { cwd: string | null; resume_id: string | null } | null;
+      const cwd = ir?.cwd ?? null;
+      const live = open.has(sid) || (!!ir?.resume_id && open.has(ir.resume_id));
+      return toMember(row, cwd, ir?.resume_id ?? null, live);
+    });
+    const map = buildClusterMap(clusterSlug, members);
+    if (asJson) {
+      // Machine-readable roster for AGENTS to consume each tick (control/concierge/scout/…):
+      // all sessions, core + fleet, live/lifecycle, work-unit, + a closedWithWork roll-up.
+      console.log(JSON.stringify(clusterMapToJson(map)));
+      return 0;
+    }
+    if (members.length === 0) {
+      console.log(`cluster ${clusterSlug}: no members (nothing tagged cluster=${clusterSlug}).`);
+      return 0;
+    }
+    console.log(renderClusterMap(map, expand));
+    return 0;
+  } finally {
+    db.close();
+    cat.close();
+  }
+}
+
+/** Resume all sessions in a system (idempotent reconcile). */
+/** `ccs resume-session <id>` — the core op: re-embody one identity (ADR-0015). */
+function resumeSession(sessionId: string | undefined, dryRun: boolean): number {
+  if (!sessionId) {
+    console.error("ccs: missing session id. Usage: ccs resume-session <id> [--dry-run]");
+    return 1;
+  }
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
+  try {
+    const res = resumeSessionEntry(db, cat, sessionId, { dryRun });
+    switch (res.status) {
+      case "resumed":
+        console.log(`ccs: ${dryRun ? "would resume" : "resumed"} ${sessionId}${res.note ? ` (${res.note})` : ""}`);
+        return 0;
+      case "already-open":
+        console.log(`ccs: ${sessionId} is already open — nothing to do`);
+        return 0;
+      case "not-indexed":
+        console.error(`ccs: ${sessionId} is not indexed (run \`ccs reindex\`)`);
+        return 1;
+      case "spawn-failed":
+        console.error(`ccs: failed to spawn cmux workspace for ${sessionId}`);
+        return 1;
+      case "liveness-unreadable":
+        console.error(
+          "ccs: cmux liveness is unreadable (cmux down, socket unauthed, or store unparseable) — " +
+            "aborting to avoid duplicating a session that may be running. Nothing spawned.",
+        );
+        return 1;
+      case "cwd-unreadable":
+        console.error(`ccs: cannot resume ${sessionId}: ${res.error}`);
+        return 1;
+    }
+  } finally {
+    db.close();
+    cat.close();
+  }
+}
+
+/** `ccs sync-roles` — materialize the roles registry into ~/.claude (ADR-0022/0034). */
+function syncRolesCmd(dryRun: boolean, hookFlag: boolean): number {
+  // Roles are read from config FILES now (ADR-0050), so no catalogue is opened.
+  const r = syncRoles({ dryRun, hooks: hookFlag });
+  const verb = dryRun ? "would create" : "created";
+  console.log(`ccs: sync-roles — ${verb} ${r.created}, pruned ${r.pruned}${hookFlag ? `, hooks ${r.hooks}` : ""}`);
+  if (r.collisions.length) {
+    console.warn(`ccs: skipped ${r.collisions.length} (a non-ccs file is in the way):`);
+    for (const c of r.collisions) console.warn(`  ${c}`);
+  }
+  return 0;
+}
+
+/**
+ * Print a per-session preview of a resume-cluster pass, split into CORE (singletons — control /
+ * concierge / …) and FLEET (workers) sections. Lists every non-retired member so you can see the
+ * full picture: sessions that will be resumed, ones already open (skipped, so you can tell which
+ * of the totals is already running), and superseded duplicates. Retired stays hidden — those are
+ * done and never revived. Each row uses a leading glyph so the disposition is scannable:
+ *   → resume (or ✓ resumed, live run)   ● already open   ⊘ superseded
+ * The label prefers the AI shortname (meta.shortname) with the PR number, then the stored PR
+ * title, then the role, then the sid — matching what a worker's tab renders.
+ */
+function printResumeClusterPreview(verb: string, s: ClusterResumeSummary): void {
+  const KEEP: ReadonlySet<ClusterResumeSummary["perSession"][number]["result"]> = new Set([
+    "resumed", "already-open", "superseded",
+  ]);
+  const shown = s.perSession.filter((m) => KEEP.has(m.result));
+  if (shown.length === 0) return;
+  const core: typeof shown = [], fleet: typeof shown = [];
+  for (const m of shown) (isCoreRole(m.role) ? core : fleet).push(m);
+  const label = (m: typeof shown[0]): string => {
+    const clean = m.shortname?.trim() || m.title?.replace(/^(#\d+\s+)+/, "").trim() || null;
+    if (m.prNumber && clean) return `#${m.prNumber} ${clean}`;
+    if (m.prNumber) return `#${m.prNumber}`;
+    if (clean) return clean;
+    if (m.role) return m.role;
+    return m.sessionId.slice(0, 8);
+  };
+  const glyph = (m: typeof shown[0]): string => {
+    if (m.result === "already-open") return "●";
+    if (m.result === "superseded") return "⊘";
+    return verb === "resumed" ? "✓" : "→";
+  };
+  const suffix = (m: typeof shown[0]): string => {
+    if (m.result === "already-open") return " (already open)";
+    if (m.result === "superseded") return " (superseded)";
+    return "";
+  };
+  // Sort each section: resume-candidates first (the action), then already-open, then superseded —
+  // so "what will happen" reads before "what's already fine" reads before "what got deduped".
+  const rank: Record<string, number> = { "resumed": 0, "already-open": 1, "superseded": 2 };
+  const section = (title: string, items: typeof shown) => {
+    if (items.length === 0) return;
+    const sorted = [...items].sort((a, b) => (rank[a.result] ?? 9) - (rank[b.result] ?? 9));
+    console.log(`\n  [${title}] (${items.length})`);
+    for (const m of sorted) {
+      console.log(`    ${glyph(m)} ${m.sessionId.slice(0, 8)} · ${label(m)}${suffix(m)}`);
+    }
+  };
+  section("core", core);
+  section("fleet", fleet);
+}
+
+/** `ccs resume-cluster <cluster>` — a thin loop over resume-session (ADR-0015). */
+function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
+  if (!cluster) {
+    console.error("ccs: missing cluster. Usage: ccs resume-cluster <cluster> [--dry-run]");
+    return 1;
+  }
+  // ADR-0058 inter-layer version gate: refuse to bring a cluster online whose config declares a
+  // ccs version we can't honor (major-version gap); warn-and-proceed on a minor gap or a bad
+  // manifest. This is the loud failure that a silent tool↔config schema skew otherwise lacks.
+  const gate = checkClusterGate(cluster, pkg.version);
+  if (gate.status === "refuse") {
+    console.error(`ccs: ${gate.message}. Upgrade ccs (or relax requires_ccs). Nothing spawned.`);
+    return 1;
+  }
+  if (gate.status === "warn") console.warn(`ccs: ${gate.message}`);
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
+  try {
+    const s = resumeClusterEntry(db, cat, cluster, { dryRun });
+    if (s.abortedUnreadable) {
+      console.error(
+        `ccs: cluster "${cluster}" — cmux liveness is unreadable (cmux down, socket unauthed, or ` +
+          "store unparseable). Aborted to avoid duplicating a running fleet. Nothing spawned.",
+      );
+      return 1;
+    }
+    const verb = dryRun ? "would resume" : "resumed";
+    // A dry-run without a per-session preview is a black box — "would resume 18" doesn't say WHICH
+    // 18. Split by role topology (core singletons vs fleet workers, ADR-0069) and print each session
+    // being acted on with the label you'd recognize (PR + shortname / title / role / sid). Retired
+    // and already-open members are noise for the preview — they aren't being acted on — so we skip
+    // them; superseded stays visible so you see when a duplicate work-unit gets deduped.
+    printResumeClusterPreview(verb, s);
+    console.log(
+      `\nccs: cluster "${cluster}" — ${verb} ${s.resumed}, ${s.alreadyOpen} already open, ` +
+        `${s.superseded} superseded, ${s.retired} retired, ${s.notIndexed} not indexed` +
+        `${s.failed ? `, ${s.failed} failed` : ""}`,
+    );
+    return s.failed > 0 ? 1 : 0;
+  } finally {
+    db.close();
+    cat.close();
+  }
+}
+
+/**
+ * `ccs resume <selector>` — resume anything that identifies a session or a group of them: a
+ * session id, a PR (`#123` / `owner/repo#123`), a GUS work item (`W-1234567`), an epic shortname,
+ * a role, or a cluster. Flags pin the axis (`--role`, `--pr`, `--gus`, `--epic`, `--cluster`,
+ * `--key`) and skip shape inference. One match → resume-session semantics; many → cluster
+ * semantics (one live worker per work-unit). All routes share the single resume core (resumeMany).
+ */
+function resumeSelector(args: string[]): number {
+  const token = args.find((a) => !a.startsWith("--"));
+  if (!token) {
+    console.error(
+      "ccs: missing selector. Usage: ccs resume <id|#pr|W-number|epic|role|cluster> [--role|--pr|--gus|--epic|--cluster|--key] [--dry-run]",
+    );
+    return 1;
+  }
+  const dryRun = args.includes("--dry-run");
+  const pin: SelectorKind | undefined =
+    args.includes("--role") ? "role"
+    : args.includes("--pr") ? "pr"
+    : args.includes("--gus") ? "gus-work"
+    : args.includes("--epic") ? "epic"
+    : args.includes("--cluster") ? "cluster"
+    : args.includes("--key") ? "key"
+    : undefined;
+  const cluster = flagValue(args, "--in") ?? flagValue(args, "--cluster-scope");
+
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
+  try {
+    const sel = resolveSelector(cat, db, token, { pin, cluster });
+    if (!sel) {
+      console.error(`ccs: "${token}" didn't match any session, PR, work item, epic, role, or cluster`);
+      return 1;
+    }
+    if (sel.sessionIds.length === 0) {
+      console.error(`ccs: ${sel.label} matched no sessions`);
+      return 1;
+    }
+    const s = resumeMany(db, cat, sel.sessionIds, { dryRun });
+    if (s.abortedUnreadable) {
+      console.error(
+        `ccs: ${sel.label} — cmux liveness is unreadable (cmux down, socket unauthed, or store ` +
+          "unparseable). Aborted to avoid duplicating a running session. Nothing spawned.",
+      );
+      return 1;
+    }
+    const verb = dryRun ? "would resume" : "resumed";
+    console.log(
+      `ccs: ${sel.label} (${sel.sessionIds.length} session${sel.sessionIds.length === 1 ? "" : "s"}) — ${verb} ${s.resumed}, ` +
+        `${s.alreadyOpen} already open, ${s.superseded} superseded, ${s.retired} retired, ` +
+        `${s.notIndexed} not indexed${s.failed ? `, ${s.failed} failed` : ""}`,
+    );
+    return s.failed > 0 ? 1 : 0;
+  } finally {
+    db.close();
+    cat.close();
+  }
+}
+
+/**
+ * Classify `ccs meta …` arg-shape into READ / SET / ERROR. Kept as a pure exported helper so the
+ * routing contract is unit-testable (cli.ts's switch dispatch is otherwise private to main).
+ *
+ * The disambiguation problem: the help text has always advertised BOTH shapes on `ccs meta`
+ * (read: `ccs meta [<id>|.]`; set: `ccs meta [<id>|.] <key> <value>`), but the dispatch used to
+ * unconditionally call the READ handler and DROP any extra args. So `ccs meta . milad_review
+ * approved` silently no-op'd — no error, no write. Caught 2026-07-13 when a day of concierge
+ * "record Milad's approval" writes were quietly ignored.
+ *
+ * Rules:
+ *   - 0 positionals, no --off       → READ current session
+ *   - 1 positional, no --off        → READ that arg's session (or current if it looks like a key)
+ *   - >=3 positionals               → SET (first is id-hint, then key, then value)
+ *   - 2 positionals, first is id-hint (`.` or hex-id) → SET (id, key, value)
+ *   - 2 positionals, first is NOT an id-hint → SET (id=`.`, key=pos0, value=pos1)
+ *   - 1 positional + --off          → CLEAR (id=`.`, key=pos0)
+ *   - 2 positionals + --off, first is id-hint → CLEAR (id, key)
+ *   - anything ambiguous (e.g. >1 positional in a shape that doesn't match set) → ERROR
+ *
+ * "id-hint" = literally `.` OR a hex-run of >=8 chars (matches a session-id prefix or full uuid).
+ * Everything else is treated as a key name. This heuristic accepts `ccs meta abc12345 my_key val`
+ * as a set, and `ccs meta my_key val` as a set on the current session — matching what users type.
+ */
+export type MetaArgs =
+  | { mode: "read"; id: string | undefined }
+  | { mode: "set"; id: string; key: string; value: string | undefined; flags: string[] }
+  | { mode: "error"; message: string };
+
+const META_ID_HINT = /^[0-9a-f-]{8,}$/i;
+const isIdHint = (s: string): boolean => s === "." || META_ID_HINT.test(s);
+const USAGE = [
+  "usage:",
+  "  ccs meta [<id>|.]                          # read",
+  "  ccs meta [<id>|.] <key> <value>            # set (value JSON-parsed if scalar; else stored as string)",
+  "  ccs meta [<id>|.] <key> --off              # clear",
+].join("\n");
+
+export function classifyMetaArgs(argsAfterCommand: string[]): MetaArgs {
+  const pos = argsAfterCommand.filter((a) => !a.startsWith("--"));
+  const flags = argsAfterCommand.filter((a) => a.startsWith("--"));
+  const off = flags.includes("--off");
+
+  if (!off && pos.length === 0) return { mode: "read", id: undefined };
+  if (!off && pos.length === 1) return { mode: "read", id: pos[0] };
+
+  // set/clear paths
+  if (pos.length >= 3) {
+    const [id, key, value] = pos;
+    if (!isIdHint(id!)) {
+      return { mode: "error", message: `ccs meta: first arg "${id}" doesn't look like a session id or "."\n${USAGE}` };
+    }
+    return { mode: "set", id: id!, key: key!, value, flags };
+  }
+  if (pos.length === 2 && !off) {
+    // Ambiguous: `<id-hint> <key>` (missing value) vs `<key> <value>` (implicit id=`.`).
+    // Rule: if the first positional is an id-hint we STILL treat this as a set-missing-value and
+    // fail loudly via metaSet's usage error, rather than guessing. This catches the pr-agent
+    // typo `ccs meta abc12345 milad_review` (no value) instead of silently no-op'ing.
+    if (isIdHint(pos[0]!)) {
+      return { mode: "error", message: `ccs meta: value required (or use --off to clear)\n${USAGE}` };
+    }
+    // <key> <value> — implicit id=`.`
+    return { mode: "set", id: ".", key: pos[0]!, value: pos[1], flags };
+  }
+  if (pos.length === 2 && off) {
+    if (!isIdHint(pos[0]!)) {
+      return { mode: "error", message: `ccs meta: with --off, first arg must be an id or "."\n${USAGE}` };
+    }
+    return { mode: "set", id: pos[0]!, key: pos[1]!, value: undefined, flags };
+  }
+  if (pos.length === 1 && off) {
+    return { mode: "set", id: ".", key: pos[0]!, value: undefined, flags };
+  }
+  if (pos.length === 0 && off) {
+    return { mode: "error", message: `ccs meta: --off needs a key\n${USAGE}` };
+  }
+  return { mode: "error", message: `ccs meta: unrecognized args\n${USAGE}` };
 }
 
 /** Short, skimmable label for a session id: `1a2b3c4d… <title>`, degrading to the bare id when unindexed. */

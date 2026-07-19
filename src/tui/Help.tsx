@@ -91,7 +91,7 @@ const SESSION_GROUPS: KeyGroup[] = [
     name: "Find & arrange",
     keys: [
       ["/", "search — fuzzy title/project + full-text content"],
-      ["g", "change grouping: groups → by-state → flat → tree"],
+      ["g", "change grouping: groups → by-state → flat → tree → cluster → epic"],
       ["s", "change sort: recency → cost → messages"],
       ["a", "show / hide subagent runs"],
       ["A", "show / hide archived sessions"],
@@ -103,14 +103,15 @@ const SESSION_GROUPS: KeyGroup[] = [
     keys: [
       ["t", "re-title this session"],
       ["L / C / X", "mark as loop / done / archived"],
-      ["e", "edit this session's metadata in plain English (codex)"],
-      [":", "reorganize metadata across ALL sessions in plain English (codex)"],
+      ["e", "edit this session's metadata in plain English"],
+      [":", "reorganize metadata across ALL sessions in plain English"],
     ],
   },
   {
     name: "Modes",
     keys: [
       ["Tab", "switch to SKILLS mode (Tab there returns)"],
+      ["i", "swap inference engine (codex ⇄ claude)"],
       ["?", "this help"],
       ["q", "quit"],
     ],

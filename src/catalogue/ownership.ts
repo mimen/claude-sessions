@@ -41,7 +41,7 @@ export function sameHost(a: string, b: string): boolean {
  */
 export function foreignOwner(
   sessionId: string,
-  mergePath: string = MERGE_PATH,
+  mergePath: string = MERGE_PATH(),
   localHost: string = localHostName(),
 ): string | null {
   let db;

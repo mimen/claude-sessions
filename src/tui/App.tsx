@@ -3,7 +3,7 @@ import { Box, Text, useApp, useInput } from "ink";
 import { useTerminalSize } from "./useTerminalSize.ts";
 import type { Database } from "bun:sqlite";
 import type { Config } from "../config.ts";
-import type { Titler } from "../titler/codex.ts";
+import type { EngineState } from "./Root.tsx";
 import {
   listByRecency,
   ftsMatchIds,
@@ -16,8 +16,10 @@ import {
 } from "../index/index.ts";
 import { backfillTitles } from "../titler/queue.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "../resume/command.ts";
+import { resumeSessionEntry } from "../resume/resume-session.ts";
 import { resolveTarget, cmuxReachableAsync } from "../resume/target.ts";
 import { openInCmux } from "../resume/cmux.ts";
+import { focusSession, openSessionTitlesAsync } from "../cmux/liveness.ts";
 import { searchRows } from "./search.ts";
 import { buildDisplayItems, type SortMode } from "./groupByProject.ts";
 import { SessionList } from "./SessionList.tsx";
@@ -29,17 +31,39 @@ import { SectionCard } from "./SectionCard.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
-import { getAll, lifecycleOf, setKind, setCompleted, setArchived, setCustomTitle } from "../catalogue/db.ts";
+import { getAll, lifecycleOf, setCompleted, setArchived, setCustomTitle, identityKeyOf, type CatalogueRow } from "../catalogue/db.ts";
 import { foreignOwner } from "../catalogue/ownership.ts";
-import { openSessionTitlesAsync } from "../catalogue/open-state.ts";
+import { boardIndex } from "../board/indexer.ts";
+import { allGroupingsAcrossClusters } from "../state/groupings.ts";
+import { describe as describeDisposition } from "../catalogue/disposition.ts";
+import { loadPrefs, savePrefs } from "./prefs.ts";
 import { runMetadataCommand, applyMutations, type SessionMeta } from "../catalogue/command.ts";
 import { buildStateItems, DEFAULT_COLLAPSED } from "./stateGroups.ts";
 import { buildTreeItems } from "./treeGroups.ts";
 import { buildGroupsView } from "./groupsView.ts";
+import { buildClusterView } from "./clusterView.ts";
+import { buildEpicView } from "./epicView.ts";
+
+/**
+ * State label + hex color for the TUI stage column (ADR-0077). Reads the first pill from the
+ * cluster's board.json via the mtime-cached indexer. Cluster vocabulary; the tool doesn't
+ * interpret. Missing cluster / missing board / no pill → null (column stays blank).
+ */
+function stagePillFor(cat: CatalogueRow | null, sessionId: string): { label: string; color?: string } | null {
+  if (!cat || !cat.cluster) return null;
+  try {
+    const hit = boardIndex(cat.cluster).bySession(sessionId);
+    const pill = hit?.row.pills[0];
+    if (!pill) return null;
+    return { label: pill.label, color: pill.color };
+  } catch {
+    return null;
+  }
+}
 
 const SORT_CYCLE: SortMode[] = ["recent", "cost", "msgs"];
-type View = "groups" | "state" | "flat" | "tree";
-const VIEW_CYCLE: View[] = ["groups", "state", "flat", "tree"];
+type View = "groups" | "state" | "flat" | "tree" | "cluster" | "epic";
+const VIEW_CYCLE: View[] = ["groups", "state", "flat", "tree", "cluster", "epic"];
 
 const STALE_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -50,12 +74,23 @@ export interface SessionBadge {
   nudge: boolean;
   /** Event slug this session is assigned to (catalogue.event), if any. */
   event?: string | null;
+  /** PR number + state (catalogue pr_number/pr_state), shown as a #-badge. */
+  pr?: number | null;
+  prState?: string | null;
+  /** Role (catalogue.skill), shown in the role column. */
+  role?: string | null;
+  /** Status label (lifecycle × live open-state), shown in the status column. */
+  status?: string | null;
+  /** Composed state pill label from the cluster's board.json (ADR-0077). */
+  phase?: string | null;
+  /** Optional hex color matching the cmux tab pill — the TUI renders the label in this color. */
+  phaseColor?: string | null;
 }
 
 interface AppProps {
   db: Database;
   config: Config;
-  titler: Titler;
+  engineState: EngineState;
   /** Durable user metadata. Optional so tests can mount without a catalogue (no cmux probe). */
   catalogue?: Database;
   /** Inline resume is handed back to the launcher here, after the app exits. */
@@ -72,7 +107,8 @@ interface AppProps {
 
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
-export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode, pinned, onClearPinned, initialStatus }: AppProps): React.ReactElement {
+export function App({ db, catalogue, config, engineState, resumeRequest, onSwitchMode, pinned, onClearPinned, initialStatus }: AppProps): React.ReactElement {
+  const { titler, engine, active: activeEngine, available: availableEngines, cycle: cycleEngine } = engineState;
   const { exit } = useApp();
   const { columns: cols, rows: termRows } = useTerminalSize();
 
@@ -84,7 +120,14 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   // Natural-language metadata command (Codex-backed). scope "all" = whole catalogue; "session" =
   // the selected row. busy = a Codex call is in flight.
   const [command, setCommand] = useState<{ scope: "all" | "session"; buffer: string; busy: boolean } | null>(null);
-  const [view, setView] = useState<View>("groups");
+  // Remembered view: reopen on the last view used (default "cluster"). Persisted on change.
+  const [view, setView] = useState<View>(() => {
+    const saved = loadPrefs().view;
+    return saved && (VIEW_CYCLE as string[]).includes(saved) ? (saved as View) : "cluster";
+  });
+  useEffect(() => {
+    savePrefs({ view });
+  }, [view]);
   const [sort, setSort] = useState<SortMode>("recent");
   const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(DEFAULT_COLLAPSED);
   const [expandedSessions, setExpandedSessions] = useState<ReadonlySet<string>>(new Set());
@@ -117,6 +160,16 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
     () => (catalogue ? getAll(catalogue) : new Map()),
     [catalogue, refreshTick],
   );
+  // Grouping (epic) display metadata is CLUSTER RUNTIME state now (ADR-0051), not a platform
+  // epics table. Read it across all clusters and adapt to the {name,shortName,url} shape the
+  // TUI's epic views expect — the clickable-epic experience is unchanged, just re-sourced.
+  const epicMap = useMemo(() => {
+    const out = new Map<string, { name: string | null; shortName: string | null; url: string | null }>();
+    for (const [id, g] of allGroupingsAcrossClusters()) {
+      out.set(id, { name: g.label, shortName: g.shortName, url: g.url });
+    }
+    return out;
+  }, [refreshTick]);
   // Live cmux workspace titles (source of truth for open sessions) — override the ccs Title while
   // open. Also gives us the open-set (its keys) so we probe cmux once, not twice.
   const [openTitles, setOpenTitles] = useState<Map<string, string>>(new Map());
@@ -135,8 +188,12 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       .filter((r) => !pinned || pinned.paths.has(r.path))
       .filter((r) => showArchived || lifecycleOf(catMap.get(r.sessionId) ?? null) !== "archived")
       .map((r) => {
-        // Precedence: live cmux title (open) → user's custom title → resolved Title.
-        const title = openTitles.get(r.sessionId) ?? catMap.get(r.sessionId)?.customTitle ?? r.title;
+        // Precedence: live cmux title (open) → user's custom title → ROLE (a role-tagged
+        // session reads as its role, e.g. "designer", not the auto-generated skeleton title)
+        // → resolved Title. Mirrors render-tab so the TUI + cmux tab agree.
+        const cat = catMap.get(r.sessionId);
+        const title =
+          openTitles.get(r.sessionId) ?? cat?.customTitle ?? cat?.role ?? r.title;
         return title === r.title ? r : { ...r, title };
       });
   }, [db, includeSubagents, refreshTick, catMap, showArchived, openTitles]);
@@ -148,6 +205,10 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
     const now = new Date().toISOString();
     let changed = false;
     for (const [sid, title] of openTitles) {
+      // Never persist a slug-shaped title (the session-id or its 8-char prefix): a tab that
+      // briefly showed the raw id before getting a real name would otherwise poison the
+      // customTitle, hiding the role/real name forever (hit the designer row).
+      if (!title || sid.startsWith(title) || title === sid.slice(0, 8)) continue;
       if ((catMap.get(sid)?.customTitle ?? null) !== title) {
         setCustomTitle(catalogue, sid, title, now);
         changed = true;
@@ -185,7 +246,17 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         color = Number.isNaN(ts) || nowMs - ts > STALE_MS ? theme.faint : theme.muted;
       }
       if (nudge) color = "yellowBright";
-      m.set(r.sessionId, { glyph, color, nudge, event: c?.event ?? null });
+      const pill = stagePillFor(c, r.sessionId);
+      m.set(r.sessionId, {
+        glyph, color, nudge,
+        event: identityKeyOf(c),
+        pr: c?.prNumber ?? null,
+        prState: c?.prState ?? null,
+        role: c?.role ?? null,
+        status: describeDisposition(lc, open).label,
+        phase: pill?.label ?? null,
+        phaseColor: pill?.color ?? null,
+      });
     }
     return m;
   }, [baseRows, catMap, openSet]);
@@ -257,7 +328,30 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   }, [db, expandedSessions, refreshTick]);
   const items = useMemo(
     () =>
-      view === "groups"
+      view === "epic"
+        ? buildEpicView(rows, {
+            catMap,
+            epicMap,
+            collapsedSections,
+            expandedSessions,
+            childCounts: subCounts,
+            childrenByParent,
+            sort,
+            costOf: totalCostFor,
+          })
+        : view === "cluster"
+        ? buildClusterView(rows, {
+            catMap,
+            epicMap,
+            openSet,
+            collapsedSections,
+            expandedSessions,
+            childCounts: subCounts,
+            childrenByParent,
+            sort,
+            costOf: totalCostFor,
+          })
+        : view === "groups"
         ? buildGroupsView(rows, { catMap, openSet, collapsedSections, expandedSessions })
         : view === "tree"
         ? buildTreeItems(rows, { catMap, costOf: totalCostFor })
@@ -280,7 +374,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
               sort,
               costOf: totalCostFor,
             }),
-    [view, rows, catMap, openSet, collapsedSections, expandedSessions, subCounts, childrenByParent, sort, totalCostFor],
+    [view, rows, catMap, epicMap, openSet, collapsedSections, expandedSessions, subCounts, childrenByParent, sort, totalCostFor],
   );
 
   const clampedSelected = Math.min(selected, Math.max(0, items.length - 1));
@@ -324,6 +418,16 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   const toggleSection = (key: string, collapse?: boolean) =>
     setCollapsedSections((prev) => {
       const next = new Set(prev);
+      // `:done` folds invert the default (collapsed unless an `open:` marker is present),
+      // so toggling them flips the marker instead of the key. Everything else: presence = collapsed.
+      if (key.endsWith(":done")) {
+        const marker = `open:${key}`;
+        const isOpen = next.has(marker);
+        const shouldCollapse = collapse ?? isOpen;
+        if (shouldCollapse) next.delete(marker);
+        else next.add(marker);
+        return next;
+      }
       const shouldCollapse = collapse ?? !next.has(key);
       if (shouldCollapse) next.add(key);
       else next.delete(key);
@@ -356,13 +460,36 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       setStatus("subagent runs aren't resumable — they're task runs spawned by a parent session");
       return;
     }
-    const { cwd, note } = resolveResumeCwd(r);
+    // If the session is already live, FOCUS its existing tab instead of spawning a duplicate
+    // (ADR-0040: exact session→surface→workspace resolution). Enter = "take me to it".
+    if (openSet.has(r.sessionId) || openSet.has(r.resumeId)) {
+      const focused = focusSession(r.sessionId);
+      setStatus(focused ? `switched to → ${r.title}` : `already open, but couldn't switch to ${r.title}`);
+      return;
+    }
+    const cwdResult = resolveResumeCwd(r);
+    if ("error" in cwdResult) {
+      setStatus(`can't resume: ${cwdResult.error}`);
+      return;
+    }
+    const { cwd, note } = cwdResult;
     const cmd = buildResumeCommand(r, { fork, cwd });
     const target = resolveTarget(config.resume.target, reachable, forceOther);
     const prefix = note ? `${note} · ` : "";
     if (target === "cmux") {
-      const ok = openInCmux(cmd, r.title);
-      setStatus(prefix + (ok ? `opened in cmux → ${r.title}${fork ? " (fork)" : ""}` : "cmux failed — press o to resume inline"));
+      // Route through the shared resume core (resumeSessionEntry) so the TUI gets the SAME
+      // behavior as `ccs resume`: resume_command replay (loops come back running), the
+      // ADR-0042 env-scrub, and EAGER tab paint — no divergent second spawn path. `focus:true`
+      // because an interactive resume wants to land in the pane. A fork has no catalogue
+      // resume_command to replay, and the core doesn't fork, so keep the direct path for forks.
+      if (catalogue && !fork) {
+        const res = resumeSessionEntry(db, catalogue, r.sessionId, { focus: true });
+        const ok = res.status === "resumed" || res.status === "already-open";
+        setStatus(prefix + (ok ? `opened in cmux → ${r.title}` : "cmux failed — press o to resume inline"));
+      } else {
+        const ok = openInCmux(cmd, r.title);
+        setStatus(prefix + (ok ? `opened in cmux → ${r.title}${fork ? " (fork)" : ""}` : "cmux failed — press o to resume inline"));
+      }
     } else {
       // The note must survive TUI teardown — the launcher prints it before handing off
       // (an ambiguity warning shown only in a frame that's about to unmount warns nobody).
@@ -439,6 +566,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         event: c?.event ?? null,
         role: c?.role ?? null,
         substrate: c?.substrate ?? null,
+        key: identityKeyOf(c),
         parentSessionId: c?.parentSessionId ?? null,
         completed: !!c?.completed,
         archived: !!c?.archived,
@@ -446,13 +574,14 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
         repo: r.projectName,
       };
     });
+    if (!engine) {
+      setCommand(null);
+      setStatus("no inference engine (codex/claude) found on PATH");
+      return;
+    }
     setCommand({ scope, buffer, busy: true });
-    setStatus(`${scope === "session" ? "editing session" : "reorganizing"} — asking codex…`);
-    void runMetadataCommand(buffer, sessions, focus, {
-      binary: config.titler.binary,
-      model: config.titler.model,
-      reasoningEffort: config.titler.reasoningEffort,
-    }).then((res) => {
+    setStatus(`${scope === "session" ? "editing session" : "reorganizing"} — asking ${engine.name}…`);
+    void runMetadataCommand(buffer, sessions, focus, engine).then((res) => {
       setCommand(null);
       if ("error" in res) {
         setStatus(`command failed (${res.error})`);
@@ -585,12 +714,16 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       setIncludeSubagents((v) => !v);
       setSelected(0);
     } else if (input === "t") retitle();
-    else if (input === "L")
-      applyMark(
-        (c, id, now) => setKind(c, id, catMap.get(id)?.kind === "loop" ? "session" : "loop", now),
-        "toggled loop",
-      );
-    else if (input === "C")
+    else if (input === "i") {
+      // Swap the inference engine (only meaningful when both codex + claude are installed).
+      if (availableEngines.length < 2) {
+        setStatus(availableEngines.length === 1 ? `only ${availableEngines[0]} installed` : "no inference engine installed");
+      } else {
+        const next = availableEngines[(availableEngines.indexOf(activeEngine!) + 1) % availableEngines.length]!;
+        cycleEngine();
+        setStatus(`inference engine → ${next}`);
+      }
+    } else if (input === "C")
       applyMark((c, id, now) => setCompleted(c, id, !catMap.get(id)?.completed, now), "toggled completed");
     else if (input === "X")
       applyMark((c, id, now) => setArchived(c, id, !catMap.get(id)?.archived, now), "toggled archived");
@@ -635,13 +768,21 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
       subagentCost={
         subCostMap.get(selectedRow.sessionId) ?? subCostMap.get(selectedRow.resumeId) ?? 0
       }
-      event={catMap.get(selectedRow.sessionId)?.event ?? null}
+      event={identityKeyOf(catMap.get(selectedRow.sessionId) ?? null)}
       skill={catMap.get(selectedRow.sessionId)?.skill ?? null}
       project={catMap.get(selectedRow.sessionId)?.project ?? null}
       role={catMap.get(selectedRow.sessionId)?.role ?? null}
       substrate={catMap.get(selectedRow.sessionId)?.substrate ?? null}
       identity={catMap.get(selectedRow.sessionId)?.identity ?? null}
       kind={catMap.get(selectedRow.sessionId)?.kind}
+      system={catMap.get(selectedRow.sessionId)?.system ?? null}
+      gusWork={catMap.get(selectedRow.sessionId)?.gusWork ?? null}
+      gusWorkSfId={(catMap.get(selectedRow.sessionId)?.meta?.gus_work_sf_id as string | undefined) ?? null}
+      prNumber={catMap.get(selectedRow.sessionId)?.prNumber ?? null}
+      prRepo={catMap.get(selectedRow.sessionId)?.prRepo ?? null}
+      prState={catMap.get(selectedRow.sessionId)?.prState ?? null}
+      epicName={epicMap.get(catMap.get(selectedRow.sessionId)?.groupingId ?? "")?.name ?? null}
+      epicUrl={epicMap.get(catMap.get(selectedRow.sessionId)?.groupingId ?? "")?.url ?? null}
       height={previewHeight}
     />
   ) : selSection ? (
@@ -658,7 +799,7 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
   const listCol = (w: number) => (
     <Box flexDirection="column">
       <ListHeader sort={sort} view={view} />
-      <SessionList items={items} selected={clampedSelected} height={listHeight} width={w} deco={deco} totalCost={totalCostById} />
+      <SessionList items={items} selected={clampedSelected} height={listHeight} width={w} deco={deco} totalCost={totalCostById} showRoleStatus={view === "cluster"} />
     </Box>
   );
 
@@ -744,6 +885,8 @@ export function App({ db, catalogue, config, titler, resumeRequest, onSwitchMode
             ["v", "transcript"],
             ["g", `view:${view}`],
             ["Tab", "skills"],
+            // Only surface the engine key when there's actually another engine to swap to.
+            ...(availableEngines.length > 1 ? [["i", `ai:${activeEngine}`] as [string, string]] : []),
             ["?", "all keys"],
           ]}
         />

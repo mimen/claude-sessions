@@ -203,8 +203,8 @@ test("inbox apply dead-letters malformed intents and refused-foreign mutations (
         body: {
           host: "Milads-Mac-mini",
           mutations: [
-            { sessionId: "s-ok", op: "skill", value: "fine" },
-            { sessionId: "s-foreign", op: "skill", value: "nope" },
+            { sessionId: "s-ok", op: "role", value: "fine" },
+            { sessionId: "s-foreign", op: "role", value: "nope" },
           ],
         },
       }),
@@ -216,7 +216,7 @@ test("inbox apply dead-letters malformed intents and refused-foreign mutations (
       now: "2026-07-08T12:00:00Z",
     });
     expect(summary.applied).toBe(1); // s-ok
-    expect(getRow(catalogue, "s-ok")!.skill).toBe("fine");
+    expect(getRow(catalogue, "s-ok")!.role).toBe("fine");
     expect(getRow(catalogue, "s-foreign")).toBeNull();
     // Both envelopes consumed; both have dead-letter records (nothing vanished silently).
     expect(existsSync(join(stateDir, "dead-letter", "msg-1-bad.json"))).toBe(true);
@@ -239,8 +239,8 @@ test("applyIntents refuses a locally-foreign mutation even inside a correctly-ad
     body: {
       host: "Milads-Mac-mini",
       mutations: [
-        { sessionId: "ours", op: "skill", value: "ok" },
-        { sessionId: "theirs", op: "skill", value: "nope" }, // merge says another machine owns it
+        { sessionId: "ours", op: "role", value: "ok" },
+        { sessionId: "theirs", op: "role", value: "nope" }, // merge says another machine owns it
       ],
     },
   });
@@ -250,7 +250,7 @@ test("applyIntents refuses a locally-foreign mutation even inside a correctly-ad
     now: "2026-07-08T12:00:00Z",
   });
   expect(summary.applied).toBe(1);
-  expect(getRow(catalogue, "ours")!.skill).toBe("ok");
+  expect(getRow(catalogue, "ours")!.role).toBe("ok");
   expect(getRow(catalogue, "theirs")).toBeNull();
   catalogue.close();
 });

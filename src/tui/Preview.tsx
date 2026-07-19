@@ -24,6 +24,18 @@ interface PreviewProps {
   /** Launching identity (CLAUDE_IDENTITY at launch). */
   identity?: string | null;
   kind?: "session" | "loop";
+  /** Cluster membership + PR/work-item identity (catalogue). */
+  system?: string | null;
+  gusWork?: string | null;
+  /** The work-item's Salesforce record id (`meta.gus_work_sf_id`), stamped by the cluster's
+   * sensor. Enables a proper `/ADM_Work__c/<sfId>/view` deep link; absent → search fallback. */
+  gusWorkSfId?: string | null;
+  prNumber?: number | null;
+  prRepo?: string | null;
+  prState?: string | null;
+  /** Epic (resolved from the epics entity) — name + deep link. */
+  epicName?: string | null;
+  epicUrl?: string | null;
   /** Total height available to the pane (border included). */
   height: number;
 }
@@ -37,6 +49,20 @@ const SOURCE_COLOR = {
 function fmtTs(iso: string | null): string {
   if (!iso) return "?";
   return iso.replace("T", " ").replace(/\.\d+Z$/, "Z");
+}
+
+/** OSC-8 terminal hyperlink: clickable `text` that opens `url` in supporting terminals. */
+function osc8(url: string, text: string): string {
+  return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
+}
+
+/** GUS deep link for a W-number. With the 18-char sfId (stamped on the row's meta by the
+ * cluster's sensor, e.g. pr-watch's catalogue_sync) we produce a proper record URL; without it,
+ * fall back to the object search that resolves the W-number by name. */
+function gusUrl(w: string, sfId: string | null | undefined): string {
+  return sfId
+    ? `https://gus.lightning.force.com/lightning/r/ADM_Work__c/${sfId}/view`
+    : `https://gus.lightning.force.com/lightning/o/ADM_Work__c/list?filterName=Recent&search=${encodeURIComponent(w)}`;
 }
 
 function Field({ label, value, color }: { label: string; value: string; color?: string }): React.ReactElement {
@@ -70,6 +96,14 @@ export function Preview({
   substrate,
   identity,
   kind,
+  system,
+  gusWork,
+  gusWorkSfId,
+  prNumber,
+  prRepo,
+  prState,
+  epicName,
+  epicUrl,
   height,
 }: PreviewProps): React.ReactElement {
   const models = modelBreakdown(row.costByModel);
@@ -107,6 +141,28 @@ export function Preview({
         {substrate ? <Field label="substrate" value={substrate} color={theme.muted} /> : null}
         {identity ? <Field label="identity" value={identity} color={theme.muted} /> : null}
         {skill ? <Field label="skill" value={`⚙ ${skill}`} color={theme.accent} /> : null}
+        {system ? <Field label="cluster" value={`◇ ${system}`} color={theme.accent} /> : null}
+        {prNumber && prRepo ? (
+          <Field
+            label="PR"
+            value={osc8(`https://github.com/${prRepo}/pull/${prNumber}`, `#${prNumber}`) + `  (${prState ?? "?"})`}
+            color={prState === "merged" ? theme.sourceNative : prState === "closed" ? theme.faint : theme.accent}
+          />
+        ) : null}
+        {gusWork ? (
+          <Field
+            label="work"
+            value={osc8(gusUrl(gusWork, gusWorkSfId), gusWork)}
+            color={theme.header}
+          />
+        ) : null}
+        {epicName ? (
+          <Field
+            label="epic"
+            value={epicUrl ? osc8(epicUrl, epicName.replace(/^\[[^\]]+\]\s*/, "")) : epicName.replace(/^\[[^\]]+\]\s*/, "")}
+            color={theme.project}
+          />
+        ) : null}
         {project ? <Field label="project" value={`▢ ${project}`} color={theme.header} /> : null}
         {event ? <Field label="event" value={`⊞ ${event}`} color={theme.project} /> : null}
         {row.isSubagent && parentTitle ? <Field label="parent" value={parentTitle} color="yellow" /> : null}

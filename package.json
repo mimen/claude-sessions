@@ -10,7 +10,9 @@
     "ccs": "bun run bin/ccs",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "setup": "bun run scripts/setup.ts"
+    "setup": "bun run scripts/setup.ts",
+    "lint:exports": "ts-prune -e",
+    "lint:circular": "madge --circular --extensions ts,tsx src/"
   },
   "dependencies": {
     "fuzzysort": "^3.1.0",
@@ -20,9 +22,11 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "^1.3.14",
     "@types/react": "^19.2.15",
     "ink-testing-library": "^4.0.0",
+    "madge": "^8.0.0",
+    "ts-prune": "^0.10.3",
     "typescript": "^5"
   }
 }

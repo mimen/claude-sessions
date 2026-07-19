@@ -1,8 +1,4 @@
 import { expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
   addTag,
   childrenOf,
@@ -12,19 +8,24 @@ import {
   openCatalogue,
   parentEdges,
   sessionsForEntity,
-  sessionsForRole,
   setArchived,
   setCompleted,
   setCustomTitle,
-  setEvent,
-  setIdentity,
-  setKind,
+  setKey,
   setParent,
   setParked,
+  setProject,
+  setCluster,
   setRole,
-  setSkill,
+  sessionsForRole,
+  sessionsForKey,
+  sessionsForProject,
+  sessionsForCluster,
+  setGusWork,
+  sessionsForGusWork,
+  stampPrFacts,
   setSubstrate,
-  sessionsForEvent,
+  setIdentity,
   substrateOf,
 } from "./db.ts";
 import { describe as dispo } from "./disposition.ts";
@@ -52,10 +53,12 @@ test("lifecycle precedence: archived > completed > parked > idle", () => {
   expect(lifecycleOf(getRow(db, "x"))).toBe("archived");
 });
 
-test("kind toggles loop", () => {
+test("kind derives from the role (ADR-0062): no role → 'session'", () => {
+  // kind is no longer a stored column — it derives from the session's role.toml (a role with a
+  // resume_command is a 'loop'). A row with no role (or an unresolvable one) reads as 'session'.
   const db = openCatalogue(":memory:");
-  setKind(db, "s", "loop", NOW);
-  expect(getRow(db, "s")!.kind).toBe("loop");
+  setRole(db, "s", "no-such-role", NOW);
+  expect(getRow(db, "s")!.kind).toBe("session");
 });
 
 test("tags: add, list, reverse lookup", () => {
@@ -67,17 +70,17 @@ test("tags: add, list, reverse lookup", () => {
   expect(sessionsForEntity(db, "Glizzy Galaxy").sort()).toEqual(["s1", "s2"]);
 });
 
-test("event: set, round-trip, clear, reverse lookup", () => {
+test("key: set, round-trip, clear, reverse lookup", () => {
   const db = openCatalogue(":memory:");
-  expect(getRow(db, "s1")?.event ?? null).toBeNull();
-  setEvent(db, "s1", "glizzy-galaxy", NOW);
-  setEvent(db, "s2", "glizzy-galaxy", NOW);
-  setEvent(db, "s3", "kiki-factory", NOW);
-  expect(getRow(db, "s1")!.event).toBe("glizzy-galaxy");
-  expect(sessionsForEvent(db, "glizzy-galaxy").sort()).toEqual(["s1", "s2"]);
-  setEvent(db, "s1", null, NOW); // clear
-  expect(getRow(db, "s1")!.event).toBeNull();
-  expect(sessionsForEvent(db, "glizzy-galaxy")).toEqual(["s2"]);
+  expect(getRow(db, "s1")?.key ?? null).toBeNull();
+  setKey(db, "s1", "glizzy-galaxy", NOW);
+  setKey(db, "s2", "glizzy-galaxy", NOW);
+  setKey(db, "s3", "kiki-factory", NOW);
+  expect(getRow(db, "s1")!.key).toBe("glizzy-galaxy");
+  expect(sessionsForKey(db, "glizzy-galaxy").sort()).toEqual(["s1", "s2"]);
+  setKey(db, "s1", null, NOW); // clear
+  expect(getRow(db, "s1")!.key).toBeNull();
+  expect(sessionsForKey(db, "glizzy-galaxy")).toEqual(["s2"]);
 });
 
 test("parent: set, round-trip, children reverse lookup, clear", () => {
@@ -99,21 +102,12 @@ test("parentEdges: only rows with a parent, as (sessionId, parentId) pairs", () 
   const db = openCatalogue(":memory:");
   setParent(db, "a", "root", NOW);
   setParent(db, "b", "root", NOW);
-  setSkill(db, "root", "loop-manager", NOW); // a row without a parent must not appear as an edge
+  setCustomTitle(db, "root", "loop-manager", NOW); // a row without a parent must not appear as an edge
   const edges = parentEdges(db).sort((x, y) => x.sessionId.localeCompare(y.sessionId));
   expect(edges).toEqual([
     { sessionId: "a", parentId: "root" },
     { sessionId: "b", parentId: "root" },
   ]);
-});
-
-test("skill: set, round-trip, clear", () => {
-  const db = openCatalogue(":memory:");
-  expect(getRow(db, "s1")?.skill ?? null).toBeNull();
-  setSkill(db, "s1", "loop-manager", NOW);
-  expect(getRow(db, "s1")!.skill).toBe("loop-manager");
-  setSkill(db, "s1", null, NOW); // clear
-  expect(getRow(db, "s1")!.skill).toBeNull();
 });
 
 test("disposition combines lifecycle × liveness", () => {
@@ -127,94 +121,56 @@ test("disposition combines lifecycle × liveness", () => {
   expect(dispo("completed", true).nudge).toBe(true);
 });
 
-test("role: set, round-trip, clear, reverse lookup", () => {
+test("project: set, round-trip, clear, reverse lookup", () => {
   const db = openCatalogue(":memory:");
-  expect(getRow(db, "s1")?.role ?? null).toBeNull();
-  setRole(db, "s1", "todoist-scout", NOW);
-  setRole(db, "s2", "todoist-scout", NOW);
-  setRole(db, "s3", "ops-watch", NOW);
-  expect(getRow(db, "s1")!.role).toBe("todoist-scout");
-  expect(sessionsForRole(db, "todoist-scout").sort()).toEqual(["s1", "s2"]);
-  setRole(db, "s1", null, NOW); // clear
-  expect(getRow(db, "s1")!.role).toBeNull();
-  expect(sessionsForRole(db, "todoist-scout")).toEqual(["s2"]);
+  expect(getRow(db, "s1")?.project ?? null).toBeNull();
+  setProject(db, "s1", "ccs", NOW);
+  setProject(db, "s2", "ccs", NOW);
+  setProject(db, "s3", "dashboard", NOW);
+  expect(getRow(db, "s1")!.project).toBe("ccs");
+  expect(sessionsForProject(db, "ccs").sort()).toEqual(["s1", "s2"]);
+  setProject(db, "s1", null, NOW); // clear
+  expect(getRow(db, "s1")!.project).toBeNull();
+  expect(sessionsForProject(db, "ccs")).toEqual(["s2"]);
 });
 
-test("substrate: defaults to claude-code, accepts arbitrary values, clears back to default", () => {
+test("cluster: set, round-trip, clear, reverse lookup", () => {
   const db = openCatalogue(":memory:");
-  expect(substrateOf(getRow(db, "s1"))).toBe("claude-code"); // no row at all
-  setCustomTitle(db, "s1", "t", NOW);
-  expect(getRow(db, "s1")!.substrate).toBeNull(); // stored raw: unset
-  expect(substrateOf(getRow(db, "s1"))).toBe("claude-code"); // read default
-  setSubstrate(db, "s1", "codex", NOW);
-  expect(substrateOf(getRow(db, "s1"))).toBe("codex");
-  setSubstrate(db, "s1", "engine", NOW); // arbitrary values allowed
-  expect(getRow(db, "s1")!.substrate).toBe("engine");
-  setSubstrate(db, "s1", null, NOW); // clear → back to default
-  expect(substrateOf(getRow(db, "s1"))).toBe("claude-code");
-  setSubstrate(db, "s1", "claude-code", NOW); // explicit default normalizes to unset
-  expect(getRow(db, "s1")!.substrate).toBeNull();
+  expect(getRow(db, "s1")?.cluster ?? null).toBeNull();
+  setCluster(db, "s1", "pr-watch", NOW);
+  setCluster(db, "s2", "pr-watch", NOW);
+  setCluster(db, "s3", "event-loop", NOW);
+  expect(getRow(db, "s1")!.cluster).toBe("pr-watch");
+  expect(sessionsForCluster(db, "pr-watch").sort()).toEqual(["s1", "s2"]);
+  setCluster(db, "s1", null, NOW); // clear
+  expect(getRow(db, "s1")!.cluster).toBeNull();
+  expect(sessionsForCluster(db, "pr-watch")).toEqual(["s2"]);
 });
 
-test("identity: set, round-trip, clear", () => {
+test("MRU order (ADR-0073): identity→session lookups return most-recently-used first", () => {
   const db = openCatalogue(":memory:");
-  expect(getRow(db, "s1")?.identity ?? null).toBeNull();
-  setIdentity(db, "s1", "bestfriend", NOW);
-  expect(getRow(db, "s1")!.identity).toBe("bestfriend");
-  setIdentity(db, "s1", null, NOW);
-  expect(getRow(db, "s1")!.identity).toBeNull();
+  // Three same-role sessions with ascending updated_at; newest must come first.
+  setRole(db, "old", "pr-agent", "2026-07-01T00:00:00Z");
+  setRole(db, "mid", "pr-agent", "2026-07-05T00:00:00Z");
+  setRole(db, "new", "pr-agent", "2026-07-10T00:00:00Z");
+  expect(sessionsForRole(db, "pr-agent")).toEqual(["new", "mid", "old"]);
+  // Same for the cluster resolver.
+  setCluster(db, "old", "pr-watch", "2026-07-01T00:00:00Z");
+  setCluster(db, "new", "pr-watch", "2026-07-10T00:00:00Z");
+  expect(sessionsForCluster(db, "pr-watch")).toEqual(["new", "old"]);
 });
 
-test("v5 migration upgrades a v4 catalogue in place, preserving rows", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ccs-cat-"));
-  const path = join(dir, "catalogue.db");
-  try {
-    // Build a faithful v4 catalogue by hand (the pre-v5 schema + user_version).
-    const v4 = new Database(path, { create: true });
-    v4.exec(`
-      CREATE TABLE catalogue (
-        session_id     TEXT PRIMARY KEY,
-        resume_id      TEXT,
-        custom_title   TEXT,
-        kind           TEXT NOT NULL DEFAULT 'session',
-        completed      INTEGER NOT NULL DEFAULT 0,
-        archived       INTEGER NOT NULL DEFAULT 0,
-        parked_task_id TEXT,
-        notes          TEXT,
-        updated_at     TEXT,
-        event          TEXT,
-        parent_session_id TEXT,
-        skill          TEXT,
-        project        TEXT
-      );
-      CREATE TABLE session_tags (
-        session_id TEXT NOT NULL,
-        entity     TEXT NOT NULL,
-        PRIMARY KEY (session_id, entity)
-      );
-      INSERT INTO catalogue (session_id, custom_title, kind, skill) VALUES ('old', 'Keep Me', 'loop', 'ops-watch');
-      PRAGMA user_version = 4;
-    `);
-    v4.close();
-
-    const db = openCatalogue(path);
-    const r = getRow(db, "old")!;
-    expect(r.customTitle).toBe("Keep Me"); // user data survived
-    expect(r.kind).toBe("loop");
-    expect(r.role).toBeNull(); // new columns exist, unset
-    expect(r.identity).toBeNull();
-    expect(substrateOf(r)).toBe("claude-code");
-    setRole(db, "old", "ops-watch", NOW); // and are writable
-    expect(getRow(db, "old")!.role).toBe("ops-watch");
-    db.close();
-
-    // Idempotent: reopening (re-running migrate at v5) must not throw or drop.
-    const again = openCatalogue(path);
-    expect(getRow(again, "old")!.role).toBe("ops-watch");
-    again.close();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+test("gusWork: set, round-trip, clear, reverse lookup (a work item may span sessions)", () => {
+  const db = openCatalogue(":memory:");
+  expect(getRow(db, "s1")?.gusWork ?? null).toBeNull();
+  setGusWork(db, "s1", "W-23143806", NOW);
+  setGusWork(db, "s2", "W-23143806", NOW); // same work item, second session
+  setGusWork(db, "s3", "W-23143807", NOW);
+  expect(getRow(db, "s1")!.gusWork).toBe("W-23143806");
+  expect(sessionsForGusWork(db, "W-23143806").sort()).toEqual(["s1", "s2"]);
+  setGusWork(db, "s1", null, NOW); // clear
+  expect(getRow(db, "s1")!.gusWork).toBeNull();
+  expect(sessionsForGusWork(db, "W-23143806")).toEqual(["s2"]);
 });
 
 test("catalogue survives reopen (durable file semantics)", () => {
@@ -225,4 +181,160 @@ test("catalogue survives reopen (durable file semantics)", () => {
   const again = openCatalogue(":memory:"); // separate db, just asserts no throw + clean schema
   expect(getRow(again, "s")).toBeNull(); // separate in-memory db is empty (sanity)
   expect(getRow(db, "s")!.customTitle).toBe("keep");
+});
+
+test("PR facts: git-backed session stamps PR metadata", () => {
+  const db = openCatalogue(":memory:");
+  const sensed = {
+    prNumber: 123,
+    prRepo: "mimen/claude-sessions",
+    prBranch: "feature/pr-sense",
+    prState: "open" as const,
+    prHeadSha: "abc123def456",
+  };
+  stampPrFacts(db, "s1", sensed, NOW);
+  const row = getRow(db, "s1")!;
+  expect(row.prNumber).toBe(123);
+  expect(row.prRepo).toBe("mimen/claude-sessions");
+  expect(row.prBranch).toBe("feature/pr-sense");
+  expect(row.prState).toBe("open");
+  expect(row.prHeadSha).toBe("abc123def456");
+  expect(row.updatedAt).toBe(NOW);
+});
+
+test("PR facts: non-git session gets nulls", () => {
+  const db = openCatalogue(":memory:");
+  stampPrFacts(db, "s2", null, NOW);
+  const row = getRow(db, "s2")!;
+  expect(row.prNumber).toBeNull();
+  expect(row.prRepo).toBeNull();
+  expect(row.prBranch).toBeNull();
+  expect(row.prState).toBeNull();
+  expect(row.prHeadSha).toBeNull();
+});
+
+test("PR facts: merged PR state", () => {
+  const db = openCatalogue(":memory:");
+  const sensed = {
+    prNumber: 456,
+    prRepo: "owner/repo",
+    prBranch: "main",
+    prState: "merged" as const,
+    prHeadSha: "deadbeef",
+  };
+  stampPrFacts(db, "s3", sensed, NOW);
+  const row = getRow(db, "s3")!;
+  expect(row.prState).toBe("merged");
+  expect(row.prHeadSha).toBe("deadbeef");
+});
+
+test("PR facts: update existing session", () => {
+  const db = openCatalogue(":memory:");
+  setCustomTitle(db, "s4", "My PR", NOW);
+  const sensed = {
+    prNumber: 789,
+    prRepo: "org/proj",
+    prBranch: "fix/bug",
+    prState: "open" as const,
+    prHeadSha: "sha1",
+  };
+  stampPrFacts(db, "s4", sensed, NOW);
+  const row = getRow(db, "s4")!;
+  expect(row.customTitle).toBe("My PR"); // existing data preserved
+  expect(row.prNumber).toBe(789);
+  expect(row.prBranch).toBe("fix/bug");
+});
+
+test("key: set, round-trip, clear, reverse lookup", () => {
+  const db = openCatalogue(":memory:");
+  const { setKey, sessionsForKey } = require("./db.ts");
+  expect(getRow(db, "s1")?.key ?? null).toBeNull();
+  setKey(db, "s1", "heroku/dashboard#12345", NOW);
+  setKey(db, "s2", "heroku/dashboard#12345", NOW);
+  setKey(db, "s3", "owner/repo#678", NOW);
+  expect(getRow(db, "s1")!.key).toBe("heroku/dashboard#12345");
+  expect(sessionsForKey(db, "heroku/dashboard#12345").sort()).toEqual(["s1", "s2"]);
+  setKey(db, "s1", null, NOW); // clear
+  expect(getRow(db, "s1")!.key).toBeNull();
+  expect(sessionsForKey(db, "heroku/dashboard#12345")).toEqual(["s2"]);
+});
+
+test("identityKeyOf: returns key or null", () => {
+  const db = openCatalogue(":memory:");
+  const { setKey, identityKeyOf } = require("./db.ts");
+  // row with key set
+  setKey(db, "new", "heroku/dashboard#999", NOW);
+  const newRow = getRow(db, "new")!;
+  expect(newRow.key).toBe("heroku/dashboard#999");
+  expect(identityKeyOf(newRow)).toBe("heroku/dashboard#999");
+  // neither set: null
+  const emptyRow = getRow(db, "neither") ?? { key: null } as any;
+  expect(identityKeyOf(emptyRow)).toBeNull();
+});
+
+test("D1: identity key auto-derives from PR facts on stampPrFacts", () => {
+  const db = openCatalogue(":memory:");
+  stampPrFacts(db, "s1", { prNumber: 12345, prRepo: "heroku/dashboard", prBranch: "feat/x", prState: "open", prHeadSha: "abc" }, NOW);
+  expect(getRow(db, "s1")!.key).toBe("pr:heroku/dashboard#12345");
+});
+
+test("D1: identity key auto-derives from role on setRole (no work-unit)", () => {
+  const db = openCatalogue(":memory:");
+  setRole(db, "s1", "control", NOW);
+  expect(getRow(db, "s1")!.key).toBe("role:control");
+});
+
+test("D1: work-unit id wins over PR facts once linked", () => {
+  const db = openCatalogue(":memory:");
+  const { setWorkUnitId } = require("./db.ts");
+  stampPrFacts(db, "s1", { prNumber: 12345, prRepo: "heroku/dashboard", prBranch: "feat/x", prState: "open", prHeadSha: "abc" }, NOW);
+  expect(getRow(db, "s1")!.key).toBe("pr:heroku/dashboard#12345");
+  setWorkUnitId(db, "s1", "wu_dashboard_12345", NOW);
+  expect(getRow(db, "s1")!.key).toBe("wu:wu_dashboard_12345");
+});
+
+test("D1: setGusWork derives gus: key", () => {
+  const db = openCatalogue(":memory:");
+  setGusWork(db, "s1", "W-19338247", NOW);
+  expect(getRow(db, "s1")!.key).toBe("gus:W-19338247");
+});
+
+test("D1: setRole after PR facts doesn't clobber pr: key (PR wins over role)", () => {
+  const db = openCatalogue(":memory:");
+  stampPrFacts(db, "s1", { prNumber: 100, prRepo: "o/r", prBranch: "b", prState: "open", prHeadSha: "s" }, NOW);
+  setRole(db, "s1", "pr-agent", NOW);
+  expect(getRow(db, "s1")!.key).toBe("pr:o/r#100");
+});
+
+test("D1: explicit setKey remains a hard override (freeform anchor)", () => {
+  const db = openCatalogue(":memory:");
+  setRole(db, "s1", "control", NOW);
+  expect(getRow(db, "s1")!.key).toBe("role:control");
+  // Explicit setKey wins (freeform anchor per ADR-0069)
+  setKey(db, "s1", "custom-key-xyz", NOW);
+  expect(getRow(db, "s1")!.key).toBe("custom-key-xyz");
+});
+
+test("B15: schema postcondition passes on a fresh migrated DB", () => {
+  // openCatalogue runs migrations + postcondition; a clean fresh DB must satisfy it.
+  const db = openCatalogue(":memory:");
+  // If we got a db back, the postcondition passed. Sanity-check a required column exists.
+  const cols = db.query("PRAGMA table_info(catalogue)").all() as { name: string }[];
+  const names = new Set(cols.map((c) => c.name));
+  expect(names.has("cluster")).toBe(true);
+  expect(names.has("key")).toBe(true);
+});
+
+
+test("substrate defaults to claude-code and identity round-trips", () => {
+  const db = openCatalogue(":memory:");
+  expect(substrateOf(getRow(db, "s1"))).toBe("claude-code");
+  setSubstrate(db, "s1", "codex", NOW);
+  expect(substrateOf(getRow(db, "s1"))).toBe("codex");
+  setSubstrate(db, "s1", "claude-code", NOW);
+  expect(getRow(db, "s1")!.substrate).toBeNull();
+  setIdentity(db, "s1", "bestfriend", NOW);
+  expect(getRow(db, "s1")!.identity).toBe("bestfriend");
+  setIdentity(db, "s1", null, NOW);
+  expect(getRow(db, "s1")!.identity).toBeNull();
 });

@@ -93,19 +93,6 @@ export interface UsageAccumulator {
   totals(): UsageTotals;
 }
 
-export function emptyUsageTotals(): UsageTotals {
-  return {
-    costUSD: 0,
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite5m: 0,
-    cacheWrite1h: 0,
-    webSearches: 0,
-    costByModel: {},
-  };
-}
-
 /**
  * Streaming usage summer for one Session file. Dedupes on message.id + requestId —
  * Claude Code writes one line per content block during streaming, all sharing the same

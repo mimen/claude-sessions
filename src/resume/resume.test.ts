@@ -41,13 +41,17 @@ test("resolveResumeCwd: existing cwd kept; missing falls back", () => {
   mkdirSync(repo, { recursive: true });
   const repoPath = join(dir, ".projects", encodePath(repo), "s.jsonl");
 
-  expect(resolveResumeCwd(row({ path: repoPath, cwd: repo, projectRoot: repo })).note).toBeNull();
+  const ok1 = resolveResumeCwd(row({ path: repoPath, cwd: repo, projectRoot: repo }));
+  if ("error" in ok1) throw new Error("should succeed");
+  expect(ok1.note).toBeNull();
 
   const gone = resolveResumeCwd(row({ path: "/p", cwd: "/no/such/dir", projectRoot: repo }));
+  if ("error" in gone) throw new Error("should succeed");
   expect(gone.cwd).toBe(repo);
   expect(gone.note).toContain("project root");
 
   const allGone = resolveResumeCwd(row({ path: "/p", cwd: "/no/such/dir", projectRoot: "/also/gone" }));
+  if ("error" in allGone) throw new Error("should succeed");
   expect(allGone.cwd).toBe(homedir());
   expect(allGone.note).toContain("home");
 
@@ -65,6 +69,7 @@ test("resolveResumeCwd locates the launch dir from the storage folder, not the r
   const path = join(base, ".projects", folder, "session.jsonl");
 
   const out = resolveResumeCwd(row({ path, cwd: "/orphaned/old/path", projectRoot: "/orphaned/old" }));
+  if ("error" in out) throw new Error("should succeed");
   expect(out.cwd).toBe(vault); // located via the folder, not the orphaned cwd
   expect(out.note).toContain("no longer maps");
 

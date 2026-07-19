@@ -104,7 +104,7 @@ async function list(opts: ListOpts): Promise<number> {
     return 1;
   }
   ensureDataDir();
-  const db = openSkillsDb(SKILLS_DB_PATH);
+  const db = openSkillsDb(SKILLS_DB_PATH());
   try {
     let skills = loadSkills(db);
     if (skills.length === 0 || opts.rescan) {
@@ -248,7 +248,7 @@ function categoryCommand(args: string[]): number {
     return 1;
   }
   ensureDataDir();
-  const db = openSkillsDb(SKILLS_DB_PATH);
+  const db = openSkillsDb(SKILLS_DB_PATH());
   try {
     const skills = loadSkills(db);
     if (!skills.some((s) => s.name === name)) {
@@ -273,7 +273,7 @@ function tagCommand(args: string[]): number {
     return 1;
   }
   ensureDataDir();
-  const db = openSkillsDb(SKILLS_DB_PATH);
+  const db = openSkillsDb(SKILLS_DB_PATH());
   try {
     const known = new Set(loadSkills(db).map((s) => s.name));
     if (!known.has(name)) {

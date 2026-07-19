@@ -46,6 +46,22 @@ import { SkillsList } from "./SkillsList.tsx";
 import { SkillsPreview, type FileEntry, type UsedByEntry } from "./SkillsPreview.tsx";
 import { SkillReader, type ReaderState } from "./SkillReader.tsx";
 
+// A mode switch remounts this panel. Share the in-flight mine by DB connection so rapid Tab
+// toggles don't queue redundant full-store scans or write to a database after test teardown.
+const activeUsageMines = new WeakMap<Database, Promise<void>>();
+
+function mineUsageOnce(skillsDb: Database, storePath: string, dirs: Map<string, string>): Promise<void> {
+  const active = activeUsageMines.get(skillsDb);
+  if (active) return active;
+  const mine = serializeSkillsWrite(() => mineUsage(skillsDb, storePath, dirs)).then(() => undefined);
+  activeUsageMines.set(skillsDb, mine);
+  void mine.then(
+    () => { if (activeUsageMines.get(skillsDb) === mine) activeUsageMines.delete(skillsDb); },
+    () => { if (activeUsageMines.get(skillsDb) === mine) activeUsageMines.delete(skillsDb); },
+  );
+  return mine;
+}
+
 interface SkillsPanelProps {
   skillsDb: Database;
   /** Session Index — used to resolve transcript files → project names for used-by. */
@@ -156,7 +172,7 @@ export function SkillsPanel({ skillsDb, indexDb, config, onSwitchMode, onShowSes
         dirs.set(s.realPath, s.name);
         for (const a of s.aliases) dirs.set(a, s.name);
       }
-      await serializeSkillsWrite(() => mineUsage(skillsDb, config.store.path, dirs));
+      await mineUsageOnce(skillsDb, config.store.path, dirs);
       if (!alive) return;
       setBusy(null);
       reload();
