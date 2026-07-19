@@ -12,7 +12,9 @@ export type Ecosystem =
   | "marketplace" // marketplace catalog clones (~/.claude/plugins/marketplaces) — listings, not installs
   | "codex"
   | "cursor"
+  | "grok" // grok CLI's own skills (~/.grok)
   | "hermes"
+  | "ide" // editor-bundled prompt assets (VS Code Copilot etc.)
   | "archive" // _archive / deprecated corpses
   | "download" // ~/Downloads copies
   | "other";
@@ -49,6 +51,11 @@ export function classifyPath(path: string, home: string = homedir()): Ecosystem 
   if (p.startsWith("~/.codex/.tmp/") || p.startsWith("~/.codex/vendor_imports/")) return "marketplace";
   if (p.startsWith("~/.codex/")) return "codex";
   if (p.startsWith("~/.cursor/")) return "cursor";
+  // Grok CLI: bundled + marketplace-cache copies are catalogs; its skills dir is its install.
+  if (p.startsWith("~/.grok/marketplace-cache/") || p.startsWith("~/.grok/bundled/")) return "marketplace";
+  if (p.startsWith("~/.grok/")) return "grok";
+  // Editor-bundled prompt assets (VS Code Copilot etc.) — not project skills.
+  if (p.startsWith("~/.vscode") || p.includes("/extensions/github.copilot")) return "ide";
   // Hermes ships an opt-in library inside its repo; entries are a catalog until enabled in config.
   if (p.startsWith("~/.hermes/hermes-agent/optional-skills/")) return "marketplace";
   if (p.startsWith("~/.hermes/")) return "hermes";
