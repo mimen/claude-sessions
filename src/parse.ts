@@ -53,7 +53,7 @@ interface AnyLine extends CostLine {
 type Block = { type?: string; text?: string; name?: string };
 
 /** Concatenated human-authored text of a message (text blocks / string content only). */
-function humanText(content: unknown): string {
+export function humanText(content: unknown): string {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
   return content

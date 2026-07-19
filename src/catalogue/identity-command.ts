@@ -12,6 +12,7 @@
  *   ccs identity complete|archive|uncomplete <key>              lifecycle
  *   ccs identity path <key> [--new]                             scratch dir
  *   ccs identity sessions <key>                                 attached session ids
+ *   ccs identity lineage <key> [--search "<q>"]                 bodies in succession + transcript search
  *   ccs identity resolve --session <sid> [--json]               (legacy — kept for engines)
  *
  * The legacy `resolve` verb is kept until step 9 rewrites engine callers.
@@ -31,6 +32,7 @@ import {
   setIdentityFields,
   uncompleteIdentity,
 } from "./identities.ts";
+import { identityLineage } from "./lineage-view.ts";
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -53,14 +55,22 @@ function parseFlags(args: string[]): { flags: Record<string, string>; bools: Set
 }
 
 /** Legacy engine-facing shape: `ccs identity resolve --session <sid> [--json]`. Preserved. */
-export function identityResolveCommand(args: string[]): number {
+export async function identityResolveCommand(args: string[]): Promise<number> {
   return identityCommand(args);
 }
 
-export function identityCommand(args: string[]): number {
+export async function identityCommand(args: string[]): Promise<number> {
   const sub = args[0];
   if (!sub) return usage();
   ensureDataDir();
+  // Lineage handled outside the shared db lifecycle — it opens its own catalogue + index.
+  if (sub === "lineage") {
+    const rest = args.slice(1);
+    const searchIdx = rest.findIndex((a) => a === "--search");
+    const query = searchIdx >= 0 ? rest[searchIdx + 1] : undefined;
+    const key = rest.find((a) => !a.startsWith("--") && rest[rest.indexOf(a) - 1] !== "--search");
+    return identityLineage(key, query);
+  }
   const db = openCatalogue(CATALOGUE_PATH());
   try {
     switch (sub) {
@@ -97,6 +107,7 @@ function usage(rc = 1): number {
   console.error("  ccs identity complete|archive|uncomplete <key>");
   console.error("  ccs identity path <key> [--new]");
   console.error("  ccs identity sessions <key>");
+  console.error('  ccs identity lineage <key> [--search "<q>"]        bodies in succession + transcript search');
   console.error("  ccs identity resolve --session <sid>              (legacy)");
   return rc;
 }

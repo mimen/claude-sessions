@@ -61,6 +61,7 @@ Identities (durable, per-work-unit — ADR-0089):
   ccs identity complete|archive|uncomplete <key>  Lifecycle (cascades to attached sessions)
   ccs identity path <key> [--new]                 Deterministic scratch dir for the identity
   ccs identity sessions <key>                     List sessions attached to this identity
+  ccs identity lineage <key> [--search "<q>"]     Bodies in succession + transcript search
   ccs identity resolve --session <sid> [--json]   Session → identity key + facts (ADR-D1)
 
 Sessions (ephemeral, per-run):

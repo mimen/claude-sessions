@@ -22,11 +22,11 @@ async function withRoot(fn: (root: string) => Promise<void> | void): Promise<voi
 }
 
 /** Silence expected stderr output during error-path tests. */
-function withSilentStderr<T>(fn: () => T): T {
+async function withSilentStderr<T>(fn: () => T | Promise<T>): Promise<T> {
   const orig = console.error;
   console.error = () => {};
   try {
-    return fn();
+    return await fn();
   } finally {
     console.error = orig;
   }
@@ -38,7 +38,7 @@ describe("ccs identity set — unknown field handling", () => {
       const db = openCatalogue(join(root, "cache", "catalogue.db"));
       mintIdentity(db, "pr-watch:concierge", { cluster: "pr-watch", role: "concierge" }, NOW);
       db.close();
-      const rc = withSilentStderr(() =>
+      const rc = await withSilentStderr(() =>
         identityCommand(["set", "pr-watch:concierge", "--unknown_field=x"]),
       );
       expect(rc).toBe(1);
@@ -55,7 +55,7 @@ describe("ccs identity set — unknown field handling", () => {
         NOW,
       );
       db.close();
-      const rc = withSilentStderr(() =>
+      const rc = await withSilentStderr(() =>
         identityCommand(["set", "pr-watch:pr-agent:owner/repo#12345", "--unknown_field=x"]),
       );
       expect(rc).toBe(1);
@@ -67,7 +67,7 @@ describe("ccs identity set — unknown field handling", () => {
       const db = openCatalogue(join(root, "cache", "catalogue.db"));
       mintIdentity(db, "pr-watch:concierge", { cluster: "pr-watch", role: "concierge" }, NOW);
       db.close();
-      const rc = identityCommand(["set", "pr-watch:concierge", "--meta.freeform=hello"]);
+      const rc = await identityCommand(["set", "pr-watch:concierge", "--meta.freeform=hello"]);
       expect(rc).toBe(0);
     });
   });
@@ -82,7 +82,7 @@ describe("ccs identity ls / list — both aliases work", () => {
       const db = openCatalogue(join(root, "cache", "catalogue.db"));
       mintIdentity(db, "pr-watch:pr-agent:o/r#1", { cluster: "pr-watch", role: "pr-agent" }, NOW);
       db.close();
-      const rc = identityCommand(["list", "--cluster=pr-watch"]);
+      const rc = await identityCommand(["list", "--cluster=pr-watch"]);
       expect(rc).toBe(0);
     });
   });
@@ -92,7 +92,7 @@ describe("ccs identity ls / list — both aliases work", () => {
       const db = openCatalogue(join(root, "cache", "catalogue.db"));
       mintIdentity(db, "pr-watch:pr-agent:o/r#1", { cluster: "pr-watch", role: "pr-agent" }, NOW);
       db.close();
-      const rc = identityCommand(["ls", "--cluster=pr-watch"]);
+      const rc = await identityCommand(["ls", "--cluster=pr-watch"]);
       expect(rc).toBe(0);
     });
   });
