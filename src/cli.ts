@@ -38,6 +38,7 @@ import { catalogueExportCommand } from "./catalogue/export-command.ts";
 import { identityCommand, identityResolveCommand } from "./catalogue/identity-command.ts";
 import { sessionCommand } from "./catalogue/session-command.ts";
 import { sessionFieldsCommand } from "./catalogue/session-fields-command.ts";
+import { installCrashLog } from "./crashlog.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -130,6 +131,7 @@ Roles & skills:
 
 /** Entry point. Routes argv to a command; returns a process exit code. */
 export async function main(argv: string[]): Promise<number> {
+  installCrashLog();
   const args = argv.slice(2);
 
   if (args.includes("--version") || args.includes("-v")) {
