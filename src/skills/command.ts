@@ -4,6 +4,7 @@ import { discoverSkills, isInLinkedWorktree, type SkillRecord } from "./scan.ts"
 import { shadowDuplicatePaths, accessIn, contextLabel, type SkillContext } from "./view.ts";
 import { homedir } from "node:os";
 import { openSkillsDb, saveSkills, loadSkills, usageTotals, tagsFor, addTag, removeTag, setCategory, categoriesFor } from "./db.ts";
+import { writeCategory, pruneCategoryRows } from "./category-write.ts";
 import { mineUsage } from "./usage.ts";
 
 const HELP = `ccs skills — every skill on this machine, with real usage numbers
@@ -115,7 +116,12 @@ async function list(opts: ListOpts): Promise<number> {
       }
       saveSkills(db, found.value);
       skills = found.value;
-      process.stderr.write(`${skills.length} found\n`);
+      // Prune db rows shadowed by frontmatter or orphaned by removed skills. Keeps the db
+      // from silently masking a frontmatter edit.
+      const dropped = pruneCategoryRows(db, skills);
+      process.stderr.write(
+        `${skills.length} found${dropped > 0 ? ` · pruned ${dropped} shadowed/orphaned category row(s)` : ""}\n`,
+      );
     }
 
     // Usage join: every known skill dir (primary + aliases + realpath) maps to its slug.
@@ -174,7 +180,7 @@ async function list(opts: ListOpts): Promise<number> {
         JSON.stringify(
           rows.map((s) => ({
           ...s,
-          category: categories.get(s.name) ?? null,
+          category: s.category ?? categories.get(s.name) ?? null,
           tags: tags.get(s.name) ?? [],
           usage: usage.get(s.name) ?? null,
           ...(opts.context ? { access: accessByPath.get(s.path) ?? null } : {}),
@@ -212,7 +218,7 @@ async function list(opts: ListOpts): Promise<number> {
       const cols = [
         pad(s.name + (s.copies > 1 ? ` ×${s.copies}` : ""), 30),
         opts.context ? pad(accessByPath.get(s.path) ?? "", 24) : pad(s.ecosystem, 15),
-        pad(categories.get(s.name) ?? "", 13),
+        pad(s.category ?? categories.get(s.name) ?? "", 13),
         pad(t.join(","), 14),
         padLeft(u ? String(u.invocations) : "·", 8),
         padLeft(u ? String(u.commands) : "·", 6),
@@ -248,13 +254,19 @@ function categoryCommand(args: string[]): number {
   ensureDataDir();
   const db = openSkillsDb(SKILLS_DB_PATH());
   try {
-    const known = new Set(loadSkills(db).map((s) => s.name));
+    const records = loadSkills(db);
+    const known = new Set(records.map((s) => s.name));
     if (!known.has(name)) {
       console.error(`Unknown skill "${name}" — not in the registry (run \`ccs skills --rescan\` if it's new).`);
       return 1;
     }
-    setCategory(db, name, clear ? null : category!);
-    console.log(clear ? `Cleared category on ${name}` : `category(${name}) = ${category}`);
+    // writeCategory prefers SKILL.md frontmatter (canonical, travels with the file) and
+    // falls back to the db table for foreign ecosystems (plugins, other tools).
+    const result = writeCategory(db, records, name, clear ? null : category!);
+    const where = result.mode === "frontmatter" ? ` → ${result.path}` : " → skills.db (foreign ecosystem)";
+    console.log(
+      (clear ? `Cleared category on ${name}` : `category(${name}) = ${category}`) + where,
+    );
     return 0;
   } finally {
     db.close();
