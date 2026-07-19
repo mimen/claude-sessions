@@ -70,6 +70,20 @@ export interface CatalogueRow {
   prHeadSha: string | null;
   /** ADR-0089: FK to identities.identity_key. Nullable for "loose" sessions with no cluster/role. */
   identityKey: string | null;
+  /** Agent runtime that hosted this body. Null reads as the default `claude-code`. Salvage
+   *  from origin's v5 — makes ccs honest about hosting non-Claude agents (grok, codex, …)
+   *  when we decide to. Optional for test fixtures constructed before v34. */
+  substrate?: string | null;
+  /** The launcher's `CLAUDE_IDENTITY` env var, if it exported one — which `claude-<alias>`
+   *  started this body. Distinct from `identityKey` (our durable work-unit key); this is a
+   *  provenance breadcrumb from the invocation environment. Optional for pre-v34 fixtures. */
+  launcherIdentity?: string | null;
+}
+
+/** Effective substrate for a row (defaults unset rows to claude-code). */
+export const DEFAULT_SUBSTRATE = "claude-code";
+export function substrateOf(row: CatalogueRow | null): string {
+  return row?.substrate ?? DEFAULT_SUBSTRATE;
 }
 
 export interface PrFacts {
@@ -80,7 +94,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 33;
+const CATALOGUE_VERSION = 34;
 
 export function openCatalogue(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -740,6 +754,23 @@ function migrate(db: Database): void {
     }
   }
 
+  if (v < 34) {
+    // v34: agent-runtime awareness (salvaged from origin's v5).
+    // `substrate` = which agent runtime hosted this session body — null reads as
+    // claude-code (the default we've always assumed). Adding this makes the platform
+    // honest about hosting non-Claude agents (grok, codex, etc.) later without a schema
+    // shift when we do.
+    // `identity` = the CLAUDE_IDENTITY env var the launcher exported (a launcher-provenance
+    // breadcrumb; distinct from identity_key, which is our post-ADR-0089 durable work-unit
+    // key). Useful for attributing a body to which claude-<name> alias started it.
+    if (!hasColumn(db, "catalogue", "substrate")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN substrate TEXT;");
+    }
+    if (!hasColumn(db, "catalogue", "launcher_identity")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN launcher_identity TEXT;");
+    }
+  }
+
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -850,6 +881,8 @@ function rowFrom(r: Record<string, unknown> | null, db?: Database): CatalogueRow
     prState: (idAttrs.pr_state as PrState) ?? null,
     prHeadSha: (idAttrs.pr_head_sha as string) ?? null,
     identityKey,
+    substrate: (r.substrate as string) ?? null,
+    launcherIdentity: (r.launcher_identity as string) ?? null,
   };
 }
 
