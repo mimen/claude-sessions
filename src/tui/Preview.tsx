@@ -177,6 +177,7 @@ export function Preview({
         <Field label="active" value={`${fmtTs(row.lastTs)}  (${formatAge(row.lastTs)})`} />
         <Field label="version" value={row.version ?? "?"} />
         <Field label="id" value={row.sessionId} />
+        {row.models.length > 0 ? <Field label="models" value={row.models.join(", ")} /> : null}
         {kind === "loop" ? <Field label="kind" value="loop ◆" color={theme.accent} /> : null}
         {sessionClass ? <Field label="class" value={sessionClass} color={sessionClass === "auxiliary" ? theme.accent : theme.title} /> : null}
         {skill ? <Field label="skill" value={`⚙ ${skill}`} color={theme.accent} /> : null}

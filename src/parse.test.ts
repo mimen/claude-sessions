@@ -122,6 +122,10 @@ test("sums billed usage from assistant lines into ParsedSession.usage", async ()
       timestamp: "2026-07-01T00:00:01Z",
       message: { id: "msg1", model: "claude-opus-4-8", usage, content: [{ type: "tool_use", name: "Bash" }] },
     },
+    {
+      type: "assistant",
+      message: { id: "msg2", model: "gpt-5.6-sol", content: [{ type: "text", text: "b" }] },
+    },
   ]);
   const parsed = await parseSessionFile(path, "cost");
   cleanup();
@@ -134,4 +138,5 @@ test("sums billed usage from assistant lines into ParsedSession.usage", async ()
   // Opus 4.8 $5/$25: in 0.005 + out 0.0125 + read 0.001 + 5m 0.001875 + 1h 0.007 = 0.027375
   expect(parsed.usage.costUSD).toBeCloseTo(0.027375, 9);
   expect(parsed.usage.costByModel["claude-opus-4-8"]).toBeCloseTo(0.027375, 9);
+  expect(parsed.usage.models).toEqual(["claude-opus-4-8", "gpt-5.6-sol"]);
 });

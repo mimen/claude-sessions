@@ -18,10 +18,21 @@ import { resolveRole } from "../roles/role-files.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
 import { pushRenderOps } from "../catalogue/sync-tabs.ts";
+import {
+  DEFAULT_LAUNCHERS,
+  defaultRoute,
+  launcherByName,
+  resolveRoutes,
+  type Launcher,
+} from "./launchers.ts";
 
 /** Just the catalogue bits resume needs (kept narrow so the planner is easy to test). */
 export interface ResumeMeta {
   resumeCommand: string | null;
+  /** Launcher executable for argv[0]; null → plain `claude`. */
+  binary?: string | null;
+  /** Launcher env for the spawned process. */
+  env?: Readonly<Record<string, string>>;
 }
 
 export type ResumePlan =
@@ -54,6 +65,8 @@ export function planResumeSession(
     fork: false,
     cwd,
     resumeCommand: meta?.resumeCommand ?? null,
+    binary: meta?.binary ?? undefined,
+    env: meta?.env,
   });
   const name = row.title || row.sessionId;
   return { action: "resume", sessionId: row.sessionId, command, name, note };
@@ -71,7 +84,45 @@ export type ResumeSessionResult =
   /** liveness sources were unreadable — we fail closed and spawn nothing (ADR-0054) */
   | { status: "liveness-unreadable" }
   /** cwd location failed with I/O error — fail closed per ADR-0066 */
-  | { status: "cwd-unreadable"; error: string };
+  | { status: "cwd-unreadable"; error: string }
+  /** the requested (or default) launcher can't replay this session's model history */
+  | { status: "route-ineligible"; reason: string }
+  /** `--via` named a launcher that isn't in config */
+  | { status: "unknown-launcher"; name: string };
+
+/**
+ * Pick the launcher for a session's model history: `via` forces one by name (route
+ * eligibility still enforced unless `force`); otherwise the origin-backend default route.
+ * Pure — shared by resume-session, the CLI `routes` view, and the TUI picker.
+ */
+export function chooseLauncher(
+  launchers: readonly Launcher[],
+  models: readonly string[],
+  opts: { via?: string; force?: boolean },
+):
+  | { ok: true; launcher: Launcher }
+  | { ok: false; status: "unknown-launcher"; name: string }
+  | { ok: false; status: "route-ineligible"; reason: string } {
+  const routes = resolveRoutes(launchers, models);
+  if (opts.via) {
+    const launcher = launcherByName(launchers, opts.via);
+    if (!launcher) return { ok: false, status: "unknown-launcher", name: opts.via };
+    const route = routes.find((r) => r.launcher.name === opts.via);
+    if (route && !route.eligible && !opts.force) {
+      return { ok: false, status: "route-ineligible", reason: route.reason ?? "ineligible" };
+    }
+    return { ok: true, launcher };
+  }
+  const def = defaultRoute(routes, models);
+  if (!def) {
+    return {
+      ok: false,
+      status: "route-ineligible",
+      reason: `no configured launcher serves [${models.join(", ")}]`,
+    };
+  }
+  return { ok: true, launcher: def.launcher };
+}
 
 /**
  * The full `ccs resume-session <id>` entry: resolve the row + its resume_command, plan, and
@@ -81,7 +132,18 @@ export function resumeSessionEntry(
   indexDb: Database,
   catalogueDb: Database,
   sessionId: string,
-  opts: { dryRun?: boolean; cmuxBin?: string; bridge?: Bridge; focus?: boolean } = {},
+  opts: {
+    dryRun?: boolean;
+    cmuxBin?: string;
+    bridge?: Bridge;
+    focus?: boolean;
+    /** Launcher name to resume through; default = origin-backend route from the model history. */
+    via?: string;
+    /** Bypass route eligibility for an explicit `via` (loud override). */
+    force?: boolean;
+    /** Configured launcher fleet; default = plain `claude` (byte-identical to pre-routes ccs). */
+    launchers?: readonly Launcher[];
+  } = {},
 ): ResumeSessionResult {
   const row = sessionById(indexDb, sessionId);
   if (!row) return { status: "not-indexed" };
@@ -92,11 +154,25 @@ export function resumeSessionEntry(
   // unreadable as closed would re-spawn a session that's actually running → duplicate-fleet
   // runaway (ADR-0054). Abort instead — spawn nothing, report the reason.
   if (!bridge.readable) return { status: "liveness-unreadable" };
+  // Route BEFORE planning so an ineligible `--via` can never spawn (an already-open session
+  // still reports already-open first — route choice is irrelevant for a live tab).
+  if (sessionIsOpen(bridge, row)) return { status: "already-open" };
+  const launchers = opts.launchers ?? DEFAULT_LAUNCHERS;
+  const chosen = chooseLauncher(launchers, row.models, { via: opts.via, force: opts.force });
+  if (!chosen.ok) {
+    return chosen.status === "unknown-launcher"
+      ? { status: "unknown-launcher", name: chosen.name }
+      : { status: "route-ineligible", reason: chosen.reason };
+  }
   // ADR-0062: re-arm from the ROLE's authored resume_command (files-are-truth), not the session
   // column copy that can drift from a config edit. Fall back to the session column for a row whose
   // role isn't resolvable (unregistered/standalone) so nothing regresses.
   const roleResume = cat?.role ? resolveRole(cat.role, cat.cluster)?.resumeCommand ?? null : null;
-  const plan = planResumeSession(bridge, row, { resumeCommand: roleResume ?? cat?.resumeCommand ?? null });
+  const plan = planResumeSession(bridge, row, {
+    resumeCommand: roleResume ?? cat?.resumeCommand ?? null,
+    binary: chosen.launcher.binary,
+    env: chosen.launcher.env,
+  });
 
   if (plan.action === "skip") return { status: "already-open" };
   if (plan.action === "fail") return { status: "cwd-unreadable", error: plan.error };
@@ -157,6 +233,7 @@ export function executeResumePlan(
   const ref = spawnCmux({
     argv: plan.command.argv,
     cwd: plan.command.cwd,
+    env: plan.command.env,
     name: plan.name,
     focus: opts.focus,
     cmuxBin: opts.cmuxBin,

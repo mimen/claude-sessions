@@ -10,6 +10,12 @@ export interface ModelBadge {
 // Order matters: first prefix match wins. Muted family hues — legible but not shouting, since
 // a model tag sits on most rows and color-only would be noise (it's always paired with the label).
 const FAMILIES: ReadonlyArray<readonly [prefix: string, label: string, color: string]> = [
+  // Gateway-backed GPT models (claude-gpt launcher) — distinct teal hues so a cross-backend
+  // session is spottable at a glance in the model column.
+  ["gpt-5.6-sol", "sol", "#4fb3a9"],
+  ["gpt-5.6-terra", "terra", "#3d8f87"],
+  ["gpt-5.6-luna", "luna", "#6fcfc4"],
+  ["gpt-", "gpt", "#4fb3a9"],
   ["claude-fable", "fable", "#a689c9"],
   ["claude-mythos", "mythos", "#a689c9"],
   ["claude-opus", "opus", "#c99a6b"],
@@ -22,7 +28,7 @@ const FAMILIES: ReadonlyArray<readonly [prefix: string, label: string, color: st
   ["claude-3-haiku", "haiku", "#7ba85f"],
 ];
 
-function familyOf(modelId: string): ModelBadge {
+export function familyOf(modelId: string): ModelBadge {
   for (const [prefix, label, color] of FAMILIES) {
     if (modelId.startsWith(prefix)) return { key: label, label, color };
   }
@@ -43,6 +49,20 @@ export function dominantModel(costByModel: Readonly<Record<string, number>>): Mo
     }
   }
   return best ? familyOf(best) : null;
+}
+
+/**
+ * List-column model badge: dominant-by-spend when any cost was recorded, else the first model
+ * from the persisted model set — so an all-zero-cost session (pure-gpt: unpriced) still badges.
+ */
+export function modelBadge(
+  costByModel: Readonly<Record<string, number>>,
+  models: readonly string[],
+): ModelBadge | null {
+  const dominant = dominantModel(costByModel);
+  if (dominant) return dominant;
+  const first = models[0];
+  return first ? familyOf(first) : null;
 }
 
 /** All model families used by a Session, richest first (for the preview breakdown). */

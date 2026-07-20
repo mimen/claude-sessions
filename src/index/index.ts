@@ -36,6 +36,8 @@ export interface SessionRow {
   readonly tokCacheWrite: number;
   /** USD per model id for this file — drives the model indicator + per-model breakdown. */
   readonly costByModel: Readonly<Record<string, number>>;
+  /** Model ids seen in this file's assistant turns — drives cross-backend resume routing. */
+  readonly models: readonly string[];
   /** Real prompts / ticks (human/loop turns, excluding tool-result lines). */
   readonly userTurns: number;
   /** Median seconds between ticks — a loop's cadence (0 if fewer than two ticks). */
@@ -82,6 +84,7 @@ const SELECT_COLS = `
   tok_cache_read AS tokCacheRead,
   tok_cache_write AS tokCacheWrite,
   cost_by_model AS costByModelJson,
+  models AS modelsJson,
   user_turns AS userTurns,
   tick_interval_sec AS tickIntervalSec,
   shadow_paths AS shadowPathsJson
@@ -132,13 +135,13 @@ export async function reindexStore(
       first_ts, last_ts, msg_count, file_mtime, file_size,
       native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id,
       cost_usd, tok_input, tok_output, tok_cache_read, tok_cache_write, cost_by_model,
-      user_turns, tick_interval_sec, shadow_paths
+      models, user_turns, tick_interval_sec, shadow_paths
     ) VALUES (
       $session_id, $host, $path, $cwd, $project_root, $project_name, $branch, $version,
       $first_ts, $last_ts, $msg_count, $file_mtime, $file_size,
       $native_title, $fallback_label, $skeleton, $is_subagent, $parent_session_id, $resume_id,
       $cost_usd, $tok_input, $tok_output, $tok_cache_read, $tok_cache_write, $cost_by_model,
-      $user_turns, $tick_interval_sec, $shadow_paths
+      $models, $user_turns, $tick_interval_sec, $shadow_paths
     ) ON CONFLICT(session_id) DO UPDATE SET
       host = $host, path = $path, cwd = $cwd,
       project_root = $project_root, project_name = $project_name,
@@ -149,7 +152,7 @@ export async function reindexStore(
       is_subagent = $is_subagent, parent_session_id = $parent_session_id, resume_id = $resume_id,
       cost_usd = $cost_usd, tok_input = $tok_input, tok_output = $tok_output,
       tok_cache_read = $tok_cache_read, tok_cache_write = $tok_cache_write,
-      cost_by_model = $cost_by_model, user_turns = $user_turns,
+      cost_by_model = $cost_by_model, models = $models, user_turns = $user_turns,
       tick_interval_sec = $tick_interval_sec, shadow_paths = $shadow_paths
   `);
   const refreshDiagnostics = db.query(
@@ -219,6 +222,7 @@ export async function reindexStore(
       $tok_cache_read: parsed.usage.cacheRead,
       $tok_cache_write: parsed.usage.cacheWrite5m + parsed.usage.cacheWrite1h,
       $cost_by_model: JSON.stringify(parsed.usage.costByModel),
+      $models: JSON.stringify(parsed.usage.models),
       $user_turns: parsed.userTurns,
       $tick_interval_sec: parsed.tickIntervalSec,
       $shadow_paths: shadowPathsJson,
@@ -297,17 +301,19 @@ export function recordTitleFailure(db: Database, sessionId: string): void {
   ).run({ $id: sessionId });
 }
 
-type RawRow = Omit<SessionRow, "isSubagent" | "costByModel" | "shadowPaths"> & {
+type RawRow = Omit<SessionRow, "isSubagent" | "costByModel" | "models" | "shadowPaths"> & {
   isSubagent: number;
   costByModelJson: string;
+  modelsJson: string;
   shadowPathsJson: string;
 };
 
-/** Coerce SQLite's 0/1 is_subagent into a boolean and parse the per-model cost JSON. */
+/** Coerce SQLite's boolean and parse its JSON-backed model/diagnostic fields. */
 function mapRows(raw: unknown[]): SessionRow[] {
   return (raw as RawRow[]).map((r) => {
-    const { costByModelJson, shadowPathsJson, ...rest } = r;
+    const { costByModelJson, modelsJson, shadowPathsJson, ...rest } = r;
     let costByModel: Record<string, number> = {};
+    let models: string[] = [];
     let shadowPaths: string[] = [];
     try {
       costByModel = JSON.parse(costByModelJson) as Record<string, number>;
@@ -315,12 +321,18 @@ function mapRows(raw: unknown[]): SessionRow[] {
       // tolerate a corrupt cell; the scalar totals are still correct
     }
     try {
+      const decoded = JSON.parse(modelsJson) as string[];
+      if (decoded.every((model) => typeof model === "string")) models = decoded;
+    } catch {
+      // tolerate a corrupt cell; model-based resume routing falls back to an empty history
+    }
+    try {
       const decoded = JSON.parse(shadowPathsJson) as string[];
       if (decoded.every((path) => typeof path === "string")) shadowPaths = decoded;
     } catch {
       // tolerate a corrupt diagnostic cell; canonical transcript facts remain usable
     }
-    return { ...rest, isSubagent: Boolean(r.isSubagent), costByModel, shadowPaths };
+    return { ...rest, isSubagent: Boolean(r.isSubagent), costByModel, models, shadowPaths };
   });
 }
 

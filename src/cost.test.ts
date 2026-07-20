@@ -119,12 +119,27 @@ test("unknown models count tokens but cost 0, and surface in costByModel", () =>
   expect(acc.totals().costByModel["claude-future-9"]).toBe(0);
 });
 
-test("lines without usage are ignored; synthetic model excluded from breakdown", () => {
+test("collects priced and unpriced models even from lines without usage", () => {
   const acc = createUsageAccumulator();
-  acc.add({ message: { model: "claude-opus-4-8" } }); // no usage at all
+  acc.add({ message: { model: "gpt-5.6-sol" } });
+  acc.add(line({ requestId: "r1", model: "claude-opus-4-8", usage: { input_tokens: 1 } }));
+  expect(acc.totals().models).toEqual(["claude-opus-4-8", "gpt-5.6-sol"]);
+});
+
+test("model ids are deduped and sorted", () => {
+  const acc = createUsageAccumulator();
+  acc.add({ message: { id: "msg1", model: "gpt-5.6-sol" } });
+  acc.add({ message: { id: "msg1", model: "gpt-5.6-sol" } });
+  acc.add({ message: { model: "claude-sonnet-5" } });
+  expect(acc.totals().models).toEqual(["claude-sonnet-5", "gpt-5.6-sol"]);
+});
+
+test("synthetic model is excluded from models and cost breakdown", () => {
+  const acc = createUsageAccumulator();
   acc.add(line({ requestId: "r1", model: "<synthetic>", usage: { input_tokens: 0 } }));
   expect(acc.totals().costUSD).toBe(0);
   expect(Object.keys(acc.totals().costByModel)).toEqual([]);
+  expect(acc.totals().models).toEqual([]);
 });
 
 test("formatCost renders compact column values", () => {

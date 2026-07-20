@@ -30,6 +30,7 @@ import { resolveRole } from "../roles/role-files.ts";
 import { checkClusterGate } from "../cluster/manifest.ts";
 import { shellQuote } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
+import { launcherByName, loadLaunchers, type Launcher } from "./launchers.ts";
 import { execFileSync } from "node:child_process";
 import { spawnContractError, type SpawnFacts, type WorktreeState } from "../catalogue/spawn-contract.ts";
 import { interpretSpawnLocation, syntheticRow, type SpawnLocationConfig } from "../catalogue/spawn-location.ts";
@@ -91,6 +92,10 @@ export interface NewSessionOpts {
    * surface). Default is DETACHED into a fresh cmux workspace — inline hijacks the caller's
    * CMUX_SURFACE_ID and rebinds their tab to the new session (ADR-0042). */
   inline: boolean;
+  /** Launch through a configured launcher (`[[launcher]]` in config.toml) instead of plain
+   * `claude` — e.g. `--via gpt` births the session on the gateway backend. No eligibility
+   * check: a fresh session has no model history yet. */
+  via?: string;
 }
 
 /** Parse a --pr-number value to a positive integer, or undefined (0 / non-numeric = "no PR yet"). */
@@ -102,7 +107,7 @@ function prNumberFrom(raw: string | undefined): number | undefined {
 
 const VALUE_FLAGS = new Set([
   "--cluster", "--identity", "--role", "--skill", "--project", "--key", "--title", "--parent", "--child-of",
-  "--gus-work", "--pr-number", "--pr-repo", "--cwd", "--prompt", "--permission-mode",
+  "--gus-work", "--pr-number", "--pr-repo", "--cwd", "--prompt", "--permission-mode", "--via",
 ]);
 const BOOLEAN_FLAGS = new Set(["--print-id", "--top-level", "--inline"]);
 
@@ -165,6 +170,7 @@ export function parseOpts(args: string[]): NewSessionOpts {
     printId: booleans.has("--print-id"),
     topLevel: booleans.has("--top-level"),
     inline: booleans.has("--inline"),
+    via: values.get("--via"),
   };
 }
 
@@ -333,9 +339,10 @@ function supersedeWorkUnitSiblings(db: Database, workUnitId: string, keepId: str
   }
 }
 
-/** Build the `claude` invocation for launch mode. Prompt (if any) is a trailing positional arg. */
-function buildLaunchArgv(id: string, opts: NewSessionOpts): string[] {
-  const argv = ["claude", "--session-id", id];
+/** Build the launch invocation. Prompt (if any) is a trailing positional arg. `binary` comes
+ * from the `--via` launcher; default is plain `claude`. */
+export function buildLaunchArgv(id: string, opts: NewSessionOpts, binary = "claude"): string[] {
+  const argv = [binary, "--session-id", id];
   if (opts.permissionMode) argv.push("--permission-mode", opts.permissionMode);
   if (opts.prompt) argv.push(opts.prompt);
   return argv;
@@ -455,6 +462,24 @@ export function newSession(args: string[]): number {
 
   const cwd = opts.cwd ?? process.cwd();
 
+  // Resolve the `--via` launcher BEFORE minting anything — an unknown name must fail loud
+  // with no half-born session. Without --via the launch is plain `claude`, as always.
+  let launcher: Launcher = { name: "claude", binary: "claude", serves: ["*"], env: {} };
+  if (opts.via) {
+    const launchersRes = loadLaunchers();
+    if (!launchersRes.ok) {
+      console.error(`ccs new-session: ${launchersRes.error.message}`);
+      return 2;
+    }
+    const found = launcherByName(launchersRes.value, opts.via);
+    if (!found) {
+      const known = launchersRes.value.map((l) => l.name).join(", ");
+      console.error(`ccs new-session: unknown launcher "${opts.via}" (configured: ${known})`);
+      return 2;
+    }
+    launcher = found;
+  }
+
   // Explicit identity births must reject before an id is minted or a catalogue row is created.
   // Keep this connection through registration so validation and the atomic metadata write observe
   // the same catalogue state.
@@ -494,17 +519,23 @@ export function newSession(args: string[]): number {
     return 0;
   }
 
-  const argv = buildLaunchArgv(id, opts);
+  const argv = buildLaunchArgv(id, opts, launcher.binary);
 
   // --inline: genuine interactive launch in THIS terminal. Binds to the caller's surface —
   // correct only when that IS the intent. NOT the default (ADR-0042).
   if (opts.inline) {
     console.error(`ccs: launching INLINE ${argv.map(shellQuote).join(" ")}  (cwd: ${cwd})`);
     try {
-      const result = Bun.spawnSync(argv, { cwd, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+      const result = Bun.spawnSync(argv, {
+        cwd,
+        env: { ...process.env, ...launcher.env },
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      });
       const outcome = inlineLaunchOutcome(result.exitCode, result.signalCode);
       if (outcome.startupFailed) {
-        console.error("ccs: could not run claude — is it on your PATH?");
+        console.error(`ccs: could not run ${launcher.binary} — is it on your PATH?`);
         reportRecoverableExplicitBirth(id, opts.identity);
       }
       return outcome.exitCode;
@@ -518,7 +549,7 @@ export function newSession(args: string[]): number {
   // DEFAULT: spawn DETACHED into a fresh cmux workspace. The new surface gets its OWN
   // CMUX_SURFACE_ID, so the new session's SessionStart hook binds THAT surface — never
   // rebinding the caller's (the hijack ADR-0042 documents). Deterministic: own surface or fail.
-  return spawnDetached(id, argv, cwd, opts.title || opts.role || id.slice(0, 8), opts.identity);
+  return spawnDetached(id, argv, cwd, opts.title || opts.role || id.slice(0, 8), opts.identity, launcher.env);
 }
 
 export function inlineLaunchOutcome(
@@ -616,8 +647,15 @@ function probeWorktree(cwd: string): WorktreeState {
  * the SAME detached-spawn + CMUX_SURFACE_ID env-scrub (ADR-0042) used by resume, so a born-fresh
  * and a resumed session launch identically.
  */
-function spawnDetached(id: string, argv: string[], cwd: string, name: string, identity: string | undefined): number {
-  const ref = spawnCmux({ argv, cwd, name });
+function spawnDetached(
+  id: string,
+  argv: string[],
+  cwd: string,
+  name: string,
+  identity: string | undefined,
+  env: Readonly<Record<string, string>> = {},
+): number {
+  const ref = spawnCmux({ argv, cwd, name, env });
   if (ref === null) {
     console.error(`ccs: failed to spawn cmux workspace for ${id.slice(0, 8)} (cwd ${cwd})`);
     reportRecoverableExplicitBirth(id, identity);

@@ -76,6 +76,7 @@ const SESSION_GROUPS: KeyGroup[] = [
     name: "Resume",
     keys: [
       ["enter", "resume the session (on a section header: expand/collapse)"],
+      ["r", "resume via… — pick the launcher/backend (claude, claude-gpt, …)"],
       ["f", "fork-resume (new session id, same history)"],
       ["o", "resume via the other target (inline ↔ cmux)"],
     ],

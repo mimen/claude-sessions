@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
 import { theme, isRecentAge, costColor, roleColor } from "./theme.ts";
-import { dominantModel, formatCostList, formatCompactUSD } from "./format.ts";
+import { modelBadge, formatCostList, formatCompactUSD } from "./format.ts";
 import { CARET_W, GLYPH_W, PHASE_W, ROLE_W, TASKS_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
 
 /** List cost color: dimmed by default so cost doesn't shout over status/title; only a
@@ -152,7 +152,7 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
               : theme.title;
 
         const cost = totalCost?.get(r.sessionId) ?? r.costUSD;
-        const model = dominantModel(r.costByModel);
+        const model = modelBadge(r.costByModel, r.models);
 
         return (
           <Box key={index} backgroundColor={bg}>

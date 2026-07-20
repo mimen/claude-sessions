@@ -17,6 +17,15 @@ import {
 import { backfillTitles } from "../titler/queue.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "../resume/command.ts";
 import { resumeSessionEntry } from "../resume/resume-session.ts";
+import {
+  DEFAULT_LAUNCHERS,
+  defaultRoute,
+  launchersFrom,
+  resolveRoutes,
+  type Launcher,
+  type Route,
+} from "../resume/launchers.ts";
+import { RoutePicker } from "./RoutePicker.tsx";
 import { resolveTarget, cmuxReachableAsync } from "../resume/target.ts";
 import { openInCmux } from "../resume/cmux.ts";
 import { focusSession, openSessionTitlesAsync } from "../cmux/liveness.ts";
@@ -161,6 +170,20 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   const { titler, engine, active: activeEngine, available: availableEngines, cycle: cycleEngine } = engineState;
   const { exit } = useApp();
   const { columns: cols, rows: termRows } = useTerminalSize();
+
+  // Cross-backend launcher fleet from config `[[launcher]]`. A duplicate-name config error
+  // falls back to plain `claude` here (the CLI stays loud; the TUI must still render).
+  const launchers = useMemo<readonly Launcher[]>(() => {
+    const l = launchersFrom(config.launcher);
+    return "error" in l ? DEFAULT_LAUNCHERS : l;
+  }, [config]);
+  // The `r` overlay: route picker over the selected session (owns input while open).
+  const [routePicker, setRoutePicker] = useState<{
+    row: SessionRow;
+    routes: Route[];
+    selected: number;
+    live: boolean;
+  } | null>(null);
 
   const [includeSubagents, setIncludeSubagents] = useState(false);
   const [showAuxiliary, setShowAuxiliary] = useState(false);
@@ -612,10 +635,10 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
     });
   };
 
-  const doResume = (fork: boolean, forceOther: boolean) => {
+  const doResume = (fork: boolean, forceOther: boolean, via?: Launcher, rowOverride?: SessionRow) => {
     const item = items[clampedSelected];
-    if (!item || item.kind !== "session") return;
-    const r = item.row;
+    const r = rowOverride ?? (item?.kind === "session" ? item.row : null);
+    if (!r) return;
     if (r.isSubagent) {
       setStatus("subagent runs aren't resumable — they're task runs spawned by a parent session");
       return;
@@ -627,13 +650,21 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       setStatus(focused ? `switched to → ${r.title}` : `already open, but couldn't switch to ${r.title}`);
       return;
     }
+    // Cross-backend route: an explicit pick from the `r` overlay wins; plain enter takes the
+    // origin-backend default from the session's model history (pure-gpt → the gpt launcher).
+    const launcher = via ?? defaultRoute(resolveRoutes(launchers, r.models), r.models)?.launcher;
+    if (!launcher) {
+      setStatus(`no configured launcher can replay [${r.models.join(", ")}] — check [[launcher]] serves globs`);
+      return;
+    }
+    const viaSuffix = launcher.name !== "claude" ? ` via ${launcher.name}` : "";
     const cwdResult = resolveResumeCwd(r);
     if ("error" in cwdResult) {
       setStatus(`can't resume: ${cwdResult.error}`);
       return;
     }
     const { cwd, note } = cwdResult;
-    const cmd = buildResumeCommand(r, { fork, cwd });
+    const cmd = buildResumeCommand(r, { fork, cwd, binary: launcher.binary, env: launcher.env });
     const target = resolveTarget(config.resume.target, reachable, forceOther);
     const prefix = note ? `${note} · ` : "";
     if (target === "cmux") {
@@ -643,18 +674,60 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       // because an interactive resume wants to land in the pane. A fork has no catalogue
       // resume_command to replay, and the core doesn't fork, so keep the direct path for forks.
       if (catalogue && !fork) {
-        const res = resumeSessionEntry(db, catalogue, r.sessionId, { focus: true });
+        const res = resumeSessionEntry(db, catalogue, r.sessionId, {
+          focus: true,
+          via: launcher.name,
+          launchers,
+        });
         const ok = res.status === "resumed" || res.status === "already-open";
-        setStatus(prefix + (ok ? `opened in cmux → ${r.title}` : "cmux failed — press o to resume inline"));
+        const fail =
+          res.status === "route-ineligible"
+            ? `route ineligible: ${res.reason}`
+            : "cmux failed — press o to resume inline";
+        setStatus(prefix + (ok ? `opened in cmux${viaSuffix} → ${r.title}` : fail));
       } else {
         const ok = openInCmux(cmd, r.title);
-        setStatus(prefix + (ok ? `opened in cmux → ${r.title}${fork ? " (fork)" : ""}` : "cmux failed — press o to resume inline"));
+        setStatus(prefix + (ok ? `opened in cmux${viaSuffix} → ${r.title}${fork ? " (fork)" : ""}` : "cmux failed — press o to resume inline"));
       }
     } else {
       resumeRequest.current = cmd;
       exit();
     }
   };
+
+  // Open the `r` overlay on the selected session: summary of what you'd be resuming + one row
+  // per configured launcher. Live sessions still open it (informational) — enter focuses.
+  const openRoutePicker = () => {
+    const item = items[clampedSelected];
+    if (!item || item.kind !== "session") return;
+    const r = item.row;
+    if (r.isSubagent) {
+      setStatus("subagent runs aren't resumable — they're task runs spawned by a parent session");
+      return;
+    }
+    const routes = resolveRoutes(launchers, r.models);
+    const def = defaultRoute(routes, r.models);
+    const defIdx = def ? routes.findIndex((rt) => rt.launcher.name === def.launcher.name) : 0;
+    setRoutePicker({
+      row: r,
+      routes,
+      selected: Math.max(0, defIdx),
+      live: openSet.has(r.sessionId) || openSet.has(r.resumeId),
+    });
+  };
+
+  /** Move the picker highlight to the next ELIGIBLE route in `dir`, wrapping. */
+  const moveRoutePicker = (dir: 1 | -1) =>
+    setRoutePicker((p) => {
+      if (!p) return p;
+      const n = p.routes.length;
+      let i = p.selected;
+      for (let step = 0; step < n; step++) {
+        i = (i + dir + n) % n;
+        if (p.routes[i]!.eligible) return { ...p, selected: i };
+      }
+      return p;
+    });
 
   const activate = () => {
     const item = items[clampedSelected];
@@ -762,6 +835,23 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       else if (key.pageDown || input === " ") scrollTranscript(page);
       else if (input === "g") scrollTranscript(-1_000_000);
       else if (input === "G") scrollTranscript(1_000_000);
+      return;
+    }
+
+    // Route picker owns input while open.
+    if (routePicker) {
+      const chosen = routePicker.routes[routePicker.selected];
+      if (key.escape || input === "q" || input === "r") setRoutePicker(null);
+      else if (key.upArrow || input === "k") moveRoutePicker(-1);
+      else if (key.downArrow || input === "j") moveRoutePicker(1);
+      else if (key.return && routePicker.live) {
+        // Live tab: enter = focus (doResume's live guard handles it; route is irrelevant).
+        setRoutePicker(null);
+        doResume(false, false, undefined, routePicker.row);
+      } else if ((key.return || input === "f" || input === "o") && chosen?.eligible) {
+        setRoutePicker(null);
+        doResume(input === "f", input === "o", chosen.launcher, routePicker.row);
+      }
       return;
     }
 
@@ -885,11 +975,12 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       setSelected(0);
     } else if (input === "f") doResume(true, false);
     else if (input === "o") doResume(false, true);
+    else if (input === "r") openRoutePicker();
     else if (key.return) activate();
   });
 
   // ---- Layout (recomputed on every resize via useTerminalSize) ----
-  const listMode = !transcript && !showHelp;
+  const listMode = !transcript && !showHelp && !routePicker;
   // Chrome = header (2) + footer (1) + rule under header (list mode only) + optional search/status.
   const chrome = 3 + (listMode ? 1 : 0) + (searching ? 1 : 0) + (command ? 1 : 0) + (status ? 1 : 0);
   const body = Math.max(3, termRows - chrome);
@@ -998,7 +1089,16 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         </Box>
       ) : null}
 
-      {transcript ? (
+      {routePicker ? (
+        <RoutePicker
+          row={routePicker.row}
+          routes={routePicker.routes}
+          defaultName={defaultRoute(routePicker.routes, routePicker.row.models)?.launcher.name ?? null}
+          selected={routePicker.selected}
+          live={routePicker.live}
+          target={resolveTarget(config.resume.target, reachable, false)}
+        />
+      ) : transcript ? (
         <Transcript
           title={transcript.title}
           lines={transcript.lines}
@@ -1045,6 +1145,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         <KeyBar
           items={[
             ["enter", "resume"],
+            ["r", "resume via…"],
             ["/", "search"],
             ["v", "transcript"],
             ["g", `view:${view}`],

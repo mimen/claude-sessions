@@ -1,4 +1,4 @@
-import { shellQuote } from "./command.ts";
+import { shellWithEnv } from "./command.ts";
 
 /**
  * The ONE primitive for spawning a `claude` invocation into a fresh, detached cmux workspace.
@@ -26,6 +26,8 @@ export interface SpawnCmuxOpts {
    * cluster resume of many panes generally does not). Default false. */
   readonly focus?: boolean;
   readonly cmuxBin?: string;
+  /** Launcher env, rendered as an `env K=V …` prefix on the workspace command. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /** The new workspace ref (e.g. "workspace:60") on success, or null on any failure. */
@@ -34,7 +36,7 @@ export function spawnCmux(opts: SpawnCmuxOpts): string | null {
   // Plain command — no `exec`, no env-scrub — so the workspace's shell resolves cmux's claude
   // shim and the session registers in the hook store (see the header note). cmux gives the new
   // workspace its own surface id.
-  const command = opts.argv.map(shellQuote).join(" ");
+  const command = shellWithEnv(opts.argv, opts.env ?? {});
   const args = ["new-workspace", "--cwd", opts.cwd, "--name", opts.name, "--command", command];
   if (opts.focus) args.push("--focus", "true");
   try {

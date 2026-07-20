@@ -12,7 +12,7 @@ function row(over: Partial<SessionRow> = {}): SessionRow {
     sessionId: "id", host: "h", path: "/p", cwd: "/c", projectRoot: "/c",
     projectName: "c", branch: null, version: null, firstTs: null, lastTs: null,
     msgCount: 0, fileSize: 0, title: "t", titleSource: "fallback",
-    isSubagent: false, parentSessionId: null, resumeId: "id", costUSD: 0, tokInput: 0, tokOutput: 0, tokCacheRead: 0, tokCacheWrite: 0, costByModel: {}, userTurns: 0, tickIntervalSec: 0, ...over,
+    isSubagent: false, parentSessionId: null, resumeId: "id", costUSD: 0, tokInput: 0, tokOutput: 0, tokCacheRead: 0, tokCacheWrite: 0, costByModel: {}, models: [], userTurns: 0, tickIntervalSec: 0, ...over,
   };
 }
 
@@ -62,6 +62,7 @@ test("handoffInline returns 127 when the command is missing", () => {
   const code = handoffInline({
     argv: ["definitely-not-a-real-binary-xyz", "--resume", "id"],
     cwd: tmpdir(),
+    env: {},
     shell: "definitely-not-a-real-binary-xyz --resume id",
   });
   expect(code).toBe(127);

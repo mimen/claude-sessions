@@ -1,8 +1,9 @@
 import { Database } from "bun:sqlite";
 
 /** Bump when the schema changes. Index rows are rebuildable, but preserve them across additive upgrades. */
-// v7 recomputed cached physical cost rows after GPT gateway model pricing was introduced; v8 adds shadow paths.
-export const SCHEMA_VERSION = 8;
+// v7 recomputed cached physical cost rows after GPT gateway model pricing was introduced; v8 adds
+// shadow paths; v9 persists transcript model ids so cross-backend resume routes are safe.
+export const SCHEMA_VERSION = 9;
 
 /**
  * Open (creating if needed) the Index and ensure its schema is current. Additive migrations
@@ -32,9 +33,14 @@ export function openIndex(dbPath: string): Database {
     if (!hasTable(db, "sessions")) {
       createSchema(db);
     } else if (current >= 7 && isV6OrV7Compatible(db)) {
+      // v8: retain v7 observations and title cache while adding duplicate diagnostics.
       if (!hasColumn(db, "sessions", "shadow_paths")) {
-        // v8: retain v7 observations and title cache while adding duplicate diagnostics.
         db.exec("ALTER TABLE sessions ADD COLUMN shadow_paths TEXT NOT NULL DEFAULT '[]';");
+      }
+      // v9: model history drives cross-backend launcher eligibility. Backfill on the next
+      // reindex; empty is the conservative "no assistant turns observed" value meanwhile.
+      if (!hasColumn(db, "sessions", "models")) {
+        db.exec("ALTER TABLE sessions ADD COLUMN models TEXT NOT NULL DEFAULT '[]';");
       }
     } else {
       // v6 cost accounting changed in v7, so its cache is stale even when its columns happen
@@ -110,6 +116,7 @@ function createSchema(db: Database): void {
       tok_cache_read  INTEGER NOT NULL DEFAULT 0,
       tok_cache_write INTEGER NOT NULL DEFAULT 0,
       cost_by_model   TEXT NOT NULL DEFAULT '{}',
+      models          TEXT NOT NULL DEFAULT '[]',
       user_turns      INTEGER NOT NULL DEFAULT 0,
       tick_interval_sec INTEGER NOT NULL DEFAULT 0,
       shadow_paths    TEXT NOT NULL DEFAULT '[]'

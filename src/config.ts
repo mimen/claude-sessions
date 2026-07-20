@@ -26,6 +26,21 @@ const ConfigSchema = z.object({
     })
     .prefault({}),
   /**
+   * Claude Code launcher executables for cross-backend resume (`[[launcher]]` array tables).
+   * Each entry names an executable and the model-id globs its backend can replay; sessions
+   * route to launchers via src/resume/launchers.ts. Empty (the default) → plain `claude`.
+   */
+  launcher: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        binary: z.string().min(1),
+        serves: z.array(z.string().min(1)).default(["*"]),
+        env: z.record(z.string(), z.string()).default({}),
+      }),
+    )
+    .default([]),
+  /**
    * The LLM backend `ccs` uses for titling and the natural-language catalogue editor.
    * `engine` picks the backend: "auto" uses the first installed one (Codex preferred, then
    * Claude); "codex"/"claude" force it (falling back if that one isn't installed). The

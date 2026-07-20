@@ -18,29 +18,48 @@ export interface ResumeCommand {
   readonly argv: string[];
   /** Directory to run it in (the Session's recorded cwd). */
   readonly cwd: string;
-  /** Single-string form, for cmux --command and for display. */
+  /** Extra env for the spawned process (from the launcher; empty for plain `claude`). */
+  readonly env: Readonly<Record<string, string>>;
+  /** Single-string form, for cmux --command and for display (env-prefixed when env is set). */
   readonly shell: string;
 }
 
 /**
  * Build the canonical resume invocation for a Session. We always construct
- * `claude --resume <id>` ourselves and run it in the Session's recorded cwd — this is what
+ * `<binary> --resume <id>` ourselves and run it in the Session's recorded cwd — this is what
  * sidesteps the cwd-scoped picker and the unreliable end-of-session hint (failure modes A/B/D).
+ * `binary` defaults to `claude`; a route through another launcher (claude-gpt, …) swaps argv[0].
  */
 export function buildResumeCommand(
   row: SessionRow,
-  opts: { fork: boolean; cwd: string; resumeCommand?: string | null },
+  opts: {
+    fork: boolean;
+    cwd: string;
+    resumeCommand?: string | null;
+    binary?: string;
+    env?: Readonly<Record<string, string>>;
+  },
 ): ResumeCommand {
-  const argv = ["claude", "--resume", row.resumeId];
+  const argv = [opts.binary ?? "claude", "--resume", row.resumeId];
   if (opts.fork) argv.push("--fork-session");
   // ADR-0015: a loop's resume_command is replayed as the trailing prompt so it comes back
   // RUNNING (`claude --resume <id> '<resume_command>'`). Workers have none → bare resume.
   if (opts.resumeCommand) argv.push(opts.resumeCommand);
+  const env = opts.env ?? {};
   return {
     argv,
     cwd: opts.cwd,
-    shell: argv.map(shellQuote).join(" "),
+    env,
+    shell: shellWithEnv(argv, env),
   };
+}
+
+/** argv → shell string, prefixed with `env K=V …` when the launcher sets env vars. */
+export function shellWithEnv(argv: readonly string[], env: Readonly<Record<string, string>>): string {
+  const cmd = argv.map(shellQuote).join(" ");
+  const pairs = Object.entries(env);
+  if (pairs.length === 0) return cmd;
+  return `env ${pairs.map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ")} ${cmd}`;
 }
 
 /** Minimal POSIX shell quoting for building the cmux --command string. */
