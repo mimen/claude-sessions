@@ -10,6 +10,8 @@ export const STATUS_W = 8;
 export const PHASE_W = 10;
 /** Role column (catalogue.skill, abbreviated) — e.g. control/concierge/eval/worker. */
 export const ROLE_W = 10;
+/** Claude task-list column (▣ done/total, ! when interrupted) — wide terminals only. */
+export const TASKS_W = 8;
 export const MODEL_W = 7;
 export const COST_W = 7;
 export const AGE_W = 5;

@@ -4,7 +4,7 @@ import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
 import { theme, isRecentAge, costColor, roleColor } from "./theme.ts";
 import { dominantModel, formatCostList, formatCompactUSD } from "./format.ts";
-import { CARET_W, GLYPH_W, PHASE_W, ROLE_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
+import { CARET_W, GLYPH_W, PHASE_W, ROLE_W, TASKS_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
 
 /** List cost color: dimmed by default so cost doesn't shout over status/title; only a
  * genuine outlier (≥ the high tier) keeps its warning color. */
@@ -42,6 +42,10 @@ interface SessionBadge {
   phase?: string | null;
   /** Optional hex color for the stage-column text — matches the cmux tab pill. */
   phaseColor?: string | null;
+  /** Claude task list: completed/total counts + interrupted (in_progress but not open). */
+  taskDone?: number | null;
+  taskTotal?: number | null;
+  taskInterrupted?: boolean;
 }
 
 interface SessionListProps {
@@ -56,10 +60,12 @@ interface SessionListProps {
   totalCost?: Map<string, number>;
   /** Show the STATUS + ROLE columns (cluster view only — they'd steal title width elsewhere). */
   showRoleStatus?: boolean;
+  /** Show the TASKS column (wide terminals only; narrow keeps just the interrupted marker). */
+  showTasks?: boolean;
 }
 
 /** Box-based row layout — column widths are enforced by flexbox, so glyph width never drifts. */
-export function SessionList({ items, selected, height, width, deco, totalCost, showRoleStatus }: SessionListProps): React.ReactElement {
+export function SessionList({ items, selected, height, width, deco, totalCost, showRoleStatus, showTasks }: SessionListProps): React.ReactElement {
   const start = Math.max(0, Math.min(selected - Math.floor(height / 2), items.length - height));
   const offset = Math.max(0, start);
   const window = items.slice(offset, offset + height);
@@ -205,6 +211,34 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                   </Text>
                 </Box>
               </>
+            ) : null}
+            {!showTasks && badge?.taskInterrupted ? (
+              /* Narrow terminals lose the TASKS column but keep the one signal that matters:
+                 this session was abandoned with a task mid-flight. */
+              <Box flexShrink={0} marginRight={1}>
+                <Text color={sel ? theme.selFg : "yellow"}>!</Text>
+              </Box>
+            ) : null}
+            {showTasks ? (
+              <Box width={TASKS_W} flexShrink={0}>
+                {badge?.taskTotal ? (
+                  <Text
+                    color={
+                      sel
+                        ? theme.selFg
+                        : badge.taskInterrupted
+                          ? "yellow"
+                          : badge.taskDone === badge.taskTotal
+                            ? theme.faint
+                            : theme.muted
+                    }
+                    wrap="truncate-end"
+                  >
+                    ▣ {badge.taskDone}/{badge.taskTotal}
+                    {badge.taskInterrupted ? "!" : ""}
+                  </Text>
+                ) : null}
+              </Box>
             ) : null}
             <Box width={MODEL_W} flexShrink={0}>
               <Text color={sel ? theme.selFg : model?.color ?? theme.faint} wrap="truncate-end">

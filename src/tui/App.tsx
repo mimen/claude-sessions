@@ -44,6 +44,7 @@ import { buildGroupsView } from "./groupsView.ts";
 import { buildClusterView } from "./clusterView.ts";
 import { buildEpicView } from "./epicView.ts";
 import { getCrashReporter } from "../crashlog.ts";
+import { tasksFor, sessionsWithTasks } from "../tasks/reader.ts";
 
 /**
  * State label + hex color for the TUI stage column (ADR-0077). Reads the first pill from the
@@ -95,6 +96,11 @@ export interface SessionBadge {
   phase?: string | null;
   /** Optional hex color matching the cmux tab pill — the TUI renders the label in this color. */
   phaseColor?: string | null;
+  /** Claude Code task list (~/.claude/tasks/<id>/): completed/total counts for the ▣ column. */
+  taskDone?: number | null;
+  taskTotal?: number | null;
+  /** An in_progress task in a session that isn't open — abandoned mid-task. */
+  taskInterrupted?: boolean;
 }
 
 /** Narrow cmux seam for the mount-time TUI probes. */
@@ -107,6 +113,10 @@ const productionCmuxProbes: TuiCmuxProbes = {
   reachable: () => cmuxReachableAsync(),
   openSessionTitles: () => openSessionTitlesAsync(),
 };
+
+/** Cycle for the `u` key: everything → sessions with unfinished tasks → interrupted only. */
+type TaskFilter = "all" | "open" | "interrupted";
+const TASK_FILTER_CYCLE: TaskFilter[] = ["all", "open", "interrupted"];
 
 interface AppProps {
   db: Database;
@@ -134,6 +144,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
 
   const [includeSubagents, setIncludeSubagents] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [refreshTick, setRefreshTick] = useState(0);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
@@ -260,11 +271,21 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
     return () => { alive = false; };
   }, [catalogue, refreshTick, cmuxProbes]);
   const openSet = useMemo(() => new Set(openTitles.keys()), [openTitles]);
+  // Which sessions have a Claude Code task dir at all — one readdir, so the per-row
+  // tasksFor() probe only ever runs for sessions that can have tasks (103/166 here).
+  const taskIds = useMemo(() => sessionsWithTasks(), [refreshTick]);
   const baseRows = useMemo(() => {
     const raw = listByRecency(db, includeSubagents);
     return raw
       .filter((r) => !pinned || pinned.paths.has(r.path))
       .filter((r) => showArchived || lifecycleOf(catMap.get(r.sessionId) ?? null) !== "archived")
+      .filter((r) => {
+        if (taskFilter === "all") return true;
+        if (!taskIds.has(r.sessionId)) return false;
+        const t = tasksFor(r.sessionId);
+        if (!t || t.completed === t.total) return false;
+        return taskFilter === "open" || (t.inProgress > 0 && !openSet.has(r.sessionId));
+      })
       .map((r) => {
         // Precedence: live cmux title (open) → user's custom title → ROLE (a role-tagged
         // session reads as its role, e.g. "designer", not the auto-generated skeleton title)
@@ -274,7 +295,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
           openTitles.get(r.sessionId) ?? cat?.customTitle ?? cat?.role ?? r.title;
         return title === r.title ? r : { ...r, title };
       });
-  }, [db, includeSubagents, refreshTick, catMap, showArchived, openTitles]);
+  }, [db, includeSubagents, refreshTick, catMap, showArchived, openTitles, taskFilter, taskIds, openSet]);
 
   // Write-through: persist an open session's cmux title into the catalogue so the name stays put
   // after the tab closes (cmux is the source of truth, tightly linked). Only writes on a change.
@@ -325,6 +346,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       }
       if (nudge) color = "yellowBright";
       const pill = stagePillFor(c, r.sessionId);
+      const tasks = taskIds.has(r.sessionId) ? tasksFor(r.sessionId) : null;
       m.set(r.sessionId, {
         glyph, color, nudge,
         event: identityKeyOf(c),
@@ -334,10 +356,13 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         status: describeDisposition(lc, open).label,
         phase: pill?.label ?? null,
         phaseColor: pill?.color ?? null,
+        taskDone: tasks?.completed ?? null,
+        taskTotal: tasks?.total ?? null,
+        taskInterrupted: !!tasks && tasks.inProgress > 0 && !open,
       });
     }
     return m;
-  }, [baseRows, catMap, openSet]);
+  }, [baseRows, catMap, openSet, taskIds]);
   const subCounts = useMemo(() => subagentCounts(db), [db, refreshTick]);
   // A parent's subagent runs key on its INTERNAL id (= resumeId); match both to be safe.
   const subCostMap = useMemo(() => subagentCosts(db), [db, refreshTick]);
@@ -398,7 +423,17 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
     () => (query.trim() ? ftsMatchIds(db, query) : new Set<string>()),
     [db, query, refreshTick],
   );
-  const rows = useMemo(() => searchRows(baseRows, query, contentIds), [baseRows, query, contentIds]);
+  // Fuzzy-search haystack: a session is findable by its task subjects too ("/type checks"
+  // hits the session whose plan had that step). Joined once per task-dir change.
+  const taskText = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const id of taskIds) {
+      const t = tasksFor(id);
+      if (t) m.set(id, t.tasks.map((x) => x.subject).join(" "));
+    }
+    return m;
+  }, [taskIds]);
+  const rows = useMemo(() => searchRows(baseRows, query, contentIds, taskText), [baseRows, query, contentIds, taskText]);
   const childrenByParent = useMemo(() => {
     const map = new Map<string, SessionRow[]>();
     for (const id of expandedSessions) map.set(id, childrenOf(db, id));
@@ -792,6 +827,19 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
     else if (input === "A") {
       setShowArchived((v) => !v);
       setSelected(0);
+    } else if (input === "u") {
+      setTaskFilter((f) => {
+        const next = TASK_FILTER_CYCLE[(TASK_FILTER_CYCLE.indexOf(f) + 1) % TASK_FILTER_CYCLE.length]!;
+        setStatus(
+          next === "all"
+            ? "tasks: all sessions"
+            : next === "open"
+              ? "tasks: sessions with unfinished tasks"
+              : "tasks: interrupted mid-task only",
+        );
+        return next;
+      });
+      setSelected(0);
     } else if (input === "f") doResume(true, false);
     else if (input === "o") doResume(false, true);
     else if (key.return) activate();
@@ -848,6 +896,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         const url = attrs?.review_app_url;
         return typeof url === "string" && url.startsWith("http") ? url : null;
       })()}
+      tasks={taskIds.has(selectedRow.sessionId) ? tasksFor(selectedRow.sessionId) : null}
       height={previewHeight}
     />
   ) : selSection ? (
@@ -861,10 +910,15 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
     />
   ) : null;
 
+  // The task column earns its 8 cells only when the LIST is wide enough to keep a readable
+  // title next to the fixed columns (cluster view carries PHASE+ROLE too, so it needs more).
+  // Narrow lists keep just the interrupted `!` marker on the title row; the preview pane
+  // always has the full task list regardless.
+  const showTasksCol = listWidth >= (view === "cluster" ? 100 : 80);
   const listCol = (w: number) => (
     <Box flexDirection="column">
-      <ListHeader sort={sort} view={view} />
-      <SessionList items={items} selected={clampedSelected} height={listHeight} width={w} deco={deco} totalCost={totalCostById} showRoleStatus={view === "cluster"} />
+      <ListHeader sort={sort} view={view} showTasks={showTasksCol} />
+      <SessionList items={items} selected={clampedSelected} height={listHeight} width={w} deco={deco} totalCost={totalCostById} showRoleStatus={view === "cluster"} showTasks={showTasksCol} />
     </Box>
   );
 
@@ -949,6 +1003,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
             ["/", "search"],
             ["v", "transcript"],
             ["g", `view:${view}`],
+            ...(taskFilter !== "all" ? [["u", `tasks:${taskFilter}`] as [string, string]] : []),
             ["Tab", "skills"],
             // Only surface the engine key when there's actually another engine to swap to.
             ...(availableEngines.length > 1 ? [["i", `ai:${activeEngine}`] as [string, string]] : []),

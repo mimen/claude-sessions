@@ -11,12 +11,14 @@ export function searchRows(
   rows: readonly SessionRow[],
   query: string,
   contentIds: ReadonlySet<string>,
+  /** Extra fuzzy haystack per session (e.g. Claude task subjects), joined into one string. */
+  extraText?: ReadonlyMap<string, string>,
 ): SessionRow[] {
   const q = query.trim();
   if (!q) return [...rows];
 
   const results = fuzzysort.go(q, rows, {
-    keys: ["title", "projectName"],
+    keys: ["title", "projectName", (r) => extraText?.get(r.sessionId) ?? ""],
     threshold: -10000,
   });
 

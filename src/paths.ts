@@ -31,6 +31,13 @@ export const PREFS_PATH = () => join(runtimeRoot(), "prefs.json");
 /** Default Store: the single directory Claude Code centralises all Sessions into. */
 export const DEFAULT_STORE_PATH = join(homedir(), ".claude", "projects");
 
+/**
+ * Claude Code's per-session task lists (TaskCreate/TaskUpdate tool state): one dir per
+ * session UUID holding N.json files. A sibling of the Store, owned by Claude Code — we
+ * only ever read it.
+ */
+export const DEFAULT_TASKS_PATH = join(homedir(), ".claude", "tasks");
+
 /** Create the data dir lazily. Idempotent. */
 export function ensureDataDir(): void {
   mkdirSync(DATA_DIR(), { recursive: true });

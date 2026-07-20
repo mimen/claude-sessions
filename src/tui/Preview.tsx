@@ -5,6 +5,7 @@ import { formatBytes, formatAge } from "../store.ts";
 import { formatCost } from "../cost.ts";
 import { theme, costColor } from "./theme.ts";
 import { formatTokens, modelBreakdown, formatDuration, burnPerDay } from "./format.ts";
+import type { TaskSummary } from "../tasks/reader.ts";
 
 interface PreviewProps {
   row: SessionRow;
@@ -32,6 +33,8 @@ interface PreviewProps {
   epicUrl?: string | null;
   /** Review-app URL (fleet identity attr, per-role table). Clickable when present. */
   reviewAppUrl?: string | null;
+  /** Claude Code task list for this session (~/.claude/tasks/<id>/), if any. */
+  tasks?: TaskSummary | null;
   /** Total height available to the pane (border included). */
   height: number;
 }
@@ -98,6 +101,7 @@ export function Preview({
   epicName,
   epicUrl,
   reviewAppUrl,
+  tasks,
   height,
 }: PreviewProps): React.ReactElement {
   const models = modelBreakdown(row.costByModel);
@@ -160,6 +164,16 @@ export function Preview({
         {project ? <Field label="project" value={`▢ ${project}`} color={theme.header} /> : null}
         {event ? <Field label="event" value={`⊞ ${event}`} color={theme.project} /> : null}
         {row.isSubagent && parentTitle ? <Field label="parent" value={parentTitle} color="yellow" /> : null}
+        {tasks ? (
+          <Field
+            label="tasks"
+            value={
+              `${tasks.completed}/${tasks.total} done` +
+              (tasks.inProgress > 0 ? ` · ${tasks.inProgress} in progress` : "")
+            }
+            color={tasks.completed === tasks.total ? theme.faint : theme.accent}
+          />
+        ) : null}
       </Box>
 
       <Box marginTop={1} flexDirection="column" flexShrink={0}>
@@ -209,6 +223,40 @@ export function Preview({
           <Field label="cadence" value={`~${cadence} · ${row.userTurns} ticks`} color={theme.accent} />
         ) : null}
       </Box>
+
+      {tasks ? (
+        <Box marginTop={1} flexDirection="column" flexShrink={0}>
+          <Box>
+            <Text color={theme.muted} bold>
+              TASKS
+            </Text>
+            <Text color={theme.muted}>
+              {"  "}
+              {tasks.completed}/{tasks.total}
+            </Text>
+          </Box>
+          {tasks.tasks.slice(0, 10).map((t) => {
+            const glyph = t.status === "completed" ? "✓" : t.status === "in_progress" ? "▸" : "·";
+            const color =
+              t.status === "completed" ? theme.faint : t.status === "in_progress" ? theme.accent : theme.muted;
+            return (
+              <Text key={t.id || t.subject} color={color} wrap="truncate-end">
+                {" "}
+                {glyph} {t.subject}
+                {t.status === "in_progress" && t.activeForm ? (
+                  <Text color={theme.muted}>{`  ← ${t.activeForm}`}</Text>
+                ) : null}
+                {t.status !== "completed" && t.blockedBy.length > 0 ? (
+                  <Text color={theme.muted}>{`  ⛓ blocked by ${t.blockedBy.length}`}</Text>
+                ) : null}
+              </Text>
+            );
+          })}
+          {tasks.total > 10 ? (
+            <Text color={theme.muted}> … +{tasks.total - 10} more</Text>
+          ) : null}
+        </Box>
+      ) : null}
 
       {peek.length ? (
         <Box marginTop={1} flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
