@@ -110,6 +110,10 @@ export function Preview({
   const cadence = formatDuration(row.tickIntervalSec);
   const burn = burnPerDay(totalCost, row.firstTs, row.lastTs);
   const peek = skeleton ? skeleton.split("\n").slice(0, 60) : [];
+  // The side pane's useful task signal is what remains, not a replay of the completed plan.
+  // Keep it high in the pane and bounded so it stays visible at normal terminal heights.
+  const openTasks = tasks?.tasks.filter((t) => t.status !== "completed") ?? [];
+  const visibleOpenTasks = openTasks.slice(0, 5);
 
   return (
     <Box
@@ -126,6 +130,40 @@ export function Preview({
       <Text color={theme.muted}>
         {row.titleSource} title · {row.msgCount} msgs · {formatBytes(row.fileSize)}
       </Text>
+
+      {tasks ? (
+        <Box marginTop={1} flexDirection="column" flexShrink={0}>
+          <Box>
+            <Text color={openTasks.length > 0 ? theme.accent : theme.muted} bold>
+              {openTasks.length > 0 ? "OPEN TASKS" : "TASKS"}
+            </Text>
+            <Text color={theme.muted}>
+              {openTasks.length > 0
+                ? `  ${openTasks.length} remaining · ${tasks.completed}/${tasks.total} done`
+                : `  ✓ ${tasks.completed}/${tasks.total} done`}
+            </Text>
+          </Box>
+          {visibleOpenTasks.map((t) => {
+            const glyph = t.status === "in_progress" ? "▸" : "·";
+            const color = t.status === "in_progress" ? theme.accent : theme.title;
+            return (
+              <Text key={t.id || t.subject} color={color} wrap="truncate-end">
+                {" "}
+                {glyph} {t.subject}
+                {t.status === "in_progress" && t.activeForm ? (
+                  <Text color={theme.muted}>{`  ← ${t.activeForm}`}</Text>
+                ) : null}
+                {t.blockedBy.length > 0 ? (
+                  <Text color={theme.muted}>{`  ⛓ blocked by ${t.blockedBy.length}`}</Text>
+                ) : null}
+              </Text>
+            );
+          })}
+          {openTasks.length > visibleOpenTasks.length ? (
+            <Text color={theme.muted}> … +{openTasks.length - visibleOpenTasks.length} more open</Text>
+          ) : null}
+        </Box>
+      ) : null}
 
       <Box marginTop={1} flexDirection="column" flexShrink={0}>
         <Field label="repo" value={`${row.projectName}  (${row.branch ?? "-"})`} color={theme.accent} />
@@ -164,16 +202,6 @@ export function Preview({
         {project ? <Field label="project" value={`▢ ${project}`} color={theme.header} /> : null}
         {event ? <Field label="event" value={`⊞ ${event}`} color={theme.project} /> : null}
         {row.isSubagent && parentTitle ? <Field label="parent" value={parentTitle} color="yellow" /> : null}
-        {tasks ? (
-          <Field
-            label="tasks"
-            value={
-              `${tasks.completed}/${tasks.total} done` +
-              (tasks.inProgress > 0 ? ` · ${tasks.inProgress} in progress` : "")
-            }
-            color={tasks.completed === tasks.total ? theme.faint : theme.accent}
-          />
-        ) : null}
       </Box>
 
       <Box marginTop={1} flexDirection="column" flexShrink={0}>
@@ -223,40 +251,6 @@ export function Preview({
           <Field label="cadence" value={`~${cadence} · ${row.userTurns} ticks`} color={theme.accent} />
         ) : null}
       </Box>
-
-      {tasks ? (
-        <Box marginTop={1} flexDirection="column" flexShrink={0}>
-          <Box>
-            <Text color={theme.muted} bold>
-              TASKS
-            </Text>
-            <Text color={theme.muted}>
-              {"  "}
-              {tasks.completed}/{tasks.total}
-            </Text>
-          </Box>
-          {tasks.tasks.slice(0, 10).map((t) => {
-            const glyph = t.status === "completed" ? "✓" : t.status === "in_progress" ? "▸" : "·";
-            const color =
-              t.status === "completed" ? theme.faint : t.status === "in_progress" ? theme.accent : theme.muted;
-            return (
-              <Text key={t.id || t.subject} color={color} wrap="truncate-end">
-                {" "}
-                {glyph} {t.subject}
-                {t.status === "in_progress" && t.activeForm ? (
-                  <Text color={theme.muted}>{`  ← ${t.activeForm}`}</Text>
-                ) : null}
-                {t.status !== "completed" && t.blockedBy.length > 0 ? (
-                  <Text color={theme.muted}>{`  ⛓ blocked by ${t.blockedBy.length}`}</Text>
-                ) : null}
-              </Text>
-            );
-          })}
-          {tasks.total > 10 ? (
-            <Text color={theme.muted}> … +{tasks.total - 10} more</Text>
-          ) : null}
-        </Box>
-      ) : null}
 
       {peek.length ? (
         <Box marginTop={1} flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
