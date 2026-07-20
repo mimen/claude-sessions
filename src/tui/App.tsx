@@ -3,7 +3,8 @@ import { Box, Text, useApp, useInput } from "ink";
 import { useTerminalSize } from "./useTerminalSize.ts";
 import type { Database } from "bun:sqlite";
 import type { Config } from "../config.ts";
-import type { EngineState } from "./Root.tsx";
+import type { Titler } from "../titler/codex.ts";
+import type { EngineName, InferenceEngine } from "../inference/engine.ts";
 import {
   listByRecency,
   ftsMatchIds,
@@ -42,6 +43,7 @@ import { buildTreeItems } from "./treeGroups.ts";
 import { buildGroupsView } from "./groupsView.ts";
 import { buildClusterView } from "./clusterView.ts";
 import { buildEpicView } from "./epicView.ts";
+import { getCrashReporter } from "../crashlog.ts";
 
 /**
  * State label + hex color for the TUI stage column (ADR-0077). Reads the first pill from the
@@ -66,6 +68,15 @@ const VIEW_CYCLE: View[] = ["groups", "state", "flat", "tree", "cluster", "epic"
 
 const STALE_MS = 14 * 24 * 60 * 60 * 1000;
 
+/** The inference engine state shared by Root and the sessions panel. */
+export interface EngineState {
+  titler: Titler;
+  engine: InferenceEngine | null;
+  active: EngineName | null;
+  available: EngineName[];
+  cycle: () => void;
+}
+
 /** Per-row visual style derived from catalogue lifecycle × live open-state. */
 export interface SessionBadge {
   glyph: string;
@@ -86,6 +97,17 @@ export interface SessionBadge {
   phaseColor?: string | null;
 }
 
+/** Narrow cmux seam for the mount-time TUI probes. */
+export interface TuiCmuxProbes {
+  reachable(): Promise<boolean>;
+  openSessionTitles(): Promise<Map<string, string>>;
+}
+
+const productionCmuxProbes: TuiCmuxProbes = {
+  reachable: () => cmuxReachableAsync(),
+  openSessionTitles: () => openSessionTitlesAsync(),
+};
+
 interface AppProps {
   db: Database;
   config: Config;
@@ -99,11 +121,13 @@ interface AppProps {
   /** Cross-jump pin from skills mode: only sessions whose transcript path is in the set. */
   pinned?: { paths: ReadonlySet<string>; label: string } | null;
   onClearPinned?: () => void;
+  /** Optional test seam; production defaults to non-blocking cmux probes. */
+  cmuxProbes?: TuiCmuxProbes;
 }
 
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
-export function App({ db, catalogue, config, engineState, resumeRequest, onSwitchMode, pinned, onClearPinned }: AppProps): React.ReactElement {
+export function App({ db, catalogue, config, engineState, resumeRequest, onSwitchMode, pinned, onClearPinned, cmuxProbes = productionCmuxProbes }: AppProps): React.ReactElement {
   const { titler, engine, active: activeEngine, available: availableEngines, cycle: cycleEngine } = engineState;
   const { exit } = useApp();
   const { columns: cols, rows: termRows } = useTerminalSize();
@@ -143,12 +167,32 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   // already be working." — the Tab-between-modes crash, since every toggle remounts App).
   const [reachable, setReachable] = useState(false);
   useEffect(() => {
-    let alive = true;
-    void cmuxReachableAsync().then((v) => alive && setReachable(v));
-    return () => {
-      alive = false;
-    };
+    getCrashReporter()?.breadcrumb("tui.app.mount");
+    return () => getCrashReporter()?.breadcrumb("tui.app.unmount");
   }, []);
+  useEffect(() => {
+    let alive = true;
+    getCrashReporter()?.breadcrumb("tui.cmux.reachable.start");
+    void cmuxProbes.reachable().then(
+      (value) => {
+        if (!alive) {
+          getCrashReporter()?.breadcrumb("tui.cmux.reachable.cancelled");
+          return;
+        }
+        setReachable(value);
+        getCrashReporter()?.breadcrumb("tui.cmux.reachable.success", { reachable: value });
+      },
+      () => {
+        if (!alive) {
+          getCrashReporter()?.breadcrumb("tui.cmux.reachable.cancelled");
+          return;
+        }
+        setReachable(false);
+        getCrashReporter()?.breadcrumb("tui.cmux.reachable.failure");
+      },
+    );
+    return () => { alive = false; };
+  }, [cmuxProbes]);
 
   // Catalogue join: custom-title override + lifecycle; live open-state from cmux. Only when a
   // catalogue is present (tests mount without one, so no cmux probe runs there).
@@ -194,11 +238,27 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   useEffect(() => {
     if (!catalogue) return;
     let alive = true;
-    void openSessionTitlesAsync().then((titles) => alive && setOpenTitles(titles));
-    return () => {
-      alive = false;
-    };
-  }, [catalogue, refreshTick]);
+    getCrashReporter()?.breadcrumb("tui.cmux.titles.start");
+    void cmuxProbes.openSessionTitles().then(
+      (titles) => {
+        if (!alive) {
+          getCrashReporter()?.breadcrumb("tui.cmux.titles.cancelled");
+          return;
+        }
+        setOpenTitles(titles);
+        getCrashReporter()?.breadcrumb("tui.cmux.titles.success", { count: titles.size });
+      },
+      () => {
+        if (!alive) {
+          getCrashReporter()?.breadcrumb("tui.cmux.titles.cancelled");
+          return;
+        }
+        setOpenTitles(new Map());
+        getCrashReporter()?.breadcrumb("tui.cmux.titles.failure");
+      },
+    );
+    return () => { alive = false; };
+  }, [catalogue, refreshTick, cmuxProbes]);
   const openSet = useMemo(() => new Set(openTitles.keys()), [openTitles]);
   const baseRows = useMemo(() => {
     const raw = listByRecency(db, includeSubagents);
@@ -407,18 +467,27 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   // Background title drain while open (no-op when nothing needs titling).
   useEffect(() => {
     let alive = true;
-    void backfillTitles(db, titler, {
-      concurrency: config.titler.concurrency,
-      maxAttempts: config.titler.maxAttempts,
-      isCancelled: () => !alive, // stop persisting once the app unmounts (DB is about to close)
-      onProgress: (done, total) => {
-        if (!alive) return;
-        setTitling(done < total ? { done, total } : null);
-        reload();
-      },
-    }).then(() => alive && setTitling(null));
+    // Engine discovery has a synchronous PATH probe. Start it on a later task, not inside Ink's
+    // passive-effect turn, so a rapid mode remount cannot re-enter React's work loop.
+    const timer = setTimeout(() => {
+      if (!alive) return;
+      void backfillTitles(db, titler, {
+        concurrency: config.titler.concurrency,
+        maxAttempts: config.titler.maxAttempts,
+        isCancelled: () => !alive, // stop persisting once the app unmounts (DB is about to close)
+        onProgress: (done, total) => {
+          if (!alive) return;
+          setTitling(done < total ? { done, total } : null);
+          reload();
+        },
+      }).then(
+        () => alive && setTitling(null),
+        () => alive && setTitling(null),
+      );
+    }, 0);
     return () => {
       alive = false;
+      clearTimeout(timer);
     };
   }, [db, titler]);
 

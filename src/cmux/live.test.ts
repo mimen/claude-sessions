@@ -1,50 +1,86 @@
 import { describe, expect, test } from "bun:test";
-import { cmuxVersion } from "./live.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { cmuxVersion, liveBridgeAsync, type AsyncCmuxIo } from "./live.ts";
+
+const fixtures = join(import.meta.dir, "__fixtures__");
+const tree = readFileSync(join(fixtures, "tree.json"), "utf8");
+const store = readFileSync(join(fixtures, "hook-store.json"), "utf8");
+
+interface FakeOptions {
+  version?: string;
+  tree?: string;
+  treeOk?: boolean;
+  store?: string | null;
+  storeFailure?: boolean;
+}
+
+function fakeIo(options: FakeOptions = {}): AsyncCmuxIo & { calls: string[][] } {
+  const calls: string[][] = [];
+  return {
+    calls,
+    now: () => 10,
+    async execFile(_file, args): Promise<{ ok: boolean; stdout: string }> {
+      calls.push([...args]);
+      if (args[0] === "--version") return { ok: true, stdout: options.version ?? "cmux 0.64.0" };
+      return { ok: options.treeOk ?? true, stdout: options.tree ?? tree };
+    },
+    async readFile(): Promise<{ found: boolean; content: string | null }> {
+      if (options.storeFailure) throw new Error("denied");
+      return options.store === null ? { found: false, content: null } : { found: true, content: options.store ?? store };
+    },
+  };
+}
 
 describe("cmuxVersion", () => {
-  test("parses valid version string", () => {
-    // cmuxVersion shells out to `cmux --version`, so we can't easily mock it in a unit test.
-    // Instead, we test the parsing logic by checking the actual installed version (if present).
-    // The real validation is: does it return a structured {major, minor, patch}?
-    const v = cmuxVersion();
-    if (v !== null) {
-      expect(typeof v.major).toBe("number");
-      expect(typeof v.minor).toBe("number");
-      expect(typeof v.patch).toBe("number");
-      expect(v.major).toBeGreaterThanOrEqual(0);
-      expect(v.minor).toBeGreaterThanOrEqual(0);
-      expect(v.patch).toBeGreaterThanOrEqual(0);
-    }
-    // If cmux is not installed or the version is unparseable, v will be null — that's valid
-    // behavior we're testing (graceful degradation).
-  });
-
-  test("returns null for absent cmux (simulated via PATH isolation)", () => {
-    // We can't easily stub execFileSync in Bun without heavy mocking. The actual test of
-    // "absent binary → null" happens when cmux is not in PATH. If this test runs in CI
-    // without cmux, it proves null handling. If it runs locally with cmux, the prior test
-    // proves the parse path. Both branches are thus covered across environments.
-    const v = cmuxVersion();
-    // If cmux is installed: v is non-null, parsed correctly (prior test).
-    // If cmux is NOT installed: v is null (this assertion).
-    if (v === null) {
-      expect(v).toBeNull();
-    }
+  test("returns a parsed version or null when cmux is unavailable", () => {
+    const version = cmuxVersion();
+    if (version) expect(version.major).toBeGreaterThanOrEqual(0);
   });
 });
 
-describe("CMUX_HOOK_STORE_PATH env override", () => {
-  test("module loads and respects env var contract", () => {
-    // The HOOK_STORE_PATH constant is initialized at module load time, so we can't
-    // dynamically change process.env.CMUX_HOOK_STORE_PATH mid-test and observe it.
-    // Instead, this test is a CONTRACT test: it documents that the code reads
-    // process.env.CMUX_HOOK_STORE_PATH ?? default. The implementation in live.ts is:
-    //   const HOOK_STORE_PATH = process.env.CMUX_HOOK_STORE_PATH ?? join(...);
-    // To actually test the override, you'd launch a subprocess with the env var set.
-    // For now, we verify that the module imports cleanly (no crash) and that the
-    // env var is accessible (whether defined or not is both valid).
-    const envValue = process.env.CMUX_HOOK_STORE_PATH;
-    // Either undefined (default path) or a string (override) — both are valid
-    expect(envValue === undefined || typeof envValue === "string").toBe(true);
+describe("liveBridgeAsync", () => {
+  test("does not settle before deferred I/O and requests every workspace", async () => {
+    const releases: Array<() => void> = [];
+    const gate = new Promise<void>((resolve) => { releases.push(resolve); });
+    const io: AsyncCmuxIo = {
+      now: () => 0,
+      async execFile(_file, args): Promise<{ ok: boolean; stdout: string }> {
+        await gate;
+        return { ok: true, stdout: args[0] === "--version" ? "cmux 0.64.0" : tree };
+      },
+      async readFile(): Promise<{ found: boolean; content: string | null }> {
+        await gate;
+        return { found: true, content: store };
+      },
+    };
+    let settled = false;
+    const bridge = liveBridgeAsync(io).then((value) => { settled = true; return value; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    releases[0]!();
+    expect((await bridge).readable).toBe(true);
+  });
+
+  test("uses tree --all --json --id-format both", async () => {
+    const io = fakeIo();
+    await liveBridgeAsync(io);
+    expect(io.calls).toContainEqual(["tree", "--all", "--json", "--id-format", "both"]);
+  });
+
+  test("is unreadable when tree fails or JSON is invalid", async () => {
+    expect((await liveBridgeAsync(fakeIo({ treeOk: false }))).readable).toBe(false);
+    expect((await liveBridgeAsync(fakeIo({ tree: "not-json" }))).readable).toBe(false);
+  });
+
+  test("treats missing store as empty but malformed or unreadable store as unreadable", async () => {
+    expect((await liveBridgeAsync(fakeIo({ store: null }))).readable).toBe(true);
+    expect((await liveBridgeAsync(fakeIo({ store: "not-json" }))).readable).toBe(false);
+    expect((await liveBridgeAsync(fakeIo({ storeFailure: true }))).readable).toBe(false);
+  });
+
+  test("fails closed before cmux 0.64 and permits an untested major", async () => {
+    expect((await liveBridgeAsync(fakeIo({ version: "cmux 0.63.9" }))).readable).toBe(false);
+    expect((await liveBridgeAsync(fakeIo({ version: "cmux 1.0.0" }))).readable).toBe(true);
   });
 });

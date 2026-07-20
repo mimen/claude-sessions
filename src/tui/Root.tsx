@@ -1,14 +1,14 @@
 import React, { useMemo, useState } from "react";
 import type { Database } from "bun:sqlite";
 import type { Config } from "../config.ts";
-import type { Titler } from "../titler/codex.ts";
 import type { ResumeCommand } from "../resume/command.ts";
-import { buildEngine, resolveEngine, type EngineName, type InferenceEngine } from "../inference/engine.ts";
+import { buildEngine, resolveEngine, type EngineName } from "../inference/engine.ts";
 import { createTitler } from "../titler/codex.ts";
-import { App } from "./App.tsx";
+import { App, type EngineState, type TuiCmuxProbes } from "./App.tsx";
 import { SkillsPanel } from "./skills/SkillsPanel.tsx";
 import { loadPrefs, savePrefs } from "./prefs.ts";
 
+export type { EngineState } from "./App.tsx";
 export type TuiMode = "sessions" | "skills";
 
 interface RootProps {
@@ -18,20 +18,8 @@ interface RootProps {
   config: Config;
   resumeRequest: { current: ResumeCommand | null };
   initialMode?: TuiMode;
-}
-
-/**
- * The active inference engine (Codex or Claude) that backs titling + the catalogue command,
- * plus everything the UI needs to render and cycle it. Owned by Root so a toggle rebuilds
- * the titler and the metadata engine together and both panels see the same choice.
- */
-export interface EngineState {
-  titler: Titler;
-  engine: InferenceEngine | null;
-  active: EngineName | null;
-  /** Installed engines, in preference order. A toggle is only meaningful when length > 1. */
-  available: EngineName[];
-  cycle: () => void;
+  /** Test seam for App's mount-time cmux probes. */
+  cmuxProbes?: TuiCmuxProbes;
 }
 
 /**
@@ -39,7 +27,7 @@ export interface EngineState {
  * useInput is the sole key handler. Tab toggles; a skills cross-jump lands in sessions
  * pre-pinned to the sessions that used the chosen skill.
  */
-export function Root({ db, catalogue, skillsDb, config, resumeRequest, initialMode }: RootProps): React.ReactElement {
+export function Root({ db, catalogue, skillsDb, config, resumeRequest, initialMode, cmuxProbes }: RootProps): React.ReactElement {
   const [mode, setMode] = useState<TuiMode>(initialMode ?? "sessions");
   const [pinned, setPinned] = useState<{ paths: ReadonlySet<string>; label: string } | null>(null);
 
@@ -91,6 +79,7 @@ export function Root({ db, catalogue, skillsDb, config, resumeRequest, initialMo
       resumeRequest={resumeRequest}
       onSwitchMode={() => setMode("skills")}
       pinned={pinned}
+      cmuxProbes={cmuxProbes}
       onClearPinned={() => {
         // The pin came from a skills cross-jump — esc is "go back", not just "unfilter".
         setPinned(null);

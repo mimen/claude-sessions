@@ -38,7 +38,7 @@ import { catalogueExportCommand } from "./catalogue/export-command.ts";
 import { identityCommand, identityResolveCommand } from "./catalogue/identity-command.ts";
 import { sessionCommand } from "./catalogue/session-command.ts";
 import { sessionFieldsCommand } from "./catalogue/session-fields-command.ts";
-import { installCrashLog } from "./crashlog.ts";
+import { getCrashReporter, installCrashLog, summarizeArgv } from "./crashlog.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -132,8 +132,11 @@ Roles & skills:
 
 /** Entry point. Routes argv to a command; returns a process exit code. */
 export async function main(argv: string[]): Promise<number> {
-  installCrashLog();
+  const reporter = installCrashLog();
   const args = argv.slice(2);
+  const invocation = summarizeArgv(args);
+  reporter.invocation(invocation);
+  reporter.breadcrumb("cli.start", invocation);
 
   if (args.includes("--version") || args.includes("-v")) {
     console.log(pkg.version);
@@ -352,12 +355,17 @@ function getConfig(): Config | null {
 
 /** Refresh the Index from the Store and report what changed. */
 async function reindex(opts: { titles: boolean }): Promise<number> {
+  getCrashReporter()?.breadcrumb("cli.reindex.start");
   ensureDataDir();
   const config = getConfig();
-  if (!config) return 1;
+  if (!config) {
+    getCrashReporter()?.breadcrumb("cli.reindex.failure", { stage: "config" });
+    return 1;
+  }
 
   const scan = scanStore(config.store.path);
   if (!scan.ok) {
+    getCrashReporter()?.breadcrumb("cli.reindex.failure", { stage: "scan" });
     console.error(scan.error.message);
     return 1;
   }
@@ -398,13 +406,19 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
   } finally {
     db.close();
   }
+  getCrashReporter()?.breadcrumb("cli.reindex.success", { scanned: scan.value.length });
   return 0;
 }
 
 /** Launch the interactive browser: refresh the Index, then render the Ink app. */
 async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promise<number> {
+  const reporter = getCrashReporter();
+  reporter?.breadcrumb("cli.tui.launch.start", { mode: initialMode });
   const config = getConfig();
-  if (!config) return 1;
+  if (!config) {
+    reporter?.breadcrumb("cli.tui.launch.failure", { stage: "config" });
+    return 1;
+  }
   ensureDataDir();
 
   const firstRun = !existsSync(DB_PATH());
@@ -416,15 +430,31 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
   const { SKILLS_DB_PATH } = await import("./paths.ts");
   const skillsDb = openSkillsDb(SKILLS_DB_PATH());
   const resumeRequest: { current: ResumeCommand | null } = { current: null };
+  let stage: "scan" | "reindex" | "import" | "render" | "runtime" = "scan";
   try {
+    reporter?.breadcrumb("cli.tui.scan.start");
     const scan = scanStore(config.store.path);
-    if (scan.ok) await reindexStore(db, scan.value, config.host.label);
+    if (scan.ok) {
+      stage = "reindex";
+      await reindexStore(db, scan.value, config.host.label);
+      reporter?.breadcrumb("cli.tui.scan.success", { sessions: scan.value.length });
+    } else {
+      reporter?.breadcrumb("cli.tui.scan.failure");
+    }
 
+    stage = "import";
     const { render } = await import("ink");
     const { createElement } = await import("react");
     const { Root } = await import("./tui/Root.tsx");
+    stage = "render";
+    reporter?.breadcrumb("cli.tui.render.mount");
     const app = render(createElement(Root, { db, catalogue, skillsDb, config, resumeRequest, initialMode }));
+    stage = "runtime";
     await app.waitUntilExit();
+    reporter?.breadcrumb("cli.tui.clean-exit");
+  } catch (error) {
+    reporter?.breadcrumb("cli.tui.launch.failure", { stage });
+    throw error;
   } finally {
     db.close();
     catalogue.close();

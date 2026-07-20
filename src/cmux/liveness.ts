@@ -11,7 +11,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { type Bridge, type SurfaceLocation } from "./bridge";
-import { liveBridge } from "./live";
+import { liveBridge, liveBridgeAsync, type AsyncCmuxIo } from "./live";
 
 /** Every Claude session id that currently has a live surface (i.e. is open). */
 export function openSessionIdsFrom(bridge: Bridge): Set<string> {
@@ -130,10 +130,7 @@ export function openSessionTitles(): Map<string, string> {
   return openSessionTitlesFrom(liveBridge());
 }
 
-/**
- * Async variant for the TUI: load open session titles without blocking the event loop.
- * The sync probe can block on wedged cmux, so this wraps it in Promise for useEffect.
- */
-export async function openSessionTitlesAsync(): Promise<Map<string, string>> {
-  return Promise.resolve(openSessionTitles());
+/** Async TUI variant: uses the non-blocking bridge path before deriving titles. */
+export async function openSessionTitlesAsync(io?: AsyncCmuxIo): Promise<Map<string, string>> {
+  return openSessionTitlesFrom(await liveBridgeAsync({ io }));
 }

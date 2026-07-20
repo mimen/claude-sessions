@@ -37,6 +37,9 @@ export async function backfillTitles(
   // If the titler tool isn't installed, skip entirely — don't burn an attempt on every
   // Session (which would permanently mark them failed once the cap is hit).
   if (!titler.available()) return { generated: 0, failed: 0, skippedUnavailable: true };
+  // available() may synchronously probe PATH. An App can unmount while that starts, so check
+  // cancellation again before touching the database.
+  if (opts.isCancelled?.()) return { generated: 0, failed: 0 };
 
   const candidates = titleCandidates(db, opts.maxAttempts);
   const stats: BackfillStats = { generated: 0, failed: 0 };
