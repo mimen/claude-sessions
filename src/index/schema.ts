@@ -1,12 +1,11 @@
 import { Database } from "bun:sqlite";
 
-/** Bump when the schema changes; the Index is a pure cache, so we just rebuild on mismatch. */
-export const SCHEMA_VERSION = 7;
+/** Bump when the schema changes. Index rows are rebuildable, but preserve them across additive upgrades. */
+export const SCHEMA_VERSION = 8;
 
 /**
- * Open (creating if needed) the Index and ensure its schema is current. If the on-disk
- * schema version differs, drop everything and recreate — nothing is lost, the Index is
- * fully reconstructable from the Store.
+ * Open (creating if needed) the Index and ensure its schema is current. Additive migrations
+ * retain index rows so a binary upgrade never makes existing sessions disappear before reindex.
  */
 export function openIndex(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -16,17 +15,24 @@ export function openIndex(dbPath: string): Database {
   db.exec("PRAGMA busy_timeout = 5000;");
 
   const current = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-  if (current !== SCHEMA_VERSION) {
-    dropAll(db);
+  if (!hasTable(db, "sessions")) {
     createSchema(db);
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+  } else if (!hasColumn(db, "sessions", "shadow_paths")) {
+    // v8: retain v6/v7 observations and title cache while adding duplicate diagnostics.
+    db.exec("ALTER TABLE sessions ADD COLUMN shadow_paths TEXT NOT NULL DEFAULT '[]';");
   }
+  if (current !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
   return db;
 }
 
-function dropAll(db: Database): void {
-  db.exec("DROP TABLE IF EXISTS sessions_fts;");
-  db.exec("DROP TABLE IF EXISTS sessions;");
+function hasTable(db: Database, table: string): boolean {
+  return db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $table")
+    .get({ $table: table }) !== null;
+}
+
+function hasColumn(db: Database, table: string, column: string): boolean {
+  return (db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+    .some((entry) => entry.name === column);
 }
 
 function createSchema(db: Database): void {
