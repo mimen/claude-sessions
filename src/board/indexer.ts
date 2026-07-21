@@ -11,11 +11,20 @@ export interface BoardIndex {
   refresh(): void;
 }
 
+interface FileSignature {
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+  birthtimeNs: bigint;
+}
+
 interface CacheEntry {
   board: Board;
   identityMap: Map<string, BoardRow>;
   sessionMap: Map<string, string>;
-  mtime: number;
+  signature: FileSignature;
 }
 
 const cache = new Map<string, CacheEntry>();
@@ -32,21 +41,38 @@ function buildMaps(board: Board): { identityMap: Map<string, BoardRow>; sessionM
   return { identityMap, sessionMap };
 }
 
+function sameSignature(a: FileSignature, b: FileSignature): boolean {
+  return a.dev === b.dev &&
+    a.ino === b.ino &&
+    a.size === b.size &&
+    a.mtimeNs === b.mtimeNs &&
+    a.ctimeNs === b.ctimeNs &&
+    a.birthtimeNs === b.birthtimeNs;
+}
+
 function loadOrRefresh(cluster: string, force: boolean): CacheEntry | null {
   const path = boardPath(cluster);
-  let mtime = 0;
+  let signature: FileSignature;
   try {
-    mtime = statSync(path).mtimeMs;
+    const stat = statSync(path, { bigint: true });
+    signature = {
+      dev: stat.dev,
+      ino: stat.ino,
+      size: stat.size,
+      mtimeNs: stat.mtimeNs,
+      ctimeNs: stat.ctimeNs,
+      birthtimeNs: stat.birthtimeNs,
+    };
   } catch {
     return null;
   }
-  const cached = cache.get(cluster);
-  if (!force && cached && cached.mtime === mtime) return cached;
+  const cached = cache.get(path);
+  if (!force && cached && sameSignature(cached.signature, signature)) return cached;
   const board = readBoard(cluster);
   if (!board) return null;
   const { identityMap, sessionMap } = buildMaps(board);
-  const entry: CacheEntry = { board, identityMap, sessionMap, mtime };
-  cache.set(cluster, entry);
+  const entry: CacheEntry = { board, identityMap, sessionMap, signature };
+  cache.set(path, entry);
   return entry;
 }
 

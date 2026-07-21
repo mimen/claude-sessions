@@ -1,9 +1,9 @@
 import { test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { boardIndex } from "./indexer.ts";
-import { writeBoard } from "./paths.ts";
+import { boardPath, writeBoard } from "./paths.ts";
 import type { Board } from "./types.ts";
 import { openCatalogue, ensureRow, setCluster, setKey } from "../catalogue/db.ts";
 
@@ -129,7 +129,7 @@ test("indexer bySession falls back to catalogue when session not in board", () =
   expect(hit?.row.pills[0]?.label).toBe("approved");
 });
 
-test("indexer mtime-based cache invalidation", () => {
+test("indexer invalidates equal-size replacements with the same mtime", () => {
   const board1: Board = {
     status: "OK",
     provenance: { source: "test", at: "2026-07-13T00:00:00Z" },
@@ -146,29 +146,31 @@ test("indexer mtime-based cache invalidation", () => {
       },
     ],
   };
+  const path = boardPath("test-cluster");
+  const fixedTime = new Date("2026-07-13T00:00:00Z");
   writeBoard("test-cluster", board1);
+  utimesSync(path, fixedTime, fixedTime);
+  const firstStat = statSync(path);
+
   const idx = boardIndex("test-cluster");
-  const row1 = idx.byIdentity("pr-watch:pr-agent:heroku/dashboard#123");
-  expect(row1?.pills[0]?.label).toBe("building");
+  expect(idx.byIdentity("pr-watch:pr-agent:heroku/dashboard#123")?.pills[0]?.label).toBe("building");
+
   const board2: Board = {
-    status: "OK",
-    provenance: { source: "test", at: "2026-07-13T00:01:00Z" },
+    ...board1,
     rows: [
       {
-        identity: "pr-watch:pr-agent:heroku/dashboard#123",
-        workUnit: { kind: "pr", number: 123 },
-        sessions: [{ sessionId: "aaa", isPrimary: true, lastActivity: "2026-07-13T00:01:00Z" }],
-        pills: [{ key: "ccs_lifecycle", label: "in review", priority: 50 }],
-        description: null,
-        alerts: [],
-        awaitingFrom: [],
-        lastComposed: "2026-07-13T00:01:00Z",
+        ...board1.rows[0]!,
+        pills: [{ key: "ccs_lifecycle", label: "approved", priority: 50 }],
       },
     ],
   };
   writeBoard("test-cluster", board2);
-  const row2 = idx.byIdentity("pr-watch:pr-agent:heroku/dashboard#123");
-  expect(row2?.pills[0]?.label).toBe("in review");
+  utimesSync(path, fixedTime, fixedTime);
+  const secondStat = statSync(path);
+
+  expect(secondStat.mtimeMs).toBe(firstStat.mtimeMs);
+  expect(secondStat.size).toBe(firstStat.size);
+  expect(idx.byIdentity("pr-watch:pr-agent:heroku/dashboard#123")?.pills[0]?.label).toBe("approved");
 });
 
 test("indexer missing file returns null", () => {
