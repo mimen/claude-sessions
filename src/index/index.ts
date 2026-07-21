@@ -58,6 +58,7 @@ interface ExistingMeta {
   file_size: number;
   path: string;
   shadow_paths: string;
+  codex_title: string | null;
 }
 
 // COALESCE order encodes Title priority; titleSource reports which one won.
@@ -97,18 +98,20 @@ export async function reindexStore(
   host: string,
 ): Promise<ReindexStats> {
   const existing = new Map<string, ExistingMeta>();
-  for (const row of db.query("SELECT session_id, file_mtime, file_size, path, shadow_paths FROM sessions").all() as Array<{
+  for (const row of db.query("SELECT session_id, file_mtime, file_size, path, shadow_paths, codex_title FROM sessions").all() as Array<{
     session_id: string;
     file_mtime: number;
     file_size: number;
     path: string;
     shadow_paths: string;
+    codex_title: string | null;
   }>) {
     existing.set(row.session_id, {
       file_mtime: row.file_mtime,
       file_size: row.file_size,
       path: row.path,
       shadow_paths: row.shadow_paths,
+      codex_title: row.codex_title,
     });
   }
 
@@ -220,7 +223,7 @@ export async function reindexStore(
       $tick_interval_sec: parsed.tickIntervalSec,
       $shadow_paths: shadowPathsJson,
     });
-    const ftsTitle = parsed.nativeTitle ?? fallback;
+    const ftsTitle = parsed.nativeTitle ?? prev?.codex_title ?? fallback;
     ftsDelete.run({ $id: parsed.sessionId });
     ftsInsert.run({ $id: parsed.sessionId, $title: ftsTitle, $skeleton: parsed.skeleton });
     stats.parsed++;

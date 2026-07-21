@@ -17,9 +17,16 @@ export function openIndex(dbPath: string): Database {
   const current = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
   if (!hasTable(db, "sessions")) {
     createSchema(db);
-  } else if (!hasColumn(db, "sessions", "shadow_paths")) {
-    // v8: retain v6/v7 observations and title cache while adding duplicate diagnostics.
-    db.exec("ALTER TABLE sessions ADD COLUMN shadow_paths TEXT NOT NULL DEFAULT '[]';");
+  } else if (isV6OrV7Compatible(db)) {
+    if (!hasColumn(db, "sessions", "shadow_paths")) {
+      // v8: retain v6/v7 observations and title cache while adding duplicate diagnostics.
+      db.exec("ALTER TABLE sessions ADD COLUMN shadow_paths TEXT NOT NULL DEFAULT '[]';");
+    }
+  } else {
+    // Older index shapes lack columns that reindex needs. They are a cache, so rebuild rather
+    // than stamp a partial table as v8 and fail later with an opaque SQLite error.
+    dropAll(db);
+    createSchema(db);
   }
   if (current !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
   return db;
@@ -33,6 +40,23 @@ function hasTable(db: Database, table: string): boolean {
 function hasColumn(db: Database, table: string, column: string): boolean {
   return (db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
     .some((entry) => entry.name === column);
+}
+
+/** v6/v7 contain every reindex input column; v8 merely adds shadow_paths diagnostics. */
+function isV6OrV7Compatible(db: Database): boolean {
+  const required = [
+    "session_id", "host", "path", "cwd", "project_root", "project_name", "branch", "version",
+    "first_ts", "last_ts", "msg_count", "file_mtime", "file_size", "native_title", "codex_title",
+    "fallback_label", "title_msg_count", "title_attempts", "skeleton", "is_subagent",
+    "parent_session_id", "resume_id", "cost_usd", "tok_input", "tok_output", "tok_cache_read",
+    "tok_cache_write", "cost_by_model", "user_turns", "tick_interval_sec",
+  ];
+  return hasTable(db, "sessions_fts") && required.every((column) => hasColumn(db, "sessions", column));
+}
+
+function dropAll(db: Database): void {
+  db.exec("DROP TABLE IF EXISTS sessions_fts;");
+  db.exec("DROP TABLE IF EXISTS sessions;");
 }
 
 function createSchema(db: Database): void {

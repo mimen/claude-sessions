@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { reindexStore, sessionById } from "./index.ts";
+import { reindexStore, search, sessionById } from "./index.ts";
 import { openIndex, SCHEMA_VERSION } from "./schema.ts";
 
 function createPreChangeIndex(dbPath: string): void {
@@ -66,6 +66,33 @@ test("openIndex migrates pre-shadow index rows without data loss and reindexes t
       resume_id: "legacy",
       shadow_paths: "[]",
     });
+    expect(search(db, "preserved generated").map((entry) => entry.sessionId)).toEqual(["legacy"]);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test("openIndex rebuilds incompatible pre-v6 schemas instead of stamping them as v8", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-index-pre-v6-"));
+  const dbPath = join(root, "index.db");
+  const legacy = new Database(dbPath, { create: true });
+  legacy.exec(`
+    CREATE TABLE sessions (session_id TEXT PRIMARY KEY, path TEXT NOT NULL);
+    INSERT INTO sessions (session_id, path) VALUES ('v5-row', '/old.jsonl');
+    PRAGMA user_version = 5;
+  `);
+  legacy.close();
+
+  const db = openIndex(dbPath);
+  try {
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: SCHEMA_VERSION });
+    const columns = db.query("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+    expect(columns.some((column) => column.name === "host")).toBe(true);
+    expect(columns.some((column) => column.name === "shadow_paths")).toBe(true);
+    expect(db.query("SELECT session_id FROM sessions WHERE session_id = 'v5-row'").get()).toBeNull();
+    expect(db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions_fts'").get()).not.toBeNull();
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });
