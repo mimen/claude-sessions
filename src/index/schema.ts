@@ -9,6 +9,13 @@ export const SCHEMA_VERSION = 8;
  */
 export function openIndex(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
+  // Reject a newer schema before changing persistent connection settings such as journal_mode.
+  const observedVersion = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
+  if (observedVersion > SCHEMA_VERSION) {
+    db.close();
+    throw new Error(`index schema version ${observedVersion} is newer than supported version ${SCHEMA_VERSION}`);
+  }
+
   // Set before acquiring any write lock so parallel opens wait rather than immediately failing.
   db.exec("PRAGMA busy_timeout = 5000;");
   db.exec("PRAGMA journal_mode = WAL;");

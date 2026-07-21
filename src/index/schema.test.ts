@@ -149,12 +149,16 @@ test("openIndex refuses a future compatible schema without changing it", () => {
   const root = mkdtempSync(join(tmpdir(), "ccs-index-future-"));
   const dbPath = join(root, "index.db");
   createPreChangeIndex(dbPath, SCHEMA_VERSION + 1);
+  const before = new Database(dbPath, { readonly: true });
+  const journalMode = (before.query("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode;
+  before.close();
 
   expect(() => openIndex(dbPath)).toThrow(`index schema version ${SCHEMA_VERSION + 1} is newer than supported version ${SCHEMA_VERSION}`);
 
   const db = new Database(dbPath, { readonly: true });
   try {
     expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: SCHEMA_VERSION + 1 });
+    expect(db.query("PRAGMA journal_mode").get()).toEqual({ journal_mode: journalMode });
     const columns = db.query("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
     expect(columns.some((column) => column.name === "shadow_paths")).toBe(false);
     expect(db.query("SELECT session_id FROM sessions WHERE session_id = 'legacy'").get()).toEqual({ session_id: "legacy" });
