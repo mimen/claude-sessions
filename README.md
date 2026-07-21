@@ -59,13 +59,20 @@ ccs session new --child-of . --cwd /path/to/repo
 
 # Run one canonical seat as a synchronous, causally parented helper:
 ccs delegate primary-review --child-of . --cwd /path/to/repo --prompt "Review the diff."
+
+# Explicitly select the seat's declared fallback before launch:
+ccs delegate primary-review --fallback --child-of . --cwd /path/to/repo --prompt "Review the diff."
 ```
 
 `--top-level` creates a visible work body. `--child-of` creates an auxiliary session whose
-cost belongs to its causal parent. Auxiliary sessions are hidden in normal list, search, and
-tree views; use `u` in the TUI or `--auxiliary` in CLI views to reveal them for one invocation.
-Canonical delegated seats live outside Claude Code's auto-discovered agent directories and are
-compiled into process-local `--agents` JSON only for the selected delegation.
+cost belongs to its causal parent. A delegate call selects the seat's fixed primary route by
+default; `--fallback` explicitly selects its declared backup before reservation. CCS never
+automatically retries a child after launch, because the child may already have changed state;
+a manual fallback invocation creates a separate auxiliary child. Auxiliary sessions are hidden in
+normal list, search, and tree views; use `u` in the TUI or `--auxiliary` in CLI views to reveal
+them for one invocation. Canonical delegated seats live outside Claude Code's auto-discovered
+agent directories and are compiled into process-local `--agents` JSON only for the selected
+delegation.
 
 ### Keys
 

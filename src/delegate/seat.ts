@@ -5,30 +5,33 @@ import { z } from "zod";
 import { err, ok, type Result } from "../result.ts";
 
 const SeatNameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]*$/);
+const EffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
 
-const FixedRoutingSchema = z.object({
+const FixedRouteSchema = z.object({
   provider: z.enum(["claude", "gpt"]),
   launcher: z.enum(["claude-native", "claude-gpt"]),
   requested_model: z.string().min(1),
-});
+  effort: EffortSchema,
+}).strict();
 
-const InheritedRoutingSchema = z.object({
-  provider: z.literal("inherit_parent"),
-  launcher: z.literal("inherit_parent"),
-  requested_model: z.string().min(1),
-});
+const RoutingSchema = z.object({
+  primary: FixedRouteSchema,
+  fallback: FixedRouteSchema.optional(),
+}).strict();
 
 const SeatFileSchema = z.object({
   name: SeatNameSchema,
   description: z.string().min(1),
   tools: z.array(z.string().min(1)).default([]),
-  effort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
   permission_mode: z.string().min(1).optional(),
   skills: z.array(z.string().min(1)).default([]),
-  routing: z.union([FixedRoutingSchema, InheritedRoutingSchema]),
-});
+  routing: RoutingSchema,
+}).strict();
 
 export type ProviderFamily = "claude" | "gpt";
+export type SeatEffort = z.infer<typeof EffortSchema>;
+export type SeatRouteKind = "primary" | "fallback";
+export type SeatRoute = z.infer<typeof FixedRouteSchema>;
 export type SeatFile = z.infer<typeof SeatFileSchema>;
 
 export interface SeatDefinition extends SeatFile {
@@ -37,10 +40,12 @@ export interface SeatDefinition extends SeatFile {
 }
 
 export interface ResolvedSeatRoute {
+  readonly route: SeatRouteKind;
   readonly provider: ProviderFamily;
   readonly launcher: "claude-native" | "claude-gpt";
   readonly requestedModel: string;
   readonly compiledModel: string;
+  readonly effort: SeatEffort;
 }
 
 export interface CompiledAgentDefinition {
@@ -50,7 +55,7 @@ export interface CompiledAgentDefinition {
   readonly model: string;
   readonly permissionMode?: string;
   readonly skills?: readonly string[];
-  readonly effort?: "low" | "medium" | "high" | "xhigh";
+  readonly effort: SeatEffort;
 }
 
 export type CompiledAgents = Readonly<Record<string, CompiledAgentDefinition>>;
@@ -61,11 +66,6 @@ function errorMessage(error: object): string {
 
 export function normalizeGptModel(model: string): string {
   return model.startsWith("gpt-") && !model.endsWith("[1m]") ? `${model}[1m]` : model;
-}
-
-export function inferParentProvider(environment: Readonly<Record<string, string | undefined>>): ProviderFamily {
-  const baseUrl = environment.ANTHROPIC_BASE_URL ?? "";
-  return /(?:127\.0\.0\.1|localhost):8317/.test(baseUrl) ? "gpt" : "claude";
 }
 
 export function loadSeat(seatsRoot: string, seatName: string): Result<SeatDefinition> {
@@ -99,31 +99,25 @@ export function loadSeat(seatsRoot: string, seatName: string): Result<SeatDefini
 
 export function resolveSeatRoute(
   seat: SeatDefinition,
-  parentProvider: ProviderFamily,
+  routeKind: SeatRouteKind = "primary",
 ): Result<ResolvedSeatRoute> {
-  const provider = seat.routing.provider === "inherit_parent" ? parentProvider : seat.routing.provider;
-  const configured = seat.routing.provider === "inherit_parent"
-    ? {
-        launcher: parentProvider === "gpt" ? "claude-gpt" as const : "claude-native" as const,
-        requested_model: seat.routing.requested_model,
-      }
-    : {
-        launcher: seat.routing.launcher,
-        requested_model: seat.routing.requested_model,
-      };
+  const route = routeKind === "primary" ? seat.routing.primary : seat.routing.fallback;
+  if (!route) return err(new Error(`Seat ${seat.name} does not declare a fallback route`));
 
-  if (provider === "claude" && configured.launcher !== "claude-native") {
-    return err(new Error(`Seat ${seat.name} routes Claude through ${configured.launcher}; expected claude-native`));
+  if (route.provider === "claude" && route.launcher !== "claude-native") {
+    return err(new Error(`Seat ${seat.name} routes Claude through ${route.launcher}; expected claude-native`));
   }
-  if (provider === "gpt" && configured.launcher !== "claude-gpt") {
-    return err(new Error(`Seat ${seat.name} routes GPT through ${configured.launcher}; expected claude-gpt`));
+  if (route.provider === "gpt" && route.launcher !== "claude-gpt") {
+    return err(new Error(`Seat ${seat.name} routes GPT through ${route.launcher}; expected claude-gpt`));
   }
 
   return ok({
-    provider,
-    launcher: configured.launcher,
-    requestedModel: configured.requested_model,
-    compiledModel: provider === "gpt" ? normalizeGptModel(configured.requested_model) : configured.requested_model,
+    route: routeKind,
+    provider: route.provider,
+    launcher: route.launcher,
+    requestedModel: route.requested_model,
+    compiledModel: route.provider === "gpt" ? normalizeGptModel(route.requested_model) : route.requested_model,
+    effort: route.effort,
   });
 }
 
@@ -135,7 +129,7 @@ export function compileAgent(seat: SeatDefinition, route: ResolvedSeatRoute): Co
     ...(seat.tools.length > 0 ? { tools: seat.tools } : {}),
     ...(seat.permission_mode ? { permissionMode: seat.permission_mode } : {}),
     ...(seat.skills.length > 0 ? { skills: seat.skills } : {}),
-    ...(seat.effort ? { effort: seat.effort } : {}),
+    effort: route.effort,
   };
   return { [seat.name]: definition };
 }

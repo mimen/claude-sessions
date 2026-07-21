@@ -1,4 +1,4 @@
-import { compileAgent, inferParentProvider, loadSeat, resolveSeatRoute, type ProviderFamily } from "./seat.ts";
+import { compileAgent, loadSeat, resolveSeatRoute, type ProviderFamily, type SeatEffort, type SeatRouteKind } from "./seat.ts";
 import { err, ok, type Result } from "../result.ts";
 
 export interface DelegateRequest {
@@ -7,8 +7,7 @@ export interface DelegateRequest {
   readonly cwd: string;
   readonly prompt: string;
   readonly seatsRoot: string;
-  /** undefined = infer from caller environment; null = explicit parent provider unavailable. */
-  readonly parentProvider?: ProviderFamily | null;
+  readonly route?: SeatRouteKind;
 }
 
 export interface DelegateReservation {
@@ -16,10 +15,12 @@ export interface DelegateReservation {
   readonly seat: string;
   readonly parentSessionId: string;
   readonly cwd: string;
+  readonly route: SeatRouteKind;
   readonly provider: ProviderFamily;
   readonly launcher: "claude-native" | "claude-gpt";
   readonly requestedModel: string;
   readonly compiledModel: string;
+  readonly effort: SeatEffort;
 }
 
 export interface DelegateLaunchResult {
@@ -75,14 +76,8 @@ export function executeDelegate(
 
   const loaded = loadSeat(request.seatsRoot, request.seat);
   if (!loaded.ok) return loaded;
-
-  const parentProvider = request.parentProvider === undefined
-    ? inferParentProvider(dependencies.environment)
-    : request.parentProvider;
-  if (loaded.value.routing.provider === "inherit_parent" && parentProvider === null) {
-    return err(new Error(`Cannot resolve provider for explicit parent ${request.parentSessionId}; use --child-of . or a fixed-provider seat`));
-  }
-  const routed = resolveSeatRoute(loaded.value, parentProvider ?? "claude");
+  const route = request.route ?? "primary";
+  const routed = resolveSeatRoute(loaded.value, route);
   if (!routed.ok) return routed;
 
   const sessionId = dependencies.mintSessionId();
@@ -91,10 +86,12 @@ export function executeDelegate(
     seat: loaded.value.name,
     parentSessionId: request.parentSessionId,
     cwd: request.cwd,
+    route: routed.value.route,
     provider: routed.value.provider,
     launcher: routed.value.launcher,
     requestedModel: routed.value.requestedModel,
     compiledModel: routed.value.compiledModel,
+    effort: routed.value.effort,
   };
   const reserved = dependencies.reserve(reservation);
   if (!reserved.ok) return reserved;
