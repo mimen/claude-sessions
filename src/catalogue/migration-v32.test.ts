@@ -22,6 +22,7 @@ describe("catalogue schema (post-v33)", () => {
     expect(tables).toContain("identity_state");
     expect(tables).toContain("dispositions");
     expect(tables).toContain("schema_migrations");
+    expect(tables).toContain("historical_detached_child_backfills");
   });
 
   test("catalogue holds identity_key FK + only per-run columns", () => {
@@ -48,7 +49,7 @@ describe("catalogue schema (post-v33)", () => {
   test("stamps user_version to CATALOGUE_VERSION", () => {
     const db = openCatalogue(":memory:");
     const v = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-    expect(v).toBe(35);
+    expect(v).toBe(36);
   });
 
   test("universal indexes exist", () => {
