@@ -15,10 +15,8 @@ import {
   setSessionClass,
 } from "../catalogue/db.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
-import { providerFamily } from "../index/cost-rollup.ts";
 import { err, ok, type Result } from "../result.ts";
 import { parseDelegateArgs } from "./args.ts";
-import { inferParentProvider, type ProviderFamily } from "./seat.ts";
 import {
   executeDelegate,
   type DelegateDependencies,
@@ -49,8 +47,10 @@ function reserveDelegate(db: Database, input: DelegateReservation): Result<void>
       }
       setMeta(db, input.sessionId, "relation", "causal_child", now);
       setMeta(db, input.sessionId, "seat", input.seat, now);
+      setMeta(db, input.sessionId, "delegation_route", input.route, now);
       setMeta(db, input.sessionId, "provider", input.provider, now);
       setMeta(db, input.sessionId, "launcher", input.launcher, now);
+      setMeta(db, input.sessionId, "effective_effort", input.effort, now);
       setMeta(db, input.sessionId, "requested_model", input.requestedModel, now);
       setMeta(db, input.sessionId, "compiled_model", input.compiledModel, now);
       setMeta(db, input.sessionId, "launch_cwd", input.cwd, now);
@@ -90,35 +90,6 @@ function parentExists(catalogue: Database, sessionId: string): boolean {
     sessionId,
     "SELECT 1 AS found FROM sessions WHERE session_id = $id OR resume_id = $id LIMIT 1",
   ) !== null;
-}
-
-function observedParentProvider(sessionId: string): ProviderFamily | null {
-  const row = readIndexedParent<{ cost_by_model: string }>(
-    sessionId,
-    "SELECT cost_by_model FROM sessions WHERE session_id = $id OR resume_id = $id LIMIT 1",
-  );
-  if (!row) return null;
-  let models: string[];
-  try {
-    models = Object.keys(JSON.parse(row.cost_by_model) as Record<string, number>);
-  } catch {
-    return null;
-  }
-  const providers = new Set(models.map(providerFamily).filter((provider) => provider !== "other"));
-  return providers.size === 1 ? [...providers][0]! : null;
-}
-
-function resolveParentProvider(
-  catalogue: Database,
-  parentSessionId: string,
-  parentIsCurrent: boolean,
-  environment: Readonly<Record<string, string | undefined>>,
-): ProviderFamily | null {
-  if (parentIsCurrent) return inferParentProvider(environment);
-  const observed = observedParentProvider(parentSessionId);
-  if (observed) return observed;
-  const metadata = getRow(catalogue, parentSessionId)?.meta.provider;
-  return metadata === "claude" || metadata === "gpt" ? metadata : null;
 }
 
 function createDependencies(
@@ -184,12 +155,7 @@ export function delegateCommand(
       {
         seat: parsed.value.seat,
         parentSessionId: parsed.value.parentSessionId,
-        parentProvider: resolveParentProvider(
-          db,
-          parsed.value.parentSessionId,
-          parsed.value.parentIsCurrent,
-          environment,
-        ),
+        route: parsed.value.useFallback ? "fallback" : "primary",
         cwd: parsed.value.cwd,
         prompt: parsed.value.prompt,
         seatsRoot: parsed.value.seatsRoot ?? defaultSeatsRoot(environment),

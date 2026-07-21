@@ -18,34 +18,29 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function seatsRoot(provider: "fixed" | "inherit" = "fixed"): string {
+function seatsRoot(withFallback = true): string {
   const root = mkdtempSync(join(tmpdir(), "ccs-delegate-"));
   roots.push(root);
   const directory = join(root, "primary-review");
   mkdirSync(directory);
   writeFileSync(
     join(directory, "seat.toml"),
-    provider === "fixed"
-      ? `name = "primary-review"
+    `name = "primary-review"
 description = "Independent primary review"
 tools = ["Bash", "Read"]
-effort = "high"
 
-[routing]
+[routing.primary]
 provider = "gpt"
 launcher = "claude-gpt"
 requested_model = "gpt-5.6-sol"
-`
-      : `name = "primary-review"
-description = "Inherited capability review"
-tools = ["Bash", "Read"]
-effort = "medium"
-
-[routing]
-provider = "inherit_parent"
-launcher = "inherit_parent"
-requested_model = "opus"
-`,
+effort = "high"
+${withFallback ? `
+[routing.fallback]
+provider = "gpt"
+launcher = "claude-gpt"
+requested_model = "gpt-5.6-terra"
+effort = "xhigh"
+` : ""}`,
   );
   writeFileSync(join(directory, "prompt.md"), "Review the specified implementation.");
   return root;
@@ -71,10 +66,7 @@ function harness(launchResult: Result<DelegateLaunchResult> = ok({ exitCode: 0 }
     reservations,
     launches,
     dependencies: {
-      environment: {
-        ANTHROPIC_BASE_URL: "http://127.0.0.1:8317",
-        CLAUDE_CODE_SUBAGENT_MODEL: "must-not-leak",
-      },
+      environment: { CLAUDE_CODE_SUBAGENT_MODEL: "must-not-leak" },
       mintSessionId: () => CHILD,
       cwdExists: () => true,
       reserve: (input) => {
@@ -94,7 +86,7 @@ function harness(launchResult: Result<DelegateLaunchResult> = ok({ exitCode: 0 }
 }
 
 describe("executeDelegate", () => {
-  test("reserves the causal child before launching an argv array", () => {
+  test("reserves the primary causal child before launching an argv array", () => {
     const h = harness();
     const result = executeDelegate(
       {
@@ -115,10 +107,12 @@ describe("executeDelegate", () => {
         seat: "primary-review",
         parentSessionId: PARENT,
         cwd: "/tmp",
+        route: "primary",
         provider: "gpt",
         launcher: "claude-gpt",
         requestedModel: "gpt-5.6-sol",
         compiledModel: "gpt-5.6-sol[1m]",
+        effort: "high",
       },
     ]);
     const argv = h.launches[0]!.argv;
@@ -130,30 +124,13 @@ describe("executeDelegate", () => {
     expect(h.launches[0]!.environment.CLAUDE_CODE_SUBAGENT_MODEL).toBeUndefined();
   });
 
-  test("keeps the reservation and records a process startup failure", () => {
-    const h = harness(err(new Error("launcher missing")));
+  test("selects the fallback route once with its model and effort", () => {
+    const h = harness();
     const result = executeDelegate(
       {
         seat: "primary-review",
         parentSessionId: PARENT,
-        cwd: "/tmp",
-        prompt: "Review.",
-        seatsRoot: seatsRoot(),
-      },
-      h.dependencies,
-    );
-
-    expect(result.ok).toBe(false);
-    expect(h.events).toEqual(["reserve", "launch", "failed:launcher missing"]);
-    expect(h.reservations).toHaveLength(1);
-  });
-
-  test("propagates the child exit status", () => {
-    const h = harness(ok({ exitCode: 17 }));
-    const result = executeDelegate(
-      {
-        seat: "primary-review",
-        parentSessionId: PARENT,
+        route: "fallback",
         cwd: "/tmp",
         prompt: "Review.",
         seatsRoot: seatsRoot(),
@@ -161,60 +138,74 @@ describe("executeDelegate", () => {
       h.dependencies,
     );
     expect(result.ok).toBe(true);
+    expect(h.events).toEqual(["reserve", "launch", "exit:0"]);
+    expect(h.reservations[0]).toMatchObject({
+      route: "fallback",
+      requestedModel: "gpt-5.6-terra",
+      compiledModel: "gpt-5.6-terra[1m]",
+      effort: "xhigh",
+    });
+    expect(h.launches).toHaveLength(1);
+    expect(h.launches[0]!.argv.join(" ")).toContain('"model":"gpt-5.6-terra[1m]"');
+    expect(h.launches[0]!.argv.join(" ")).toContain('"effort":"xhigh"');
+  });
+
+  test("rejects a missing fallback before minting or reserving", () => {
+    const h = harness();
+    const result = executeDelegate(
+      {
+        seat: "primary-review",
+        parentSessionId: PARENT,
+        route: "fallback",
+        cwd: "/tmp",
+        prompt: "Review.",
+        seatsRoot: seatsRoot(false),
+      },
+      h.dependencies,
+    );
+    expect(result.ok).toBe(false);
+    expect(h.events).toEqual([]);
+  });
+
+  test("keeps the reservation and records a process startup failure", () => {
+    const h = harness(err(new Error("launcher missing")));
+    const result = executeDelegate(
+      { seat: "primary-review", parentSessionId: PARENT, cwd: "/tmp", prompt: "Review.", seatsRoot: seatsRoot() },
+      h.dependencies,
+    );
+    expect(result.ok).toBe(false);
+    expect(h.events).toEqual(["reserve", "launch", "failed:launcher missing"]);
+    expect(h.reservations).toHaveLength(1);
+  });
+
+  test("propagates a nonzero child exit without a hidden fallback retry", () => {
+    const h = harness(ok({ exitCode: 17 }));
+    const result = executeDelegate(
+      { seat: "primary-review", parentSessionId: PARENT, cwd: "/tmp", prompt: "Review.", seatsRoot: seatsRoot() },
+      h.dependencies,
+    );
+    expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.exitCode).toBe(17);
     expect(h.events).toEqual(["reserve", "launch", "exit:17"]);
+    expect(h.reservations).toHaveLength(1);
+    expect(h.launches).toHaveLength(1);
   });
 
-  test("rejects inherit-parent routing when an explicit parent's provider is unavailable", () => {
+  test("rejects missing cwd and invalid input before minting or reserving", () => {
     const h = harness();
-    const result = executeDelegate(
-      {
-        seat: "primary-review",
-        parentSessionId: PARENT,
-        parentProvider: null,
-        cwd: "/tmp",
-        prompt: "Review.",
-        seatsRoot: seatsRoot("inherit"),
-      },
+    const missingCwd = executeDelegate(
+      { seat: "primary-review", parentSessionId: PARENT, cwd: "/missing", prompt: "Review.", seatsRoot: seatsRoot() },
+      { ...h.dependencies, cwdExists: () => false },
+    );
+    expect(missingCwd.ok).toBe(false);
+    expect(h.events).toEqual([]);
+
+    const invalid = executeDelegate(
+      { seat: "primary-review", parentSessionId: "not-a-uuid", cwd: "/tmp", prompt: "Review.", seatsRoot: seatsRoot() },
       h.dependencies,
     );
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.message).toContain("Cannot resolve provider for explicit parent");
-    expect(h.events).toEqual([]);
-  });
-
-  test("rejects a missing cwd before minting or reserving", () => {
-    const h = harness();
-    const dependencies: DelegateDependencies = { ...h.dependencies, cwdExists: () => false };
-    const result = executeDelegate(
-      {
-        seat: "primary-review",
-        parentSessionId: PARENT,
-        cwd: "/missing",
-        prompt: "Review.",
-        seatsRoot: seatsRoot(),
-      },
-      dependencies,
-    );
-    expect(result.ok).toBe(false);
-    expect(h.events).toEqual([]);
-  });
-
-  test("rejects invalid input before minting or reserving", () => {
-    const h = harness();
-    const result = executeDelegate(
-      {
-        seat: "primary-review",
-        parentSessionId: "not-a-uuid",
-        cwd: "/tmp",
-        prompt: "Review.",
-        seatsRoot: seatsRoot(),
-      },
-      h.dependencies,
-    );
-    expect(result.ok).toBe(false);
+    expect(invalid.ok).toBe(false);
     expect(h.events).toEqual([]);
   });
 });

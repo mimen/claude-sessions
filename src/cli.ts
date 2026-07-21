@@ -56,8 +56,8 @@ Usage:
   ccs reindex [--titles]   Refresh the session index (--titles: also regenerate titles headless)
   ccs ls [--auxiliary]    Print indexed sessions (with catalogue badges)
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
-  ccs delegate <seat> --child-of <uuid|.> --cwd <dir> --prompt <task>
-                         Reserve and synchronously run an auxiliary seat
+  ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
+                         Reserve and synchronously run an auxiliary seat (fallback is explicit; never automatic)
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
 
 Identities (durable, per-work-unit — ADR-0089):
