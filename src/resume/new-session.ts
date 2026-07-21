@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { constants } from "node:os";
 import type { Database } from "bun:sqlite";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import {
@@ -23,6 +24,7 @@ import {
 } from "../catalogue/db.ts";
 import pkg from "../../package.json" with { type: "json" };
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
+import { getIdentity } from "../catalogue/identities.ts";
 import { resolveRole } from "../roles/role-files.ts";
 import { checkClusterGate } from "../cluster/manifest.ts";
 import { shellQuote } from "./command.ts";
@@ -56,6 +58,8 @@ import { runSpawnActions } from "../hooks/spawn-actions.ts";
 
 export interface NewSessionOpts {
   cluster?: string;
+  /** A pre-minted durable identity to attach at session birth. */
+  identity?: string;
   /** The session's role — the canonical identity axis (ADR-0015). */
   role?: string;
   /** How a loop is re-armed on resume — DERIVED from the role's role.toml at launch (ADR-0062),
@@ -79,6 +83,8 @@ export interface NewSessionOpts {
   permissionMode?: string;
   /** Reserve mode: write metadata + print the id, don't launch. */
   printId: boolean;
+  /** Assert this session has no parent at birth. */
+  topLevel?: boolean;
   /** Escape hatch: launch INLINE in the current terminal (Bun.spawnSync, inherits this
    * surface). Default is DETACHED into a fresh cmux workspace — inline hijacks the caller's
    * CMUX_SURFACE_ID and rebinds their tab to the new session (ADR-0042). */
@@ -92,49 +98,141 @@ function prNumberFrom(raw: string | undefined): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-/** Read the value following `--flag`; returns undefined if absent or immediately followed by another flag. */
-function flagValue(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  if (i === -1) return undefined;
-  const v = args[i + 1];
-  return v !== undefined && !v.startsWith("--") ? v : undefined;
+const VALUE_FLAGS = new Set([
+  "--cluster", "--identity", "--role", "--skill", "--project", "--key", "--title", "--parent",
+  "--gus-work", "--pr-number", "--pr-repo", "--cwd", "--prompt", "--permission-mode",
+]);
+const BOOLEAN_FLAGS = new Set(["--print-id", "--top-level", "--inline"]);
+
+interface ParsedOptions {
+  values: Map<string, string>;
+  booleans: Set<string>;
+}
+
+/** Parse known options in order so text supplied to another flag is never reinterpreted as a flag. */
+function parseOptions(args: string[]): ParsedOptions {
+  const values = new Map<string, string>();
+  const booleans = new Set<string>();
+  for (let index = 0; index < args.length; index++) {
+    const token = args[index]!;
+    const equals = token.indexOf("=");
+    const flag = equals === -1 ? token : token.slice(0, equals);
+    if (VALUE_FLAGS.has(flag)) {
+      if (equals !== -1) {
+        values.set(flag, token.slice(equals + 1));
+        continue;
+      }
+      const value = args[index + 1];
+      // Prompts are free-form and may intentionally begin with `--`; all other option values use
+      // the conventional non-flag token form so a missing value does not swallow the next option.
+      if (value !== undefined && (flag === "--prompt" || !value.startsWith("--"))) {
+        values.set(flag, value);
+        index++;
+      }
+      continue;
+    }
+    if (BOOLEAN_FLAGS.has(token)) booleans.add(token);
+  }
+  return { values, booleans };
+}
+
+function normalizedRole(role: string): string {
+  return role.replace(/^\//, "");
 }
 
 export function parseOpts(args: string[]): NewSessionOpts {
+  const { values, booleans } = parseOptions(args);
   return {
-    cluster: flagValue(args, "--cluster"),
+    cluster: values.get("--cluster"),
+    identity: values.get("--identity"),
     // `--role` reads best for the fleet ("this is a pr-agent"); `--skill` is accepted as a synonym.
     // ADR-0062: --kind and --resume-command are retired — kind + re-arm derive from the role's
     // role.toml now (a role with a resume_command IS a loop), not per-session flags/columns.
-    role: flagValue(args, "--role") ?? flagValue(args, "--skill"),
-    project: flagValue(args, "--project"),
-    key: flagValue(args, "--key"),
-    title: flagValue(args, "--title"),
-    parent: flagValue(args, "--parent"),
-    gusWork: flagValue(args, "--gus-work"),
-    prNumber: prNumberFrom(flagValue(args, "--pr-number")),
-    prRepo: flagValue(args, "--pr-repo"),
-    cwd: flagValue(args, "--cwd"),
-    prompt: flagValue(args, "--prompt"),
-    permissionMode: flagValue(args, "--permission-mode"),
-    printId: args.includes("--print-id"),
-    inline: args.includes("--inline"),
+    role: values.get("--role") ?? values.get("--skill"),
+    project: values.get("--project"),
+    key: values.get("--key"),
+    title: values.get("--title"),
+    parent: values.get("--parent"),
+    gusWork: values.get("--gus-work"),
+    prNumber: prNumberFrom(values.get("--pr-number")),
+    prRepo: values.get("--pr-repo"),
+    cwd: values.get("--cwd"),
+    prompt: values.get("--prompt"),
+    permissionMode: values.get("--permission-mode"),
+    printId: booleans.has("--print-id"),
+    topLevel: booleans.has("--top-level"),
+    inline: booleans.has("--inline"),
   };
+}
+
+/** Validate birth flags that are independent of identity mode. */
+function validateBirthFlags(opts: NewSessionOpts): string | null {
+  return opts.topLevel && opts.parent ? "--top-level cannot be combined with --parent" : null;
+}
+
+/** Validate explicit-birth flags that must not be filled by role defaults. */
+function validateExplicitIdentityFlags(opts: NewSessionOpts): string | null {
+  const birthError = validateBirthFlags(opts);
+  if (birthError) return birthError;
+  if (!opts.identity) return null;
+  if (opts.key) return "--identity cannot be combined with legacy --key";
+  if (!opts.cluster) return "--identity requires --cluster";
+  if (!opts.role) return "--identity requires --role";
+  if (opts.gusWork || opts.prRepo || opts.prNumber) {
+    return "--identity cannot be combined with legacy --pr-repo, --pr-number, or --gus-work";
+  }
+  return null;
+}
+
+/** Validate a pre-minted identity birth request before a session id or row is created. */
+export function validateExplicitIdentityBirth(db: Database, opts: NewSessionOpts): string | null {
+  const flagsError = validateExplicitIdentityFlags(opts);
+  if (flagsError) return flagsError;
+  const identityKey = opts.identity;
+  if (!identityKey) return null;
+
+  const cluster = opts.cluster;
+  const roleArg = opts.role;
+  if (!cluster || !roleArg) return "--identity requires --cluster and --role";
+  const identity = getIdentity(db, identityKey);
+  if (!identity) return `identity '${identityKey}' does not exist — mint it first with \`ccs identity mint\``;
+  const role = normalizedRole(roleArg);
+  if (identity.cluster !== cluster) {
+    return `identity '${identityKey}' belongs to cluster '${identity.cluster}', not '${cluster}'`;
+  }
+  if (identity.role !== role) {
+    return `identity '${identityKey}' belongs to role '${identity.role}', not '${role}'`;
+  }
+  return null;
 }
 
 /**
  * Write every provided metadatum for `id` into `db`, all stamped `now`. The row is created if
- * absent (a forward reference — the session isn't indexed yet). Pure w.r.t. process/launch, so
- * it's the seam the test drives directly.
+ * absent (a forward reference — the session isn't indexed yet). The entire metadata bundle is
+ * transactional, so an explicit birth never leaves a partially registered session behind.
  */
 export function writeSessionMetadata(db: Database, id: string, opts: NewSessionOpts, now: string): void {
+  const explicitError = validateExplicitIdentityBirth(db, opts);
+  if (explicitError) throw new Error(explicitError);
+  db.transaction(() => writeSessionMetadataTransaction(db, id, opts, now))();
+}
+
+function writeSessionMetadataTransaction(db: Database, id: string, opts: NewSessionOpts, now: string): void {
   // The session id doubles as the resume handle when launched with `--session-id`, so record
   // it now — `ccs resume` can then revive the session even before it's indexed.
   setResumeId(db, id, id, now);
   // ADR-0089 v33: mint the identity + link the session. Identity carries every identity-
   // relevant field; the legacy per-session setters below are no-ops that stamp updated_at.
-  const role = opts.role ? opts.role.replace(/^\//, "") : null;
-  if (opts.cluster && role) {
+  const role = opts.role ? normalizedRole(opts.role) : null;
+  if (opts.identity) {
+    // Explicit birth attaches only to the pre-validated identity. It never derives an anchor,
+    // mints an identity, populates PR/GUS attrs, or supersedes sibling embodiments.
+    db.query("UPDATE catalogue SET identity_key = $k, updated_at = $now WHERE session_id = $id").run({
+      $k: opts.identity,
+      $now: now,
+      $id: id,
+    });
+  } else if (opts.cluster && role) {
     const workRef =
       opts.prRepo && opts.prNumber ? `${opts.prRepo}#${opts.prNumber}` :
       opts.gusWork ? opts.gusWork : null;
@@ -178,7 +276,7 @@ export function writeSessionMetadata(db: Database, id: string, opts: NewSessionO
   // The work-unit lives in cluster state, so this only applies to a cluster-scoped session with an
   // anchor (PR/GUS). find-or-create: a second spawn for the same PR reconnects to the same id
   // (the dedup/lineage foundation). Best-effort — a work-unit-store failure never blocks the spawn.
-  if (opts.cluster && (opts.gusWork || (opts.prNumber && opts.prRepo))) {
+  if (!opts.identity && opts.cluster && (opts.gusWork || (opts.prNumber && opts.prRepo))) {
     try {
       // ADR-0069: dispatch on the role's declared anchor type (a core role — work_unit "none" —
       // owns no work-unit, so skip). Undeclared roles infer PR-then-GUS (resolver default).
@@ -238,7 +336,7 @@ function buildLaunchArgv(id: string, opts: NewSessionOpts): string[] {
  */
 export function validateSpawn(opts: NewSessionOpts, roleDef: RoleDef | null): string | null {
   // A --role must name a real registry role (else its home_dir/arming can't be resolved).
-  if (opts.role && !roleDef) {
+  if (opts.role && !roleDef && !opts.identity) {
     return `role "${opts.role.replace(/^\//, "")}" is not in the registry — define it with \`ccs roles upsert\` first`;
   }
   // Standalone roles (registered outside a cluster) are not yet supported — they would create
@@ -260,6 +358,11 @@ export function validateSpawn(opts: NewSessionOpts, roleDef: RoleDef | null): st
 
 export function newSession(args: string[]): number {
   const opts = parseOpts(args);
+  const explicitFlagsError = validateExplicitIdentityFlags(opts);
+  if (explicitFlagsError) {
+    console.error(`ccs new-session: ${explicitFlagsError}`);
+    return 2;
+  }
 
   ensureDataDir();
   // Registry defaults (ADR-0022): if --role names a defined role, inherit its home_dir as
@@ -336,9 +439,18 @@ export function newSession(args: string[]): number {
 
   const cwd = opts.cwd ?? process.cwd();
 
-  const id = randomUUID();
+  // Explicit identity births must reject before an id is minted or a catalogue row is created.
+  // Keep this connection through registration so validation and the atomic metadata write observe
+  // the same catalogue state.
   const db = openCatalogue(CATALOGUE_PATH());
+  let id: string;
   try {
+    const explicitIdentityError = validateExplicitIdentityBirth(db, opts);
+    if (explicitIdentityError) {
+      console.error(`ccs new-session: ${explicitIdentityError}`);
+      return 2;
+    }
+    id = randomUUID();
     writeSessionMetadata(db, id, opts, new Date().toISOString());
     // ADR-0075: run the role's declared BIRTH setup (grant-perms, seed-files, …) in the launch
     // cwd, now that the row exists (rowResolved). Runs for BOTH --print-id (reserve) and direct
@@ -374,13 +486,15 @@ export function newSession(args: string[]): number {
     console.error(`ccs: launching INLINE ${argv.map(shellQuote).join(" ")}  (cwd: ${cwd})`);
     try {
       const result = Bun.spawnSync(argv, { cwd, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
-      if (!result.success && result.exitCode == null) {
-        console.error(`ccs: could not run claude — is it on your PATH?`);
-        return 127;
+      const outcome = inlineLaunchOutcome(result.exitCode, result.signalCode);
+      if (outcome.startupFailed) {
+        console.error("ccs: could not run claude — is it on your PATH?");
+        reportRecoverableExplicitBirth(id, opts.identity);
       }
-      return result.exitCode ?? 0;
+      return outcome.exitCode;
     } catch (e) {
       console.error(`ccs: failed to launch claude: ${(e as Error).message}`);
+      reportRecoverableExplicitBirth(id, opts.identity);
       return 127;
     }
   }
@@ -388,7 +502,28 @@ export function newSession(args: string[]): number {
   // DEFAULT: spawn DETACHED into a fresh cmux workspace. The new surface gets its OWN
   // CMUX_SURFACE_ID, so the new session's SessionStart hook binds THAT surface — never
   // rebinding the caller's (the hijack ADR-0042 documents). Deterministic: own surface or fail.
-  return spawnDetached(id, argv, cwd, opts.title || opts.role || id.slice(0, 8));
+  return spawnDetached(id, argv, cwd, opts.title || opts.role || id.slice(0, 8), opts.identity);
+}
+
+export function inlineLaunchOutcome(
+  exitCode: number | null,
+  signalCode: string | undefined,
+): { exitCode: number; startupFailed: boolean } {
+  // A numeric exit code or signal proves the child process started. Only absent exit and signal
+  // codes identify a startup failure that leaves the registered session unlaunched.
+  if (exitCode !== null) return { exitCode, startupFailed: false };
+  if (signalCode !== undefined) {
+    const signalNumber = Object.entries(constants.signals).find(([name]) => name === signalCode)?.[1];
+    return { exitCode: signalNumber === undefined ? 1 : 128 + signalNumber, startupFailed: false };
+  }
+  return { exitCode: 127, startupFailed: true };
+}
+
+function reportRecoverableExplicitBirth(id: string, identity: string | undefined): void {
+  if (!identity) return;
+  console.error(
+    `ccs: launch failed after registration; session ${id} remains attached to identity '${identity}' and can be retried with claude --session-id ${id}`,
+  );
 }
 
 /**
@@ -465,10 +600,11 @@ function probeWorktree(cwd: string): WorktreeState {
  * the SAME detached-spawn + CMUX_SURFACE_ID env-scrub (ADR-0042) used by resume, so a born-fresh
  * and a resumed session launch identically.
  */
-function spawnDetached(id: string, argv: string[], cwd: string, name: string): number {
+function spawnDetached(id: string, argv: string[], cwd: string, name: string, identity: string | undefined): number {
   const ref = spawnCmux({ argv, cwd, name });
   if (ref === null) {
     console.error(`ccs: failed to spawn cmux workspace for ${id.slice(0, 8)} (cwd ${cwd})`);
+    reportRecoverableExplicitBirth(id, identity);
     return 1;
   }
   console.error(`ccs: spawned ${name} → ${ref} (session ${id.slice(0, 8)}, cwd ${cwd})`);

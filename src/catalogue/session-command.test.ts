@@ -73,6 +73,48 @@ describe("session set", () => {
     });
   });
 
+  test("--identity= rejects a target whose cluster or role conflicts with an attached session", async () => {
+    await withRoot(async (root) => {
+      const sid = "sess-identity-conflict";
+      const source = "event-watch:event-worker:gio";
+      const target = "event-watch:other-role:gio";
+      seedSession(root, sid, source);
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      mintIdentity(db, target, { cluster: "event-watch", role: "other-role" }, NOW);
+      db.close();
+
+      const rc = await sessionCommand(["set", sid, `--identity=${target}`]);
+      expect(rc).toBe(1);
+      const check = openCatalogue(join(root, "cache", "catalogue.db"));
+      const row = check.query("SELECT identity_key FROM catalogue WHERE session_id = $sid").get({ $sid: sid }) as {
+        identity_key: string | null;
+      };
+      expect(row.identity_key).toBe(source);
+      check.close();
+    });
+  });
+
+  test("--identity= repairs a session whose previous identity is missing", async () => {
+    await withRoot(async (root) => {
+      const sid = "sess-dangling-identity";
+      const stale = "event-watch:event-worker:gio";
+      const replacement = "event-watch:event-worker:gio-fixed";
+      seedSession(root, sid, stale);
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      db.query("DELETE FROM identities WHERE identity_key = $key").run({ $key: stale });
+      mintIdentity(db, replacement, { cluster: "event-watch", role: "event-worker" }, NOW);
+      db.close();
+
+      expect(await sessionCommand(["set", sid, `--identity=${replacement}`])).toBe(0);
+      const check = openCatalogue(join(root, "cache", "catalogue.db"));
+      const row = check.query("SELECT identity_key FROM catalogue WHERE session_id = $sid").get({ $sid: sid }) as {
+        identity_key: string | null;
+      };
+      expect(row.identity_key).toBe(replacement);
+      check.close();
+    });
+  });
+
   test("--identity= refuses an identity_key that hasn't been minted (no dangling FKs)", async () => {
     // Regression: `ccs session set <sid> --identity=<key>` used to blindly
     // write identity_key with no existence check, producing a dangling FK

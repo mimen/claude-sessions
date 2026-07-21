@@ -70,9 +70,11 @@ Sessions (ephemeral, per-run):
   ccs session unset <id> --identity|--title|--parent|--parked
   ccs session title <id> "text"                   Custom title + cmux tab sync
   ccs session complete|archive|uncomplete|unarchive <id>   Per-session lifecycle
-  ccs session new [flags]                         Mint id, tag AT BIRTH, launch \`claude --session-id\`
-    flags: --cluster --role --title --parent <id> --cwd <dir> --prompt "..." --permission-mode <mode>
-           --pr-repo owner/repo --pr-number 123 --gus-work W-... · --print-id (reserve only)
+  ccs session new --identity=<key> --cluster=<c> --role=<r> [--top-level] [flags]
+                                                  Attach pre-minted identity AT BIRTH, launch \`claude --session-id\`
+    explicit identity requires matching stored cluster + role; cannot combine with --key
+    flags: --title --parent <id> --cwd <dir> --prompt "..." --permission-mode <mode> · --print-id (reserve only)
+    legacy birth (without --identity): --cluster --role --pr-repo owner/repo --pr-number 123 --gus-work W-...
   ccs session bump <id> [--note "..."]            Wake the session's cmux tab
   ccs session-fields <sid> --json '{...}' [--sensor <name>]  Atomic multi-field write (ADR-0078)
 

@@ -82,7 +82,8 @@ function usage(rc = 1): number {
   console.error("  ccs session unset <id> --identity|--title|--parent|--parked");
   console.error("  ccs session title <id> \"text\"                   set title + sync cmux tab");
   console.error("  ccs session complete|archive|uncomplete|unarchive <id>");
-  console.error("  ccs session new [flags]                         mint id + launch claude");
+  console.error("  ccs session new --identity=<key> --cluster=<c> --role=<r> [--top-level] [flags]  attach a pre-minted identity + launch claude");
+  console.error("    legacy PR/GUS birth remains available without --identity");
   console.error("  ccs session bump <id> [--note=\"…\"]              wake this session's cmux tab");
   return rc;
 }
@@ -149,12 +150,21 @@ function doSet(rest: string[]): number {
       // — otherwise we create a dangling FK that breaks export, board, and TUI
       // joins downstream. `identity` is nullable, so the sole rule is: if you
       // pass a key, it must exist.
-      const exists = db
-        .query("SELECT 1 FROM identities WHERE identity_key = $k")
-        .get({ $k: flags.identity });
-      if (!exists) {
+      const identity = getIdentity(db, flags.identity);
+      if (!identity) {
         console.error(
           `ccs session set: identity '${flags.identity}' does not exist — mint it first with \`ccs identity mint\``,
+        );
+        return 1;
+      }
+      // A session that already has a known identity cannot be silently moved across a cluster
+      // or role boundary. Loose sessions remain attachable for the Gio pilot/backfill flow.
+      const current = getRow(db, sid);
+      if (current?.identityKey && current.cluster && current.role &&
+        (current.cluster !== identity.cluster || current.role !== identity.role)) {
+        console.error(
+          `ccs session set: identity '${flags.identity}' is ${identity.role}@${identity.cluster}, ` +
+          `but session '${sid}' is ${current.role}@${current.cluster}`,
         );
         return 1;
       }

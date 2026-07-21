@@ -2,15 +2,16 @@ import { expect, test, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue, getRow, lifecycleOf, identityKeyOf, setCluster, stampPrFacts, setWorkUnitId, getMeta } from "../catalogue/db.ts";
+import { openCatalogue, getRow, lifecycleOf, identityKeyOf, setCluster, stampPrFacts, setWorkUnitId, getMeta, _resetRoleResumeCache } from "../catalogue/db.ts";
 import { getIdentity } from "../catalogue/identities.ts";
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
-import { parseOpts, writeSessionMetadata } from "./new-session.ts";
+import { inlineLaunchOutcome, newSession, parseOpts, writeSessionMetadata } from "./new-session.ts";
 
 const NOW = "2026-07-08T00:00:00.000Z";
 
 const roots: string[] = [];
 afterEach(() => {
+  _resetRoleResumeCache();
   for (const d of roots.splice(0)) rmSync(d, { recursive: true, force: true });
   delete process.env.CCS_CONFIG_ROOT; delete process.env.CCS_ROOT;
 });
@@ -23,6 +24,20 @@ function withPrRole(): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "role.toml"), 'work_unit = "pr"\n');
   process.env.CCS_CONFIG_ROOT = cfg; process.env.CCS_ROOT = rt;
+  _resetRoleResumeCache();
+}
+
+function withEventRole(): string {
+  const cfg = mkdtempSync(join(tmpdir(), "ccs-ns-cfg-"));
+  const rt = mkdtempSync(join(tmpdir(), "ccs-ns-rt-"));
+  roots.push(cfg, rt);
+  const dir = join(cfg, "clusters", "event-watch", "roles", "event-worker");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "role.toml"), 'kind = "session"\nwork_unit = "none"\n');
+  mkdirSync(join(rt, "cache"), { recursive: true });
+  process.env.CCS_CONFIG_ROOT = cfg; process.env.CCS_ROOT = rt;
+  _resetRoleResumeCache();
+  return rt;
 }
 
 test("supersede-on-spawn: a new worker archives prior sessions of the same identity (ADR-0073)", () => {
@@ -128,6 +143,170 @@ test("parseOpts: --skill is accepted as an alias for --role", () => {
   expect(parseOpts(["--skill", "pr-watch-eval"]).role).toBe("pr-watch-eval");
 });
 
+test("parseOpts: reads explicit identity-at-birth flags", () => {
+  const opts = parseOpts([
+    "--identity=event-watch:event-worker:gio",
+    "--cluster=event-watch",
+    "--role=/event-worker",
+    "--top-level",
+    "--print-id",
+  ]);
+  expect(opts.identity).toBe("event-watch:event-worker:gio");
+  expect(opts.cluster).toBe("event-watch");
+  expect(opts.role).toBe("/event-worker");
+  expect(opts.topLevel).toBe(true);
+  expect(opts.printId).toBe(true);
+});
+
+test("parseOpts: does not reinterpret an option-shaped prompt as identity", () => {
+  const opts = parseOpts(["--prompt", "--identity=not-a-flag", "--cluster=event-watch"]);
+  expect(opts.prompt).toBe("--identity=not-a-flag");
+  expect(opts.identity).toBeUndefined();
+  expect(opts.cluster).toBe("event-watch");
+});
+
+test("parseOpts: does not reinterpret boolean flags inside a prompt", () => {
+  expect(parseOpts(["--prompt", "--top-level"]).topLevel).toBe(false);
+  expect(parseOpts(["--prompt", "--print-id"]).printId).toBe(false);
+  expect(parseOpts(["--prompt", "--inline"]).inline).toBe(false);
+});
+
+test("inline launch outcome distinguishes startup failures from launched failures", () => {
+  expect(inlineLaunchOutcome(null, undefined)).toEqual({ exitCode: 127, startupFailed: true });
+  expect(inlineLaunchOutcome(1, undefined)).toEqual({ exitCode: 1, startupFailed: false });
+  expect(inlineLaunchOutcome(null, "SIGKILL")).toEqual({ exitCode: 137, startupFailed: false });
+});
+
+test("writeSessionMetadata: explicit identity attaches without minting or inferring work", () => {
+  const db = openCatalogue(":memory:");
+  try {
+    const key = "event-watch:event-worker:gio";
+    const { mintIdentity } = require("../catalogue/identities.ts") as typeof import("../catalogue/identities.ts");
+    mintIdentity(db, key, { cluster: "event-watch", role: "event-worker" }, NOW);
+    const id = "11111111-1111-4111-8111-111111111111";
+    writeSessionMetadata(db, id, parseOpts([
+      `--identity=${key}`, "--cluster=event-watch", "--role=/event-worker", "--title=Gio", "--top-level",
+    ]), NOW);
+    const row = getRow(db, id)!;
+    expect(row.identityKey).toBe(key);
+    expect(row.resumeId).toBe(id);
+    expect(row.customTitle).toBe("Gio");
+    expect(row.parentSessionId).toBeNull();
+    expect(db.query("SELECT COUNT(*) AS count FROM identities").get()).toEqual({ count: 1 });
+  } finally {
+    db.close();
+  }
+});
+
+test("writeSessionMetadata: explicit identity failure leaves no partial session row", () => {
+  const db = openCatalogue(":memory:");
+  try {
+    const id = "22222222-2222-4222-8222-222222222222";
+    expect(() => writeSessionMetadata(db, id, parseOpts([
+      "--identity=event-watch:event-worker:missing", "--cluster=event-watch", "--role=event-worker", "--title=must not persist",
+    ]), NOW)).toThrow("does not exist");
+    expect(getRow(db, id)).toBeNull();
+    expect(db.query("SELECT COUNT(*) AS count FROM identities").get()).toEqual({ count: 0 });
+  } finally {
+    db.close();
+  }
+});
+
+test("writeSessionMetadata: explicit metadata rolls back if a later write fails", () => {
+  const db = openCatalogue(":memory:");
+  try {
+    const key = "event-watch:event-worker:gio";
+    const { mintIdentity } = require("../catalogue/identities.ts") as typeof import("../catalogue/identities.ts");
+    mintIdentity(db, key, { cluster: "event-watch", role: "event-worker" }, NOW);
+    db.exec(`
+      CREATE TRIGGER abort_explicit_title
+      BEFORE UPDATE OF custom_title ON catalogue
+      WHEN NEW.custom_title IS NOT NULL
+      BEGIN SELECT RAISE(ABORT, 'title write failed'); END;
+    `);
+    const id = "33333333-3333-4333-8333-333333333333";
+    expect(() => writeSessionMetadata(db, id, parseOpts([
+      `--identity=${key}`, "--cluster=event-watch", "--role=event-worker", "--title=rollback",
+    ]), NOW)).toThrow("title write failed");
+    expect(getRow(db, id)).toBeNull();
+    expect(getIdentity(db, key)).not.toBeNull();
+  } finally {
+    db.close();
+  }
+});
+
+test("newSession: explicit --print-id registers only a matching pre-minted identity", () => {
+  const root = withEventRole();
+  const key = "event-watch:event-worker:gio";
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const { mintIdentity } = require("../catalogue/identities.ts") as typeof import("../catalogue/identities.ts");
+    mintIdentity(db, key, { cluster: "event-watch", role: "event-worker" }, NOW);
+  } finally {
+    db.close();
+  }
+
+  expect(newSession([
+    `--identity=${key}`, "--cluster=event-watch", "--role=/event-worker", "--top-level", "--print-id",
+  ])).toBe(0);
+  const check = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const rows = check.query("SELECT identity_key, resume_id, parent_session_id FROM catalogue").all() as Array<{
+      identity_key: string; resume_id: string; parent_session_id: string | null;
+    }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.identity_key).toBe(key);
+    expect(rows[0]?.resume_id).toBeDefined();
+    expect(rows[0]?.parent_session_id).toBeNull();
+    expect(check.query("SELECT COUNT(*) AS count FROM identities").get()).toEqual({ count: 1 });
+  } finally {
+    check.close();
+  }
+});
+
+test("newSession: --top-level rejects --parent for legacy births before registration", () => {
+  const root = withEventRole();
+  expect(newSession([
+    "--cluster=event-watch", "--role=event-worker", "--top-level", "--parent=parent-session", "--print-id",
+  ])).toBe(2);
+  const check = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    expect(check.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 0 });
+  } finally {
+    check.close();
+  }
+});
+
+test("newSession: explicit birth rejects absent identity, missing or mismatched axes, and --key before registration", () => {
+  const root = withEventRole();
+  const key = "event-watch:event-worker:gio";
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const { mintIdentity } = require("../catalogue/identities.ts") as typeof import("../catalogue/identities.ts");
+    mintIdentity(db, key, { cluster: "event-watch", role: "event-worker" }, NOW);
+  } finally {
+    db.close();
+  }
+
+  expect(newSession(["--identity=event-watch:event-worker:missing", "--cluster=event-watch", "--role=event-worker", "--print-id"])).toBe(2);
+  expect(newSession([`--identity=${key}`, "--role=event-worker", "--print-id"])).toBe(2);
+  expect(newSession([`--identity=${key}`, "--cluster=other-cluster", "--role=event-worker", "--print-id"])).toBe(2);
+  expect(newSession([`--identity=${key}`, "--cluster=event-watch", "--role=other-role", "--print-id"])).toBe(2);
+  expect(newSession([`--identity=${key}`, "--cluster=event-watch", "--role=event-worker", "--key=legacy", "--print-id"])).toBe(2);
+  expect(newSession([
+    `--identity=${key}`, "--cluster=event-watch", "--role=event-worker",
+    "--pr-repo=owner/repo", "--pr-number=123", "--print-id",
+  ])).toBe(2);
+
+  const check = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    expect(check.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 0 });
+    expect(check.query("SELECT COUNT(*) AS count FROM identities").get()).toEqual({ count: 1 });
+  } finally {
+    check.close();
+  }
+});
+
 test("writeSessionMetadata: binds identity to a not-yet-indexed id (forward reference)", () => {
   const db = openCatalogue(":memory:");
   try {
@@ -188,19 +367,21 @@ test("parseOpts: --pr-number 0 (no PR yet) is treated as absent, not stamped", (
   expect(o.prNumber).toBeUndefined();
 });
 
-test("writeSessionMetadata: --resume-command is stored for a loop (comes back running)", () => {
+test("writeSessionMetadata: --resume-command is not persisted outside the role definition", () => {
+  withPrRole();
   const db = openCatalogue(":memory:");
   try {
     const id = "ffffffff-0000-1111-2222-333333333333";
-    // ADR-D3: role resolution is (cluster, role); pass --cluster so the derived resumeCommand
-    // finds the pr-watch/control role.toml on this developer machine.
-    writeSessionMetadata(
-      db,
-      id,
-      parseOpts(["--cluster", "pr-watch", "--role", "control", "--resume-command", "/loop 15m /pr-watch-control"]),
-      NOW,
-    );
-    expect(getRow(db, id)!.resumeCommand).toBe("/loop 15m /pr-watch-control");
+    const opts = parseOpts([
+      "--cluster", "pr-watch",
+      "--role", "pr-agent",
+      "--pr-number", "12080",
+      "--pr-repo", "heroku/dashboard",
+      "--resume-command", "/loop 15m /pr-watch-control",
+    ]);
+    expect(opts.resumeCommand).toBeUndefined();
+    writeSessionMetadata(db, id, opts, NOW);
+    expect(getRow(db, id)!.resumeCommand).toBeNull();
   } finally {
     db.close();
   }
