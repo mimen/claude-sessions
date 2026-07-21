@@ -381,6 +381,9 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
         `(${formatBytes(totalBytes)}) from ${config.store.path} [host: ${config.host.label}]`,
     );
     console.log(`  ${stats.parsed} parsed, ${stats.skipped} unchanged, ${stats.removed} removed`);
+    if (stats.duplicates > 0) {
+      console.warn(`  warning: ${stats.duplicates} duplicate transcript path${stats.duplicates === 1 ? "" : "s"} shadowed by deterministic canonical selection`);
+    }
     const spend = db.query("SELECT SUM(cost_usd) AS usd FROM sessions").get() as { usd: number | null };
     if (spend.usd) console.log(`  ${formatCost(spend.usd)} total API-equivalent spend across the store`);
 
