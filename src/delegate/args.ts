@@ -7,9 +7,11 @@ export interface DelegateCliArgs {
   readonly cwd: string;
   readonly prompt: string;
   readonly seatsRoot: string | null;
+  readonly useFallback: boolean;
 }
 
 const VALUE_FLAGS = new Set(["--child-of", "--cwd", "--prompt", "--seats-root"]);
+const NO_VALUE_FLAGS = new Set(["--fallback"]);
 
 function flagValue(args: readonly string[], flag: string): string | null {
   const inline = args.find((arg) => arg.startsWith(`${flag}=`));
@@ -18,7 +20,17 @@ function flagValue(args: readonly string[], flag: string): string | null {
   if (index < 0) return null;
   const value = args[index + 1];
   if (!value) return null;
-  return value.startsWith("--") && VALUE_FLAGS.has(value.split("=", 1)[0]!) ? null : value;
+  const valueFlag = value.split("=", 1)[0]!;
+  return value.startsWith("--") && (VALUE_FLAGS.has(valueFlag) || NO_VALUE_FLAGS.has(valueFlag)) ? null : value;
+}
+
+function fallbackSelection(args: readonly string[]): Result<boolean> {
+  const fallbackArgs = args.filter((arg) => arg === "--fallback" || arg.startsWith("--fallback="));
+  if (fallbackArgs.length === 0) return ok(false);
+  if (fallbackArgs.length !== 1 || fallbackArgs[0] !== "--fallback") {
+    return err(new Error("ccs delegate accepts --fallback at most once and without a value"));
+  }
+  return ok(true);
 }
 
 export function parseDelegateArgs(
@@ -26,7 +38,10 @@ export function parseDelegateArgs(
   environment: Readonly<Record<string, string | undefined>>,
 ): Result<DelegateCliArgs> {
   const seat = args[0];
-  if (!seat || seat.startsWith("--")) return err(new Error("Usage: ccs delegate <seat> --child-of <uuid|.> --cwd <directory> --prompt <task>"));
+  if (!seat || seat.startsWith("--")) return err(new Error("Usage: ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <directory> --prompt <task>"));
+
+  const fallback = fallbackSelection(args);
+  if (!fallback.ok) return fallback;
 
   const childOf = flagValue(args, "--child-of");
   if (!childOf) return err(new Error("ccs delegate requires --child-of <uuid|.>"));
@@ -47,5 +62,6 @@ export function parseDelegateArgs(
     cwd,
     prompt,
     seatsRoot: flagValue(args, "--seats-root"),
+    useFallback: fallback.value,
   });
 }

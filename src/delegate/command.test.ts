@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { openCatalogue, setMeta, setSessionClass } from "../catalogue/db.ts";
+import { openCatalogue, setSessionClass } from "../catalogue/db.ts";
 import { delegateCommand } from "./command.ts";
 
 const PARENT = "754b9a1a-e5e0-49b7-8e45-d433e82621bf";
@@ -16,7 +16,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function fixture(exitCode = 0, routing: "fixed" | "inherit" = "fixed"): {
+function fixture(exitCode = 0, withFallback = true): {
   readonly root: string;
   readonly seatsRoot: string;
   readonly bin: string;
@@ -32,25 +32,22 @@ function fixture(exitCode = 0, routing: "fixed" | "inherit" = "fixed"): {
   mkdirSync(bin);
   writeFileSync(
     join(seatDirectory, "seat.toml"),
-    routing === "fixed"
-      ? `name = "primary-review"
+    `name = "primary-review"
 description = "Primary review"
 tools = ["Bash", "Read"]
-effort = "high"
-[routing]
+
+[routing.primary]
 provider = "gpt"
 launcher = "claude-gpt"
 requested_model = "gpt-5.6-sol"
-`
-      : `name = "primary-review"
-description = "Inherited review"
-tools = ["Bash", "Read"]
-effort = "medium"
-[routing]
-provider = "inherit_parent"
-launcher = "inherit_parent"
-requested_model = "opus"
-`,
+effort = "high"
+${withFallback ? `
+[routing.fallback]
+provider = "gpt"
+launcher = "claude-gpt"
+requested_model = "gpt-5.6-terra"
+effort = "xhigh"
+` : ""}`,
   );
   writeFileSync(join(seatDirectory, "prompt.md"), "Review the implementation.");
   const executable = join(bin, "claude-gpt");
@@ -73,12 +70,11 @@ process.exit(${exitCode});
   return { root, seatsRoot, bin, observation };
 }
 
-function seedParent(root: string, provider?: "claude" | "gpt"): void {
+function seedParent(root: string): void {
   mkdirSync(join(root, "runtime", "cache"), { recursive: true });
   const db = openCatalogue(join(root, "runtime", "cache", "catalogue.db"));
   try {
     setSessionClass(db, PARENT, "work_body", "2026-07-20T00:00:00Z");
-    if (provider) setMeta(db, PARENT, "provider", provider, "2026-07-20T00:00:00Z");
   } finally {
     db.close();
   }
@@ -96,7 +92,7 @@ function childRows(root: string): Array<{ session_id: string; session_class: str
 }
 
 describe("delegateCommand", () => {
-  test("reserves auxiliary metadata before launch and preserves argv/cwd/exit status", () => {
+  test("reserves primary auxiliary metadata before launch and preserves argv/cwd/exit status", () => {
     const f = fixture(7);
     process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
@@ -127,7 +123,10 @@ describe("delegateCommand", () => {
     expect(JSON.parse(observation.row.meta) as Record<string, string>).toMatchObject({
       launch_status: "reserved",
       seat: "primary-review",
-      provider: "gpt",
+      delegation_route: "primary",
+      requested_model: "gpt-5.6-sol",
+      compiled_model: "gpt-5.6-sol[1m]",
+      effective_effort: "high",
     });
 
     const rows = childRows(f.root);
@@ -138,21 +137,40 @@ describe("delegateCommand", () => {
     });
   });
 
-  test("routes an inherit-parent seat from the explicit parent's metadata", () => {
-    const f = fixture(0, "inherit");
+  test("runs an explicit fallback as a separate Terra xhigh child", () => {
+    const f = fixture();
     process.env.CCS_ROOT = join(f.root, "runtime");
-    seedParent(f.root, "gpt");
+    seedParent(f.root);
     const code = delegateCommand(
-      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      ["primary-review", "--fallback", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
       { ...process.env, PATH: `${f.bin}:${process.env.PATH ?? ""}`, OBSERVATION_PATH: f.observation },
     );
     expect(code).toBe(0);
-    const observation = JSON.parse(readFileSync(f.observation, "utf8")) as { argv: string[] };
-    expect(observation.argv.join(" ")).toContain('"model":"opus"');
+    const observation = JSON.parse(readFileSync(f.observation, "utf8")) as { argv: string[]; row: { meta: string } };
+    expect(observation.argv.join(" ")).toContain('"model":"gpt-5.6-terra[1m]"');
+    expect(observation.argv.join(" ")).toContain('"effort":"xhigh"');
+    expect(JSON.parse(observation.row.meta) as Record<string, string>).toMatchObject({
+      delegation_route: "fallback",
+      requested_model: "gpt-5.6-terra",
+      compiled_model: "gpt-5.6-terra[1m]",
+      effective_effort: "xhigh",
+    });
     expect(childRows(f.root)).toHaveLength(1);
   });
 
-  test("keeps a failed reservation when the launcher cannot start", () => {
+  test("rejects explicit fallback for a seat without one before reservation", () => {
+    const f = fixture(0, false);
+    process.env.CCS_ROOT = join(f.root, "runtime");
+    seedParent(f.root);
+    const code = delegateCommand(
+      ["primary-review", "--fallback", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      { ...process.env, PATH: `${f.bin}:${process.env.PATH ?? ""}` },
+    );
+    expect(code).toBe(1);
+    expect(childRows(f.root)).toHaveLength(0);
+  });
+
+  test("keeps one failed reservation when the selected launcher cannot start", () => {
     const f = fixture();
     process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
@@ -165,7 +183,10 @@ describe("delegateCommand", () => {
     const rows = childRows(f.root);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.session_class).toBe("auxiliary");
-    expect(JSON.parse(rows[0]!.meta) as Record<string, string>).toMatchObject({ launch_status: "failed" });
+    expect(JSON.parse(rows[0]!.meta) as Record<string, string>).toMatchObject({
+      launch_status: "failed",
+      delegation_route: "primary",
+    });
   });
 
   test("rejects a nonexistent explicit parent without creating a stub", () => {
@@ -179,7 +200,7 @@ describe("delegateCommand", () => {
     expect(childRows(f.root)).toHaveLength(0);
   });
 
-  test("resolves child-of dot before opening the catalogue", () => {
+  test("resolves child-of dot without parent provider inference", () => {
     const f = fixture();
     process.env.CCS_ROOT = join(f.root, "runtime");
     const code = delegateCommand(
