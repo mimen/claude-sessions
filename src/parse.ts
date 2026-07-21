@@ -33,8 +33,9 @@ export interface ParsedSession {
   readonly tickIntervalSec: number;
 }
 
-const FIRST_TURNS = 8;
-const LAST_TURNS = 4;
+/** How many opening / closing turns the skeleton keeps — also the preview peek's label ("first N · last N"). */
+export const FIRST_TURNS = 8;
+export const LAST_TURNS = 4;
 const USER_TEXTS = 4;
 const SKELETON_MAX_CHARS = 14_000; // ~3.5k tokens
 
@@ -66,7 +67,7 @@ export function humanText(content: unknown): string {
 
 /** One skeleton line for a message: prose kept, tool calls/results/thinking reduced to stubs. */
 function skeletonLine(role: string, content: unknown): string {
-  if (typeof content === "string") return `${role}: ${content.trim()}`;
+  if (typeof content === "string") return `${role}: ${content.replace(/\s+/g, " ").trim()}`;
   if (!Array.isArray(content)) return "";
   const parts: string[] = [];
   for (const raw of content) {
@@ -85,7 +86,9 @@ function skeletonLine(role: string, content: unknown): string {
       // thinking and others are omitted from the skeleton
     }
   }
-  return parts.length ? `${role}: ${parts.join(" ")}` : "";
+  // Collapse to a single physical line so the preview peek renders one turn per row (a long
+  // opening message can no longer consume the whole line budget) and role parsing stays trivial.
+  return parts.length ? `${role}: ${parts.join(" ").replace(/\s+/g, " ").trim()}` : "";
 }
 
 /**

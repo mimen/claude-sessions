@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { useTerminalSize } from "./useTerminalSize.ts";
 import type { Database } from "bun:sqlite";
@@ -215,6 +215,12 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   const [transcript, setTranscript] = useState<
     { title: string; lines: TranscriptLine[]; truncated: boolean; scroll: number } | null
   >(null);
+  // Preview pane: `d` swaps the compact peek view for the full metadata dossier; J/K scroll the
+  // peek over the real transcript (lazily loaded, cached per session so revisits are instant).
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [peekScroll, setPeekScroll] = useState(0);
+  const [peekLines, setPeekLines] = useState<TranscriptLine[] | null>(null);
+  const peekCache = useRef<Map<string, TranscriptLine[]>>(new Map());
 
   const reload = () => setRefreshTick((t) => t + 1);
   // cmux probes must be ASYNC in the TUI. In render they block React mid-frame; even in an
@@ -554,11 +560,22 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   const clampedSelected = Math.min(selected, Math.max(0, items.length - 1));
   const current = items[clampedSelected];
   const selectedRow: SessionRow | null = current?.kind === "session" ? current.row : null;
+  // Tracks the live selection for the async peek loader, so a slow transcript read that resolves
+  // after the cursor has moved on doesn't paint the wrong session's transcript into the pane.
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedRow?.sessionId ?? null;
 
   const [skeleton, setSkeleton] = useState("");
   useEffect(() => {
     setSkeleton(selectedRow ? getSkeleton(db, selectedRow.sessionId) : "");
   }, [db, selectedRow?.sessionId]);
+
+  // Selecting a different row resets the peek to the top; reuse a cached transcript if we already
+  // read this session's file, so scrolling back into it is instant (else fall back to the skeleton).
+  useEffect(() => {
+    setPeekScroll(0);
+    setPeekLines(selectedRow ? peekCache.current.get(selectedRow.sessionId) ?? null : null);
+  }, [selectedRow?.sessionId]);
 
   // Background title drain while open (no-op when nothing needs titling).
   useEffect(() => {
@@ -753,6 +770,33 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   const scrollTranscript = (delta: number) =>
     setTranscript((t) => (t ? { ...t, scroll: Math.max(0, t.scroll + delta) } : t));
 
+  // Scroll the preview peek by ~half its visible height. The first scroll lazily reads the real
+  // transcript (cached per session); until then the peek shows the baked skeleton. Overshoot is
+  // clamped inside the pane, so a coarse step still lands exactly on END.
+  const scrollPeek = (dir: -1 | 1) => {
+    if (!selectedRow || !previewVisible) return;
+    const step = Math.max(1, Math.floor((previewHeight - 10) / 2));
+    if (peekLines) {
+      setPeekScroll((s) => Math.max(0, s + dir * step));
+      return;
+    }
+    const id = selectedRow.sessionId;
+    const land = () => setPeekScroll(dir > 0 ? step : 0);
+    const cached = peekCache.current.get(id);
+    if (cached) {
+      setPeekLines(cached);
+      land();
+      return;
+    }
+    void readTranscript(selectedRow.path).then(({ lines }) => {
+      peekCache.current.set(id, lines);
+      if (selectedIdRef.current === id) {
+        setPeekLines(lines);
+        land();
+      }
+    });
+  };
+
   const retitle = () => {
     const item = items[clampedSelected];
     if (!item || item.kind !== "session") return;
@@ -934,6 +978,10 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       setSort((s) => SORT_CYCLE[(SORT_CYCLE.indexOf(s) + 1) % SORT_CYCLE.length]!);
       setSelected(0);
     } else if (input === "p") setPreviewVisible((v) => !v);
+    else if (input === "d") {
+      if (selectedRow) setDetailsOpen((v) => !v);
+    } else if (input === "J") scrollPeek(1);
+    else if (input === "K") scrollPeek(-1);
     else if (input === "v") openTranscript();
     else if (input === "a") {
       setIncludeSubagents((v) => !v);
@@ -1034,6 +1082,9 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       })()}
       tasks={taskIds.has(selectedRow.sessionId) ? tasksFor(selectedRow.sessionId) : null}
       height={previewHeight}
+      detailsOpen={detailsOpen}
+      peekLines={peekLines}
+      peekScroll={peekScroll}
     />
   ) : selSection ? (
     <SectionCard
