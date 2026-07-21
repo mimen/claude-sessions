@@ -37,29 +37,37 @@ test("g cycles grouping views", async () => {
 });
 
 test("g inside a context lens cycles access -> home -> ... -> category", async () => {
-  const skillsDb = openSkillsDb(":memory:");
-  const indexDb = openIndex(":memory:");
-  saveSkills(skillsDb, [{ name: "beeper", path: "/Users/mimen/.claude/skills/beeper", realPath: "/Users/mimen/.claude/skills/beeper", ecosystem: "claude-user", description: "", aliases: [], mtimeMs: 1, contentHash: "h" }]);
-  const cr = loadConfig("/nonexistent.toml");
-  if (!cr.ok) throw new Error("cfg");
-  const config = { ...cr.value, store: { path: mkdtempSync(join(tmpdir(), "ccs-gx-")) } };
-  const { lastFrame, stdin, unmount } = render(createElement(SkillsPanel, { skillsDb, indexDb, config, onSwitchMode: () => {}, onShowSessions: () => {} }));
-  await new Promise((r) => setTimeout(r, 60));
-  // A worktree's cwd can make the footer context path truncate at different points.
-  // The summary's `view <name>` label is the stable rendering of the active view,
-  // so assert it rather than a footer token whose wording/visibility is width-dependent.
-  stdin.write("x"); // -> claude @ ~
-  await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("view access");
-  expect(lastFrame()).toContain("GLOBAL");
-  stdin.write("g");
-  await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("view home");
-  stdin.write("g"); stdin.write("g");
-  await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("view category");
-  stdin.write("x"); // next context resets to access
-  await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("view access");
-  unmount();
+  // The claude-@-cwd context lens shows the ACTUAL cwd in the summary line. When run from
+  // a deep worktree, the summary line hits the ink-testing-library's 100-column stdout mock
+  // and the "view <name>" token gets clipped by the right-flexbox label ("Tab sessions · ?").
+  // Pin process.cwd() to a short path for the duration of this test so the width math is stable
+  // regardless of where the test process actually runs. Restore in finally.
+  const origCwd = process.cwd;
+  process.cwd = () => "/x";
+  try {
+    const skillsDb = openSkillsDb(":memory:");
+    const indexDb = openIndex(":memory:");
+    saveSkills(skillsDb, [{ name: "beeper", path: "/Users/mimen/.claude/skills/beeper", realPath: "/Users/mimen/.claude/skills/beeper", ecosystem: "claude-user", description: "", aliases: [], mtimeMs: 1, contentHash: "h" }]);
+    const cr = loadConfig("/nonexistent.toml");
+    if (!cr.ok) throw new Error("cfg");
+    const config = { ...cr.value, store: { path: mkdtempSync(join(tmpdir(), "ccs-gx-")) } };
+    const { lastFrame, stdin, unmount } = render(createElement(SkillsPanel, { skillsDb, indexDb, config, onSwitchMode: () => {}, onShowSessions: () => {} }));
+    await new Promise((r) => setTimeout(r, 60));
+    stdin.write("x"); // -> claude @ ~
+    await new Promise((r) => setTimeout(r, 30));
+    expect(lastFrame()).toContain("view access");
+    expect(lastFrame()).toContain("GLOBAL");
+    stdin.write("g");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(lastFrame()).toContain("view home");
+    stdin.write("g"); stdin.write("g");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(lastFrame()).toContain("view category");
+    stdin.write("x"); // next context resets to access
+    await new Promise((r) => setTimeout(r, 30));
+    expect(lastFrame()).toContain("view access");
+    unmount();
+  } finally {
+    process.cwd = origCwd;
+  }
 });
