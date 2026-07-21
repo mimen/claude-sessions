@@ -91,7 +91,7 @@ const SESSION_GROUPS: KeyGroup[] = [
     name: "Find & arrange",
     keys: [
       ["/", "search — fuzzy title/project/tasks + full-text content"],
-      ["u", "task filter: all → unfinished tasks → interrupted mid-task"],
+      ["U", "task filter: all → unfinished tasks → interrupted mid-task"],
       ["g", "change grouping: groups → by-state → flat → tree → cluster → epic"],
       ["s", "change sort: recency → cost → messages"],
       ["a", "show / hide subagent runs"],

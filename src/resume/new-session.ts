@@ -211,7 +211,7 @@ export function resolveLaunchIntent(opts: NewSessionOpts, _args: readonly string
   if (!opts.childOf) return "--child-of requires a parent UUID or .";
   const parent = opts.childOf === "." ? process.env.CLAUDE_CODE_SESSION_ID : opts.childOf;
   if (!parent) return "--child-of . requires CLAUDE_CODE_SESSION_ID";
-  if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{4}-[0-9a-f]{12}$/i.test(parent)) return "--child-of must be a UUID or .";
+  if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(parent)) return "--child-of must be a UUID or .";
   opts.parent = parent;
   return null;
 }
