@@ -1,28 +1,77 @@
 import { Database } from "bun:sqlite";
 
-/** Bump when the schema changes; the Index is a pure cache, so we just rebuild on mismatch. */
-// v7 recomputes cached physical cost rows after GPT gateway model pricing was introduced.
-export const SCHEMA_VERSION = 7;
+/** Bump when the schema changes. Index rows are rebuildable, but preserve them across additive upgrades. */
+// v7 recomputed cached physical cost rows after GPT gateway model pricing was introduced; v8 adds shadow paths.
+export const SCHEMA_VERSION = 8;
 
 /**
- * Open (creating if needed) the Index and ensure its schema is current. If the on-disk
- * schema version differs, drop everything and recreate — nothing is lost, the Index is
- * fully reconstructable from the Store.
+ * Open (creating if needed) the Index and ensure its schema is current. Additive migrations
+ * retain index rows so a binary upgrade never makes existing sessions disappear before reindex.
  */
 export function openIndex(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
+  // Reject a newer schema before changing persistent connection settings such as journal_mode.
+  const observedVersion = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
+  if (observedVersion > SCHEMA_VERSION) {
+    db.close();
+    throw new Error(`index schema version ${observedVersion} is newer than supported version ${SCHEMA_VERSION}`);
+  }
+
+  // Set before acquiring any write lock so parallel opens wait rather than immediately failing.
+  db.exec("PRAGMA busy_timeout = 5000;");
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
-  // Don't throw SQLITE_BUSY when a concurrent reindex (or scheduled job) is writing; wait.
-  db.exec("PRAGMA busy_timeout = 5000;");
 
-  const current = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-  if (current !== SCHEMA_VERSION) {
-    dropAll(db);
-    createSchema(db);
-    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+  // SQLite's immediate transaction serializes creation/migration across concurrent ccs processes.
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    const current = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
+    if (current > SCHEMA_VERSION) {
+      throw new Error(`index schema version ${current} is newer than supported version ${SCHEMA_VERSION}`);
+    }
+    if (!hasTable(db, "sessions")) {
+      createSchema(db);
+    } else if (current >= 7 && isV6OrV7Compatible(db)) {
+      if (!hasColumn(db, "sessions", "shadow_paths")) {
+        // v8: retain v7 observations and title cache while adding duplicate diagnostics.
+        db.exec("ALTER TABLE sessions ADD COLUMN shadow_paths TEXT NOT NULL DEFAULT '[]';");
+      }
+    } else {
+      // v6 cost accounting changed in v7, so its cache is stale even when its columns happen
+      // to match. Pre-v6 shapes are also incomplete. Both are rebuildable from the Store.
+      dropAll(db);
+      createSchema(db);
+    }
+    if (current !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+    db.exec("COMMIT;");
+  } catch (error) {
+    try { db.exec("ROLLBACK;"); } catch { /* no transaction remained to roll back */ }
+    db.close();
+    throw error;
   }
   return db;
+}
+
+function hasTable(db: Database, table: string): boolean {
+  return db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $table")
+    .get({ $table: table }) !== null;
+}
+
+function hasColumn(db: Database, table: string, column: string): boolean {
+  return (db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+    .some((entry) => entry.name === column);
+}
+
+/** v6/v7 contain every reindex input column; v8 merely adds shadow_paths diagnostics. */
+function isV6OrV7Compatible(db: Database): boolean {
+  const required = [
+    "session_id", "host", "path", "cwd", "project_root", "project_name", "branch", "version",
+    "first_ts", "last_ts", "msg_count", "file_mtime", "file_size", "native_title", "codex_title",
+    "fallback_label", "title_msg_count", "title_attempts", "skeleton", "is_subagent",
+    "parent_session_id", "resume_id", "cost_usd", "tok_input", "tok_output", "tok_cache_read",
+    "tok_cache_write", "cost_by_model", "user_turns", "tick_interval_sec",
+  ];
+  return hasTable(db, "sessions_fts") && required.every((column) => hasColumn(db, "sessions", column));
 }
 
 function dropAll(db: Database): void {
@@ -62,7 +111,8 @@ function createSchema(db: Database): void {
       tok_cache_write INTEGER NOT NULL DEFAULT 0,
       cost_by_model   TEXT NOT NULL DEFAULT '{}',
       user_turns      INTEGER NOT NULL DEFAULT 0,
-      tick_interval_sec INTEGER NOT NULL DEFAULT 0
+      tick_interval_sec INTEGER NOT NULL DEFAULT 0,
+      shadow_paths    TEXT NOT NULL DEFAULT '[]'
     );
   `);
   db.exec("CREATE INDEX idx_sessions_last_ts ON sessions(last_ts DESC);");

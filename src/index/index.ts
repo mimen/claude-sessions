@@ -40,6 +40,8 @@ export interface SessionRow {
   readonly userTurns: number;
   /** Median seconds between ticks — a loop's cadence (0 if fewer than two ticks). */
   readonly tickIntervalSec: number;
+  /** Other scanned paths with this session id, ranked after the canonical transcript. */
+  readonly shadowPaths?: readonly string[];
 }
 
 export interface ReindexStats {
@@ -47,11 +49,16 @@ export interface ReindexStats {
   parsed: number;
   skipped: number;
   removed: number;
+  /** Physical transcript files shadowed by a canonical duplicate. */
+  duplicates: number;
 }
 
 interface ExistingMeta {
   file_mtime: number;
   file_size: number;
+  path: string;
+  shadow_paths: string;
+  codex_title: string | null;
 }
 
 // COALESCE order encodes Title priority; titleSource reports which one won.
@@ -76,7 +83,8 @@ const SELECT_COLS = `
   tok_cache_write AS tokCacheWrite,
   cost_by_model AS costByModelJson,
   user_turns AS userTurns,
-  tick_interval_sec AS tickIntervalSec
+  tick_interval_sec AS tickIntervalSec,
+  shadow_paths AS shadowPathsJson
 `;
 
 /**
@@ -90,13 +98,33 @@ export async function reindexStore(
   host: string,
 ): Promise<ReindexStats> {
   const existing = new Map<string, ExistingMeta>();
-  for (const row of db.query("SELECT session_id, file_mtime, file_size FROM sessions").all() as Array<{
+  for (const row of db.query("SELECT session_id, file_mtime, file_size, path, shadow_paths, codex_title FROM sessions").all() as Array<{
     session_id: string;
     file_mtime: number;
     file_size: number;
+    path: string;
+    shadow_paths: string;
+    codex_title: string | null;
   }>) {
-    existing.set(row.session_id, { file_mtime: row.file_mtime, file_size: row.file_size });
+    existing.set(row.session_id, {
+      file_mtime: row.file_mtime,
+      file_size: row.file_size,
+      path: row.path,
+      shadow_paths: row.shadow_paths,
+      codex_title: row.codex_title,
+    });
   }
+
+  const grouped = new Map<string, StoredSessionFile[]>();
+  for (const file of files) {
+    const group = grouped.get(file.sessionId);
+    if (group) group.push(file);
+    else grouped.set(file.sessionId, [file]);
+  }
+  const canonical = [...grouped.entries()].map(([sessionId, candidates]) => {
+    const ranked = [...candidates].sort(compareTranscriptFiles);
+    return { sessionId, file: ranked[0]!, shadowPaths: ranked.slice(1).map((candidate) => candidate.path) };
+  });
 
   const upsert = db.query(`
     INSERT INTO sessions (
@@ -104,15 +132,14 @@ export async function reindexStore(
       first_ts, last_ts, msg_count, file_mtime, file_size,
       native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id,
       cost_usd, tok_input, tok_output, tok_cache_read, tok_cache_write, cost_by_model,
-      user_turns, tick_interval_sec
+      user_turns, tick_interval_sec, shadow_paths
     ) VALUES (
       $session_id, $host, $path, $cwd, $project_root, $project_name, $branch, $version,
       $first_ts, $last_ts, $msg_count, $file_mtime, $file_size,
       $native_title, $fallback_label, $skeleton, $is_subagent, $parent_session_id, $resume_id,
       $cost_usd, $tok_input, $tok_output, $tok_cache_read, $tok_cache_write, $cost_by_model,
-      $user_turns, $tick_interval_sec
-    )
-    ON CONFLICT(session_id) DO UPDATE SET
+      $user_turns, $tick_interval_sec, $shadow_paths
+    ) ON CONFLICT(session_id) DO UPDATE SET
       host = $host, path = $path, cwd = $cwd,
       project_root = $project_root, project_name = $project_name,
       branch = $branch, version = $version,
@@ -122,29 +149,43 @@ export async function reindexStore(
       is_subagent = $is_subagent, parent_session_id = $parent_session_id, resume_id = $resume_id,
       cost_usd = $cost_usd, tok_input = $tok_input, tok_output = $tok_output,
       tok_cache_read = $tok_cache_read, tok_cache_write = $tok_cache_write,
-      cost_by_model = $cost_by_model,
-      user_turns = $user_turns, tick_interval_sec = $tick_interval_sec
+      cost_by_model = $cost_by_model, user_turns = $user_turns,
+      tick_interval_sec = $tick_interval_sec, shadow_paths = $shadow_paths
   `);
+  const refreshDiagnostics = db.query(
+    "UPDATE sessions SET path = $path, shadow_paths = $shadow_paths WHERE session_id = $session_id",
+  );
   const ftsDelete = db.query("DELETE FROM sessions_fts WHERE session_id = $id");
   const ftsInsert = db.query(
     "INSERT INTO sessions_fts (session_id, title, skeleton) VALUES ($id, $title, $skeleton)",
   );
 
-  const stats: ReindexStats = { scanned: files.length, parsed: 0, skipped: 0, removed: 0 };
+  const stats: ReindexStats = {
+    scanned: files.length,
+    parsed: 0,
+    skipped: 0,
+    removed: 0,
+    duplicates: files.length - canonical.length,
+  };
   const seen = new Set<string>();
 
-  for (const file of files) {
-    seen.add(file.sessionId);
-    const prev = existing.get(file.sessionId);
-    if (prev && prev.file_mtime === file.mtimeMs && prev.file_size === file.sizeBytes) {
+  for (const candidate of canonical) {
+    const { sessionId, file, shadowPaths } = candidate;
+    seen.add(sessionId);
+    const prev = existing.get(sessionId);
+    const shadowPathsJson = JSON.stringify(shadowPaths);
+    if (prev && prev.file_mtime === file.mtimeMs && prev.file_size === file.sizeBytes && prev.path === file.path) {
+      // Diagnostics must refresh when changed, but an unchanged reindex stays read-only.
+      if (prev.shadow_paths !== shadowPathsJson) {
+        refreshDiagnostics.run({ $session_id: sessionId, $path: file.path, $shadow_paths: shadowPathsJson });
+      }
       stats.skipped++;
       continue;
     }
 
-    // One unreadable/locked/deleted-mid-scan file must not abort the whole reindex.
     let parsed;
     try {
-      parsed = await parseSessionFile(file.path, file.sessionId);
+      parsed = await parseSessionFile(file.path, sessionId);
     } catch {
       stats.skipped++;
       continue;
@@ -180,17 +221,14 @@ export async function reindexStore(
       $cost_by_model: JSON.stringify(parsed.usage.costByModel),
       $user_turns: parsed.userTurns,
       $tick_interval_sec: parsed.tickIntervalSec,
+      $shadow_paths: shadowPathsJson,
     });
-
-    // Keep FTS in step with the resolved title (native if present, else fallback for now;
-    // codex titles refresh the FTS row when generated in M3).
-    const ftsTitle = parsed.nativeTitle ?? fallback;
+    const ftsTitle = parsed.nativeTitle ?? prev?.codex_title ?? fallback;
     ftsDelete.run({ $id: parsed.sessionId });
     ftsInsert.run({ $id: parsed.sessionId, $title: ftsTitle, $skeleton: parsed.skeleton });
     stats.parsed++;
   }
 
-  // Remove rows whose files have disappeared from the Store.
   const removeRow = db.query("DELETE FROM sessions WHERE session_id = $id");
   for (const sessionId of existing.keys()) {
     if (!seen.has(sessionId)) {
@@ -199,8 +237,14 @@ export async function reindexStore(
       stats.removed++;
     }
   }
-
   return stats;
+}
+
+/** Stable winner: largest, then newest, then lexicographically smallest absolute path. */
+function compareTranscriptFiles(a: StoredSessionFile, b: StoredSessionFile): number {
+  if (a.sizeBytes !== b.sizeBytes) return b.sizeBytes - a.sizeBytes;
+  if (a.mtimeMs !== b.mtimeMs) return b.mtimeMs - a.mtimeMs;
+  return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
 }
 
 /** A Session needing a generated Title, with the skeleton to feed the Titler. */
@@ -253,22 +297,30 @@ export function recordTitleFailure(db: Database, sessionId: string): void {
   ).run({ $id: sessionId });
 }
 
-type RawRow = Omit<SessionRow, "isSubagent" | "costByModel"> & {
+type RawRow = Omit<SessionRow, "isSubagent" | "costByModel" | "shadowPaths"> & {
   isSubagent: number;
   costByModelJson: string;
+  shadowPathsJson: string;
 };
 
 /** Coerce SQLite's 0/1 is_subagent into a boolean and parse the per-model cost JSON. */
 function mapRows(raw: unknown[]): SessionRow[] {
   return (raw as RawRow[]).map((r) => {
-    const { costByModelJson, ...rest } = r;
+    const { costByModelJson, shadowPathsJson, ...rest } = r;
     let costByModel: Record<string, number> = {};
+    let shadowPaths: string[] = [];
     try {
       costByModel = JSON.parse(costByModelJson) as Record<string, number>;
     } catch {
       // tolerate a corrupt cell; the scalar totals are still correct
     }
-    return { ...rest, isSubagent: Boolean(r.isSubagent), costByModel };
+    try {
+      const decoded = JSON.parse(shadowPathsJson) as string[];
+      if (decoded.every((path) => typeof path === "string")) shadowPaths = decoded;
+    } catch {
+      // tolerate a corrupt diagnostic cell; canonical transcript facts remain usable
+    }
+    return { ...rest, isSubagent: Boolean(r.isSubagent), costByModel, shadowPaths };
   });
 }
 

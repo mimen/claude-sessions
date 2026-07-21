@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { openCatalogue } from "./db.ts";
+import { openIndex } from "../index/schema.ts";
 import { mintIdentity } from "./identities.ts";
 import { sessionCommand } from "./session-command.ts";
 
@@ -34,6 +35,19 @@ function seedSession(root: string, sid: string, identityKey?: string): void {
     `INSERT INTO catalogue (session_id, identity_key, custom_title, updated_at)
      VALUES ($sid, $k, 'seed title', $now)`,
   ).run({ $sid: sid, $k: identityKey ?? null, $now: NOW });
+  db.close();
+}
+
+function seedIndexedSession(root: string, sid: string, resumeId = "resume-id"): void {
+  mkdirSync(join(root, "cache"), { recursive: true });
+  const db = openIndex(join(root, "cache", "index.db"));
+  db.query(
+    `INSERT INTO sessions (
+      session_id, host, path, cwd, project_root, project_name, fallback_label,
+      msg_count, file_mtime, file_size, skeleton, resume_id
+    ) VALUES ($sid, 'host', '/tmp/transcript.jsonl', '/tmp/project', '/tmp/project', 'project',
+      'indexed transcript', 1, 1, 1, '', $resume)`,
+  ).run({ $sid: sid, $resume: resumeId });
   db.close();
 }
 
@@ -173,6 +187,29 @@ describe("session set", () => {
         .query("SELECT parent_session_id FROM catalogue WHERE session_id = $sid")
         .get({ $sid: child }) as { parent_session_id: string | null };
       expect(row.parent_session_id).toBe(orphanParent);
+      db.close();
+    });
+  });
+
+  test("--parent=. resolves the current session id before UUID validation", async () => {
+    await withRoot(async (root) => {
+      const child = "2ed1df23-e1d3-4381-b285-bad39a4f5c00";
+      const currentParent = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+      const previous = process.env.CLAUDE_CODE_SESSION_ID;
+      seedSession(root, child);
+      process.env.CLAUDE_CODE_SESSION_ID = currentParent;
+      try {
+        expect(await sessionCommand(["set", child, "--parent=."])).toBe(0);
+      } finally {
+        previous === undefined
+          ? delete process.env.CLAUDE_CODE_SESSION_ID
+          : (process.env.CLAUDE_CODE_SESSION_ID = previous);
+      }
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      const row = db.query("SELECT parent_session_id FROM catalogue WHERE session_id = $sid").get({ $sid: child }) as {
+        parent_session_id: string | null;
+      };
+      expect(row.parent_session_id).toBe(currentParent);
       db.close();
     });
   });
@@ -330,6 +367,84 @@ describe("session help / errors", () => {
     await withRoot(async () => {
       const rc = await sessionCommand([]);
       expect(rc).toBe(1);
+    });
+  });
+});
+
+
+describe("indexed-unattached sessions and adoption", () => {
+  test("read succeeds for an indexed but uncatalogued session without converting it", async () => {
+    await withRoot(async (root) => {
+      seedIndexedSession(root, "indexed-only");
+      expect(await sessionCommand(["indexed-only", "--json"])).toBe(0);
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      expect(db.query("SELECT session_id FROM catalogue WHERE session_id = 'indexed-only'").get()).toBeNull();
+      db.close();
+    });
+  });
+
+  test("adopt requires an index row and a pre-existing identity", async () => {
+    await withRoot(async (root) => {
+      const key = "event-watch:event-worker:gio";
+      mkdirSync(join(root, "cache"), { recursive: true });
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      mintIdentity(db, key, { cluster: "event-watch", role: "event-worker" }, NOW);
+      db.close();
+      expect(await sessionCommand(["adopt", "not-indexed", `--identity=${key}`])).toBe(1);
+      seedIndexedSession(root, "indexed-only");
+      expect(await sessionCommand(["adopt", "indexed-only", "--identity=missing"])).toBe(1);
+      const check = openCatalogue(join(root, "cache", "catalogue.db"));
+      expect(check.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 0 });
+      check.close();
+    });
+  });
+
+  test("adopt creates only minimal metadata and refuses a second adopter", async () => {
+    await withRoot(async (root) => {
+      const sid = "indexed-only";
+      const key = "event-watch:event-worker:gio";
+      seedIndexedSession(root, sid, "resume-from-index");
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      mintIdentity(db, key, { cluster: "event-watch", role: "event-worker" }, NOW);
+      db.close();
+      expect(await sessionCommand(["adopt", sid, `--identity=${key}`])).toBe(0);
+      expect(await sessionCommand(["adopt", sid, `--identity=${key}`])).toBe(1);
+      const check = openCatalogue(join(root, "cache", "catalogue.db"));
+      expect(check.query("SELECT identity_key, resume_id, custom_title, parent_session_id FROM catalogue WHERE session_id = $sid").get({ $sid: sid })).toEqual({
+        identity_key: key,
+        resume_id: "resume-from-index",
+        custom_title: null,
+        parent_session_id: null,
+      });
+      expect(check.query("SELECT COUNT(*) AS count FROM identities").get()).toEqual({ count: 1 });
+      check.close();
+    });
+  });
+
+  test("set refuses uncatalogued ids and rolls back every combined field on validation failure", async () => {
+    await withRoot(async (root) => {
+      const sid = "indexed-only";
+      const key = "event-watch:event-worker:gio";
+      seedIndexedSession(root, sid);
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      mintIdentity(db, key, { cluster: "event-watch", role: "event-worker" }, NOW);
+      db.close();
+      expect(await sessionCommand(["set", sid, `--identity=${key}`, "--title=must-not-write"])).toBe(1);
+      const afterUncatalogued = openCatalogue(join(root, "cache", "catalogue.db"));
+      expect(afterUncatalogued.query("SELECT session_id FROM catalogue WHERE session_id = $sid").get({ $sid: sid })).toBeNull();
+      afterUncatalogued.close();
+
+      seedSession(root, "catalogued");
+      expect(await sessionCommand(["set", "catalogued", "--title=must-not-write", "--parent=not-a-uuid"])).toBe(1);
+      expect(await sessionCommand(["set", "catalogued", "--cluster=retired"])).toBe(1);
+      expect(await sessionCommand(["title", sid, "must-not-create"])).toBe(1);
+      expect(await sessionCommand(["unset", sid, "--parent"])).toBe(1);
+      const check = openCatalogue(join(root, "cache", "catalogue.db"));
+      expect(check.query("SELECT custom_title, parent_session_id FROM catalogue WHERE session_id = 'catalogued'").get()).toEqual({
+        custom_title: "seed title",
+        parent_session_id: null,
+      });
+      check.close();
     });
   });
 });
