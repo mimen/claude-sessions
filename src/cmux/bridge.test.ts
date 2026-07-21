@@ -70,30 +70,58 @@ describe("parseHookStore", () => {
     expect(m.get("surface-X")?.sessionId).toBe("session-B");
   });
 
-  test("B14: contradictions log loudly; sessions view wins (fresher)", () => {
-    // The exact reattach shape: both views cover surface-X but with different sessions. The
-    // sessions view is the fresher signal (hook fires post-reattach and stamps .surfaceId
-    // first). We keep it AND log so operators see the drift. This is the sole difference
-    // from the old logic — which trusted activeSessionsBySurface as first-writer.
+  test("B14: sessions winner beats contradictory active map with no raw console.error", () => {
     const errs: string[] = [];
-    const origErr = console.error;
+    const original = console.error;
     console.error = (...args: unknown[]) => { errs.push(args.map(String).join(" ")); };
     try {
-      const contradictoryStore = {
-        sessions: {
-          "session-A": { surfaceId: "surface-X" },  // fresh: A on X
-        },
-        activeSessionsBySurface: {
-          "surface-X": { sessionId: "session-B" },  // stale: B on X (pre-reattach)
-        },
-      };
-      const m = parseHookStore(contradictoryStore);
-      expect(m.get("surface-X")?.sessionId).toBe("session-A"); // fresher wins
-      expect(errs.some((e) => e.includes("contradictory hook-store binding"))).toBe(true);
-      expect(errs.some((e) => e.includes("session-A".slice(0, 8) + " (KEPT"))).toBe(true);
+      const m = parseHookStore({
+        sessions: { "session-A": { surfaceId: "surface-X", updatedAt: 200 } },
+        activeSessionsBySurface: { "surface-X": { sessionId: "session-B" } },
+      });
+      expect(m.get("surface-X")?.sessionId).toBe("session-A");
+      expect(errs).toEqual([]);
     } finally {
-      console.error = origErr;
+      console.error = original;
     }
+  });
+
+  test("reconciliation diagnostics deduplicate reordered equivalent state and rearm after clean state", () => {
+    const bridgePath = join(import.meta.dir, "bridge.ts");
+    const script = `
+      const { parseHookStore } = await import(${JSON.stringify(bridgePath)});
+      const contradictory = {
+        sessions: {
+          old: { surfaceId: "surface-X", updatedAt: 1 },
+          middle: { surfaceId: "surface-X", updatedAt: 2 },
+          current: { surfaceId: "surface-X", updatedAt: 3 },
+        },
+        activeSessionsBySurface: { "surface-X": { sessionId: "old" } },
+      };
+      const reordered = {
+        sessions: {
+          current: { surfaceId: "surface-X", updatedAt: 3 },
+          old: { surfaceId: "surface-X", updatedAt: 1 },
+          middle: { surfaceId: "surface-X", updatedAt: 2 },
+        },
+        activeSessionsBySurface: { "surface-X": { sessionId: "old" } },
+      };
+      parseHookStore(contradictory);
+      parseHookStore(reordered);
+      parseHookStore({ sessions: {} });
+      parseHookStore(contradictory);
+    `;
+    const result = Bun.spawnSync({
+      cmd: [process.execPath, "-e", script],
+      env: { ...process.env, CCS_DEBUG: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(result.exitCode).toBe(0);
+    const diagnostics = result.stderr.toString().trim().split("\n").filter((line) =>
+      line.includes('"message":"cmux hook-store reconciliation"'),
+    );
+    expect(diagnostics).toHaveLength(2);
   });
 
   test("B14: activeSessionsBySurface fills in surfaces the sessions view doesn't cover", () => {
@@ -107,6 +135,56 @@ describe("parseHookStore", () => {
     };
     const m = parseHookStore(partialStore);
     expect(m.get("surface-Y")?.sessionId).toBe("session-C");
+  });
+
+  test("newest session-history record wins independent of object order and carries its metadata", () => {
+    const older = { surfaceId: "surface-X", updatedAt: 100, workspaceId: "old-ws" };
+    const newer = { surfaceId: "surface-X", updatedAt: 200, workspaceId: "new-ws", cwd: "/new" };
+    const first = parseHookStore({ sessions: { old: older, new: newer } });
+    const reversed = parseHookStore({ sessions: { new: newer, old: older } });
+    expect(first.get("surface-X")).toEqual({
+      sessionId: "new", workspaceId: "new-ws", cwd: "/new", agentLifecycle: null,
+      isRestorable: false, pid: null, updatedAt: 200,
+    });
+    expect(reversed.get("surface-X")).toEqual(first.get("surface-X"));
+  });
+
+  test("valid timestamps outrank missing or invalid timestamps independent of object order", () => {
+    const valid = { surfaceId: "surface-X", updatedAt: 0 };
+    const missing = { surfaceId: "surface-X" };
+    expect(parseHookStore({ sessions: { missing, valid } }).get("surface-X")?.sessionId).toBe("valid");
+    expect(parseHookStore({ sessions: { valid, missing } }).get("surface-X")?.sessionId).toBe("valid");
+    expect(parseHookStore({ sessions: {
+      invalid: { surfaceId: "surface-X", updatedAt: Number.POSITIVE_INFINITY },
+      valid: { surfaceId: "surface-X", updatedAt: 1 },
+    } }).get("surface-X")?.sessionId).toBe("valid");
+  });
+
+  test("equal, missing, and invalid timestamps use lexical sessionId tie-break", () => {
+    expect(parseHookStore({ sessions: {
+      z: { surfaceId: "equal", updatedAt: 10 }, a: { surfaceId: "equal", updatedAt: 10 },
+    } }).get("equal")?.sessionId).toBe("a");
+    expect(parseHookStore({ sessions: {
+      z: { surfaceId: "missing" }, a: { surfaceId: "missing" },
+    } }).get("missing")?.sessionId).toBe("a");
+    expect(parseHookStore({ sessions: {
+      z: { surfaceId: "invalid", updatedAt: Number.NaN },
+      a: { surfaceId: "invalid", updatedAt: Number.POSITIVE_INFINITY },
+    } }).get("invalid")?.sessionId).toBe("a");
+  });
+
+  test("active map fills gaps and enriches from session detail", () => {
+    const m = parseHookStore({
+      sessions: { partial: { workspaceId: "ws-2", cwd: "/tmp", isRestorable: true } },
+      activeSessionsBySurface: {
+        "surface-Y": { sessionId: "partial" }, "surface-Z": { sessionId: "missing" },
+      },
+    });
+    expect(m.get("surface-Y")).toEqual({
+      sessionId: "partial", workspaceId: "ws-2", cwd: "/tmp", agentLifecycle: null,
+      isRestorable: true, pid: null,
+    });
+    expect(m.get("surface-Z")?.sessionId).toBe("missing");
   });
 });
 

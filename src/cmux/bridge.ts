@@ -1,3 +1,5 @@
+import { log } from "../logger.ts";
+
 /**
  * cmux bridge — the surface-keyed link between a Claude session and its live cmux body.
  *
@@ -98,6 +100,8 @@ export interface SurfaceSession {
    * fail to fire the stop hook (crash, kill -9), leaving the store claiming a dead session is
    * `agentLifecycle: running` — the pid check catches that. */
   pid: number | null;
+  /** cmux's Unix-seconds update timestamp, when the store recorded a finite number. */
+  updatedAt?: number;
 }
 
 // --- parse `cmux tree --all --json --id-format both` ----------------------------
@@ -144,6 +148,7 @@ interface HookSessionEntry {
   agentLifecycle?: string | null;
   isRestorable?: boolean;
   pid?: number | null;
+  updatedAt?: number;
 }
 /** One entry in `activeSessionsBySurface[surfaceUUID]` — the CURRENT surface→session binding. */
 interface ActiveSurfaceBinding {
@@ -154,6 +159,8 @@ export interface CmuxHookStore {
   sessions?: Record<string, HookSessionEntry>;
   activeSessionsBySurface?: Record<string, ActiveSurfaceBinding>;
 }
+
+let lastHookStoreDiagnosticFingerprint: string | null = null;
 
 /**
  * surface UUID -> the claude session cmux currently binds to it.
@@ -181,47 +188,104 @@ export interface CmuxHookStore {
 export function parseHookStore(store: CmuxHookStore): Map<string, SurfaceSession> {
   const map = new Map<string, SurfaceSession>();
   const sessions = store.sessions ?? {};
-  const conflicts: Array<{ surfaceId: string; kept: string; discarded: string }> = [];
-  const record = (surfaceId: string, sessionId: string): void => {
-    if (!surfaceId || !sessionId) return;
+  const winners = new Map<string, { sessionId: string; detail: HookSessionEntry }>();
+  const historicalSamples: string[] = [];
+  const activeMapSamples: string[] = [];
+  let historicalDiscards = 0;
+  let activeMapDisagreements = 0;
+  const sample = (items: string[], value: string): void => {
+    const bounded = value.slice(0, 120);
+    const insertionIndex = items.findIndex((item) => bounded < item);
+    if (insertionIndex < 0) items.push(bounded);
+    else items.splice(insertionIndex, 0, bounded);
+    if (items.length > 8) items.pop();
+  };
+  const timestampIsValid = (value: number | undefined): value is number =>
+    typeof value === "number" && Number.isFinite(value);
+  const candidateWins = (
+    candidateSessionId: string,
+    candidate: HookSessionEntry,
+    currentSessionId: string,
+    current: HookSessionEntry,
+  ): boolean => {
+    const candidateTimestamp = candidate.updatedAt;
+    const currentTimestamp = current.updatedAt;
+    const candidateTimestampValid = timestampIsValid(candidateTimestamp);
+    const currentTimestampValid = timestampIsValid(currentTimestamp);
+    if (candidateTimestampValid !== currentTimestampValid) return candidateTimestampValid;
+    if (candidateTimestampValid && currentTimestampValid && candidateTimestamp !== currentTimestamp) {
+      return candidateTimestamp > currentTimestamp;
+    }
+    // Equal timestamps, including equally missing/invalid timestamps: lexical minimum wins.
+    return candidateSessionId < currentSessionId;
+  };
+  // Reduce the accreted sessions history before merging the current surface-side view. This makes
+  // the winner independent of JSON object order and ensures all detail comes from that winner.
+  for (const [sessionId, detail] of Object.entries(sessions)) {
+    const surfaceId = detail?.surfaceId;
+    if (!surfaceId || !sessionId) continue;
+    const existing = winners.get(surfaceId);
+    if (!existing) {
+      winners.set(surfaceId, { sessionId, detail });
+      continue;
+    }
+    if (candidateWins(sessionId, detail, existing.sessionId, existing.detail)) {
+      winners.set(surfaceId, { sessionId, detail });
+    }
+  }
+  // Count and sample against the final winner, not intermediate comparisons. Keeping the
+  // lexicographically smallest bounded samples makes equivalent stores order-independent.
+  for (const [sessionId, detail] of Object.entries(sessions)) {
+    const surfaceId = detail?.surfaceId;
+    if (!surfaceId || !sessionId) continue;
+    const winner = winners.get(surfaceId);
+    if (!winner || winner.sessionId === sessionId) continue;
+    historicalDiscards += 1;
+    sample(historicalSamples, `${surfaceId}:${sessionId}->${winner.sessionId}`);
+  }
+
+  const materialize = (sessionId: string, detail: HookSessionEntry): SurfaceSession => ({
+    sessionId,
+    workspaceId: detail.workspaceId ?? null,
+    cwd: detail.cwd ?? null,
+    agentLifecycle: detail.agentLifecycle ?? null,
+    isRestorable: detail.isRestorable ?? false,
+    pid: typeof detail.pid === "number" ? detail.pid : null,
+    ...(timestampIsValid(detail.updatedAt) ? { updatedAt: detail.updatedAt } : {}),
+  });
+  for (const [surfaceId, winner] of winners) map.set(surfaceId, materialize(winner.sessionId, winner.detail));
+
+  // The selected sessions-view winner remains authoritative for covered surfaces. The active map
+  // only fills gaps, enriching its binding from sessions detail when that record exists.
+  for (const [surfaceId, binding] of Object.entries(store.activeSessionsBySurface ?? {})) {
+    const sessionId = binding?.sessionId;
+    if (!surfaceId || !sessionId) continue;
     const existing = map.get(surfaceId);
     if (existing) {
       if (existing.sessionId !== sessionId) {
-        // Two views disagree on the same surface. First writer (sessions view) wins by design;
-        // record the conflict for the operator log so ambiguous bookkeeping surfaces.
-        conflicts.push({ surfaceId, kept: existing.sessionId, discarded: sessionId });
+        activeMapDisagreements += 1;
+        sample(activeMapSamples, `${surfaceId}:${existing.sessionId}!=${sessionId}`);
       }
-      return;
+      continue;
     }
-    const detail = sessions[sessionId] ?? {};
-    map.set(surfaceId, {
-      sessionId,
-      workspaceId: detail.workspaceId ?? null,
-      cwd: detail.cwd ?? null,
-      agentLifecycle: detail.agentLifecycle ?? null,
-      isRestorable: detail.isRestorable ?? false,
-      pid: typeof detail.pid === "number" ? detail.pid : null,
-    });
-  };
-  // FRESHER view first: sessions[sid].surfaceId is the per-session hook-stamped surface, which
-  // gets rewritten on every reattach. B14 fix: this used to be second, so a stale byMap won.
-  for (const [sessionId, detail] of Object.entries(sessions)) {
-    const surfaceId = detail?.surfaceId;
-    if (surfaceId) record(surfaceId, sessionId);
+    map.set(surfaceId, materialize(sessionId, sessions[sessionId] ?? {}));
   }
-  // Fill in surfaces the sessions view didn't cover (a legitimate case: cmux knows about a
-  // surface via activeSessionsBySurface but the sessions[sid] entry hasn't been written yet).
-  for (const [surfaceId, binding] of Object.entries(store.activeSessionsBySurface ?? {})) {
-    if (binding?.sessionId) record(surfaceId, binding.sessionId);
-  }
-  if (conflicts.length > 0) {
-    for (const c of conflicts) {
-      console.error(
-        `ccs cmux: contradictory hook-store binding for surface ${c.surfaceId} — ` +
-        `sessions view claims ${c.kept.slice(0, 8)} (KEPT — fresher), ` +
-        `activeSessionsBySurface claims ${c.discarded.slice(0, 8)} (discarded, likely stale post-reattach).`,
-      );
+
+  if (historicalDiscards > 0 || activeMapDisagreements > 0) {
+    const diagnostic = {
+      historicalDiscards,
+      activeMapDisagreements,
+      historicalSamples,
+      activeMapSamples,
+    };
+    const fingerprint = JSON.stringify(diagnostic);
+    if (fingerprint !== lastHookStoreDiagnosticFingerprint) {
+      log.debug("cmux hook-store reconciliation", diagnostic);
+      lastHookStoreDiagnosticFingerprint = fingerprint;
     }
+  } else {
+    // A later recurrence should be visible after the store returns to a clean state.
+    lastHookStoreDiagnosticFingerprint = null;
   }
   return map;
 }
