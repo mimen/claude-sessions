@@ -18,6 +18,9 @@ export function openIndex(dbPath: string): Database {
   db.exec("BEGIN IMMEDIATE;");
   try {
     const current = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
+    if (current > SCHEMA_VERSION) {
+      throw new Error(`index schema version ${current} is newer than supported version ${SCHEMA_VERSION}`);
+    }
     if (!hasTable(db, "sessions")) {
       createSchema(db);
     } else if (current >= 7 && isV6OrV7Compatible(db)) {

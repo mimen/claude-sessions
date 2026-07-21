@@ -15,3 +15,5 @@ predates the v7 semantics; incompatible pre-v6 shapes are also rebuildable cache
    to avoid an unnecessary title-generation backlog.
 4. Schema open/migration uses SQLite `BEGIN IMMEDIATE` plus a five-second busy timeout, so simultaneous
    ccs processes serialize the upgrade rather than racing table creation or alteration.
+5. A newer on-disk schema version is refused without modification. Upgrade the ccs binary before opening
+   that index; this prevents an older binary from downgrading or partially migrating newer cache data.
