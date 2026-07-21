@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Why ccs Prints Contradictory Hook-Store Bindings</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #667085;
+      --paper: #f7f4ed;
+      --panel: #fffdf8;
+      --line: #d8d2c5;
+      --blue: #3266d6;
+      --blue-soft: #e9f0ff;
+      --red: #c83b45;
+      --red-soft: #fff0f1;
+      --amber: #b66a0c;
+      --amber-soft: #fff5df;
+      --green: #177a58;
+      --green-soft: #e8f7f0;
+      --purple: #7756b5;
+      --purple-soft: #f1ecff;
+      --shadow: 0 16px 50px rgba(31, 36, 48, 0.10);
+      --mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+      --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 5%, rgba(50, 102, 214, 0.08), transparent 28rem),
+        radial-gradient(circle at 92% 10%, rgba(119, 86, 181, 0.08), transparent 25rem),
+        var(--paper);
+      font-family: var(--sans);
+      line-height: 1.5;
+    }
+
+    .page { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 42px 0 72px; }
+    header { display: grid; grid-template-columns: 1fr auto; gap: 28px; align-items: end; margin-bottom: 28px; }
+    h1 { max-width: 850px; margin: 0; font-size: clamp(32px, 5vw, 62px); line-height: 0.98; letter-spacing: -0.055em; }
+    .eyebrow { color: var(--blue); font: 700 12px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 14px; }
+    .subtitle { max-width: 790px; margin: 18px 0 0; color: var(--muted); font-size: 17px; }
+    .status-pill { align-self: start; border: 1px solid #efc6ca; color: var(--red); background: var(--red-soft); border-radius: 999px; padding: 9px 13px; font: 700 12px/1 var(--mono); white-space: nowrap; }
+
+    .fact-strip { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 17px; overflow: hidden; background: rgba(255, 253, 248, 0.8); box-shadow: var(--shadow); margin-bottom: 28px; }
+    .fact { padding: 18px 20px; border-right: 1px solid var(--line); }
+    .fact:last-child { border-right: 0; }
+    .fact strong { display: block; font-size: 25px; letter-spacing: -0.04em; }
+    .fact span { color: var(--muted); font-size: 12px; }
+
+    .mode-switch { display: inline-flex; padding: 4px; gap: 4px; border: 1px solid var(--line); border-radius: 12px; background: #ece8df; margin-bottom: 18px; }
+    .mode-switch button { border: 0; background: transparent; color: var(--muted); font: 700 13px/1 var(--sans); padding: 10px 15px; border-radius: 9px; cursor: pointer; }
+    .mode-switch button.active { color: var(--ink); background: var(--panel); box-shadow: 0 2px 10px rgba(31, 36, 48, 0.08); }
+
+    .diagram { position: relative; display: grid; grid-template-columns: 1fr 72px 1.15fr 72px 1fr; align-items: stretch; min-height: 570px; }
+    .column { display: flex; flex-direction: column; gap: 14px; }
+    .column-title { display: flex; align-items: center; justify-content: space-between; min-height: 35px; color: var(--muted); font: 700 12px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.09em; }
+    .card { position: relative; border: 1px solid var(--line); background: var(--panel); border-radius: 16px; padding: 18px; box-shadow: 0 8px 25px rgba(31,36,48,.05); }
+    .card h3 { margin: 0 0 7px; font-size: 17px; letter-spacing: -0.02em; }
+    .card p { margin: 0; color: var(--muted); font-size: 13px; }
+    .card code, code { font-family: var(--mono); font-size: 0.9em; }
+    .tag { display: inline-block; margin-bottom: 10px; padding: 5px 8px; border-radius: 7px; font: 700 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+    .tag.blue { color: var(--blue); background: var(--blue-soft); }
+    .tag.red { color: var(--red); background: var(--red-soft); }
+    .tag.amber { color: var(--amber); background: var(--amber-soft); }
+    .tag.green { color: var(--green); background: var(--green-soft); }
+    .tag.purple { color: var(--purple); background: var(--purple-soft); }
+
+    .surface { border-color: #adc2f0; background: linear-gradient(145deg, #fff, var(--blue-soft)); }
+    .surface-id { display: block; margin-top: 10px; overflow-wrap: anywhere; color: var(--blue); font: 700 11px/1.45 var(--mono); }
+    .process { display: grid; grid-template-columns: 9px 1fr; gap: 11px; align-items: start; }
+    .process-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; background: var(--green); box-shadow: 0 0 0 5px var(--green-soft); }
+
+    .store { flex: 1; border-color: #c8b9e7; background: linear-gradient(180deg, #fff, #faf7ff); }
+    .store::before { content: "JSON"; position: absolute; right: 14px; top: 14px; color: #9788b5; font: 700 10px/1 var(--mono); }
+    .store-section { margin-top: 14px; padding-top: 14px; border-top: 1px dashed #d8cfea; }
+    .store-section:first-of-type { border-top: 0; padding-top: 0; }
+    .store-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; font: 700 11px/1 var(--mono); }
+    .count { border-radius: 999px; padding: 4px 7px; color: var(--purple); background: var(--purple-soft); }
+    .record { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: center; padding: 8px 9px; margin: 6px 0; border-radius: 8px; background: #f5f1fb; font: 11px/1.25 var(--mono); }
+    .record .dot { width: 7px; height: 7px; border-radius: 50%; background: #aaa0be; }
+    .record.selected { outline: 2px solid var(--green); background: var(--green-soft); }
+    .record.selected .dot { background: var(--green); }
+    .record.wrong { outline: 2px solid var(--red); background: var(--red-soft); }
+    .record.wrong .dot { background: var(--red); }
+    .record.stale { opacity: .68; }
+    .record time { color: var(--muted); }
+    .ellipsis { color: var(--muted); text-align: center; font: 12px/1 var(--mono); padding: 4px; }
+
+    .arrow { display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); gap: 8px; }
+    .arrow-line { position: relative; width: 52px; height: 2px; background: currentColor; }
+    .arrow-line::after { content: ""; position: absolute; right: -1px; top: -4px; width: 8px; height: 8px; border-top: 2px solid currentColor; border-right: 2px solid currentColor; transform: rotate(45deg); }
+    .arrow small { width: 70px; text-align: center; font: 700 9px/1.25 var(--mono); text-transform: uppercase; }
+
+    .algorithm { flex: 1; overflow: hidden; }
+    .step { display: grid; grid-template-columns: 30px 1fr; gap: 11px; margin: 13px 0; }
+    .step-num { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #eef0f4; font: 700 12px/1 var(--mono); }
+    .step.bad .step-num { color: var(--red); background: var(--red-soft); }
+    .step.good .step-num { color: var(--green); background: var(--green-soft); }
+    .step strong { display: block; font-size: 13px; margin-bottom: 2px; }
+    .step span { display: block; color: var(--muted); font-size: 12px; }
+    .code-box { padding: 12px; border-radius: 10px; background: #202636; color: #e8edf7; font: 11px/1.65 var(--mono); overflow-x: auto; }
+    .code-box .bad-text { color: #ff9099; }
+    .code-box .good-text { color: #78e0b6; }
+    .code-box .dim { color: #8993a7; }
+
+    .result { border-width: 2px; }
+    .result.bad { border-color: #e7a9af; background: linear-gradient(145deg, #fff, var(--red-soft)); }
+    .result.good { border-color: #9bd5bf; background: linear-gradient(145deg, #fff, var(--green-soft)); }
+    .result-id { display: block; margin: 9px 0; font: 800 20px/1 var(--mono); letter-spacing: -0.05em; }
+    .result.bad .result-id { color: var(--red); }
+    .result.good .result-id { color: var(--green); }
+    .impact { display: grid; gap: 8px; margin-top: 12px; }
+    .impact-row { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; font-size: 12px; }
+    .impact-icon { font: 800 14px/1 var(--mono); }
+
+    .refresh-loop { border-color: #edcf94; background: var(--amber-soft); }
+    .loop { display: flex; align-items: center; gap: 12px; }
+    .loop-icon { display: grid; place-items: center; width: 42px; height: 42px; border: 2px solid var(--amber); border-radius: 50%; color: var(--amber); font-size: 23px; animation: spin 5s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .section { margin-top: 38px; }
+    .section h2 { margin: 0 0 16px; font-size: 25px; letter-spacing: -0.035em; }
+    .explain-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .explain-grid .card { min-height: 168px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 18px; color: var(--muted); font-size: 12px; }
+    .legend-item { display: flex; align-items: center; gap: 7px; }
+    .legend-dot { width: 9px; height: 9px; border-radius: 50%; }
+
+    .hidden { display: none !important; }
+    .fade-in { animation: fade .25s ease-out; }
+    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+    footer { margin-top: 42px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font: 11px/1.6 var(--mono); }
+
+    @media (max-width: 900px) {
+      header { grid-template-columns: 1fr; }
+      .fact-strip { grid-template-columns: 1fr 1fr; }
+      .fact:nth-child(2) { border-right: 0; }
+      .fact:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .diagram { grid-template-columns: 1fr; gap: 12px; }
+      .arrow { min-height: 54px; transform: rotate(90deg); }
+      .column-title { margin-top: 10px; }
+      .explain-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div>
+        <div class="eyebrow">ccs × cmux · hook-store reconciliation</div>
+        <h1>One surface. Hundreds of historical sessions. The wrong winner.</h1>
+        <p class="subtitle">
+          The message is not 233 separate cmux failures. It is one reconciliation bug repeatedly
+          interpreting an append-like history as if every record were a current binding.
+        </p>
+      </div>
+      <div class="status-pill">Observed on cmux 0.64.18</div>
+    </header>
+
+    <section class="fact-strip" aria-label="Observed state summary">
+      <div class="fact"><strong>317</strong><span>session-detail records in the hook store</span></div>
+      <div class="fact"><strong>42</strong><span>surface bindings in the active map</span></div>
+      <div class="fact"><strong>21</strong><span>surfaces currently present in cmux</span></div>
+      <div class="fact"><strong>233</strong><span>historical sessions claiming the example surface</span></div>
+    </section>
+
+    <nav class="mode-switch" aria-label="Diagram mode">
+      <button id="currentButton" class="active" type="button">Current behavior</button>
+      <button id="fixedButton" type="button">Corrected behavior</button>
+    </nav>
+
+    <section id="currentDiagram" class="diagram fade-in" aria-label="Current buggy data flow">
+      <div class="column">
+        <div class="column-title"><span>1 · Runtime</span><span>cmux</span></div>
+        <article class="card surface">
+          <span class="tag blue">Live surface</span>
+          <h3>Terminal surface exists now</h3>
+          <p>The live cmux tree proves the surface exists, but does not itself identify the correct Claude session.</p>
+          <span class="surface-id">0FAD92DF-0462-419C-B779-C97D917EC469</span>
+        </article>
+        <article class="card">
+          <div class="process">
+            <div class="process-dot"></div>
+            <div><h3>Claude hooks write state</h3><p>Start, stop, and reattach hooks update a JSON store outside <code>ccs</code>.</p></div>
+          </div>
+        </article>
+        <article class="card refresh-loop">
+          <div class="loop">
+            <div class="loop-icon">↻</div>
+            <div><h3>TUI refresh calls this repeatedly</h3><p>Title and liveness probes rebuild the bridge, so every parse prints the same batch again.</p></div>
+          </div>
+        </article>
+      </div>
+
+      <div class="arrow"><div class="arrow-line"></div><small>writes &amp; reads</small></div>
+
+      <div class="column">
+        <div class="column-title"><span>2 · Shared state</span><span>hook-store JSON</span></div>
+        <article class="card store">
+          <span class="tag purple">Two overlapping views</span>
+          <h3><code>claude-hook-sessions.json</code></h3>
+          <div class="store-section">
+            <div class="store-title"><span>sessions[sessionId]</span><span class="count">317 total</span></div>
+            <p>Accretes history. Old and replaced sessions remain present.</p>
+            <div class="record stale"><span class="dot"></span><span>e33c1758 · same surface</span><time>oldest</time></div>
+            <div class="record wrong"><span class="dot"></span><span>0084379f · first object entry</span><time>chosen</time></div>
+            <div class="ellipsis">⋮ 230 more historical records ⋮</div>
+            <div class="record selected"><span class="dot"></span><span>82b85715 · same surface</span><time>newest</time></div>
+          </div>
+          <div class="store-section">
+            <div class="store-title"><span>activeSessionsBySurface</span><span class="count">42 total</span></div>
+            <p>Intended as the current binding, but known to remain stale after reattach.</p>
+            <div class="record stale"><span class="dot"></span><span>0FAD… → c7465b77</span><time>stale</time></div>
+          </div>
+        </article>
+      </div>
+
+      <div class="arrow"><div class="arrow-line"></div><small>parseHookStore</small></div>
+
+      <div class="column">
+        <div class="column-title"><span>3 · Reconciliation</span><span>ccs</span></div>
+        <article class="card algorithm">
+          <span class="tag red">Current algorithm</span>
+          <h3>First writer wins</h3>
+          <div class="step bad"><div class="step-num">1</div><div><strong>Iterate every session record</strong><span>JavaScript object order decides which historical record reaches a surface first.</span></div></div>
+          <div class="step bad"><div class="step-num">2</div><div><strong>Keep the first one forever</strong><span>Later session records for that surface are treated as contradictions, even though they are history from the same view.</span></div></div>
+          <div class="step bad"><div class="step-num">3</div><div><strong>Mislabel every collision</strong><span>The error says each discarded ID came from <code>activeSessionsBySurface</code>; most actually came from <code>sessions</code>.</span></div></div>
+          <div class="code-box"><span class="dim">// Actual behavior</span><br />for (session of sessions) {<br />&nbsp;&nbsp;if (!map.has(surface)) <span class="bad-text">map.set(surface, session)</span><br />&nbsp;&nbsp;else <span class="bad-text">console.error("contradiction")</span><br />}</div>
+        </article>
+        <article class="card result bad">
+          <span class="tag red">Wrong resolution</span>
+          <h3>Surface resolves by insertion order</h3>
+          <span class="result-id">0084379f</span>
+          <p>It is described as “fresher,” but no freshness comparison occurred.</p>
+          <div class="impact">
+            <div class="impact-row"><span class="impact-icon">×</span><span>Up to hundreds of stderr lines per bridge rebuild.</span></div>
+            <div class="impact-row"><span class="impact-icon">×</span><span>Old PID and lifecycle metadata may be selected.</span></div>
+            <div class="impact-row"><span class="impact-icon">×</span><span>Liveness and resume decisions can target the wrong session.</span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="fixedDiagram" class="diagram hidden" aria-label="Corrected data flow">
+      <div class="column">
+        <div class="column-title"><span>1 · Runtime</span><span>cmux</span></div>
+        <article class="card surface">
+          <span class="tag blue">Live surface</span>
+          <h3>Same upstream state</h3>
+          <p>No cmux reset or hook-store deletion is required. The consumer becomes history-aware.</p>
+          <span class="surface-id">0FAD92DF-0462-419C-B779-C97D917EC469</span>
+        </article>
+        <article class="card">
+          <span class="tag green">Safety boundary</span>
+          <h3>Live tree still gates liveness</h3>
+          <p>After reconciliation, <code>buildBridge</code> still intersects bindings with current cmux surfaces and filters dead PIDs.</p>
+        </article>
+      </div>
+
+      <div class="arrow" style="color: var(--green)"><div class="arrow-line"></div><small>same inputs</small></div>
+
+      <div class="column">
+        <div class="column-title"><span>2 · Normalize history</span><span>hook-store JSON</span></div>
+        <article class="card store">
+          <span class="tag green">Freshest per surface</span>
+          <h3>Reduce before merging views</h3>
+          <div class="store-section">
+            <div class="store-title"><span>Group by surfaceId</span><span class="count">233 → 1</span></div>
+            <div class="record stale"><span class="dot"></span><span>e33c1758</span><time>1784415852</time></div>
+            <div class="record stale"><span class="dot"></span><span>0084379f</span><time>1784417456</time></div>
+            <div class="ellipsis">compare numeric updatedAt</div>
+            <div class="record selected"><span class="dot"></span><span>82b85715</span><time>1784510624</time></div>
+          </div>
+          <div class="store-section">
+            <div class="store-title"><span>Then compare the two views</span><span class="count">1 × 1</span></div>
+            <p>The freshest session-detail winner keeps ADR-0085 precedence. The stale active-map value only fills a gap when no session-detail winner exists.</p>
+          </div>
+        </article>
+      </div>
+
+      <div class="arrow" style="color: var(--green)"><div class="arrow-line"></div><small>deterministic merge</small></div>
+
+      <div class="column">
+        <div class="column-title"><span>3 · Reconciliation</span><span>ccs</span></div>
+        <article class="card algorithm">
+          <span class="tag green">Corrected algorithm</span>
+          <h3>Freshest record wins</h3>
+          <div class="step good"><div class="step-num">1</div><div><strong>Group session history by surface</strong><span>Historical records are recognized as records from one source, not cross-view contradictions.</span></div></div>
+          <div class="step good"><div class="step-num">2</div><div><strong>Select greatest finite updatedAt</strong><span>A stable session-ID tie-break handles equal or malformed timestamps.</span></div></div>
+          <div class="step good"><div class="step-num">3</div><div><strong>Merge active map second</strong><span>It fills missing surfaces; genuine disagreement becomes one bounded debug summary.</span></div></div>
+          <div class="code-box"><span class="dim">// Corrected behavior</span><br />winner = <span class="good-text">maxBy(surfaceSessions, updatedAt)</span><br />map.set(surface, winner)<br /><span class="dim">// active map fills gaps only</span><br />if (!map.has(surface)) map.set(surface, active)</div>
+        </article>
+        <article class="card result good">
+          <span class="tag green">Correct resolution</span>
+          <h3>Surface resolves by recorded freshness</h3>
+          <span class="result-id">82b85715</span>
+          <p>All metadata comes from the same freshest record.</p>
+          <div class="impact">
+            <div class="impact-row"><span class="impact-icon">✓</span><span>Normal TUI runs stay quiet.</span></div>
+            <div class="impact-row"><span class="impact-icon">✓</span><span>Resolution is independent of JSON object order.</span></div>
+            <div class="impact-row"><span class="impact-icon">✓</span><span>Tree and PID checks remain downstream safeguards.</span></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>How the systems fit together</h2>
+      <div class="explain-grid">
+        <article class="card">
+          <span class="tag blue">cmux tree</span>
+          <h3>What exists right now?</h3>
+          <p><code>cmux tree --all</code> is authoritative for current windows, workspaces, panes, and surfaces. It cannot answer which Claude session owns a surface.</p>
+        </article>
+        <article class="card">
+          <span class="tag purple">cmux hook store</span>
+          <h3>Which session claimed it?</h3>
+          <p>Claude lifecycle hooks write session identity and process metadata. One view accumulates history; the other can lag after reattach.</p>
+        </article>
+        <article class="card">
+          <span class="tag amber">ccs bridge</span>
+          <h3>Is that session live?</h3>
+          <p><code>ccs</code> reconciles both hook-store views, checks the PID, and intersects the result with the live tree before resume and title decisions.</p>
+        </article>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><span class="legend-dot" style="background: var(--blue)"></span>live runtime topology</div>
+        <div class="legend-item"><span class="legend-dot" style="background: var(--purple)"></span>persisted identity state</div>
+        <div class="legend-item"><span class="legend-dot" style="background: var(--red)"></span>current incorrect choice</div>
+        <div class="legend-item"><span class="legend-dot" style="background: var(--green)"></span>freshness-based choice</div>
+      </div>
+    </section>
+
+    <footer>
+      Source paths: <code>src/cmux/bridge.ts</code> → <code>parseHookStore</code> → <code>buildBridge</code> ·
+      runtime store: <code>~/.cmuxterm/claude-hook-sessions.json</code> ·
+      example values sampled locally on 2026-07-20.
+    </footer>
+  </main>
+
+  <script>
+    const currentButton = document.getElementById("currentButton");
+    const fixedButton = document.getElementById("fixedButton");
+    const currentDiagram = document.getElementById("currentDiagram");
+    const fixedDiagram = document.getElementById("fixedDiagram");
+
+    function showMode(mode) {
+      const showCurrent = mode === "current";
+      currentButton.classList.toggle("active", showCurrent);
+      fixedButton.classList.toggle("active", !showCurrent);
+      currentDiagram.classList.toggle("hidden", !showCurrent);
+      fixedDiagram.classList.toggle("hidden", showCurrent);
+      const visible = showCurrent ? currentDiagram : fixedDiagram;
+      visible.classList.remove("fade-in");
+      requestAnimationFrame(() => visible.classList.add("fade-in"));
+    }
+
+    currentButton.addEventListener("click", () => showMode("current"));
+    fixedButton.addEventListener("click", () => showMode("fixed"));
+  </script>
+</body>
+</html>
