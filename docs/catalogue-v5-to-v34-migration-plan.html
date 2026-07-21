@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Forensic migration plan for reconciling a legacy catalogue v5 database with the current v34 catalogue model.">
+  <title>Catalogue v5 → v34 · Migration dossier</title>
+  <style>
+    :root{--paper:#e9edf0;--sheet:#f7f8f6;--sheet-strong:#ffffff;--ink:#15212b;--ink-soft:#4d5b65;--ink-faint:#596a75;--rule:#aeb9c0;--rule-strong:#687985;--navy:#183d59;--blue:#356b8c;--blue-pale:#dce8ef;--teal:#2d6f68;--teal-pale:#dbeae6;--amber:#8b601c;--amber-pale:#f1e7d0;--red:#8a413b;--red-pale:#eedfdd;--violet:#5e557f;--violet-pale:#e5e1ed;--shadow:0 18px 45px rgba(30,47,59,0.12);--radius:3px;--mono:"SFMono-Regular","Cascadia Mono","Roboto Mono",Consolas,monospace;--sans:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--serif:Iowan Old Style,"Palatino Linotype",Palatino,Georgia,serif;--max:1180px;}
+    *{box-sizing:border-box;}
+    html{scroll-behavior:smooth;}
+    body{margin:0;color:var(--ink);background-color:var(--paper);background-image:linear-gradient(rgba(38,65,82,0.045) 1px,transparent 1px),linear-gradient(90deg,rgba(38,65,82,0.045) 1px,transparent 1px),linear-gradient(rgba(38,65,82,0.02) 1px,transparent 1px),linear-gradient(90deg,rgba(38,65,82,0.02) 1px,transparent 1px);background-size:28px 28px,28px 28px,7px 7px,7px 7px;font-family:var(--sans);font-size:16px;line-height:1.58;}
+    a{color:var(--navy);text-underline-offset:0.16em;}
+    button,input{font:inherit;}
+    button:focus-visible,input:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #f0b84f;outline-offset:3px;}
+    .page-shell{width:min(calc(100% - 28px),var(--max));margin:28px auto 72px;background:var(--sheet);border:1px solid var(--rule-strong);box-shadow:var(--shadow);}
+    .topline{display:grid;grid-template-columns:1fr auto;gap:20px;padding:12px 20px;border-bottom:1px solid var(--rule-strong);background:var(--navy);color:white;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.09em;text-transform:uppercase;}
+    .topline span:last-child{text-align:right;}
+    .hero{position:relative;overflow:hidden;padding:clamp(38px,7vw,84px) clamp(22px,6vw,72px) 42px;border-bottom:1px solid var(--rule-strong);background:linear-gradient(105deg,rgba(255,255,255,0.92),rgba(247,248,246,0.86)),repeating-linear-gradient(0deg,transparent 0 25px,rgba(24,61,89,0.055) 25px 26px);}
+    .hero::after{content:"V5 ≠ V34";position:absolute;top:22px;right:-18px;transform:rotate(7deg);padding:10px 18px 8px;border:3px double var(--red);color:var(--red);font-family:var(--mono);font-size:clamp(0.75rem,1.6vw,1rem);font-weight:800;letter-spacing:0.14em;opacity:0.82;}
+    .kicker,.section-code,.eyebrow{margin:0;font-family:var(--mono);font-size:0.73rem;font-weight:700;letter-spacing:0.13em;text-transform:uppercase;}
+    .kicker{color:var(--blue);}
+    h1{max-width:920px;margin:14px 0 18px;font-family:var(--serif);font-size:clamp(2.8rem,7vw,6.7rem);font-weight:600;letter-spacing:-0.055em;line-height:0.94;}
+    .hero-deck{max-width:780px;margin:0;color:var(--ink-soft);font-family:var(--serif);font-size:clamp(1.12rem,2.2vw,1.55rem);line-height:1.42;}
+    .verdict-strip{display:grid;grid-template-columns:minmax(180px,0.7fr) 2fr;gap:0;margin-top:36px;border:1px solid var(--red);background:var(--sheet-strong);}
+    .verdict-label{display:grid;place-items:center;padding:18px;background:var(--red);color:white;font-family:var(--mono);font-size:0.78rem;font-weight:800;letter-spacing:0.13em;text-transform:uppercase;}
+    .verdict-copy{margin:0;padding:18px 22px;font-weight:680;}
+    .document-grid{display:grid;grid-template-columns:210px minmax(0,1fr);}
+    .rail{padding:24px 18px;border-right:1px solid var(--rule);background:rgba(220,232,239,0.23);}
+    .rail-inner{position:sticky;top:18px;}
+    .rail-title{margin:0 0 10px;color:var(--ink-faint);font-family:var(--mono);font-size:0.68rem;font-weight:700;letter-spacing:0.13em;text-transform:uppercase;}
+    .rail ol{margin:0;padding:0;list-style:none;counter-reset:dossier;}
+    .rail li{counter-increment:dossier;border-top:1px solid var(--rule);}
+    .rail li:last-child{border-bottom:1px solid var(--rule);}
+    .rail a{display:grid;grid-template-columns:26px 1fr;gap:8px;padding:10px 2px;color:var(--ink-soft);font-size:0.78rem;line-height:1.3;text-decoration:none;}
+    .rail a::before{content:counter(dossier,decimal-leading-zero);color:var(--blue);font-family:var(--mono);font-size:0.68rem;}
+    .rail a:hover{color:var(--ink);background:rgba(255,255,255,0.7);}
+    main{min-width:0;}
+    .section{padding:clamp(36px,6vw,70px) clamp(22px,5vw,62px);border-bottom:1px solid var(--rule-strong);}
+    .section:last-child{border-bottom:0;}
+    .section-head{display:grid;grid-template-columns:92px minmax(0,1fr);gap:20px;align-items:start;margin-bottom:28px;}
+    .section-code{padding-top:9px;color:var(--blue);border-top:3px solid var(--blue);}
+    h2{margin:0;font-family:var(--serif);font-size:clamp(2rem,4.4vw,3.6rem);font-weight:600;letter-spacing:-0.04em;line-height:1.02;}
+    h3{margin:0 0 10px;font-family:var(--serif);font-size:clamp(1.35rem,2.3vw,1.85rem);font-weight:600;letter-spacing:-0.025em;line-height:1.15;}
+    h4{margin:0 0 8px;font-size:0.92rem;letter-spacing:0.02em;}
+    p{margin:0 0 1em;}
+    .lede{max-width:780px;margin:-8px 0 30px 112px;color:var(--ink-soft);font-family:var(--serif);font-size:1.15rem;}
+    .fact{border-bottom:2px solid var(--blue);font-weight:700;}
+    .path{overflow-wrap:anywhere;font-family:var(--mono);font-size:0.83em;}
+    .evidence-ledger{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid var(--rule-strong);background:var(--sheet-strong);}
+    .ledger-side{min-width:0;padding:22px;}
+    .ledger-side + .ledger-side{border-left:1px solid var(--rule-strong);}
+    .db-tag{display:inline-block;margin-bottom:14px;padding:4px 8px 3px;color:white;background:var(--navy);font-family:var(--mono);font-size:0.67rem;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;}
+    .db-tag.current{background:var(--teal);}
+    .db-path{min-height:3.6em;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--rule);font-family:var(--mono);font-size:0.83rem;overflow-wrap:anywhere;}
+    .ledger-counts{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin:0;background:var(--rule);border:1px solid var(--rule);}
+    .ledger-counts div{padding:12px 10px;background:var(--sheet);}
+    .ledger-counts dt{color:var(--ink-faint);font-family:var(--mono);font-size:0.63rem;letter-spacing:0.08em;text-transform:uppercase;}
+    .ledger-counts dd{margin:2px 0 0;font-family:var(--serif);font-size:1.8rem;line-height:1;}
+    .schema-switch{display:none;justify-content:flex-end;margin:16px 0 10px;}
+    .js .schema-switch{display:flex;}
+    .control-button{padding:8px 12px;border:1px solid var(--rule-strong);border-radius:var(--radius);color:var(--ink);background:var(--sheet-strong);cursor:pointer;font-family:var(--mono);font-size:0.74rem;font-weight:700;}
+    .control-button:hover{background:var(--blue-pale);}
+    .schema-lineage{display:grid;grid-template-columns:1fr 120px 1fr;align-items:stretch;margin-top:18px;}
+    .schema-card{padding:20px;border:1px solid var(--rule-strong);background:var(--sheet-strong);}
+    .schema-card h3{font-family:var(--mono);font-size:0.96rem;letter-spacing:0;}
+    .schema-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:14px 0 0;padding:14px 0 0;border-top:1px solid var(--rule);list-style:none;font-family:var(--mono);font-size:0.72rem;}
+    .js .schema-fields{display:none;}
+    .js .schema-lineage.schemas-open .schema-fields{display:grid;}
+    .broken-link{position:relative;display:grid;place-items:center;min-height:122px;color:var(--red);font-family:var(--mono);font-size:0.66rem;font-weight:800;letter-spacing:0.08em;text-align:center;text-transform:uppercase;}
+    .broken-link::before,.broken-link::after{content:"";position:absolute;top:50%;width:38%;border-top:2px dashed var(--red);}
+    .broken-link::before{left:0;}
+    .broken-link::after{right:0;}
+    .broken-link span{z-index:1;max-width:70px;padding:6px;background:var(--sheet);border:1px solid var(--red);}
+    .error-slip{margin-top:20px;padding:15px 18px;border-left:5px solid var(--red);background:var(--red-pale);font-family:var(--mono);font-size:0.8rem;}
+    .model-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;}
+    .model-card{padding:20px;border:1px solid var(--rule-strong);background:var(--sheet-strong);}
+    .model-card .eyebrow{color:var(--blue);}
+    .model-card.identity{border-top:5px solid var(--teal);}
+    .model-card.grouping{border-top:5px solid var(--violet);}
+    .model-card.session{border-top:5px solid var(--blue);}
+    .observed-grid{display:grid;grid-template-columns:1.2fr 0.8fr;gap:24px;}
+    .coverage-table,.mapping-table,.report-table{width:100%;border-collapse:collapse;background:var(--sheet-strong);font-size:0.84rem;}
+    .coverage-table caption,.mapping-table caption,.report-table caption{padding:0 0 10px;color:var(--ink-soft);font-family:var(--serif);font-size:1.1rem;font-weight:600;text-align:left;}
+    th,td{padding:10px 12px;border:1px solid var(--rule);text-align:left;vertical-align:top;}
+    th{background:var(--blue-pale);font-family:var(--mono);font-size:0.67rem;letter-spacing:0.08em;text-transform:uppercase;}
+    td.num{width:78px;font-family:var(--mono);font-weight:800;text-align:right;}
+    .zero-list{margin:20px 0 0;padding:15px 18px;border:1px solid var(--rule);background:rgba(255,255,255,0.58);}
+    .zero-list strong{display:block;margin-bottom:6px;font-family:var(--mono);font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;}
+    .distribution{padding:18px;border:1px solid var(--rule-strong);background:var(--sheet-strong);}
+    .distribution + .distribution{margin-top:16px;}
+    .bar-row{display:grid;grid-template-columns:minmax(110px,1fr) minmax(90px,2fr) 36px;gap:10px;align-items:center;margin-top:9px;font-size:0.72rem;}
+    .bar-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);}
+    .bar-track{height:9px;background:#e2e7e9;border-radius:4px;overflow:hidden;}
+    .bar-fill{display:block;height:100%;min-width:3px;background:var(--blue);border-radius:0 4px 4px 0;}
+    .bar-fill.none{background:#7d8b94;}
+    .bar-value{font-family:var(--mono);font-weight:800;text-align:right;}
+    .table-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;}
+    .table-tools span{margin-right:4px;color:var(--ink-faint);font-family:var(--mono);font-size:0.68rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;}
+    .filter-button{padding:6px 9px;border:1px solid var(--rule);border-radius:999px;color:var(--ink-soft);background:var(--sheet-strong);cursor:pointer;font-family:var(--mono);font-size:0.68rem;}
+    .filter-button[aria-pressed="true"]{border-color:var(--navy);color:white;background:var(--navy);}
+    .confidence{display:inline-block;min-width:102px;padding:4px 7px 3px;border:1px solid currentColor;font-family:var(--mono);font-size:0.62rem;font-weight:800;letter-spacing:0.08em;text-align:center;text-transform:uppercase;}
+    .confidence.direct{color:var(--teal);background:var(--teal-pale);}
+    .confidence.conditional{color:var(--amber);background:var(--amber-pale);}
+    .confidence.forbidden{color:var(--red);background:var(--red-pale);}
+    tr[hidden]{display:none;}
+    .mapping-table code{font-family:var(--mono);font-size:0.8rem;}
+    .manifest-wrap{overflow-x:auto;padding:4px 0 10px;}
+    .manifest{min-width:800px;border:1px solid var(--rule-strong);background:var(--sheet-strong);}
+    .manifest-head{display:grid;grid-template-columns:190px repeat(3,1fr);background:var(--navy);color:white;font-family:var(--mono);font-size:0.68rem;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;}
+    .manifest-head div{padding:10px 14px;border-right:1px solid rgba(255,255,255,0.28);}
+    .manifest-body{position:relative;display:grid;grid-template-columns:190px repeat(3,1fr);min-height:310px;}
+    .manifest-source{padding:18px 14px;border-right:1px solid var(--rule-strong);background:repeating-linear-gradient(0deg,#f2f5f5 0 29px,#dfe5e8 29px 30px);}
+    .ticket{position:relative;z-index:2;margin-bottom:10px;padding:8px 10px;border:1px solid var(--rule-strong);background:white;box-shadow:3px 3px 0 rgba(24,61,89,0.1);font-family:var(--mono);font-size:0.68rem;}
+    .manifest-lane{position:relative;padding:18px 14px;border-right:1px solid var(--rule);}
+    .manifest-lane:last-child{border-right:0;}
+    .manifest-lane::before{content:"";position:absolute;top:41px;left:0;right:0;border-top:2px solid var(--rule-strong);}
+    .manifest-lane::after{content:"";position:absolute;top:36px;right:12px;width:9px;height:9px;border-top:2px solid var(--rule-strong);border-right:2px solid var(--rule-strong);transform:rotate(45deg);}
+    .lane-stamp{position:relative;z-index:2;display:inline-block;padding:4px 8px;border:2px solid currentColor;background:var(--sheet-strong);font-family:var(--mono);font-size:0.68rem;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;}
+    .session-lane .lane-stamp{color:var(--blue);}
+    .identity-lane .lane-stamp{color:var(--teal);}
+    .quarantine-lane .lane-stamp{color:var(--red);}
+    .lane-list{position:relative;z-index:2;margin:46px 0 0;padding:0;list-style:none;font-size:0.79rem;}
+    .lane-list li{margin-top:9px;padding:8px 9px;border-left:3px solid var(--rule-strong);background:rgba(255,255,255,0.9);}
+    .policy-grid,.gate-grid,.decision-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}
+    .policy-card,.gate-card,.decision-card{padding:20px;border:1px solid var(--rule-strong);background:var(--sheet-strong);}
+    .policy-card strong,.gate-card strong{color:var(--navy);}
+    .pipeline{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));margin:0;padding:0;list-style:none;counter-reset:pipeline;border:1px solid var(--rule-strong);background:var(--sheet-strong);}
+    .pipeline li{position:relative;min-height:160px;padding:46px 12px 15px;border-right:1px solid var(--rule);counter-increment:pipeline;font-size:0.75rem;}
+    .pipeline li:last-child{border-right:0;}
+    .pipeline li::before{content:counter(pipeline,decimal-leading-zero);position:absolute;top:13px;left:12px;color:var(--blue);font-family:var(--mono);font-size:0.72rem;font-weight:800;}
+    .pipeline li::after{content:"→";position:absolute;z-index:2;top:10px;right:-9px;color:var(--rule-strong);background:white;font-family:var(--mono);}
+    .pipeline li:last-child::after{content:none;}
+    .pipeline b{display:block;margin-bottom:8px;font-family:var(--serif);font-size:1rem;line-height:1.2;}
+    .phase-hold{color:var(--red);background:linear-gradient(135deg,white,var(--red-pale));}
+    .gate-card ul,.decision-card ul,.report-notes,.schema-card ul{margin:10px 0 0;padding-left:19px;}
+    .gate-card li,.decision-card li,.report-notes li{margin:6px 0;}
+    .gate-card.stop{border-top:5px solid var(--red);}
+    .gate-card.pass{border-top:5px solid var(--teal);}
+    .gate-card.rollback{border-top:5px solid var(--amber);}
+    .decision-card{border-left:5px solid var(--violet);}
+    .recommendation{display:grid;grid-template-columns:160px 1fr;gap:20px;margin-top:28px;padding:22px;border:2px solid var(--navy);background:var(--blue-pale);}
+    .recommendation .eyebrow{color:var(--navy);}
+    .recommendation p:last-child{margin-bottom:0;}
+    .status-mark{display:inline-flex;gap:7px;align-items:center;font-family:var(--mono);font-size:0.7rem;font-weight:800;text-transform:uppercase;}
+    .status-mark::before{content:"";width:9px;height:9px;border:2px solid currentColor;}
+    .status-mark.hold{color:var(--red);}
+    .footnotes{padding:24px clamp(22px,5vw,62px);border-top:1px solid var(--rule-strong);color:var(--ink-soft);background:#edf1f2;font-family:var(--mono);font-size:0.7rem;}
+    .footnotes p{margin:4px 0;}
+    .noscript-note{padding:10px 14px;border-bottom:1px solid var(--rule-strong);color:var(--amber);background:var(--amber-pale);font-family:var(--mono);font-size:0.75rem;}
+    @media (max-width:900px){.document-grid{grid-template-columns:1fr;}
+    .rail{border-right:0;border-bottom:1px solid var(--rule-strong);}
+    .rail-inner{position:static;}
+    .rail ol{display:flex;gap:8px;overflow-x:auto;padding-bottom:5px;}
+    .rail li,.rail li:last-child{flex:0 0 170px;border:1px solid var(--rule);}
+    .rail a{padding:9px;}
+    .pipeline{grid-template-columns:repeat(2,1fr);}
+    .pipeline li{min-height:130px;border-bottom:1px solid var(--rule);}
+    .pipeline li::after{content:none;}
+    }
+    @media (max-width:700px){.page-shell{width:100%;margin:0;border-right:0;border-left:0;}
+    .topline{grid-template-columns:1fr;gap:3px;}
+    .topline span:last-child{text-align:left;}
+    .hero::after{top:16px;right:-33px;}
+    .verdict-strip,.evidence-ledger,.observed-grid,.model-grid,.policy-grid,.gate-grid,.decision-grid,.recommendation{grid-template-columns:1fr;}
+    .ledger-side + .ledger-side{border-top:1px solid var(--rule-strong);border-left:0;}
+    .section-head{grid-template-columns:1fr;gap:10px;}
+    .section-code{width:92px;}
+    .lede{margin-left:0;}
+    .schema-lineage{grid-template-columns:1fr;}
+    .broken-link{min-height:86px;}
+    .broken-link::before,.broken-link::after{width:42%;}
+    .pipeline{grid-template-columns:1fr;}
+    .pipeline li{min-height:0;}
+    .bar-row{grid-template-columns:minmax(96px,1fr) 1.5fr 30px;}
+    th,td{padding:8px;}
+    }
+    @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto;}
+    }
+    @media print{body{background:white;}
+    .page-shell{width:100%;margin:0;border:0;box-shadow:none;}
+    .rail,.schema-switch,.table-tools{display:none;}
+    .document-grid{display:block;}
+    .section{break-inside:avoid;}
+    .schema-fields{display:grid;}
+    }
+    </style>
+</head>
+<body>
+  <div class="page-shell">
+    <header>
+      <div class="topline">
+        <span>Forensic data migration dossier · Catalogue lineage inquiry</span>
+        <span>Disposition: hold / dry-run only</span>
+      </div>
+      <div class="hero">
+        <p class="kicker">Evidence brief · legacy recovery into current model</p>
+        <h1>Two catalogues.<br>Not one upgrade path.</h1>
+        <p class="hero-deck">A controlled plan for preserving 106 legacy session records without pretending a v5 schema from one lineage can be automatically upgraded into the current v34 identity model.</p>
+        <div class="verdict-strip" role="note" aria-label="Current recommendation">
+          <div class="verdict-label">Recommendation</div>
+          <p class="verdict-copy">Obtain or sync <span class="path">~/.ccs-config</span> from the work laptop, then build a dry-run adapter. Do not apply a migration yet.</p>
+        </div>
+      </div>
+    </header>
+
+    <noscript><div class="noscript-note">JavaScript is off. All evidence and recommendations remain visible; only schema reveal and confidence filtering are unavailable.</div></noscript>
+
+    <div class="document-grid">
+      <nav class="rail" aria-label="Dossier sections">
+        <div class="rail-inner">
+          <p class="rail-title">Manifest index</p>
+          <ol>
+            <li><a href="#finding">Primary finding</a></li>
+            <li><a href="#model">Mental model</a></li>
+            <li><a href="#inventory">Observed inventory</a></li>
+            <li><a href="#mapping">Field mapping</a></li>
+            <li><a href="#routing">Routing manifest</a></li>
+            <li><a href="#pipeline">Migration pipeline</a></li>
+            <li><a href="#safety">Safety gates</a></li>
+            <li><a href="#dry-run">Dry-run packet</a></li>
+            <li><a href="#decisions">Milad decisions</a></li>
+          </ol>
+        </div>
+      </nav>
+
+      <main>
+        <section class="section" id="finding">
+          <div class="section-head">
+            <p class="section-code">Finding 01</p>
+            <h2>The version numbers conceal different schema lineages.</h2>
+          </div>
+          <p class="lede">The observed evidence supports a bridge between two databases—not an in-place version upgrade.</p>
+
+          <div class="evidence-ledger" aria-label="Database evidence comparison">
+            <article class="ledger-side">
+              <span class="db-tag">Legacy evidence</span>
+              <div class="db-path">~/.claude-sessions/catalogue.db</div>
+              <dl class="ledger-counts">
+                <div><dt>user_version</dt><dd>5</dd></div>
+                <div><dt>rows</dt><dd>106</dd></div>
+                <div><dt>lineage</dt><dd>old</dd></div>
+              </dl>
+            </article>
+            <article class="ledger-side">
+              <span class="db-tag current">Current target</span>
+              <div class="db-path">~/.ccs/cache/catalogue.db</div>
+              <dl class="ledger-counts">
+                <div><dt>user_version</dt><dd>34</dd></div>
+                <div><dt>catalogue</dt><dd>19</dd></div>
+                <div><dt>identities</dt><dd>0</dd></div>
+              </dl>
+            </article>
+          </div>
+
+          <div class="schema-switch">
+            <button class="control-button" type="button" id="schema-toggle" aria-expanded="false" aria-controls="schema-lineage">Reveal schema evidence</button>
+          </div>
+
+          <div class="schema-lineage" id="schema-lineage">
+            <article class="schema-card">
+              <h3>Legacy v5 · relevant fields</h3>
+              <p>Rich session annotations exist, but the old database does not establish the durable identity structure expected by v34.</p>
+              <ul class="schema-fields">
+                <li>session_id</li><li>custom_title</li>
+                <li>parent_session_id</li><li>event</li>
+                <li>skill</li><li>kind</li>
+                <li>completed</li><li>archived</li>
+                <li>parked_task_id</li><li>notes</li>
+                <li>updated_at</li>
+              </ul>
+            </article>
+            <div class="broken-link" aria-label="No automatic schema lineage"><span>No direct upgrade</span></div>
+            <article class="schema-card">
+              <h3>Current v34 · relevant tables</h3>
+              <p>The current model separates ephemeral session bodies from durable work-unit identities and their organization.</p>
+              <ul class="schema-fields">
+                <li>catalogue</li><li>identities</li>
+                <li>groupings</li><li>inboxes</li>
+                <li>identity_state</li><li>dispositions</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="error-slip" role="note"><strong>Observed failure on a disposable copy:</strong> SQLiteError: no such column: cluster</div>
+          <p style="margin-top: 18px;">That failure is diagnostic evidence. The automatic migrator expected a column from another historical shape. It is unsafe to treat the old v5 file as an earlier revision of the current v34 schema.</p>
+        </section>
+
+        <section class="section" id="model">
+          <div class="section-head">
+            <p class="section-code">Model 02</p>
+            <h2>Sessions are bodies. Identities are work units.</h2>
+          </div>
+          <p class="lede">The migration must preserve this distinction instead of converting every historical label into durable structure.</p>
+
+          <div class="model-grid">
+            <article class="model-card session">
+              <p class="eyebrow">Catalogue / session</p>
+              <h3>Ephemeral body</h3>
+              <p>A concrete conversation or runtime record. Legacy rows can remain useful here even when their durable identity is unknown.</p>
+            </article>
+            <article class="model-card identity">
+              <p class="eyebrow">Identity</p>
+              <h3>Durable work unit</h3>
+              <p>The stable thing that can outlive one session. Reconstruction requires authoritative configuration or explicit human mapping.</p>
+            </article>
+            <article class="model-card grouping">
+              <p class="eyebrow">Grouping</p>
+              <h3>Identity organizer</h3>
+              <p>A structure that organizes identities. An old event value may inform one, but it is not automatically one.</p>
+            </article>
+          </div>
+
+          <div class="recommendation">
+            <p class="eyebrow">Authority gap</p>
+            <div>
+              <p><strong>No <span class="path">~/.ccs-config</span> role tree exists on this Mac.</strong></p>
+              <p>Identity reconstruction therefore cannot be authoritative yet. The work laptop’s configuration is the missing source needed to resolve roles, identity keys, clusters, and role-derived loop behavior.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="inventory">
+          <div class="section-head">
+            <p class="section-code">Evidence 03</p>
+            <h2>The legacy catalogue has annotation coverage, not identity coverage.</h2>
+          </div>
+          <p class="lede">Observed values show useful historical signal, but most fields required for authoritative identity reconstruction are absent.</p>
+
+          <div class="observed-grid">
+            <div>
+              <table class="coverage-table">
+                <caption>Legacy v5 field coverage · 106 rows</caption>
+                <thead><tr><th>Observed field</th><th>Populated rows</th><th>Reading</th></tr></thead>
+                <tbody>
+                  <tr><td>Custom title</td><td class="num">79</td><td>Strong direct descriptive signal</td></tr>
+                  <tr><td>Parent link</td><td class="num">34</td><td>Useful session relationship</td></tr>
+                  <tr><td>Event value</td><td class="num">37</td><td>Historical work reference; meaning unresolved</td></tr>
+                  <tr><td>Skill value</td><td class="num">18</td><td>Possible role evidence; not authoritative</td></tr>
+                </tbody>
+              </table>
+
+              <div class="zero-list">
+                <strong>Observed as zero across all 106 legacy rows</strong>
+                completed, archived, role, project, resume_id, substrate, launcher identity, notes, parked.
+              </div>
+            </div>
+
+            <div>
+              <figure class="distribution" aria-labelledby="event-dist-title">
+                <figcaption id="event-dist-title"><strong>Event values</strong> · complete distribution</figcaption>
+                <div class="bar-row"><span class="bar-label">none</span><span class="bar-track"><span class="bar-fill none" style="width:100%"></span></span><span class="bar-value">69</span></div>
+                <div class="bar-row"><span class="bar-label">glizzy-galaxy</span><span class="bar-track"><span class="bar-fill" style="width:18.84%"></span></span><span class="bar-value">13</span></div>
+                <div class="bar-row"><span class="bar-label">kiki-factory</span><span class="bar-track"><span class="bar-fill" style="width:14.49%"></span></span><span class="bar-value">10</span></div>
+                <div class="bar-row"><span class="bar-label">daisychain-zachfox</span><span class="bar-track"><span class="bar-fill" style="width:5.80%"></span></span><span class="bar-value">4</span></div>
+                <div class="bar-row"><span class="bar-label">freedom-fest</span><span class="bar-track"><span class="bar-fill" style="width:5.80%"></span></span><span class="bar-value">4</span></div>
+                <div class="bar-row"><span class="bar-label">freakuency</span><span class="bar-track"><span class="bar-fill" style="width:4.35%"></span></span><span class="bar-value">3</span></div>
+                <div class="bar-row"><span class="bar-label">gio-lucca-3oz-august</span><span class="bar-track"><span class="bar-fill" style="width:2.90%"></span></span><span class="bar-value">2</span></div>
+                <div class="bar-row"><span class="bar-label">meltdown-september</span><span class="bar-track"><span class="bar-fill" style="width:1.45%"></span></span><span class="bar-value">1</span></div>
+              </figure>
+
+              <figure class="distribution" aria-labelledby="skill-dist-title">
+                <figcaption id="skill-dist-title"><strong>Skill values</strong> · observed categories</figcaption>
+                <div class="bar-row"><span class="bar-label">none</span><span class="bar-track"><span class="bar-fill none" style="width:100%"></span></span><span class="bar-value">88</span></div>
+                <div class="bar-row"><span class="bar-label">event-worker</span><span class="bar-track"><span class="bar-fill" style="width:9.09%"></span></span><span class="bar-value">8</span></div>
+                <div class="bar-row"><span class="bar-label">10 distinct one-offs · aggregate</span><span class="bar-track"><span class="bar-fill" style="width:11.36%"></span></span><span class="bar-value">10</span></div>
+                <p style="margin:12px 0 0; font-size:.72rem; color:var(--ink-soft);">One-offs include event-watch/scout/eval, todoist-scout, session-closer, ops-watch, notifier, loop-manager, label-pass, and inbox-closer.</p>
+              </figure>
+            </div>
+          </div>
+
+          <p style="margin-top:24px;"><strong>Current v34 inventory:</strong> <span class="fact">19 catalogue rows</span>, <span class="fact">0 identities</span>, <span class="fact">0 groupings</span>, and <span class="fact">0 inboxes</span>. Those 19 current rows are existing target data, not empty space reserved for the import.</p>
+        </section>
+
+        <section class="section" id="mapping">
+          <div class="section-head">
+            <p class="section-code">Registry 04</p>
+            <h2>Map what is known. Preserve what is not.</h2>
+          </div>
+          <p class="lede">The mapping registry must separate direct transfer from conditional interpretation and prohibited inference.</p>
+
+          <div class="table-tools" aria-label="Mapping confidence filter">
+            <span>Show confidence</span>
+            <button class="filter-button" type="button" data-filter="all" aria-pressed="true">All</button>
+            <button class="filter-button" type="button" data-filter="direct" aria-pressed="false">Direct / safe</button>
+            <button class="filter-button" type="button" data-filter="conditional" aria-pressed="false">Conditional</button>
+            <button class="filter-button" type="button" data-filter="forbidden" aria-pressed="false">Do not infer</button>
+          </div>
+
+          <div style="overflow-x:auto;">
+            <table class="mapping-table" id="mapping-table">
+              <caption>Field mapping matrix</caption>
+              <thead>
+                <tr><th>Legacy evidence</th><th>v34 treatment</th><th>Confidence</th><th>Rule</th></tr>
+              </thead>
+              <tbody>
+                <tr data-confidence="direct"><td><code>session_id</code></td><td>Catalogue session key</td><td><span class="confidence direct">Direct / safe</span></td><td>Transfer as the session record identifier; collision policy still applies.</td></tr>
+                <tr data-confidence="direct"><td><code>custom_title</code></td><td>Session title</td><td><span class="confidence direct">Direct / safe</span></td><td>Copy only into a null target field.</td></tr>
+                <tr data-confidence="direct"><td><code>parent_session_id</code></td><td>Session parent link</td><td><span class="confidence direct">Direct / safe</span></td><td>Preserve the observed session relationship when referentially valid.</td></tr>
+                <tr data-confidence="direct"><td><code>completed</code></td><td>Session disposition field</td><td><span class="confidence direct">Direct / safe</span></td><td>Directly mappable, although all observed legacy values are zero.</td></tr>
+                <tr data-confidence="direct"><td><code>archived</code></td><td>Session disposition field</td><td><span class="confidence direct">Direct / safe</span></td><td>Directly mappable, although all observed legacy values are zero.</td></tr>
+                <tr data-confidence="direct"><td><code>parked_task_id</code></td><td>Parked task reference</td><td><span class="confidence direct">Direct / safe</span></td><td>Preserve if present; observed legacy parked coverage is zero.</td></tr>
+                <tr data-confidence="direct"><td><code>notes</code></td><td>Session notes</td><td><span class="confidence direct">Direct / safe</span></td><td>Copy only into a null target field; observed legacy coverage is zero.</td></tr>
+                <tr data-confidence="direct"><td><code>updated_at</code></td><td>Recency comparator</td><td><span class="confidence direct">Direct / safe</span></td><td>Use to prevent legacy data from overwriting newer target values.</td></tr>
+                <tr data-confidence="direct"><td><code>event</code>, <code>skill</code>, <code>kind</code></td><td>Legacy metadata</td><td><span class="confidence direct">Direct / safe</span></td><td>Preserve as legacy meta whenever no approved semantic mapping exists.</td></tr>
+                <tr data-confidence="conditional"><td><code>skill</code></td><td>Role candidate</td><td><span class="confidence conditional">Conditional</span></td><td>Map only through an explicit registry validated against the authoritative role tree.</td></tr>
+                <tr data-confidence="conditional"><td><code>event</code></td><td>Work reference or grouping candidate</td><td><span class="confidence conditional">Conditional</span></td><td>Map per registered event meaning; never assume one universal interpretation.</td></tr>
+                <tr data-confidence="conditional"><td>Legacy row + authoritative config</td><td><code>identity_key</code></td><td><span class="confidence conditional">Conditional</span></td><td>Construct only when the work unit can be resolved without guesswork.</td></tr>
+                <tr data-confidence="conditional"><td>Role tree evidence</td><td><code>cluster</code></td><td><span class="confidence conditional">Conditional</span></td><td>Populate only from authoritative configuration or a human-approved registry.</td></tr>
+                <tr data-confidence="conditional"><td>Role definition</td><td>Loop behavior</td><td><span class="confidence conditional">Conditional</span></td><td>Derive from the resolved role, not from a legacy skill string alone.</td></tr>
+                <tr data-confidence="forbidden"><td>Absent evidence</td><td>Invented <code>cluster</code></td><td><span class="confidence forbidden">Do not infer</span></td><td>Leave unresolved. The disposable-copy failure already shows this assumption is unsafe.</td></tr>
+                <tr data-confidence="forbidden"><td>Every <code>event</code> value</td><td>Cluster</td><td><span class="confidence forbidden">Do not infer</span></td><td>An event may be a work reference or grouping signal; it is not automatically a cluster.</td></tr>
+                <tr data-confidence="forbidden"><td>Legacy <code>kind</code></td><td>New identity kind</td><td><span class="confidence forbidden">Do not infer</span></td><td>Persist as legacy meta unless an explicit mapping rule is approved.</td></tr>
+                <tr data-confidence="forbidden"><td>Missing <code>resume_id</code></td><td>Guessed resume identifier</td><td><span class="confidence forbidden">Do not infer</span></td><td>Observed legacy resume_id coverage is zero; do not synthesize one.</td></tr>
+                <tr data-confidence="forbidden"><td>Legacy collision</td><td>Overwrite current row</td><td><span class="confidence forbidden">Do not infer</span></td><td>The current 19 catalogue rows win. Merge only eligible null fields.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="routing">
+          <div class="section-head">
+            <p class="section-code">Manifest 05</p>
+            <h2>Route records through three lanes.</h2>
+          </div>
+          <p class="lede">Every legacy row receives a disposition. Ambiguity is retained visibly rather than converted into false certainty.</p>
+
+          <div class="manifest-wrap" role="region" aria-label="Horizontal migration routing manifest" tabindex="0">
+            <div class="manifest">
+              <div class="manifest-head">
+                <div>Legacy consignment</div>
+                <div>Session lane</div>
+                <div>Identity lane</div>
+                <div>Quarantine lane</div>
+              </div>
+              <div class="manifest-body">
+                <div class="manifest-source">
+                  <div class="ticket">106 × v5 rows</div>
+                  <div class="ticket">79 × titled</div>
+                  <div class="ticket">34 × parent-linked</div>
+                  <div class="ticket">37 × event-tagged</div>
+                  <div class="ticket">18 × skill-tagged</div>
+                </div>
+                <div class="manifest-lane session-lane">
+                  <span class="lane-stamp">Session</span>
+                  <ul class="lane-list">
+                    <li>Direct fields preserved</li>
+                    <li>Current-row nulls optionally merged</li>
+                    <li>Unattached sessions remain valid outcomes</li>
+                  </ul>
+                </div>
+                <div class="manifest-lane identity-lane">
+                  <span class="lane-stamp">Identity</span>
+                  <ul class="lane-list">
+                    <li>Only authoritative identity matches</li>
+                    <li>Role and cluster resolved by registry</li>
+                    <li>Grouping attached only with evidence</li>
+                  </ul>
+                </div>
+                <div class="manifest-lane quarantine-lane">
+                  <span class="lane-stamp">Quarantine</span>
+                  <ul class="lane-list">
+                    <li>Ambiguous semantics preserved as legacy meta</li>
+                    <li>No invented cluster, identity, or resume ID</li>
+                    <li>Human decision packet records the question</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="policy-grid" style="margin-top:22px;">
+            <article class="policy-card">
+              <h3>Collision policy</h3>
+              <p><strong>Current 19 rows win.</strong> On a matching session, merge only null fields from the legacy row. Never overwrite a non-null current value.</p>
+            </article>
+            <article class="policy-card">
+              <h3>Recency policy</h3>
+              <p><strong>Never overwrite newer timestamps.</strong> Use <code class="path">updated_at</code> as a gate; older legacy evidence cannot move current data backward.</p>
+            </article>
+            <article class="policy-card">
+              <h3>Ambiguity policy</h3>
+              <p><strong>Unresolved rows remain unattached sessions.</strong> Their event, skill, and kind survive as legacy metadata pending a later decision.</p>
+            </article>
+            <article class="policy-card">
+              <h3>Identity policy</h3>
+              <p><strong>No identity by resemblance.</strong> Similar titles or skill labels may generate a dry-run candidate, never an automatic durable work unit.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="pipeline">
+          <div class="section-head">
+            <p class="section-code">Route 06</p>
+            <h2>Seven controlled stages, with apply held behind a human gate.</h2>
+          </div>
+          <p class="lede">Each stage emits evidence for the next. No stage silently upgrades interpretation into fact.</p>
+
+          <ol class="pipeline" aria-label="Migration pipeline">
+            <li><b>Snapshot &amp; backup</b>Freeze both databases and record hashes, versions, paths, counts, and timestamps.</li>
+            <li><b>Inventory &amp; dry-run</b>Read both schemas and classify every legacy row without writing target data.</li>
+            <li><b>Mapping registry</b>Define explicit role, event, identity, grouping, and legacy-meta rules.</li>
+            <li><b>Disposable v34 copy</b>Run the adapter against a copy of the current database—not the live file.</li>
+            <li><b>Validate</b>Check counts, referential integrity, collision outcomes, timestamps, and invariant totals.</li>
+            <li><b>Human decision packet</b>Present ambiguous mappings, collision summaries, and unresolved identity questions.</li>
+            <li class="phase-hold"><b>Transactional apply</b>Only after decisions; apply atomically, then perform post-apply verification.</li>
+          </ol>
+
+          <div class="recommendation">
+            <p class="eyebrow">Current stage</p>
+            <div>
+              <p><span class="status-mark hold">Hold before adapter apply</span></p>
+              <p>The next justified action is to obtain the missing role tree and build the inventory/dry-run adapter. The live v34 database is not an acceptable test surface.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="safety">
+          <div class="section-head">
+            <p class="section-code">Gates 07</p>
+            <h2>Safety is expressed as invariants and stop conditions.</h2>
+          </div>
+          <p class="lede">A migration is acceptable only when it can prove what it preserved, what it merged, and what it declined to infer.</p>
+
+          <div class="gate-grid">
+            <article class="gate-card pass">
+              <h3>Pre-apply invariants</h3>
+              <ul>
+                <li>Both source and target snapshots are readable and restorable.</li>
+                <li>The source inventory accounts for exactly 106 legacy rows.</li>
+                <li>The untouched target snapshot accounts for 19 catalogue rows, 0 identities, 0 groupings, and 0 inboxes.</li>
+                <li>Every legacy row has one dry-run disposition: create, null-only merge, unattached session, or rejected with reason.</li>
+                <li>No identity or grouping write lacks an explicit registry rule.</li>
+              </ul>
+            </article>
+
+            <article class="gate-card stop">
+              <h3>Immediate stop conditions</h3>
+              <ul>
+                <li>The adapter expects a column absent from the inspected schema.</li>
+                <li>A current non-null value would be overwritten.</li>
+                <li>A legacy timestamp would replace a newer current timestamp.</li>
+                <li>Identity, cluster, grouping, role, loop behavior, or resume_id would be guessed.</li>
+                <li>Any source row disappears from the reconciliation totals.</li>
+                <li>Validation changes the live database or runs outside the disposable copy.</li>
+              </ul>
+            </article>
+
+            <article class="gate-card rollback">
+              <h3>Transactional apply gate</h3>
+              <ul>
+                <li>Begin one explicit transaction against a freshly backed-up v34 target.</li>
+                <li>Recheck target counts and timestamps immediately before writes.</li>
+                <li>Abort on any drift from the approved dry-run manifest.</li>
+                <li>Commit only after all post-write invariants pass inside the transaction.</li>
+              </ul>
+            </article>
+
+            <article class="gate-card rollback">
+              <h3>Rollback posture</h3>
+              <ul>
+                <li>Rollback the transaction on any invariant failure.</li>
+                <li>If post-commit verification fails, restore the exact pre-apply target snapshot.</li>
+                <li>Retain the dry-run manifest and decision packet so the failure is reproducible.</li>
+                <li>Never use the legacy database itself as a mutable working copy.</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="dry-run">
+          <div class="section-head">
+            <p class="section-code">Packet 08</p>
+            <h2>The dry-run report is the migration’s real first deliverable.</h2>
+          </div>
+          <p class="lede">It should make row outcomes auditable before asking for any approval to write.</p>
+
+          <div style="overflow-x:auto;">
+            <table class="report-table">
+              <caption>Expected dry-run row categories</caption>
+              <thead><tr><th>Category</th><th>Required evidence</th><th>Expected action</th></tr></thead>
+              <tbody>
+                <tr><td>New session / direct</td><td>No current collision; direct fields parse and validate</td><td>Create catalogue row, preserve unmapped legacy meta</td></tr>
+                <tr><td>Current collision / null-only merge</td><td>Matching session_id; current fields win; legacy is not newer</td><td>Fill eligible target nulls only</td></tr>
+                <tr><td>Current collision / no-op</td><td>Target already populated or newer</td><td>Write nothing; report protected fields</td></tr>
+                <tr><td>Authoritative identity attachment</td><td>Approved registry plus authoritative role-tree evidence</td><td>Attach session to durable identity</td></tr>
+                <tr><td>Conditional candidate</td><td>Skill or event suggests a mapping but does not prove it</td><td>Place in decision packet; do not attach</td></tr>
+                <tr><td>Unattached session</td><td>No authoritative identity match</td><td>Preserve session and legacy meta without identity</td></tr>
+                <tr><td>Rejected row</td><td>Invalid key, broken required relation, or unparseable boundary value</td><td>Write nothing; preserve reason and source reference</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="policy-grid" style="margin-top:22px;">
+            <article class="policy-card">
+              <h3>Report totals</h3>
+              <ul class="report-notes">
+                <li>Source rows inventoried: 106.</li>
+                <li>Counts by every row category above.</li>
+                <li>Target rows before and projected after.</li>
+                <li>Number of current rows protected from overwrite.</li>
+                <li>Number of legacy values retained only as metadata.</li>
+              </ul>
+            </article>
+            <article class="policy-card">
+              <h3>Unanswered decisions</h3>
+              <ul class="report-notes">
+                <li>Which legacy skills correspond to current roles?</li>
+                <li>Which event values are work references, groupings, or neither?</li>
+                <li>What constructs the canonical identity_key?</li>
+                <li>Which authoritative source assigns cluster?</li>
+                <li>Which role definitions imply loop behavior?</li>
+                <li>Should any unattached historical sessions remain permanently unattached?</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="section" id="decisions">
+          <div class="section-head">
+            <p class="section-code">Decision 09</p>
+            <h2>What I need from Milad.</h2>
+          </div>
+          <p class="lede">No approval to apply is requested yet. These inputs unlock a trustworthy dry run.</p>
+
+          <div class="decision-grid">
+            <article class="decision-card">
+              <h3>1. Restore the authority source</h3>
+              <p>Obtain or sync <span class="path">~/.ccs-config</span> from the work laptop so the role tree, identity vocabulary, cluster assignments, and role-derived behavior can be inspected.</p>
+            </article>
+            <article class="decision-card">
+              <h3>2. Confirm event semantics</h3>
+              <p>Decide whether each legacy event value is a work reference, a grouping candidate, legacy metadata only, or a mixture resolved per value.</p>
+            </article>
+            <article class="decision-card">
+              <h3>3. Confirm role mappings</h3>
+              <p>Approve an explicit registry for skill-to-role candidates, including <span class="path">event-worker</span> and the ten one-off skill values.</p>
+            </article>
+            <article class="decision-card">
+              <h3>4. Confirm historical attachment policy</h3>
+              <p>Decide whether ambiguous historical sessions should remain unattached indefinitely or return in a later manual reconciliation pass.</p>
+            </article>
+          </div>
+
+          <div class="recommendation">
+            <p class="eyebrow">Final recommendation</p>
+            <div>
+              <p><strong>Do not apply yet.</strong></p>
+              <p>First obtain the missing <span class="path">~/.ccs-config</span> role tree. Then build a schema-specific dry-run adapter that reads legacy v5, writes only to a disposable v34 copy, emits the complete decision packet, and proves the collision and rollback invariants before any live transaction is considered.</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <footer class="footnotes">
+      <p><strong>Evidence status:</strong> “Observed” statements above are limited to the supplied database paths, versions, counts, field coverage, distributions, current table counts, missing configuration, and disposable-copy failure.</p>
+      <p><strong>Rule status:</strong> Mapping, collision, quarantine, pipeline, safety, and rollback language is proposed migration policy—not a claim that migration has occurred.</p>
+      <p><strong>Decision status:</strong> Identity, role, cluster, event semantics, grouping, and loop behavior remain unresolved until authoritative configuration or explicit human decisions exist.</p>
+    </footer>
+  </div>
+
+  <script>
+    (() => {
+      document.documentElement.classList.add('js');
+
+      const schemaToggle = document.querySelector('#schema-toggle');
+      const schemaLineage = document.querySelector('#schema-lineage');
+
+      if (schemaToggle && schemaLineage) {
+        schemaToggle.addEventListener('click', () => {
+          const isOpen = schemaLineage.classList.toggle('schemas-open');
+          schemaToggle.setAttribute('aria-expanded', String(isOpen));
+          schemaToggle.textContent = isOpen ? 'Hide schema evidence' : 'Reveal schema evidence';
+        });
+      }
+
+      const filterButtons = Array.from(document.querySelectorAll('[data-filter]'));
+      const mappingRows = Array.from(document.querySelectorAll('#mapping-table tbody tr'));
+
+      filterButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          const selected = button.dataset.filter;
+
+          filterButtons.forEach((candidate) => {
+            candidate.setAttribute('aria-pressed', String(candidate === button));
+          });
+
+          mappingRows.forEach((row) => {
+            row.hidden = selected !== 'all' && row.dataset.confidence !== selected;
+          });
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
