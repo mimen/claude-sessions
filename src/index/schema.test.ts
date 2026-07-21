@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { reindexStore, search, sessionById } from "./index.ts";
 import { openIndex, SCHEMA_VERSION } from "./schema.ts";
 
-function createPreChangeIndex(dbPath: string): void {
+function createPreChangeIndex(dbPath: string, userVersion = 7): void {
   const db = new Database(dbPath, { create: true });
   db.exec(`
     CREATE TABLE sessions (
@@ -24,7 +24,7 @@ function createPreChangeIndex(dbPath: string): void {
       tick_interval_sec INTEGER NOT NULL DEFAULT 0
     );
     CREATE VIRTUAL TABLE sessions_fts USING fts5(session_id UNINDEXED, title, skeleton);
-    PRAGMA user_version = 7;
+    PRAGMA user_version = ${userVersion};
   `);
   db.query(`INSERT INTO sessions (
     session_id, host, path, cwd, project_root, project_name, fallback_label,
@@ -35,7 +35,7 @@ function createPreChangeIndex(dbPath: string): void {
   db.close();
 }
 
-test("openIndex migrates pre-shadow index rows without data loss and reindexes them", async () => {
+test("openIndex preserves complete v7 rows while adding duplicate diagnostics", async () => {
   const root = mkdtempSync(join(tmpdir(), "ccs-index-migration-"));
   const dbPath = join(root, "index.db");
   const transcript = join(root, "legacy.jsonl");
@@ -95,6 +95,51 @@ test("openIndex rebuilds incompatible pre-v6 schemas instead of stamping them as
     expect(db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions_fts'").get()).not.toBeNull();
   } finally {
     db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test("openIndex invalidates structurally compatible v6 stale-cost rows before reindex", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-index-v6-"));
+  const dbPath = join(root, "index.db");
+  const transcript = join(root, "legacy.jsonl");
+  createPreChangeIndex(dbPath, 6);
+  const stale = new Database(dbPath);
+  stale.query("UPDATE sessions SET cost_usd = 999 WHERE session_id = 'legacy'").run();
+  stale.close();
+  writeFileSync(transcript, `${JSON.stringify({ type: "user", cwd: root, message: { content: "fresh" } })}
+`);
+
+  const db = openIndex(dbPath);
+  try {
+    expect(db.query("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 0 });
+    const stats = await reindexStore(db, [{
+      path: transcript,
+      sessionId: "legacy",
+      sizeBytes: 2,
+      mtimeMs: 2,
+    }], "host");
+    expect(stats.parsed).toBe(1);
+    expect(db.query("SELECT cost_usd FROM sessions WHERE session_id = 'legacy'").get()).toEqual({ cost_usd: 0 });
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("openIndex is idempotent after a serialized v7 migration", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-index-lock-"));
+  const dbPath = join(root, "index.db");
+  createPreChangeIndex(dbPath);
+  const first = openIndex(dbPath);
+  const second = openIndex(dbPath);
+  try {
+    expect(first.query("PRAGMA user_version").get()).toEqual({ user_version: SCHEMA_VERSION });
+    expect(second.query("SELECT session_id FROM sessions WHERE session_id = 'legacy'").get()).toEqual({ session_id: "legacy" });
+  } finally {
+    second.close();
+    first.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

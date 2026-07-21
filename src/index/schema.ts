@@ -9,26 +9,35 @@ export const SCHEMA_VERSION = 8;
  */
 export function openIndex(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
+  // Set before acquiring any write lock so parallel opens wait rather than immediately failing.
+  db.exec("PRAGMA busy_timeout = 5000;");
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
-  // Don't throw SQLITE_BUSY when a concurrent reindex (or scheduled job) is writing; wait.
-  db.exec("PRAGMA busy_timeout = 5000;");
 
-  const current = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-  if (!hasTable(db, "sessions")) {
-    createSchema(db);
-  } else if (isV6OrV7Compatible(db)) {
-    if (!hasColumn(db, "sessions", "shadow_paths")) {
-      // v8: retain v6/v7 observations and title cache while adding duplicate diagnostics.
-      db.exec("ALTER TABLE sessions ADD COLUMN shadow_paths TEXT NOT NULL DEFAULT '[]';");
+  // SQLite's immediate transaction serializes creation/migration across concurrent ccs processes.
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    const current = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
+    if (!hasTable(db, "sessions")) {
+      createSchema(db);
+    } else if (current >= 7 && isV6OrV7Compatible(db)) {
+      if (!hasColumn(db, "sessions", "shadow_paths")) {
+        // v8: retain v7 observations and title cache while adding duplicate diagnostics.
+        db.exec("ALTER TABLE sessions ADD COLUMN shadow_paths TEXT NOT NULL DEFAULT '[]';");
+      }
+    } else {
+      // v6 cost accounting changed in v7, so its cache is stale even when its columns happen
+      // to match. Pre-v6 shapes are also incomplete. Both are rebuildable from the Store.
+      dropAll(db);
+      createSchema(db);
     }
-  } else {
-    // Older index shapes lack columns that reindex needs. They are a cache, so rebuild rather
-    // than stamp a partial table as v8 and fail later with an opaque SQLite error.
-    dropAll(db);
-    createSchema(db);
+    if (current !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+    db.exec("COMMIT;");
+  } catch (error) {
+    try { db.exec("ROLLBACK;"); } catch { /* no transaction remained to roll back */ }
+    db.close();
+    throw error;
   }
-  if (current !== SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
   return db;
 }
 
