@@ -84,7 +84,7 @@ Add findings here as you go. Every idea, even ones you rule out, gets a checkbox
 When exit criteria are met, this loop:
 
 1. Writes `docs/overnight/PHASE1_DONE` with a summary of what was fixed.
-2. Spawns Phase 2 via `ccs session new --cwd ~/.ccs-config --title overnight-signal-scout --prompt "/loop 45m /overnight-dogfood"`.
+2. Spawns Phase 2 as an independently managed work body via `ccs session new --top-level --cwd ~/.ccs-config --title overnight-signal-scout --prompt "/loop 45m /overnight-dogfood"`.
 3. Marks itself completed (`ccs session complete .`) so the phase-1 loop stops on the next tick.
 
 The phase-1 loop is done. Phase 2 takes over.

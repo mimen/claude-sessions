@@ -52,8 +52,12 @@ export interface StateGroupCtx {
   childrenByParent?: ReadonlyMap<string, SessionRow[]>;
   /** Ordering within each section (default: recency, as rows arrive). */
   sort?: SortMode;
-  /** A row's total spend (own + subagent rollup) — drives cost-sort + section totals. */
+  /** A row's recursive total — drives row cost sorting. */
   costOf?: (row: SessionRow) => number;
+  /** Physical per-row cost used for aggregate section totals to avoid counting descendants twice. */
+  sectionCostOf?: (row: SessionRow) => number;
+  /** Optional closure-aware aggregate; callers use it when hidden descendants must still count. */
+  sectionCost?: (rows: readonly SessionRow[]) => number;
 }
 
 /** Flatten rows into section headers + sessions, honoring collapse + subagent expansion. */
@@ -63,6 +67,7 @@ export function buildStateItems(rows: readonly SessionRow[], ctx: StateGroupCtx)
   const childrenByParent = ctx.childrenByParent ?? new Map<string, SessionRow[]>();
   const sort = ctx.sort ?? "recent";
   const costOf = ctx.costOf ?? (() => 0);
+  const sectionCostOf = ctx.sectionCostOf ?? ((row: SessionRow) => row.costUSD);
 
   const buckets = new Map<SectionKey, SessionRow[]>();
   for (const row of rows) {
@@ -86,7 +91,7 @@ export function buildStateItems(rows: readonly SessionRow[], ctx: StateGroupCtx)
     if (!rowsIn || rowsIn.length === 0) continue;
     const collapsed = ctx.collapsedSections.has(meta.key);
     const section: SectionMeta = { key: meta.key, name: meta.name, glyph: meta.glyph };
-    const cost = rowsIn.reduce((sum, row) => sum + costOf(row), 0);
+    const cost = ctx.sectionCost?.(rowsIn) ?? rowsIn.reduce((sum, row) => sum + sectionCostOf(row), 0);
     items.push({ kind: "section", section, count: rowsIn.length, collapsed, cost });
     if (!collapsed) for (const row of sortRows(rowsIn, sort, costOf)) pushSession(row, 0);
   }

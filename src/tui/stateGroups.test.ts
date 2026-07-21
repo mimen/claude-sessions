@@ -14,6 +14,7 @@ const cat = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   parkedTaskId: null,
   key: null,
   parentSessionId: null,
+  sessionClass: null,
   role: null,
   resumeCommand: null,
   project: null,
@@ -44,6 +45,22 @@ test("classify: lifecycle precedence then open then age", () => {
   expect(classify(row("s", "2026-06-19T00:00:00Z"), null, true, NOW)).toBe("active");
   expect(classify(row("s", "2026-06-19T00:00:00Z"), null, false, NOW)).toBe("recent"); // 1d ago
   expect(classify(row("s", "2026-05-01T00:00:00Z"), null, false, NOW)).toBe("stale"); // >2w
+});
+
+test("buildStateItems: uses physical costs for a section total while retaining recursive costs for sort", () => {
+  const parent = { ...row("parent", "2026-06-19T00:00:00Z"), costUSD: 5 };
+  const child = { ...row("child", "2026-06-19T00:00:00Z"), costUSD: 10 };
+  const recursive = new Map([["parent", 15], ["child", 10]]);
+  const items = buildStateItems([parent, child], {
+    catMap: new Map(),
+    openSet: new Set(),
+    nowMs: NOW,
+    collapsedSections: new Set(),
+    costOf: (session) => recursive.get(session.sessionId) ?? 0,
+    sectionCostOf: (session) => session.costUSD,
+  });
+  const section = items.find((item) => item.kind === "section" && item.section.key === "recent");
+  expect(section?.kind === "section" ? section.cost : null).toBe(15);
 });
 
 test("buildStateItems: section order + default collapse", () => {

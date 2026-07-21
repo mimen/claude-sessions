@@ -10,7 +10,6 @@ import {
   ftsMatchIds,
   getSkeleton,
   subagentCounts,
-  subagentCosts,
   childrenOf,
   saveCodexTitle,
   type SessionRow,
@@ -32,7 +31,8 @@ import { SectionCard } from "./SectionCard.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
-import { getAll, lifecycleOf, setCompleted, setArchived, setCustomTitle, identityKeyOf, type CatalogueRow } from "../catalogue/db.ts";
+import { getAll, lifecycleOf, parentEdges, setCompleted, setArchived, setCustomTitle, identityKeyOf, type CatalogueRow } from "../catalogue/db.ts";
+import { buildCostRollup, type CostRollup } from "../index/cost-rollup.ts";
 import { boardIndex } from "../board/indexer.ts";
 import { allGroupingsAcrossClusters } from "../state/groupings.ts";
 import { describe as describeDisposition } from "../catalogue/disposition.ts";
@@ -45,6 +45,7 @@ import { buildClusterView } from "./clusterView.ts";
 import { buildEpicView } from "./epicView.ts";
 import { getCrashReporter } from "../crashlog.ts";
 import { tasksFor, sessionsWithTasks } from "../tasks/reader.ts";
+import { SESSION_CLASS_ROLLOUT_MS } from "../session-class.ts";
 
 /**
  * State label + hex color for the TUI stage column (ADR-0077). Reads the first pill from the
@@ -68,6 +69,23 @@ type View = "groups" | "state" | "flat" | "tree" | "cluster" | "epic";
 const VIEW_CYCLE: View[] = ["groups", "state", "flat", "tree", "cluster", "epic"];
 
 const STALE_MS = 14 * 24 * 60 * 60 * 1000;
+
+/**
+ * Union recursive physical closures for a visible group. This keeps hidden auxiliary/native work
+ * in its owner's section total while counting a visible descendant only once.
+ */
+export function aggregateSectionCost(rows: readonly SessionRow[], rollup: CostRollup): number {
+  const physicalIds = new Set<string>();
+  const fallbackCosts = new Map(rows.map((row) => [row.sessionId, row.costUSD]));
+  for (const row of rows) {
+    const closure = rollup.bySessionId.get(row.sessionId)?.physicalSessionIds;
+    if (closure) for (const id of closure) physicalIds.add(id);
+    else physicalIds.add(row.sessionId);
+  }
+  let total = 0;
+  for (const id of physicalIds) total += rollup.bySessionId.get(id)?.selfCost ?? fallbackCosts.get(id) ?? 0;
+  return total;
+}
 
 /** The inference engine state shared by Root and the sessions panel. */
 export interface EngineState {
@@ -101,6 +119,8 @@ export interface SessionBadge {
   taskTotal?: number | null;
   /** An in_progress task in a session that isn't open — abandoned mid-task. */
   taskInterrupted?: boolean;
+  /** Explicit execution classification warning shown beside the title. */
+  classification?: "AUX" | "UNCLASSIFIED" | null;
 }
 
 /** Narrow cmux seam for the mount-time TUI probes. */
@@ -143,6 +163,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   const { columns: cols, rows: termRows } = useTerminalSize();
 
   const [includeSubagents, setIncludeSubagents] = useState(false);
+  const [showAuxiliary, setShowAuxiliary] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [refreshTick, setRefreshTick] = useState(0);
@@ -274,10 +295,16 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   // Which sessions have a Claude Code task dir at all — one readdir, so the per-row
   // tasksFor() probe only ever runs for sessions that can have tasks (103/166 here).
   const taskIds = useMemo(() => sessionsWithTasks(), [refreshTick]);
+  const allIndexedRows = useMemo(() => listByRecency(db, true), [db, refreshTick]);
+  const costRollup = useMemo(
+    () => buildCostRollup(allIndexedRows, catalogue ? parentEdges(catalogue) : []),
+    [allIndexedRows, catalogue, refreshTick],
+  );
   const baseRows = useMemo(() => {
-    const raw = listByRecency(db, includeSubagents);
-    return raw
+    return allIndexedRows
+      .filter((r) => includeSubagents || !r.isSubagent)
       .filter((r) => !pinned || pinned.paths.has(r.path))
+      .filter((r) => showAuxiliary || catMap.get(r.sessionId)?.sessionClass !== "auxiliary")
       .filter((r) => showArchived || lifecycleOf(catMap.get(r.sessionId) ?? null) !== "archived")
       .filter((r) => {
         if (taskFilter === "all") return true;
@@ -295,7 +322,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
           openTitles.get(r.sessionId) ?? cat?.customTitle ?? cat?.role ?? r.title;
         return title === r.title ? r : { ...r, title };
       });
-  }, [db, includeSubagents, refreshTick, catMap, showArchived, openTitles, taskFilter, taskIds, openSet]);
+  }, [allIndexedRows, includeSubagents, pinned, catMap, showAuxiliary, showArchived, openTitles, taskFilter, taskIds, openSet]);
 
   // Write-through: persist an open session's cmux title into the catalogue so the name stays put
   // after the tab closes (cmux is the source of truth, tightly linked). Only writes on a change.
@@ -359,26 +386,32 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         taskDone: tasks?.completed ?? null,
         taskTotal: tasks?.total ?? null,
         taskInterrupted: !!tasks && tasks.inProgress > 0 && !open,
+        classification: c?.sessionClass === "auxiliary"
+          ? "AUX"
+          : c?.sessionClass == null && r.firstTs && Date.parse(r.firstTs) >= SESSION_CLASS_ROLLOUT_MS
+            ? "UNCLASSIFIED"
+            : null,
       });
     }
     return m;
   }, [baseRows, catMap, openSet, taskIds]);
   const subCounts = useMemo(() => subagentCounts(db), [db, refreshTick]);
-  // A parent's subagent runs key on its INTERNAL id (= resumeId); match both to be safe.
-  const subCostMap = useMemo(() => subagentCosts(db), [db, refreshTick]);
   const totalCostFor = React.useCallback(
-    (r: SessionRow): number =>
-      r.costUSD + (subCostMap.get(r.sessionId) ?? subCostMap.get(r.resumeId) ?? 0),
-    [subCostMap],
+    (r: SessionRow): number => costRollup.bySessionId.get(r.sessionId)?.totalCost ?? r.costUSD,
+    [costRollup],
   );
   const totalCostById = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of baseRows) m.set(r.sessionId, totalCostFor(r));
     return m;
   }, [baseRows, totalCostFor]);
+  const sectionCostFor = React.useCallback(
+    (sectionRows: readonly SessionRow[]): number => aggregateSectionCost(sectionRows, costRollup),
+    [costRollup],
+  );
   const stats = useMemo<DashStats>(() => {
-    let spend = 0,
-      active = 0,
+    const spend = costRollup.physicalStoreCost;
+    let active = 0,
       parked = 0,
       loops = 0,
       loopSpend = 0;
@@ -387,7 +420,6 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
     for (const r of baseRows) {
       const c = catMap.get(r.sessionId) ?? null;
       const total = totalCostFor(r);
-      spend += total;
       const lc = lifecycleOf(c);
       // Mirror stateGroups.classify precedence: loop → archived/done → parked → open.
       if (c?.kind === "loop") {
@@ -404,7 +436,9 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       }
     }
     let agentSpend = 0;
-    for (const usd of subCostMap.values()) agentSpend += usd;
+    for (const row of allIndexedRows) {
+      if (row.isSubagent || catMap.get(row.sessionId)?.sessionClass === "auxiliary") agentSpend += row.costUSD;
+    }
     return {
       host: config.host.label,
       sessions: baseRows.length,
@@ -417,7 +451,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       topTitle,
       topCost,
     };
-  }, [baseRows, catMap, openSet, subCostMap, totalCostFor, config.host.label]);
+  }, [baseRows, allIndexedRows, catMap, openSet, costRollup, totalCostFor, config.host.label]);
   const titleById = useMemo(() => new Map(baseRows.map((r) => [r.sessionId, r.title])), [baseRows]);
   const contentIds = useMemo(
     () => (query.trim() ? ftsMatchIds(db, query) : new Set<string>()),
@@ -451,6 +485,8 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
             childrenByParent,
             sort,
             costOf: totalCostFor,
+            sectionCostOf: (row) => row.costUSD,
+            sectionCost: sectionCostFor,
           })
         : view === "cluster"
         ? buildClusterView(rows, {
@@ -479,6 +515,8 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
               childrenByParent,
               sort,
               costOf: totalCostFor,
+              sectionCostOf: (row) => row.costUSD,
+              sectionCost: sectionCostFor,
             })
           : buildDisplayItems(rows, false, {
               expandedSessions,
@@ -487,7 +525,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
               sort,
               costOf: totalCostFor,
             }),
-    [view, rows, catMap, epicMap, openSet, collapsedSections, expandedSessions, subCounts, childrenByParent, sort, totalCostFor],
+    [view, rows, catMap, epicMap, openSet, collapsedSections, expandedSessions, subCounts, childrenByParent, sort, totalCostFor, sectionCostFor],
   );
 
   const clampedSelected = Math.min(selected, Math.max(0, items.length - 1));
@@ -828,6 +866,11 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       setShowArchived((v) => !v);
       setSelected(0);
     } else if (input === "u") {
+      // `u` is the explicit user-selected auxiliary visibility toggle. It is independent from
+      // native subagent visibility (`a`) and always resets on a fresh TUI mount.
+      setShowAuxiliary((visible) => !visible);
+      setSelected(0);
+    } else if (input === "U") {
       setTaskFilter((f) => {
         const next = TASK_FILTER_CYCLE[(TASK_FILTER_CYCLE.indexOf(f) + 1) % TASK_FILTER_CYCLE.length]!;
         setStatus(
@@ -865,24 +908,26 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   const spin = SPINNER[frame % SPINNER.length];
 
   const selSection = current?.kind === "section" ? current : null;
+  const selectedCost = selectedRow ? costRollup.bySessionId.get(selectedRow.sessionId) : undefined;
+  const selectedCatalogue = selectedRow ? catMap.get(selectedRow.sessionId) : undefined;
   const previewEl = selectedRow ? (
     <Preview
       row={selectedRow}
       skeleton={skeleton}
-      parentTitle={
-        selectedRow.parentSessionId
-          ? titleById.get(selectedRow.parentSessionId) ?? selectedRow.parentSessionId
-          : null
-      }
-      subagentCount={subCounts.get(selectedRow.sessionId) ?? 0}
-      subagentCost={
-        subCostMap.get(selectedRow.sessionId) ?? subCostMap.get(selectedRow.resumeId) ?? 0
-      }
+      parentTitle={(() => {
+        const parentId = selectedRow.parentSessionId ?? selectedCatalogue?.parentSessionId ?? null;
+        return parentId ? titleById.get(parentId) ?? parentId : null;
+      })()}
+      descendantCount={selectedCost?.descendantCount ?? 0}
+      selfCost={selectedCost?.selfCost ?? selectedRow.costUSD}
+      totalCost={selectedCost?.totalCost ?? selectedRow.costUSD}
+      providerCost={selectedCost?.byProvider ?? { claude: 0, gpt: 0, other: selectedRow.costUSD }}
       event={identityKeyOf(catMap.get(selectedRow.sessionId) ?? null)}
       skill={catMap.get(selectedRow.sessionId)?.skill ?? null}
       project={catMap.get(selectedRow.sessionId)?.project ?? null}
-      kind={catMap.get(selectedRow.sessionId)?.kind}
-      system={catMap.get(selectedRow.sessionId)?.system ?? null}
+      kind={selectedCatalogue?.kind}
+      sessionClass={selectedCatalogue?.sessionClass ?? null}
+      system={selectedCatalogue?.system ?? null}
       gusWork={catMap.get(selectedRow.sessionId)?.gusWork ?? null}
       gusWorkSfId={(catMap.get(selectedRow.sessionId)?.meta?.gus_work_sf_id as string | undefined) ?? null}
       prNumber={catMap.get(selectedRow.sessionId)?.prNumber ?? null}

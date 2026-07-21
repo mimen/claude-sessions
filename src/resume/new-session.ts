@@ -8,6 +8,7 @@ import {
   setCustomTitle,
   setKey,
   setParent,
+  setSessionClass,
   setRole,
   setProject,
   setCluster,
@@ -70,6 +71,9 @@ export interface NewSessionOpts {
   key?: string;
   title?: string;
   parent?: string;
+  /** Required birth declaration: independent work body versus causal auxiliary child. */
+  topLevel?: boolean;
+  childOf?: string;
   /** Work-item id (W-number) — stamped at birth so the statusline/tab link the ticket from
    * turn one (ADR-0027), before any later git/PR sense tick. */
   gusWork?: string;
@@ -83,8 +87,6 @@ export interface NewSessionOpts {
   permissionMode?: string;
   /** Reserve mode: write metadata + print the id, don't launch. */
   printId: boolean;
-  /** Assert this session has no parent at birth. */
-  topLevel?: boolean;
   /** Escape hatch: launch INLINE in the current terminal (Bun.spawnSync, inherits this
    * surface). Default is DETACHED into a fresh cmux workspace — inline hijacks the caller's
    * CMUX_SURFACE_ID and rebinds their tab to the new session (ADR-0042). */
@@ -99,7 +101,7 @@ function prNumberFrom(raw: string | undefined): number | undefined {
 }
 
 const VALUE_FLAGS = new Set([
-  "--cluster", "--identity", "--role", "--skill", "--project", "--key", "--title", "--parent",
+  "--cluster", "--identity", "--role", "--skill", "--project", "--key", "--title", "--parent", "--child-of",
   "--gus-work", "--pr-number", "--pr-repo", "--cwd", "--prompt", "--permission-mode",
 ]);
 const BOOLEAN_FLAGS = new Set(["--print-id", "--top-level", "--inline"]);
@@ -153,6 +155,7 @@ export function parseOpts(args: string[]): NewSessionOpts {
     key: values.get("--key"),
     title: values.get("--title"),
     parent: values.get("--parent"),
+    childOf: values.get("--child-of"),
     gusWork: values.get("--gus-work"),
     prNumber: prNumberFrom(values.get("--pr-number")),
     prRepo: values.get("--pr-repo"),
@@ -165,15 +168,8 @@ export function parseOpts(args: string[]): NewSessionOpts {
   };
 }
 
-/** Validate birth flags that are independent of identity mode. */
-function validateBirthFlags(opts: NewSessionOpts): string | null {
-  return opts.topLevel && opts.parent ? "--top-level cannot be combined with --parent" : null;
-}
-
 /** Validate explicit-birth flags that must not be filled by role defaults. */
 function validateExplicitIdentityFlags(opts: NewSessionOpts): string | null {
-  const birthError = validateBirthFlags(opts);
-  if (birthError) return birthError;
   if (!opts.identity) return null;
   if (opts.key) return "--identity cannot be combined with legacy --key";
   if (!opts.cluster) return "--identity requires --cluster";
@@ -203,6 +199,20 @@ export function validateExplicitIdentityBirth(db: Database, opts: NewSessionOpts
   if (identity.role !== role) {
     return `identity '${identityKey}' belongs to role '${identity.role}', not '${role}'`;
   }
+  return null;
+}
+
+/** Validate causal launch intent before a UUID or catalogue row is created. */
+export function resolveLaunchIntent(opts: NewSessionOpts, _args: readonly string[] = []): string | null {
+  if (opts.parent !== undefined) return "--parent is repair-only; use --child-of for a new session";
+  const hasChild = opts.childOf !== undefined;
+  if (opts.topLevel === hasChild) return "require exactly one of --top-level or --child-of <uuid|.>";
+  if (opts.topLevel) return null;
+  if (!opts.childOf) return "--child-of requires a parent UUID or .";
+  const parent = opts.childOf === "." ? process.env.CLAUDE_CODE_SESSION_ID : opts.childOf;
+  if (!parent) return "--child-of . requires CLAUDE_CODE_SESSION_ID";
+  if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{4}-[0-9a-f]{12}$/i.test(parent)) return "--child-of must be a UUID or .";
+  opts.parent = parent;
   return null;
 }
 
@@ -268,6 +278,7 @@ function writeSessionMetadataTransaction(db: Database, id: string, opts: NewSess
   if (opts.key) setKey(db, id, opts.key, now);
   if (opts.title) setCustomTitle(db, id, opts.title, now);
   if (opts.parent) setParent(db, id, opts.parent, now);
+  setSessionClass(db, id, opts.topLevel ? "work_body" : opts.parent ? "auxiliary" : null, now);
   if (opts.gusWork) setGusWork(db, id, opts.gusWork, now);
   if (opts.prNumber && opts.prRepo) {
     stampPrFacts(db, id, { prNumber: opts.prNumber, prRepo: opts.prRepo, prBranch: "", prState: "open", prHeadSha: "" }, now);
@@ -358,6 +369,11 @@ export function validateSpawn(opts: NewSessionOpts, roleDef: RoleDef | null): st
 
 export function newSession(args: string[]): number {
   const opts = parseOpts(args);
+  const intentError = resolveLaunchIntent(opts);
+  if (intentError) {
+    console.error(`ccs new-session: ${intentError}`);
+    return 2;
+  }
   const explicitFlagsError = validateExplicitIdentityFlags(opts);
   if (explicitFlagsError) {
     console.error(`ccs new-session: ${explicitFlagsError}`);

@@ -9,7 +9,7 @@ def w(o):
  elif isinstance(o,list):
   [w(v) for v in o]
 w(d)" 2>/dev/null)
-OUT=$(bun run bin/ccs new-session --role testrole --title "verify-run" --prompt "echo ok" 2>&1)
+OUT=$(bun run bin/ccs new-session --top-level --role testrole --title "verify-run" --prompt "echo ok" 2>&1)
 WS=$(echo "$OUT" | grep -oE "workspace:[0-9]+" | head -1)
 sleep 5
 # checks

@@ -229,25 +229,25 @@ This reads the role.toml + derived structure and shows the resolved RoleDef.
 For a **core** role (singleton, no work-unit):
 
 ```bash
-ccs new-session --role <new-role> --cluster <cluster>
+ccs new-session --top-level --role <new-role> --cluster <cluster>
 ```
 
 Example:
 
 ```bash
-ccs new-session --role metrics --cluster pr-watch
+ccs new-session --top-level --role metrics --cluster pr-watch
 ```
 
 For a **fleet** role (tied to a work-unit, e.g. a PR):
 
 ```bash
-ccs new-session --role <new-role> --cluster <cluster> --pr <owner/repo#number>
+ccs new-session --top-level --role <new-role> --cluster <cluster> --pr <owner/repo#number>
 ```
 
 Example (assuming a `pr-reviewer` fleet role):
 
 ```bash
-ccs new-session --role pr-reviewer --cluster pr-watch --pr myorg/myrepo#456
+ccs new-session --top-level --role pr-reviewer --cluster pr-watch --pr myorg/myrepo#456
 ```
 
 The session spawns into a fresh cmux workspace. If it's a loop role, it comes back running (the resume_command fires at SessionStart via the **arm** action).

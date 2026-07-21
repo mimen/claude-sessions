@@ -17,6 +17,11 @@ export interface TreeCtx {
 export function buildTreeItems(rows: readonly SessionRow[], ctx: TreeCtx): DisplayItem[] {
   const rowById = new Map(rows.map((r) => [r.sessionId, r]));
 
+  const allParentIds = new Set<string>();
+  for (const row of ctx.catMap.values()) {
+    if (row.parentSessionId) allParentIds.add(row.parentSessionId);
+  }
+
   // Catalogue child edges, restricted to sessions that are actually visible.
   const childIds = new Map<string, string[]>();
   for (const r of rows) {
@@ -28,26 +33,25 @@ export function buildTreeItems(rows: readonly SessionRow[], ctx: TreeCtx): Displ
 
   // Roots: constellation members (a parent, or a child) whose own parent isn't a visible row.
   const isMember = (id: string): boolean =>
-    childIds.has(id) || (() => {
+    allParentIds.has(id) || childIds.has(id) || (() => {
       const p = ctx.catMap.get(id)?.parentSessionId ?? null;
       return !!p && rowById.has(p);
     })();
 
-  const subtreeCost = (id: string, seen = new Set<string>()): number => {
-    if (seen.has(id)) return 0; // cycle guard
-    seen.add(id);
+  // costOf is already the authoritative recursive causal/native total. Never sum child totals
+  // again here or a visible child would be counted once in its parent and once as a row.
+  const subtreeCost = (id: string): number => {
     const row = rowById.get(id);
-    let sum = row ? ctx.costOf(row) : 0;
-    for (const kid of childIds.get(id) ?? []) sum += subtreeCost(kid, seen);
-    return sum;
+    return row ? ctx.costOf(row) : 0;
   };
 
-  const roots: string[] = [];
+  let roots: string[] = [];
   for (const r of rows) {
     if (!isMember(r.sessionId)) continue;
     const p = ctx.catMap.get(r.sessionId)?.parentSessionId ?? null;
     if (!p || !rowById.has(p)) roots.push(r.sessionId);
   }
+  if (roots.length === 0) roots = rows.filter((row) => isMember(row.sessionId)).map((row) => row.sessionId);
   roots.sort((a, b) => subtreeCost(b) - subtreeCost(a));
 
   const items: DisplayItem[] = [];
@@ -64,7 +68,7 @@ export function buildTreeItems(rows: readonly SessionRow[], ctx: TreeCtx): Displ
       depth,
       childCount: kids.length,
       expanded: kids.length > 0,
-      subtreeCost: kids.length > 0 ? subtreeCost(id) : undefined,
+      subtreeCost: kids.length > 0 || subtreeCost(id) > row.costUSD ? subtreeCost(id) : undefined,
     });
     for (const kid of kids) walk(kid, depth + 1);
   };

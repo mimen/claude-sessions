@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite";
 import { openIndex } from "../index/schema.ts";
 import { loadConfig } from "../config.ts";
 import { App } from "./App.tsx";
+import { openCatalogue, setSessionClass } from "../catalogue/db.ts";
 import type { Titler } from "../titler/codex.ts";
 import type { EngineState } from "./Root.tsx";
 
@@ -33,6 +34,10 @@ const noopEngineState: EngineState = {
   available: [],
   cycle() {},
 };
+const noopCmuxProbes = {
+  async reachable(): Promise<boolean> { return false; },
+  async openSessionTitles(): Promise<Map<string, string>> { return new Map(); },
+};
 
 function makeConfig() {
   const r = loadConfig("/nonexistent-ccs-test.toml");
@@ -52,6 +57,7 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
       config: makeConfig(),
       engineState: noopEngineState,
       resumeRequest: { current: null },
+      cmuxProbes: noopCmuxProbes,
     }),
   );
   await new Promise((r) => setTimeout(r, 80));
@@ -72,4 +78,52 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
 
   unmount();
   real.close();
+});
+
+test("auxiliary sessions stay hidden until the session-local u toggle reveals them", async () => {
+  const index = openIndex(":memory:");
+  seed(index);
+  index.query(
+    `INSERT INTO sessions (
+      session_id, host, path, cwd, project_root, project_name, branch, version,
+      first_ts, last_ts, msg_count, file_mtime, file_size,
+      native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id
+    ) VALUES ('aux1','h','/aux','/c','/c','myproj',NULL,'1',
+      '2026-07-20T01:00:00Z','2026-07-20T01:01:00Z',2,1,1,
+      'Auxiliary Row','fallback','user: delegated',0,NULL,'aux1')`,
+  ).run();
+  index.query(
+    `INSERT INTO sessions (
+      session_id, host, path, cwd, project_root, project_name, branch, version,
+      first_ts, last_ts, msg_count, file_mtime, file_size,
+      native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id
+    ) VALUES ('new1','h','/new','/c','/c','myproj',NULL,'1',
+      '2026-07-20T02:00:00Z','2026-07-20T02:01:00Z',2,1,1,
+      'Recent Unclassified','fallback','user: plain claude',0,NULL,'new1')`,
+  ).run();
+  const catalogue = openCatalogue(":memory:");
+  setSessionClass(catalogue, "aux1", "auxiliary", "2026-07-20T01:00:00Z");
+
+  const { lastFrame, stdin, unmount } = render(
+    createElement(App, {
+      db: index,
+      catalogue,
+      config: makeConfig(),
+      engineState: noopEngineState,
+      resumeRequest: { current: null },
+      cmuxProbes: noopCmuxProbes,
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  expect(lastFrame() ?? "").not.toContain("AUX");
+  expect(lastFrame() ?? "").toContain("UNCLASSIFIED");
+
+  stdin.write("u");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  const revealed = lastFrame() ?? "";
+  expect(revealed).toContain("AUX");
+
+  unmount();
+  catalogue.close();
+  index.close();
 });

@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { SessionRow } from "../index/index.ts";
+import type { CostBreakdown } from "../index/cost-rollup.ts";
 import { formatBytes, formatAge } from "../store.ts";
 import { formatCost } from "../cost.ts";
 import { theme, costColor } from "./theme.ts";
@@ -11,14 +12,16 @@ interface PreviewProps {
   row: SessionRow;
   skeleton: string;
   parentTitle: string | null;
-  subagentCount: number;
-  /** Summed cost of this Session's subagent runs (0 if none). */
-  subagentCost: number;
+  descendantCount: number;
+  selfCost: number;
+  totalCost: number;
+  providerCost: CostBreakdown;
   /** Catalogue classification for the selected session. */
   event?: string | null;
   skill?: string | null;
   project?: string | null;
   kind?: "session" | "loop";
+  sessionClass?: "work_body" | "auxiliary" | null;
   /** Cluster membership + PR/work-item identity (catalogue). */
   system?: string | null;
   gusWork?: string | null;
@@ -86,12 +89,15 @@ export function Preview({
   row,
   skeleton,
   parentTitle,
-  subagentCount,
-  subagentCost,
+  descendantCount,
+  selfCost,
+  totalCost,
+  providerCost,
   event,
   skill,
   project,
   kind,
+  sessionClass,
   system,
   gusWork,
   gusWorkSfId,
@@ -105,7 +111,6 @@ export function Preview({
   height,
 }: PreviewProps): React.ReactElement {
   const models = modelBreakdown(row.costByModel);
-  const totalCost = row.costUSD + subagentCost;
   const cacheTok = row.tokCacheRead + row.tokCacheWrite;
   const cadence = formatDuration(row.tickIntervalSec);
   const burn = burnPerDay(totalCost, row.firstTs, row.lastTs);
@@ -173,6 +178,7 @@ export function Preview({
         <Field label="version" value={row.version ?? "?"} />
         <Field label="id" value={row.sessionId} />
         {kind === "loop" ? <Field label="kind" value="loop ◆" color={theme.accent} /> : null}
+        {sessionClass ? <Field label="class" value={sessionClass} color={sessionClass === "auxiliary" ? theme.accent : theme.title} /> : null}
         {skill ? <Field label="skill" value={`⚙ ${skill}`} color={theme.accent} /> : null}
         {system ? <Field label="cluster" value={`◇ ${system}`} color={theme.accent} /> : null}
         {prNumber && prRepo ? (
@@ -201,7 +207,7 @@ export function Preview({
         ) : null}
         {project ? <Field label="project" value={`▢ ${project}`} color={theme.header} /> : null}
         {event ? <Field label="event" value={`⊞ ${event}`} color={theme.project} /> : null}
-        {row.isSubagent && parentTitle ? <Field label="parent" value={parentTitle} color="yellow" /> : null}
+        {parentTitle ? <Field label="parent" value={parentTitle} color="yellow" /> : null}
       </Box>
 
       <Box marginTop={1} flexDirection="column" flexShrink={0}>
@@ -210,22 +216,19 @@ export function Preview({
             <Text color={theme.muted}>spend</Text>
           </Box>
           <Text bold color={costColor(totalCost)}>
-            {formatCost(totalCost) || "$0"}
+            {formatCost(selfCost) || "$0"} self / {formatCost(totalCost) || "$0"} total
           </Text>
-          {subagentCount > 0 ? (
-            <Text color={theme.muted}>
-              {"  "}
-              {formatCost(row.costUSD) || "$0"} self
-            </Text>
-          ) : null}
         </Box>
-        {subagentCost > 0 ? (
+        {descendantCount > 0 ? (
           <Field
             label=""
-            value={`+ ${formatCost(subagentCost)} across ${subagentCount} subagent run${subagentCount === 1 ? "" : "s"}`}
+            value={`${descendantCount} causal/native descendant${descendantCount === 1 ? "" : "s"} included`}
             color={theme.accent}
           />
         ) : null}
+        {providerCost.claude > 0 ? <Field label="Claude" value={formatCost(providerCost.claude) || "$0"} color={theme.sourceNative} /> : null}
+        {providerCost.gpt > 0 ? <Field label="GPT" value={formatCost(providerCost.gpt) || "$0"} color={theme.sourceCodex} /> : null}
+        {providerCost.other > 0 ? <Field label="other" value={formatCost(providerCost.other) || "$0"} color={theme.muted} /> : null}
         <Box>
           <Box width={9} flexShrink={0}>
             <Text color={theme.muted}>tokens</Text>

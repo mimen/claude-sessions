@@ -8,8 +8,28 @@ const row = (id: string): SessionRow => ({ sessionId: id, lastTs: "2026-07-08" }
 const cat = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
   archived: false, parkedTaskId: null, key: null, parentSessionId: null,
+  sessionClass: null,
   role: null, resumeCommand: null, project: null, cluster: null, gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null,
   updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, identityKey: null, ...o,
+});
+
+test("buildEpicView: uses physical row cost for epic totals", () => {
+  const catMap = new Map<string, CatalogueRow>([
+    ["parent", cat({ sessionId: "parent", cluster: "pr-watch", groupingId: "E1" })],
+    ["child", cat({ sessionId: "child", cluster: "pr-watch", groupingId: "E1" })],
+  ]);
+  const parent = { ...row("parent"), costUSD: 5 };
+  const child = { ...row("child"), costUSD: 10 };
+  const recursive = new Map([["parent", 15], ["child", 10]]);
+  const items = buildEpicView([parent, child], {
+    catMap,
+    epicMap: new Map([["E1", { name: "Epic", shortName: "Epic", url: null }]]),
+    collapsedSections: new Set(),
+    costOf: (session) => recursive.get(session.sessionId) ?? 0,
+    sectionCostOf: (session) => session.costUSD,
+  });
+  const section = items.find((item) => item.kind === "section");
+  expect(section?.kind === "section" ? section.cost : null).toBe(15);
 });
 
 test("buildEpicView: groups system members by epic, strips team prefix, no-epic last, excludes no-system", () => {

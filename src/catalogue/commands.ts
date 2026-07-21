@@ -21,9 +21,11 @@ import {
   getRow,
   getTags,
   identityKeyOf,
+  parentEdges,
 } from "./db.ts";
 import { openIndex } from "../index/schema.ts";
-import { titleOf, usageOf, subagentCostOf, type SessionUsage } from "../index/index.ts";
+import { titleOf, usageOf, listByRecency, type SessionUsage } from "../index/index.ts";
+import { buildCostRollup, type SessionCostRollup } from "../index/cost-rollup.ts";
 import { formatCost, formatTokens } from "../cost.ts";
 import { pushCmuxRename } from "../cmux/liveness.ts";
 import { resolveRole } from "../roles/role-files.ts";
@@ -563,14 +565,18 @@ export function sessionEpic(sessionArg: string | undefined, groupingId: string |
   return 0;
 }
 
-/** Token/cost detail from the Index for one session, or null when unindexed. */
-function usageFor(id: string): { usage: SessionUsage; subagentUSD: number } | null {
+/** Token/cost detail and authoritative causal rollup for one indexed session. */
+function usageFor(id: string, edges: ReturnType<typeof parentEdges>): { usage: SessionUsage; rollup: SessionCostRollup } | null {
   if (!existsSync(DB_PATH())) return null;
   const db = openIndex(DB_PATH());
   try {
     const usage = usageOf(db, id);
     if (!usage) return null;
-    return { usage, subagentUSD: subagentCostOf(db, id) };
+    const rows = listByRecency(db, true);
+    const row = rows.find((candidate) => candidate.sessionId === id || candidate.resumeId === id);
+    if (!row) return null;
+    const rollup = buildCostRollup(rows, edges).bySessionId.get(row.sessionId);
+    return rollup ? { usage, rollup } : null;
   } finally {
     db.close();
   }
@@ -580,9 +586,9 @@ function usageFor(id: string): { usage: SessionUsage; subagentUSD: number } | nu
 export function meta(sessionArg: string | undefined): number {
   const id = resolveSessionId(sessionArg);
   if (!id) return notInSession();
-  const cost = usageFor(id);
   const db = openCatalogue(CATALOGUE_PATH());
   try {
+    const cost = usageFor(id, parentEdges(db));
     const row = getRow(db, id);
     const tags = getTags(db, id);
     const children = childrenOf(db, id);
@@ -593,6 +599,7 @@ export function meta(sessionArg: string | undefined): number {
     console.log(id);
     if (row?.customTitle) console.log(`  title: ${row.customTitle}`);
     console.log(`  kind: ${row?.kind ?? "session"}`);
+    console.log(`  session class: ${row?.sessionClass ?? "unclassified"}`);
     console.log(
       `  lifecycle: ${row?.archived ? "archived" : row?.completed ? "completed" : row?.parkedTaskId ? "parked" : "idle"}`,
     );
@@ -606,19 +613,25 @@ export function meta(sessionArg: string | undefined): number {
     const keyValue = identityKeyOf(row);
     if (keyValue) console.log(`  key: ${keyValue}`);
     if (tags.length) console.log(`  tags: ${tags.join(", ")}`);
-    if (cost && (cost.usage.costUSD > 0 || cost.subagentUSD > 0)) {
+    if (cost && cost.rollup.totalCost > 0) {
       const u = cost.usage;
-      const sub = cost.subagentUSD > 0 ? ` (+ ${formatCost(cost.subagentUSD)} subagents)` : "";
-      console.log(`  cost: ${formatCost(u.costUSD) || "$0.00"}${sub}`);
       console.log(
-        `  tokens: in ${formatTokens(u.tokInput)} · out ${formatTokens(u.tokOutput)}` +
+        `  cost: ${formatCost(cost.rollup.selfCost) || "$0.00"} self / ` +
+          `${formatCost(cost.rollup.totalCost) || "$0.00"} total`,
+      );
+      console.log(
+        `  provider cost: Claude ${formatCost(cost.rollup.byProvider.claude) || "$0.00"}` +
+          ` · GPT ${formatCost(cost.rollup.byProvider.gpt) || "$0.00"}` +
+          ` · other ${formatCost(cost.rollup.byProvider.other) || "$0.00"}`,
+      );
+      console.log(`  descendants: ${cost.rollup.descendantCount}`);
+      console.log(
+        `  tokens (self): in ${formatTokens(u.tokInput)} · out ${formatTokens(u.tokOutput)}` +
           ` · cache read ${formatTokens(u.tokCacheRead)} · cache write ${formatTokens(u.tokCacheWrite)}`,
       );
       const models = Object.entries(u.costByModel).sort((a, b) => b[1] - a[1]);
       if (models.length > 1) {
-        for (const [model, usd] of models) {
-          console.log(`    ${model}: ${formatCost(usd) || "$0.00"}`);
-        }
+        for (const [model, usd] of models) console.log(`    ${model}: ${formatCost(usd) || "$0.00"}`);
       }
     }
   } finally {

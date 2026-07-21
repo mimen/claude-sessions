@@ -52,7 +52,20 @@ ccs                    # launch the browser
 ccs reindex            # refresh the index from the store (incremental)
 ccs reindex --titles   # also generate missing titles (cron/launchd-friendly)
 ccs ls                 # debug: print the indexed sessions
+
+# CCS-managed launches declare their intent before a UUID is reserved:
+ccs session new --top-level --cwd /path/to/repo
+ccs session new --child-of . --cwd /path/to/repo
+
+# Run one canonical seat as a synchronous, causally parented helper:
+ccs delegate primary-review --child-of . --cwd /path/to/repo --prompt "Review the diff."
 ```
+
+`--top-level` creates a visible work body. `--child-of` creates an auxiliary session whose
+cost belongs to its causal parent. Auxiliary sessions are hidden in normal list, search, and
+tree views; use `u` in the TUI or `--auxiliary` in CLI views to reveal them for one invocation.
+Canonical delegated seats live outside Claude Code's auto-discovered agent directories and are
+compiled into process-local `--agents` JSON only for the selected delegation.
 
 ### Keys
 
@@ -65,7 +78,8 @@ ccs ls                 # debug: print the indexed sessions
 | `/` | search |
 | `g` | toggle group-by-project |
 | `p` | toggle preview pane |
-| `a` | show / hide subagent runs |
+| `a` | show / hide native subagent runs |
+| `u` | show / hide auxiliary delegated sessions (resets hidden each launch) |
 | `t` | re-title the selected session |
 | `i` | swap inference engine (codex ⇄ claude; shown only when both are installed) |
 | `q` / `esc` | quit |

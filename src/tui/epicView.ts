@@ -22,6 +22,10 @@ export interface EpicViewCtx {
   childrenByParent?: ReadonlyMap<string, SessionRow[]>;
   sort?: SortMode;
   costOf?: (row: SessionRow) => number;
+  /** Physical per-row cost used for aggregate section totals to avoid descendant double counting. */
+  sectionCostOf?: (row: SessionRow) => number;
+  /** Optional closure-aware aggregate; callers use it when hidden descendants must still count. */
+  sectionCost?: (rows: readonly SessionRow[]) => number;
   /** Only include sessions in this system (default: any session that has a system). */
   cluster?: string;
 }
@@ -37,6 +41,7 @@ export function buildEpicView(rows: readonly SessionRow[], ctx: EpicViewCtx): Di
   const childrenByParent = ctx.childrenByParent ?? new Map<string, SessionRow[]>();
   const sort = ctx.sort ?? "recent";
   const costOf = ctx.costOf ?? (() => 0);
+  const sectionCostOf = ctx.sectionCostOf ?? ((row: SessionRow) => row.costUSD);
 
   // Bucket by epic_id (or "" for no-epic). Only sessions that belong to a system.
   const byEpic = new Map<string, SessionRow[]>();
@@ -73,7 +78,7 @@ export function buildEpicView(rows: readonly SessionRow[], ctx: EpicViewCtx): Di
     const collapsed = ctx.collapsedSections.has(key);
     const name = groupingId ? (ctx.epicMap.get(groupingId)?.name ?? groupingId) : "(no epic)";
     const section: SectionMeta = { key, name: groupingId ? epicLabel(name) : "(no epic)", glyph: "◈" };
-    const cost = rowsIn.reduce((sum, r) => sum + costOf(r), 0);
+    const cost = ctx.sectionCost?.(rowsIn) ?? rowsIn.reduce((sum, row) => sum + sectionCostOf(row), 0);
     items.push({ kind: "section", section, count: rowsIn.length, collapsed, cost });
     if (!collapsed) for (const r of sortRows(rowsIn, sort, costOf)) pushSession(r, 0);
   }

@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite";
 
 /** Bump when the schema changes; the Index is a pure cache, so we just rebuild on mismatch. */
-export const SCHEMA_VERSION = 6;
+// v7 recomputes cached physical cost rows after GPT gateway model pricing was introduced.
+export const SCHEMA_VERSION = 7;
 
 /**
  * Open (creating if needed) the Index and ensure its schema is current. If the on-disk

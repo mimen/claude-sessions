@@ -85,7 +85,7 @@ test("buildExport: pure — same inputs, deterministic output shape", () => {
     {
       sessionId: "s1", resumeId: null, customTitle: null, kind: "session" as const,
       completed: false, archived: false, parkedTaskId: null, key: "pr-watch:pr-agent:o/r#1",
-      parentSessionId: null, role: "pr-agent", resumeCommand: null, project: null,
+      parentSessionId: null, sessionClass: null, role: "pr-agent", resumeCommand: null, project: null,
       cluster: "pr-watch", gusWork: null, workUnitId: null, groupingId: null,
       stage: null, statusLine: null, meta: {}, notes: null, updatedAt: NOW,
       prNumber: 1, prRepo: "o/r", prBranch: null, prState: null, prHeadSha: null,

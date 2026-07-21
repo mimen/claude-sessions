@@ -58,6 +58,7 @@ export function syntheticRow(facts: {
   return {
     sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
     archived: false, parkedTaskId: null, key: null, parentSessionId: null,
+    sessionClass: null,
     role: facts.role ?? null, resumeCommand: null, project: null,
     cluster: facts.cluster ?? null, gusWork: facts.gusWork ?? null, workUnitId: null, groupingId: facts.groupingId ?? null,
     statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null, prNumber: facts.prNumber ?? null,

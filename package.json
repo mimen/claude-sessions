@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "setup": "bun run scripts/setup.ts",
+    "report:detached-children": "bun run scripts/report-detached-children.ts",
+    "report:detached-children:dossier": "bun run scripts/render-detached-child-dossier.ts",
     "lint:exports": "ts-prune -e",
     "lint:circular": "madge --circular --extensions ts,tsx src/"
   },

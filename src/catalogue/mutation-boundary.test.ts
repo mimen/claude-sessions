@@ -18,9 +18,11 @@ import { join } from "node:path";
 // Every db.ts export that MUTATES the catalogue (writes a row). Queries + pure helpers are free.
 const MUTATION_FNS = [
   "ensureRow", "touch", "setCustomTitle", "setKind", "setCompleted", "setArchived", "setParked",
-  "setResumeId", "setKey", "setParent", "setRole", "setResumeCommand", "setProject", "setCluster",
+  "setResumeId", "setKey", "setParent", "setSessionClass", "setRole", "setResumeCommand", "setProject", "setCluster",
   "setGusWork", "setWorkUnitId", "setStage", "setActivity", "setStatusLine", "setMeta",
   "setSessionEpic", "stampPrFacts", "addTag", "removeTag",
+  "createHistoricalDetachedChildBackfillAudit", "markHistoricalDetachedChildBackfillReverted",
+  "deleteHistoricalDetachedChildBackfillPlaceholder",
 ];
 
 /**
@@ -33,6 +35,8 @@ const ALLOWLIST: Record<string, string> = {
   "catalogue/session-fields-command.ts": "the atomic multi-field CLI (ADR-0078 finish-line) — a batch of the same setters commands.ts uses",
   "catalogue/backfill-work-units.ts": "one-time ADR-0057 migration command (setWorkUnitId)",
   "resume/new-session.ts": "the spawn primitive — writes a session's birth metadata (ADR-0065)",
+  "delegate/command.ts": "the canonical delegated-child launcher — atomically reserves causal auxiliary metadata before transport",
+  "catalogue/historical-detached-child-backfill.ts": "the reviewed exact-manifest backfill command — transactional causal metadata writes with audit snapshots",
   "roles/materialize.ts": "touches updated_at when materializing role config",
   "hooks/register.ts": "SessionStart hook — touches updated_at (the heartbeat)",
   "hooks/worker-stop-command.ts": "Stop hook — touches updated_at (the heartbeat)",

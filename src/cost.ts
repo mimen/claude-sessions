@@ -51,6 +51,12 @@ const WEB_SEARCH_USD = 0.01;
 
 /** USD per million tokens, matched by model-id prefix (ids may carry date suffixes). */
 const PRICES: ReadonlyArray<readonly [prefix: string, input: number, output: number]> = [
+  // GPT gateway sessions retain their served model ids in transcript usage. These are
+  // API-equivalent list prices; subscription-backed runs remain notional, like Claude runs.
+  ["gpt-5.6-sol", 5, 30],
+  ["gpt-5.6-terra", 2.5, 15],
+  ["gpt-5.6-luna", 1, 6],
+  ["gpt-5.5", 5, 30],
   ["claude-fable-5", 10, 50],
   ["claude-mythos", 10, 50],
   ["claude-opus-4-8", 5, 25],

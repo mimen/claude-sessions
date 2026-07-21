@@ -5,7 +5,8 @@ import { existsSync } from "node:fs";
 import { ensureDataDir, DB_PATH, CATALOGUE_PATH } from "./paths.ts";
 import { openIndex } from "./index/schema.ts";
 import type { Database } from "bun:sqlite";
-import { reindexStore, listByRecency, titleOf, costOf, subagentCosts } from "./index/index.ts";
+import { reindexStore, listByRecency, titleOf } from "./index/index.ts";
+import { buildCostRollup } from "./index/cost-rollup.ts";
 import { formatCost } from "./cost.ts";
 import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster } from "./catalogue/db.ts";
 import { openSessionIds } from "./cmux/liveness.ts";
@@ -13,6 +14,7 @@ import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson, isCoreRo
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
+import { delegateCommand } from "./delegate/command.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { boardCommand } from "./catalogue/board-command.ts";
 import { backfillTitles } from "./titler/queue.ts";
@@ -38,7 +40,9 @@ import { catalogueExportCommand } from "./catalogue/export-command.ts";
 import { identityCommand, identityResolveCommand } from "./catalogue/identity-command.ts";
 import { sessionCommand } from "./catalogue/session-command.ts";
 import { sessionFieldsCommand } from "./catalogue/session-fields-command.ts";
+import { historicalDetachedChildBackfillCommand } from "./catalogue/historical-detached-child-backfill.ts";
 import { getCrashReporter, installCrashLog, summarizeArgv } from "./crashlog.ts";
+import { SESSION_CLASS_ROLLOUT_AT } from "./session-class.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -49,8 +53,10 @@ use \`ccs identity …\`; for per-run session state (title, parent, lifecycle) u
 Usage:
   ccs                 Launch the session browser (TUI)
   ccs reindex [--titles]   Refresh the session index (--titles: also regenerate titles headless)
-  ccs ls              Print indexed sessions (with catalogue badges)
-  ccs tree            Constellation view: children grouped under their parent
+  ccs ls [--auxiliary]    Print indexed sessions (with catalogue badges)
+  ccs tree [--auxiliary]  Causal tree with recursive self/total cost
+  ccs delegate <seat> --child-of <uuid|.> --cwd <dir> --prompt <task>
+                         Reserve and synchronously run an auxiliary seat
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
 
 Identities (durable, per-work-unit — ADR-0089):
@@ -70,13 +76,16 @@ Sessions (ephemeral, per-run):
   ccs session unset <id> --identity|--title|--parent|--parked
   ccs session title <id> "text"                   Custom title + cmux tab sync
   ccs session complete|archive|uncomplete|unarchive <id>   Per-session lifecycle
-  ccs session new --identity=<key> --cluster=<c> --role=<r> [--top-level] [flags]
-                                                  Attach pre-minted identity AT BIRTH, launch \`claude --session-id\`
-    explicit identity requires matching stored cluster + role; cannot combine with --key
-    flags: --title --parent <id> --cwd <dir> --prompt "..." --permission-mode <mode> · --print-id (reserve only)
-    legacy birth (without --identity): --cluster --role --pr-repo owner/repo --pr-number 123 --gus-work W-...
+  ccs session new <--top-level|--child-of <uuid|.>> [flags]  Mint id, classify at birth, launch \`claude --session-id\`
+    explicit identity: --identity=<key> --cluster=<c> --role=<r> (must match stored identity; cannot combine with --key)
+    flags: --cluster --role --title --cwd <dir> --prompt "..." --permission-mode <mode>
+           --pr-repo owner/repo --pr-number 123 --gus-work W-... · --print-id (reserve only)
   ccs session bump <id> [--note "..."]            Wake the session's cmux tab
   ccs session-fields <sid> --json '{...}' [--sensor <name>]  Atomic multi-field write (ADR-0078)
+  ccs historical-backfill detached-children --expect-sha256 <digest> [--apply]
+                         Dry-run/apply the reviewed exact historical auxiliary manifest
+  ccs historical-backfill rollback --operation <uuid> [--apply]
+                         Restore one audited historical backfill's managed fields
 
 Legacy per-session verbs (still work; will migrate to \`ccs session …\` in a later sweep):
   ccs meta [<id>|.]                               Show a session's row (identity join included)
@@ -88,7 +97,7 @@ Legacy per-session verbs (still work; will migrate to \`ccs session …\` in a l
   ccs status [<id>|.] "<line>" [--off]            Freeform status pill (mirrors to identity.status_line)
   ccs name [<id>|.] "<short name>" [--off]        Short tab name (<=35 chars)
   ccs stage [<id>|.] [<value> --sensor <name>]    Read/write pipeline stage (sensor-only write)
-  ccs new-session [flags]                         Legacy alias for \`ccs session new\`
+  ccs new-session <--top-level|--child-of <uuid|.>> [flags]  Legacy alias for \`ccs session new\`
   ccs bump-session <sid> [--note "..."]           Legacy alias for \`ccs session bump\`
 
 Clusters & board:
@@ -154,12 +163,11 @@ export async function main(argv: string[]): Promise<number> {
     case "reindex":
       return await reindex({ titles: args.includes("--titles") });
     case "ls":
-      return ls({
-        all: args.includes("--all"),
-        loops: args.includes("--loops"),
-      });
+      return ls({ all: args.includes("--all"), loops: args.includes("--loops"), auxiliary: args.includes("--auxiliary") });
     case "tree":
-      return tree({ all: args.includes("--all") });
+      return tree({ all: args.includes("--all"), auxiliary: args.includes("--auxiliary") });
+    case "delegate":
+      return delegateCommand(args.slice(1));
     case "whoami":
       return whoami();
     case "meta": {
@@ -305,6 +313,8 @@ export async function main(argv: string[]): Promise<number> {
       // ADR-0078 finish-line: atomic multi-field write for cluster hot-path composers.
       // `ccs session-fields <sid> --json '{...}' [--sensor <name>]`
       return sessionFieldsCommand(args.slice(1));
+    case "historical-backfill":
+      return historicalDetachedChildBackfillCommand(args.slice(1));
     case "session":
       // ADR-0089 step 7: `ccs session <verb>` — per-session CLI noun. See session-command.ts.
       return await sessionCommand(args.slice(1));
@@ -471,20 +481,20 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
 }
 
 /** Table of indexed sessions, joined with catalogue metadata + live open-state. */
-function ls(opts: { all: boolean; loops: boolean }): number {
+function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number {
   ensureDataDir();
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
   try {
-    const rows = listByRecency(db);
+    const indexedRows = listByRecency(db, true);
+    const rows = indexedRows.filter((row) => !row.isSubagent);
     if (rows.length === 0) {
       console.log("No sessions indexed. Run `ccs reindex` first.");
       return 0;
     }
     const catalogue = getAll(cat);
     const open = openSessionIds();
-    // Subagent runs are separate index rows keyed to the parent's INTERNAL id (= resumeId).
-    const subCosts = subagentCosts(db);
+    const rollup = buildCostRollup(indexedRows, parentEdges(cat));
     const srcMark = { native: "★", codex: "✎", fallback: " " } as const;
     let shown = 0;
     for (const r of rows) {
@@ -492,18 +502,21 @@ function ls(opts: { all: boolean; loops: boolean }): number {
       const lifecycle = lifecycleOf(c);
       const keyValue = identityKeyOf(c);
       if (!opts.all && lifecycle === "archived") continue;
+      if (!opts.auxiliary && c?.sessionClass === "auxiliary") continue;
       if (opts.loops && c?.kind !== "loop") continue;
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
       // A child in the constellation gets a ↳ marker inside the (padded) title cell, keeping columns aligned.
       const childMark = c?.parentSessionId ? "↳ " : "";
       const title = pad(childMark + (c?.customTitle ?? r.title), 42);
-      const badge = pad((c?.kind === "loop" ? "LOOP " : "") + d.label + (d.nudge ? "!" : ""), 16);
+      const isRecentUnclassified = c?.sessionClass == null && r.firstTs != null
+        && Date.parse(r.firstTs) >= Date.parse(SESSION_CLASS_ROLLOUT_AT);
+      const classification = c?.sessionClass === "auxiliary" ? "AUX " : isRecentUnclassified ? "UNCLASSIFIED " : "";
+      const badge = pad((c?.kind === "loop" ? "LOOP " : "") + classification + d.label + (d.nudge ? "!" : ""), 28);
       const sk = pad(c?.role ? `⚙${c.role}` : "", 14);
       const key = pad(keyValue ? `⊞${keyValue}` : "", 18);
       const project = pad(r.projectName, 16);
       const age = pad(formatAge(r.lastTs), 5);
-      const subCost = subCosts.get(r.sessionId) ?? subCosts.get(r.resumeId) ?? 0;
-      const cost = pad(formatCost(r.costUSD + subCost), 7);
+      const cost = pad(formatCost(rollup.bySessionId.get(r.sessionId)?.totalCost ?? r.costUSD), 7);
       console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${key}${project} ${age} ${cost} ${r.msgCount}m`);
       shown++;
     }
@@ -524,52 +537,59 @@ function ls(opts: { all: boolean; loops: boolean }): number {
  * parent. A "root" is any parent that isn't itself someone's child; on a pure cycle we fall back to
  * every parent as a root, and a seen-set guards the recursion so a cycle prints once, not forever.
  */
-function tree(_opts: { all: boolean }): number {
+function tree(opts: { all: boolean; auxiliary: boolean }): number {
   ensureDataDir();
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
   try {
     const edges = parentEdges(cat);
     if (edges.length === 0) {
-      console.log("No constellation edges yet. Link one with `ccs parent <id|.> <parent-id|.>`.");
+      console.log("No causal session edges yet. Link one with `ccs parent <id|.> <parent-id|.>`.");
       return 0;
     }
+    const allRows = listByRecency(db, true);
+    const catMap = getAll(cat);
+    const rowById = new Map(allRows.filter((row) => !row.isSubagent).map((row) => [row.sessionId, row]));
+    const visible = (id: string): boolean => {
+      const row = catMap.get(id);
+      if (!opts.all && lifecycleOf(row ?? null) === "archived") return false;
+      return opts.auxiliary || row?.sessionClass !== "auxiliary";
+    };
     const childMap = new Map<string, string[]>();
     const isChild = new Set<string>();
-    for (const e of edges) {
-      const kids = childMap.get(e.parentId) ?? [];
-      kids.push(e.sessionId);
-      childMap.set(e.parentId, kids);
-      isChild.add(e.sessionId);
+    const memberParents = new Set<string>();
+    for (const edge of edges) {
+      if (visible(edge.parentId)) memberParents.add(edge.parentId);
+      if (!visible(edge.parentId) || !visible(edge.sessionId)) continue;
+      const kids = childMap.get(edge.parentId) ?? [];
+      kids.push(edge.sessionId);
+      childMap.set(edge.parentId, kids);
+      isChild.add(edge.sessionId);
     }
     for (const kids of childMap.values()) kids.sort();
-    const catMap = getAll(cat);
+    const rollup = buildCostRollup(allRows, edges);
+    const rollupFor = (id: string) => {
+      const direct = rollup.bySessionId.get(id);
+      if (direct) return direct;
+      const row = allRows.find((candidate) => candidate.resumeId === id);
+      return row ? rollup.bySessionId.get(row.sessionId) : undefined;
+    };
     const skillOf = (id: string): string => {
-      const s = catMap.get(id)?.role;
-      return s ? `  ⚙${s}` : "";
+      const role = catMap.get(id)?.role;
+      return role ? `  ⚙${role}` : "";
     };
-    // A node's own cost includes its index-level subagent runs (agent-*.jsonl files).
-    const subCosts = subagentCosts(db);
-    const ownCost = (id: string): number => costOf(db, id) + (subCosts.get(id) ?? 0);
-    const subtreeCost = (id: string, visiting = new Set<string>()): number => {
-      if (visiting.has(id)) return 0; // cycle guard
-      visiting.add(id);
-      let sum = ownCost(id);
-      for (const kid of childMap.get(id) ?? []) sum += subtreeCost(kid, visiting);
-      return sum;
-    };
+    const classOf = (id: string): string => catMap.get(id)?.sessionClass === "auxiliary" ? "  AUX" : "";
     const costLabel = (id: string): string => {
-      const own = ownCost(id);
-      const kids = childMap.get(id) ?? [];
-      const total = kids.length ? subtreeCost(id) : own;
-      const ownStr = formatCost(own);
-      const parts: string[] = [];
-      if (ownStr) parts.push(ownStr);
-      if (kids.length && total > own) parts.push(`Σ${formatCost(total)}`);
-      return parts.length ? `  ${parts.join(" ")}` : "";
+      const cost = rollupFor(id);
+      if (!cost) return "";
+      const parts = [`${formatCost(cost.selfCost) || "$0"} self`, `${formatCost(cost.totalCost) || "$0"} total`];
+      if (cost.byProvider.claude > 0) parts.push(`Claude ${formatCost(cost.byProvider.claude)}`);
+      if (cost.byProvider.gpt > 0) parts.push(`GPT ${formatCost(cost.byProvider.gpt)}`);
+      if (cost.byProvider.other > 0) parts.push(`other ${formatCost(cost.byProvider.other)}`);
+      return `  ${parts.join(" · ")}`;
     };
-    let roots = [...childMap.keys()].filter((p) => !isChild.has(p)).sort();
-    if (roots.length === 0) roots = [...childMap.keys()].sort();
+    let roots = [...memberParents].filter((parent) => visible(parent) && !isChild.has(parent)).sort();
+    if (roots.length === 0) roots = [...memberParents].filter(visible).sort();
     const seen = new Set<string>();
     const print = (id: string, depth: number): void => {
       const indent = depth === 0 ? "" : "  ".repeat(depth - 1) + "↳ ";
@@ -578,10 +598,11 @@ function tree(_opts: { all: boolean }): number {
         return;
       }
       seen.add(id);
-      console.log(`${indent}${labelForId(db, id)}${skillOf(id)}${costLabel(id)}`);
+      const missing = rowById.has(id) ? "" : "  (unindexed)";
+      console.log(`${indent}${labelForId(db, id)}${classOf(id)}${skillOf(id)}${missing}${costLabel(id)}`);
       for (const kid of childMap.get(id) ?? []) print(kid, depth + 1);
     };
-    for (const r of roots) print(r, 0);
+    for (const root of roots) print(root, 0);
   } finally {
     db.close();
     cat.close();

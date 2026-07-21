@@ -9,7 +9,7 @@
  *   ccs session unset <id> --identity | --title | --parent | --parked
  *   ccs session title <id> "text"                   same as --title but also cmux tab sync
  *   ccs session complete <id> | archive <id>        session lifecycle (distinct from identity)
- *   ccs session new [flags]                         delegates to legacy new-session
+ *   ccs session new <--top-level|--child-of <uuid|.>> [flags]  delegates to legacy new-session
  *   ccs session bump <id> [--note "…"]              wake a specific session
  *
  * Old top-level commands (rename, mark, key, parent, project, role, gus-work, epic, status,
@@ -82,8 +82,8 @@ function usage(rc = 1): number {
   console.error("  ccs session unset <id> --identity|--title|--parent|--parked");
   console.error("  ccs session title <id> \"text\"                   set title + sync cmux tab");
   console.error("  ccs session complete|archive|uncomplete|unarchive <id>");
-  console.error("  ccs session new --identity=<key> --cluster=<c> --role=<r> [--top-level] [flags]  attach a pre-minted identity + launch claude");
-  console.error("    legacy PR/GUS birth remains available without --identity");
+  console.error("  ccs session new <--top-level|--child-of <uuid|.>> [flags]  mint id + launch claude");
+  console.error("    --identity=<key> requires matching --cluster=<c> and --role=<r>; legacy PR/GUS birth remains available");
   console.error("  ccs session bump <id> [--note=\"…\"]              wake this session's cmux tab");
   return rc;
 }

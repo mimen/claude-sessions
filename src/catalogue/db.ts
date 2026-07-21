@@ -11,6 +11,7 @@ import { Database } from "bun:sqlite";
 export type Kind = "session" | "loop";
 export type Lifecycle = "idle" | "parked" | "completed" | "archived";
 export type PrState = "open" | "merged" | "closed";
+export type SessionClass = "work_body" | "auxiliary";
 
 export interface CatalogueRow {
   sessionId: string;
@@ -22,8 +23,10 @@ export interface CatalogueRow {
   parkedTaskId: string | null;
   /** Neutral, opaque identity key for system-level grouping. */
   key: string | null;
-  /** The session that spawned/owns this one (a sessionId). Children are a reverse lookup. */
+  /** The causal session that spawned this body; descendant cost belongs to it. */
   parentSessionId: string | null;
+  /** Explicit birth intent. Null is retained for legacy/plain sessions. */
+  sessionClass: SessionClass | null;
   /** The session's ROLE — first-class identity axis (control, concierge, scout, pr-agent…). */
   role: string | null;
   /** How this session is re-armed on resume so it comes back RUNNING (e.g. a loop's
@@ -94,9 +97,12 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 34;
+const CATALOGUE_VERSION = 36;
 
-export function openCatalogue(dbPath: string): Database {
+export function openCatalogue(
+  dbPath: string,
+  options: { readonly materialize?: boolean } = {},
+): Database {
   const db = new Database(dbPath, { create: true });
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA busy_timeout = 5000;");
@@ -112,6 +118,9 @@ export function openCatalogue(dbPath: string): Database {
     // migration creates every required column.
     throw new Error(`catalogue schema postcondition failed: ${post.error}`);
   }
+  // Exact-manifest transactional maintenance must not incidentally import filesystem-derived
+  // identity/grouping/inbox state. It still receives required catalogue schema migrations above.
+  if (options.materialize === false) return db;
   // ADR-0089 step 3: materialize per-fleet-role identity tables from each role's
   // identity-schema.toml under ~/.ccs-config/clusters/<c>/roles/<r>/. Additive-only,
   // idempotent. Only fires when a config root is discoverable — tests using
@@ -165,7 +174,7 @@ export function openCatalogue(dbPath: string): Database {
 function validateSchemaPostcondition(db: Database): { ok: true } | { ok: false; error: string } {
   // ADR-0089 v33: identity attrs moved to identities + identity_<role> tables. Catalogue
   // holds only per-run session state now.
-  const required = ["session_id", "identity_key", "meta", "updated_at"];
+  const required = ["session_id", "identity_key", "meta", "updated_at", "session_class"];
   const forbidden_pairs = [
     // ADR-0059 renamed system → cluster; both should never coexist.
     ["system", "cluster"],
@@ -771,6 +780,30 @@ function migrate(db: Database): void {
     }
   }
 
+  if (v < 35) {
+    // No backfill: null distinguishes legacy/plain sessions from declared causal intent.
+    if (!hasColumn(db, "catalogue", "session_class")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN session_class TEXT CHECK (session_class IN ('work_body', 'auxiliary') OR session_class IS NULL);");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_session_class ON catalogue(session_class);");
+  }
+  if (v < 36) {
+    // The reviewed historical detached-child backfill records a complete managed-field preimage
+    // before changing catalogue state. It is intentionally separate from general session metadata:
+    // every operation is manifest-pinned and can be inspected or safely reverted later.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS historical_detached_child_backfills (
+        operation_id TEXT PRIMARY KEY,
+        manifest_sha256 TEXT NOT NULL,
+        manifest_path TEXT NOT NULL,
+        applied_at TEXT NOT NULL,
+        reverted_at TEXT,
+        snapshot_json TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_historical_detached_child_backfills_manifest
+        ON historical_detached_child_backfills(manifest_sha256);
+    `);
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -862,6 +895,7 @@ function rowFrom(r: Record<string, unknown> | null, db?: Database): CatalogueRow
     // Legacy `key` field — mapped to the same value as identityKey for API-stable consumers.
     key: identityKey,
     parentSessionId: (r.parent_session_id as string) ?? null,
+    sessionClass: (r.session_class as SessionClass) ?? null,
     role,
     resumeCommand,
     project: null,  // dropped in v33 (unused post-refactor)
@@ -1067,6 +1101,9 @@ export function setKey(db: Database, sessionId: string, key: string | null, now:
 }
 export function setParent(db: Database, sessionId: string, parentId: string | null, now: string): void {
   set(db, sessionId, "parent_session_id", parentId, now);
+}
+export function setSessionClass(db: Database, sessionId: string, value: SessionClass | null, now: string): void {
+  set(db, sessionId, "session_class", value, now);
 }
 /** Set the session's ROLE (ADR-0015) — the canonical identity axis. */
 export function setRole(db: Database, sessionId: string, role: string | null, now: string): void {
@@ -1417,6 +1454,106 @@ export function getTags(db: Database, sessionId: string): string[] {
     }) as { entity: string }[]
   ).map((r) => r.entity);
 }
+
+export interface HistoricalDetachedChildBackfillAudit {
+  readonly operationId: string;
+  readonly manifestSha256: string;
+  readonly manifestPath: string;
+  readonly appliedAt: string;
+  readonly revertedAt: string | null;
+  readonly snapshotJson: string;
+}
+
+/** Persist one exact-manifest backfill preimage inside the same transaction as its mutations. */
+export function createHistoricalDetachedChildBackfillAudit(
+  db: Database,
+  audit: Omit<HistoricalDetachedChildBackfillAudit, "revertedAt">,
+): void {
+  db.query(
+    `INSERT INTO historical_detached_child_backfills
+      (operation_id, manifest_sha256, manifest_path, applied_at, snapshot_json)
+     VALUES ($operationId, $manifestSha256, $manifestPath, $appliedAt, $snapshotJson)`,
+  ).run({
+    $operationId: audit.operationId,
+    $manifestSha256: audit.manifestSha256,
+    $manifestPath: audit.manifestPath,
+    $appliedAt: audit.appliedAt,
+    $snapshotJson: audit.snapshotJson,
+  });
+}
+
+/** Read one historical exact-backfill audit record for verification or rollback. */
+export function getHistoricalDetachedChildBackfillAudit(
+  db: Database,
+  operationId: string,
+): HistoricalDetachedChildBackfillAudit | null {
+  const row = db.query(
+    `SELECT operation_id, manifest_sha256, manifest_path, applied_at, reverted_at, snapshot_json
+       FROM historical_detached_child_backfills
+      WHERE operation_id = $operationId`,
+  ).get({ $operationId: operationId }) as {
+    operation_id: string;
+    manifest_sha256: string;
+    manifest_path: string;
+    applied_at: string;
+    reverted_at: string | null;
+    snapshot_json: string;
+  } | null;
+  if (row === null) return null;
+  return {
+    operationId: row.operation_id,
+    manifestSha256: row.manifest_sha256,
+    manifestPath: row.manifest_path,
+    appliedAt: row.applied_at,
+    revertedAt: row.reverted_at,
+    snapshotJson: row.snapshot_json,
+  };
+}
+
+/** Mark a historical exact-backfill audit record reverted after its managed fields are restored. */
+export function markHistoricalDetachedChildBackfillReverted(
+  db: Database,
+  operationId: string,
+  revertedAt: string,
+): void {
+  db.query(
+    `UPDATE historical_detached_child_backfills
+        SET reverted_at = $revertedAt
+      WHERE operation_id = $operationId`,
+  ).run({ $operationId: operationId, $revertedAt: revertedAt });
+}
+
+/**
+ * Remove the empty catalogue placeholder created for an indexed historical child that had no
+ * pre-existing catalogue row. This intentionally cannot remove a session with any independently
+ * authored metadata or tag; callers run it inside their rollback transaction.
+ */
+export function deleteHistoricalDetachedChildBackfillPlaceholder(db: Database, sessionId: string): void {
+  const tags = db.query("SELECT COUNT(*) AS count FROM session_tags WHERE session_id = $id").get({
+    $id: sessionId,
+  }) as { count: number };
+  if (tags.count !== 0) throw new Error(`refusing to delete ${sessionId}: tags remain after rollback`);
+  const result = db.query(
+    `DELETE FROM catalogue
+      WHERE session_id = $id
+        AND resume_id IS NULL
+        AND custom_title IS NULL
+        AND completed = 0
+        AND archived = 0
+        AND parked_task_id IS NULL
+        AND notes IS NULL
+        AND identity_key IS NULL
+        AND substrate IS NULL
+        AND launcher_identity IS NULL
+        AND session_class IS NULL
+        AND parent_session_id IS NULL
+        AND (meta IS NULL OR meta = '{}')`,
+  ).run({ $id: sessionId });
+  if (result.changes !== 1) {
+    throw new Error(`refusing to delete ${sessionId}: row contains state beyond the historical backfill`);
+  }
+}
+
 /** Reverse lookup: which sessions are tagged with this entity. */
 export function sessionsForEntity(db: Database, entity: string): string[] {
   return (

@@ -24,6 +24,15 @@ test("prices input/output tokens at the model's rates", () => {
   expect(acc.totals().output).toBe(1_000_000);
 });
 
+test("prices observed GPT gateway model ids at their API-equivalent rates", () => {
+  const acc = createUsageAccumulator();
+  acc.add(line({ requestId: "sol", model: "gpt-5.6-sol", usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } }));
+  acc.add(line({ requestId: "terra", model: "gpt-5.6-terra[1m]", usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } }));
+  acc.add(line({ requestId: "luna", model: "gpt-5.6-luna", usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } }));
+  acc.add(line({ requestId: "55", model: "gpt-5.5", usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } }));
+  expect(acc.totals().costUSD).toBeCloseTo(35 + 17.5 + 7 + 35, 6);
+});
+
 test("cache tiers bill at 0.1x read, 1.25x 5m write, 2x 1h write of input price", () => {
   const acc = createUsageAccumulator();
   acc.add(

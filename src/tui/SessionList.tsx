@@ -46,6 +46,8 @@ interface SessionBadge {
   taskDone?: number | null;
   taskTotal?: number | null;
   taskInterrupted?: boolean;
+  /** Explicit execution classification warning. */
+  classification?: "AUX" | "UNCLASSIFIED" | null;
 }
 
 interface SessionListProps {
@@ -169,6 +171,13 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                 {badge?.pr ? r.title.replace(/^(#\d+\s+)+/, "") : r.title}
               </Text>
             </Box>
+            {badge?.classification ? (
+              <Box flexShrink={0} marginRight={1}>
+                <Text color={sel ? theme.selFg : badge.classification === "AUX" ? theme.accent : "yellow"}>
+                  {badge.classification}
+                </Text>
+              </Box>
+            ) : null}
             {badge?.pr ? (
               <Box flexShrink={0} marginRight={1}>
                 <Text

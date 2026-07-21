@@ -95,6 +95,7 @@ const SESSION_GROUPS: KeyGroup[] = [
       ["g", "change grouping: groups → by-state → flat → tree → cluster → epic"],
       ["s", "change sort: recency → cost → messages"],
       ["a", "show / hide subagent runs"],
+      ["u", "show / hide auxiliary sessions (session-local)"],
       ["A", "show / hide archived sessions"],
       ["esc", "clear search or skill-pin; when clear, quit"],
     ],

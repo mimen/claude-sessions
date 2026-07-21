@@ -359,7 +359,7 @@ Your cluster's roles should appear.
 Spawn the control role:
 
 ```bash
-ccs new-session --role control --cluster event-watch
+ccs new-session --top-level --role control --cluster event-watch
 ```
 
 The session spawns into a fresh cmux workspace. If it's a loop role (like control), it comes back running (the resume_command fires at SessionStart).
@@ -382,7 +382,7 @@ A session is filed under a cluster via the `cluster` column in the catalogue (AD
 
 **At spawn:**
 ```bash
-ccs new-session --role <role> --cluster <cluster>
+ccs new-session --top-level --role <role> --cluster <cluster>
 ```
 
 The `--cluster` flag writes the cluster to the CatalogueRow. The session is now part of that cluster's fleet.
@@ -514,8 +514,8 @@ The control role is a **loop** (`kind = "loop"`, `resume_command = "/loop 15m /p
 2. **Run `ccs sync-roles`** to materialize the roles.
 3. **Spawn the core roles** (control, concierge, etc.):
    ```bash
-   ccs new-session --role control --cluster <name>
-   ccs new-session --role concierge --cluster <name>
+   ccs new-session --top-level --role control --cluster <name>
+   ccs new-session --top-level --role concierge --cluster <name>
    ```
 4. **Resume the cluster** to bring up any closed sessions:
    ```bash

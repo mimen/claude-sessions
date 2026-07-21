@@ -42,12 +42,13 @@ describe("catalogue schema (post-v33)", () => {
     expect(cols.has("grouping_id")).toBe(false);
     expect(cols.has("work_unit_id")).toBe(false);
     expect(cols.has("project")).toBe(false);
+    expect(cols.has("session_class")).toBe(true);
   });
 
   test("stamps user_version to CATALOGUE_VERSION", () => {
     const db = openCatalogue(":memory:");
     const v = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-    expect(v).toBe(34);
+    expect(v).toBe(35);
   });
 
   test("universal indexes exist", () => {
@@ -59,6 +60,7 @@ describe("catalogue schema (post-v33)", () => {
     expect(idx).toContain("idx_identities_grouping");
     expect(idx).toContain("idx_inboxes_identity_status");
     expect(idx).toContain("idx_catalogue_identity");
+    expect(idx).toContain("idx_catalogue_session_class");
   });
 });
 

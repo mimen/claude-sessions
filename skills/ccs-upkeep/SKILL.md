@@ -57,7 +57,7 @@ ccs resume-cluster pr-watch             # do it
 ```
 - **resume** = re-embody an existing session (keeps transcript/context). Use for WORKERS and
   any warm session. Loops come back RUNNING (their `resume_command` replays).
-- **rebirth** (`ccs new-session --role <name>`) = fresh session in the role's dir, armed from
+- **rebirth** (`ccs new-session --top-level --role <name>`) = fresh session in the role's dir, armed from
   the registry. Use for CORE LOOPS / new work only — NOT workers (rebirth loses PR context).
 - resume-cluster automatically: skips already-open, supersedes stale duplicates of a
   work-unit, skips retired (completed/archived). One live embodiment per responsibility.
@@ -77,7 +77,7 @@ Closing is SAFE — state is durable in `~/.ccs`, resume brings it back. That's 
 
 Core loops (control/scout/eval/concierge) should run in their role dir, not `$HOME`:
 ```bash
-ccs new-session --role control    # inherits home_dir + resume_command from the registry
+ccs new-session --top-level --role control    # inherits home_dir + resume_command from the registry
 ```
 If you're replacing an old misplaced session, **archive the old one** so it's not left behind:
 ```bash
