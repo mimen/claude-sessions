@@ -85,6 +85,8 @@ const SESSION_GROUPS: KeyGroup[] = [
     name: "Inspect",
     keys: [
       ["v", "read the full transcript (j/k, PgUp/PgDn, g/G)"],
+      ["J / K", "scroll the preview peek — reads the real transcript inline"],
+      ["d", "preview: full metadata dossier ⇄ compact peek"],
       ["p", "show / hide the preview pane"],
     ],
   },

@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { SessionRow } from "../index/index.ts";
 import type { CostBreakdown } from "../index/cost-rollup.ts";
+import type { TranscriptLine } from "../transcript.ts";
 import { formatBytes, formatAge } from "../store.ts";
 import { formatCost } from "../cost.ts";
 import { theme, costColor } from "./theme.ts";
@@ -40,6 +41,13 @@ interface PreviewProps {
   tasks?: TaskSummary | null;
   /** Total height available to the pane (border included). */
   height: number;
+  /** false → compact identity strip + big scrollable content peek (default); true → full metadata
+   *  dossier (every field + cost breakdown), toggled with `d`. */
+  detailsOpen: boolean;
+  /** Real transcript for the peek, lazily loaded on first J/K scroll; null → show the baked skeleton. */
+  peekLines: TranscriptLine[] | null;
+  /** Peek scroll offset in rows (only meaningful once `peekLines` is loaded); clamped here. */
+  peekScroll: number;
 }
 
 const SOURCE_COLOR = {
@@ -47,6 +55,94 @@ const SOURCE_COLOR = {
   codex: theme.sourceCodex,
   fallback: theme.sourceFallback,
 } as const;
+
+// ---- Content peek (compact-mode default) --------------------------------------------------
+// The peek renders role-tagged rows so top-to-bottom reads as a conversation, and it gets a
+// deterministic line budget (not flexbox leftover), so it can window + scroll predictably.
+
+type PeekKind = "user" | "assistant" | "tool" | "meta";
+interface PeekRow {
+  kind: PeekKind;
+  text: string;
+  /** An elision marker ("…" between the skeleton's head and tail turns), rendered as a rule. */
+  sep?: boolean;
+}
+
+const PEEK_GUTTER: Record<PeekKind, string> = { user: "you", assistant: "ai", tool: "", meta: "" };
+const PEEK_COLOR: Record<PeekKind, string> = {
+  user: theme.accent,
+  assistant: theme.title,
+  tool: theme.faint,
+  meta: theme.muted,
+};
+
+/** Drop the skeleton's tool stubs ("[tool: X]", "[tool result]") and collapse whitespace — the peek
+ *  is for reading the conversation, not the plumbing. A turn left empty by this is dropped entirely. */
+function stripTools(s: string): string {
+  return s
+    .replace(/\[tool: [^\]]*\]/g, " ")
+    .replace(/\[tool result\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Parse the baked skeleton ("role: text" lines + a bare "…" elision marker) into role-tagged rows.
+ *  Tolerates the pre-collapse multi-line format: a continuation line that lacks a role prefix renders
+ *  as a gutter-less muted row rather than being misattributed. Tool-only turns strip to nothing. */
+function skeletonRows(skeleton: string): PeekRow[] {
+  const rows: PeekRow[] = [];
+  for (const raw of skeleton.split("\n")) {
+    if (raw === "…") {
+      rows.push({ kind: "meta", text: "earlier turns", sep: true });
+      continue;
+    }
+    const m = /^(user|assistant): ?(.*)$/.exec(raw);
+    const kind: PeekKind = m ? (m[1] as PeekKind) : "meta";
+    const text = stripTools(m ? m[2]! : raw);
+    if (text) rows.push({ kind, text });
+  }
+  return rows;
+}
+
+/** Flatten a loaded real transcript into single-row peek entries. Tool calls/results and the viewer's
+ *  blank turn-separators are dropped — the you/ai gutter delimits turns, and every peek row is precious. */
+function transcriptRows(lines: TranscriptLine[]): PeekRow[] {
+  return lines
+    .filter((l) => l.kind === "user" || l.kind === "assistant")
+    .map((l) => ({ kind: l.kind, text: l.text.replace(/\s+/g, " ").trim() }))
+    .filter((r) => r.text !== "");
+}
+
+/** Interleave a faint " · " between chip nodes so a compact line reads as one dotted run. */
+function withSeps(nodes: React.ReactNode[]): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  nodes.forEach((n, i) => {
+    if (i) out.push(<Text key={`sep-${i}`} color={theme.faint}> · </Text>);
+    out.push(n);
+  });
+  return out;
+}
+
+/** One peek row: a fixed role gutter (you/ai) + truncated text, or a dim elision rule. */
+function PeekLine({ row }: { row: PeekRow }): React.ReactElement {
+  if (row.sep) {
+    return (
+      <Text color={theme.faint} wrap="truncate-end">
+        {`  ┈┈┈  ${row.text} elided  ┈┈┈`}
+      </Text>
+    );
+  }
+  return (
+    <Box>
+      <Box width={4} flexShrink={0}>
+        <Text color={theme.muted}>{PEEK_GUTTER[row.kind]}</Text>
+      </Box>
+      <Text color={PEEK_COLOR[row.kind]} wrap="truncate-end">
+        {row.text || " "}
+      </Text>
+    </Box>
+  );
+}
 
 function fmtTs(iso: string | null): string {
   if (!iso) return "?";
@@ -109,6 +205,9 @@ export function Preview({
   reviewAppUrl,
   tasks,
   height,
+  detailsOpen,
+  peekLines,
+  peekScroll,
 }: PreviewProps): React.ReactElement {
   const models = modelBreakdown(row.costByModel);
   const cacheTok = row.tokCacheRead + row.tokCacheWrite;
@@ -119,6 +218,118 @@ export function Preview({
   // Keep it high in the pane and bounded so it stays visible at normal terminal heights.
   const openTasks = tasks?.tasks.filter((t) => t.status !== "completed") ?? [];
   const visibleOpenTasks = openTasks.slice(0, 5);
+
+  if (!detailsOpen) {
+    const inProgress = openTasks.find((t) => t.status === "in_progress") ?? null;
+    const taskSummary = tasks
+      ? openTasks.length > 0
+        ? `${openTasks.length} open`
+        : `✓ ${tasks.completed}/${tasks.total}`
+      : null;
+
+    // Dense classification / link chips — only those present, colors + OSC-8 links preserved.
+    const chips: React.ReactNode[] = [];
+    if (sessionClass) chips.push(<Text key="cls" color={sessionClass === "auxiliary" ? theme.accent : theme.muted}>{sessionClass}</Text>);
+    if (system) chips.push(<Text key="sys" color={theme.accent}>◇ {system}</Text>);
+    if (prNumber && prRepo) chips.push(<Text key="pr" color={prState === "merged" ? theme.sourceNative : prState === "closed" ? theme.faint : theme.accent}>{osc8(`https://github.com/${prRepo}/pull/${prNumber}`, `#${prNumber}`)}{prState ? ` ${prState}` : ""}</Text>);
+    if (gusWork) chips.push(<Text key="gw" color={theme.header}>{osc8(gusUrl(gusWork, gusWorkSfId), gusWork)}</Text>);
+    if (epicName) chips.push(<Text key="ep" color={theme.project}>{epicUrl ? osc8(epicUrl, epicName.replace(/^\[[^\]]+\]\s*/, "")) : epicName.replace(/^\[[^\]]+\]\s*/, "")}</Text>);
+    if (project) chips.push(<Text key="pj" color={theme.header}>▢ {project}</Text>);
+    if (event) chips.push(<Text key="ev" color={theme.project}>⊞ {event}</Text>);
+    if (reviewAppUrl) chips.push(<Text key="rv" color={theme.accent}>{osc8(reviewAppUrl, "↗ review")}</Text>);
+    if (parentTitle) chips.push(<Text key="pt" color="yellow">⤴ {parentTitle}</Text>);
+
+    // Per-provider split only when the spend is genuinely mixed; a single-provider session folds its
+    // one model into the spend line instead of earning a whole row. (burn/cwd/id live in `d`.)
+    const provNodes: React.ReactNode[] = [];
+    const provCount = [providerCost.claude, providerCost.gpt, providerCost.other].filter((x) => x > 0).length;
+    if (provCount > 1) {
+      if (providerCost.claude > 0) provNodes.push(<Text key="pc" color={theme.sourceNative}>Claude {formatCost(providerCost.claude)}</Text>);
+      if (providerCost.gpt > 0) provNodes.push(<Text key="pgt" color={theme.sourceCodex}>GPT {formatCost(providerCost.gpt)}</Text>);
+      if (providerCost.other > 0) provNodes.push(<Text key="pot" color={theme.muted}>other {formatCost(providerCost.other)}</Text>);
+    }
+
+    // Build the header row-by-row so the peek budget is exact regardless of which fields exist.
+    const H: React.ReactNode[] = [];
+    H.push(
+      <Text key="title" bold color={SOURCE_COLOR[row.titleSource]} wrap="truncate-end">{row.title}</Text>,
+    );
+    H.push(
+      <Text key="sub" color={theme.muted} wrap="truncate-end">
+        {row.titleSource} title · {row.msgCount} msgs · {formatBytes(row.fileSize)}
+        {skill ? <Text color={theme.accent}> · ⚙ {skill}</Text> : null}
+        {kind === "loop" ? <Text color={theme.accent}> · loop ◆</Text> : null}
+      </Text>,
+    );
+    H.push(
+      <Text key="repo" wrap="truncate-end">
+        <Text color={theme.accent}>{row.projectName}</Text>
+        <Text color={theme.muted}>  ({row.branch ?? "-"})</Text>
+      </Text>,
+    );
+    if (chips.length) H.push(<Text key="chips" wrap="truncate-end">{withSeps(chips)}</Text>);
+    H.push(
+      <Text key="spend" wrap="truncate-end">
+        <Text bold color={costColor(totalCost)}>{formatCost(selfCost) || "$0"} self / {formatCost(totalCost) || "$0"} total</Text>
+        <Text color={theme.muted}>  ·  {formatTokens(row.tokInput)}↓ {formatTokens(row.tokOutput)}↑</Text>
+        {models.length ? <Text color={models[0]!.badge.color}>{"  ·  ● "}{models[0]!.badge.label}{models.length > 1 ? ` +${models.length - 1}` : ""}</Text> : null}
+        {descendantCount > 0 ? <Text color={theme.accent}>{`  ·  +${descendantCount} desc`}</Text> : null}
+      </Text>,
+    );
+    if (provNodes.length) H.push(<Text key="prov" wrap="truncate-end">{withSeps(provNodes)}</Text>);
+    H.push(
+      <Text key="active" color={theme.muted} wrap="truncate-end">
+        active {formatAge(row.lastTs)}
+        {cadence ? ` · ~${cadence} · ${row.userTurns} ticks` : ""}
+        {taskSummary ? ` · ${taskSummary}` : ""}
+      </Text>,
+    );
+    if (inProgress) {
+      H.push(
+        <Text key="task" color={theme.accent} wrap="truncate-end">
+          ▸ {inProgress.subject}
+          {openTasks.length > 1 ? <Text color={theme.muted}>{`  +${openTasks.length - 1} open`}</Text> : null}
+        </Text>,
+      );
+    }
+
+    // Peek owns the remainder: border(2) + header rows + peek margin(1) + peek header(1).
+    const peekBody = Math.max(3, height - (H.length + 4));
+    let peekRows: PeekRow[];
+    let peekHeader: string;
+    if (peekLines) {
+      const all = transcriptRows(peekLines);
+      const maxScroll = Math.max(0, all.length - peekBody);
+      const clamped = Math.min(Math.max(0, peekScroll), maxScroll);
+      peekRows = all.slice(clamped, clamped + peekBody);
+      peekHeader = `TRANSCRIPT · ${clamped + peekRows.length}/${all.length}${clamped >= maxScroll ? " · END" : ""}`;
+    } else {
+      const all = skeletonRows(skeleton);
+      peekRows = all.slice(0, peekBody);
+      const sepIdx = all.findIndex((r) => r.sep);
+      peekHeader =
+        sepIdx >= 0
+          ? `PEEK · first ${sepIdx} · last ${all.length - sepIdx - 1}`
+          : `PEEK · ${all.length} turn${all.length === 1 ? "" : "s"}`;
+    }
+
+    return (
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.faint} paddingX={1} height={height} overflow="hidden">
+        {H}
+        <Box marginTop={1} flexDirection="column" flexShrink={0}>
+          <Text color={theme.muted} wrap="truncate-end">
+            {peekHeader}
+            <Text color={theme.faint}>{"   J/K scroll · d full"}</Text>
+          </Text>
+          {peekRows.length ? (
+            peekRows.map((r, i) => <PeekLine key={i} row={r} />)
+          ) : (
+            <Text color={theme.faint}>(no readable content)</Text>
+          )}
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box
