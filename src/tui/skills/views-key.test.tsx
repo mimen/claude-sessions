@@ -45,21 +45,21 @@ test("g inside a context lens cycles access -> home -> ... -> category", async (
   const config = { ...cr.value, store: { path: mkdtempSync(join(tmpdir(), "ccs-gx-")) } };
   const { lastFrame, stdin, unmount } = render(createElement(SkillsPanel, { skillsDb, indexDb, config, onSwitchMode: () => {}, onShowSessions: () => {} }));
   await new Promise((r) => setTimeout(r, 60));
-  // Inside a context lens the header carries the long ⌖ path, so the header's "view <x>"
-  // label wraps across the 80-col boundary. Assert on the footer's short, stable
-  // `group:<view>` token instead (same state, never wraps).
+  // A worktree's cwd can make the footer context path truncate at different points.
+  // The summary's `view <name>` label is the stable rendering of the active view,
+  // so assert it rather than a footer token whose wording/visibility is width-dependent.
   stdin.write("x"); // -> claude @ ~
   await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("group:access");
+  expect(lastFrame()).toContain("view access");
   expect(lastFrame()).toContain("GLOBAL");
   stdin.write("g");
   await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("group:home");
+  expect(lastFrame()).toContain("view home");
   stdin.write("g"); stdin.write("g");
   await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("group:category");
+  expect(lastFrame()).toContain("view category");
   stdin.write("x"); // next context resets to access
   await new Promise((r) => setTimeout(r, 30));
-  expect(lastFrame()).toContain("group:access");
+  expect(lastFrame()).toContain("view access");
   unmount();
 });
