@@ -96,6 +96,26 @@ export function formatCompactUSD(usd: number): string {
   return `$${(usd / 1_000_000).toFixed(1)}m`;
 }
 
+/**
+ * Compact Event Watch identity annotation for a session row. Core identities already read as
+ * their role in the hierarchy, while fleet worker refs become a scannable event label. Other
+ * clusters retain their full key because CCS has no cluster-specific display contract for them.
+ */
+export function identityRowLabel(identityKey: string | null | undefined): string | null {
+  if (!identityKey) return null;
+  if (identityKey.startsWith("event-watch:") && identityKey.split(":").length === 2) return null;
+
+  const prefix = "event-watch:event-worker:";
+  if (!identityKey.startsWith(prefix)) return identityKey;
+
+  return identityKey
+    .slice(prefix.length)
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((segment) => `${segment[0]?.toUpperCase() ?? ""}${segment.slice(1)}`)
+    .join(" · ");
+}
+
 /** Human cadence from seconds: "45s" · "12m" · "1.5h" · "3.2h" · "2.1d". Blank for 0. */
 export function formatDuration(sec: number): string {
   if (!sec || sec <= 0) return "";
