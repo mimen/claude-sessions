@@ -132,7 +132,7 @@ The same seam powers `e`, `S`, ask-the-fleet, and cleanup. Ask-the-fleet ranks e
 
 ## Skills mode
 
-`Tab` opens a separate machine-wide Skills registry. It reads `~/.ccs/cache/skills.db` in SQLite `mode=ro` when populated. If the rebuildable cache is empty or on an older schema, it performs a parallel, pruned full-home scan without writing a cache; `R` always forces that fresh filesystem scan instead of reloading a populated cache. Claude, Codex, Grok, Hermes, Cursor, IDE, agents, archive, download, project, and other discovered ecosystems remain visible; only marketplace catalogue listings, linked-worktree copies, and exact-content shadow duplicates are hidden.
+`Tab` opens a separate machine-wide Skills registry. It reads `~/.ccs/cache/skills.db` in SQLite `mode=ro` when populated. If the rebuildable cache is empty or on an older schema, it performs a parallel, pruned full-home scan without writing a cache; `R` always forces that fresh filesystem scan instead of reloading a populated cache. System/package caches, marketplace catalogue listings, linked-worktree copies, and exact-content shadow duplicates are hidden; Claude, Codex, Grok, Hermes, Cursor, IDE, agents, archive, download, project, and other discovered ecosystems remain visible. If the 30-second scan budget or one root fails, the partial registry remains usable and the footer surfaces a warning instead of presenting it as complete.
 
 Skills keys:
 

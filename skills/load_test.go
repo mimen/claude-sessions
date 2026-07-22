@@ -38,16 +38,25 @@ func TestScanMachineDiscoversSkillsAcrossHome(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	ignored := filepath.Join(home, "Library", "hidden", "SKILL.md")
-	if err := os.MkdirAll(filepath.Dir(ignored), 0o755); err != nil {
-		t.Fatal(err)
+	ignored := []string{
+		filepath.Join(home, "Library", "hidden", "SKILL.md"),
+		filepath.Join(home, ".cache", "package", "SKILL.md"),
+		filepath.Join(home, ".bun", "install", "cache", "package", "skills", "cached", "SKILL.md"),
 	}
-	if err := os.WriteFile(ignored, []byte("# ignored"), 0o600); err != nil {
-		t.Fatal(err)
+	for _, path := range ignored {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("# ignored"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	scanned, err := scanMachine(home)
+	scanned, warnings, err := scanMachine(home)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
 	}
 	if len(scanned) != 2 {
 		t.Fatalf("scanned = %+v", scanned)

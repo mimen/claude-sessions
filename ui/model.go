@@ -118,6 +118,7 @@ type Model struct {
 	skillSearching     bool
 	skillLoading       bool
 	skillError         string
+	skillWarning       string
 	skillPreview       bool
 	skillReader        *skillReader
 	handoff            *resume.Command
@@ -194,12 +195,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case skillsLoadedMsg:
 		m.skillLoading = false
+		m.skillWarning = ""
 		if msg.err != nil {
 			m.skillError = msg.err.Error()
 			return m, nil
 		}
 		m.skills = msg.snapshot
 		m.skillError = ""
+		if len(msg.snapshot.Warnings) > 0 {
+			m.skillWarning = msg.snapshot.Warnings[0]
+		}
 		m.rebuildSkillRows()
 		return m, nil
 	case routesLoadedMsg:

@@ -39,14 +39,14 @@ func Load() (Snapshot, error) {
 		markDrift(cached)
 		return Snapshot{Skills: visibleSkills(cached), Source: path}, nil
 	}
-	scanned, scanErr := scanMachine(home)
+	scanned, scanWarnings, scanErr := scanMachine(home)
 	if scanErr != nil {
 		if cacheErr != nil {
 			return Snapshot{}, fmt.Errorf("skills cache: %v; scan: %w", cacheErr, scanErr)
 		}
 		return Snapshot{}, scanErr
 	}
-	warnings := []string{}
+	warnings := append([]string(nil), scanWarnings...)
 	if cacheErr != nil && !errors.Is(cacheErr, os.ErrNotExist) {
 		warnings = append(warnings, cacheErr.Error())
 	}
@@ -60,12 +60,12 @@ func Scan() (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("resolve home directory: %w", err)
 	}
-	scanned, err := scanMachine(home)
+	scanned, warnings, err := scanMachine(home)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	markDrift(scanned)
-	return Snapshot{Skills: visibleSkills(scanned), Source: "filesystem scan"}, nil
+	return Snapshot{Skills: visibleSkills(scanned), Warnings: warnings, Source: "filesystem scan"}, nil
 }
 
 func loadCache(path string, home string) ([]Skill, error) {
@@ -238,6 +238,8 @@ func skillFindArgs(root string) []string {
 		"-path", "*/.archive", "-o",
 		"-path", "*/Library", "-o",
 		"-path", "*/.Trash", "-o",
+		"-path", "*/.cache", "-o",
+		"-path", "*/.bun/install/cache", "-o",
 		"-path", "*/.claude/worktrees", "-o",
 		"-path", "*/.milad-vault-worktrees", "-o",
 		"-path", "*/.claude/plugins/marketplaces", "-o",
@@ -256,10 +258,10 @@ func isRegularFile(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-func scanMachine(home string) ([]Skill, error) {
+func scanMachine(home string) ([]Skill, []string, error) {
 	roots, err := skillScanRoots(home)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -294,12 +296,20 @@ func scanMachine(home string) ([]Skill, error) {
 			firstErr = result.err
 		}
 	}
-	if len(outputs) == 0 && firstErr != nil {
-		return nil, fmt.Errorf("scan machine for skills: %w", firstErr)
-	}
 	if direct := filepath.Join(home, "SKILL.md"); isRegularFile(direct) {
 		outputs = append(outputs, direct...)
 		outputs = append(outputs, '\n')
+	}
+	if len(outputs) == 0 && firstErr != nil {
+		return nil, nil, fmt.Errorf("scan machine for skills: %w", firstErr)
+	}
+	warnings := make([]string, 0, 1)
+	if firstErr != nil {
+		message := "skill scan was partial: " + firstErr.Error()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			message = "skill scan was partial: 30-second scan budget exhausted"
+		}
+		warnings = append(warnings, message)
 	}
 	byReal := make(map[string]*Skill)
 	for _, line := range strings.Split(string(outputs), "\n") {
@@ -359,7 +369,7 @@ func scanMachine(home string) ([]Skill, error) {
 		}
 		return skills[i].Path < skills[j].Path
 	})
-	return skills, nil
+	return skills, warnings, nil
 }
 
 func probeSymlinkFarms(byReal map[string]*Skill, home string) {

@@ -211,6 +211,9 @@ func (m Model) renderSkillFooter(width int) string {
 	if m.skillError != "" {
 		return fit(fg(theme.Warning).Render(m.skillError), width)
 	}
+	if m.skillWarning != "" {
+		return fit(fg(theme.Warning).Render(m.skillWarning)+fg(theme.FgMoreSubtle).Render(" · R rescan"), width)
+	}
 	return fit(fg(theme.Accent).Bold(true).Render("Tab")+fg(theme.FgMoreSubtle).Render(" sessions · ")+fg(theme.Accent).Bold(true).Render("↑↓")+fg(theme.FgMoreSubtle).Render(" move · ")+fg(theme.Accent).Bold(true).Render("v/enter")+fg(theme.FgMoreSubtle).Render(" read · ")+fg(theme.Accent).Bold(true).Render("/")+fg(theme.FgMoreSubtle).Render(" search · ")+fg(theme.Accent).Bold(true).Render("g")+fg(theme.FgMoreSubtle).Render(" view · ")+fg(theme.Accent).Bold(true).Render("p")+fg(theme.FgMoreSubtle).Render(" preview · ")+fg(theme.Accent).Bold(true).Render("R")+fg(theme.FgMoreSubtle).Render(" rescan · q quit"), width)
 }
 

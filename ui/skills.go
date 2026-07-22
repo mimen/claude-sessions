@@ -138,6 +138,7 @@ func (m Model) handleSkillKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "R":
 		m.skillLoading = true
 		m.skillError = ""
+		m.skillWarning = ""
 		return m, scanSkillsCmd()
 	case "?":
 		m.overlay = OverlayHelp

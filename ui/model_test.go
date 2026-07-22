@@ -168,6 +168,18 @@ func TestTranscriptPeekDeduplicatesTailLoadAndFullReaderLoadsSeparately(t *testi
 	}
 }
 
+func TestSkillScanWarningsRemainVisibleWithoutHidingResults(t *testing.T) {
+	model := New(testSnapshot(1))
+	updated, _ := model.Update(skillsLoadedMsg{snapshot: skills.Snapshot{
+		Skills:   []skills.Skill{{Name: "visible"}},
+		Warnings: []string{"skill scan was partial: timeout"},
+	}})
+	model = updated.(Model)
+	if model.skillWarning == "" || len(model.skillRows) == 0 {
+		t.Fatalf("warning=%q rows=%+v", model.skillWarning, model.skillRows)
+	}
+}
+
 func TestSkillRescanCommandBypassesCacheLoader(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
