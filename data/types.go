@@ -92,6 +92,8 @@ type TreeNode struct {
 type Launcher struct {
 	Name     string
 	Backend  string
+	Env      map[string]string
+	Target   string
 	Eligible bool
 	Default  bool
 	Reason   string

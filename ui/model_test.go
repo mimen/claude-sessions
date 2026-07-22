@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -98,6 +100,39 @@ func TestNarrowViewDoesNotOverflowOrPanic(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestDefaultResumeUsesOriginBackendAndResumeID(t *testing.T) {
+	root := t.TempDir()
+	config := `
+[[launcher]]
+name = "claude"
+binary = "claude"
+serves = ["*"]
+
+[[launcher]]
+name = "claude-gpt"
+binary = "claude-gpt"
+serves = ["gpt-*"]
+`
+	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCS_ROOT", root)
+	snapshot := testSnapshot(1)
+	snapshot.Sessions[0].CWD = t.TempDir()
+	snapshot.Sessions[0].ResumeID = "internal-id"
+	snapshot.Sessions[0].Models = []string{"gpt-5.6-sol"}
+	model := New(snapshot)
+	updated, command := model.resumeDefault()
+	if command == nil {
+		t.Fatal("resumeDefault returned no quit command")
+	}
+	final := updated.(Model)
+	handoff, ok := final.Handoff()
+	if !ok || strings.Join(handoff.Argv, " ") != "claude-gpt --resume internal-id" {
+		t.Fatalf("handoff = %+v, ok=%v", handoff, ok)
 	}
 }
 

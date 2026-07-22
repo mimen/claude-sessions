@@ -1,9 +1,8 @@
 package ui
 
 import (
-	"fmt"
-
 	"ccsspike/data"
+	"ccsspike/resume"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -41,6 +40,12 @@ type routesLoadedMsg struct {
 	err       error
 }
 
+type cmuxOpenedMsg struct {
+	title string
+	note  string
+	err   error
+}
+
 // Model is the single Bubble Tea state machine for the browser.
 type Model struct {
 	w, h         int
@@ -58,6 +63,7 @@ type Model struct {
 	routeError   string
 	query        string
 	searching    bool
+	handoff      *resume.Command
 	status       string
 }
 
@@ -73,6 +79,14 @@ func New(snapshot data.Snapshot) Model {
 		rows:     rows,
 		cursor:   firstSessionRow(rows),
 	}
+}
+
+// Handoff returns the inline resume command selected before the TUI exited.
+func (m Model) Handoff() (resume.Command, bool) {
+	if m.handoff == nil {
+		return resume.Command{}, false
+	}
+	return *m.handoff, true
 }
 
 func firstSessionRow(rows []row) int {
@@ -121,6 +135,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.routeCursor = defaultRouteIndex(m.routes)
 		return m, nil
+	case cmuxOpenedMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		} else if msg.note != "" {
+			m.status = msg.note + " · opened in cmux → " + msg.title
+		} else {
+			m.status = "opened in cmux → " + msg.title
+		}
+		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -145,8 +168,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.moveRouteCursor(1)
 		case "enter":
 			if !m.routeLoading && m.routeCursor >= 0 && m.routeCursor < len(m.routes) && m.routes[m.routeCursor].Eligible {
-				m.status = fmt.Sprintf("resume via %s is a v1 TODO", m.routes[m.routeCursor].Name)
-				m.overlay = OverlayNone
+				return m.activateRoute(m.routes[m.routeCursor])
 			}
 		}
 		return m, nil
@@ -203,13 +225,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.overlay = OverlayHelp
 	case "enter":
-		if _, ok := m.selectedSession(); ok {
-			m.status = "resume is a v1 TODO; press r to inspect real routes"
-		}
-	case "f":
-		if _, ok := m.selectedSession(); ok {
-			m.status = "fork-resume is a v1 TODO"
-		}
+		return m.resumeDefault()
 	case "v":
 		m.status = "transcript view is outside v1"
 	case "/":
@@ -219,6 +235,45 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = "recency is the only v1 sort"
 	}
 	return m, nil
+}
+
+func (m Model) resumeDefault() (tea.Model, tea.Cmd) {
+	session, ok := m.selectedSession()
+	if !ok {
+		return m, nil
+	}
+	routes, err := data.LoadRoutes(session.Models)
+	if err != nil {
+		m.status = "can't resolve origin backend: " + err.Error()
+		return m, nil
+	}
+	index := defaultRouteIndex(routes)
+	if index < 0 || index >= len(routes) || !routes[index].Eligible {
+		m.status = "no configured launcher can replay this session"
+		return m, nil
+	}
+	return m.activateRoute(routes[index])
+}
+
+func (m Model) activateRoute(route data.Launcher) (tea.Model, tea.Cmd) {
+	session, ok := m.selectedSession()
+	if !ok {
+		return m, nil
+	}
+	command, note := resume.Build(session, route)
+	m.overlay = OverlayNone
+	if route.Target == "cmux" {
+		m.status = "opening in cmux…"
+		return m, openCmuxCmd(command, session.Title, note)
+	}
+	m.handoff = &command
+	return m, tea.Quit
+}
+
+func openCmuxCmd(command resume.Command, title string, note string) tea.Cmd {
+	return func() tea.Msg {
+		return cmuxOpenedMsg{title: title, note: note, err: resume.OpenCmux(command, title)}
+	}
 }
 
 func (m Model) openRoutePicker() (tea.Model, tea.Cmd) {

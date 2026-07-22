@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"ccsspike/data"
+	"ccsspike/resume"
 	"ccsspike/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,7 +22,20 @@ func main() {
 		return
 	}
 	program := tea.NewProgram(ui.New(snapshot), tea.WithAltScreen())
-	if _, err := program.Run(); err != nil {
+	final, err := program.Run()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "ccs-go:", err)
+		os.Exit(1)
+	}
+	model, ok := final.(ui.Model)
+	if !ok {
+		return
+	}
+	command, ok := model.Handoff()
+	if !ok {
+		return
+	}
+	if err := resume.RunInline(command); err != nil {
 		fmt.Fprintln(os.Stderr, "ccs-go:", err)
 		os.Exit(1)
 	}

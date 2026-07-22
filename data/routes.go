@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -32,6 +33,9 @@ func LoadRoutes(models []string) ([]Launcher, error) {
 	}
 	if len(entries) == 0 {
 		entries = []launcherEntry{{Name: "claude", Binary: "claude", Serves: []string{"*"}}}
+		if _, lookErr := exec.LookPath("claude-gpt"); lookErr == nil {
+			entries = append(entries, launcherEntry{Name: "claude-gpt", Binary: "claude-gpt", Serves: []string{"gpt-*"}})
+		}
 	}
 	seen := make(map[string]bool)
 	routes := make([]Launcher, 0, len(entries))
@@ -69,6 +73,8 @@ func LoadRoutes(models []string) ([]Launcher, error) {
 		routes = append(routes, Launcher{
 			Name:     entry.Name,
 			Backend:  entry.Binary,
+			Env:      copyStringMap(entry.Env),
+			Target:   "inline",
 			Eligible: eligible,
 			Reason:   reason,
 		})
@@ -77,6 +83,21 @@ func LoadRoutes(models []string) ([]Launcher, error) {
 	if defaultIndex >= 0 {
 		routes[defaultIndex].Default = true
 		routes[defaultIndex].Reason = "origin-backend default"
+		origin := routes[defaultIndex]
+		cmuxEligible := true
+		cmuxReason := "new focused workspace via " + origin.Name
+		if _, lookErr := exec.LookPath("cmux"); lookErr != nil {
+			cmuxEligible = false
+			cmuxReason = "cmux is not installed on PATH"
+		}
+		routes = append(routes, Launcher{
+			Name:     "cmux",
+			Backend:  origin.Backend,
+			Env:      copyStringMap(origin.Env),
+			Target:   "cmux",
+			Eligible: cmuxEligible,
+			Reason:   cmuxReason,
+		})
 	}
 	return routes, nil
 }
@@ -183,4 +204,15 @@ func minInt(a int, b int) int {
 		return a
 	}
 	return b
+}
+
+func copyStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	copy := make(map[string]string, len(source))
+	for key, value := range source {
+		copy[key] = value
+	}
+	return copy
 }

@@ -423,7 +423,7 @@ func (m Model) renderRoutePicker() string {
 			lines = append(lines, fit(fg(theme.FgMostSubtle).Render("     "+truncate(launcher.Reason, max(1, contentWidth-5))), contentWidth))
 		}
 	}
-	lines = append(lines, "", fit(fg(theme.FgMostSubtle).Render("enter resume (v1 TODO) · esc cancel"), contentWidth))
+	lines = append(lines, "", fit(fg(theme.FgMostSubtle).Render("enter resume · inline routes hand off after exit · esc cancel"), contentWidth))
 	lines = clipPanelLines(lines, max(1, m.h-4))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).BorderForeground(theme.Primary).
@@ -433,14 +433,13 @@ func (m Model) renderRoutePicker() string {
 func (m Model) renderHelp() string {
 	groups := [][2]string{
 		{"↑↓ / j k", "move selection"},
-		{"enter", "resume the session (v1 TODO)"},
-		{"r", "resume via… (real launcher eligibility)"},
-		{"f", "fork-resume (v1 TODO)"},
-		{"v", "read the full transcript (later)"},
+		{"enter", "resume inline on the origin backend"},
+		{"r", "pick claude / claude-gpt / cmux"},
+		{"v", "read the full transcript"},
+		{"J / K", "scroll the dossier transcript peek"},
 		{"p", "show / hide preview pane"},
-		{"g", "toggle groups / causal tree"},
-		{"s", "sort (recency only in v1)"},
-		{"/", "search (later)"},
+		{"g", "cycle default / tree / flat"},
+		{"/", "fuzzy title / project / task filter"},
 		{"?", "this help · q quit"},
 	}
 	panelWidth := min(62, max(8, m.w-2))

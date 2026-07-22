@@ -27,7 +27,7 @@ serves = ["gpt-*"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(routes) != 2 || !routes[1].Default || !routes[1].Eligible {
+	if len(routes) != 3 || !routes[1].Default || !routes[1].Eligible || routes[2].Name != "cmux" || routes[2].Target != "cmux" {
 		t.Fatalf("unexpected routes: %+v", routes)
 	}
 }
