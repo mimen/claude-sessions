@@ -4,6 +4,7 @@ import { theme } from "./theme.ts";
 import type { SessionRow } from "../index/index.ts";
 import type { Route } from "../resume/launchers.ts";
 import { familyOf, formatCostList } from "./format.ts";
+import { stripSpinnerPrefix } from "./titleDisplay.ts";
 import { formatAge } from "../store.ts";
 
 /**
@@ -29,7 +30,7 @@ export function RoutePicker({ row, routes, defaultName, selected, live, target }
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.accent} paddingX={2} paddingY={1}>
       <Text bold color={theme.accent}>
-        Resume — {row.title}
+        Resume — {stripSpinnerPrefix(row.title)}
       </Text>
 
       <Box flexDirection="column" marginTop={1}>
