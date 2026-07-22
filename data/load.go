@@ -62,8 +62,8 @@ func Load() (Snapshot, error) {
 		if row.IsSubagent || meta.Archived || meta.SessionClass == "auxiliary" {
 			continue
 		}
-		isOpen, liveTitle := liveState(row, live)
-		title, titleSource := resolveDisplayTitle(row, meta, liveTitle)
+		isOpen, liveInfo := liveState(row, live)
+		title, titleSource := resolveDisplayTitle(row, meta, liveInfo.Title)
 		state := disposition(meta, isOpen)
 		isLoop := roleKinds[roleKey(meta.Cluster, meta.Role)] == "loop"
 		class := displayClass(row, meta, isLoop)
@@ -74,38 +74,40 @@ func Load() (Snapshot, error) {
 			task = tasks[row.ResumeID]
 		}
 		session := Session{
-			ID:           row.ID,
-			ResumeID:     row.ResumeID,
-			Path:         row.Path,
-			Title:        title,
-			TitleSource:  titleSource,
-			State:        state,
-			Class:        class,
-			SessionClass: meta.SessionClass,
-			IdentityKey:  meta.IdentityKey,
-			IdentityKind: meta.IdentityKind,
-			Role:         meta.Role,
-			Cluster:      meta.Cluster,
-			Project:      row.ProjectName,
-			ProjectRoot:  row.ProjectRoot,
-			CWD:          row.CWD,
-			Branch:       row.Branch,
-			Skeleton:     row.Skeleton,
-			FirstAt:      row.FirstAt,
-			LastAt:       row.LastAt,
-			Messages:     row.Messages,
-			Models:       append([]string(nil), row.Models...),
-			Model:        model,
-			SelfCost:     rollup.Self,
-			TotalCost:    rollup.Total,
-			ProviderCost: rollup.Providers,
-			Duration:     FormatSpan(row.FirstAt, row.LastAt),
-			Subagents:    subagentCounts[row.ID],
-			ParentID:     meta.ParentSessionID,
-			TaskSubjects: append([]string(nil), task.Subjects...),
-			TasksDone:    task.Done,
-			TasksTotal:   task.Total,
-			IsLoop:       isLoop,
+			ID:               row.ID,
+			ResumeID:         row.ResumeID,
+			Path:             row.Path,
+			Title:            title,
+			TitleSource:      titleSource,
+			State:            state,
+			Class:            class,
+			SessionClass:     meta.SessionClass,
+			IdentityKey:      meta.IdentityKey,
+			IdentityKind:     meta.IdentityKind,
+			Role:             meta.Role,
+			Cluster:          meta.Cluster,
+			Project:          row.ProjectName,
+			ProjectRoot:      row.ProjectRoot,
+			CWD:              row.CWD,
+			Branch:           row.Branch,
+			Skeleton:         row.Skeleton,
+			FirstAt:          row.FirstAt,
+			LastAt:           row.LastAt,
+			Messages:         row.Messages,
+			Models:           append([]string(nil), row.Models...),
+			Model:            model,
+			SelfCost:         rollup.Self,
+			TotalCost:        rollup.Total,
+			ProviderCost:     rollup.Providers,
+			Duration:         FormatSpan(row.FirstAt, row.LastAt),
+			Subagents:        subagentCounts[row.ID],
+			ParentID:         meta.ParentSessionID,
+			TaskSubjects:     append([]string(nil), task.Subjects...),
+			TasksDone:        task.Done,
+			TasksTotal:       task.Total,
+			LiveWindowRef:    liveInfo.WindowRef,
+			LiveWorkspaceRef: liveInfo.WorkspaceRef,
+			IsLoop:           isLoop,
 		}
 		byID[session.ID] = len(visible)
 		visible = append(visible, session)
@@ -131,16 +133,18 @@ func envOr(name string, fallback string) string {
 	return fallback
 }
 
-func liveState(row indexedSession, live map[string]liveSession) (bool, string) {
+func liveState(row indexedSession, live map[string]liveSession) (bool, liveSession) {
 	if entry, ok := live[row.ID]; ok {
-		return true, strings.TrimSpace(entry.Title)
+		entry.Title = strings.TrimSpace(entry.Title)
+		return true, entry
 	}
 	if row.ResumeID != "" {
 		if entry, ok := live[row.ResumeID]; ok {
-			return true, strings.TrimSpace(entry.Title)
+			entry.Title = strings.TrimSpace(entry.Title)
+			return true, entry
 		}
 	}
-	return false, ""
+	return false, liveSession{}
 }
 
 func resolveDisplayTitle(row indexedSession, meta catalogueMeta, liveTitle string) (string, string) {

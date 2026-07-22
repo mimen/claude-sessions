@@ -28,38 +28,40 @@ func (c ProviderCost) Total() float64 {
 
 // Session is one normalized browser row backed by the CCS index and catalogue.
 type Session struct {
-	ID           string
-	ResumeID     string
-	Path         string
-	Title        string
-	TitleSource  string
-	State        string
-	Class        string
-	SessionClass string
-	IdentityKey  string
-	IdentityKind string
-	Role         string
-	Cluster      string
-	Project      string
-	ProjectRoot  string
-	CWD          string
-	Branch       string
-	Skeleton     string
-	FirstAt      time.Time
-	LastAt       time.Time
-	Messages     int
-	Models       []string
-	Model        string
-	SelfCost     float64
-	TotalCost    float64
-	ProviderCost ProviderCost
-	Duration     string
-	Subagents    int
-	ParentID     string
-	TaskSubjects []string
-	TasksDone    int
-	TasksTotal   int
-	IsLoop       bool
+	ID               string
+	ResumeID         string
+	Path             string
+	Title            string
+	TitleSource      string
+	State            string
+	Class            string
+	SessionClass     string
+	IdentityKey      string
+	IdentityKind     string
+	Role             string
+	Cluster          string
+	Project          string
+	ProjectRoot      string
+	CWD              string
+	Branch           string
+	Skeleton         string
+	FirstAt          time.Time
+	LastAt           time.Time
+	Messages         int
+	Models           []string
+	Model            string
+	SelfCost         float64
+	TotalCost        float64
+	ProviderCost     ProviderCost
+	Duration         string
+	Subagents        int
+	ParentID         string
+	TaskSubjects     []string
+	TasksDone        int
+	TasksTotal       int
+	LiveWindowRef    string
+	LiveWorkspaceRef string
+	IsLoop           bool
 }
 
 // Dash contains the aggregate values rendered in the dashboard header.

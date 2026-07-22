@@ -1,6 +1,8 @@
 package resume
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,6 +31,27 @@ func TestBuildFallsBackToProjectRoot(t *testing.T) {
 	command, note := Build(data.Session{ResumeID: "id", CWD: root + "/gone", ProjectRoot: root}, data.Launcher{Backend: "claude"})
 	if command.CWD != root || note == "" {
 		t.Fatalf("cwd=%q note=%q", command.CWD, note)
+	}
+}
+
+func TestFocusLiveUsesExactWorkspaceAndWindow(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "calls")
+	binary := filepath.Join(t.TempDir(), "cmux")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + logPath + "'\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CMUX_BIN", binary)
+	if err := FocusLive(data.Session{LiveWorkspaceRef: "workspace:7", LiveWindowRef: "window:2"}); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(contents)
+	if got != "select-workspace --workspace workspace:7 --window window:2\nfocus-window --window window:2\n" {
+		t.Fatalf("calls = %q", got)
 	}
 }
 

@@ -60,6 +60,26 @@ func RunInline(command Command) error {
 	return nil
 }
 
+// FocusLive switches cmux to the exact workspace/window already running a session.
+func FocusLive(session data.Session) error {
+	if session.LiveWorkspaceRef == "" || session.LiveWindowRef == "" {
+		return errors.New("session has no live cmux location")
+	}
+	binary := strings.TrimSpace(os.Getenv("CMUX_BIN"))
+	if binary == "" {
+		binary = "cmux"
+	}
+	selectCommand := exec.Command(binary, "select-workspace", "--workspace", session.LiveWorkspaceRef, "--window", session.LiveWindowRef)
+	if output, err := selectCommand.CombinedOutput(); err != nil {
+		return fmt.Errorf("focus live workspace: %s", commandOutput(output, err))
+	}
+	focusCommand := exec.Command(binary, "focus-window", "--window", session.LiveWindowRef)
+	if output, err := focusCommand.CombinedOutput(); err != nil {
+		return fmt.Errorf("focus live window: %s", commandOutput(output, err))
+	}
+	return nil
+}
+
 // OpenCmux starts the resume in a focused workspace without taking over this terminal.
 func OpenCmux(command Command, title string) error {
 	if len(command.Argv) == 0 {
@@ -72,7 +92,11 @@ func OpenCmux(command Command, title string) error {
 		"--command", Shell(command),
 		"--focus", "true",
 	}
-	cmd := exec.Command("cmux", args...)
+	binary := strings.TrimSpace(os.Getenv("CMUX_BIN"))
+	if binary == "" {
+		binary = "cmux"
+	}
+	cmd := exec.Command(binary, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		message := strings.TrimSpace(string(output))
 		if message == "" {
@@ -169,6 +193,14 @@ func copyEnv(source map[string]string) map[string]string {
 		out[key] = value
 	}
 	return out
+}
+
+func commandOutput(output []byte, err error) string {
+	message := strings.TrimSpace(string(output))
+	if message == "" {
+		message = err.Error()
+	}
+	return message
 }
 
 func cleanTitle(title string) string {

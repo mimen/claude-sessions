@@ -55,6 +55,11 @@ type cmuxOpenedMsg struct {
 	err   error
 }
 
+type liveFocusedMsg struct {
+	title string
+	err   error
+}
+
 type transcriptLoadedMsg struct {
 	sessionID string
 	document  transcript.Document
@@ -202,6 +207,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.note + " · opened in cmux → " + msg.title
 		} else {
 			m.status = "opened in cmux → " + msg.title
+		}
+		return m, nil
+	case liveFocusedMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		} else {
+			m.status = "focused live session → " + msg.title
 		}
 		return m, nil
 	case transcriptLoadedMsg:
@@ -505,6 +517,10 @@ func (m Model) resumeDefault() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	if session.LiveWorkspaceRef != "" {
+		m.status = "focusing live session…"
+		return m, focusLiveCmd(session)
+	}
 	routes, err := data.LoadRoutes(session.Models)
 	if err != nil {
 		m.status = "can't resolve origin backend: " + err.Error()
@@ -523,14 +539,24 @@ func (m Model) activateRoute(route data.Launcher) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	command, note := resume.Build(session, route)
 	m.overlay = OverlayNone
+	if session.LiveWorkspaceRef != "" {
+		m.status = "focusing live session…"
+		return m, focusLiveCmd(session)
+	}
+	command, note := resume.Build(session, route)
 	if route.Target == "cmux" {
 		m.status = "opening in cmux…"
 		return m, openCmuxCmd(command, session.Title, note)
 	}
 	m.handoff = &command
 	return m, tea.Quit
+}
+
+func focusLiveCmd(session data.Session) tea.Cmd {
+	return func() tea.Msg {
+		return liveFocusedMsg{title: session.Title, err: resume.FocusLive(session)}
+	}
 }
 
 func openCmuxCmd(command resume.Command, title string, note string) tea.Cmd {

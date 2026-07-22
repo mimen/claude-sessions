@@ -17,11 +17,14 @@ type cmuxTree struct {
 }
 
 type cmuxWindow struct {
+	ID         string          `json:"id"`
+	Ref        string          `json:"ref"`
 	Workspaces []cmuxWorkspace `json:"workspaces"`
 }
 
 type cmuxWorkspace struct {
 	ID    string     `json:"id"`
+	Ref   string     `json:"ref"`
 	Title string     `json:"title"`
 	Panes []cmuxPane `json:"panes"`
 }
@@ -50,13 +53,21 @@ type hookBinding struct {
 }
 
 type liveSession struct {
-	SessionID string
-	Title     string
+	SessionID    string
+	Title        string
+	WindowRef    string
+	WorkspaceRef string
 }
 
 type surfaceWinner struct {
 	SessionID string
 	Detail    hookSession
+}
+
+type liveLocation struct {
+	Title        string
+	WindowRef    string
+	WorkspaceRef string
 }
 
 func loadLiveSessions(home string) (map[string]liveSession, error) {
@@ -105,13 +116,13 @@ func loadLiveSessions(home string) (map[string]liveSession, error) {
 		}
 	}
 
-	surfaces := make(map[string]string)
+	surfaces := make(map[string]liveLocation)
 	for _, window := range tree.Windows {
 		for _, workspace := range window.Workspaces {
 			for _, pane := range workspace.Panes {
 				for _, surface := range pane.Surfaces {
 					if surface.ID != "" {
-						surfaces[surface.ID] = workspace.Title
+						surfaces[surface.ID] = liveLocation{Title: workspace.Title, WindowRef: window.Ref, WorkspaceRef: workspace.Ref}
 					}
 				}
 			}
@@ -120,7 +131,7 @@ func loadLiveSessions(home string) (map[string]liveSession, error) {
 
 	live := make(map[string]liveSession)
 	for surfaceID, winner := range winners {
-		title, exists := surfaces[surfaceID]
+		location, exists := surfaces[surfaceID]
 		if !exists {
 			continue
 		}
@@ -131,7 +142,12 @@ func loadLiveSessions(home string) (map[string]liveSession, error) {
 		if sessionID == "" {
 			continue
 		}
-		live[sessionID] = liveSession{SessionID: sessionID, Title: normalizeInline(title)}
+		live[sessionID] = liveSession{
+			SessionID:    sessionID,
+			Title:        normalizeInline(location.Title),
+			WindowRef:    normalizeInline(location.WindowRef),
+			WorkspaceRef: normalizeInline(location.WorkspaceRef),
+		}
 	}
 	return live, nil
 }
