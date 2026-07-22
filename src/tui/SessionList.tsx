@@ -154,6 +154,9 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
         const cost = totalCost?.get(r.sessionId) ?? r.costUSD;
         const model = modelBadge(r.costByModel, r.models);
         const identityLabel = identityRowLabel(badge?.event);
+        const isEventWatchWorker = badge?.event?.startsWith("event-watch:event-worker:") ?? false;
+        const displayTitle = isEventWatchWorker && identityLabel ? identityLabel : r.title;
+        const isEventWatchIdentity = badge?.event?.startsWith("event-watch:") ?? false;
 
         return (
           <Box key={index} backgroundColor={bg}>
@@ -169,7 +172,7 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                 {hasSlot ? <Text color={sel ? theme.selFg : theme.faint}>{triangle}</Text> : null}
                 {/* The PR# is shown by the badge; strip any leading #<num> from the
                     title so it never doubles (e.g. "#12137 #12137 …"). */}
-                {badge?.pr ? r.title.replace(/^(#\d+\s+)+/, "") : r.title}
+                {badge?.pr ? displayTitle.replace(/^(#\d+\s+)+/, "") : displayTitle}
               </Text>
             </Box>
             {badge?.classification ? (
@@ -195,7 +198,7 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                   #{badge.pr}
                 </Text>
               </Box>
-            ) : identityLabel ? (
+            ) : !isEventWatchWorker && identityLabel ? (
               <Box flexShrink={0} marginRight={1}>
                 <Text color={sel ? theme.selFg : theme.project}>{identityLabel}</Text>
               </Box>
@@ -217,7 +220,7 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                     {/* Only non-worker roles carry signal — "worker" is the default 20x over, so
                         blank it. eval/designer/control/concierge stand out, each in its own hue
                         (matching the cmux tab palette) so the role reads at a glance. */}
-                    {roleLabel(badge?.role) === "worker" ? "" : roleLabel(badge?.role)}
+                    {isEventWatchIdentity || roleLabel(badge?.role) === "worker" ? "" : roleLabel(badge?.role)}
                   </Text>
                 </Box>
               </>

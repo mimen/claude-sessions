@@ -132,14 +132,15 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
     header(`cluster:${system}`, system, "◇", 0, total);
     if (isCollapsed(`cluster:${system}`)) continue;
 
-    // LEVEL 1 — CORE tier: a FLAT list under one header (role shown in the role column,
-    // not as subgroups). Ordered by the fixed core-role order, then any extras.
+    // LEVEL 1 — CORE tier: a flat list under one header. The hierarchy already conveys that
+    // every child is a core role, so neither a star suffix nor per-role subgroups add signal.
     const coreRoles = [...CORE_ORDER.filter((r) => b.core.has(r)),
       ...[...b.core.keys()].filter((r) => !CORE_ORDER.includes(r)).sort()];
     const coreRows = coreRoles.flatMap((r) => b.core.get(r)!);
-    if (coreRows.length > 0) group(`cluster:${system}:core`, "core ★", "★", 1, coreRows);
+    if (coreRows.length > 0) group(`cluster:${system}:core`, "core", " ", 1, coreRows);
 
-    // LEVEL 1 — WORKERS tier header, then one LEVEL-2 group per epic (short name).
+    // LEVEL 1 — WORKERS tier. Epic subgroups only earn a row when they actually partition the
+    // fleet. A single all-unassigned bucket is just an extra indentation layer, not information.
     const epicKeys = [...b.workers.keys()].sort((a, z) => {
       if ((a === "") !== (z === "")) return a === "" ? 1 : -1;
       const d = b.workers.get(z)!.length - b.workers.get(a)!.length;
@@ -147,9 +148,26 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
     });
     const workerCount = epicKeys.reduce((n, k) => n + b.workers.get(k)!.length, 0);
     if (workerCount > 0) {
-      header(`cluster:${system}:workers`, "workers", "●", 1, workerCount);
-      if (!isCollapsed(`cluster:${system}:workers`)) {
-        for (const ek of epicKeys) group(`cluster:${system}:workers:${ek || "(none)"}`, epicLabel(ek), "◈", 2, b.workers.get(ek)!);
+      const workersKey = `cluster:${system}:workers`;
+      header(workersKey, "workers", "●", 1, workerCount);
+      if (!isCollapsed(workersKey)) {
+        if (epicKeys.length === 1 && epicKeys[0] === "") {
+          const unassigned = b.workers.get("")!;
+          const live = unassigned.filter((r) => !isRetired(r));
+          const retired = unassigned.filter(isRetired);
+          for (const r of sortRows(live, sort, costOf)) pushSession(r, 1);
+          if (retired.length > 0) {
+            const doneKey = `${workersKey}:done`;
+            header(doneKey, "done", "✓", 2, retired.length);
+            if (!isCollapsed(doneKey)) {
+              for (const r of sortRows(retired, sort, costOf)) pushSession(r, 2);
+            }
+          }
+        } else {
+          for (const ek of epicKeys) {
+            group(`cluster:${system}:workers:${ek || "(none)"}`, epicLabel(ek), "◈", 2, b.workers.get(ek)!);
+          }
+        }
       }
     }
   }
