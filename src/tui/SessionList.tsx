@@ -4,6 +4,7 @@ import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
 import { theme, isRecentAge, costColor, roleColor } from "./theme.ts";
 import { modelBadge, formatCostList, formatCompactUSD, identityRowLabel } from "./format.ts";
+import { stripSpinnerPrefix } from "./titleDisplay.ts";
 import { CARET_W, GLYPH_W, PHASE_W, ROLE_W, TASKS_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
 
 /** List cost color: dimmed by default so cost doesn't shout over status/title; only a
@@ -155,7 +156,8 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
         const model = modelBadge(r.costByModel, r.models);
         const identityLabel = identityRowLabel(badge?.event);
         const isEventWatchWorker = badge?.event?.startsWith("event-watch:event-worker:") ?? false;
-        const displayTitle = isEventWatchWorker && identityLabel ? identityLabel : r.title;
+        // Strip any captured spinner frame ("✳ …", "⠂ …") baked into a stored title.
+        const displayTitle = stripSpinnerPrefix(isEventWatchWorker && identityLabel ? identityLabel : r.title);
         const isEventWatchIdentity = badge?.event?.startsWith("event-watch:") ?? false;
 
         return (
