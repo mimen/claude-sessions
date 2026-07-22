@@ -2,6 +2,7 @@ package ui
 
 import (
 	"os"
+	"strings"
 
 	"ccsspike/data"
 	"ccsspike/skills"
@@ -14,21 +15,25 @@ func Shot(name string, snapshot data.Snapshot) string {
 	model.w, model.h = 132, 40
 	model.cursor = nthSessionRow(model.rows, 3)
 	model.treeCursor = min(3, max(0, len(snapshot.Tree)-1))
-	if session, ok := model.selectedSession(); ok {
-		if document, err := transcript.Read(session.Path, 2000); err == nil {
-			model.transcripts[session.ID] = document
-			model.peekSession = session.ID
-			model.peekScroll = max(0, len(document.Lines)-6)
-		}
-	}
+	loadShotTranscript(&model)
 	switch name {
 	case "browser":
 		model.view, model.preview = ViewGroups, true
+	case "peek":
+		model.view, model.preview = ViewGroups, true
+		selectShotSession(&model, func(session data.Session) bool {
+			return strings.Contains(strings.ToLower(session.Title), "research best tui")
+		})
+		loadShotTranscript(&model)
 	case "nopreview":
 		model.view, model.preview = ViewGroups, false
 	case "tree":
 		model.view = ViewTree
 	case "transcript":
+		selectShotSession(&model, func(session data.Session) bool {
+			return session.ProviderCost.GPT > 0 && session.State == "active"
+		})
+		loadShotTranscript(&model)
 		if session, ok := model.selectedSession(); ok {
 			if document, loaded := model.transcripts[session.ID]; loaded {
 				model.reader = &transcriptReader{sessionID: session.ID, title: session.Title, document: document, scroll: 1_000_000}
@@ -88,4 +93,31 @@ func nthSessionRow(rows []row, wanted int) int {
 		seen++
 	}
 	return firstSessionRow(rows)
+}
+
+func selectShotSession(model *Model, predicate func(data.Session) bool) {
+	for index, candidate := range model.rows {
+		if candidate.header || candidate.sIdx < 0 || candidate.sIdx >= len(model.snapshot.Sessions) {
+			continue
+		}
+		if predicate(model.snapshot.Sessions[candidate.sIdx]) {
+			model.cursor = index
+			return
+		}
+	}
+}
+
+func loadShotTranscript(model *Model) {
+	session, ok := model.selectedSession()
+	if !ok {
+		return
+	}
+	if _, loaded := model.transcripts[session.ID]; loaded {
+		return
+	}
+	if document, err := transcript.Read(session.Path, 2000); err == nil {
+		model.transcripts[session.ID] = document
+		model.peekSession = session.ID
+		model.peekScroll = max(0, len(document.Lines)-6)
+	}
 }
