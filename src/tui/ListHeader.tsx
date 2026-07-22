@@ -42,7 +42,7 @@ export function ListHeader({ sort, view, showTasks }: { sort: SortMode; view: "g
       <Head label="MODEL" width={MODEL_W} />
       <Head label="COST" width={COST_W} align="flex-end" active={sort === "cost"} />
       <Head label="AGE" width={AGE_W} align="flex-end" active={sort === "recent"} />
-      <Head label={tree ? "Σ" : "⤷"} width={SUB_W} align="flex-end" />
+      <Head label={tree ? "Σ" : "↳"} width={SUB_W} align="flex-end" />
     </Box>
   );
 }

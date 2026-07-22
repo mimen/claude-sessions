@@ -42,7 +42,9 @@ test("state pill without a color renders label plain", () => {
     { nowMs: NOW, statePill: { label: "in review" } },
   );
   expect(line).toContain("in review");
-  expect(line).not.toContain("\x1b[38;2;");
+  // The LABEL carries no color of its own. (The line still contains 24-bit codes — the section
+  // separator is faint-tinted — so assert on the label specifically, not the whole line.)
+  expect(line).not.toMatch(/\x1b\[38;2;[\d;]+min review/);
 });
 
 test("strips a leading #num already baked into the title (no double PR#)", () => {
@@ -86,7 +88,7 @@ test("a stale row drops the state pill (never asserts an old value)", () => {
   });
   const line = renderStatusline(stale, { nowMs: NOW, statePill: { label: "merged", color: "#34c759" } });
   expect(line).not.toContain("merged"); // the stale pill is NOT shown
-  expect(line).not.toContain("\x1b[38;2;");
+  expect(line).not.toContain("\x1b[38;2;52;199;89m"); // ...and its color never reaches the line
 });
 
 test("a fresh row within the window keeps its state pill", () => {
@@ -169,10 +171,27 @@ test("meters: null context percent omits the ctx bit (pre-first-response)", () =
   expect(line).toContain("$2.00");
 });
 
-test("meters: sections are separated by the wide gap, not a middot", () => {
+test("meters: sections are separated by a faint pipe rule", () => {
   const line = renderMeters({ modelId: "claude-opus-4-8", modelLabel: "Opus 4.8", costUsd: 2 });
-  expect(line).toContain("    "); // 4-space section gap
+  expect(line).toContain("│");
+  expect(line).toContain("  │  "); // air either side
   expect(line).not.toContain("·");
+});
+
+test("meters: subagent bit renders count + summed cost", () => {
+  const line = renderMeters({ subagentCount: 3, subagentUsd: 0.42 });
+  expect(line).toContain("↳3");
+  expect(line).toContain("42¢");
+});
+
+test("meters: no subagents omits the bit entirely (no dead ↳0)", () => {
+  const line = renderMeters({ subagentCount: 0, subagentUsd: 0, costUsd: 1 });
+  expect(line).not.toContain("↳");
+});
+
+test("meters: subagent count renders even when their cost is zero", () => {
+  const line = renderMeters({ subagentCount: 2, subagentUsd: 0 });
+  expect(line).toContain("↳2");
 });
 
 test("meters: the context gauge is 16 cells wide", () => {
@@ -183,11 +202,11 @@ test("meters: the context gauge is 16 cells wide", () => {
   expect(filled).toBe(7); // round(0.42 * 16)
 });
 
-test("identity line also uses the wide gap (both rows stay consistent)", () => {
+test("identity line uses the same pipe rule (both rows stay consistent)", () => {
   const line = renderStatusline(
     row({ prNumber: 12080, prRepo: "heroku/dashboard", customTitle: "Fix navbar" }),
     { nowMs: NOW, statePill: { label: "in review", color: "#bf5af2" } },
   );
-  expect(line).toContain("    ");
+  expect(line).toContain("  │  ");
   expect(line).not.toContain(" · ");
 });

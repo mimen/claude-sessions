@@ -11,8 +11,10 @@
  * (ADR-0035): any error prints the safe default and exits 0 — the statusline never blocks a turn.
  */
 import { basename } from "node:path";
+import { existsSync } from "node:fs";
 import { openCatalogue, getRow } from "../catalogue/db.ts";
-import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
+import { openIndex } from "../index/schema.ts";
+import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { renderStatusline, renderMeters } from "../catalogue/render-statusline.ts";
 import { getGrouping } from "../state/groupings.ts";
 
@@ -29,11 +31,49 @@ interface StatuslinePayload {
   fast_mode?: boolean;
 }
 
+/**
+ * Count + summed cost of this session's subagent runs, from the search index.
+ *
+ * Id-set semantics are deliberately identical to `subagentCostOf` (index/index.ts): subagent rows
+ * key their parent by the parent's INTERNAL sessionId, which differs from the id Claude Code hands
+ * us for a resumed/forked session — so we match the resume_id as well. Kept here rather than
+ * alongside `subagentCostOf` only because index.ts currently carries unrelated work-in-progress;
+ * worth consolidating into a `subagentStatsOf` there once that lands.
+ *
+ * One indexed query (idx_sessions_parent), ~5ms — well inside the statusline's budget. Fail-open:
+ * a missing/locked index yields zeros, which simply omits the bit.
+ */
+function subagentStats(sessionId: string): { n: number; usd: number } {
+  const none = { n: 0, usd: 0 };
+  try {
+    if (!existsSync(DB_PATH())) return none;
+    const db = openIndex(DB_PATH());
+    try {
+      const row = db
+        .query(
+          `SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd), 0) AS usd FROM sessions
+           WHERE is_subagent = 1 AND parent_session_id IN (
+             SELECT resume_id FROM sessions WHERE session_id = $id
+             UNION SELECT $id
+           )`,
+        )
+        .get({ $id: sessionId }) as { n: number; usd: number } | null;
+      return { n: row?.n ?? 0, usd: row?.usd ?? 0 };
+    } finally {
+      db.close();
+    }
+  } catch {
+    return none;
+  }
+}
+
 /** Parse the live payload into the meters line (line 2). Fail-open to "" so a malformed field can
  * never blank the whole statusline — the identity line still prints. */
-function metersOf(p: StatuslinePayload): string {
+function metersOf(p: StatuslinePayload, sub: { n: number; usd: number }): string {
   try {
     return renderMeters({
+      subagentCount: sub.n,
+      subagentUsd: sub.usd,
       modelId: p.model?.id ?? null,
       modelLabel: p.model?.display_name ?? null,
       effort: p.effort?.level ?? null,
@@ -129,7 +169,7 @@ export async function statuslineCommand(): Promise<number> {
   // Line 2: the live meters (model · effort · context · cost), from the payload — rendered for
   // EVERY session, not just tracked workers. Omitted entirely when nothing is known yet (empty
   // payload / pre-first-response), so an ordinary session degrades to just the identity line.
-  const meters = metersOf(payload);
+  const meters = metersOf(payload, payload.session_id ? subagentStats(payload.session_id) : { n: 0, usd: 0 });
   process.stdout.write((meters ? `${line}\n${meters}` : line) + "\n");
   return 0;
 }

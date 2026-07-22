@@ -273,7 +273,7 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                 </Text>
               ) : (
                 <Text color={sel ? theme.selFg : theme.faint}>
-                  {item.childCount > 0 ? `⤷${item.childCount}` : ""}
+                  {item.childCount > 0 ? `↳${item.childCount}` : ""}
                 </Text>
               )}
             </Box>

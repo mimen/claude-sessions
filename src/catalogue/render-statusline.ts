@@ -27,13 +27,13 @@ export function osc8(url: string, text: string): string {
 export const DEFAULT_STALENESS_MS = 6 * 60 * 60 * 1000; // 6h
 
 /**
- * Section separator for BOTH statusline rows. Whitespace rather than the TUI's ` · ` middot: the
- * status bar has the full terminal width to play with, so sections read better separated by air
- * than by punctuation, and a single gap width keeps the identity row and the meters row visually
- * consistent. Wider than an in-section space (bits use single spaces internally), so the grouping
- * stays unambiguous without a glyph.
+ * Section separator for BOTH statusline rows: a faint pipe with air either side. The status bar
+ * has the full terminal width to play with, so sections get real breathing room; the rule divides
+ * them unambiguously where bare whitespace could read as accidental spacing. Drawn in `faint` so
+ * it recedes behind the values. In-section spacing stays a single space (`medium ⚡fast`), which
+ * keeps each section reading as one unit against the wider rule.
  */
-const SEP = "    "; // 4 spaces
+const SEP = colorize("  │  ", theme.faint);
 
 /** A generic grouping's display bits — a {label, url} the CLUSTER supplied (ADR-0051). The
  * platform renders it clickable; it does NOT know the url is a GUS epic link. */
@@ -144,6 +144,10 @@ export interface MetersInput {
   ctxSize?: number | null;
   /** Session cost so far, USD. */
   costUsd?: number | null;
+  /** Number of subagent runs this session spawned (0/absent → the bit is omitted). */
+  subagentCount?: number | null;
+  /** Summed cost of those subagent runs, USD. */
+  subagentUsd?: number | null;
 }
 
 const METER_FAINT = theme.faint; // labels, empty gauge cells
@@ -192,7 +196,20 @@ export function renderMeters(m: MetersInput): string {
       ? colorize(formatCost(m.costUsd), costColor(m.costUsd))
       : null;
 
-  const bits = [modelBit, effortBit, ctxBit, costBit].filter((b): b is string => !!b);
+  // Subagent rollup, in the TUI's own vocabulary: `↳N` child count in faint, their summed spend
+  // graded by the cost ramp. Omitted entirely for a session that spawned none, so ordinary
+  // sessions don't carry a dead `↳0`.
+  let subBit: string | null = null;
+  if (typeof m.subagentCount === "number" && m.subagentCount > 0) {
+    const count = colorize(`↳${m.subagentCount}`, METER_FAINT);
+    const usd =
+      typeof m.subagentUsd === "number" && m.subagentUsd > 0
+        ? ` ${colorize(formatCost(m.subagentUsd), costColor(m.subagentUsd))}`
+        : "";
+    subBit = `${count}${usd}`;
+  }
+
+  const bits = [modelBit, effortBit, ctxBit, costBit, subBit].filter((b): b is string => !!b);
   return bits.join(SEP);
 }
 
