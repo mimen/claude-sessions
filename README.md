@@ -97,6 +97,32 @@ delegation.
 | `i` | swap inference engine (codex ⇄ claude; shown only when both are installed) |
 | `q` / `esc` | quit |
 
+## Slash commands (the `ccs` plugin)
+
+The TUI catalogues sessions from the outside. The plugin does it from inside the
+conversation, where filing the work is one command away.
+
+```sh
+/plugin marketplace add mimen/claude-sessions
+/plugin install ccs@claude-sessions
+/reload-plugins        # only needed in an already-running session
+```
+
+| command | what it does |
+|---------|--------------|
+| `/ccs:archive` | keep the title useful, mark archived, and offer a safe tab-close link |
+| `/ccs:complete` | mark the work finished while keeping the session visible in history |
+| `/ccs:unarchive` | clear archive or completion flags and return to active views |
+| `/ccs:title <words>` | set an explicit title verbatim and sync the cmux tab |
+| `/ccs:suggest-title` | generate a title from what the session actually became |
+| `/ccs:tag <entity>` | tag the session so related work is easy to find |
+| `/ccs:info` | show this session's lifecycle, cost, identity, and tags |
+
+`completed` and `archived` are different claims. Completed work stays visible in CCS
+history but completed cluster members are not resumed. Archived work leaves active
+browse/search views and cluster resumes. Both states are reversible; neither touches
+the transcript.
+
 ## Configuration
 
 Optional `~/.ccs/config.toml` (every key has a default):

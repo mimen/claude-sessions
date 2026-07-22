@@ -1,0 +1,19 @@
+{
+  "name": "claude-sessions",
+  "metadata": {
+    "description": "Plugins for ccs — session hygiene commands for Claude Code",
+    "version": "1.0.0"
+  },
+  "owner": {
+    "name": "Milad Imen",
+    "url": "https://github.com/mimen"
+  },
+  "plugins": [
+    {
+      "name": "ccs",
+      "source": "./plugins/ccs",
+      "description": "Session hygiene from inside the session: archive, complete, retitle, and tag the conversation you're in.",
+      "category": "productivity"
+    }
+  ]
+}
