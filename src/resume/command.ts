@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync, mkdirSync, rmdirSync } from "node:fs";
 import { homedir } from "node:os";
 import type { SessionRow } from "../index/index.ts";
 import { locateLaunchDir, storageFolderOf, encodePath } from "./locate.ts";
@@ -74,6 +74,16 @@ export function shellQuote(arg: string): string {
  * the substitution so the UI can warn instead of silently launching in the wrong place.
  * FAILS CLOSED on filesystem errors per ADR-0066 — a transient I/O error must never look like
  * "absent" and unblock a wrong-dir resume.
+ *
+ * FUTURE-PROOF ANCHOR RECREATION (ADR-0092, approach A): when nothing on disk maps to the
+ * storage folder AND the recorded cwd is simply GONE, we recreate that exact directory. Claude
+ * files a transcript under encode(realpath(cwd)); a removed git worktree (worktree-per-issue
+ * churn) or a cleaned scratch dir therefore strands the session — no live dir maps back, and
+ * `claude --resume` dies with "No conversation found". Recreating the recorded cwd restores the
+ * mapping deterministically (we have the EXACT path, not a lossy decode). Verified before use,
+ * idempotent, non-destructive (an empty dir where the deleted one was), and self-cleaning when
+ * the recreate doesn't actually restore the mapping. Does NOT cover a cwd that still exists but
+ * has become a symlink (realpath now differs) — that needs a transcript move, out of this path.
  */
 export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string | null } | { error: string } {
   const folder = storageFolderOf(row.path);
@@ -108,6 +118,26 @@ export function resolveResumeCwd(row: SessionRow): { cwd: string; note: string |
       notes.push("filesystem walk exhausted its budget — a further match can't be ruled out");
     }
     return { cwd: located.dir, note: notes.length > 0 ? notes.join(" · ") : null };
+  }
+
+  // Future-proof: the recorded cwd is simply GONE (deleted worktree / cleaned scratch). Rebuild
+  // it exactly and use it only if that restores the storage-folder mapping. See the header note.
+  if (row.cwd && !existsSync(row.cwd)) {
+    try {
+      mkdirSync(row.cwd, { recursive: true });
+      if (encodePathRealpath(row.cwd) === folder) {
+        return { cwd: row.cwd, note: `recreated missing anchor dir ${row.cwd} to resume` };
+      }
+      // Recreated but the realpath still doesn't map (a parent moved or became a symlink): the
+      // empty leaf we just made is useless — remove it (best-effort) and fall through.
+      try {
+        rmdirSync(row.cwd);
+      } catch {
+        /* leave the harmless empty dir; nothing depends on removing it */
+      }
+    } catch {
+      /* mkdir failed (permissions, a file in the path) — fall through to the last-resort ladder */
+    }
   }
 
   // Last resort when nothing on disk matches: recorded cwd → project root → home.
