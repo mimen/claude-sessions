@@ -793,7 +793,7 @@ function migrate(db: Database): void {
     const legacy = [
       "role", "cluster", "project", "event",
       "pr_number", "pr_repo", "pr_branch", "pr_state", "pr_head_sha",
-      "gus_work", "work_unit_id", "grouping_id",
+      "gus_work", "work_unit_id", "epic_id", "grouping_id",
       "key", "stage", "status_line",
     ];
     for (const col of legacy) {

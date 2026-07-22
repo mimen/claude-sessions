@@ -222,6 +222,7 @@ test("v33 schema postcondition passes on a fresh migrated DB", () => {
   expect(names.has("cluster")).toBe(false);
   expect(names.has("pr_number")).toBe(false);
   expect(names.has("gus_work")).toBe(false);
+  expect(names.has("epic_id")).toBe(false);
   expect(names.has("key")).toBe(false);
   expect(names.has("stage")).toBe(false);
   expect(names.has("status_line")).toBe(false);
