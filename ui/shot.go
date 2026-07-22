@@ -35,7 +35,7 @@ func Shot(name string, snapshot data.Snapshot) string {
 		})
 		loadShotTranscript(&model)
 		if session, ok := model.selectedSession(); ok {
-			if document, err := transcript.Read(session.Path, 2000); err == nil {
+			if document, err := transcript.ReadAll(session.Path); err == nil {
 				model.cacheFullTranscript(session.ID, document)
 				model.openTranscriptDocument(session, document)
 				model.reader.scroll = max(0, len(model.reader.visual)-max(1, model.h-6))

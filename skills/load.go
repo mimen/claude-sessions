@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -51,6 +52,20 @@ func Load() (Snapshot, error) {
 	}
 	markDrift(scanned)
 	return Snapshot{Skills: visibleSkills(scanned), Warnings: warnings, Source: "filesystem scan"}, nil
+}
+
+// Scan performs a fresh read-only full-home discovery, bypassing the rebuildable cache.
+func Scan() (Snapshot, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("resolve home directory: %w", err)
+	}
+	scanned, err := scanMachine(home)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	markDrift(scanned)
+	return Snapshot{Skills: visibleSkills(scanned), Source: "filesystem scan"}, nil
 }
 
 func loadCache(path string, home string) ([]Skill, error) {
@@ -179,39 +194,50 @@ func loadTagsAndCategories(db *sql.DB, skills []Skill) {
 	}
 }
 
-func scanMachine(home string) ([]Skill, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	roots := []string{
-		filepath.Join(home, ".claude", "skills"),
-		filepath.Join(home, ".claude", "plugins", "cache"),
-		filepath.Join(home, ".agents", "skills"),
-		filepath.Join(home, ".codex"),
-		filepath.Join(home, ".grok"),
-		filepath.Join(home, ".hermes"),
-		filepath.Join(home, ".cursor"),
-		filepath.Join(home, ".gemini"),
-		filepath.Join(home, ".vscode", "extensions"),
-		filepath.Join(home, "Downloads"),
-		filepath.Join(home, "Documents", "milad-vault", "ClaudeConfig", "skills"),
-		filepath.Join(home, "Documents", "milad-vault", "Workspaces"),
-		filepath.Join(home, "Programming", "Repos"),
+func skillScanRoots(home string) ([]string, error) {
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		return nil, fmt.Errorf("read home for skill scan: %w", err)
 	}
-	args := make([]string, 0, len(roots)+24)
-	for _, root := range roots {
-		if info, statErr := os.Stat(root); statErr == nil && info.IsDir() {
-			args = append(args, root)
+	roots := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == "Library" || entry.Name() == ".Trash" {
+			continue
 		}
+		roots = append(roots, filepath.Join(home, entry.Name()))
 	}
-	if len(args) == 0 {
+	if len(roots) == 0 {
 		return nil, errors.New("no skill registry roots exist")
 	}
-	args = append(args,
+	priority := map[string]int{
+		"Documents": 0, "Programming": 1, "Downloads": 2, ".claude": 3,
+		".bun": 4, ".hermes": 5, ".cursor": 6, ".grok": 7,
+	}
+	sort.Slice(roots, func(i int, j int) bool {
+		leftName, rightName := filepath.Base(roots[i]), filepath.Base(roots[j])
+		left, leftKnown := priority[leftName]
+		right, rightKnown := priority[rightName]
+		if leftKnown != rightKnown {
+			return leftKnown
+		}
+		if leftKnown && left != right {
+			return left < right
+		}
+		return roots[i] < roots[j]
+	})
+	return roots, nil
+}
+
+func skillFindArgs(root string) []string {
+	return []string{
+		root,
 		"-maxdepth", "9",
 		"(",
 		"-path", "*/node_modules", "-o",
 		"-path", "*/.git", "-o",
 		"-path", "*/.archive", "-o",
+		"-path", "*/Library", "-o",
+		"-path", "*/.Trash", "-o",
 		"-path", "*/.claude/worktrees", "-o",
 		"-path", "*/.milad-vault-worktrees", "-o",
 		"-path", "*/.claude/plugins/marketplaces", "-o",
@@ -222,13 +248,61 @@ func scanMachine(home string) ([]Skill, error) {
 		"-path", "*/.hermes/hermes-agent/optional-skills",
 		")", "-prune", "-o",
 		"-name", "SKILL.md", "-print",
-	)
-	output, err := exec.CommandContext(ctx, "find", args...).Output()
-	if err != nil && len(output) == 0 {
-		return nil, fmt.Errorf("scan machine for skills: %w", err)
+	}
+}
+
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+func scanMachine(home string) ([]Skill, error) {
+	roots, err := skillScanRoots(home)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	type scanResult struct {
+		output []byte
+		err    error
+	}
+	results := make(chan scanResult, len(roots))
+	semaphore := make(chan struct{}, 8)
+	var wait sync.WaitGroup
+	for _, root := range roots {
+		root := root
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			output, scanErr := exec.CommandContext(ctx, "find", skillFindArgs(root)...).Output()
+			results <- scanResult{output: output, err: scanErr}
+		}()
+	}
+	wait.Wait()
+	close(results)
+	outputs := make([]byte, 0, 256*1024)
+	var firstErr error
+	for result := range results {
+		outputs = append(outputs, result.output...)
+		if len(result.output) > 0 && result.output[len(result.output)-1] != '\n' {
+			outputs = append(outputs, '\n')
+		}
+		if result.err != nil && firstErr == nil {
+			firstErr = result.err
+		}
+	}
+	if len(outputs) == 0 && firstErr != nil {
+		return nil, fmt.Errorf("scan machine for skills: %w", firstErr)
+	}
+	if direct := filepath.Join(home, "SKILL.md"); isRegularFile(direct) {
+		outputs = append(outputs, direct...)
+		outputs = append(outputs, '\n')
 	}
 	byReal := make(map[string]*Skill)
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(string(outputs), "\n") {
 		if !strings.HasSuffix(line, string(filepath.Separator)+"SKILL.md") {
 			continue
 		}

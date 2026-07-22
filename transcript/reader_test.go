@@ -61,6 +61,25 @@ func TestReadSupportsOpenAIResponsesEvents(t *testing.T) {
 	}
 }
 
+func TestReadAllRetainsEveryTurn(t *testing.T) {
+	path := writeTranscript(t,
+		`{"type":"user","message":{"content":"one"}}`,
+		`{"type":"assistant","message":{"content":"two"}}`,
+		`{"type":"user","message":{"content":"three"}}`,
+	)
+	document, err := ReadAll(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, line := range document.Lines {
+		joined += line.Text
+	}
+	if document.Truncated || !strings.Contains(joined, "one") || !strings.Contains(joined, "two") || !strings.Contains(joined, "three") {
+		t.Fatalf("unexpected full document: %+v", document)
+	}
+}
+
 func TestReadRetainsRecentBoundedTurns(t *testing.T) {
 	path := writeTranscript(t,
 		`{"type":"user","message":{"content":"one"}}`,

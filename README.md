@@ -87,7 +87,7 @@ The shared `transcript/` reader streams or tail-reads JSONL, skips corrupt recor
 - direct gateway `role` / `content` records;
 - OpenAI Responses-style `response.output_text` and output-item records.
 
-The dossier peek byte-tail-reads at most 512 KiB and caches a bounded set of sessions with in-flight load deduplication; live-session peeks refresh after a short interval. Opening `v` separately streams the full file while retaining the most recent 2,000 rendered turns. Visual wrapping is precomputed for responsive paging, and a truncated document is labeled as a recent tail. Fleet-wide AI calls use byte-bounded transcript tails plus CCS’s indexed opening/closing skeleton, avoiding full rescans of hundreds of large files.
+The dossier peek byte-tail-reads at most 512 KiB and caches a bounded set of sessions with in-flight load deduplication; live-session peeks refresh after a short interval. Opening `v` separately streams and retains the entire normalized transcript, including histories longer than 2,000 records. Visual wrapping is precomputed for responsive paging; only genuinely byte-tailed documents are labeled as a recent tail. Fleet-wide AI calls use byte-bounded transcript tails plus CCS’s indexed opening/closing skeleton, avoiding full rescans of hundreds of large files.
 
 ## Resume contract
 
@@ -132,7 +132,7 @@ The same seam powers `e`, `S`, ask-the-fleet, and cleanup. Ask-the-fleet ranks e
 
 ## Skills mode
 
-`Tab` opens a separate machine-wide Skills registry. It reads `~/.ccs/cache/skills.db` in SQLite `mode=ro` when populated. If the rebuildable cache is empty or on an older schema, it scans installed/global skills, plugin cache, the canonical vault registry, vault workspaces, and programming repositories without writing a cache. Claude, Codex, Grok, Hermes, Cursor, IDE, agents, archive, and other discovered ecosystems remain visible; only marketplace catalogue listings, linked-worktree copies, and exact-content shadow duplicates are hidden.
+`Tab` opens a separate machine-wide Skills registry. It reads `~/.ccs/cache/skills.db` in SQLite `mode=ro` when populated. If the rebuildable cache is empty or on an older schema, it performs a parallel, pruned full-home scan without writing a cache; `R` always forces that fresh filesystem scan instead of reloading a populated cache. Claude, Codex, Grok, Hermes, Cursor, IDE, agents, archive, download, project, and other discovered ecosystems remain visible; only marketplace catalogue listings, linked-worktree copies, and exact-content shadow duplicates are hidden.
 
 Skills keys:
 

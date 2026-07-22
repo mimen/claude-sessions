@@ -24,6 +24,36 @@ func TestClassifyAndHome(t *testing.T) {
 	}
 }
 
+func TestScanMachineDiscoversSkillsAcrossHome(t *testing.T) {
+	home := t.TempDir()
+	paths := []string{
+		filepath.Join(home, "Documents", "scout-core", "skills", "todoist-scout", "SKILL.md"),
+		filepath.Join(home, "Documents", "vault", ".claude", "skills", "wiki-session-startup", "SKILL.md"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("---\nname: "+filepath.Base(filepath.Dir(path))+"\n---\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ignored := filepath.Join(home, "Library", "hidden", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(ignored), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ignored, []byte("# ignored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scanned, err := scanMachine(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scanned) != 2 {
+		t.Fatalf("scanned = %+v", scanned)
+	}
+}
+
 func TestVisibleSkillsKeepsAllInstalledEcosystems(t *testing.T) {
 	registry := []Skill{
 		{Name: "claude", Path: "/skills/claude", RealPath: "/skills/claude", Ecosystem: "claude-user", Hash: "a"},

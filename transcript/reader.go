@@ -64,12 +64,25 @@ type block struct {
 // Read streams a JSONL transcript and retains the most recent maxMessages rendered turns.
 // A zero/negative limit uses 2,000 turns. Corrupt records are skipped.
 func Read(path string, maxMessages int) (Document, error) {
+	if maxMessages <= 0 {
+		maxMessages = 2000
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return Document{}, fmt.Errorf("open transcript: %w", err)
 	}
 	defer file.Close()
 	return scanDocument(file, maxMessages, false)
+}
+
+// ReadAll streams and normalizes the entire transcript for the explicit full reader.
+func ReadAll(path string) (Document, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return Document{}, fmt.Errorf("open transcript: %w", err)
+	}
+	defer file.Close()
+	return scanDocument(file, 0, false)
 }
 
 // ReadRecent reads only the byte tail before normalizing the most recent turns. It is used for
@@ -132,10 +145,11 @@ func RecentText(path string, maxMessages int, maxChars int) (string, error) {
 }
 
 func scanDocument(file *os.File, maxMessages int, discardFirstPartial bool) (Document, error) {
-	if maxMessages <= 0 {
-		maxMessages = 2000
+	capacity := 256
+	if maxMessages > 0 {
+		capacity = min(maxMessages, capacity)
 	}
-	turns := make([][]Line, 0, min(maxMessages, 256))
+	turns := make([][]Line, 0, capacity)
 	truncated := discardFirstPartial
 	format := "unknown"
 	scanner := bufio.NewScanner(file)
@@ -157,7 +171,7 @@ func scanDocument(file *os.File, maxMessages int, discardFirstPartial bool) (Doc
 		} else if observedFormat != "" && format != observedFormat {
 			format = "mixed"
 		}
-		if len(turns) == maxMessages {
+		if maxMessages > 0 && len(turns) == maxMessages {
 			copy(turns, turns[1:])
 			turns[len(turns)-1] = lines
 			truncated = true

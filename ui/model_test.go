@@ -158,13 +158,32 @@ func TestTranscriptPeekDeduplicatesTailLoadAndFullReaderLoadsSeparately(t *testi
 		t.Fatal("reader reused the bounded peek instead of loading the full transcript")
 	}
 	fullMsg, ok := fullCmd().(transcriptLoadedMsg)
-	if !ok || !fullMsg.full || fullMsg.err != nil {
+	if !ok || !fullMsg.full || fullMsg.err != nil || fullMsg.document.Truncated {
 		t.Fatalf("full message = %+v", fullMsg)
 	}
 	updated, _ = model.Update(fullMsg)
 	model = updated.(Model)
 	if model.reader == nil || len(model.reader.visual) == 0 {
 		t.Fatal("full transcript reader did not precompute visual rows")
+	}
+}
+
+func TestSkillRescanCommandBypassesCacheLoader(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, "Documents", "custom", "skills", "fresh", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("---\nname: fresh\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	message, ok := scanSkillsCmd()().(skillsLoadedMsg)
+	if !ok || message.err != nil {
+		t.Fatalf("rescan message = %+v", message)
+	}
+	if message.snapshot.Source != "filesystem scan" || len(message.snapshot.Skills) != 1 || message.snapshot.Skills[0].Name != "fresh" {
+		t.Fatalf("rescan snapshot = %+v", message.snapshot)
 	}
 }
 

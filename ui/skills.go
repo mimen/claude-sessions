@@ -49,6 +49,13 @@ func loadSkillsCmd() tea.Cmd {
 	}
 }
 
+func scanSkillsCmd() tea.Cmd {
+	return func() tea.Msg {
+		snapshot, err := skills.Scan()
+		return skillsLoadedMsg{snapshot: snapshot, err: err}
+	}
+}
+
 func (m Model) handleSkillKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.overlay == OverlayHelp {
 		switch message.String() {
@@ -131,7 +138,7 @@ func (m Model) handleSkillKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "R":
 		m.skillLoading = true
 		m.skillError = ""
-		return m, loadSkillsCmd()
+		return m, scanSkillsCmd()
 	case "?":
 		m.overlay = OverlayHelp
 	}

@@ -511,7 +511,7 @@ func loadTranscriptCmd(session data.Session, full bool) tea.Cmd {
 		var document transcript.Document
 		var err error
 		if full {
-			document, err = transcript.Read(session.Path, 2000)
+			document, err = transcript.ReadAll(session.Path)
 		} else {
 			document, err = transcript.ReadRecent(session.Path, 200, 512*1024)
 		}
@@ -527,7 +527,7 @@ func (m *Model) cachePeekTranscript(sessionID string, document transcript.Docume
 }
 
 func (m *Model) cacheFullTranscript(sessionID string, document transcript.Document) {
-	if _, exists := m.fullTranscripts[sessionID]; !exists && len(m.fullTranscripts) >= 8 {
+	if _, exists := m.fullTranscripts[sessionID]; !exists && len(m.fullTranscripts) >= 2 {
 		m.evictOldestTranscript(m.fullTranscripts, sessionID, false)
 	}
 	m.fullTranscripts[sessionID] = document
