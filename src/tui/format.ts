@@ -113,7 +113,7 @@ export function identityRowLabel(identityKey: string | null | undefined): string
     .split(/[-_]+/)
     .filter(Boolean)
     .map((segment) => `${segment[0]?.toUpperCase() ?? ""}${segment.slice(1)}`)
-    .join(" · ");
+    .join(" ");
 }
 
 /** Human cadence from seconds: "45s" · "12m" · "1.5h" · "3.2h" · "2.1d". Blank for 0. */
