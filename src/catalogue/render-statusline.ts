@@ -1,4 +1,7 @@
 import type { CatalogueRow } from "./db.ts";
+import { familyOf } from "../tui/format.ts";
+import { theme, costColor, fullnessColor } from "../tui/theme.ts";
+import { formatCost } from "../cost.ts";
 
 /**
  * The Claude Code statusline renderer (ADR-0027): a pure projection of a session's ccs
@@ -105,6 +108,81 @@ export function renderStatusline(row: CatalogueRow, ctx: StatuslineCtx): string 
   const reviewBit = ctx.reviewAppUrl ? osc8(ctx.reviewAppUrl, "↗ review-app") : null;
 
   const bits = [pillBit, linked, groupingBit, wBit, reviewBit].filter((b): b is string => !!b);
+  return bits.join(" · ");
+}
+
+/**
+ * The live-session meters line (line 2) — rendered from the Claude Code statusline PAYLOAD, not the
+ * ccs catalogue: model badge, reasoning effort (+ fast-mode), context-window gauge, session cost.
+ * Styled in the SAME palette as the TUI list (model color from `familyOf`, cost from `costColor`,
+ * fill from `fullnessColor`) so the statusline reads as one system with ccs. Every field is optional
+ * and absent ones drop out cleanly (early session, model without effort, non-gateway model, …).
+ * Pure/testable: the caller parses the payload into this typed input.
+ */
+export interface MetersInput {
+  /** Raw model id (e.g. `claude-opus-4-8`, `gpt-5.6-sol-…`) — drives the family COLOR. */
+  modelId?: string | null;
+  /** Display label (Claude Code's `model.display_name`, e.g. `Opus 4.8`). Falls back to the family
+   * short label when absent. */
+  modelLabel?: string | null;
+  /** Reasoning effort level (`high`/`medium`/`low`), when the model exposes it. */
+  effort?: string | null;
+  /** Whether /fast is active. */
+  fast?: boolean;
+  /** Context-window used percentage (0–100), or null before the first API response of a turn. */
+  ctxPercent?: number | null;
+  /** Context-window size in tokens (200000 / 1000000) — rendered as `200k` / `1M`. */
+  ctxSize?: number | null;
+  /** Session cost so far, USD. */
+  costUsd?: number | null;
+}
+
+const METER_FAINT = theme.faint; // labels, empty gauge cells
+const METER_MUTED = theme.muted; // effort label
+
+/** `1M` / `200k` for a context-window token size. */
+function ctxWindowLabel(size: number): string {
+  if (size >= 1_000_000) return `${Math.round(size / 1_000_000)}M`;
+  if (size >= 1000) return `${Math.round(size / 1000)}k`;
+  return String(size);
+}
+
+/** An 8-cell block gauge: filled portion in the fullness color, remainder faint. */
+function ctxGauge(pct: number): string {
+  const cells = 8;
+  const filled = Math.max(0, Math.min(cells, Math.round((pct / 100) * cells)));
+  return colorize("█".repeat(filled), fullnessColor(pct)) + colorize("░".repeat(cells - filled), METER_FAINT);
+}
+
+/** Render the meters line from a parsed payload. Returns "" when nothing is known yet (caller then
+ * emits only the identity line). Bits are joined with the same ` · ` separator as the identity line. */
+export function renderMeters(m: MetersInput): string {
+  const modelBit =
+    m.modelLabel || m.modelId
+      ? colorize(m.modelLabel ?? familyOf(m.modelId ?? "").label, familyOf(m.modelId ?? "").color)
+      : null;
+
+  let effortBit: string | null = null;
+  if (m.effort || m.fast) {
+    const parts: string[] = [];
+    if (m.effort) parts.push(colorize(m.effort, METER_MUTED));
+    if (m.fast) parts.push(colorize("⚡fast", theme.costMid));
+    effortBit = parts.join(" ");
+  }
+
+  let ctxBit: string | null = null;
+  if (typeof m.ctxPercent === "number") {
+    const pct = Math.max(0, Math.round(m.ctxPercent));
+    const size = m.ctxSize ? ` ${colorize(ctxWindowLabel(m.ctxSize), METER_FAINT)}` : "";
+    ctxBit = `${colorize("ctx", METER_FAINT)} ${ctxGauge(pct)} ${colorize(`${pct}%`, fullnessColor(pct))}${size}`;
+  }
+
+  const costBit =
+    typeof m.costUsd === "number" && m.costUsd > 0
+      ? colorize(formatCost(m.costUsd), costColor(m.costUsd))
+      : null;
+
+  const bits = [modelBit, effortBit, ctxBit, costBit].filter((b): b is string => !!b);
   return bits.join(" · ");
 }
 

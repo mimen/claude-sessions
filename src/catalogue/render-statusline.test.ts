@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { renderStatusline, osc8, DEFAULT_STALENESS_MS } from "./render-statusline.ts";
+import { renderStatusline, renderMeters, osc8, DEFAULT_STALENESS_MS } from "./render-statusline.ts";
 import type { CatalogueRow } from "./db.ts";
 
 const NOW = Date.parse("2026-07-10T12:00:00Z");
@@ -108,4 +108,68 @@ test("a bare row with no PR/work reads as the neutral 'PR' label", () => {
     nowMs: NOW, statePill: { label: "building", color: "#32ade6" },
   });
   expect(line).toContain("PR");
+});
+
+// ── meters line (line 2) ───────────────────────────────────────────────────────────────────────
+
+test("meters: model display_name is tinted with the ccs family color", () => {
+  const line = renderMeters({ modelId: "claude-opus-4-8", modelLabel: "Opus 4.8" });
+  // opus #c99a6b → 201;154;107
+  expect(line).toContain("\x1b[38;2;201;154;107mOpus 4.8\x1b[39m");
+});
+
+test("meters: a gateway GPT model keeps its teal family color", () => {
+  const line = renderMeters({ modelId: "gpt-5.6-sol-high", modelLabel: "GPT-5.6 Sol" });
+  // sol #4fb3a9 → 79;179;169
+  expect(line).toContain("\x1b[38;2;79;179;169mGPT-5.6 Sol\x1b[39m");
+});
+
+test("meters: falls back to the family short label when display_name is absent", () => {
+  const line = renderMeters({ modelId: "claude-sonnet-5" });
+  expect(line).toContain("sonnet");
+});
+
+test("meters: effort and fast-mode render together", () => {
+  const line = renderMeters({ effort: "high", fast: true });
+  expect(line).toContain("high");
+  expect(line).toContain("⚡fast");
+});
+
+test("meters: context gauge shows a bar, the percent, and the window size", () => {
+  const line = renderMeters({ ctxPercent: 42, ctxSize: 1_000_000 });
+  expect(line).toContain("ctx");
+  expect(line).toContain("█"); // gauge filled cells drawn
+  expect(line).toContain("42%");
+  expect(line).toContain("1M");
+});
+
+test("meters: a 200k window renders as 200k", () => {
+  const line = renderMeters({ ctxPercent: 8, ctxSize: 200_000 });
+  expect(line).toContain("200k");
+});
+
+test("meters: cost is graded by the ccs cost ramp", () => {
+  const line = renderMeters({ costUsd: 1.23 });
+  // $1–$100 → costLow #9aa3b2 → 154;163;178
+  expect(line).toContain("\x1b[38;2;154;163;178m$1.23\x1b[39m");
+});
+
+test("meters: sub-dollar cost renders as cents", () => {
+  const line = renderMeters({ costUsd: 0.5 });
+  expect(line).toContain("50¢");
+});
+
+test("meters: empty input yields an empty line (identity-only session)", () => {
+  expect(renderMeters({})).toBe("");
+});
+
+test("meters: null context percent omits the ctx bit (pre-first-response)", () => {
+  const line = renderMeters({ ctxPercent: null, costUsd: 2 });
+  expect(line).not.toContain("ctx");
+  expect(line).toContain("$2.00");
+});
+
+test("meters: bits are joined with the ccs ` · ` separator", () => {
+  const line = renderMeters({ modelId: "claude-opus-4-8", modelLabel: "Opus 4.8", costUsd: 2 });
+  expect(line).toContain(" · ");
 });

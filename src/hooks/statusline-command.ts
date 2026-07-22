@@ -13,13 +13,38 @@
 import { basename } from "node:path";
 import { openCatalogue, getRow } from "../catalogue/db.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
-import { renderStatusline } from "../catalogue/render-statusline.ts";
+import { renderStatusline, renderMeters } from "../catalogue/render-statusline.ts";
 import { getGrouping } from "../state/groupings.ts";
 
 interface StatuslinePayload {
   session_id?: string;
   cwd?: string;
   workspace?: { current_dir?: string; cwd?: string; project_dir?: string };
+  // Live-session fields Claude Code pipes each turn — used for the meters line (line 2). All
+  // optional/conditional (absent early in a session or for models without effort), handled leniently.
+  model?: { id?: string; display_name?: string };
+  cost?: { total_cost_usd?: number };
+  context_window?: { used_percentage?: number | null; context_window_size?: number | null };
+  effort?: { level?: string };
+  fast_mode?: boolean;
+}
+
+/** Parse the live payload into the meters line (line 2). Fail-open to "" so a malformed field can
+ * never blank the whole statusline — the identity line still prints. */
+function metersOf(p: StatuslinePayload): string {
+  try {
+    return renderMeters({
+      modelId: p.model?.id ?? null,
+      modelLabel: p.model?.display_name ?? null,
+      effort: p.effort?.level ?? null,
+      fast: p.fast_mode === true,
+      ctxPercent: typeof p.context_window?.used_percentage === "number" ? p.context_window.used_percentage : null,
+      ctxSize: typeof p.context_window?.context_window_size === "number" ? p.context_window.context_window_size : null,
+      costUsd: typeof p.cost?.total_cost_usd === "number" ? p.cost.total_cost_usd : null,
+    });
+  } catch {
+    return "";
+  }
 }
 
 async function readStdin(): Promise<string> {
@@ -101,6 +126,10 @@ export async function statuslineCommand(): Promise<number> {
     // fail-open: keep the default line
   }
 
-  process.stdout.write(line + "\n");
+  // Line 2: the live meters (model · effort · context · cost), from the payload — rendered for
+  // EVERY session, not just tracked workers. Omitted entirely when nothing is known yet (empty
+  // payload / pre-first-response), so an ordinary session degrades to just the identity line.
+  const meters = metersOf(payload);
+  process.stdout.write((meters ? `${line}\n${meters}` : line) + "\n");
   return 0;
 }
