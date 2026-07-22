@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"ccsspike/data"
+	"ccsspike/transcript"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -89,16 +90,24 @@ func TestNarrowViewDoesNotOverflowOrPanic(t *testing.T) {
 		model.h = size[1]
 		for _, overlay := range []Overlay{OverlayNone, OverlayHelp, OverlayRoute} {
 			model.overlay = overlay
-			view := model.View()
-			lines := strings.Split(view, "\n")
-			if len(lines) > model.h {
-				t.Fatalf("%dx%d overlay %d rendered %d lines", model.w, model.h, overlay, len(lines))
-			}
-			for lineNumber, line := range lines {
-				if width := lipgloss.Width(line); width > model.w {
-					t.Fatalf("%dx%d overlay %d line %d width = %d", model.w, model.h, overlay, lineNumber+1, width)
-				}
-			}
+			assertViewFits(t, model, fmt.Sprintf("overlay %d", overlay))
+		}
+		model.overlay = OverlayNone
+		model.reader = &transcriptReader{title: "reader", document: transcript.Document{Lines: []transcript.Line{{Kind: transcript.KindUser, Text: strings.Repeat("long ", 100)}}}}
+		assertViewFits(t, model, "transcript reader")
+	}
+}
+
+func assertViewFits(t *testing.T, model Model, label string) {
+	t.Helper()
+	view := model.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) > model.h {
+		t.Fatalf("%dx%d %s rendered %d lines", model.w, model.h, label, len(lines))
+	}
+	for lineNumber, line := range lines {
+		if width := lipgloss.Width(line); width > model.w {
+			t.Fatalf("%dx%d %s line %d width = %d", model.w, model.h, label, lineNumber+1, width)
 		}
 	}
 }

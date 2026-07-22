@@ -22,6 +22,10 @@ func (m Model) View() string {
 		return lipgloss.Place(max(1, m.w), max(1, m.h), lipgloss.Center, lipgloss.Center, fit("ccs", max(1, m.w)),
 			lipgloss.WithWhitespaceBackground(theme.BgBase))
 	}
+	if m.reader != nil {
+		content := m.renderTranscriptReader(max(1, m.w-4), max(1, m.h-2))
+		return lipgloss.NewStyle().Background(theme.BgBase).Padding(1, 2).Render(content)
+	}
 	innerW := max(1, m.w-4)
 	bodyH := max(1, m.h-7)
 
@@ -42,7 +46,7 @@ func (m Model) View() string {
 				Border(lipgloss.NormalBorder(), false, false, false, true).
 				BorderForeground(theme.Sep).BorderBackground(theme.BgBase).
 				Background(theme.BgBase).Padding(0, 1, 0, 2)
-			preview := prevStyle.Width(prevW).Height(bodyH).Render(clipHeight(m.renderPreview(prevW), bodyH))
+			preview := prevStyle.Width(prevW).Height(bodyH).Render(clipHeight(m.renderPreview(prevW, bodyH), bodyH))
 			body = lipgloss.JoinHorizontal(lipgloss.Top, list, gap, preview)
 		} else {
 			body = theme.Main.Width(innerW).Height(bodyH).Render(clipHeight(m.renderList(innerW, bodyH), bodyH))
@@ -221,7 +225,7 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 
 // ---- preview dossier ----
 
-func (m Model) renderPreview(width int) string {
+func (m Model) renderPreview(width int, height int) string {
 	session, ok := m.selectedSession()
 	if !ok {
 		return fg(theme.FgMoreSubtle).Render("no session selected")
@@ -256,11 +260,12 @@ func (m Model) renderPreview(width int) string {
 	}
 	if session.TasksTotal > 0 {
 		lines = append(lines, "", sect(fmt.Sprintf("Tasks · %d/%d", session.TasksDone, session.TasksTotal)))
-		for _, subject := range session.TaskSubjects {
-			lines = append(lines, fg(theme.FgMoreSubtle).Render("· ")+fg(theme.FgSubtle).Render(truncate(subject, max(1, contentWidth-2))))
-			if len(lines) > 22 {
+		for index, subject := range session.TaskSubjects {
+			if index == 3 {
+				lines = append(lines, fg(theme.FgMostSubtle).Render(fmt.Sprintf("  … %d more", len(session.TaskSubjects)-index)))
 				break
 			}
+			lines = append(lines, fg(theme.FgMoreSubtle).Render("· ")+fg(theme.FgSubtle).Render(truncate(subject, max(1, contentWidth-2))))
 		}
 	}
 	lines = append(lines, "", sect("Meta"))
@@ -274,6 +279,23 @@ func (m Model) renderPreview(width int) string {
 	}
 	for _, pair := range metadata {
 		lines = append(lines, fg(theme.FgMostSubtle).Render(pad(pair[0], 10))+fg(theme.FgSubtle).Render(truncate(pair[1], max(1, contentWidth-11))))
+	}
+	lines = append(lines, "", sect("Transcript")+fg(theme.FgMostSubtle).Render("  J/K peek · v full"))
+	remaining := max(1, height-len(lines))
+	if errText := m.transcriptErrs[session.ID]; errText != "" {
+		lines = append(lines, fg(theme.Warning).Render(truncate(errText, contentWidth)))
+	} else if document, loaded := m.transcripts[session.ID]; loaded {
+		start := m.peekScroll
+		if m.peekSession != session.ID {
+			start = max(0, len(document.Lines)-remaining)
+		}
+		start = clamp(start, 0, max(0, len(document.Lines)-1))
+		end := min(len(document.Lines), start+remaining)
+		for _, transcriptLine := range document.Lines[start:end] {
+			lines = append(lines, renderPeekLine(transcriptLine, contentWidth))
+		}
+	} else {
+		lines = append(lines, fg(theme.FgMostSubtle).Render("loading recent transcript…"))
 	}
 	return strings.Join(lines, "\n")
 }

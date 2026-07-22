@@ -1,6 +1,9 @@
 package ui
 
-import "ccsspike/data"
+import (
+	"ccsspike/data"
+	"ccsspike/transcript"
+)
 
 // Shot renders a named real-data view at the fixed design-spec size.
 func Shot(name string, snapshot data.Snapshot) string {
@@ -8,6 +11,13 @@ func Shot(name string, snapshot data.Snapshot) string {
 	model.w, model.h = 132, 40
 	model.cursor = nthSessionRow(model.rows, 3)
 	model.treeCursor = min(3, max(0, len(snapshot.Tree)-1))
+	if session, ok := model.selectedSession(); ok {
+		if document, err := transcript.Read(session.Path, 2000); err == nil {
+			model.transcripts[session.ID] = document
+			model.peekSession = session.ID
+			model.peekScroll = max(0, len(document.Lines)-6)
+		}
+	}
 	switch name {
 	case "browser":
 		model.view, model.preview = ViewGroups, true
@@ -15,6 +25,12 @@ func Shot(name string, snapshot data.Snapshot) string {
 		model.view, model.preview = ViewGroups, false
 	case "tree":
 		model.view = ViewTree
+	case "transcript":
+		if session, ok := model.selectedSession(); ok {
+			if document, loaded := model.transcripts[session.ID]; loaded {
+				model.reader = &transcriptReader{sessionID: session.ID, title: session.Title, document: document, scroll: 1_000_000}
+			}
+		}
 	case "route":
 		model.view, model.overlay = ViewGroups, OverlayRoute
 		if session, ok := model.selectedSession(); ok {
