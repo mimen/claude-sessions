@@ -9,9 +9,9 @@ test("Event Watch core identities omit the redundant key annotation", () => {
 
 test("Event Watch worker identities render a humanized work reference", () => {
   expect(identityRowLabel("event-watch:event-worker:gio-lucca-3oz-august"))
-    .toBe("Gio · Lucca · 3oz · August");
+    .toBe("Gio Lucca 3oz August");
   expect(identityRowLabel("event-watch:event-worker:umbrella-weekend-2027"))
-    .toBe("Umbrella · Weekend · 2027");
+    .toBe("Umbrella Weekend 2027");
 });
 
 test("other clusters retain their full identity key", () => {

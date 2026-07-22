@@ -197,7 +197,7 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
               </Box>
             ) : identityLabel ? (
               <Box flexShrink={0} marginRight={1}>
-                <Text color={sel ? theme.selFg : theme.project}>⊞{identityLabel}</Text>
+                <Text color={sel ? theme.selFg : theme.project}>{identityLabel}</Text>
               </Box>
             ) : null}
             {showRoleStatus ? (
