@@ -1,22 +1,48 @@
 package ui
 
-// Shot renders a named view at a fixed size for static capture.
-func Shot(name string) string {
-	m := New()
-	m.w, m.h = 132, 40
-	m.frame = 3
-	m.cursor = 4 // "Port CCS from Work Laptop" (Repos group)
+import "ccsspike/data"
+
+// Shot renders a named real-data view at the fixed design-spec size.
+func Shot(name string, snapshot data.Snapshot) string {
+	model := New(snapshot)
+	model.w, model.h = 132, 40
+	model.cursor = nthSessionRow(model.rows, 3)
+	model.treeCursor = min(3, max(0, len(snapshot.Tree)-1))
 	switch name {
 	case "browser":
-		m.view, m.preview = ViewGroups, true
+		model.view, model.preview = ViewGroups, true
 	case "nopreview":
-		m.view, m.preview = ViewGroups, false
+		model.view, model.preview = ViewGroups, false
 	case "tree":
-		m.view = ViewTree
+		model.view = ViewTree
 	case "route":
-		m.view, m.overlay = ViewGroups, OverlayRoute
+		model.view, model.overlay = ViewGroups, OverlayRoute
+		if session, ok := model.selectedSession(); ok {
+			routes, err := data.LoadRoutes(session.Models)
+			model.routeSession = session.ID
+			model.routeLoading = false
+			model.routes = routes
+			model.routeCursor = defaultRouteIndex(routes)
+			if err != nil {
+				model.routeError = err.Error()
+			}
+		}
 	case "help":
-		m.overlay = OverlayHelp
+		model.overlay = OverlayHelp
 	}
-	return m.View()
+	return model.View()
+}
+
+func nthSessionRow(rows []row, wanted int) int {
+	seen := 0
+	for i, candidate := range rows {
+		if candidate.header {
+			continue
+		}
+		if seen == wanted {
+			return i
+		}
+		seen++
+	}
+	return firstSessionRow(rows)
 }

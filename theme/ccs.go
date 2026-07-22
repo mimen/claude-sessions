@@ -38,6 +38,11 @@ var modelFamilies = []struct {
 	{"claude-opus", "opus", "#C99A6B"},
 	{"claude-sonnet", "sonnet", "#6F9BC2"},
 	{"claude-haiku", "haiku", "#7BA85F"},
+	{"claude-3-opus", "opus", "#C99A6B"},
+	{"claude-3-5-sonnet", "sonnet", "#6F9BC2"},
+	{"claude-3-7-sonnet", "sonnet", "#6F9BC2"},
+	{"claude-3-5-haiku", "haiku", "#7BA85F"},
+	{"claude-3-haiku", "haiku", "#7BA85F"},
 }
 
 func Model(id string) ModelBadge {
