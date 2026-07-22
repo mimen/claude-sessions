@@ -24,6 +24,7 @@ export function SectionCard({
   cost,
   sectionKey,
   height,
+  width,
 }: {
   name: string;
   glyph: string;
@@ -31,9 +32,10 @@ export function SectionCard({
   cost: number;
   sectionKey: string;
   height: number;
+  width: number;
 }): React.ReactElement {
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={theme.faint} paddingX={1} height={height}>
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.faint} paddingX={1} width={width} height={height}>
       <Text bold color={theme.header}>
         {glyph !== " " ? `${glyph} ` : ""}
         {name}
