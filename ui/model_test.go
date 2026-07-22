@@ -10,6 +10,7 @@ import (
 
 	"ccsspike/data"
 	"ccsspike/inference"
+	"ccsspike/skills"
 	"ccsspike/transcript"
 
 	"github.com/charmbracelet/lipgloss"
@@ -102,6 +103,11 @@ func TestNarrowViewDoesNotOverflowOrPanic(t *testing.T) {
 		model.confirmation = nil
 		model.fleetResults = &fleetResults{query: strings.Repeat("question ", 20), matches: []inference.AskMatch{{Title: strings.Repeat("match ", 20), Answer: strings.Repeat("answer ", 20), Reason: strings.Repeat("reason ", 20)}}}
 		assertViewFits(t, model, "fleet results")
+		model.fleetResults = nil
+		model.mode = ModeSkills
+		model.skills = skills.Snapshot{Skills: []skills.Skill{{Name: strings.Repeat("skill ", 20), Description: strings.Repeat("description ", 20), Category: "dev", Home: "global"}}}
+		model.rebuildSkillRows()
+		assertViewFits(t, model, "skills mode")
 	}
 }
 
@@ -116,6 +122,18 @@ func assertViewFits(t *testing.T, model Model, label string) {
 		if width := lipgloss.Width(line); width > model.w {
 			t.Fatalf("%dx%d %s line %d width = %d", model.w, model.h, label, lineNumber+1, width)
 		}
+	}
+}
+
+func TestSkillsRowsGroupByCategoryAndSearchDescription(t *testing.T) {
+	registry := []skills.Skill{
+		{Name: "alpha", Category: "dev", Description: "build the gateway"},
+		{Name: "beta", Category: "events"},
+		{Name: "gamma", Category: "dev"},
+	}
+	rows := buildSkillRows(registry, skillViewCategory, "gateway")
+	if len(rows) != 2 || !rows[0].header || rows[0].label != "dev" || rows[1].sIdx != 0 {
+		t.Fatalf("rows = %+v", rows)
 	}
 }
 

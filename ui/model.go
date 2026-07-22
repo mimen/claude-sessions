@@ -3,9 +3,17 @@ package ui
 import (
 	"ccsspike/data"
 	"ccsspike/resume"
+	"ccsspike/skills"
 	"ccsspike/transcript"
 
 	tea "github.com/charmbracelet/bubbletea"
+)
+
+type AppMode int
+
+const (
+	ModeSessions AppMode = iota
+	ModeSkills
 )
 
 type View int
@@ -63,6 +71,7 @@ type transcriptReader struct {
 // Model is the single Bubble Tea state machine for the browser.
 type Model struct {
 	w, h           int
+	mode           AppMode
 	view           View
 	overlay        Overlay
 	snapshot       data.Snapshot
@@ -87,6 +96,16 @@ type Model struct {
 	confirmation   *confirmation
 	fleetResults   *fleetResults
 	summaries      map[string]string
+	skills         skills.Snapshot
+	skillRows      []skillRow
+	skillCursor    int
+	skillView      skillView
+	skillQuery     string
+	skillSearching bool
+	skillLoading   bool
+	skillError     string
+	skillPreview   bool
+	skillReader    *skillReader
 	handoff        *resume.Command
 	status         string
 }
@@ -99,6 +118,8 @@ func New(snapshot data.Snapshot) Model {
 		h:              40,
 		view:           ViewGroups,
 		preview:        true,
+		skillView:      skillViewCategory,
+		skillPreview:   true,
 		snapshot:       snapshot,
 		rows:           rows,
 		cursor:         firstSessionRow(rows),
@@ -151,6 +172,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w = max(1, msg.Width)
 		m.h = max(1, msg.Height)
+		return m, nil
+	case skillsLoadedMsg:
+		m.skillLoading = false
+		if msg.err != nil {
+			m.skillError = msg.err.Error()
+			return m, nil
+		}
+		m.skills = msg.snapshot
+		m.skillError = ""
+		m.rebuildSkillRows()
 		return m, nil
 	case routesLoadedMsg:
 		if msg.sessionID != m.routeSession {
@@ -257,6 +288,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.mode == ModeSkills {
+		return m.handleSkillKey(msg)
+	}
 	if m.reader != nil {
 		page := max(1, m.h-6)
 		switch msg.String() {
@@ -339,6 +373,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
+	case "tab":
+		m.mode = ModeSkills
+		m.status = ""
+		if len(m.skills.Skills) == 0 && !m.skillLoading {
+			m.skillLoading = true
+			return m, loadSkillsCmd()
+		}
 	case "up", "k":
 		m.moveSelection(-1)
 		return m, m.loadSelectedTranscriptCmd()

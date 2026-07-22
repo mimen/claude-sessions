@@ -22,6 +22,15 @@ func (m Model) View() string {
 		return lipgloss.Place(max(1, m.w), max(1, m.h), lipgloss.Center, lipgloss.Center, fit("ccs", max(1, m.w)),
 			lipgloss.WithWhitespaceBackground(theme.BgBase))
 	}
+	if m.mode == ModeSkills {
+		out := m.renderSkillsScreen()
+		if m.overlay != OverlayNone {
+			panel := clipBlock(m.renderOverlay(), m.w, m.h)
+			out = lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, panel,
+				lipgloss.WithWhitespaceBackground(theme.BgBase))
+		}
+		return out
+	}
 	if m.reader != nil {
 		content := m.renderTranscriptReader(max(1, m.w-4), max(1, m.h-2))
 		return lipgloss.NewStyle().Background(theme.BgBase).Padding(1, 2).Render(content)
@@ -485,6 +494,7 @@ func (m Model) renderHelp() string {
 		{"S", "summarize selected transcript"},
 		{"A", "ask across transcript excerpts"},
 		{"D", "AI cleanup proposal; approve checked set"},
+		{"Tab", "toggle session manager / Skills registry"},
 		{"?", "this help · q quit"},
 	}
 	panelWidth := min(62, max(8, m.w-2))
@@ -519,7 +529,7 @@ func (m Model) renderKeybar(width int) string {
 		viewLabel = "flat"
 	}
 	items := [][2]string{
-		{"↑↓", "move"}, {"enter", "resume"}, {"r", "via…"}, {"v", "transcript"},
+		{"Tab", "skills"}, {"↑↓", "move"}, {"enter", "resume"}, {"r", "via…"}, {"v", "transcript"},
 		{"/", "search"}, {"g", "view:" + viewLabel}, {"t/e", "organize"}, {"C/X", "done/archive"},
 		{"S/A/D", "AI"}, {"?", "help"}, {"q", "quit"},
 	}
