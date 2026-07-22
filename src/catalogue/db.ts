@@ -364,8 +364,11 @@ function migrate(db: Database): void {
     if (!hasColumn(db, "catalogue", "resume_command")) {
       db.exec("ALTER TABLE catalogue ADD COLUMN resume_command TEXT;");
     }
-    // one-time backfill: seed role from the legacy skill where role is still empty
-    db.exec("UPDATE catalogue SET role = skill WHERE role IS NULL AND skill IS NOT NULL;");
+    // one-time backfill: seed role from the legacy skill where role is still empty.
+    // A retry after v25 may already have dropped skill while user_version is still old.
+    if (hasColumn(db, "catalogue", "skill")) {
+      db.exec("UPDATE catalogue SET role = skill WHERE role IS NULL AND skill IS NOT NULL;");
+    }
   }
   if (v < 13) {
     // Additive: the ROLES registry (ADR-0022) — a first-class entity like `epics`. Holds
@@ -533,9 +536,13 @@ function migrate(db: Database): void {
     // Guard on column presence (older binary can reset version, re-run).
     if (hasColumn(db, "catalogue", "system") && !hasColumn(db, "catalogue", "cluster")) {
       db.exec("ALTER TABLE catalogue RENAME COLUMN system TO cluster;");
-      db.exec("DROP INDEX IF EXISTS idx_catalogue_system;");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_cluster ON catalogue(cluster);");
+    } else if (!hasColumn(db, "catalogue", "cluster")) {
+      // Some legacy v5 catalogues advanced user_version without ever receiving the v5
+      // `system` column. Add the renamed column directly so later migrations can read it.
+      db.exec("ALTER TABLE catalogue ADD COLUMN cluster TEXT;");
     }
+    db.exec("DROP INDEX IF EXISTS idx_catalogue_system;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_cluster ON catalogue(cluster);");
   }
   if (v < 28) {
     // ADR-0070: rename the `epic_id` FK column to `grouping_id` — "grouping" is the generic
@@ -566,6 +573,12 @@ function migrate(db: Database): void {
     if (hasColumn(db, "catalogue", "activity")) db.exec("ALTER TABLE catalogue DROP COLUMN activity;");
   }
   if (v < 31) {
+    // A few legacy catalogues carried user_version 27–30 without either side of the
+    // system→cluster rename. v31 reads cluster during its key backfill, so repair that
+    // invariant here too before selecting rows; v33 removes the legacy identity column.
+    if (!hasColumn(db, "catalogue", "cluster")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN cluster TEXT;");
+    }
     // ADR-D1 (2026-07-14): ccs is the single source of truth for the identity KEY. Historically
     // `key` was populated only by explicit setKey() calls (new-session, key command), so many
     // rows had a null key even though their pr_repo+pr_number/gus_work/role columns implied one.
@@ -771,7 +784,7 @@ function migrate(db: Database): void {
   // the drop actually applied heals on next boot. Sqlite 3.35+ DROP COLUMN.
   {
     const legacyIndexes = [
-      "idx_catalogue_event", "idx_catalogue_project", "idx_catalogue_system",
+      "idx_catalogue_event", "idx_catalogue_project", "idx_catalogue_role", "idx_catalogue_system",
       "idx_catalogue_cluster", "idx_catalogue_pr_number", "idx_catalogue_pr_repo",
       "idx_catalogue_key", "idx_catalogue_gus_work", "idx_catalogue_epic",
       "idx_catalogue_grouping", "idx_catalogue_work_unit",

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -224,4 +225,96 @@ test("v33 schema postcondition passes on a fresh migrated DB", () => {
   expect(names.has("key")).toBe(false);
   expect(names.has("stage")).toBe(false);
   expect(names.has("status_line")).toBe(false);
+});
+
+test("repairs partially migrated catalogues missing cluster and skill", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-partial-no-cluster-"));
+  try {
+    for (const version of [5, 30]) {
+      const path = join(root, `catalogue-v${version}.db`);
+      const legacy = new Database(path);
+      legacy.exec(`
+        CREATE TABLE catalogue (
+          session_id TEXT PRIMARY KEY,
+          resume_id TEXT,
+          custom_title TEXT,
+          completed INTEGER,
+          archived INTEGER,
+          parked_task_id TEXT,
+          notes TEXT,
+          updated_at TEXT,
+          parent_session_id TEXT,
+          project TEXT,
+          role TEXT,
+          substrate TEXT,
+          identity TEXT,
+          pr_number INTEGER,
+          pr_repo TEXT,
+          pr_branch TEXT,
+          pr_state TEXT,
+          pr_head_sha TEXT,
+          key TEXT,
+          gus_work TEXT,
+          grouping_id TEXT,
+          status_line TEXT,
+          stage TEXT,
+          work_unit_id TEXT,
+          meta TEXT
+        );
+        CREATE INDEX idx_catalogue_role ON catalogue(role);
+        INSERT INTO catalogue (session_id, custom_title, updated_at)
+        VALUES ('partial-session', 'Retry title', '2026-07-22T00:00:00Z');
+        PRAGMA user_version = ${version};
+      `);
+      legacy.close();
+
+      const migrated = openCatalogue(path);
+      expect(migrated.query("PRAGMA user_version").get()).toEqual({ user_version: 37 });
+      expect(getRow(migrated, "partial-session")?.customTitle).toBe("Retry title");
+      expect(migrated.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+      migrated.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("migrates a legacy v5 catalogue that never received the system column", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-v5-no-system-"));
+  const path = join(root, "catalogue.db");
+  try {
+    const legacy = new Database(path);
+    legacy.exec(`
+      CREATE TABLE catalogue (
+        session_id TEXT PRIMARY KEY,
+        resume_id TEXT,
+        custom_title TEXT,
+        kind TEXT,
+        completed INTEGER,
+        archived INTEGER,
+        parked_task_id TEXT,
+        notes TEXT,
+        updated_at TEXT,
+        event TEXT,
+        parent_session_id TEXT,
+        skill TEXT,
+        project TEXT,
+        role TEXT,
+        substrate TEXT,
+        identity TEXT
+      );
+      INSERT INTO catalogue (session_id, custom_title, updated_at)
+      VALUES ('legacy-session', 'Preserved title', '2026-07-22T00:00:00Z');
+      PRAGMA user_version = 5;
+    `);
+    legacy.close();
+
+    const migrated = openCatalogue(path);
+    expect(migrated.query("PRAGMA user_version").get()).toEqual({ user_version: 37 });
+    expect(getRow(migrated, "legacy-session")?.customTitle).toBe("Preserved title");
+    expect(migrated.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+    migrated.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
