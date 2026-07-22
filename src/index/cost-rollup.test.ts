@@ -68,6 +68,28 @@ describe("buildCostRollup", () => {
     expect(result.physicalStoreCost).toBe(17);
   });
 
+  test("rolls delegated cost into a catalogue-only automation anchor", () => {
+    const result = buildCostRollup(
+      [
+        row("child", 4, { costByModel: { "gpt-5.6-luna": 4 } }),
+        row("grandchild", 2, { costByModel: { "claude-opus-4-8": 2 } }),
+      ],
+      [
+        { parentId: "automation-anchor", sessionId: "child" },
+        { parentId: "child", sessionId: "grandchild" },
+      ],
+    );
+
+    expect(result.bySessionId.get("automation-anchor")).toEqual({
+      selfCost: 0,
+      totalCost: 6,
+      byProvider: { claude: 2, gpt: 4, other: 0 },
+      descendantCount: 2,
+      physicalSessionIds: new Set(["child", "grandchild"]),
+    });
+    expect(result.physicalStoreCost).toBe(6);
+  });
+
   test("terminates cycles while retaining each physical transcript once", () => {
     const result = buildCostRollup(
       [row("a", 2), row("b", 3)],

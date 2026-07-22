@@ -15,6 +15,8 @@ import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
 import { delegateCommand } from "./delegate/command.ts";
+import { doctorCommand } from "./doctor/command.ts";
+import { launcherCommand } from "./launcher/command.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { boardCommand } from "./catalogue/board-command.ts";
 import { backfillTitles } from "./titler/queue.ts";
@@ -59,6 +61,8 @@ Usage:
   ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
                          Reserve and synchronously run an auxiliary seat (fallback is explicit; never automatic)
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
+  ccs launcher install  Install the stable CCS Claude shim and shell initialization
+  ccs doctor sessions [--json]  Report post-rollout unclassified or provenance-missing sessions
 
 Identities (durable, per-work-unit — ADR-0089):
   ccs identity mint <key> --cluster=<c> --role=<r> [--grouping=<g>]
@@ -173,6 +177,10 @@ export async function main(argv: string[]): Promise<number> {
       return tree({ all: args.includes("--all"), auxiliary: args.includes("--auxiliary") });
     case "delegate":
       return delegateCommand(args.slice(1));
+    case "doctor":
+      return doctorCommand(args.slice(1));
+    case "launcher":
+      return launcherCommand(args.slice(1));
     case "whoami":
       return whoami();
     case "meta": {

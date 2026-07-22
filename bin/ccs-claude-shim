@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+# CCS Phase 1 launcher: register ordinary persistent session births, then exec the
+# updater-managed Claude binary by absolute path. Registration is advisory/fail-open
+# for human launches and strict only for obvious nested agent launches.
+set -u
+
+warn() {
+  printf 'ccs claude shim: %s\n' "$*" >&2
+}
+
+find_cmux_wrapper() {
+  local candidate="${CCS_CMUX_CLAUDE_WRAPPER_PATH:-}"
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+
+  local entry old_ifs="$IFS"
+  IFS=:
+  for entry in ${PATH:-}; do
+    case "$entry" in
+      */cmux-cli-shims/*)
+        candidate="${entry%/}/claude"
+        if [[ -x "$candidate" && ! "$candidate" -ef "$0" ]]; then
+          IFS="$old_ifs"
+          printf '%s' "$candidate"
+          return 0
+        fi
+        ;;
+    esac
+  done
+  IFS="$old_ifs"
+
+  if [[ -n "${CMUX_BUNDLED_CLI_PATH:-}" ]]; then
+    candidate="${CMUX_BUNDLED_CLI_PATH%/*}/cmux-claude-wrapper"
+    if [[ -x "$candidate" ]]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  fi
+  candidate="/Applications/cmux.app/Contents/Resources/bin/cmux-claude-wrapper"
+  if [[ -x "$candidate" ]]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  return 1
+}
+
+# cmux deliberately clears inherited Claude session identity before it invokes its
+# custom target. Enter cmux once from the PATH-precedent shim so we can preserve the
+# causal parent in a CCS-only variable, then perform registration on the second pass.
+if [[ -n "${CMUX_SURFACE_ID:-}" && -z "${CCS_CLAUDE_SHIM_AFTER_CMUX:-}" ]]; then
+  cmux_wrapper="$(find_cmux_wrapper || true)"
+  if [[ -n "$cmux_wrapper" ]]; then
+    export CCS_LAUNCH_PARENT_SESSION_ID="${CCS_LAUNCH_PARENT_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
+    export CCS_CLAUDE_SHIM_AFTER_CMUX=1
+    exec "$cmux_wrapper" "$@"
+  fi
+fi
+
+raw_link="${CCS_RAW_CLAUDE_PATH:-${HOME:-}/.local/bin/claude}"
+if [[ -z "$raw_link" || ! -x "$raw_link" ]]; then
+  warn "raw Claude executable is missing or not executable: $raw_link"
+  exit 127
+fi
+
+if command -v realpath >/dev/null 2>&1; then
+  raw_claude="$(realpath "$raw_link")"
+else
+  raw_claude="$raw_link"
+fi
+if [[ "$raw_claude" -ef "$0" ]]; then
+  warn "raw Claude path resolves back to the CCS shim"
+  exit 126
+fi
+
+exec_raw() {
+  unset CCS_CLAUDE_SHIM_AFTER_CMUX CCS_LAUNCH_PARENT_SESSION_ID
+  unset CCS_LAUNCH_CREATOR_KIND CCS_LAUNCH_CREATOR_REF
+  unset CCS_CREATOR_KIND CCS_CREATOR_REF
+  exec "$raw_claude" "$@"
+}
+
+args=("$@")
+
+claude_option_consumes_many() {
+  case "$1" in
+    --add-dir|--allowedTools|--allowed-tools|--betas|--disallowedTools|--disallowed-tools|--file|--mcp-config|--tools)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+claude_option_consumes_value() {
+  case "$1" in
+    --agent|--agents|--append-system-prompt|--debug-file|--effort|--fallback-model|\
+    --input-format|--json-schema|--max-budget-usd|--model|-n|--name|--output-format|\
+    --permission-mode|--plugin-dir|--plugin-url|--remote-control-session-name-prefix|\
+    --session-id|--setting-sources|--settings|--system-prompt)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+claude_option_consumes_optional_value() {
+  case "$1" in
+    -d|--debug|--from-pr|--prompt-suggestions|--remote-control|-r|--resume|-w|--worktree)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+is_builtin_command_invocation() {
+  local pending_value=false pending_optional_value=false consuming_many=false arg option
+  for arg in "${args[@]}"; do
+    if [[ "$pending_optional_value" == true ]]; then
+      pending_optional_value=false
+      if [[ "$arg" != -* ]]; then continue; fi
+    fi
+    if [[ "$consuming_many" == true ]]; then
+      if [[ "$arg" != -* ]]; then continue; fi
+      consuming_many=false
+    fi
+    if [[ "$pending_value" == true ]]; then
+      pending_value=false
+      continue
+    fi
+    case "$arg" in
+      --)
+        return 1
+        ;;
+      -p|--print)
+        return 1
+        ;;
+      --help|-h|--version|-v)
+        return 0
+        ;;
+      --*=*)
+        option="${arg%%=*}"
+        if claude_option_consumes_many "$option"; then consuming_many=true; fi
+        continue
+        ;;
+      -*)
+        if claude_option_consumes_many "$arg"; then
+          consuming_many=true
+        elif claude_option_consumes_value "$arg"; then
+          pending_value=true
+        elif claude_option_consumes_optional_value "$arg"; then
+          pending_optional_value=true
+        fi
+        continue
+        ;;
+      agents|auth|auto-mode|config|api-key|daemon|doctor|experimental-next|gateway|install|mcp|plugin|plugins|project|rc|remote-control|setup-token|ultrareview|update|upgrade)
+        return 0
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  done
+  return 1
+}
+
+if is_builtin_command_invocation; then
+  exec_raw "${args[@]}"
+fi
+
+if [[ -n "${CLAUDE_CODE_SKIP_PROMPT_HISTORY:-}" ]]; then
+  exec_raw "${args[@]}"
+fi
+
+session_id=""
+explicit_session=false
+resume_or_nonpersistent=false
+pending_option=""
+pending_optional_value=false
+consuming_many=false
+options_ended=false
+for arg in "${args[@]}"; do
+  if [[ "$options_ended" == true ]]; then continue; fi
+  if [[ "$pending_optional_value" == true ]]; then
+    pending_optional_value=false
+    if [[ "$arg" != -* ]]; then continue; fi
+  fi
+  if [[ -n "$pending_option" ]]; then
+    if [[ "$pending_option" == "session-id" ]]; then
+      session_id="$arg"
+      explicit_session=true
+    fi
+    pending_option=""
+    continue
+  fi
+  if [[ "$consuming_many" == true ]]; then
+    if [[ "$arg" != -* ]]; then continue; fi
+    consuming_many=false
+  fi
+  case "$arg" in
+    --)
+      options_ended=true
+      ;;
+    --session-id)
+      pending_option="session-id"
+      ;;
+    --session-id=*)
+      session_id="${arg#--session-id=}"
+      explicit_session=true
+      ;;
+    --resume|-r|--from-pr)
+      resume_or_nonpersistent=true
+      pending_optional_value=true
+      ;;
+    --resume=*|--from-pr=*|--continue|-c|--no-session-persistence)
+      resume_or_nonpersistent=true
+      ;;
+    --*=*)
+      option="${arg%%=*}"
+      if claude_option_consumes_many "$option"; then consuming_many=true; fi
+      ;;
+    -*)
+      if claude_option_consumes_many "$arg"; then
+        consuming_many=true
+      elif claude_option_consumes_value "$arg"; then
+        pending_option="value"
+      elif claude_option_consumes_optional_value "$arg"; then
+        pending_optional_value=true
+      fi
+      ;;
+  esac
+done
+
+if [[ "$resume_or_nonpersistent" == true ]]; then
+  exec_raw "${args[@]}"
+fi
+
+nested_parent="${CCS_LAUNCH_PARENT_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
+if [[ -z "$session_id" ]]; then
+  if [[ -n "$nested_parent" ]]; then
+    warn "nested persistent launch requires 'ccs delegate' or 'ccs session new --child-of .'"
+    exit 2
+  fi
+  if ! command -v uuidgen >/dev/null 2>&1; then
+    warn "uuidgen is required to mint a Claude session id"
+    exit 127
+  fi
+  session_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+fi
+
+ccs_bin="${CCS_BIN:-}"
+if [[ -z "$ccs_bin" ]]; then ccs_bin="$(command -v ccs 2>/dev/null || true)"; fi
+if [[ -z "$ccs_bin" || ! -x "$ccs_bin" ]]; then
+  if [[ -n "$nested_parent" ]]; then
+    warn "cannot verify the managed nested session because ccs is unavailable"
+    exit 2
+  fi
+  warn "ccs is unavailable; launching as an unclassified session"
+else
+  register_args=(session shim-register "--session-id=$session_id" "--cwd=$PWD")
+  if [[ -n "$nested_parent" ]]; then
+    register_args+=(--require-existing "--parent-session-id=$nested_parent")
+  fi
+  "$ccs_bin" "${register_args[@]}" >/dev/null
+  register_status=$?
+  if (( register_status != 0 )); then
+    if [[ -n "$nested_parent" ]]; then
+      warn "managed nested session verification failed for $session_id"
+      exit 2
+    fi
+    warn "registration failed for $session_id; launching as an unclassified session"
+  fi
+fi
+
+if [[ -n "${CCS_SHIM_DEBUG:-}" ]]; then
+  warn "launching $raw_claude with session $session_id from $PWD"
+fi
+
+if [[ "$explicit_session" == true ]]; then
+  exec_raw "${args[@]}"
+fi
+exec_raw --session-id "$session_id" "${args[@]}"

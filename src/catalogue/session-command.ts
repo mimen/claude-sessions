@@ -17,6 +17,7 @@
  * — they're used by hooks/skills and get swept in step 10. This noun is the new PREFERRED
  * surface; the old ones become deprecation candidates once the sweep lands.
  */
+import { randomUUID } from "node:crypto";
 import { openCatalogue, getRow } from "./db.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { existsSync } from "node:fs";
@@ -24,7 +25,7 @@ import { openIndex } from "../index/schema.ts";
 import { sessionById } from "../index/index.ts";
 import type { Database } from "bun:sqlite";
 import { getIdentity } from "./identities.ts";
-import { rename, mark } from "./commands.ts";
+import { registerShimBirth, rename, mark } from "./commands.ts";
 import { newSession } from "../resume/new-session.ts";
 import { pushCmuxRename } from "../cmux/liveness.ts";
 
@@ -70,6 +71,7 @@ export async function sessionCommand(args: string[]): Promise<number> {
     case "uncomplete": return doLifecycle(args.slice(1), ["--completed", "--off"]);
     case "unarchive":  return doLifecycle(args.slice(1), ["--archived", "--off"]);
     case "new":      return newSession(args.slice(1));
+    case "shim-register": return doShimRegister(args.slice(1));
     case "bump":     return await doBump(args.slice(1));
     case "--help":
     case "-h":
@@ -164,6 +166,40 @@ function indexedSession(sessionId: string) {
   } finally {
     index.close();
   }
+}
+
+function doShimRegister(rest: string[]): number {
+  const { flags, bools } = parseFlags(rest);
+  const sessionId = flags["session-id"] ?? randomUUID();
+  if (!SESSION_ID_RE.test(sessionId)) {
+    console.error(`ccs session shim-register: invalid session id: ${sessionId}`);
+    return 2;
+  }
+  const expectedParentSessionId = flags["parent-session-id"];
+  if (expectedParentSessionId && !SESSION_ID_RE.test(expectedParentSessionId)) {
+    console.error(`ccs session shim-register: invalid parent session id: ${expectedParentSessionId}`);
+    return 2;
+  }
+  const result = registerShimBirth(
+    sessionId,
+    flags.cwd,
+    bools.has("require-existing"),
+    expectedParentSessionId,
+  );
+  if (!result.ok) {
+    console.error(`ccs session shim-register: ${result.error.message}`);
+    return 1;
+  }
+  if (result.value.status === "missing") {
+    console.error(`ccs session shim-register: managed session does not exist: ${sessionId}`);
+    return 3;
+  }
+  if (result.value.status === "mismatch") {
+    console.error(`ccs session shim-register: managed session mismatch: ${result.value.reason}`);
+    return 4;
+  }
+  console.log(sessionId);
+  return 0;
 }
 
 function doList(_rest: string[]): number {

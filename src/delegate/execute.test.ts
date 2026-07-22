@@ -66,7 +66,13 @@ function harness(launchResult: Result<DelegateLaunchResult> = ok({ exitCode: 0 }
     reservations,
     launches,
     dependencies: {
-      environment: { CLAUDE_CODE_SUBAGENT_MODEL: "must-not-leak" },
+      environment: {
+        CLAUDE_CODE_SUBAGENT_MODEL: "must-not-leak",
+        CCS_CREATOR_KIND: "automation",
+        CCS_CREATOR_REF: "imsg-server",
+        HOME: "/tmp/ccs-test-home",
+        PATH: "/raw-claude:/tmp/ccs-test-home/.ccs/bin:/usr/bin",
+      },
       mintSessionId: () => CHILD,
       cwdExists: () => true,
       reserve: (input) => {
@@ -122,6 +128,10 @@ describe("executeDelegate", () => {
     expect(argv).toContain("--agent");
     expect(argv).not.toContain("--bare");
     expect(h.launches[0]!.environment.CLAUDE_CODE_SUBAGENT_MODEL).toBeUndefined();
+    expect(h.launches[0]!.environment.CCS_CREATOR_KIND).toBeUndefined();
+    expect(h.launches[0]!.environment.CCS_CREATOR_REF).toBeUndefined();
+    expect(h.launches[0]!.environment.CCS_LAUNCH_PARENT_SESSION_ID).toBe(PARENT);
+    expect(h.launches[0]!.environment.PATH?.split(":")[0]).toBe("/tmp/ccs-test-home/.ccs/bin");
   });
 
   test("selects the fallback route once with its model and effort", () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { constants } from "node:os";
+import { constants, homedir } from "node:os";
+import { delimiter, join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import {
@@ -9,6 +10,11 @@ import {
   setKey,
   setParent,
   setSessionClass,
+  setCreatorKind,
+  setCreatorRef,
+  setLaunchChannel,
+  setForkedFromSessionId,
+  setLauncherIdentity,
   setRole,
   setProject,
   setCluster,
@@ -21,6 +27,8 @@ import {
   lifecycleOf,
   sessionsForWorkUnit,
   stampPrFacts,
+  type CreatorKind,
+  type LaunchChannel,
   type RoleDef,
 } from "../catalogue/db.ts";
 import pkg from "../../package.json" with { type: "json" };
@@ -37,6 +45,7 @@ import { interpretSpawnLocation, syntheticRow, type SpawnLocationConfig } from "
 import { resolveConfig } from "../hooks/resolve-config.ts";
 import { liveResolveCtx } from "../hooks/compose-claude-md.ts";
 import { runSpawnActions } from "../hooks/spawn-actions.ts";
+import { resolveNewSessionCreator } from "../session-provenance.ts";
 
 /**
  * `ccs new-session` — mint a session id, bind its catalogue metadata AT BIRTH, then either
@@ -75,6 +84,12 @@ export interface NewSessionOpts {
   /** Required birth declaration: independent work body versus causal auxiliary child. */
   topLevel?: boolean;
   childOf?: string;
+  /** Internal birth provenance. Derived from managed launch context, never CLI flags. */
+  creatorKind?: CreatorKind;
+  creatorRef?: string;
+  launchChannel?: LaunchChannel;
+  forkedFromSessionId?: string;
+  launcherIdentity?: string;
   /** Work-item id (W-number) — stamped at birth so the statusline/tab link the ticket from
    * turn one (ADR-0027), before any later git/PR sense tick. */
   gusWork?: string;
@@ -285,6 +300,11 @@ function writeSessionMetadataTransaction(db: Database, id: string, opts: NewSess
   if (opts.title) setCustomTitle(db, id, opts.title, now);
   if (opts.parent) setParent(db, id, opts.parent, now);
   setSessionClass(db, id, opts.topLevel ? "work_body" : opts.parent ? "auxiliary" : null, now);
+  if (opts.creatorKind) setCreatorKind(db, id, opts.creatorKind, now);
+  if (opts.creatorRef) setCreatorRef(db, id, opts.creatorRef, now);
+  if (opts.launchChannel) setLaunchChannel(db, id, opts.launchChannel, now);
+  if (opts.forkedFromSessionId) setForkedFromSessionId(db, id, opts.forkedFromSessionId, now);
+  setLauncherIdentity(db, id, opts.launcherIdentity ?? null, now);
   if (opts.gusWork) setGusWork(db, id, opts.gusWork, now);
   if (opts.prNumber && opts.prRepo) {
     stampPrFacts(db, id, { prNumber: opts.prNumber, prRepo: opts.prRepo, prBranch: "", prState: "open", prHeadSha: "" }, now);
@@ -348,6 +368,45 @@ export function buildLaunchArgv(id: string, opts: NewSessionOpts, binary = "clau
   return argv;
 }
 
+/** Launcher overrides that force the stable shim and carry one-birth provenance to it. */
+export function launchEnvironmentOverrides(
+  opts: NewSessionOpts,
+  launcherEnvironment: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> {
+  const environment: Record<string, string> = { ...launcherEnvironment };
+  const shimDirectory = join(process.env.HOME ?? homedir(), ".ccs", "bin");
+  const pathEntries = (environment.PATH ?? process.env.PATH ?? "").split(delimiter).filter(
+    (entry) => entry.length > 0 && entry !== shimDirectory,
+  );
+  environment.PATH = [shimDirectory, ...pathEntries].join(delimiter);
+  // A detached cmux shell may inherit these from its parent outside the explicit env prefix.
+  // Empty values are treated as absent and cannot attribute descendants to the prior birth.
+  environment.CCS_CREATOR_KIND = "";
+  environment.CCS_CREATOR_REF = "";
+  if (opts.creatorKind) environment.CCS_LAUNCH_CREATOR_KIND = opts.creatorKind;
+  if (opts.creatorRef) environment.CCS_LAUNCH_CREATOR_REF = opts.creatorRef;
+  if (opts.parent) environment.CCS_LAUNCH_PARENT_SESSION_ID = opts.parent;
+  return environment;
+}
+
+/** Exact inline environment: preserve ordinary variables but remove all inherited birth claims. */
+export function inlineLaunchEnvironment(
+  opts: NewSessionOpts,
+  launcherEnvironment: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> {
+  const environment: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (key === "CCS_CREATOR_KIND" || key === "CCS_CREATOR_REF") continue;
+    if (key === "CCS_LAUNCH_CREATOR_KIND" || key === "CCS_LAUNCH_CREATOR_REF" || key === "CCS_LAUNCH_PARENT_SESSION_ID") continue;
+    environment[key] = value;
+  }
+  Object.assign(environment, launchEnvironmentOverrides(opts, launcherEnvironment));
+  delete environment.CCS_CREATOR_KIND;
+  delete environment.CCS_CREATOR_REF;
+  return environment;
+}
+
 /**
  * Validate a spawn is fully + correctly configured. Returns an error string (caller errors
  * out) or null. The determinism gate: a misconfigured spawn fails LOUD, never half-born.
@@ -381,6 +440,15 @@ export function newSession(args: string[]): number {
     console.error(`ccs new-session: ${intentError}`);
     return 2;
   }
+  const creator = resolveNewSessionCreator(process.env, opts.parent);
+  if (!creator.ok) {
+    console.error(`ccs new-session: ${creator.error.message}`);
+    return 2;
+  }
+  opts.creatorKind = creator.value.kind;
+  opts.creatorRef = creator.value.ref ?? undefined;
+  opts.launchChannel = "ccs_session_new";
+  opts.launcherIdentity = process.env.CLAUDE_IDENTITY;
   const explicitFlagsError = validateExplicitIdentityFlags(opts);
   if (explicitFlagsError) {
     console.error(`ccs new-session: ${explicitFlagsError}`);
@@ -528,7 +596,7 @@ export function newSession(args: string[]): number {
     try {
       const result = Bun.spawnSync(argv, {
         cwd,
-        env: { ...process.env, ...launcher.env },
+        env: { ...inlineLaunchEnvironment(opts, launcher.env) },
         stdin: "inherit",
         stdout: "inherit",
         stderr: "inherit",
@@ -549,7 +617,14 @@ export function newSession(args: string[]): number {
   // DEFAULT: spawn DETACHED into a fresh cmux workspace. The new surface gets its OWN
   // CMUX_SURFACE_ID, so the new session's SessionStart hook binds THAT surface — never
   // rebinding the caller's (the hijack ADR-0042 documents). Deterministic: own surface or fail.
-  return spawnDetached(id, argv, cwd, opts.title || opts.role || id.slice(0, 8), opts.identity, launcher.env);
+  return spawnDetached(
+    id,
+    argv,
+    cwd,
+    opts.title || opts.role || id.slice(0, 8),
+    opts.identity,
+    launchEnvironmentOverrides(opts, launcher.env),
+  );
 }
 
 export function inlineLaunchOutcome(

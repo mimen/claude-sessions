@@ -12,6 +12,13 @@ export type Kind = "session" | "loop";
 export type Lifecycle = "idle" | "parked" | "completed" | "archived";
 export type PrState = "open" | "merged" | "closed";
 export type SessionClass = "work_body" | "auxiliary";
+export type CreatorKind = "human" | "agent" | "automation";
+export type LaunchChannel =
+  | "claude_shim"
+  | "ccs_session_new"
+  | "ccs_delegate"
+  | "native_agent_inferred"
+  | "repair";
 
 export interface CatalogueRow {
   sessionId: string;
@@ -27,6 +34,14 @@ export interface CatalogueRow {
   parentSessionId: string | null;
   /** Explicit birth intent. Null is retained for legacy/plain sessions. */
   sessionClass: SessionClass | null;
+  /** Who caused this birth. Null remains honest for legacy/unmanaged sessions. */
+  creatorKind?: CreatorKind | null;
+  /** Launching session id for agents or stable daemon/job id for automations. */
+  creatorRef?: string | null;
+  /** Managed path that registered or inferred the birth. */
+  launchChannel?: LaunchChannel | null;
+  /** Fork lineage only; never used for causal cost ancestry. */
+  forkedFromSessionId?: string | null;
   /** The session's ROLE — first-class identity axis (control, concierge, scout, pr-agent…). */
   role: string | null;
   /** How this session is re-armed on resume so it comes back RUNNING (e.g. a loop's
@@ -97,7 +112,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 36;
+const CATALOGUE_VERSION = 37;
 
 export function openCatalogue(
   dbPath: string,
@@ -174,7 +189,17 @@ export function openCatalogue(
 function validateSchemaPostcondition(db: Database): { ok: true } | { ok: false; error: string } {
   // ADR-0089 v33: identity attrs moved to identities + identity_<role> tables. Catalogue
   // holds only per-run session state now.
-  const required = ["session_id", "identity_key", "meta", "updated_at", "session_class"];
+  const required = [
+    "session_id",
+    "identity_key",
+    "meta",
+    "updated_at",
+    "session_class",
+    "creator_kind",
+    "creator_ref",
+    "launch_channel",
+    "forked_from_session_id",
+  ];
   const forbidden_pairs = [
     // ADR-0059 renamed system → cluster; both should never coexist.
     ["system", "cluster"],
@@ -804,6 +829,24 @@ function migrate(db: Database): void {
         ON historical_detached_child_backfills(manifest_sha256);
     `);
   }
+  if (v < 37) {
+    // Managed session births: creator provenance is independent from causal parentage and class.
+    if (!hasColumn(db, "catalogue", "creator_kind")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN creator_kind TEXT CHECK (creator_kind IN ('human', 'agent', 'automation') OR creator_kind IS NULL);");
+    }
+    if (!hasColumn(db, "catalogue", "creator_ref")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN creator_ref TEXT;");
+    }
+    if (!hasColumn(db, "catalogue", "launch_channel")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN launch_channel TEXT;");
+    }
+    if (!hasColumn(db, "catalogue", "forked_from_session_id")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN forked_from_session_id TEXT;");
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_creator_kind ON catalogue(creator_kind);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_launch_channel ON catalogue(launch_channel);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_forked_from ON catalogue(forked_from_session_id);");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -896,6 +939,10 @@ function rowFrom(r: Record<string, unknown> | null, db?: Database): CatalogueRow
     key: identityKey,
     parentSessionId: (r.parent_session_id as string) ?? null,
     sessionClass: (r.session_class as SessionClass) ?? null,
+    creatorKind: (r.creator_kind as CreatorKind) ?? null,
+    creatorRef: (r.creator_ref as string) ?? null,
+    launchChannel: (r.launch_channel as LaunchChannel) ?? null,
+    forkedFromSessionId: (r.forked_from_session_id as string) ?? null,
     role,
     resumeCommand,
     project: null,  // dropped in v33 (unused post-refactor)
@@ -1104,6 +1151,21 @@ export function setParent(db: Database, sessionId: string, parentId: string | nu
 }
 export function setSessionClass(db: Database, sessionId: string, value: SessionClass | null, now: string): void {
   set(db, sessionId, "session_class", value, now);
+}
+export function setCreatorKind(db: Database, sessionId: string, value: CreatorKind | null, now: string): void {
+  set(db, sessionId, "creator_kind", value, now);
+}
+export function setCreatorRef(db: Database, sessionId: string, value: string | null, now: string): void {
+  set(db, sessionId, "creator_ref", value, now);
+}
+export function setLaunchChannel(db: Database, sessionId: string, value: LaunchChannel | null, now: string): void {
+  set(db, sessionId, "launch_channel", value, now);
+}
+export function setForkedFromSessionId(db: Database, sessionId: string, value: string | null, now: string): void {
+  set(db, sessionId, "forked_from_session_id", value, now);
+}
+export function setLauncherIdentity(db: Database, sessionId: string, value: string | null, now: string): void {
+  set(db, sessionId, "launcher_identity", value, now);
 }
 /** Set the session's ROLE (ADR-0015) — the canonical identity axis. */
 export function setRole(db: Database, sessionId: string, role: string | null, now: string): void {

@@ -62,6 +62,12 @@ ccs delegate primary-review --child-of . --cwd /path/to/repo --prompt "Review th
 
 # Explicitly select the seat's declared fallback before launch:
 ccs delegate primary-review --fallback --child-of . --cwd /path/to/repo --prompt "Review the diff."
+
+# Reserve a transcript-free automation anchor, then run synchronous attributed children:
+ANCHOR_ID="$(CCS_CREATOR_KIND=automation CCS_CREATOR_REF=imsg-server ccs session new \
+  --top-level --cwd /path/to/repo --title 'iMessage server' --print-id)"
+CCS_CREATOR_KIND=automation CCS_CREATOR_REF=imsg-server ccs delegate utility \
+  --child-of "$ANCHOR_ID" --cwd /path/to/repo --prompt "Classify this request."
 ```
 
 `--top-level` creates a visible work body. `--child-of` creates an auxiliary session whose
@@ -134,4 +140,4 @@ maxAttempts = 3
 > Set it higher in `~/.claude/settings.json` to keep history; already-pruned sessions are
 > unrecoverable. A future `ccs` archive mode will copy transcripts out before they're pruned.
 
-See `CONTEXT.md` for the glossary and `docs/adr/` for architecture decisions.
+See [`docs/managed-session-launches.md`](docs/managed-session-launches.md) for the agent and automation launch contract, `CONTEXT.md` for the glossary, and `docs/adr/` for architecture decisions.

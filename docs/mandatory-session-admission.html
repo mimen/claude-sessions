@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>CCS managed session births</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#f6f7f9; --panel:#fff; --ink:#18202c; --muted:#5e6978; --line:#cbd2dc; --accent:#245f9e; --open:#8a5a13; --ok:#24623a; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#11151b; --panel:#181e27; --ink:#edf1f6; --muted:#aab3c0; --line:#394352; --accent:#8fc2ff; --open:#f0bd68; --ok:#8bd39f; } }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 system-ui,-apple-system,sans-serif; }
+    main { max-width:1080px; margin:auto; padding:32px 20px 80px; }
+    h1 { margin:.2rem 0 .5rem; font-size:clamp(2rem,5vw,3.8rem); line-height:1; letter-spacing:-.04em; }
+    h2 { margin-top:2.4rem; padding-bottom:.35rem; border-bottom:1px solid var(--line); }
+    h3 { margin-bottom:.35rem; }
+    p, li { max-width:82ch; }
+    code { font: .9em ui-monospace,SFMono-Regular,monospace; }
+    a { color:var(--accent); }
+    .status { border:1px solid var(--line); border-left:5px solid var(--open); background:var(--panel); padding:14px 16px; margin:20px 0; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; }
+    .card { border:1px solid var(--line); background:var(--panel); padding:14px 16px; }
+    .label { color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; }
+    .confirmed { color:var(--ok); font-weight:700; }
+    .open { color:var(--open); font-weight:700; }
+    table { width:100%; border-collapse:collapse; background:var(--panel); }
+    th, td { text-align:left; vertical-align:top; border:1px solid var(--line); padding:9px 10px; }
+    th { background:color-mix(in srgb,var(--panel),var(--line) 16%); }
+    .path { overflow-wrap:anywhere; }
+    .funnel { margin:1.2rem 0 2rem; }
+    .funnel figcaption { color:var(--muted); margin-bottom:12px; max-width:90ch; }
+    .source-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(245px,1fr)); gap:12px; }
+    .lane { border:1px solid var(--line); background:var(--panel); padding:14px; }
+    .lane h3 { margin-top:0; }
+    .lane ul { margin:.5rem 0 0; padding-left:1.15rem; }
+    .lane li + li { margin-top:.55rem; }
+    .intent-pill { display:inline-block; max-width:100%; margin:.12rem .14rem .12rem 0; padding:.14rem .42rem; border:1px solid var(--line); border-radius:999px; font: .78rem ui-monospace,SFMono-Regular,monospace; white-space:normal; overflow-wrap:anywhere; vertical-align:top; }
+    .funnel-arrow { display:grid; place-items:center; min-height:58px; color:var(--accent); font-weight:750; text-align:center; }
+    .funnel-arrow::before { content:"↓"; display:block; font-size:2rem; line-height:1; }
+    .spine { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; counter-reset:spine; margin:0; padding:0; list-style:none; }
+    .spine li { position:relative; min-height:132px; border:1px solid var(--line); background:var(--panel); padding:38px 12px 12px; }
+    .spine li::before { counter-increment:spine; content:counter(spine); position:absolute; top:10px; left:11px; width:20px; height:20px; border-radius:50%; display:grid; place-items:center; color:var(--panel); background:var(--accent); font:700 .72rem system-ui,sans-serif; }
+    .spine li:not(:last-child)::after { content:"→"; position:absolute; right:-9px; top:48%; z-index:2; color:var(--accent); background:var(--bg); font-weight:900; }
+    .spine strong { display:block; margin-bottom:.25rem; }
+    .outcome-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:12px; }
+    .outcome { border:1px solid var(--line); background:var(--panel); padding:12px 14px; }
+    .outcome.good { border-top:4px solid var(--ok); }
+    .outcome.warn { border-top:4px solid var(--open); }
+    .outcome.muted { border-top:4px solid var(--muted); }
+    .matrix td:first-child { font-weight:700; min-width:11rem; }
+    .matrix td code { white-space:normal; overflow-wrap:anywhere; }
+    .matrix .subhead td { color:var(--muted); background:color-mix(in srgb,var(--panel),var(--line) 12%); font-size:.78rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
+    @media (max-width:900px) {
+      .source-grid, .outcome-grid { grid-template-columns:1fr; }
+      .spine { grid-template-columns:1fr 1fr; }
+      .spine li:not(:last-child)::after { content:"↓"; right:10px; top:auto; bottom:-14px; background:var(--panel); }
+    }
+    @media (max-width:560px) {
+      .spine { grid-template-columns:1fr; }
+      table.matrix, .matrix tbody, .matrix tr, .matrix td { display:block; width:100%; }
+      .matrix thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+      .matrix tr { margin-bottom:12px; border:1px solid var(--line); }
+      .matrix td { border:0; border-bottom:1px solid var(--line); }
+      .matrix td:last-child { border-bottom:0; }
+      .matrix td::before { content:attr(data-label); display:block; color:var(--muted); font-size:.72rem; font-weight:800; text-transform:uppercase; letter-spacing:.07em; }
+      .matrix .subhead td::before { content:none; }
+    }
+  </style>
+  <script>
+    const key = "ccs-mandatory-admission-scroll";
+    addEventListener("beforeunload", () => sessionStorage.setItem(key, String(scrollY)));
+    addEventListener("load", () => scrollTo(0, Number(sessionStorage.getItem(key) || 0)));
+  </script>
+</head>
+<body>
+<main>
+  <p class="label">Living implementation plan · CCS</p>
+  <h1>Managed session births</h1>
+  <p class="path"><strong>Artifact:</strong> /Users/mimen/Programming/Repos/claude-sessions/docs/mandatory-session-admission.html</p>
+  <div class="status"><strong>Status: simplified Phase 1 is implemented, installed, and live-verified.</strong> CCS now records managed session births on the common launcher paths, blocks unmanaged nested persistent launches, and reports post-rollout integrity gaps without turning SessionStart into a brittle startup gate. The deferred strict admission controller remains out of scope.</div>
+
+  <h2>Goal</h2>
+  <p>Every persistent local Claude Code session is admitted or detected by CCS, receives creator and launch provenance with an explicit attestation source/strength, and declares whether it is independently user-managed or supporting work. Default views show user-managed work bodies and hide supporting sessions without deleting history.</p>
+
+  <h2>Selected Phase 1 scope <span class="confirmed">complete</span></h2>
+  <div class="status"><strong>Reframe CCS as a managed birth registry and integrity monitor, not a hostile-code admission controller.</strong> Make the correct path automatic for normal human, delegate, cmux, and scripted launches; infer native subagents using existing transcript evidence; retain unusual escapes as visible unclassified warnings. Harden only the bypasses that actually recur.</div>
+  <div class="grid">
+    <section class="card"><div class="label">Keep</div><p><code>session_class</code>, causal parent, <code>creator_kind/ref</code>, launch channel, familiar launcher shims, <code>ccs delegate</code>, default auxiliary hiding, and visible unclassified warnings.</p></section>
+    <section class="card"><div class="label">Drop initially</div><p>Single-use claim tokens, fail-closed SessionStart, 1:N launch-event state machines, Unix-socket secret brokers, cross-hook native-Agent correlation, managed Agent SDK enforcement, cryptographic creator credentials, and exhaustive in-process succession.</p></section>
+    <section class="card"><div class="label">Accept</div><p>Rare raw/SDK/in-process paths may appear as visible unclassified sessions and need manual repair. CCS protects against accidental and policy-compliant litter, not hostile code running as the same Unix user.</p></section>
+  </div>
+  <table>
+    <thead><tr><th>Common path</th><th>Simplified behavior</th></tr></thead>
+    <tbody>
+      <tr><td>Interactive <code>claude*</code></td><td>Outside cmux, the stable CCS shim generates the session ID and writes <code>work_body + human</code>. Inside cmux, the PATH-precedent shim first preserves any causal parent, enters cmux for its settings/session-ID injection, then handles registration on the second pass before executing the raw Claude binary. No claim token or SessionStart dependency.</td></tr>
+      <tr><td><code>ccs delegate</code> / explicit nested worker</td><td>Write <code>auxiliary + agent + parent</code> before launch using the already-implemented reservation path.</td></tr>
+      <tr><td>cmux / launchd / scripts</td><td>Migrate commands to the existing <code>ccs session new --top-level|--child-of</code> flow or <code>ccs delegate</code>; pass only the preassigned session/reservation ID through the command.</td></tr>
+      <tr><td>Native Agent</td><td>Keep current <code>isSidechain</code> and transcript-parent inference; classify auxiliary after indexing rather than adding four lifecycle hooks.</td></tr>
+      <tr><td>Forks, Agent SDK, raw/bare paths</td><td>Best-effort registration where cheap; otherwise remain visibly unclassified and appear in a doctor/repair queue.</td></tr>
+      <tr><td>SessionStart</td><td>Advisory registration and reconciliation only. Never brick Claude because a hook, database, or migration failed.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Phase 1 implementation contract</h3>
+  <ol>
+    <li>Add typed birth metadata to the durable catalogue: <code>creator_kind</code>, <code>creator_ref</code>, <code>launch_channel</code>, and optional <code>forked_from_session_id</code>, alongside existing class and parent.</li>
+    <li>Install a stable CCS Claude shim outside the updater-managed binary path. Inside cmux, accept its injected session ID/settings; outside cmux, generate the ID. Exec the dynamically resolved raw Claude binary by absolute path.</li>
+    <li>Auto-register ordinary interactive new sessions as <code>work_body + human</code>. Resume/continue preserve existing birth metadata. Explicit persistent nested work must use <code>ccs delegate</code> or <code>ccs session new</code>. Keep the already-implemented <code>--top-level</code>/<code>--child-of</code> grammar in Phase 1; do not spend scope on renaming flags or compatibility aliases.</li>
+    <li>Extend <code>ccs delegate</code> reservations with <code>creator_kind=agent</code>, creator ref, and launch channel while retaining existing parent/class/seat/route metadata and failure recording.</li>
+    <li>Keep native Agent classification on existing sidechain/transcript-parent inference; do not add the four-hook admission choreography in Phase 1.</li>
+    <li>Route CCS TUI new/fork and the known cmux, daemon, launchd, script, and eval callsites through managed launch commands where practical.</li>
+    <li>Add a doctor/integrity report for post-cutoff unclassified sessions and preserve the existing visible warning behavior. Unknown edge paths remain repairable evidence, not startup failures.</li>
+    <li>Keep SessionStart advisory/fail-open. Do not implement claim tokens, strict blocking, secret handoff, managed SDK enforcement, or process-succession machinery.</li>
+    <li>Test launcher ordering inside/outside cmux, updater target changes, native/GPT provider environments, explicit session IDs, resume/continue, subcommands, no-persistence paths, delegate metadata, native-sidechain inference, TUI actions, and default visibility.</li>
+  </ol>
+
+  <h3>Phase 1 execution status</h3>
+  <div class="grid">
+    <section class="card"><div class="label">Installed</div><p><code>~/.ccs/bin/claude</code> is executable; <code>~/.ccs/shell/launcher.zsh</code> is sourced from the managed <code>~/.zshrc</code> block; <code>CMUX_CUSTOM_CLAUDE_PATH</code> routes cmux back through the same shim. The globally linked <code>ccs</code> currently points at the root checkout.</p></section>
+    <section class="card"><div class="label">Durable metadata</div><p>Catalogue schema v37 stores creator kind/ref, launch channel, and optional fork lineage. <code>ccs session new</code>, <code>ccs delegate</code>, and shim births populate their birth fields without rewriting an existing managed birth. Fork-lineage storage is available, but the current root checkout does not yet wire a fork caller to it.</p></section>
+    <section class="card"><div class="label">Nested enforcement</div><p>The entry shim preserves the launching parent before cmux clears Claude identity variables. Nested IDs must already be reserved by that exact parent through <code>ccs delegate</code> or <code>ccs session new</code>; mismatched, missing, and unmanaged births are blocked before the raw Claude process executes.</p></section>
+    <section class="card"><div class="label">Integrity</div><p>Provenance rollout cutoff: <code>2026-07-22T19:25:38.000Z</code>. The final live report checked one observed post-rollout session and found zero unclassified sessions and zero missing-provenance findings.</p></section>
+    <section class="card"><div class="label">Forks</div><p>The catalogue reserves <code>forked_from_session_id</code> as a separate lineage axis instead of overloading causal parentage. Wiring current CLI/TUI fork callers to populate it remains follow-up work.</p></section>
+    <section class="card"><div class="label">Index compatibility</div><p>Index v9 model history is collected and upserted. A durable one-time migration marker invalidates old cached observations so the next reindex cannot freeze empty or stale model routing data. The live index was refreshed: 4,782 canonical sessions, 23 deterministic shadow paths.</p></section>
+  </div>
+  <table>
+    <thead><tr><th>Verification</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Focused Phase 1 tests</td><td>Launcher composition, parent preservation, mismatch blocking, provenance, forks, doctor, index model backfill, provider environments, built-in commands, resume, and non-persistence paths pass.</td></tr>
+      <tr><td>TypeScript</td><td><code>tsc --noEmit</code> passes.</td></tr>
+      <tr><td>Full suite</td><td>926 passed, 2 failed across 119 files. Both failures are pre-existing baseline issues: the bounded filesystem-walk assertion in <code>src/resume/locate.test.ts</code> and the narrow-width title assertion in <code>src/tui/app.test.tsx</code>. Focused managed-birth tests pass.</td></tr>
+      <tr><td>Independent review</td><td>Primary Sol review plus Fable escalation found launcher, model-backfill, fork, command-parser, and auditability defects during implementation. Each was fixed and regression-tested; final targeted review returned <code>NO-ISSUES</code>.</td></tr>
+      <tr><td>Static architecture checks</td><td>The mutation-boundary test passes. Circular lint still reports the two pre-existing cycles <code>catalogue/db.ts → roles/role-files.ts</code> and <code>cli.ts → hooks/self-check-sidecar.ts</code>. Export lint remains the repository's broad pre-existing unused-export report.</td></tr>
+      <tr><td>Version-control state</td><td>The managed-birth implementation is scoped into its own feature commit. Pre-existing title, TUI, plugin, resume-probe, and session-starter work remains outside this change.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Explicitly deferred</h3>
+  <p>Strict SessionStart claims, 1:N launch lifecycle, Agent SDK policy enforcement, native Agent cross-hook admission, in-process <code>/branch</code>/<code>/clear</code> succession, cryptographic automation credentials, hostile same-user bypass prevention, DB-independent break glass, and exhaustive adoption/repair UX. Add one only after observed Phase 1 failures justify it.</p>
+
+  <h2>Long-term product semantics</h2>
+  <p>The semantics below remain useful direction. Any strict enforcement mechanism that conflicts with the selected Phase 1 contract is deferred, not part of implementation authorization.</p>
+  <div class="grid">
+    <section class="card"><div class="label">Managed coverage</div><p class="confirmed">Normal persistent launch paths register birth metadata through CCS.</p><p>Unintegrated raw, SDK, in-process, or future paths remain visible as unclassified warnings; Phase 1 does not brick Claude to enforce coverage.</p></section>
+    <section class="card"><div class="label">Non-sessions</div><p class="confirmed">API calls and <code>--no-session-persistence</code> inference remain outside CCS admission.</p><p>They do not create local session history and therefore do not contribute to session litter.</p></section>
+    <section class="card"><div class="label">Axes</div><p class="confirmed">Creator provenance and visibility/management class are separate.</p><p><code>work_body</code> versus <code>auxiliary</code> answers management/default visibility; creator fields answer who caused the session.</p></section>
+    <section class="card"><div class="label">Creator taxonomy</div><p class="confirmed"><code>human | agent | automation</code>.</p><p>Each non-human creator carries a stable reference: launching session for agents, job/daemon identity for automation.</p></section>
+    <section class="card"><div class="label">Creator provenance</div><p class="confirmed">Store creator kind/ref and launch channel using honest best-effort evidence.</p><p>Phase 1 does not build cryptographic attestation or confidence tiers. Inferred/unknown origins stay distinguishable through channel metadata or a null creator.</p></section>
+    <section class="card"><div class="label">Durable workers</div><p class="confirmed">Agent-created, user-managed workers are root work bodies.</p><p>They have no cost parent; creator provenance records the launching agent. Supporting runs remain auxiliary causal children.</p></section>
+    <section class="card"><div class="label">Root authority</div><p class="confirmed">An explicit admission flag is sufficient for a non-human launcher to create a visible root.</p><p>No role-manifest allowlist or human approval token is required; correctness depends on mandatory intent declaration and policy/enforcement around the flag.</p></section>
+    <section class="card"><div class="label">Automation auxiliaries</div><p class="confirmed">Parentless automation may create hidden auxiliary runs only with a mandatory paper trail.</p><p>The caller must provide a stable automation identity and a unique job/workflow run reference. <code>parent_session_id</code> remains reserved for session causality and cost rollup.</p></section>
+    <section class="card"><div class="label">Admission grammar</div><p class="confirmed">Exactly one of three high-level admission forms is required.</p><p><code>--user-managed</code>, <code>--supporting-of &lt;session|.&gt;</code>, or <code>--automation-run &lt;job-id&gt; --run-ref &lt;run-id&gt;</code>. Invalid combinations never reach reservation.</p></section>
+    <section class="card"><div class="label">Native Agent tool</div><p class="confirmed">Preserve it using existing sidechain/transcript inference in Phase 1.</p><p>The documented multi-hook adapter remains available as future hardening, but current post-index parent/class inference already covers the visibility and cost-rollup need without brittle hook choreography.</p></section>
+    <section class="card"><div class="label">Human convenience</div><p class="confirmed">Bare interactive human commands auto-admit as visible work bodies through CCS.</p><p>The familiar launcher names route through CCS. Print mode and non-human callers must use an explicit admission form.</p></section>
+    <section class="card"><div class="label">Command surface</div><p class="confirmed">The familiar launcher names become CCS-aware executable shims.</p><p><code>claude</code>, <code>claude-native</code>, and <code>claude-gpt</code> preserve current human UX through a dedicated PATH-precedent shim layer; updater-managed binaries and the existing shell function are migrated rather than overwritten in place.</p></section>
+    <section class="card"><div class="label">Phase 1 enforcement</div><p class="confirmed">Automatic common-path registration plus visible integrity warnings.</p><p>The launcher shim and managed commands write metadata before launch. SessionStart remains advisory and fail-open; unknown sessions are reported rather than blocked.</p></section>
+    <section class="card"><div class="label">Forks</div><p class="confirmed">CCS TUI/launcher forks prompt for intent, defaulting to visible independent work.</p><p>Fork lineage is stored separately when known. In-process branch/fork paths are best-effort or visibly unclassified in Phase 1.</p></section>
+    <section class="card"><div class="label">Phase 1 lifecycle</div><p class="confirmed">Keep reservation/start/failure evidence without a full launch state machine.</p><p>Reuse the existing delegate-style metadata and never delete evidence or automatically retry work. Per-resume activation history is deferred.</p></section>
+    <section class="card"><div class="label">Failure behavior</div><p class="confirmed">Phase 1 remains usable when CCS registration fails.</p><p>The session proceeds as visibly unclassified and doctor reports it. A dedicated break-glass subsystem is unnecessary until strict blocking exists.</p></section>
+    <section class="card"><div class="label">Integrity warnings</div><p class="confirmed">Post-cutoff unmanaged sessions remain visible as unclassified warnings.</p><p>CCS retains them intact and does not guess parentage, silently hide them, archive them, or treat unknown provenance as managed.</p></section>
+  </div>
+
+  <h2>Deferred strict-admission funnel</h2>
+  <p>This diagram covers the full surface: interactive humans, explicit CCS commands, delegated seats, native Agent, Agent SDK hosts, TUI actions, in-process resume/branch/clear/compact, cmux workers, scripts, daemons, launchd jobs, direct provider binaries, and non-session inference. No caller may set <code>creator_kind</code> directly; CCS stores how strongly that provenance was attested.</p>
+
+  <figure class="funnel" aria-labelledby="funnel-caption">
+    <figcaption id="funnel-caption"><strong>External processes reserve before launch; in-process and embedded births join through authenticated succession or host integration.</strong> The lanes describe origin, not visibility. Every persistent identity must end with an admission record or a visible violation.</figcaption>
+
+    <div class="source-grid">
+      <section class="lane" aria-labelledby="human-lane">
+        <h3 id="human-lane">Human entrypoints</h3>
+        <ul>
+          <li><code>claude</code>, <code>claude-native</code>, or <code>claude-gpt</code> in a trusted interactive shell<br><span class="intent-pill">implicit --user-managed</span></li>
+          <li><code>ccs session start --user-managed -- …</code><br><span class="intent-pill">work_body root</span></li>
+          <li><code>--resume &lt;id&gt;</code> / <code>--continue</code><br><span class="intent-pill">launch existing session</span></li>
+          <li>Fork from CLI or TUI<br><span class="intent-pill">prompt: user-managed</span><span class="intent-pill">or supporting-of</span></li>
+          <li>Break glass<br><span class="intent-pill">--raw-bypass</span><span class="intent-pill">--reason &lt;text&gt;</span></li>
+        </ul>
+      </section>
+
+      <section class="lane" aria-labelledby="agent-lane">
+        <h3 id="agent-lane">Agent entrypoints</h3>
+        <ul>
+          <li><code>ccs delegate &lt;seat&gt; --child-of .</code><br><span class="intent-pill">normalizes to supporting-of .</span><span class="intent-pill">optional --fallback</span></li>
+          <li>Native <code>Agent</code> tool<br><span class="intent-pill">PreToolUse reserve by tool_use_id</span><span class="intent-pill">SubagentStart birth record</span><span class="intent-pill">PostToolUse bind agentId</span><span class="intent-pill">SubagentStop reconcile</span></li>
+          <li>Durable user-driven worker<br><span class="intent-pill">--user-managed</span></li>
+          <li>Generic persistent CLI / print worker<br><span class="intent-pill">--supporting-of &lt;id|.&gt;</span></li>
+          <li>Resume or fork<br><span class="intent-pill">explicit intent required</span></li>
+        </ul>
+      </section>
+
+      <section class="lane" aria-labelledby="automation-lane">
+        <h3 id="automation-lane">Automation entrypoints</h3>
+        <ul>
+          <li>Parentless scheduled/job run<br><span class="intent-pill">--automation-run &lt;job-id&gt;</span><span class="intent-pill">--run-ref &lt;unique-id&gt;</span></li>
+          <li>Visible durable automation root<br><span class="intent-pill">--user-managed</span><span class="intent-pill">--run-ref &lt;unique-id&gt;</span></li>
+          <li>Support for an active session<br><span class="intent-pill">--supporting-of &lt;session&gt;</span><span class="intent-pill">--run-ref &lt;unique-id&gt;</span></li>
+          <li>cmux, launchd, scripts, daemons, and eval fan-out<br><span class="intent-pill">must invoke one form above</span></li>
+          <li>Identity comes from a registered automation credential; the job cannot self-assert <code>creator_kind</code>.</li>
+        </ul>
+      </section>
+
+      <section class="lane" aria-labelledby="embedded-lane">
+        <h3 id="embedded-lane">In-process and embedded paths</h3>
+        <ul>
+          <li><code>/branch</code> / in-process fork<br><span class="intent-pill">source=fork</span><span class="intent-pill">new identity</span><span class="intent-pill">active-process succession</span></li>
+          <li><code>/resume</code> / recovery<br><span class="intent-pill">activate existing birth</span></li>
+          <li><code>/compact</code><br><span class="intent-pill">same active identity</span></li>
+          <li><code>/clear</code><br><span class="intent-pill">identity behavior must be verified</span></li>
+          <li>Persistent Agent SDK host<br><span class="intent-pill">CCS host API or managed policy</span><span class="intent-pill">settingSources may skip local hooks</span></li>
+        </ul>
+      </section>
+    </div>
+
+    <div class="funnel-arrow">One CCS admission and integrity model</div>
+
+    <ol class="spine" aria-label="Common admission stages">
+      <li><strong>Attest origin</strong>Derive <code>human | agent | automation</code>, creator reference, attestation source/strength, channel, and process/substrate identity.</li>
+      <li><strong>Normalize semantics</strong>Choose new birth, existing-session activation, in-process succession, or no-persistence exemption; validate management intent and parent authority.</li>
+      <li><strong>Reserve or inherit</strong>External launches write a short-lived reservation. In-process transitions prove continuity with the active process capability. Native Agent and SDK routes use their adapters.</li>
+      <li><strong>Launch safely</strong>Use internal provider launchers and a protected spool/Unix-socket handoff; never expose a claim token in argv, cmux commands, logs, or restored workspace state.</li>
+      <li><strong>Bind actual identity</strong>SessionStart claims external/succession admissions after ID allocation; Agent hooks bind <code>tool_use_id ↔ agentId</code>; SDK hosts bind through the CCS host API.</li>
+      <li><strong>Record and reconcile</strong>Persist immutable birth plus 1:N activation lifecycle, parent/origin, channel, lineage, violations, repairs, and terminal states without deleting evidence.</li>
+    </ol>
+
+    <div class="outcome-grid" aria-label="Admission outcomes">
+      <section class="outcome good"><strong>New user-managed session</strong><br><code>session_class=work_body</code><br><code>parent_session_id=null</code></section>
+      <section class="outcome good"><strong>New supporting session</strong><br><code>session_class=auxiliary</code><br><code>parent_session_id=&lt;causal session&gt;</code></section>
+      <section class="outcome good"><strong>Parentless automation run</strong><br><code>session_class=auxiliary</code><br><code>automation_identity + run_ref</code></section>
+      <section class="outcome muted"><strong>Resume / activation</strong><br>Add a launch or in-process activation event; preserve immutable birth creator, class, parent, and lineage.</section>
+      <section class="outcome warn"><strong>Human break glass</strong><br>Use a DB-independent shim-local reasoned bypass; append evidence and retain a warning until reconciled.</section>
+      <section class="outcome warn"><strong>Unadmitted persistent session</strong><br>The shim refuses supported external launches. Hook/SDK/raw-path escapes remain visible violations and are denied by defense-in-depth after empirical verification.</section>
+    </div>
+  </figure>
+
+  <h3>Path configuration matrix</h3>
+  <p>The command column shows the public trigger. CCS-only intent flags are consumed by the shim and are not forwarded to the underlying Claude executable. Provider/model flags compiled from a seat remain ordinary launcher configuration.</p>
+  <table class="matrix">
+    <thead><tr><th>Path</th><th>Public command or trigger</th><th>Admission configuration</th><th>Provider launch</th></tr></thead>
+    <tbody>
+      <tr class="subhead"><td colspan="4">Human</td></tr>
+      <tr><td data-label="Path">Bare interactive new session</td><td data-label="Trigger"><code>claude</code>, <code>claude-native</code>, <code>claude-gpt</code></td><td data-label="Admission">Trusted interactive shim adds <code>--user-managed</code>; <code>creator_kind=human</code>, root work body.</td><td data-label="Provider">Internal real launcher receives original Claude arguments plus a protected local admission handoff; no token appears in argv.</td></tr>
+      <tr><td data-label="Path">Explicit new session</td><td data-label="Trigger"><code>ccs session start --user-managed -- &lt;launcher args&gt;</code></td><td data-label="Admission">Visible root; human creator; no parent.</td><td data-label="Provider">Selected native/GPT launcher after reservation.</td></tr>
+      <tr><td data-label="Path">Resume / continue</td><td data-label="Trigger"><code>claude --resume &lt;id&gt;</code> or <code>--continue</code></td><td data-label="Admission">Reserve <code>launch_mode=resume</code>; bind to existing ID; never rewrite birth provenance or class.</td><td data-label="Provider">Forward resume arguments with a fresh protected launch handoff; <code>--continue</code> resolves the actual target only at claim time.</td></tr>
+      <tr><td data-label="Path">Launcher/TUI fork</td><td data-label="Trigger">TUI fork or <code>--resume &lt;id&gt; --fork-session</code></td><td data-label="Admission">Prompt defaults to <code>--user-managed</code>; alternate is <code>--supporting-of &lt;id&gt;</code>. Always set <code>forked_from_session_id</code>.</td><td data-label="Provider">Forward native fork arguments only after intent reservation.</td></tr>
+      <tr><td data-label="Path">In-process branch / fork</td><td data-label="Trigger"><code>/branch</code> or Claude Code’s in-process/background fork flow</td><td data-label="Admission"><strong>Open:</strong> no launcher or prompt is available. SessionStart reports <code>source=fork</code> after the new ID exists; succession must be authenticated from the active predecessor process capability and record <code>forked_from_session_id</code>.</td><td data-label="Provider">Same Claude process; never reuse the predecessor’s consumed launch token.</td></tr>
+      <tr><td data-label="Path">In-process resume / recovery</td><td data-label="Trigger"><code>/resume</code> or conversation recovery</td><td data-label="Admission">Activate an existing identity through process-succession evidence; preserve immutable birth creator/class/parent. The target ID is known only at SessionStart claim time.</td><td data-label="Provider">Same Claude process; record a new activation event, not a new birth.</td></tr>
+      <tr><td data-label="Path">Break glass</td><td data-label="Trigger"><code>ccs session start --raw-bypass --reason &lt;text&gt; -- …</code></td><td data-label="Admission">Human-interactive only; record reason and bypass state; do not infer class or parent.</td><td data-label="Provider">Launch through a minimal DB-independent bypass marker and append-only evidence spool, never as a silent raw invocation.</td></tr>
+
+      <tr class="subhead"><td colspan="4">Agent</td></tr>
+      <tr><td data-label="Path">Delegated seat</td><td data-label="Trigger"><code>ccs delegate &lt;seat&gt; --child-of . [--fallback] --cwd &lt;dir&gt; --prompt &lt;text&gt;</code></td><td data-label="Admission"><code>creator_kind=agent</code>, creator ref=current session, auxiliary, causal parent=current session. Existing <code>--child-of</code> normalizes to canonical <code>supporting-of</code>.</td><td data-label="Provider">Seat compiles fixed provider, launcher, model, effort, and optional explicit fallback route.</td></tr>
+      <tr><td data-label="Path">Native Agent tool</td><td data-label="Trigger"><code>Agent(...)</code></td><td data-label="Admission"><code>PreToolUse:Agent</code> proves the parent is admitted and reserves by documented <code>tool_use_id</code>. <code>SubagentStart</code> records a pending auxiliary birth under its actual <code>agent_id</code>. <code>PostToolUse</code> binds <code>tool_use_id</code> to documented <code>tool_response.agentId</code> for completed or <code>async_launched</code> runs; <code>SubagentStop</code> reconciles final state.</td><td data-label="Provider">Claude Code owns the launch. SubagentStart is non-blocking, so failed birth recording is caught and repaired by PostToolUse/SubagentStop/integrity reconciliation rather than pretending the native hook is atomic.</td></tr>
+      <tr><td data-label="Path">Durable user-driven worker</td><td data-label="Trigger"><code>ccs session start --user-managed -- …</code></td><td data-label="Admission"><code>creator_kind=agent</code>, creator ref=launching session, <code>work_body</code>, no cost parent.</td><td data-label="Provider">Explicit launcher or seat route; no automatic retry.</td></tr>
+      <tr><td data-label="Path">Generic supporting CLI / print worker</td><td data-label="Trigger"><code>ccs session start --supporting-of &lt;id|.&gt; -- &lt;launcher&gt; -p …</code></td><td data-label="Admission"><code>creator_kind=agent</code>, auxiliary, explicit causal parent.</td><td data-label="Provider">Persistent print mode receives a protected admission handoff; <code>--no-session-persistence</code> takes the non-session path instead.</td></tr>
+      <tr><td data-label="Path">Agent resume or fork</td><td data-label="Trigger">CCS-aware launcher with resume/fork arguments</td><td data-label="Admission">Resume preserves existing metadata. Fork must explicitly choose <code>--user-managed</code> or <code>--supporting-of</code>; no prompt or implicit default.</td><td data-label="Provider">Forward only after explicit admission succeeds.</td></tr>
+
+      <tr class="subhead"><td colspan="4">Automation</td></tr>
+      <tr><td data-label="Path">Parentless auxiliary run</td><td data-label="Trigger"><code>ccs session start --automation-run &lt;job-id&gt; --run-ref &lt;run-id&gt; -- …</code></td><td data-label="Admission"><code>creator_kind=automation</code>, registered identity, auxiliary, no session parent, unique run reference.</td><td data-label="Provider">Credentialed job selects an allowed internal launcher or seat.</td></tr>
+      <tr><td data-label="Path">Visible automation root</td><td data-label="Trigger"><code>ccs session start --user-managed --run-ref &lt;run-id&gt; -- …</code></td><td data-label="Admission"><code>creator_kind=automation</code>, credential-derived creator ref, work body, no parent.</td><td data-label="Provider">Same reserved-launch path; visibility comes only from explicit user-managed intent.</td></tr>
+      <tr><td data-label="Path">Automation supporting a session</td><td data-label="Trigger"><code>ccs session start --supporting-of &lt;session&gt; --run-ref &lt;run-id&gt; -- …</code></td><td data-label="Admission"><code>creator_kind=automation</code>, auxiliary, causal parent set, stable job identity retained separately.</td><td data-label="Provider">Same reserved-launch path.</td></tr>
+      <tr><td data-label="Path">cmux / launchd / script / daemon / eval</td><td data-label="Trigger">The orchestrator invokes one of the three commands above.</td><td data-label="Admission">Execution substrate does not determine class. Automation credential + explicit intent + run reference do.</td><td data-label="Provider">Raw <code>cmux … --command 'claude …'</code> and subprocess launches are migrated to CCS-aware commands.</td></tr>
+
+      <tr class="subhead"><td colspan="4">Embedded Agent SDK</td></tr>
+      <tr><td data-label="Path">Persistent Agent SDK session</td><td data-label="Trigger">TypeScript/Python Agent SDK host with persistence enabled; TypeScript <code>persistSession</code> defaults to <code>true</code>.</td><td data-label="Admission"><strong>Open:</strong> sanctioned hosts must reserve through a CCS library/API and inject the claim hook/token programmatically or through managed policy. <code>settingSources: []</code> can skip user/project/local hooks.</td><td data-label="Provider">The SDK spawns its bundled Claude Code process rather than the shell shim. Unintegrated persistent SDK sessions become visible admission violations; <code>persistSession:false</code> is exempt.</td></tr>
+
+      <tr class="subhead"><td colspan="4">Adapters, compatibility, and rejected paths</td></tr>
+      <tr><td data-label="Path">TUI new / resume / fork</td><td data-label="Trigger">CCS TUI action</td><td data-label="Admission">Calls the same admission service as the CLI; the TUI is not a bypass.</td><td data-label="Provider">Launches through the shim/internal launcher split.</td></tr>
+      <tr><td data-label="Path">Legacy managed flags</td><td data-label="Trigger"><code>ccs session new --top-level</code> or <code>--child-of</code></td><td data-label="Admission">Compatibility normalization to <code>--user-managed</code> / <code>--supporting-of</code> during migration, with warnings; removal timing remains open.</td><td data-label="Provider">No semantic downgrade while aliases remain.</td></tr>
+      <tr><td data-label="Path">Raw provider executable</td><td data-label="Trigger">Absolute path, nested shell, variable expansion, subprocess, or direct internal binary</td><td data-label="Admission">The supported shims reject missing admission before launch. If an unmanaged process reaches SessionStart, CCS records a violation and applies empirically verified defense-in-depth. Agents and automation cannot invoke break glass.</td><td data-label="Provider"><code>--bare</code> skips hook discovery and <code>--safe-mode</code> skips ordinary custom hooks; same-Unix-user raw execution remains outside the shim boundary and requires managed policy where available plus doctor/integrity detection.</td></tr>
+      <tr><td data-label="Path"><code>/compact</code></td><td data-label="Trigger">Claude Code emits SessionStart again with <code>source=compact</code>.</td><td data-label="Admission">Context transition, not a process launch. Revalidate the active process capability without consuming a new launch token.</td><td data-label="Provider">Continue the existing process/session identity.</td></tr>
+      <tr><td data-label="Path"><code>/clear</code></td><td data-label="Trigger">Claude Code saves the previous conversation, starts fresh, and emits <code>source=clear</code>.</td><td data-label="Admission"><strong>Verification required:</strong> current docs do not explicitly state whether the session ID changes. Empirically determine identity semantics before assigning succession versus same-session behavior.</td><td data-label="Provider">Same process; never assume the consumed predecessor token is valid for a new identity.</td></tr>
+      <tr><td data-label="Path">API / raw gateway / non-persistent inference</td><td data-label="Trigger">Anthropic API, gateway HTTP, <code>--no-session-persistence</code>, SDK <code>persistSession:false</code>, or <code>CLAUDE_CODE_SKIP_PROMPT_HISTORY</code></td><td data-label="Admission">Outside CCS session admission because no persistent local Claude Code session is created.</td><td data-label="Provider">Runs directly; no catalogue session row or resumable local transcript identity.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Current funnel facts</h2>
+  <table>
+    <thead><tr><th>Path</th><th>Current behavior</th><th>Gap</th></tr></thead>
+    <tbody>
+      <tr><td><code>ccs session new</code></td><td>Reserves ID, requires top-level or child intent, writes class/parent before launch.</td><td>No creator kind/channel or ordinary lifecycle status; <code>--print-id</code> cannot prove later process binding.</td></tr>
+      <tr><td><code>ccs delegate</code></td><td>Best-covered path: auxiliary parent, seat/route/provider/model/CWD, reservation and exit/failure.</td><td>Caller may name an arbitrary parent; lifecycle is process termination rather than full session state.</td></tr>
+      <tr><td>Native Agent tool</td><td>Parent and sidechain status are derived after indexing; hidden by default.</td><td>No first-class creator/channel admission today. Current hooks do provide the required correlation pieces: <code>tool_use_id</code> in Pre/PostToolUse, <code>agent_id</code> at SubagentStart/Stop, and <code>tool_response.agentId</code> in Agent PostToolUse.</td></tr>
+      <tr><td>Raw Claude wrappers</td><td><code>claude</code>, <code>claude-native</code>, and <code>claude-gpt</code> can create sessions directly.</td><td>No CCS birth record.</td></tr>
+      <tr><td>cmux workers</td><td>Documented skills spawn <code>cmux ... --command 'claude ...'</code>.</td><td>cmux liveness mapping is not admission metadata.</td></tr>
+      <tr><td>Forks / daemon dispatch</td><td>TUI and daemon can create forked sessions.</td><td>Forks appear later as unclassified sessions.</td></tr>
+      <tr><td>launchd / scripts / evals</td><td>Several jobs shell out to raw persistent print-mode sessions.</td><td>Bash hooks do not see subprocesses launched inside scripts or launchd.</td></tr>
+      <tr><td>In-process session changes</td><td><code>/resume</code>, <code>/branch</code>, recovery, <code>/clear</code>, and compaction can fire SessionStart without a new outer process.</td><td>The launcher cannot reserve or prompt; existing code does not model process succession or distinguish birth from activation.</td></tr>
+      <tr><td>Agent SDK</td><td>Persistent sessions are enabled by default in TypeScript; embedding hosts can disable user/project/local settings with <code>settingSources: []</code>.</td><td>The SDK spawns its bundled CLI, bypassing shell shims and potentially filesystem hooks.</td></tr>
+      <tr><td>Launcher installation</td><td><code>~/.local/bin/claude</code> is updater-managed; generated identity functions call <code>command claude</code>; cmux currently inserts its own wrapper first and can target a configured custom binary.</td><td>Do not overwrite the managed symlink. Put CCS at a stable custom path, let cmux invoke it, and have CCS exec the resolved raw symlink target. <code>claude</code> using <code>$HOME</code> and <code>claude-here</code> using the current directory are intentional.</td></tr>
+      <tr><td>Global SessionStart</td><td>No CCS-managed SessionStart or Stop hook is currently installed in <code>~/.claude/settings.json</code>.</td><td>The existing CCS registration handler is advisory and fail-open. Official SessionStart hooks cannot use event-specific blocking or exit 2. Universal JSON <code>continue:false</code> is documented, but its exact interactive/print/SDK termination behavior still needs empirical verification.</td></tr>
+      <tr><td>Catalogue schema</td><td><code>session_class</code> and flexible metadata exist, but work lifecycle is still idle/parked/completed/archived.</td><td>No typed admission record, token verifier, creator/channel fields, fork lineage, claim timestamp, expiry, or admission transition state.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Enforcement gaps</h2>
+  <ul>
+    <li>The global nested-launch guard is a Claude Code <code>PreToolUse:Bash</code> hook, not an operating-system admission boundary.</li>
+    <li>It blocks only simple direct print-mode commands. Wrappers, variables, compound shell, subprocesses, cmux, launchd, Agent tool, forks, and daemons bypass it.</li>
+    <li>The static vault scanner is manual and supports allow annotations; it is not runtime enforcement.</li>
+    <li>There is no trusted durable <code>creator_kind</code>, <code>creator_ref</code>, or <code>launch_channel</code> field today.</li>
+  </ul>
+
+  <h2>Verified Claude Code platform limits</h2>
+  <ul>
+    <li><code>SessionStart</code> receives the real session ID after initialization. Exit code 2 and event-specific <code>decision:block</code> do not block it. Universal <code>continue:false</code> is documented across events, but its exact interactive/print/SDK termination behavior at SessionStart must be empirically verified before enforcement depends on it.</li>
+    <li><code>SessionStart</code> also fires for <code>resume</code>, <code>fork</code>, <code>clear</code>, and <code>compact</code>. Fork can create a new identity inside an existing process; resume can switch identities; current docs do not explicitly settle whether clear changes the session ID. None can blindly replay the predecessor’s consumed launch token.</li>
+    <li><code>--bare</code> skips hook auto-discovery; <code>--safe-mode</code> disables ordinary custom hooks while managed-policy hooks still apply. Both can remain persistent. Shims must reject unmanaged persistent use, and SDK/managed-policy integration must not rely solely on user/project settings.</li>
+    <li>Native Agent correlation is documented but split across events: Pre/PostToolUse include <code>tool_use_id</code>; Agent PostToolUse includes <code>tool_response.agentId</code>; SubagentStart/Stop include <code>agent_id</code>. SubagentStart remains context-only/non-blocking, so later events and integrity reconciliation must repair a failed birth write.</li>
+    <li>CCS can make accidental and policy-compliant bypasses fail reliably. It cannot be a hostile-code security boundary against arbitrary code running as the same Unix user unless the process is additionally sandboxed.</li>
+  </ul>
+
+  <h2>Fable second-opinion review disposition</h2>
+  <table>
+    <thead><tr><th>Severity</th><th>Finding</th><th>Plan disposition</th></tr></thead>
+    <tbody>
+      <tr><td>Critical</td><td>In-process <code>/branch</code>, <code>/fork</code>, <code>/resume</code>, recovery, and possibly <code>/clear</code> bypass the outer launcher.</td><td class="open">Accepted. Added explicit succession paths; intent and <code>/clear</code> identity semantics remain open.</td></tr>
+      <tr><td>Critical</td><td>The earlier Native Agent “no tool-use/child ID” statement was wrong.</td><td class="confirmed">Corrected against current docs: Pre/PostToolUse expose <code>tool_use_id</code>; Agent PostToolUse exposes <code>agentId</code>; Subagent hooks supply birth/stop evidence.</td></tr>
+      <tr><td>Critical</td><td>Persistent Agent SDK sessions bypass shell shims and can skip filesystem hooks.</td><td class="open">Accepted. Added an SDK path and mandatory host/API or managed-policy integration requirement.</td></tr>
+      <tr><td>High</td><td>Fail-closed claim behavior has no CCS outage semantics; DB-backed break glass fails when CCS is broken.</td><td class="open">Accepted. Added affirmative-invalidity versus infrastructure-failure split and DB-independent append-only break glass.</td></tr>
+      <tr><td>High</td><td><code>continue:false</code> behavior is not sufficiently documented as a hard interactive termination.</td><td class="open">Accepted as a pre-authorization empirical verification gate; added UserPromptSubmit/PreToolUse defense-in-depth.</td></tr>
+      <tr><td>High</td><td>Environment token transport does not survive cmux daemon spawning and restore can replay commands.</td><td class="confirmed">Corrected to protected spool/Unix-socket handoff and fresh resume admission on restore.</td></tr>
+      <tr><td>High</td><td>The updater-managed Claude symlink cannot safely be replaced in place; wrapper ordering with cmux and shell identities must be explicit.</td><td class="confirmed">Live verification showed cmux can invoke a stable custom CCS shim while preserving injected settings/session ID. The generated shell function already delegates through <code>command claude</code>; its <code>$HOME</code> CWD is intentional identity behavior, not a bypass.</td></tr>
+      <tr><td>High</td><td>No phased rollout would brick unmigrated scripts, daemons, and jobs.</td><td class="confirmed">Added observe → migrate → warn → enforce → alias removal phases.</td></tr>
+      <tr><td>Medium</td><td><code>--print-id</code> had no safe successor.</td><td class="confirmed">Retire it in favor of typed reserve-and-launch handoff; never expose a raw UUID as launch authority.</td></tr>
+      <tr><td>Medium</td><td>Parent existence was mistaken for authority.</td><td class="confirmed">Added creator-specific parent authority rules and audited human override.</td></tr>
+      <tr><td>Medium</td><td>Automation intent versus <code>--run-ref</code> was ambiguous.</td><td class="open">Clarified the direction—intent and creator are separate; exact credential/schema/CLI contract remains open.</td></tr>
+      <tr><td>Medium</td><td>Creator provenance cannot be called fully trustworthy under the same-user threat model.</td><td class="confirmed">Added attestation source/strength rather than presenting all derivation as equally verified.</td></tr>
+      <tr><td>Medium</td><td>No adoption or append-only repair semantics.</td><td class="open">Accepted. Added human-only adopt/repair direction; exact interaction remains open.</td></tr>
+      <tr><td>Medium</td><td>Lifecycle was session-shaped despite admissions being per launch.</td><td class="confirmed">Corrected to immutable birth plus 1:N launch/activation admissions and explicit termination ownership.</td></tr>
+      <tr><td>Medium</td><td><code>--safe-mode</code> and broad no-history controls were omitted.</td><td class="confirmed">Added safe-mode, SDK <code>persistSession:false</code>, and <code>CLAUDE_CODE_SKIP_PROMPT_HISTORY</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Deferred strict-mode decisions</h2>
+  <p>These do not block the selected Phase 1 registry/integrity implementation.</p>
+  <ol>
+    <li class="open">The exact typed schema and CLI flags for automation identity and unique job/workflow-run references.</li>
+    <li class="open">In-process succession semantics for <code>/branch</code>, <code>/fork</code>, <code>/resume</code>, conversation recovery, and potentially <code>/clear</code>, where no outer launcher can mint a fresh token or prompt for intent.</li>
+    <li class="open">Agent SDK enforcement for persistent sessions when embedding hosts disable filesystem settings with <code>settingSources: []</code>.</li>
+    <li class="open">CCS outage behavior: distinguish affirmative invalid admission from unavailable/corrupt claim infrastructure, and define a database-independent human break-glass path.</li>
+    <li class="open">Human adoption and audited repair semantics for auxiliaries, bypasses, and violations without rewriting immutable birth history.</li>
+  </ol>
+
+  <h2>Deferred strict-mode implementation direction</h2>
+  <ol>
+    <li>Separate immutable <strong>session birth/origin</strong> from a 1:N stream of <strong>process launches and in-process activations</strong>. A resume or reactivation creates an admission/activation event without rewriting creator, class, parent, or lineage.</li>
+    <li>Add typed session-origin fields: management class, creator kind/ref, creator-attestation source and strength, automation origin where applicable, launch channel, fork/clear lineage, and immutable creation timestamp.</li>
+    <li>Add a dedicated admissions table with reservation ID, expected/new/existing session mode, token verifier or protected handoff reference, expiry, claim evidence, process/substrate identity, lifecycle state, and terminal reason.</li>
+    <li>Require exactly one high-level intent: <code>--user-managed</code>, <code>--supporting-of &lt;session|.&gt;</code>, or parentless <code>--automation-run &lt;job-id&gt; --run-ref &lt;run-id&gt;</code>. Creator identity is derived independently; automation credentials require <code>--run-ref</code> as supplementary metadata on every persistent intent.</li>
+    <li>Enforce parent authority: agent-created support may target only its current admitted session; automation may target only an active authorized session; an interactive human may explicitly override with an audited reason. Never accept mere parent existence as authority.</li>
+    <li>Route every external persistent launcher through one CCS admission API/CLI. Retire public <code>--print-id</code>; replace it with a typed reserve-and-launch handoff that never turns a bare UUID into permission for arbitrary raw launch.</li>
+    <li>Use protected local handoff storage or a Unix-socket broker for cmux/daemon launches. Never place claim tokens in command strings, process arguments, workspace configuration, or scrollback. Workspace restoration creates a fresh resume admission rather than replaying a consumed token.</li>
+    <li>Install a stable CCS shim outside the updater-managed <code>~/.local/bin/claude</code> symlink and point cmux’s Claude Binary Path (or PATH resolution) at it. Keep the generated identity aliases/functions: <code>claude</code> intentionally launches from <code>$HOME</code>, while <code>claude-here</code> preserves the current directory. The CCS shim must exec the dynamically resolved raw symlink target by absolute path, never call <code>claude</code> by name, and doctor-check the chain.</li>
+    <li>At SessionStart, atomically claim valid external-launch reservations after Claude allocates the ID. Empirically verify <code>continue:false</code> behavior in interactive, print, and SDK modes; add UserPromptSubmit/PreToolUse denial as defense-in-depth for identities already marked violations.</li>
+    <li>Model in-process succession separately. <code>/resume</code> activates an existing birth; <code>/branch</code>/<code>/fork</code> create a new birth from an authenticated active-process capability; conversation recovery reactivates. Verify <code>/clear</code> ID behavior before assigning it to either path.</li>
+    <li>For launcher/TUI forks, reserve before launch, prompt humans for user-managed versus supporting intent, and store <code>forked_from_session_id</code> separately. In-process fork intent needs its own default or later adoption rule because SessionStart cannot prompt.</li>
+    <li>Implement native Agent admission across documented events: reserve in blockable PreToolUse by <code>tool_use_id</code>; record pending birth at SubagentStart by <code>agent_id</code>; bind through PostToolUse <code>tool_response.agentId</code>; reconcile async/background completion at SubagentStop.</li>
+    <li>Require persistent Agent SDK hosts to integrate the CCS admission library/API and inject claim hooks/tokens programmatically or through managed policy. SDK <code>persistSession:false</code> remains exempt; persistent sessions that skip integration become visible violations.</li>
+    <li>Keep API, raw gateway calls, <code>--no-session-persistence</code>, SDK <code>persistSession:false</code>, and <code>CLAUDE_CODE_SKIP_PROMPT_HISTORY</code> outside the local session catalogue.</li>
+    <li>Persist reserved/claimed/active/exited/failed/expired/interrupted/unreconciled states per admission. Define which signal owns termination—shim wait, SessionEnd/Stop hook, or reconciler—and make reconciliation idempotent without deleting evidence or retrying work.</li>
+    <li>Distinguish affirmative invalidity from CCS infrastructure failure. Invalid/replayed/mismatched claims stop; unavailable or corrupt claim infrastructure follows an explicit degraded-mode policy and writes a violation to a DB-independent append-only spool.</li>
+    <li>Make human break glass shim-local and database-independent: interactive-only, mandatory reason, append-only evidence, explicit warning, and later reconciliation. Agents and automation cannot invoke it.</li>
+    <li>Add human-only audited <code>adopt</code> and <code>repair</code> operations. Adoption changes effective management class without rewriting birth creator; repair appends corrections for parent/origin/bypass violations while preserving every prior value and reason.</li>
+    <li>Make default visibility derive from effective management class, with creator, attestation, launch channel, admission state, and violation status independently filterable. Post-cutoff tokenless sessions remain visible unclassified violations.</li>
+    <li>Roll out in explicit phases: schema and observe-only recording; shims/hooks plus doctor; migrate every cmux/daemon/launchd/script/SDK callsite and nested guard; warn-only cutoff; enforce; then remove legacy aliases after measured zero use.</li>
+  </ol>
+
+  <h2>Deferred strict-mode verification gates</h2>
+  <ol>
+    <li>Run disposable, explicitly isolated Claude Code probes to determine whether SessionStart <code>{continue:false}</code> actually halts interactive, print, and Agent SDK processing or merely reports a stop reason.</li>
+    <li>Measure session IDs and transcript paths before and after <code>/clear</code>; verify whether it creates a new birth, a new transcript under the same ID, or an activation-like transition.</li>
+    <li>Capture actual installed-version hook payloads for PreToolUse/PostToolUse Agent, SubagentStart, and SubagentStop, including synchronous and <code>async_launched</code> responses, without depending only on documentation.</li>
+    <li>Prototype the cmux/daemon protected handoff and restore flow: no secret in argv/logs, one claim only, and restore produces a fresh resume admission.</li>
+    <li>Verify which managed-policy hooks survive <code>--bare</code>, <code>--safe-mode</code>, and Agent SDK <code>settingSources: []</code> on this machine; do not claim coverage broader than the observed boundary.</li>
+  </ol>
+
+  <h2>Constraints and non-goals</h2>
+  <ul>
+    <li>Do not archive or delete sessions merely to improve presentation.</li>
+    <li>Do not overload parentage with durable worker ownership or creator identity.</li>
+    <li>Do not automatically retry a child after process start.</li>
+    <li>Do not force raw API calls that create no Claude Code transcript into CCS.</li>
+    <li>Implementation began only after the grilling decision tree completed and Milad explicitly authorized Phase 1.</li>
+  </ul>
+
+  <h2>Key references</h2>
+  <ul>
+    <li><a target="_blank" rel="noopener" href="file:///Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-delegated-sessions/src/resume/new-session.ts">CCS session creation</a></li>
+    <li><a target="_blank" rel="noopener" href="file:///Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-delegated-sessions/src/delegate/command.ts">CCS delegation admission</a></li>
+    <li><a target="_blank" rel="noopener" href="file:///Users/mimen/Documents/milad-vault/ClaudeConfig/machine-adapter/scripts/hooks/nested_claude_guard.py">Current nested-launch guard</a></li>
+    <li><a target="_blank" rel="noopener" href="file:///Users/mimen/.claude/settings.json">Global hook wiring</a></li>
+    <li><a target="_blank" rel="noopener" href="https://code.claude.com/docs/en/hooks">Claude Code hooks reference</a></li>
+    <li><a target="_blank" rel="noopener" href="https://code.claude.com/docs/en/sub-agents#define-hooks-for-subagents">Claude Code subagent hooks</a></li>
+    <li><a target="_blank" rel="noopener" href="https://code.claude.com/docs/en/sessions">Claude Code session, resume, and branch semantics</a></li>
+    <li><a target="_blank" rel="noopener" href="https://code.claude.com/docs/en/cli-reference">Claude Code CLI persistence and safe/bare modes</a></li>
+    <li><a target="_blank" rel="noopener" href="https://code.claude.com/docs/en/agent-sdk/typescript">Agent SDK TypeScript persistence and settings sources</a></li>
+  </ul>
+
+  <h2>What changed</h2>
+  <p>Initial living plan created after three product-decision rounds. It records the mandatory-admission boundary, separate creator/management axes, three creator kinds, and root semantics for agent-created user-managed workers. Updated to confirm that an explicit admission flag is sufficient for a non-human launcher to request a visible root work body; automation may create parentless auxiliary runs only with separate typed job identity and run-reference provenance; admission uses exactly one of three high-level forms, the native Agent tool remains supported through a pre/post-tool CCS admission adapter, familiar interactive human launcher commands auto-admit through CCS as visible work bodies, and those familiar command names become the CCS-aware executable shims, every actual persistent session must claim a single-use admission token at SessionStart, human forks prompt for intent while preserving fork lineage separately from parentage, stale admissions are retained and reconciled into explicit terminal states without automatic retry, a human-only reasoned bypass exists for break-glass recovery, and any post-cutoff tokenless session remains visibly unclassified as an admission violation rather than being hidden or guessed into a class. Added a complete target-state funnel diagram and path matrix covering human, agent, automation, TUI, resume, fork, cmux, launchd, scripts, daemons, legacy aliases, direct-binary violations, and non-session inference, including normalized intent flags and resulting metadata. Current Claude Code documentation then established that SessionStart is a post-allocation claim/check rather than a pre-allocation gate. A Fable second-opinion review found additional blockers and corrected the Native Agent interpretation: Pre/PostToolUse expose <code>tool_use_id</code>, Agent PostToolUse exposes <code>agentId</code>, and SubagentStart/Stop provide birth/termination evidence. The plan now distinguishes immutable session birth from 1:N launches and in-process activations; adds in-process branch/resume/recovery and Agent SDK paths; adds cmux-safe handoff, updater-resistant shims, parent authority, attestation strength, reserve-and-launch replacement for <code>--print-id</code>, DB-independent break glass, adopt/repair semantics, safe-mode/no-history exclusions, and phased rollout. Remaining blockers are listed explicitly rather than implied solved. Selected the 80/20 Phase 1 that drops strict admission machinery in favor of birth-time metadata, common-path shims, existing native-subagent inference, visible unknowns, and targeted hardening based on observed escapes. The strict design remains below as explicitly deferred reference rather than implementation scope. Live launcher-chain verification confirmed that cmux can invoke a stable custom CCS shim while preserving its injected <code>--settings</code>, explicit session ID, surface metadata, and launch CWD; the shim must then exec the updater-managed raw target by absolute resolved path. Phase 1 was subsequently implemented and installed: the entry shim now preserves causal parentage before cmux clears inherited identity, managed nested reservations are parent-bound, forks carry explicit birth IDs and auditable outcomes, model-history cache migration is safe, and the final live doctor report is clean.</p>
+</main>
+</body>
+</html>

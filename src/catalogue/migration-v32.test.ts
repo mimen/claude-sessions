@@ -49,7 +49,7 @@ describe("catalogue schema (post-v33)", () => {
   test("stamps user_version to CATALOGUE_VERSION", () => {
     const db = openCatalogue(":memory:");
     const v = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-    expect(v).toBe(36);
+    expect(v).toBe(37);
   });
 
   test("universal indexes exist", () => {

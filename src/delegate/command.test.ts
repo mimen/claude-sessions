@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { Database } from "bun:sqlite";
 import { openCatalogue, setSessionClass } from "../catalogue/db.ts";
 import { delegateCommand } from "./command.ts";
 
 const PARENT = "754b9a1a-e5e0-49b7-8e45-d433e82621bf";
+const SHIM = resolve(import.meta.dir, "../../bin/ccs-claude-shim");
+const CCS_BIN = resolve(import.meta.dir, "../../bin/ccs");
 const roots: string[] = [];
 const savedCcsRoot = process.env.CCS_ROOT;
 
@@ -60,8 +62,8 @@ import { join } from "node:path";
 const argv = process.argv.slice(2);
 const id = argv[argv.indexOf("--session-id") + 1];
 const db = new Database(join(process.env.CCS_ROOT, "cache", "catalogue.db"), { readonly: true });
-const row = db.query("SELECT session_class, parent_session_id, meta FROM catalogue WHERE session_id = $id").get({ $id: id });
-writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({ argv, cwd: process.cwd(), forbidden: process.env.CLAUDE_CODE_SUBAGENT_MODEL ?? null, row }));
+const row = db.query("SELECT session_class, parent_session_id, creator_kind, creator_ref, launch_channel, meta FROM catalogue WHERE session_id = $id").get({ $id: id });
+writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({ argv, cwd: process.cwd(), forbidden: process.env.CLAUDE_CODE_SUBAGENT_MODEL ?? null, creatorKind: process.env.CCS_CREATOR_KIND ?? null, creatorRef: process.env.CCS_CREATOR_REF ?? null, launchCreatorKind: process.env.CCS_LAUNCH_CREATOR_KIND ?? null, launchCreatorRef: process.env.CCS_LAUNCH_CREATOR_REF ?? null, launchParent: process.env.CCS_LAUNCH_PARENT_SESSION_ID ?? null, row }));
 db.close();
 process.exit(${exitCode});
 `,
@@ -104,6 +106,9 @@ describe("delegateCommand", () => {
         PATH: `${f.bin}:${process.env.PATH ?? ""}`,
         OBSERVATION_PATH: f.observation,
         CLAUDE_CODE_SUBAGENT_MODEL: "must-not-leak",
+        CLAUDE_CODE_SESSION_ID: undefined,
+        CCS_CREATOR_KIND: undefined,
+        CCS_CREATOR_REF: undefined,
       },
     );
 
@@ -112,14 +117,30 @@ describe("delegateCommand", () => {
       argv: string[];
       cwd: string;
       forbidden: string | null;
-      row: { session_class: string; parent_session_id: string; meta: string };
+      launchCreatorKind: string | null;
+      launchCreatorRef: string | null;
+      launchParent: string | null;
+      row: {
+        session_class: string;
+        parent_session_id: string;
+        creator_kind: string;
+        creator_ref: string;
+        launch_channel: string;
+        meta: string;
+      };
     };
     expect(observation.cwd).toBe(realpathSync(f.root));
     expect(observation.forbidden).toBeNull();
+    expect(observation.launchCreatorKind).toBe("agent");
+    expect(observation.launchCreatorRef).toBe(PARENT);
+    expect(observation.launchParent).toBe(PARENT);
     expect(observation.argv.slice(-2)).toEqual(["-p", prompt]);
     expect(observation.argv).not.toContain("--bare");
     expect(observation.row.session_class).toBe("auxiliary");
     expect(observation.row.parent_session_id).toBe(PARENT);
+    expect(observation.row.creator_kind).toBe("agent");
+    expect(observation.row.creator_ref).toBe(PARENT);
+    expect(observation.row.launch_channel).toBe("ccs_delegate");
     expect(JSON.parse(observation.row.meta) as Record<string, string>).toMatchObject({
       launch_status: "reserved",
       seat: "primary-review",
@@ -135,6 +156,133 @@ describe("delegateCommand", () => {
       launch_status: "exited",
       exit_code: 7,
     });
+  });
+
+  test("records automation creator separately from the causal parent", () => {
+    const f = fixture();
+    process.env.CCS_ROOT = join(f.root, "runtime");
+    seedParent(f.root);
+    const code = delegateCommand(
+      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      {
+        ...process.env,
+        PATH: `${f.bin}:${process.env.PATH ?? ""}`,
+        OBSERVATION_PATH: f.observation,
+        CCS_CREATOR_KIND: "automation",
+        CCS_CREATOR_REF: "imsg-server",
+      },
+    );
+
+    expect(code).toBe(0);
+    const observation = JSON.parse(readFileSync(f.observation, "utf8")) as {
+      creatorKind: string | null;
+      creatorRef: string | null;
+      launchCreatorKind: string | null;
+      launchCreatorRef: string | null;
+      launchParent: string | null;
+      row: {
+        parent_session_id: string;
+        creator_kind: string;
+        creator_ref: string;
+        launch_channel: string;
+      };
+    };
+    expect(observation.row).toMatchObject({
+      parent_session_id: PARENT,
+      creator_kind: "automation",
+      creator_ref: "imsg-server",
+      launch_channel: "ccs_delegate",
+    });
+    expect(observation.creatorKind).toBeNull();
+    expect(observation.creatorRef).toBeNull();
+    expect(observation.launchCreatorKind).toBe("automation");
+    expect(observation.launchCreatorRef).toBe("imsg-server");
+    expect(observation.launchParent).toBe(PARENT);
+  });
+
+  test("automation delegation traverses the stable shim and strips all birth provenance", () => {
+    const f = fixture();
+    process.env.CCS_ROOT = join(f.root, "runtime");
+    seedParent(f.root);
+
+    const home = join(f.root, "home");
+    const shimDirectory = join(home, ".ccs", "bin");
+    mkdirSync(shimDirectory, { recursive: true });
+    symlinkSync(SHIM, join(shimDirectory, "claude"));
+
+    const launcher = join(f.bin, "claude-gpt");
+    writeFileSync(launcher, "#!/bin/sh\nexec claude \"$@\"\n");
+    chmodSync(launcher, 0o755);
+
+    const raw = join(f.root, "raw-claude");
+    writeFileSync(raw, `#!/usr/bin/env bun
+import { writeFileSync } from "node:fs";
+writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
+  argv: process.argv.slice(2),
+  creatorKind: process.env.CCS_CREATOR_KIND ?? null,
+  creatorRef: process.env.CCS_CREATOR_REF ?? null,
+  launchCreatorKind: process.env.CCS_LAUNCH_CREATOR_KIND ?? null,
+  launchCreatorRef: process.env.CCS_LAUNCH_CREATOR_REF ?? null,
+  launchParent: process.env.CCS_LAUNCH_PARENT_SESSION_ID ?? null,
+}));
+`);
+    chmodSync(raw, 0o755);
+
+    const code = delegateCommand(
+      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      {
+        ...process.env,
+        HOME: home,
+        PATH: `${f.bin}:${process.env.PATH ?? ""}`,
+        OBSERVATION_PATH: f.observation,
+        CCS_BIN,
+        CCS_RAW_CLAUDE_PATH: raw,
+        CCS_CREATOR_KIND: "automation",
+        CCS_CREATOR_REF: "imsg-server",
+        CLAUDE_CODE_SESSION_ID: undefined,
+        CLAUDE_CODE_SKIP_PROMPT_HISTORY: "",
+        CMUX_SURFACE_ID: "",
+        CMUX_CUSTOM_CLAUDE_PATH: "",
+        CCS_CLAUDE_SHIM_AFTER_CMUX: "",
+        CCS_CMUX_CLAUDE_WRAPPER_PATH: "",
+        CCS_LAUNCH_PARENT_SESSION_ID: undefined,
+        CCS_LAUNCH_CREATOR_KIND: undefined,
+        CCS_LAUNCH_CREATOR_REF: undefined,
+      },
+    );
+
+    expect(code).toBe(0);
+    const observation = JSON.parse(readFileSync(f.observation, "utf8")) as {
+      argv: string[];
+      creatorKind: string | null;
+      creatorRef: string | null;
+      launchCreatorKind: string | null;
+      launchCreatorRef: string | null;
+      launchParent: string | null;
+    };
+    expect(observation.argv.slice(-2)).toEqual(["-p", "Review."]);
+    expect(observation.creatorKind).toBeNull();
+    expect(observation.creatorRef).toBeNull();
+    expect(observation.launchCreatorKind).toBeNull();
+    expect(observation.launchCreatorRef).toBeNull();
+    expect(observation.launchParent).toBeNull();
+  });
+
+  test("rejects automation delegation without a stable creator ref before reservation", () => {
+    const f = fixture();
+    process.env.CCS_ROOT = join(f.root, "runtime");
+    seedParent(f.root);
+    const code = delegateCommand(
+      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      {
+        ...process.env,
+        PATH: `${f.bin}:${process.env.PATH ?? ""}`,
+        CCS_CREATOR_KIND: "automation",
+        CCS_CREATOR_REF: "",
+      },
+    );
+    expect(code).toBe(2);
+    expect(childRows(f.root)).toHaveLength(0);
   });
 
   test("runs an explicit fallback as a separate Terra xhigh child", () => {

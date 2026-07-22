@@ -5,7 +5,14 @@ import { join } from "node:path";
 import { openCatalogue, getRow, lifecycleOf, identityKeyOf, setCluster, stampPrFacts, setWorkUnitId, getMeta, _resetRoleResumeCache } from "../catalogue/db.ts";
 import { getIdentity } from "../catalogue/identities.ts";
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
-import { inlineLaunchOutcome, newSession, parseOpts, writeSessionMetadata } from "./new-session.ts";
+import {
+  inlineLaunchEnvironment,
+  inlineLaunchOutcome,
+  launchEnvironmentOverrides,
+  newSession,
+  parseOpts,
+  writeSessionMetadata,
+} from "./new-session.ts";
 
 const NOW = "2026-07-08T00:00:00.000Z";
 
@@ -14,6 +21,9 @@ afterEach(() => {
   _resetRoleResumeCache();
   for (const d of roots.splice(0)) rmSync(d, { recursive: true, force: true });
   delete process.env.CCS_CONFIG_ROOT; delete process.env.CCS_ROOT;
+  delete process.env.CCS_CREATOR_KIND; delete process.env.CCS_CREATOR_REF;
+  delete process.env.CCS_LAUNCH_CREATOR_KIND; delete process.env.CCS_LAUNCH_CREATOR_REF;
+  delete process.env.CCS_LAUNCH_PARENT_SESSION_ID;
 });
 /** Temp config+runtime roots with a pr-anchored role, for the work-unit spawn path. */
 function withPrRole(): void {
@@ -177,6 +187,38 @@ test("inline launch outcome distinguishes startup failures from launched failure
   expect(inlineLaunchOutcome(null, "SIGKILL")).toEqual({ exitCode: 137, startupFailed: false });
 });
 
+test("managed launch environments force the shim and consume one-birth creator declarations", () => {
+  process.env.CCS_CREATOR_KIND = "automation";
+  process.env.CCS_CREATOR_REF = "stale-daemon";
+  process.env.CCS_LAUNCH_CREATOR_KIND = "agent";
+  process.env.CCS_LAUNCH_CREATOR_REF = "stale-session";
+  process.env.CCS_LAUNCH_PARENT_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const opts = {
+    printId: false,
+    inline: true,
+    creatorKind: "automation" as const,
+    creatorRef: "imsg-server",
+    parent: "11111111-1111-4111-8111-111111111111",
+  };
+
+  const shimDirectory = join(process.env.HOME ?? "/tmp", ".ccs", "bin");
+  const overrides = launchEnvironmentOverrides(opts, { PATH: `/raw-claude:${shimDirectory}:/usr/bin` });
+  expect(overrides.PATH?.split(":")[0]).toBe(shimDirectory);
+  expect(overrides.CCS_CREATOR_KIND).toBe("");
+  expect(overrides.CCS_CREATOR_REF).toBe("");
+  expect(overrides.CCS_LAUNCH_CREATOR_KIND).toBe("automation");
+  expect(overrides.CCS_LAUNCH_CREATOR_REF).toBe("imsg-server");
+  expect(overrides.CCS_LAUNCH_PARENT_SESSION_ID).toBe(opts.parent);
+
+  const inline = inlineLaunchEnvironment(opts, { PATH: `/raw-claude:${shimDirectory}:/usr/bin` });
+  expect(inline.PATH?.split(":")[0]).toBe(shimDirectory);
+  expect(inline.CCS_CREATOR_KIND).toBeUndefined();
+  expect(inline.CCS_CREATOR_REF).toBeUndefined();
+  expect(inline.CCS_LAUNCH_CREATOR_KIND).toBe("automation");
+  expect(inline.CCS_LAUNCH_CREATOR_REF).toBe("imsg-server");
+  expect(inline.CCS_LAUNCH_PARENT_SESSION_ID).toBe(opts.parent);
+});
+
 test("writeSessionMetadata: explicit identity attaches without minting or inferring work", () => {
   const db = openCatalogue(":memory:");
   try {
@@ -259,6 +301,48 @@ test("newSession: explicit --print-id registers only a matching pre-minted ident
     expect(rows[0]?.resume_id).toBeDefined();
     expect(rows[0]?.parent_session_id).toBeNull();
     expect(check.query("SELECT COUNT(*) AS count FROM identities").get()).toEqual({ count: 1 });
+  } finally {
+    check.close();
+  }
+});
+
+test("newSession: reserve-only automation anchor records stable provenance", () => {
+  const root = withEventRole();
+  process.env.CCS_CREATOR_KIND = "automation";
+  process.env.CCS_CREATOR_REF = "imsg-server";
+
+  expect(newSession(["--top-level", `--cwd=${root}`, "--title=iMessage automation", "--print-id"])).toBe(0);
+  const check = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const row = check.query(
+      "SELECT session_class, parent_session_id, creator_kind, creator_ref, launch_channel FROM catalogue",
+    ).get() as {
+      session_class: string;
+      parent_session_id: string | null;
+      creator_kind: string;
+      creator_ref: string;
+      launch_channel: string;
+    };
+    expect(row).toEqual({
+      session_class: "work_body",
+      parent_session_id: null,
+      creator_kind: "automation",
+      creator_ref: "imsg-server",
+      launch_channel: "ccs_session_new",
+    });
+  } finally {
+    check.close();
+  }
+});
+
+test("newSession: automation declaration without a stable ref fails before registration", () => {
+  const root = withEventRole();
+  process.env.CCS_CREATOR_KIND = "automation";
+  delete process.env.CCS_CREATOR_REF;
+  expect(newSession(["--top-level", `--cwd=${root}`, "--print-id"])).toBe(2);
+  const check = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    expect(check.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 0 });
   } finally {
     check.close();
   }

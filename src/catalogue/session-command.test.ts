@@ -3,7 +3,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
-import { openCatalogue } from "./db.ts";
+import {
+  getRow,
+  openCatalogue,
+  setCreatorKind,
+  setCreatorRef,
+  setLaunchChannel,
+  setParent,
+  setSessionClass,
+} from "./db.ts";
 import { openIndex } from "../index/schema.ts";
 import { mintIdentity } from "./identities.ts";
 import { sessionCommand } from "./session-command.ts";
@@ -50,6 +58,107 @@ function seedIndexedSession(root: string, sid: string, resumeId = "resume-id"): 
   ).run({ $sid: sid, $resume: resumeId });
   db.close();
 }
+
+describe("session shim-register", () => {
+  test("creates a human work body with shim provenance", async () => {
+    await withRoot(async (root) => {
+      const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      expect(await sessionCommand([
+        "shim-register",
+        `--session-id=${sessionId}`,
+        "--cwd=/tmp/project",
+      ])).toBe(0);
+
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      try {
+        expect(getRow(db, sessionId)).toMatchObject({
+          resumeId: sessionId,
+          sessionClass: "work_body",
+          creatorKind: "human",
+          creatorRef: null,
+          launchChannel: "claude_shim",
+          meta: { launch_cwd: "/tmp/project" },
+        });
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  test("verifies a human-created supporting child without requiring a creator ref", async () => {
+    await withRoot(async (root) => {
+      const parent = "11111111-1111-4111-8111-111111111111";
+      const child = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+      mkdirSync(join(root, "cache"), { recursive: true });
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      setSessionClass(db, child, "auxiliary", NOW);
+      setCreatorKind(db, child, "human", NOW);
+      setLaunchChannel(db, child, "ccs_session_new", NOW);
+      setParent(db, child, parent, NOW);
+      db.close();
+
+      const priorKind = process.env.CCS_LAUNCH_CREATOR_KIND;
+      const priorRef = process.env.CCS_LAUNCH_CREATOR_REF;
+      process.env.CCS_LAUNCH_CREATOR_KIND = "human";
+      delete process.env.CCS_LAUNCH_CREATOR_REF;
+      try {
+        expect(await sessionCommand([
+          "shim-register",
+          `--session-id=${child}`,
+          "--require-existing",
+          `--parent-session-id=${parent}`,
+        ])).toBe(0);
+      } finally {
+        priorKind === undefined ? delete process.env.CCS_LAUNCH_CREATOR_KIND : (process.env.CCS_LAUNCH_CREATOR_KIND = priorKind);
+        priorRef === undefined ? delete process.env.CCS_LAUNCH_CREATOR_REF : (process.env.CCS_LAUNCH_CREATOR_REF = priorRef);
+      }
+    });
+  });
+
+  test("verifies automation creator independently from causal parent", async () => {
+    await withRoot(async (root) => {
+      const parent = "11111111-1111-4111-8111-111111111111";
+      const child = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      mkdirSync(join(root, "cache"), { recursive: true });
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      setSessionClass(db, child, "auxiliary", NOW);
+      setCreatorKind(db, child, "automation", NOW);
+      setCreatorRef(db, child, "imsg-server", NOW);
+      setLaunchChannel(db, child, "ccs_delegate", NOW);
+      setParent(db, child, parent, NOW);
+      db.close();
+
+      const priorPublicKind = process.env.CCS_CREATOR_KIND;
+      const priorPublicRef = process.env.CCS_CREATOR_REF;
+      const priorLaunchKind = process.env.CCS_LAUNCH_CREATOR_KIND;
+      const priorLaunchRef = process.env.CCS_LAUNCH_CREATOR_REF;
+      delete process.env.CCS_CREATOR_KIND;
+      delete process.env.CCS_CREATOR_REF;
+      process.env.CCS_LAUNCH_CREATOR_KIND = "automation";
+      process.env.CCS_LAUNCH_CREATOR_REF = "imsg-server";
+      try {
+        expect(await sessionCommand([
+          "shim-register",
+          `--session-id=${child}`,
+          "--require-existing",
+          `--parent-session-id=${parent}`,
+        ])).toBe(0);
+        process.env.CCS_LAUNCH_CREATOR_REF = "other-daemon";
+        expect(await sessionCommand([
+          "shim-register",
+          `--session-id=${child}`,
+          "--require-existing",
+          `--parent-session-id=${parent}`,
+        ])).toBe(4);
+      } finally {
+        priorPublicKind === undefined ? delete process.env.CCS_CREATOR_KIND : (process.env.CCS_CREATOR_KIND = priorPublicKind);
+        priorPublicRef === undefined ? delete process.env.CCS_CREATOR_REF : (process.env.CCS_CREATOR_REF = priorPublicRef);
+        priorLaunchKind === undefined ? delete process.env.CCS_LAUNCH_CREATOR_KIND : (process.env.CCS_LAUNCH_CREATOR_KIND = priorLaunchKind);
+        priorLaunchRef === undefined ? delete process.env.CCS_LAUNCH_CREATOR_REF : (process.env.CCS_LAUNCH_CREATOR_REF = priorLaunchRef);
+      }
+    });
+  });
+});
 
 describe("session read", () => {
   test("bare id → shows session + linked identity", async () => {

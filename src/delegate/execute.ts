@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
 import { compileAgent, loadSeat, resolveSeatRoute, type ProviderFamily, type SeatEffort, type SeatRouteKind } from "./seat.ts";
 import { err, ok, type Result } from "../result.ts";
 
@@ -49,9 +51,24 @@ export interface DelegateExecution {
 
 function cleanEnvironment(
   environment: Readonly<Record<string, string | undefined>>,
+  parentSessionId: string,
 ): Readonly<Record<string, string | undefined>> {
-  const cleaned: Record<string, string | undefined> = { ...environment };
+  const cleaned: Record<string, string | undefined> = {
+    ...environment,
+    // The stable shim consumes this before the final harness starts. It lets automation
+    // delegates verify their catalogue reservation even though no Claude parent process exists.
+    CCS_LAUNCH_PARENT_SESSION_ID: parentSessionId,
+  };
+  const shimDirectory = join(cleaned.HOME ?? homedir(), ".ccs", "bin");
+  const pathEntries = (cleaned.PATH ?? "").split(delimiter).filter(
+    (entry) => entry.length > 0 && entry !== shimDirectory,
+  );
+  cleaned.PATH = [shimDirectory, ...pathEntries].join(delimiter);
   delete cleaned.CLAUDE_CODE_SUBAGENT_MODEL;
+  // Public creator declarations describe this one delegated birth. The command layer converts
+  // them to CCS_LAUNCH_CREATOR_* values for shim verification, then the shim removes those too.
+  delete cleaned.CCS_CREATOR_KIND;
+  delete cleaned.CCS_CREATOR_REF;
   return cleaned;
 }
 
@@ -111,7 +128,7 @@ export function executeDelegate(
   const launched = dependencies.launch({
     argv,
     cwd: request.cwd,
-    environment: cleanEnvironment(dependencies.environment),
+    environment: cleanEnvironment(dependencies.environment, request.parentSessionId),
   });
   if (!launched.ok) {
     dependencies.recordLaunchFailure(sessionId, launched.error.message);

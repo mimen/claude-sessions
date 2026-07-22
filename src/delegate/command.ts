@@ -13,10 +13,16 @@ import {
   setParent,
   setResumeId,
   setSessionClass,
+  setCreatorKind,
+  setCreatorRef,
+  setLaunchChannel,
+  setLauncherIdentity,
+  type CreatorKind,
 } from "../catalogue/db.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { err, ok, type Result } from "../result.ts";
 import { parseDelegateArgs } from "./args.ts";
+import { resolveDelegateCreator } from "../session-provenance.ts";
 import {
   executeDelegate,
   type DelegateDependencies,
@@ -33,7 +39,17 @@ function errorText(error: object): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function reserveDelegate(db: Database, input: DelegateReservation): Result<void> {
+interface DelegateCreatorContext {
+  readonly kind: CreatorKind;
+  readonly ref: string | null;
+  readonly launcherIdentity: string | null;
+}
+
+function reserveDelegate(
+  db: Database,
+  input: DelegateReservation,
+  creator: DelegateCreatorContext,
+): Result<void> {
   const now = new Date().toISOString();
   try {
     db.transaction(() => {
@@ -42,6 +58,10 @@ function reserveDelegate(db: Database, input: DelegateReservation): Result<void>
       setResumeId(db, input.sessionId, input.sessionId, now);
       setParent(db, input.sessionId, input.parentSessionId, now);
       setSessionClass(db, input.sessionId, "auxiliary", now);
+      setCreatorKind(db, input.sessionId, creator.kind, now);
+      setCreatorRef(db, input.sessionId, creator.ref, now);
+      setLaunchChannel(db, input.sessionId, "ccs_delegate", now);
+      setLauncherIdentity(db, input.sessionId, creator.launcherIdentity, now);
       for (const tag of ["auxiliary", "delegated", `seat:${input.seat}`, `provider:${input.provider}`]) {
         addTag(db, input.sessionId, tag);
       }
@@ -95,6 +115,7 @@ function parentExists(catalogue: Database, sessionId: string): boolean {
 function createDependencies(
   db: Database,
   environment: Readonly<Record<string, string | undefined>>,
+  creator: DelegateCreatorContext,
 ): DelegateDependencies {
   return {
     environment,
@@ -106,7 +127,7 @@ function createDependencies(
         return false;
       }
     },
-    reserve: (input) => reserveDelegate(db, input),
+    reserve: (input) => reserveDelegate(db, input, creator),
     launch: (input): Result<DelegateLaunchResult> => {
       try {
         const process = Bun.spawnSync([...input.argv], {
@@ -143,6 +164,16 @@ export function delegateCommand(
     console.error(`ccs delegate: ${parsed.error.message}`);
     return 2;
   }
+  const creatorResult = resolveDelegateCreator(environment, parsed.value.parentSessionId);
+  if (!creatorResult.ok) {
+    console.error(`ccs delegate: ${creatorResult.error.message}`);
+    return 2;
+  }
+  const creator: DelegateCreatorContext = {
+    kind: creatorResult.value.kind,
+    ref: creatorResult.value.ref,
+    launcherIdentity: environment.CLAUDE_IDENTITY ?? null,
+  };
 
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
@@ -160,7 +191,13 @@ export function delegateCommand(
         prompt: parsed.value.prompt,
         seatsRoot: parsed.value.seatsRoot ?? defaultSeatsRoot(environment),
       },
-      createDependencies(db, environment),
+      createDependencies(db, {
+        ...environment,
+        // These internal values survive only as far as the stable shim, which verifies the
+        // pre-reserved birth and removes them before the final child harness starts.
+        CCS_LAUNCH_CREATOR_KIND: creator.kind,
+        CCS_LAUNCH_CREATOR_REF: creator.ref ?? undefined,
+      }, creator),
     );
     if (!result.ok) {
       console.error(`ccs delegate: ${result.error.message}`);
