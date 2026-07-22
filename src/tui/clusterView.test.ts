@@ -12,7 +12,7 @@ const cat = (o: Partial<CatalogueRow>): CatalogueRow => ({
   cluster: null, gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, identityKey: null, ...o,
 });
 
-test("buildClusterView: core tier first (★), then WORKERS grouped by epic short-name, no-system last", () => {
+test("buildClusterView: core tier first, then workers grouped by epic short-name, no-system last", () => {
   const catMap = new Map<string, CatalogueRow>([
     ["eval", cat({ sessionId: "eval", cluster: "pr-watch", role: "pr-watch-eval" })],
     ["w1", cat({ sessionId: "w1", cluster: "pr-watch", role: "pr-agent", groupingId: "E1" })],
@@ -31,7 +31,7 @@ test("buildClusterView: core tier first (★), then WORKERS grouped by epic shor
   // Nested headers: level-0 cluster, level-1 core/workers tiers, level-2 epic/role groups.
   expect(sections[0].section.name).toBe("pr-watch");
   expect(sections[0].section.level).toBe(0);
-  const core = named("core ★");
+  const core = named("core");
   const workers = named("workers");
   expect(core).toBeGreaterThan(-1);
   expect(sections[core].section.level).toBe(1);
@@ -51,6 +51,22 @@ test("buildClusterView: core tier first (★), then WORKERS grouped by epic shor
   // The idle stray lands in an `open` sub-group (level 1) directly after (no system).
   expect(sections[noSystem + 1].section.name).toBe("open");
   expect(sections[noSystem + 1].section.level).toBe(1);
+});
+
+test("buildClusterView: skips a redundant no-epic layer when every worker is unassigned", () => {
+  const catMap = new Map<string, CatalogueRow>([
+    ["w1", cat({ sessionId: "w1", cluster: "event-watch", role: "event-worker", groupingId: null })],
+    ["w2", cat({ sessionId: "w2", cluster: "event-watch", role: "event-worker", groupingId: null })],
+  ]);
+  const items = buildClusterView([row("w1"), row("w2")], {
+    catMap, epicMap: new Map(), openSet: new Set(), collapsedSections: new Set(),
+  });
+  const sections = items.filter((i) => i.kind === "section") as any[];
+  const workers = sections.find((s) => s.section.name === "workers");
+  expect(workers?.section.level).toBe(1);
+  expect(sections.find((s) => s.section.name === "(no epic)")).toBeUndefined();
+  const sessions = items.filter((i) => i.kind === "session") as any[];
+  expect(sessions.map((i) => i.depth)).toEqual([1, 1]);
 });
 
 test("buildClusterView: group with ALL sessions retired — outer count is total, inner 'done' fold has retired count", () => {
