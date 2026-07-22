@@ -58,7 +58,15 @@ func (m Model) View() string {
 	document := lipgloss.JoinVertical(lipgloss.Left, header, rule, body, footer)
 	out := lipgloss.NewStyle().Background(theme.BgBase).Padding(1, 2).Render(document)
 
-	if m.overlay != OverlayNone {
+	if m.confirmation != nil {
+		panel := clipBlock(m.renderConfirmation(), m.w, m.h)
+		out = lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, panel,
+			lipgloss.WithWhitespaceBackground(theme.BgBase))
+	} else if m.fleetResults != nil {
+		panel := clipBlock(m.renderFleetResults(), m.w, m.h)
+		out = lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, panel,
+			lipgloss.WithWhitespaceBackground(theme.BgBase))
+	} else if m.overlay != OverlayNone {
 		panel := clipBlock(m.renderOverlay(), m.w, m.h)
 		out = lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, panel,
 			lipgloss.WithWhitespaceBackground(theme.BgBase))
@@ -237,11 +245,21 @@ func (m Model) renderPreview(width int, height int) string {
 		fg(theme.FgMoreSubtle).Render(truncate(session.Project+" · "+session.Duration+" active", contentWidth)),
 		theme.Pill(session.State, theme.StateColor(session.State)) + "  " + classChip(classification),
 		fg(theme.Sep).Render(strings.Repeat("─", contentWidth)),
+	}
+	if summary := m.summaries[session.ID]; summary != "" {
+		lines = append(lines, "", sect("Summary"))
+		for _, summaryLine := range strings.Split(summary, "\n") {
+			for _, wrapped := range wrapPlain(summaryLine, contentWidth) {
+				lines = append(lines, fg(theme.FgSubtle).Render(wrapped))
+			}
+		}
+	}
+	lines = append(lines,
 		"",
 		sect("Cost"),
-		fg(theme.CostColor(session.TotalCost)).Bold(true).Render(nonEmpty(data.FormatCost(session.SelfCost), "$0")) +
+		fg(theme.CostColor(session.TotalCost)).Bold(true).Render(nonEmpty(data.FormatCost(session.SelfCost), "$0"))+
 			fg(theme.FgMoreSubtle).Render(" self · "+nonEmpty(data.FormatCost(session.TotalCost), "$0")+" total"),
-	}
+	)
 	if session.ProviderCost.Claude > 0 {
 		lines = append(lines, costBar(contentWidth, "Claude", session.ProviderCost.Claude, session.TotalCost, theme.Model("claude-opus-4-8").Color))
 	}
@@ -462,6 +480,11 @@ func (m Model) renderHelp() string {
 		{"p", "show / hide preview pane"},
 		{"g", "cycle default / tree / flat"},
 		{"/", "fuzzy title / project / task filter"},
+		{"t / C / X", "retitle / mark done / archive via ccs"},
+		{"e", "AI edit one session; review mutations"},
+		{"S", "summarize selected transcript"},
+		{"A", "ask across transcript excerpts"},
+		{"D", "AI cleanup proposal; approve checked set"},
 		{"?", "this help · q quit"},
 	}
 	panelWidth := min(62, max(8, m.w-2))
@@ -480,6 +503,9 @@ func (m Model) renderHelp() string {
 // ---- footer ----
 
 func (m Model) renderKeybar(width int) string {
+	if m.input != nil {
+		return fit(fg(theme.Accent).Bold(true).Render(m.input.label+" › ")+fg(theme.FgBase).Render(m.input.buffer)+fg(theme.FgMostSubtle).Render("  enter apply · esc cancel"), width)
+	}
 	if m.searching {
 		return fit(fg(theme.Accent).Bold(true).Render("/ ")+fg(theme.FgBase).Render(m.query)+fg(theme.FgMostSubtle).Render("  title · project · task"), width)
 	}
@@ -494,8 +520,8 @@ func (m Model) renderKeybar(width int) string {
 	}
 	items := [][2]string{
 		{"↑↓", "move"}, {"enter", "resume"}, {"r", "via…"}, {"v", "transcript"},
-		{"/", "search"}, {"g", "view:" + viewLabel}, {"s", "sort"}, {"p", "preview"},
-		{"?", "help"}, {"q", "quit"},
+		{"/", "search"}, {"g", "view:" + viewLabel}, {"t/e", "organize"}, {"C/X", "done/archive"},
+		{"S/A/D", "AI"}, {"?", "help"}, {"q", "quit"},
 	}
 	parts := make([]string, 0, len(items))
 	for _, item := range items {

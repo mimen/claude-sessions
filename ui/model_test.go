@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"ccsspike/data"
+	"ccsspike/inference"
 	"ccsspike/transcript"
 
 	"github.com/charmbracelet/lipgloss"
@@ -95,6 +96,12 @@ func TestNarrowViewDoesNotOverflowOrPanic(t *testing.T) {
 		model.overlay = OverlayNone
 		model.reader = &transcriptReader{title: "reader", document: transcript.Document{Lines: []transcript.Line{{Kind: transcript.KindUser, Text: strings.Repeat("long ", 100)}}}}
 		assertViewFits(t, model, "transcript reader")
+		model.reader = nil
+		model.confirmation = &confirmation{kind: confirmCleanup, title: "cleanup", items: []confirmationItem{{title: strings.Repeat("session ", 20), detail: strings.Repeat("reason ", 20), enabled: true}}}
+		assertViewFits(t, model, "confirmation")
+		model.confirmation = nil
+		model.fleetResults = &fleetResults{query: strings.Repeat("question ", 20), matches: []inference.AskMatch{{Title: strings.Repeat("match ", 20), Answer: strings.Repeat("answer ", 20), Reason: strings.Repeat("reason ", 20)}}}
+		assertViewFits(t, model, "fleet results")
 	}
 }
 
@@ -109,6 +116,15 @@ func assertViewFits(t *testing.T, model Model, label string) {
 		if width := lipgloss.Width(line); width > model.w {
 			t.Fatalf("%dx%d %s line %d width = %d", model.w, model.h, label, lineNumber+1, width)
 		}
+	}
+}
+
+func TestFleetCandidateRankingUsesIndexedSkeleton(t *testing.T) {
+	snapshot := testSnapshot(3)
+	snapshot.Sessions[2].Skeleton = "user: configured the grok build runner"
+	indexes := fleetCandidateIndexes(snapshot.Sessions, "grok build", 3)
+	if len(indexes) == 0 || indexes[0] != 2 {
+		t.Fatalf("indexes = %v, want session 2 first", indexes)
 	}
 }
 

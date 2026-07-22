@@ -64,57 +64,43 @@ type block struct {
 // Read streams a JSONL transcript and retains the most recent maxMessages rendered turns.
 // A zero/negative limit uses 2,000 turns. Corrupt records are skipped.
 func Read(path string, maxMessages int) (Document, error) {
-	if maxMessages <= 0 {
-		maxMessages = 2000
+	file, err := os.Open(path)
+	if err != nil {
+		return Document{}, fmt.Errorf("open transcript: %w", err)
+	}
+	defer file.Close()
+	return scanDocument(file, maxMessages, false)
+}
+
+// ReadRecent reads only the byte tail before normalizing the most recent turns. It is used for
+// fleet-wide inference so a query never rescans hundreds of multi-megabyte transcripts.
+func ReadRecent(path string, maxMessages int, maxBytes int64) (Document, error) {
+	if maxBytes <= 0 {
+		maxBytes = 2 * 1024 * 1024
 	}
 	file, err := os.Open(path)
 	if err != nil {
 		return Document{}, fmt.Errorf("open transcript: %w", err)
 	}
 	defer file.Close()
-
-	turns := make([][]Line, 0, min(maxMessages, 256))
-	truncated := false
-	format := "unknown"
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), 32*1024*1024)
-	for scanner.Scan() {
-		raw := strings.TrimSpace(scanner.Text())
-		if raw == "" {
-			continue
-		}
-		lines, observedFormat := parseRecord([]byte(raw))
-		if len(lines) == 0 {
-			continue
-		}
-		if format == "unknown" && observedFormat != "" {
-			format = observedFormat
-		} else if observedFormat != "" && format != observedFormat {
-			format = "mixed"
-		}
-		if len(turns) == maxMessages {
-			copy(turns, turns[1:])
-			turns[len(turns)-1] = lines
-			truncated = true
-		} else {
-			turns = append(turns, lines)
-		}
+	info, err := file.Stat()
+	if err != nil {
+		return Document{}, fmt.Errorf("stat transcript: %w", err)
 	}
-	if err := scanner.Err(); err != nil {
-		return Document{}, fmt.Errorf("read transcript: %w", err)
+	offset := info.Size() - maxBytes
+	partial := offset > 0
+	if offset < 0 {
+		offset = 0
 	}
-
-	lines := make([]Line, 0, len(turns)*2)
-	for _, turn := range turns {
-		lines = append(lines, turn...)
-		lines = append(lines, Line{Kind: KindMeta})
+	if _, err := file.Seek(offset, 0); err != nil {
+		return Document{}, fmt.Errorf("seek transcript tail: %w", err)
 	}
-	return Document{Lines: lines, Truncated: truncated, Format: format}, nil
+	return scanDocument(file, maxMessages, partial)
 }
 
 // RecentText returns a bounded, role-labelled tail for inference prompts.
 func RecentText(path string, maxMessages int, maxChars int) (string, error) {
-	document, err := Read(path, maxMessages)
+	document, err := ReadRecent(path, maxMessages, 2*1024*1024)
 	if err != nil {
 		return "", err
 	}
@@ -140,6 +126,51 @@ func RecentText(path string, maxMessages int, maxChars int) (string, error) {
 		}
 	}
 	return text, nil
+}
+
+func scanDocument(file *os.File, maxMessages int, discardFirstPartial bool) (Document, error) {
+	if maxMessages <= 0 {
+		maxMessages = 2000
+	}
+	turns := make([][]Line, 0, min(maxMessages, 256))
+	truncated := discardFirstPartial
+	format := "unknown"
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 32*1024*1024)
+	if discardFirstPartial {
+		scanner.Scan()
+	}
+	for scanner.Scan() {
+		raw := strings.TrimSpace(scanner.Text())
+		if raw == "" {
+			continue
+		}
+		lines, observedFormat := parseRecord([]byte(raw))
+		if len(lines) == 0 {
+			continue
+		}
+		if format == "unknown" && observedFormat != "" {
+			format = observedFormat
+		} else if observedFormat != "" && format != observedFormat {
+			format = "mixed"
+		}
+		if len(turns) == maxMessages {
+			copy(turns, turns[1:])
+			turns[len(turns)-1] = lines
+			truncated = true
+		} else {
+			turns = append(turns, lines)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return Document{}, fmt.Errorf("read transcript: %w", err)
+	}
+	lines := make([]Line, 0, len(turns)*2)
+	for _, turn := range turns {
+		lines = append(lines, turn...)
+		lines = append(lines, Line{Kind: KindMeta})
+	}
+	return Document{Lines: lines, Truncated: truncated, Format: format}, nil
 }
 
 func parseRecord(raw []byte) ([]Line, string) {
