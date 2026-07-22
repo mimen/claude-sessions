@@ -3,6 +3,7 @@ package ui
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"ccsspike/skills"
 
@@ -14,6 +15,8 @@ type skillView int
 const (
 	skillViewCategory skillView = iota
 	skillViewHome
+	skillViewName
+	skillViewActivity
 	skillViewFlat
 )
 
@@ -55,22 +58,23 @@ func (m Model) handleSkillKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.skillReader != nil {
-		page := max(1, m.h-5)
+		page := max(1, m.h-6)
+		maxScroll := max(0, len(m.skillReader.lines)-page)
 		switch message.String() {
 		case "esc", "q", "v":
 			m.skillReader = nil
 		case "up", "k":
 			m.skillReader.scroll = max(0, m.skillReader.scroll-1)
 		case "down", "j":
-			m.skillReader.scroll++
+			m.skillReader.scroll = min(maxScroll, m.skillReader.scroll+1)
 		case "pgup":
 			m.skillReader.scroll = max(0, m.skillReader.scroll-page)
 		case "pgdown", " ":
-			m.skillReader.scroll += page
+			m.skillReader.scroll = min(maxScroll, m.skillReader.scroll+page)
 		case "g":
 			m.skillReader.scroll = 0
 		case "G":
-			m.skillReader.scroll = 1_000_000_000
+			m.skillReader.scroll = maxScroll
 		case "tab", "right", "l":
 			m.cycleSkillFile(1)
 		case "left", "h":
@@ -116,7 +120,7 @@ func (m Model) handleSkillKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.moveSkill(1)
 	case "g":
-		m.skillView = (m.skillView + 1) % 3
+		m.skillView = (m.skillView + 1) % 5
 		m.rebuildSkillRows()
 	case "/":
 		m.skillSearching = true
@@ -163,8 +167,13 @@ func buildSkillRows(all []skills.Skill, view skillView, query string) []skillRow
 	buckets := make(map[string][]int)
 	for _, index := range indexes {
 		key := all[index].Category
-		if view == skillViewHome {
+		switch view {
+		case skillViewHome:
 			key = all[index].Home
+		case skillViewName:
+			key = all[index].Name
+		case skillViewActivity:
+			key = skillActivity(all[index].Usage.LastUsed)
 		}
 		if key == "" {
 			key = "uncategorized"
@@ -175,15 +184,41 @@ func buildSkillRows(all []skills.Skill, view skillView, query string) []skillRow
 	for key := range buckets {
 		keys = append(keys, key)
 	}
-	sort.Slice(keys, func(i int, j int) bool {
-		if view == skillViewCategory && (keys[i] == "uncategorized") != (keys[j] == "uncategorized") {
-			return keys[j] == "uncategorized"
+	if view == skillViewActivity {
+		keys = keys[:0]
+		for _, key := range []string{"active", "dormant", "unobserved"} {
+			if len(buckets[key]) > 0 {
+				keys = append(keys, key)
+			}
 		}
-		if len(buckets[keys[i]]) != len(buckets[keys[j]]) {
-			return len(buckets[keys[i]]) > len(buckets[keys[j]])
+	} else if view == skillViewName {
+		unique := make([]int, 0)
+		grouped := keys[:0]
+		for _, key := range keys {
+			if len(buckets[key]) > 1 {
+				grouped = append(grouped, key)
+			} else {
+				unique = append(unique, buckets[key]...)
+				delete(buckets, key)
+			}
 		}
-		return keys[i] < keys[j]
-	})
+		sort.Strings(grouped)
+		keys = grouped
+		if len(unique) > 0 {
+			buckets["(unique names)"] = unique
+			keys = append(keys, "(unique names)")
+		}
+	} else {
+		sort.Slice(keys, func(i int, j int) bool {
+			if view == skillViewCategory && (keys[i] == "uncategorized") != (keys[j] == "uncategorized") {
+				return keys[j] == "uncategorized"
+			}
+			if len(buckets[keys[i]]) != len(buckets[keys[j]]) {
+				return len(buckets[keys[i]]) > len(buckets[keys[j]])
+			}
+			return keys[i] < keys[j]
+		})
+	}
 	rows := make([]skillRow, 0, len(indexes)+len(keys))
 	for _, key := range keys {
 		rows = append(rows, skillRow{header: true, key: key, label: key, count: len(buckets[key])})
@@ -192,6 +227,20 @@ func buildSkillRows(all []skills.Skill, view skillView, query string) []skillRow
 		}
 	}
 	return rows
+}
+
+func skillActivity(lastUsed string) string {
+	if lastUsed == "" {
+		return "unobserved"
+	}
+	usedAt, err := time.Parse(time.RFC3339Nano, lastUsed)
+	if err != nil {
+		return "unobserved"
+	}
+	if time.Since(usedAt) <= 30*24*time.Hour {
+		return "active"
+	}
+	return "dormant"
 }
 
 func matchesSkill(skill skills.Skill, query string) bool {

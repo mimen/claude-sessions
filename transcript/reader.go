@@ -119,10 +119,13 @@ func RecentText(path string, maxMessages int, maxChars int) (string, error) {
 		builder.WriteByte('\n')
 	}
 	text := strings.TrimSpace(builder.String())
-	if maxChars > 0 && len(text) > maxChars {
-		text = text[len(text)-maxChars:]
-		if newline := strings.IndexByte(text, '\n'); newline >= 0 {
-			text = text[newline+1:]
+	if maxChars > 0 {
+		runes := []rune(text)
+		if len(runes) > maxChars {
+			text = string(runes[len(runes)-maxChars:])
+			if newline := strings.IndexByte(text, '\n'); newline >= 0 {
+				text = text[newline+1:]
+			}
 		}
 	}
 	return text, nil

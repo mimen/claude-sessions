@@ -52,12 +52,19 @@ func Files(skill Skill) []File {
 
 // ReadFile reads one listed relative path while enforcing containment.
 func ReadFile(skill Skill, relative string) ([]string, error) {
-	root := filepath.Clean(skill.RealPath)
+	root, err := filepath.EvalSymlinks(filepath.Clean(skill.RealPath))
+	if err != nil {
+		return nil, fmt.Errorf("resolve skill root: %w", err)
+	}
 	path := filepath.Clean(filepath.Join(root, relative))
-	if path != root && !strings.HasPrefix(path, root+string(filepath.Separator)) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve skill file: %w", err)
+	}
+	if resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
 		return nil, fmt.Errorf("skill file escapes root: %s", relative)
 	}
-	contents, err := os.ReadFile(path)
+	contents, err := os.ReadFile(resolved)
 	if err != nil {
 		return nil, fmt.Errorf("read skill file: %w", err)
 	}

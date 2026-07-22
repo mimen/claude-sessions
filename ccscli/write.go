@@ -4,6 +4,7 @@ package ccscli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -37,14 +38,45 @@ func Run(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+func ensureCatalogued(ctx context.Context, sessionID string) error {
+	output, err := Run(ctx, "session", sessionID, "--json")
+	if err != nil {
+		return fmt.Errorf("inspect session before write: %w", err)
+	}
+	var state struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(output), &state); err != nil {
+		return fmt.Errorf("decode ccs session state: %w", err)
+	}
+	switch state.State {
+	case "catalogued":
+		return nil
+	case "indexed-unattached":
+		_, err := Run(ctx, "session-fields", sessionID, "--json", `{"customTitle":null}`)
+		if err != nil {
+			return fmt.Errorf("materialize catalogue row through ccs: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("ccs returned unsupported session state %q", state.State)
+	}
+}
+
 // SetTitle uses the preferred per-session title command.
 func SetTitle(ctx context.Context, sessionID string, title string) error {
+	if err := ensureCatalogued(ctx, sessionID); err != nil {
+		return err
+	}
 	_, err := Run(ctx, "session", "title", sessionID, title)
 	return err
 }
 
 // MarkCompleted changes per-session completion state through ccs mark.
 func MarkCompleted(ctx context.Context, sessionID string, enabled bool) error {
+	if err := ensureCatalogued(ctx, sessionID); err != nil {
+		return err
+	}
 	args := []string{"mark", sessionID, "--completed"}
 	if !enabled {
 		args = append(args, "--off")
@@ -55,6 +87,9 @@ func MarkCompleted(ctx context.Context, sessionID string, enabled bool) error {
 
 // MarkArchived changes per-session archive state through ccs mark.
 func MarkArchived(ctx context.Context, sessionID string, enabled bool) error {
+	if err := ensureCatalogued(ctx, sessionID); err != nil {
+		return err
+	}
 	args := []string{"mark", sessionID, "--archived"}
 	if !enabled {
 		args = append(args, "--off")
@@ -68,6 +103,9 @@ func ApplyMutation(ctx context.Context, mutation inference.MetadataMutation) err
 	switch mutation.Op {
 	case "title":
 		if mutation.Value == nil {
+			if err := ensureCatalogued(ctx, mutation.SessionID); err != nil {
+				return err
+			}
 			_, err := Run(ctx, "session", "unset", mutation.SessionID, "--title")
 			return err
 		}
@@ -77,6 +115,9 @@ func ApplyMutation(ctx context.Context, mutation inference.MetadataMutation) err
 	case "archived":
 		return MarkArchived(ctx, mutation.SessionID, mutation.Enabled != nil && *mutation.Enabled)
 	case "parent", "parked", "identity":
+		if err := ensureCatalogued(ctx, mutation.SessionID); err != nil {
+			return err
+		}
 		flag := "--" + mutation.Op
 		if mutation.Value == nil {
 			_, err := Run(ctx, "session", "unset", mutation.SessionID, flag)

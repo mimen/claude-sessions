@@ -2,6 +2,7 @@
 package resume
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"ccsspike/data"
 )
@@ -22,8 +24,11 @@ type Command struct {
 }
 
 // Build constructs the origin/cross-backend resume command from indexed metadata.
-func Build(session data.Session, launcher data.Launcher) (Command, string) {
-	cwd, note := resolveCWD(session)
+func Build(session data.Session, launcher data.Launcher) (Command, string, error) {
+	cwd, note, err := resolveCWD(session)
+	if err != nil {
+		return Command{}, "", err
+	}
 	binary := strings.TrimSpace(launcher.Backend)
 	if binary == "" {
 		binary = "claude"
@@ -36,7 +41,7 @@ func Build(session data.Session, launcher data.Launcher) (Command, string) {
 		Argv: []string{binary, "--resume", resumeID},
 		CWD:  cwd,
 		Env:  copyEnv(launcher.Env),
-	}, note
+	}, note, nil
 }
 
 // RunInline hands stdin/stdout/stderr to the interactive launcher.
@@ -69,12 +74,18 @@ func FocusLive(session data.Session) error {
 	if binary == "" {
 		binary = "cmux"
 	}
-	selectCommand := exec.Command(binary, "select-workspace", "--workspace", session.LiveWorkspaceRef, "--window", session.LiveWindowRef)
-	if output, err := selectCommand.CombinedOutput(); err != nil {
+	selectCtx, cancelSelect := context.WithTimeout(context.Background(), 3*time.Second)
+	selectCommand := exec.CommandContext(selectCtx, binary, "select-workspace", "--workspace", session.LiveWorkspaceRef, "--window", session.LiveWindowRef)
+	output, err := selectCommand.CombinedOutput()
+	cancelSelect()
+	if err != nil {
 		return fmt.Errorf("focus live workspace: %s", commandOutput(output, err))
 	}
-	focusCommand := exec.Command(binary, "focus-window", "--window", session.LiveWindowRef)
-	if output, err := focusCommand.CombinedOutput(); err != nil {
+	focusCtx, cancelFocus := context.WithTimeout(context.Background(), 3*time.Second)
+	focusCommand := exec.CommandContext(focusCtx, binary, "focus-window", "--window", session.LiveWindowRef)
+	output, err = focusCommand.CombinedOutput()
+	cancelFocus()
+	if err != nil {
 		return fmt.Errorf("focus live window: %s", commandOutput(output, err))
 	}
 	return nil
@@ -96,13 +107,11 @@ func OpenCmux(command Command, title string) error {
 	if binary == "" {
 		binary = "cmux"
 	}
-	cmd := exec.Command(binary, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			message = err.Error()
-		}
-		return fmt.Errorf("open cmux workspace: %s", message)
+		return fmt.Errorf("open cmux workspace: %s", commandOutput(output, err))
 	}
 	return nil
 }
@@ -125,20 +134,6 @@ func Shell(command Command) string {
 		parts = append(parts, shellQuote(arg))
 	}
 	return strings.Join(parts, " ")
-}
-
-func resolveCWD(session data.Session) (string, string) {
-	if isDirectory(session.CWD) {
-		return session.CWD, ""
-	}
-	if isDirectory(session.ProjectRoot) {
-		return session.ProjectRoot, "recorded cwd is gone; using project root"
-	}
-	home, err := os.UserHomeDir()
-	if err == nil && isDirectory(home) {
-		return home, "recorded cwd and project root are gone; using home"
-	}
-	return ".", "recorded cwd and project root are gone; using current directory"
 }
 
 func isDirectory(path string) bool {

@@ -117,6 +117,7 @@ func MetadataEdit(ctx context.Context, engine Engine, instruction string, sessio
 		}
 	}
 	mutations := make([]MetadataMutation, 0, len(result.Mutations))
+	seenMutations := make(map[string]bool)
 	for _, candidate := range result.Mutations {
 		if candidate.N != focusIndex+1 {
 			return nil, fmt.Errorf("engine targeted session #%d outside focus", candidate.N)
@@ -125,6 +126,14 @@ func MetadataEdit(ctx context.Context, engine Engine, instruction string, sessio
 		if err != nil {
 			return nil, err
 		}
+		key := mutation.SessionID + "\x00" + mutation.Op
+		if mutation.Op == "identity_field" {
+			key += "\x00" + mutation.Field
+		}
+		if seenMutations[key] {
+			return nil, fmt.Errorf("engine proposed duplicate or conflicting %s mutations", mutation.Op)
+		}
+		seenMutations[key] = true
 		mutations = append(mutations, mutation)
 	}
 	return mutations, nil

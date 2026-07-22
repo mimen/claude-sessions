@@ -35,8 +35,10 @@ func Shot(name string, snapshot data.Snapshot) string {
 		})
 		loadShotTranscript(&model)
 		if session, ok := model.selectedSession(); ok {
-			if document, loaded := model.transcripts[session.ID]; loaded {
-				model.reader = &transcriptReader{sessionID: session.ID, title: session.Title, document: document, scroll: 1_000_000}
+			if document, err := transcript.Read(session.Path, 2000); err == nil {
+				model.cacheFullTranscript(session.ID, document)
+				model.openTranscriptDocument(session, document)
+				model.reader.scroll = max(0, len(model.reader.visual)-max(1, model.h-6))
 			}
 		}
 	case "route":
@@ -115,8 +117,9 @@ func loadShotTranscript(model *Model) {
 	if _, loaded := model.transcripts[session.ID]; loaded {
 		return
 	}
-	if document, err := transcript.Read(session.Path, 2000); err == nil {
-		model.transcripts[session.ID] = document
+	if document, err := transcript.ReadRecent(session.Path, 200, 512*1024); err == nil {
+		model.cachePeekTranscript(session.ID, document)
+		model.transcriptLoadedAt[session.ID] = model.snapshot.LoadedAt
 		model.peekSession = session.ID
 		model.peekScroll = max(0, len(document.Lines)-6)
 	}

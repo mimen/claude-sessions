@@ -87,7 +87,7 @@ The shared `transcript/` reader streams or tail-reads JSONL, skips corrupt recor
 - direct gateway `role` / `content` records;
 - OpenAI Responses-style `response.output_text` and output-item records.
 
-The full pager retains the most recent 2,000 rendered turns and labels a truncated document as a recent tail. Fleet-wide AI calls use byte-bounded transcript tails plus CCS’s indexed opening/closing skeleton, avoiding full rescans of hundreds of large files.
+The dossier peek byte-tail-reads at most 512 KiB and caches a bounded set of sessions with in-flight load deduplication; live-session peeks refresh after a short interval. Opening `v` separately streams the full file while retaining the most recent 2,000 rendered turns. Visual wrapping is precomputed for responsive paging, and a truncated document is labeled as a recent tail. Fleet-wide AI calls use byte-bounded transcript tails plus CCS’s indexed opening/closing skeleton, avoiding full rescans of hundreds of large files.
 
 ## Resume contract
 
@@ -97,7 +97,9 @@ Closed sessions resume with:
 <launcher binary> --resume <indexed resume_id>
 ```
 
-The recorded cwd is preferred, then the project root, then the home directory. Inline resume is stored in the final Bubble Tea model, the alternate screen exits, and only then does the launcher inherit stdin/stdout/stderr. This prevents the TUI and interactive Claude process from owning the terminal simultaneously.
+Claude’s transcript storage folder is authoritative: its name must equal Claude’s encoding of `realpath(cwd)`. Resume first verifies the recorded cwd against that folder, then performs the same bounded filesystem decode as CCS (24 levels, 5,000 nodes, two matches), reports lossy-encoding ambiguity or budget exhaustion, and fails closed if the walk root cannot be read. If the exact recorded anchor was deleted, it is recreated only when doing so restores the verified mapping. Only when no mapped directory exists does resume fall back to the existing recorded cwd, project root, then home.
+
+Inline resume is stored in the final Bubble Tea model, the alternate screen exits, and only then does the launcher inherit stdin/stdout/stderr. This prevents the TUI and interactive Claude process from owning the terminal simultaneously.
 
 Launcher eligibility and origin-backend selection mirror CCS model-glob semantics. A pure GPT history selects the most specific eligible `gpt-*` launcher; mixed/unknown histories fall back to an eligible catch-all. If `claude-gpt` is installed and no launcher config exists, it is exposed automatically alongside `claude`. `cmux` creates a new focused workspace with safe shell quoting and launcher environment variables. A session already live in cmux is focused by its exact surface-derived workspace/window refs instead of duplicated.
 
@@ -113,7 +115,9 @@ SQLite is never opened for writing by this program. There is no Go mutation sche
 | Parent, parked task, identity attachment | `ccs session set` / `ccs session unset` |
 | Durable identity field | `ccs identity set <key> --field=value` or `--unset=field` |
 
-The AI editor returns schema-forced mutations against a numbered session list. Go validates the focus session, operation, parent references, identity keys, booleans, title bounds, and identity-field allowlist. Each approved mutation is then executed as a separate `ccs` subprocess. Cleanup similarly applies one `ccs mark --archived` call per approved session.
+Before a session mutation, Go asks `ccs session <id> --json` for its ownership state. An indexed-but-uncatalogued session is materialized through `ccs session-fields <id> --json '{"customTitle":null}'`; Go still never writes SQLite. This makes organize actions work for every indexed session visible on the landing page.
+
+The AI editor returns schema-forced mutations against a numbered session list. Go validates the focus session, operation, duplicate/conflicting changes, parent references, identity keys, booleans, title bounds, and identity-field allowlist. Each approved mutation is then executed as a separate `ccs` subprocess. Cleanup similarly applies one `ccs mark --archived` call per approved session. A snapshot reload runs after both success and failure so a partially completed batch is never left invisible in the TUI.
 
 ## Inference seam
 
@@ -124,11 +128,11 @@ The AI editor returns schema-forced mutations against a numbered session list. G
 3. Claude: `claude -p --no-session-persistence --strict-mcp-config --output-format json --json-schema ...`.
 4. Bounded stdin payload, timeout, schema-forced result, and no agentic tool access.
 
-The same seam powers `e`, `S`, ask-the-fleet, and cleanup. There are no background model calls.
+The same seam powers `e`, `S`, ask-the-fleet, and cleanup. Ask-the-fleet ranks every visible session—not a fixed lexical shortlist—inside a shared 700,000-character evidence budget, with stronger lexical candidates ordered first. There are no background model calls.
 
 ## Skills mode
 
-`Tab` opens a separate machine-wide Skills registry. It reads `~/.ccs/cache/skills.db` in SQLite `mode=ro` when populated. If the rebuildable cache is empty or on an older schema, it scans installed/global skills, plugin cache, the canonical vault registry, vault workspaces, and programming repositories without writing a cache.
+`Tab` opens a separate machine-wide Skills registry. It reads `~/.ccs/cache/skills.db` in SQLite `mode=ro` when populated. If the rebuildable cache is empty or on an older schema, it scans installed/global skills, plugin cache, the canonical vault registry, vault workspaces, and programming repositories without writing a cache. Claude, Codex, Grok, Hermes, Cursor, IDE, agents, archive, and other discovered ecosystems remain visible; only marketplace catalogue listings, linked-worktree copies, and exact-content shadow duplicates are hidden.
 
 Skills keys:
 
@@ -136,7 +140,7 @@ Skills keys:
 | --- | --- |
 | `Tab` | Return to sessions |
 | `↑` / `↓`, `j` / `k` | Move |
-| `g` | Cycle category → home → flat |
+| `g` | Cycle category → home → name → activity → flat |
 | `/` | Fuzzy filter name, description, path, category, and tags |
 | `p` | Toggle metadata/file preview |
 | `v` / `enter` | Open the selected skill’s file reader |
@@ -185,6 +189,7 @@ Skills organization writes (tags, categories, archive/move, opening an editor) a
 
 ```bash
 go test ./...
+go test -race ./...
 go vet ./...
 go build ./...
 go run .

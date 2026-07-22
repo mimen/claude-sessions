@@ -24,6 +24,25 @@ func TestClassifyAndHome(t *testing.T) {
 	}
 }
 
+func TestVisibleSkillsKeepsAllInstalledEcosystems(t *testing.T) {
+	registry := []Skill{
+		{Name: "claude", Path: "/skills/claude", RealPath: "/skills/claude", Ecosystem: "claude-user", Hash: "a"},
+		{Name: "codex", Path: "/skills/codex", RealPath: "/skills/codex", Ecosystem: "codex", Hash: "b"},
+		{Name: "hermes", Path: "/skills/hermes", RealPath: "/skills/hermes", Ecosystem: "hermes", Hash: "c"},
+		{Name: "cursor", Path: "/skills/cursor", RealPath: "/skills/cursor", Ecosystem: "cursor", Hash: "d"},
+		{Name: "listing", Path: "/skills/listing", RealPath: "/skills/listing", Ecosystem: "marketplace", Hash: "e"},
+	}
+	visible := visibleSkills(registry)
+	if len(visible) != 4 {
+		t.Fatalf("visible = %+v", visible)
+	}
+	for _, skill := range visible {
+		if skill.Ecosystem == "marketplace" {
+			t.Fatal("marketplace listing remained visible")
+		}
+	}
+}
+
 func TestFilesKeepsSkillFirstAndReadContainsPath(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "SKILL.md"), []byte("# Skill"), 0o600); err != nil {

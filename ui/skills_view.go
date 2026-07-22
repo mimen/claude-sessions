@@ -20,9 +20,14 @@ func (m Model) renderSkillsScreen() string {
 	}
 	bodyH := max(1, innerH-4)
 	viewLabel := "category"
-	if m.skillView == skillViewHome {
+	switch m.skillView {
+	case skillViewHome:
 		viewLabel = "home"
-	} else if m.skillView == skillViewFlat {
+	case skillViewName:
+		viewLabel = "name"
+	case skillViewActivity:
+		viewLabel = "activity"
+	case skillViewFlat:
 		viewLabel = "flat"
 	}
 	brand := fg(theme.Accent).Bold(true).Render("ccs") + fg(theme.FgMoreSubtle).Render(" · skills")

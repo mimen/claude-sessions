@@ -19,6 +19,7 @@ type writeFinishedMsg struct {
 	preferredID string
 	status      string
 	snapshot    data.Snapshot
+	reloaded    bool
 	err         error
 }
 
@@ -53,7 +54,7 @@ func setTitleCmd(sessionID string, title string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := ccscli.SetTitle(ctx, sessionID, title); err != nil {
-			return writeFinishedMsg{preferredID: sessionID, err: err}
+			return reloadAfterFailure(sessionID, err)
 		}
 		return reloadAfterWrite(sessionID, "retitled → "+title)
 	}
@@ -64,7 +65,7 @@ func markCompletedCmd(sessionID string, preferredID string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := ccscli.MarkCompleted(ctx, sessionID, true); err != nil {
-			return writeFinishedMsg{preferredID: preferredID, err: err}
+			return reloadAfterFailure(preferredID, err)
 		}
 		return reloadAfterWrite(preferredID, "marked done")
 	}
@@ -75,7 +76,7 @@ func archiveBatchCmd(sessionIDs []string, preferredID string, status string) tea
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(max(30, len(sessionIDs)*10))*time.Second)
 		defer cancel()
 		if err := ccscli.ArchiveBatch(ctx, sessionIDs); err != nil {
-			return writeFinishedMsg{preferredID: preferredID, err: err}
+			return reloadAfterFailure(preferredID, err)
 		}
 		return reloadAfterWrite(preferredID, status)
 	}
@@ -86,7 +87,7 @@ func applyMutationsCmd(mutations []inference.MetadataMutation, preferredID strin
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(max(30, len(mutations)*10))*time.Second)
 		defer cancel()
 		if err := ccscli.ApplyMutations(ctx, mutations); err != nil {
-			return writeFinishedMsg{preferredID: preferredID, err: err}
+			return reloadAfterFailure(preferredID, err)
 		}
 		return reloadAfterWrite(preferredID, fmt.Sprintf("applied %d metadata changes", len(mutations)))
 	}
@@ -97,7 +98,15 @@ func reloadAfterWrite(preferredID string, status string) writeFinishedMsg {
 	if err != nil {
 		return writeFinishedMsg{preferredID: preferredID, status: status, err: fmt.Errorf("write succeeded; reload failed: %w", err)}
 	}
-	return writeFinishedMsg{preferredID: preferredID, status: status, snapshot: snapshot}
+	return writeFinishedMsg{preferredID: preferredID, status: status, snapshot: snapshot, reloaded: true}
+}
+
+func reloadAfterFailure(preferredID string, writeErr error) writeFinishedMsg {
+	snapshot, reloadErr := data.Load()
+	if reloadErr != nil {
+		return writeFinishedMsg{preferredID: preferredID, err: fmt.Errorf("%w; reload after partial write also failed: %v", writeErr, reloadErr)}
+	}
+	return writeFinishedMsg{preferredID: preferredID, snapshot: snapshot, reloaded: true, err: writeErr}
 }
 
 func metadataEditCmd(snapshot data.Snapshot, sessionID string, instruction string) tea.Cmd {
@@ -137,19 +146,18 @@ func askFleetCmd(snapshot data.Snapshot, query string) tea.Cmd {
 		if err != nil {
 			return fleetAskedMsg{query: query, err: err}
 		}
-		indexes := fleetCandidateIndexes(snapshot.Sessions, query, 100)
+		indexes := fleetCandidateIndexes(snapshot.Sessions, query, 0)
 		excerpts := make([]inference.SessionExcerpt, 0, len(indexes))
+		perSessionChars := clamp(700_000/max(1, len(indexes)), 1_200, 4_000)
 		for _, index := range indexes {
 			session := snapshot.Sessions[index]
-			recent, readErr := transcript.RecentText(session.Path, 80, 6_000)
-			if readErr != nil && session.Skeleton == "" {
-				continue
+			skeleton := truncateRunes(session.Skeleton, perSessionChars/2)
+			recent, readErr := transcript.RecentText(session.Path, 40, perSessionChars-len([]rune(skeleton)))
+			if readErr != nil && skeleton == "" {
+				recent = ""
 			}
-			text := strings.TrimSpace("INDEXED SKELETON:\n" + session.Skeleton + "\nRECENT:\n" + recent)
-			if len(text) > 12_000 {
-				text = text[:12_000]
-			}
-			excerpts = append(excerpts, inference.SessionExcerpt{Session: session, Transcript: text})
+			text := strings.TrimSpace("INDEXED SKELETON:\n" + skeleton + "\nRECENT:\n" + recent)
+			excerpts = append(excerpts, inference.SessionExcerpt{Session: session, Transcript: truncateRunes(text, perSessionChars)})
 		}
 		ctx, cancel := inference.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
@@ -191,16 +199,24 @@ func cleanupCmd(snapshot data.Snapshot) tea.Cmd {
 				continue
 			}
 			text := strings.TrimSpace("INDEXED SKELETON:\n" + session.Skeleton + "\nRECENT:\n" + recent)
-			if len(text) > 10_000 {
-				text = text[:10_000]
-			}
-			excerpts = append(excerpts, inference.SessionExcerpt{Session: session, Transcript: text})
+			excerpts = append(excerpts, inference.SessionExcerpt{Session: session, Transcript: truncateRunes(text, 10_000)})
 		}
 		ctx, cancel := inference.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 		proposals, err := inference.ProposeCleanup(ctx, engine, excerpts)
 		return cleanupProposedMsg{engine: engine.Name, proposals: proposals, err: err}
 	}
+}
+
+func truncateRunes(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit])
 }
 
 func fleetCandidateIndexes(sessions []data.Session, query string, limit int) []int {

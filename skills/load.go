@@ -186,6 +186,13 @@ func scanMachine(home string) ([]Skill, error) {
 		filepath.Join(home, ".claude", "skills"),
 		filepath.Join(home, ".claude", "plugins", "cache"),
 		filepath.Join(home, ".agents", "skills"),
+		filepath.Join(home, ".codex"),
+		filepath.Join(home, ".grok"),
+		filepath.Join(home, ".hermes"),
+		filepath.Join(home, ".cursor"),
+		filepath.Join(home, ".gemini"),
+		filepath.Join(home, ".vscode", "extensions"),
+		filepath.Join(home, "Downloads"),
 		filepath.Join(home, "Documents", "milad-vault", "ClaudeConfig", "skills"),
 		filepath.Join(home, "Documents", "milad-vault", "Workspaces"),
 		filepath.Join(home, "Programming", "Repos"),
@@ -206,7 +213,13 @@ func scanMachine(home string) ([]Skill, error) {
 		"-path", "*/.git", "-o",
 		"-path", "*/.archive", "-o",
 		"-path", "*/.claude/worktrees", "-o",
-		"-path", "*/.milad-vault-worktrees",
+		"-path", "*/.milad-vault-worktrees", "-o",
+		"-path", "*/.claude/plugins/marketplaces", "-o",
+		"-path", "*/.codex/.tmp", "-o",
+		"-path", "*/.codex/vendor_imports", "-o",
+		"-path", "*/.grok/marketplace-cache", "-o",
+		"-path", "*/.grok/bundled", "-o",
+		"-path", "*/.hermes/hermes-agent/optional-skills",
 		")", "-prune", "-o",
 		"-name", "SKILL.md", "-print",
 	)
@@ -323,13 +336,10 @@ func visibleSkills(skills []Skill) []Skill {
 	}
 	visible := make([]Skill, 0, len(skills))
 	for _, skill := range skills {
-		if shadowed[skill.Path] || isLinkedWorktree(skill.RealPath) {
+		if shadowed[skill.Path] || skill.Ecosystem == "marketplace" || isLinkedWorktree(skill.RealPath) {
 			continue
 		}
-		switch skill.Ecosystem {
-		case "claude-user", "claude-project", "agents", "plugin":
-			visible = append(visible, skill)
-		}
+		visible = append(visible, skill)
 	}
 	return visible
 }
@@ -445,17 +455,33 @@ func classifyPath(path string, home string) string {
 
 func homeOf(path string, home string) string {
 	short := strings.Replace(path, home, "~", 1)
-	if strings.HasPrefix(short, "~/.claude/skills/") || strings.Contains(short, "/ClaudeConfig/skills/") {
+	switch {
+	case strings.Contains(short, "/_archive/"), strings.Contains(short, "/deprecated/"):
+		return "archive"
+	case strings.HasPrefix(short, "~/Downloads/"):
+		return "downloads"
+	case strings.HasPrefix(short, "~/.claude/skills/"), strings.Contains(short, "/ClaudeConfig/skills/"):
 		return "global"
-	}
-	if strings.HasPrefix(short, "~/.agents/") {
+	case strings.HasPrefix(short, "~/.agents/"):
 		return "agents"
-	}
-	if match := strings.Split(short, "/.claude/skills/"); len(match) > 1 {
-		return filepath.Base(match[0])
-	}
-	if strings.HasPrefix(short, "~/.claude/plugins/") {
+	case strings.HasPrefix(short, "~/.codex/"):
+		return "codex"
+	case strings.HasPrefix(short, "~/.grok/"):
+		return "grok"
+	case strings.HasPrefix(short, "~/.cursor/"):
+		return "cursor"
+	case strings.HasPrefix(short, "~/.hermes/"):
+		return "hermes"
+	case strings.HasPrefix(short, "~/.vscode"):
+		return "ide"
+	case strings.HasPrefix(short, "~/.claude/plugins/"):
 		return "plugin"
+	}
+	if parts := strings.Split(short, "/.claude/skills/"); len(parts) > 1 {
+		return filepath.Base(parts[0])
+	}
+	if parts := strings.Split(short, "/.agents/skills/"); len(parts) > 1 {
+		return filepath.Base(parts[0])
 	}
 	return "other"
 }

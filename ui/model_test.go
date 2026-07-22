@@ -125,6 +125,49 @@ func assertViewFits(t *testing.T, model Model, label string) {
 	}
 }
 
+func TestTranscriptPeekDeduplicatesTailLoadAndFullReaderLoadsSeparately(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	old := `{"type":"user","message":{"role":"user","content":"` + strings.Repeat("old", 200_000) + `"}}` + "\n"
+	recent := `{"type":"assistant","message":{"role":"assistant","content":"recent answer"}}` + "\n"
+	if err := os.WriteFile(path, []byte(old+recent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := testSnapshot(1)
+	snapshot.Sessions[0].Path = path
+	model := New(snapshot)
+	peekCmd := model.loadSelectedTranscriptCmd()
+	if peekCmd == nil {
+		t.Fatal("first peek load returned no command")
+	}
+	if duplicate := model.loadSelectedTranscriptCmd(); duplicate != nil {
+		t.Fatal("in-flight peek load was not deduplicated")
+	}
+	peekMsg, ok := peekCmd().(transcriptLoadedMsg)
+	if !ok || peekMsg.full || peekMsg.err != nil || !peekMsg.document.Truncated {
+		t.Fatalf("peek message = %+v", peekMsg)
+	}
+	updated, _ := model.Update(peekMsg)
+	model = updated.(Model)
+	if len(model.transcripts[snapshot.Sessions[0].ID].Lines) == 0 {
+		t.Fatal("peek document was not cached")
+	}
+
+	updated, fullCmd := model.openTranscriptReader()
+	model = updated.(Model)
+	if fullCmd == nil || model.reader != nil {
+		t.Fatal("reader reused the bounded peek instead of loading the full transcript")
+	}
+	fullMsg, ok := fullCmd().(transcriptLoadedMsg)
+	if !ok || !fullMsg.full || fullMsg.err != nil {
+		t.Fatalf("full message = %+v", fullMsg)
+	}
+	updated, _ = model.Update(fullMsg)
+	model = updated.(Model)
+	if model.reader == nil || len(model.reader.visual) == 0 {
+		t.Fatal("full transcript reader did not precompute visual rows")
+	}
+}
+
 func TestSkillsRowsGroupByCategoryAndSearchDescription(t *testing.T) {
 	registry := []skills.Skill{
 		{Name: "alpha", Category: "dev", Description: "build the gateway"},
@@ -137,12 +180,38 @@ func TestSkillsRowsGroupByCategoryAndSearchDescription(t *testing.T) {
 	}
 }
 
+func TestSkillsNameAndActivityViewsRetainDuplicateAndUsageSignals(t *testing.T) {
+	now := time.Now()
+	registry := []skills.Skill{
+		{Name: "shared", Home: "codex", Usage: skills.Usage{LastUsed: now.Format(time.RFC3339Nano)}},
+		{Name: "shared", Home: "claude", Usage: skills.Usage{LastUsed: now.Add(-60 * 24 * time.Hour).Format(time.RFC3339Nano)}},
+		{Name: "unique", Home: "cursor"},
+	}
+	nameRows := buildSkillRows(registry, skillViewName, "")
+	if len(nameRows) != 5 || nameRows[0].label != "shared" || nameRows[3].label != "(unique names)" {
+		t.Fatalf("name rows = %+v", nameRows)
+	}
+	activityRows := buildSkillRows(registry, skillViewActivity, "")
+	headers := make([]string, 0, 3)
+	for _, row := range activityRows {
+		if row.header {
+			headers = append(headers, row.label)
+		}
+	}
+	if got := strings.Join(headers, ","); got != "active,dormant,unobserved" {
+		t.Fatalf("activity headers = %q", got)
+	}
+}
+
 func TestFleetCandidateRankingUsesIndexedSkeleton(t *testing.T) {
 	snapshot := testSnapshot(3)
 	snapshot.Sessions[2].Skeleton = "user: configured the grok build runner"
 	indexes := fleetCandidateIndexes(snapshot.Sessions, "grok build", 3)
 	if len(indexes) == 0 || indexes[0] != 2 {
 		t.Fatalf("indexes = %v, want session 2 first", indexes)
+	}
+	if all := fleetCandidateIndexes(snapshot.Sessions, "grok build", 0); len(all) != len(snapshot.Sessions) {
+		t.Fatalf("unlimited fleet candidates = %d, want %d", len(all), len(snapshot.Sessions))
 	}
 }
 

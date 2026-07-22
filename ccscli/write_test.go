@@ -13,7 +13,7 @@ import (
 func TestApplyMutationShellsToCCS(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "calls")
 	binary := filepath.Join(t.TempDir(), "ccs")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellPath(logPath) + "\n"
+	script := "#!/bin/sh\nif [ \"$1\" = session ] && [ \"$3\" = --json ]; then printf '{\"state\":\"catalogued\"}'; exit 0; fi\nprintf '%s\\n' \"$*\" >> " + shellPath(logPath) + "\n"
 	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -45,10 +45,51 @@ func TestApplyMutationShellsToCCS(t *testing.T) {
 	}
 }
 
+func TestWriteMaterializesIndexedUnattachedSessionThroughCCS(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "calls")
+	binary := filepath.Join(t.TempDir(), "ccs")
+	script := "#!/bin/sh\nif [ \"$1\" = session ] && [ \"$3\" = --json ]; then printf '{\"state\":\"indexed-unattached\"}'; exit 0; fi\nprintf '%s\\n' \"$*\" >> " + shellPath(logPath) + "\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCS_BINARY", binary)
+	if err := MarkArchived(context.Background(), "loose", true); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(contents)
+	if got != "session-fields loose --json {\"customTitle\":null}\nmark loose --archived\n" {
+		t.Fatalf("calls = %q", got)
+	}
+}
+
+func TestUnsetTitleMaterializesIndexedUnattachedSession(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "calls")
+	binary := filepath.Join(t.TempDir(), "ccs")
+	script := "#!/bin/sh\nif [ \"$1\" = session ] && [ \"$3\" = --json ]; then printf '{\"state\":\"indexed-unattached\"}'; exit 0; fi\nprintf '%s\\n' \"$*\" >> " + shellPath(logPath) + "\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCS_BINARY", binary)
+	if err := ApplyMutation(context.Background(), inference.MetadataMutation{SessionID: "loose", Op: "title"}); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(contents); got != "session-fields loose --json {\"customTitle\":null}\nsession unset loose --title\n" {
+		t.Fatalf("calls = %q", got)
+	}
+}
+
 func TestArchiveBatchUsesIndividualMarkCommands(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "calls")
 	binary := filepath.Join(t.TempDir(), "ccs")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellPath(logPath) + "\n"
+	script := "#!/bin/sh\nif [ \"$1\" = session ] && [ \"$3\" = --json ]; then printf '{\"state\":\"catalogued\"}'; exit 0; fi\nprintf '%s\\n' \"$*\" >> " + shellPath(logPath) + "\n"
 	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}

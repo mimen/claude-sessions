@@ -11,10 +11,13 @@ import (
 
 func TestBuildUsesResumeIDAndLauncher(t *testing.T) {
 	cwd := t.TempDir()
-	command, note := Build(data.Session{ID: "filename", ResumeID: "internal", CWD: cwd}, data.Launcher{
+	command, note, err := Build(data.Session{ID: "filename", ResumeID: "internal", CWD: cwd}, data.Launcher{
 		Backend: "claude-gpt",
 		Env:     map[string]string{"GATEWAY": "one two"},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if note != "" {
 		t.Fatalf("note = %q", note)
 	}
@@ -28,7 +31,10 @@ func TestBuildUsesResumeIDAndLauncher(t *testing.T) {
 
 func TestBuildFallsBackToProjectRoot(t *testing.T) {
 	root := t.TempDir()
-	command, note := Build(data.Session{ResumeID: "id", CWD: root + "/gone", ProjectRoot: root}, data.Launcher{Backend: "claude"})
+	command, note, err := Build(data.Session{ResumeID: "id", CWD: root + "/gone", ProjectRoot: root}, data.Launcher{Backend: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if command.CWD != root || note == "" {
 		t.Fatalf("cwd=%q note=%q", command.CWD, note)
 	}

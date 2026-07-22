@@ -23,7 +23,10 @@ func (m Model) renderTranscriptReader(width int, height int) string {
 	width = max(8, width)
 	height = max(5, height)
 	bodyHeight := max(1, height-4)
-	visual := transcriptVisualLines(m.reader.document.Lines, max(4, width-6))
+	visual := m.reader.visual
+	if m.reader.visualWidth != max(4, width-6) || visual == nil {
+		visual = transcriptVisualLines(m.reader.document.Lines, max(4, width-6))
+	}
 	maxScroll := max(0, len(visual)-bodyHeight)
 	scroll := clamp(m.reader.scroll, 0, maxScroll)
 	window := visual[scroll:min(len(visual), scroll+bodyHeight)]

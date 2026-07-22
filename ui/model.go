@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"time"
+
 	"ccsspike/data"
 	"ccsspike/resume"
 	"ccsspike/skills"
@@ -63,74 +65,85 @@ type liveFocusedMsg struct {
 type transcriptLoadedMsg struct {
 	sessionID string
 	document  transcript.Document
+	full      bool
 	err       error
 }
 
 type transcriptReader struct {
-	sessionID string
-	title     string
-	document  transcript.Document
-	scroll    int
+	sessionID   string
+	title       string
+	document    transcript.Document
+	visual      []visualTranscriptLine
+	visualWidth int
+	scroll      int
 }
 
 // Model is the single Bubble Tea state machine for the browser.
 type Model struct {
-	w, h           int
-	mode           AppMode
-	view           View
-	overlay        Overlay
-	snapshot       data.Snapshot
-	rows           []row
-	cursor         int
-	treeCursor     int
-	preview        bool
-	routes         []data.Launcher
-	routeCursor    int
-	routeLoading   bool
-	routeSession   string
-	routeError     string
-	query          string
-	searching      bool
-	transcripts    map[string]transcript.Document
-	transcriptErrs map[string]string
-	peekSession    string
-	peekScroll     int
-	openReaderID   string
-	reader         *transcriptReader
-	input          *textInput
-	confirmation   *confirmation
-	fleetResults   *fleetResults
-	summaries      map[string]string
-	skills         skills.Snapshot
-	skillRows      []skillRow
-	skillCursor    int
-	skillView      skillView
-	skillQuery     string
-	skillSearching bool
-	skillLoading   bool
-	skillError     string
-	skillPreview   bool
-	skillReader    *skillReader
-	handoff        *resume.Command
-	status         string
+	w, h               int
+	mode               AppMode
+	view               View
+	overlay            Overlay
+	snapshot           data.Snapshot
+	rows               []row
+	cursor             int
+	treeCursor         int
+	preview            bool
+	routes             []data.Launcher
+	routeCursor        int
+	routeLoading       bool
+	routeSession       string
+	routeError         string
+	query              string
+	searching          bool
+	transcripts        map[string]transcript.Document
+	fullTranscripts    map[string]transcript.Document
+	transcriptErrs     map[string]string
+	transcriptLoading  map[string]bool
+	transcriptLoadedAt map[string]time.Time
+	readerLoading      map[string]bool
+	peekSession        string
+	peekScroll         int
+	openReaderID       string
+	reader             *transcriptReader
+	input              *textInput
+	confirmation       *confirmation
+	fleetResults       *fleetResults
+	summaries          map[string]string
+	skills             skills.Snapshot
+	skillRows          []skillRow
+	skillCursor        int
+	skillView          skillView
+	skillQuery         string
+	skillSearching     bool
+	skillLoading       bool
+	skillError         string
+	skillPreview       bool
+	skillReader        *skillReader
+	handoff            *resume.Command
+	status             string
 }
 
 // New creates a browser over an immutable real-data snapshot.
 func New(snapshot data.Snapshot) Model {
 	rows := buildRows(snapshot.Sessions)
 	return Model{
-		w:              120,
-		h:              40,
-		view:           ViewGroups,
-		preview:        true,
-		skillView:      skillViewCategory,
-		skillPreview:   true,
-		snapshot:       snapshot,
-		rows:           rows,
-		cursor:         firstSessionRow(rows),
-		transcripts:    make(map[string]transcript.Document),
-		transcriptErrs: make(map[string]string),
-		summaries:      make(map[string]string),
+		w:                  120,
+		h:                  40,
+		view:               ViewGroups,
+		preview:            true,
+		skillView:          skillViewCategory,
+		skillPreview:       true,
+		snapshot:           snapshot,
+		rows:               rows,
+		cursor:             firstSessionRow(rows),
+		transcripts:        make(map[string]transcript.Document),
+		fullTranscripts:    make(map[string]transcript.Document),
+		transcriptErrs:     make(map[string]string),
+		transcriptLoading:  make(map[string]bool),
+		transcriptLoadedAt: make(map[string]time.Time),
+		readerLoading:      make(map[string]bool),
+		summaries:          make(map[string]string),
 	}
 }
 
@@ -177,6 +190,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w = max(1, msg.Width)
 		m.h = max(1, msg.Height)
+		m.reflowTranscriptReader()
 		return m, nil
 	case skillsLoadedMsg:
 		m.skillLoading = false
@@ -217,34 +231,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case transcriptLoadedMsg:
+		if msg.full {
+			delete(m.readerLoading, msg.sessionID)
+			if msg.err == nil {
+				m.cacheFullTranscript(msg.sessionID, msg.document)
+			}
+			if m.openReaderID == msg.sessionID {
+				m.openReaderID = ""
+				if msg.err != nil {
+					m.status = "transcript unavailable: " + msg.err.Error()
+				} else if session, ok := m.snapshot.SessionByID(msg.sessionID); ok {
+					m.openTranscriptDocument(session, msg.document)
+				}
+			}
+			return m, nil
+		}
+		delete(m.transcriptLoading, msg.sessionID)
+		m.transcriptLoadedAt[msg.sessionID] = time.Now()
 		if msg.err != nil {
 			m.transcriptErrs[msg.sessionID] = msg.err.Error()
 		} else {
-			m.transcripts[msg.sessionID] = msg.document
+			m.cachePeekTranscript(msg.sessionID, msg.document)
 			delete(m.transcriptErrs, msg.sessionID)
 		}
-		if session, ok := m.selectedSession(); ok && session.ID == msg.sessionID {
+		if session, ok := m.selectedSession(); ok && session.ID == msg.sessionID && msg.err == nil {
 			m.peekSession = msg.sessionID
 			m.peekScroll = max(0, len(msg.document.Lines)-6)
 		}
-		if m.openReaderID == msg.sessionID {
-			m.openReaderID = ""
-			if msg.err != nil {
-				m.status = "transcript unavailable: " + msg.err.Error()
-			} else {
-				session, ok := m.snapshot.SessionByID(msg.sessionID)
-				if ok {
-					m.reader = &transcriptReader{sessionID: session.ID, title: session.Title, document: msg.document}
-				}
-			}
-		}
 		return m, nil
 	case writeFinishedMsg:
+		if msg.reloaded {
+			m.replaceSnapshot(msg.snapshot, msg.preferredID)
+		}
 		if msg.err != nil {
 			m.status = msg.err.Error()
-			return m, nil
+			return m, m.loadSelectedTranscriptCmd()
 		}
-		m.replaceSnapshot(msg.snapshot, msg.preferredID)
 		m.status = msg.status
 		return m, m.loadSelectedTranscriptCmd()
 	case metadataProposedMsg:
@@ -305,21 +327,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.reader != nil {
 		page := max(1, m.h-6)
+		maxScroll := max(0, len(m.reader.visual)-page)
 		switch msg.String() {
 		case "esc", "q", "v":
 			m.reader = nil
 		case "up", "k":
 			m.reader.scroll = max(0, m.reader.scroll-1)
 		case "down", "j":
-			m.reader.scroll++
+			m.reader.scroll = min(maxScroll, m.reader.scroll+1)
 		case "pgup":
 			m.reader.scroll = max(0, m.reader.scroll-page)
 		case "pgdown", " ":
-			m.reader.scroll += page
+			m.reader.scroll = min(maxScroll, m.reader.scroll+page)
 		case "g":
 			m.reader.scroll = 0
 		case "G":
-			m.reader.scroll = 1_000_000_000
+			m.reader.scroll = maxScroll
 		}
 		return m, nil
 	}
@@ -369,8 +392,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.moveSelection(1)
 			return m, m.loadSelectedTranscriptCmd()
 		case "backspace", "delete":
-			if len(m.query) > 0 {
-				m.query = m.query[:len(m.query)-1]
+			runes := []rune(m.query)
+			if len(runes) > 0 {
+				m.query = string(runes[:len(runes)-1])
 				m.rebuildRows()
 			}
 		default:
@@ -379,7 +403,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.rebuildRows()
 			}
 		}
-		return m, nil
+		return m, m.loadSelectedTranscriptCmd()
 	}
 
 	switch msg.String() {
@@ -409,6 +433,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.rebuildRows()
 		m.status = ""
+		return m, m.loadSelectedTranscriptCmd()
 	case "p":
 		m.preview = !m.preview
 		m.status = ""
@@ -453,6 +478,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "v":
 		return m.openTranscriptReader()
 	case "/":
+		m.view = ViewFlat
+		m.rebuildRows()
 		m.searching = true
 		m.status = ""
 	case "s":
@@ -461,24 +488,70 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) loadSelectedTranscriptCmd() tea.Cmd {
+func (m *Model) loadSelectedTranscriptCmd() tea.Cmd {
 	session, ok := m.selectedSession()
-	if !ok || session.Path == "" {
+	if !ok || session.Path == "" || m.transcriptLoading[session.ID] {
 		return nil
 	}
-	if _, cached := m.transcripts[session.ID]; cached {
-		return nil
+	loadedAt, attempted := m.transcriptLoadedAt[session.ID]
+	if attempted {
+		age := time.Since(loadedAt)
+		_, cached := m.transcripts[session.ID]
+		live := session.State == "active" || session.LiveWorkspaceRef != ""
+		if (cached && (!live || age < 15*time.Second)) || (!cached && age < 30*time.Second) {
+			return nil
+		}
 	}
-	if _, failed := m.transcriptErrs[session.ID]; failed {
-		return nil
-	}
-	return loadTranscriptCmd(session)
+	m.transcriptLoading[session.ID] = true
+	return loadTranscriptCmd(session, false)
 }
 
-func loadTranscriptCmd(session data.Session) tea.Cmd {
+func loadTranscriptCmd(session data.Session, full bool) tea.Cmd {
 	return func() tea.Msg {
-		document, err := transcript.Read(session.Path, 2000)
-		return transcriptLoadedMsg{sessionID: session.ID, document: document, err: err}
+		var document transcript.Document
+		var err error
+		if full {
+			document, err = transcript.Read(session.Path, 2000)
+		} else {
+			document, err = transcript.ReadRecent(session.Path, 200, 512*1024)
+		}
+		return transcriptLoadedMsg{sessionID: session.ID, document: document, full: full, err: err}
+	}
+}
+
+func (m *Model) cachePeekTranscript(sessionID string, document transcript.Document) {
+	if _, exists := m.transcripts[sessionID]; !exists && len(m.transcripts) >= 64 {
+		m.evictOldestTranscript(m.transcripts, sessionID, true)
+	}
+	m.transcripts[sessionID] = document
+}
+
+func (m *Model) cacheFullTranscript(sessionID string, document transcript.Document) {
+	if _, exists := m.fullTranscripts[sessionID]; !exists && len(m.fullTranscripts) >= 8 {
+		m.evictOldestTranscript(m.fullTranscripts, sessionID, false)
+	}
+	m.fullTranscripts[sessionID] = document
+}
+
+func (m *Model) evictOldestTranscript(cache map[string]transcript.Document, keepID string, dropAttempt bool) {
+	oldestID := ""
+	var oldest time.Time
+	for sessionID := range cache {
+		if sessionID == keepID {
+			continue
+		}
+		loadedAt := m.transcriptLoadedAt[sessionID]
+		if oldestID == "" || loadedAt.Before(oldest) {
+			oldestID = sessionID
+			oldest = loadedAt
+		}
+	}
+	if oldestID != "" {
+		delete(cache, oldestID)
+		if dropAttempt {
+			delete(m.transcriptLoadedAt, oldestID)
+			delete(m.transcriptErrs, oldestID)
+		}
 	}
 }
 
@@ -500,16 +573,39 @@ func (m *Model) scrollPeek(delta int) {
 
 func (m Model) openTranscriptReader() (tea.Model, tea.Cmd) {
 	session, ok := m.selectedSession()
-	if !ok {
+	if !ok || session.Path == "" {
 		return m, nil
 	}
-	if document, cached := m.transcripts[session.ID]; cached {
-		m.reader = &transcriptReader{sessionID: session.ID, title: session.Title, document: document}
+	if document, cached := m.fullTranscripts[session.ID]; cached {
+		m.openTranscriptDocument(session, document)
 		return m, nil
 	}
 	m.openReaderID = session.ID
-	m.status = "loading transcript…"
-	return m, loadTranscriptCmd(session)
+	m.status = "loading full transcript…"
+	if m.readerLoading[session.ID] {
+		return m, nil
+	}
+	m.readerLoading[session.ID] = true
+	return m, loadTranscriptCmd(session, true)
+}
+
+func (m *Model) openTranscriptDocument(session data.Session, document transcript.Document) {
+	m.reader = &transcriptReader{sessionID: session.ID, title: session.Title, document: document}
+	m.reflowTranscriptReader()
+}
+
+func (m *Model) reflowTranscriptReader() {
+	if m.reader == nil {
+		return
+	}
+	width := max(4, m.w-10)
+	if m.reader.visualWidth == width && m.reader.visual != nil {
+		return
+	}
+	m.reader.visual = transcriptVisualLines(m.reader.document.Lines, width)
+	m.reader.visualWidth = width
+	page := max(1, m.h-6)
+	m.reader.scroll = min(m.reader.scroll, max(0, len(m.reader.visual)-page))
 }
 
 func (m Model) resumeDefault() (tea.Model, tea.Cmd) {
@@ -544,7 +640,11 @@ func (m Model) activateRoute(route data.Launcher) (tea.Model, tea.Cmd) {
 		m.status = "focusing live session…"
 		return m, focusLiveCmd(session)
 	}
-	command, note := resume.Build(session, route)
+	command, note, err := resume.Build(session, route)
+	if err != nil {
+		m.status = "can't locate resume directory: " + err.Error()
+		return m, nil
+	}
 	if route.Target == "cmux" {
 		m.status = "opening in cmux…"
 		return m, openCmuxCmd(command, session.Title, note)
