@@ -4,31 +4,31 @@
  * on a dark terminal). ANSI dark tones are reserved for borders.
  */
 export const theme = {
-  accent: "cyan",
+  accent: "#68FFD6",
   /** Selected-row highlight bar. */
-  selBg: "cyan",
-  selFg: "black",
+  selBg: "#6B50FF",
+  selFg: "#FFFAF1",
   /** Title-source marks. */
-  sourceNative: "green",
-  sourceCodex: "yellow",
-  sourceFallback: "#7f8896",
+  sourceNative: "#12C78F",
+  sourceCodex: "#F5EF34",
+  sourceFallback: "#858392",
   /** Primary list text. */
-  title: "white",
-  project: "cyan",
-  branch: "#86b3ff",
+  title: "#ECEBF0",
+  project: "#68FFD6",
+  branch: "#8B75FF",
   /** Readable muted tone for secondary text (labels, counts, footer). */
   muted: "#9aa3b2",
   /** Even quieter — borders / peek text only. */
   faint: "#6b7280",
   /** Project header accent. */
-  header: "cyanBright",
+  header: "#68FFD6",
   /** Recent vs old activity. */
-  ageRecent: "greenBright",
+  ageRecent: "#12C78F",
   ageOld: "#9aa3b2",
   /** Header/dashboard chrome. */
-  headerBorder: "#3a4150",
+  headerBorder: "#3A3943",
   headerLabel: "#9aa3b2",
-  headerValue: "white",
+  headerValue: "#ECEBF0",
   /**
    * Cost tiers — deliberately restrained. Most sessions read as calm neutral text; warmth is
    * reserved for genuine outliers so the eye is drawn only to real spend, not to every row.
