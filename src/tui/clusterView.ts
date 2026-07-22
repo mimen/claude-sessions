@@ -3,7 +3,7 @@ import type { CatalogueRow, Lifecycle } from "../catalogue/db.ts";
 import { lifecycleOf } from "../catalogue/db.ts";
 import { isCoreRole } from "../catalogue/cluster-map.ts";
 import type { EpicDisplay } from "../state/groupings.ts";
-import { groupByProject, sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./groupByProject.ts";
+import { sortRows, type DisplayItem, type SectionMeta, type SortMode } from "./groupByProject.ts";
 
 /**
  * Cluster view: group sessions by `system` (an operation like pr-watch), and within a
@@ -173,23 +173,7 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
           header(key, name, glyph, 1, rowsIn.length);
           if (!isCollapsed(key)) for (const r of sortRows(rowsIn, sort, costOf)) pushSession(r, 1);
         };
-        // `open` (active + idle) is the dominant bucket — hundreds of loose sessions — so it
-        // is further grouped BY PROJECT at level 2 rather than listed flat. Project groups
-        // render expanded (labelled separators, every row still visible) and stay individually
-        // collapsible. Rows are sorted first so both the project order and the rows inside each
-        // follow the active sort, matching groupByProject's preserve-input-order contract.
-        const openRows = strays.filter((r) => lc(r) === "idle");
-        if (openRows.length > 0) {
-          const openKey = "cluster::none:open";
-          header(openKey, "open", "○", 1, openRows.length);
-          if (!isCollapsed(openKey)) {
-            for (const g of groupByProject(sortRows(openRows, sort, costOf))) {
-              const projectKey = `${openKey}:${g.root}`;
-              header(projectKey, g.name, "◈", 2, g.sessions.length);
-              if (!isCollapsed(projectKey)) for (const r of g.sessions) pushSession(r, 2);
-            }
-          }
-        }
+        subGroup("open", "open", "○", "idle"); // active + idle (active = idle + live terminal)
         subGroup("parked", "parked", "⏸", "parked");
         subGroup("done", "done", "✓", "completed"); // `:done` → collapsed by default
         subGroup("archived", "archived", "·", "archived"); // seeded collapsed in DEFAULT_COLLAPSED

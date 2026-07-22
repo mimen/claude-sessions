@@ -4,8 +4,7 @@ import type { CatalogueRow } from "../catalogue/db.ts";
 import type { EpicDisplay } from "../state/groupings.ts";
 import { buildClusterView } from "./clusterView.ts";
 
-const row = (id: string, project = "proj-a"): SessionRow =>
-  ({ sessionId: id, lastTs: "2026-07-08", projectRoot: `/repos/${project}`, projectName: project } as unknown as SessionRow);
+const row = (id: string): SessionRow => ({ sessionId: id, lastTs: "2026-07-08" } as unknown as SessionRow);
 const cat = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
   archived: false, parkedTaskId: null, key: null, parentSessionId: null, role: null, resumeCommand: null, project: null,
@@ -143,7 +142,7 @@ test("buildClusterView: stray (no-system) bucket sub-groups by lifecycle — ope
     ["s-arch", cat({ sessionId: "s-arch", archived: true })],
   ]);
   const items = buildClusterView(
-    [row("s-idle", "vault"), row("s-active", "ccs"), row("s-parked"), row("s-done"), row("s-arch")],
+    [row("s-idle"), row("s-active"), row("s-parked"), row("s-done"), row("s-arch")],
     // s-active is "open" in the live-terminal sense; archived seeded collapsed as it is in prod.
     { catMap, epicMap: new Map(), openSet: new Set(["s-active"]), collapsedSections: new Set(["cluster::none:archived"]) },
   );
@@ -177,40 +176,4 @@ test("buildClusterView: stray (no-system) bucket sub-groups by lifecycle — ope
   expect(sessionIds).toContain("s-parked");
   expect(sessionIds).not.toContain("s-done"); // collapsed fold hides the row
   expect(sessionIds).not.toContain("s-arch");
-});
-
-test("buildClusterView: the stray `open` bucket is further grouped BY PROJECT at level 2", () => {
-  // `open` is the dominant stray bucket, so it splits into per-project groups rather than one
-  // flat wall. Project groups render EXPANDED (labelled separators, rows still visible) and
-  // remain individually collapsible.
-  const catMap = new Map<string, CatalogueRow>([
-    ["v1", cat({ sessionId: "v1" })],
-    ["v2", cat({ sessionId: "v2" })],
-    ["c1", cat({ sessionId: "c1" })],
-  ]);
-  const items = buildClusterView([row("v1", "vault"), row("v2", "vault"), row("c1", "ccs")], {
-    catMap, epicMap: new Map(), openSet: new Set(), collapsedSections: new Set(),
-  });
-  const sections = items.filter((i) => i.kind === "section") as any[];
-  const named = (n: string) => sections.findIndex((s) => s.section.name === n);
-
-  // open (level 1) → project groups (level 2), most-recently-active project first.
-  expect(sections[named("open")].count).toBe(3);
-  expect(sections[named("vault")].section.level).toBe(2);
-  expect(sections[named("vault")].count).toBe(2);
-  expect(sections[named("ccs")].section.level).toBe(2);
-  expect(sections[named("ccs")].count).toBe(1);
-  expect(named("vault")).toBeLessThan(named("ccs")); // input (recency) order preserved
-  // Expanded by default: every row is still emitted, nested one level under its project.
-  const sessions = items.filter((i) => i.kind === "session") as any[];
-  expect(sessions.map((s) => s.row.sessionId)).toEqual(["v1", "v2", "c1"]);
-  expect(sessions.every((s) => s.depth === 2)).toBe(true);
-
-  // A project group stays individually collapsible — collapsing `vault` hides only its rows.
-  const collapsed = buildClusterView([row("v1", "vault"), row("v2", "vault"), row("c1", "ccs")], {
-    catMap, epicMap: new Map(), openSet: new Set(),
-    collapsedSections: new Set(["cluster::none:open:/repos/vault"]),
-  });
-  const stillShown = collapsed.filter((i) => i.kind === "session").map((i: any) => i.row.sessionId);
-  expect(stillShown).toEqual(["c1"]);
 });
