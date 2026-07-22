@@ -178,20 +178,26 @@ test("meters: sections are separated by a faint pipe rule", () => {
   expect(line).not.toContain("·");
 });
 
-test("meters: subagent bit renders count + summed cost", () => {
+test("meters: subagent bit spells out count + summed cost", () => {
   const line = renderMeters({ subagentCount: 3, subagentUsd: 0.42 });
-  expect(line).toContain("↳3");
+  expect(line).toContain("3 subagents");
   expect(line).toContain("42¢");
 });
 
-test("meters: no subagents omits the bit entirely (no dead ↳0)", () => {
+test("meters: a single subagent reads in the singular", () => {
+  const line = renderMeters({ subagentCount: 1, subagentUsd: 0.1 });
+  expect(line).toContain("1 subagent");
+  expect(line).not.toContain("1 subagents");
+});
+
+test("meters: no subagents omits the bit entirely (no dead '0 subagents')", () => {
   const line = renderMeters({ subagentCount: 0, subagentUsd: 0, costUsd: 1 });
-  expect(line).not.toContain("↳");
+  expect(line).not.toContain("subagent");
 });
 
 test("meters: subagent count renders even when their cost is zero", () => {
   const line = renderMeters({ subagentCount: 2, subagentUsd: 0 });
-  expect(line).toContain("↳2");
+  expect(line).toContain("2 subagents");
 });
 
 test("meters: the context gauge is 16 cells wide", () => {

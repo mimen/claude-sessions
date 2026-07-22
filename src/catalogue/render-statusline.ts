@@ -196,12 +196,14 @@ export function renderMeters(m: MetersInput): string {
       ? colorize(formatCost(m.costUsd), costColor(m.costUsd))
       : null;
 
-  // Subagent rollup, in the TUI's own vocabulary: `↳N` child count in faint, their summed spend
-  // graded by the cost ramp. Omitted entirely for a session that spawned none, so ordinary
-  // sessions don't carry a dead `↳0`.
+  // Subagent rollup: spelled out (`2 subagents`) rather than the TUI's `↳N` glyph — the status bar
+  // has room for plain language, and a word needs no legend the way a symbol does. The TUI list
+  // keeps `↳N` because its column is only SUB_W chars wide. Count in faint, their summed spend
+  // graded by the cost ramp. Omitted entirely for a session that spawned none.
   let subBit: string | null = null;
   if (typeof m.subagentCount === "number" && m.subagentCount > 0) {
-    const count = colorize(`↳${m.subagentCount}`, METER_FAINT);
+    const n = m.subagentCount;
+    const count = colorize(`${n} subagent${n === 1 ? "" : "s"}`, METER_FAINT);
     const usd =
       typeof m.subagentUsd === "number" && m.subagentUsd > 0
         ? ` ${colorize(formatCost(m.subagentUsd), costColor(m.subagentUsd))}`
