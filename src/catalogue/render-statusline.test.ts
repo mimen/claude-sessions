@@ -99,7 +99,7 @@ test("a fresh row within the window keeps its state pill", () => {
 
 test("no pill + fresh row: link only, no leading pill separator", () => {
   const line = renderStatusline(row({ prNumber: 5, prRepo: "a/b" }), { nowMs: NOW });
-  expect(line.startsWith(" · ")).toBe(false);
+  expect(line.startsWith(" ")).toBe(false); // no leading separator gap
   expect(line).toContain("#5");
 });
 
@@ -169,7 +169,25 @@ test("meters: null context percent omits the ctx bit (pre-first-response)", () =
   expect(line).toContain("$2.00");
 });
 
-test("meters: bits are joined with the ccs ` · ` separator", () => {
+test("meters: sections are separated by the wide gap, not a middot", () => {
   const line = renderMeters({ modelId: "claude-opus-4-8", modelLabel: "Opus 4.8", costUsd: 2 });
-  expect(line).toContain(" · ");
+  expect(line).toContain("    "); // 4-space section gap
+  expect(line).not.toContain("·");
+});
+
+test("meters: the context gauge is 16 cells wide", () => {
+  const line = renderMeters({ ctxPercent: 42, ctxSize: 1_000_000 });
+  const filled = (line.match(/█/g) ?? []).length;
+  const empty = (line.match(/░/g) ?? []).length;
+  expect(filled + empty).toBe(16);
+  expect(filled).toBe(7); // round(0.42 * 16)
+});
+
+test("identity line also uses the wide gap (both rows stay consistent)", () => {
+  const line = renderStatusline(
+    row({ prNumber: 12080, prRepo: "heroku/dashboard", customTitle: "Fix navbar" }),
+    { nowMs: NOW, statePill: { label: "in review", color: "#bf5af2" } },
+  );
+  expect(line).toContain("    ");
+  expect(line).not.toContain(" · ");
 });

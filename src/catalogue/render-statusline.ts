@@ -26,6 +26,15 @@ export function osc8(url: string, text: string): string {
  * it as current. The statusline re-runs every turn, so this only bites a truly abandoned row. */
 export const DEFAULT_STALENESS_MS = 6 * 60 * 60 * 1000; // 6h
 
+/**
+ * Section separator for BOTH statusline rows. Whitespace rather than the TUI's ` · ` middot: the
+ * status bar has the full terminal width to play with, so sections read better separated by air
+ * than by punctuation, and a single gap width keeps the identity row and the meters row visually
+ * consistent. Wider than an in-section space (bits use single spaces internally), so the grouping
+ * stays unambiguous without a glyph.
+ */
+const SEP = "    "; // 4 spaces
+
 /** A generic grouping's display bits — a {label, url} the CLUSTER supplied (ADR-0051). The
  * platform renders it clickable; it does NOT know the url is a GUS epic link. */
 export interface GroupingDisplay {
@@ -108,7 +117,7 @@ export function renderStatusline(row: CatalogueRow, ctx: StatuslineCtx): string 
   const reviewBit = ctx.reviewAppUrl ? osc8(ctx.reviewAppUrl, "↗ review-app") : null;
 
   const bits = [pillBit, linked, groupingBit, wBit, reviewBit].filter((b): b is string => !!b);
-  return bits.join(" · ");
+  return bits.join(SEP);
 }
 
 /**
@@ -147,15 +156,16 @@ function ctxWindowLabel(size: number): string {
   return String(size);
 }
 
-/** An 8-cell block gauge: filled portion in the fullness color, remainder faint. */
+/** A 16-cell block gauge: filled portion in the fullness color, remainder faint. Wide enough that
+ * each cell is ~6%, so the bar reads as a real meter rather than a coarse 4-step indicator. */
 function ctxGauge(pct: number): string {
-  const cells = 8;
+  const cells = 16;
   const filled = Math.max(0, Math.min(cells, Math.round((pct / 100) * cells)));
   return colorize("█".repeat(filled), fullnessColor(pct)) + colorize("░".repeat(cells - filled), METER_FAINT);
 }
 
 /** Render the meters line from a parsed payload. Returns "" when nothing is known yet (caller then
- * emits only the identity line). Bits are joined with the same ` · ` separator as the identity line. */
+ * emits only the identity line). Bits are joined with the same SEP gap as the identity line. */
 export function renderMeters(m: MetersInput): string {
   const modelBit =
     m.modelLabel || m.modelId
@@ -183,7 +193,7 @@ export function renderMeters(m: MetersInput): string {
       : null;
 
   const bits = [modelBit, effortBit, ctxBit, costBit].filter((b): b is string => !!b);
-  return bits.join(" · ");
+  return bits.join(SEP);
 }
 
 /** Wrap text in 24-bit ANSI foreground color (`#RRGGBB`), reset at the end. Skips coloring when
