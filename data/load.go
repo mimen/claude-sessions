@@ -52,6 +52,7 @@ func Load() (Snapshot, error) {
 		live = map[string]liveSession{}
 	}
 	roleKinds := loadRoleKinds(home)
+	tasks := loadTaskSummaries(home)
 	rollups, subagentCounts := buildRollups(indexed, catalogue)
 
 	visible := make([]Session, 0, len(indexed))
@@ -68,20 +69,28 @@ func Load() (Snapshot, error) {
 		class := displayClass(row, meta, isLoop)
 		rollup := rollups[row.ID]
 		model := dominantModel(row.CostByModel, row.Models)
+		task := tasks[row.ID]
+		if task.Total == 0 && row.ResumeID != row.ID {
+			task = tasks[row.ResumeID]
+		}
 		session := Session{
 			ID:           row.ID,
 			ResumeID:     row.ResumeID,
+			Path:         row.Path,
 			Title:        title,
 			TitleSource:  titleSource,
 			State:        state,
 			Class:        class,
 			SessionClass: meta.SessionClass,
+			IdentityKey:  meta.IdentityKey,
+			IdentityKind: meta.IdentityKind,
 			Role:         meta.Role,
 			Cluster:      meta.Cluster,
 			Project:      row.ProjectName,
 			ProjectRoot:  row.ProjectRoot,
 			CWD:          row.CWD,
 			Branch:       row.Branch,
+			Skeleton:     row.Skeleton,
 			FirstAt:      row.FirstAt,
 			LastAt:       row.LastAt,
 			Messages:     row.Messages,
@@ -93,6 +102,9 @@ func Load() (Snapshot, error) {
 			Duration:     FormatSpan(row.FirstAt, row.LastAt),
 			Subagents:    subagentCounts[row.ID],
 			ParentID:     meta.ParentSessionID,
+			TaskSubjects: append([]string(nil), task.Subjects...),
+			TasksDone:    task.Done,
+			TasksTotal:   task.Total,
 			IsLoop:       isLoop,
 		}
 		byID[session.ID] = len(visible)

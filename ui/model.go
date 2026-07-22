@@ -13,6 +13,7 @@ type View int
 const (
 	ViewGroups View = iota
 	ViewTree
+	ViewFlat
 )
 
 type Overlay int
@@ -23,12 +24,15 @@ const (
 	OverlayHelp
 )
 
-// row is one line in the grouped list: a section header or a session ref.
+// row is one virtualized list line: a section header or a session ref.
 type row struct {
-	header  bool
-	project string
-	count   int
-	sIdx    int
+	header bool
+	key    string
+	label  string
+	glyph  string
+	level  int
+	count  int
+	sIdx   int
 }
 
 type routesLoadedMsg struct {
@@ -52,6 +56,8 @@ type Model struct {
 	routeLoading bool
 	routeSession string
 	routeError   string
+	query        string
+	searching    bool
 	status       string
 }
 
@@ -67,37 +73,6 @@ func New(snapshot data.Snapshot) Model {
 		rows:     rows,
 		cursor:   firstSessionRow(rows),
 	}
-}
-
-func buildRows(sessions []data.Session) []row {
-	var rows []row
-	seen := map[string]bool{}
-	order := []string{}
-	labels := map[string]string{}
-	byRoot := map[string][]int{}
-	for i, session := range sessions {
-		project := session.Project
-		if project == "" {
-			project = "(unknown)"
-		}
-		root := session.ProjectRoot
-		if root == "" {
-			root = "(unknown):" + session.ID
-		}
-		if !seen[root] {
-			seen[root] = true
-			order = append(order, root)
-			labels[root] = project
-		}
-		byRoot[root] = append(byRoot[root], i)
-	}
-	for _, root := range order {
-		rows = append(rows, row{header: true, project: labels[root], count: len(byRoot[root])})
-		for _, idx := range byRoot[root] {
-			rows = append(rows, row{sIdx: idx})
-		}
-	}
-	return rows
 }
 
 func firstSessionRow(rows []row) int {
@@ -173,9 +148,31 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.status = fmt.Sprintf("resume via %s is a v1 TODO", m.routes[m.routeCursor].Name)
 				m.overlay = OverlayNone
 			}
-		case "f":
-			m.status = "fork-resume is a v1 TODO"
-			m.overlay = OverlayNone
+		}
+		return m, nil
+	}
+	if m.searching {
+		switch msg.String() {
+		case "esc":
+			m.query = ""
+			m.searching = false
+			m.rebuildRows()
+		case "enter":
+			m.searching = false
+		case "up":
+			m.moveSelection(-1)
+		case "down":
+			m.moveSelection(1)
+		case "backspace", "delete":
+			if len(m.query) > 0 {
+				m.query = m.query[:len(m.query)-1]
+				m.rebuildRows()
+			}
+		default:
+			if msg.Type == tea.KeyRunes && !msg.Alt {
+				m.query += string(msg.Runes)
+				m.rebuildRows()
+			}
 		}
 		return m, nil
 	}
@@ -188,11 +185,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.moveSelection(1)
 	case "g":
-		if m.view == ViewGroups {
+		switch m.view {
+		case ViewGroups:
 			m.view = ViewTree
-		} else {
+		case ViewTree:
+			m.view = ViewFlat
+		default:
 			m.view = ViewGroups
 		}
+		m.rebuildRows()
 		m.status = ""
 	case "p":
 		m.preview = !m.preview
@@ -212,7 +213,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "v":
 		m.status = "transcript view is outside v1"
 	case "/":
-		m.status = "search is outside v1"
+		m.searching = true
+		m.status = ""
 	case "s":
 		m.status = "recency is the only v1 sort"
 	}
@@ -292,6 +294,15 @@ func (m *Model) moveRouteCursor(delta int) {
 			return
 		}
 	}
+}
+
+func (m *Model) rebuildRows() {
+	if m.view == ViewFlat {
+		m.rows = buildFlatRows(m.snapshot.Sessions, m.query)
+	} else {
+		m.rows = buildDefaultRows(m.snapshot.Sessions, m.query)
+	}
+	m.cursor = firstSessionRow(m.rows)
 }
 
 func clamp(value int, low int, high int) int {

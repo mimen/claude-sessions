@@ -76,7 +76,13 @@ func (m Model) renderHeader(width int) string {
 		stat(data.FormatCompactUSD(stats.Spend), "spend", theme.CostColor(stats.Spend)) + separator +
 		stat(fmt.Sprintf("%d", stats.Active), "active", theme.Success) + separator +
 		stat(fmt.Sprintf("%d", stats.Parked), "parked", theme.Warning)
-	right := fg(theme.FgMoreSubtle).Render("sort · recency")
+	viewName := "cluster + state"
+	if m.view == ViewTree {
+		viewName = "causal tree"
+	} else if m.view == ViewFlat {
+		viewName = "flat recency"
+	}
+	right := fg(theme.FgMoreSubtle).Render(viewName)
 	line1 := joinSides(left, right, width)
 
 	line2 := stat(fmt.Sprintf("%d", stats.Loops), "loops", theme.Accent) +
@@ -112,7 +118,7 @@ func (m Model) renderList(width int, height int) string {
 		if candidate.header {
 			out = append(out, m.renderSection(width, candidate))
 		} else {
-			out = append(out, m.renderSessionRow(width, m.snapshot.Sessions[candidate.sIdx], selected))
+			out = append(out, m.renderSessionRow(width, m.snapshot.Sessions[candidate.sIdx], candidate.level, selected))
 		}
 	}
 	return strings.Join(out, "\n")
@@ -126,17 +132,26 @@ func (m Model) listWindow(height int) (int, int) {
 }
 
 func (m Model) renderSection(width int, candidate row) string {
-	project := strings.ToUpper(sanitizePlain(candidate.project))
+	label := strings.ToUpper(sanitizePlain(candidate.label))
+	indent := strings.Repeat("  ", candidate.level)
+	glyph := candidate.glyph
+	if glyph != "" {
+		glyph += " "
+	}
 	count := fmt.Sprintf(" (%d) ", candidate.count)
-	nameText := fg(theme.Accent).Bold(true).Render(project)
+	color := theme.Accent
+	if candidate.level > 0 {
+		color = theme.FgSubtle
+	}
+	nameText := fg(color).Bold(true).Render(glyph + label)
 	countText := fg(theme.FgMoreSubtle).Render(count)
-	used := 2 + lipgloss.Width(project) + lipgloss.Width(count)
+	used := 2 + lipgloss.Width(indent) + lipgloss.Width(glyph+label) + lipgloss.Width(count)
 	ruleLen := max(0, width-used)
-	line := fg(theme.FgMostSubtle).Render("  ") + nameText + countText + fg(theme.Sep).Render(strings.Repeat("─", ruleLen))
+	line := fg(theme.FgMostSubtle).Render("  "+indent) + nameText + countText + fg(theme.Sep).Render(strings.Repeat("─", ruleLen))
 	return theme.Main.Width(width).Render(fit(line, width))
 }
 
-func (m Model) renderSessionRow(width int, session data.Session, selected bool) string {
+func (m Model) renderSessionRow(width int, session data.Session, level int, selected bool) string {
 	rowBackground := theme.BgBase
 	if selected {
 		rowBackground = theme.BgLow
@@ -184,7 +199,8 @@ func (m Model) renderSessionRow(width int, session data.Session, selected bool) 
 		inline += backgroundSpace(1) + column(theme.Info).Render("◆ "+sanitizePlain(session.Role))
 	}
 	inlineWidth := lipgloss.Width(inline)
-	available := width - 5 - rightWidth
+	indent := strings.Repeat("  ", level)
+	available := width - 5 - lipgloss.Width(indent) - rightWidth
 	if available-inlineWidth < 8 {
 		inline = ""
 		inlineWidth = 0
@@ -196,7 +212,7 @@ func (m Model) renderSessionRow(width int, session data.Session, selected bool) 
 	}
 	title := column(titleColor).Bold(selected).Render(pad(session.Title, titleWidth))
 
-	line := caret + backgroundSpace(1) + dot + backgroundSpace(1) + title + inline
+	line := caret + backgroundSpace(1) + backgroundSpace(lipgloss.Width(indent)) + dot + backgroundSpace(1) + title + inline
 	if right != "" {
 		line += backgroundSpace(1) + right
 	}
@@ -237,6 +253,15 @@ func (m Model) renderPreview(width int) string {
 		lines = append(lines, fg(theme.FgMostSubtle).Render("· unpriced"))
 	} else {
 		lines = append(lines, fg(badge.Color).Render("● "+badge.Label)+fg(theme.FgMoreSubtle).Render("  "+truncate(session.Model, max(1, contentWidth-len(badge.Label)-4))))
+	}
+	if session.TasksTotal > 0 {
+		lines = append(lines, "", sect(fmt.Sprintf("Tasks · %d/%d", session.TasksDone, session.TasksTotal)))
+		for _, subject := range session.TaskSubjects {
+			lines = append(lines, fg(theme.FgMoreSubtle).Render("· ")+fg(theme.FgSubtle).Render(truncate(subject, max(1, contentWidth-2))))
+			if len(lines) > 22 {
+				break
+			}
+		}
 	}
 	lines = append(lines, "", sect("Meta"))
 	metadata := [][2]string{
@@ -434,12 +459,17 @@ func (m Model) renderHelp() string {
 // ---- footer ----
 
 func (m Model) renderKeybar(width int) string {
-	if m.status != "" {
-		return fit(fg(theme.Warning).Bold(true).Render("TODO")+fg(theme.FgMoreSubtle).Render(" · "+m.status), width)
+	if m.searching {
+		return fit(fg(theme.Accent).Bold(true).Render("/ ")+fg(theme.FgBase).Render(m.query)+fg(theme.FgMostSubtle).Render("  title · project · task"), width)
 	}
-	viewLabel := "groups"
+	if m.status != "" {
+		return fit(fg(theme.Warning).Bold(true).Render("status")+fg(theme.FgMoreSubtle).Render(" · "+m.status), width)
+	}
+	viewLabel := "default"
 	if m.view == ViewTree {
 		viewLabel = "tree"
+	} else if m.view == ViewFlat {
+		viewLabel = "flat"
 	}
 	items := [][2]string{
 		{"↑↓", "move"}, {"enter", "resume"}, {"r", "via…"}, {"v", "transcript"},

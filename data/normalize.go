@@ -21,3 +21,19 @@ func normalizeInline(value string) string {
 	}, value)
 	return strings.TrimSpace(value)
 }
+
+func normalizeMultiline(value string) string {
+	value = ansi.Strip(value)
+	value = strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\t':
+			return r
+		default:
+			if unicode.IsControl(r) {
+				return ' '
+			}
+			return r
+		}
+	}, value)
+	return strings.TrimSpace(value)
+}

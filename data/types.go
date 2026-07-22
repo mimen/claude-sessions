@@ -30,17 +30,21 @@ func (c ProviderCost) Total() float64 {
 type Session struct {
 	ID           string
 	ResumeID     string
+	Path         string
 	Title        string
 	TitleSource  string
 	State        string
 	Class        string
 	SessionClass string
+	IdentityKey  string
+	IdentityKind string
 	Role         string
 	Cluster      string
 	Project      string
 	ProjectRoot  string
 	CWD          string
 	Branch       string
+	Skeleton     string
 	FirstAt      time.Time
 	LastAt       time.Time
 	Messages     int
@@ -52,6 +56,9 @@ type Session struct {
 	Duration     string
 	Subagents    int
 	ParentID     string
+	TaskSubjects []string
+	TasksDone    int
+	TasksTotal   int
 	IsLoop       bool
 }
 

@@ -36,21 +36,35 @@ func testSnapshot(sessionCount int) data.Snapshot {
 	}
 }
 
-func TestProjectGroupingUsesRootIdentity(t *testing.T) {
-	snapshot := testSnapshot(2)
-	snapshot.Sessions[0].Project = "same-name"
-	snapshot.Sessions[0].ProjectRoot = "/repos/one"
-	snapshot.Sessions[1].Project = "same-name"
-	snapshot.Sessions[1].ProjectRoot = "/repos/two"
+func TestDefaultGroupingPutsClustersBeforeNoSystemStates(t *testing.T) {
+	snapshot := testSnapshot(4)
+	snapshot.Sessions[0].Cluster = "event-watch"
+	snapshot.Sessions[0].Role = "coordinator"
+	snapshot.Sessions[0].State = "active"
+	snapshot.Sessions[1].Cluster = "event-watch"
+	snapshot.Sessions[1].Role = "worker"
+	snapshot.Sessions[2].State = "parked"
+	snapshot.Sessions[3].State = "completed"
 	model := New(snapshot)
-	headers := 0
+
+	var headers []string
 	for _, candidate := range model.rows {
 		if candidate.header {
-			headers++
+			headers = append(headers, candidate.key)
 		}
 	}
-	if headers != 2 {
-		t.Fatalf("headers = %d, want 2", headers)
+	want := []string{"cluster:event-watch", "cluster:event-watch:coordinator", "cluster:event-watch:worker", "no-system", "no-system:parked", "no-system:done"}
+	if fmt.Sprint(headers) != fmt.Sprint(want) {
+		t.Fatalf("headers = %v, want %v", headers, want)
+	}
+}
+
+func TestFuzzySearchIncludesTaskSubjects(t *testing.T) {
+	snapshot := testSnapshot(2)
+	snapshot.Sessions[1].TaskSubjects = []string{"Configure grok build runner"}
+	rows := buildFlatRows(snapshot.Sessions, "grk bld")
+	if len(rows) != 1 || rows[0].sIdx != 1 {
+		t.Fatalf("rows = %+v, want only session 1", rows)
 	}
 }
 

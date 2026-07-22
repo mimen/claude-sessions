@@ -36,6 +36,7 @@ type indexedSession struct {
 	CostUSD         float64
 	CostByModel     map[string]float64
 	Models          []string
+	Skeleton        string
 }
 
 type catalogueMeta struct {
@@ -149,6 +150,7 @@ func loadIndex(path string) ([]indexedSession, error) {
 		selectColumn(columns, "cost_usd", "0"),
 		selectColumn(columns, "cost_by_model", "'{}'"),
 		selectColumn(columns, "models", "'[]'"),
+		selectColumn(columns, "skeleton", "''"),
 	}
 	query := "SELECT " + strings.Join(selected, ", ") +
 		" FROM sessions ORDER BY last_ts IS NULL, last_ts DESC, session_id"
@@ -190,6 +192,7 @@ func loadIndex(path string) ([]indexedSession, error) {
 			&row.CostUSD,
 			&costJSON,
 			&modelsJSON,
+			&row.Skeleton,
 		); err != nil {
 			return nil, fmt.Errorf("scan index row: %w", err)
 		}
@@ -206,6 +209,7 @@ func loadIndex(path string) ([]indexedSession, error) {
 		row.NativeTitle = normalizeInline(nativeTitle.String)
 		row.CodexTitle = normalizeInline(codexTitle.String)
 		row.FallbackTitle = normalizeInline(row.FallbackTitle)
+		row.Skeleton = normalizeMultiline(row.Skeleton)
 		row.ParentSessionID = normalizeInline(parentID.String)
 		row.ResumeID = normalizeInline(row.ResumeID)
 		row.IsSubagent = subagent != 0
