@@ -1,4 +1,41 @@
+import { appendFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { shellWithEnv } from "./command.ts";
+
+/**
+ * TEMPORARY instrumentation (worktree-aware-resume investigation): when CCS_DEBUG_SPAWN_CWD is
+ * set, record the cwd we ASKED cmux for vs the cwd cmux actually gave the new workspace. This is
+ * the one test that distinguishes "ccs computed the wrong dir" from "cmux ignored our --cwd and
+ * reused a persisted worktree-cwd workspace". Fully best-effort; never affects the spawn result.
+ * Remove once the finding is confirmed. Appends JSON lines to ~/.ccs/spawn-cwd-probe.log.
+ */
+function probeSpawnCwd(cmux: string, ref: string, requestedCwd: string, name: string): void {
+  if (!process.env.CCS_DEBUG_SPAWN_CWD) return;
+  try {
+    const r = Bun.spawnSync([cmux, "list-workspaces", "--json"], { stdout: "pipe", stderr: "pipe", timeout: 5000 });
+    let actualCwd: string | null = null;
+    try {
+      const parsed = JSON.parse(r.stdout?.toString() ?? "");
+      const rows: Array<Record<string, unknown>> = Array.isArray(parsed) ? parsed : ((parsed?.workspaces as never) ?? []);
+      const hit = rows.find((w) => w.ref === ref);
+      actualCwd = (hit?.current_directory as string | undefined) ?? null;
+    } catch {
+      /* leave actualCwd null if list-workspaces isn't JSON */
+    }
+    const rec = {
+      ts: new Date().toISOString(),
+      ref,
+      requestedCwd,
+      actualCwd,
+      mismatch: actualCwd !== null && actualCwd !== requestedCwd,
+      name,
+    };
+    appendFileSync(join(homedir(), ".ccs", "spawn-cwd-probe.log"), JSON.stringify(rec) + "\n");
+  } catch {
+    /* probe is best-effort — never let it affect a resume */
+  }
+}
 
 /**
  * The ONE primitive for spawning a `claude` invocation into a fresh, detached cmux workspace.
@@ -54,17 +91,17 @@ export function spawnCmux(opts: SpawnCmuxOpts): string | null {
     const stderr = r.stderr?.toString() ?? "";
 
     // Try JSON parse from stdout
+    let ref: string | null = null;
     try {
       const json = JSON.parse(stdout);
-      if (json?.ref) return json.ref;
-      if (json?.id) return json.id;
+      ref = (json?.ref as string | undefined) ?? (json?.id as string | undefined) ?? null;
     } catch {
       // Not JSON, fall through to regex
     }
-
     // Regex fallback on both stdout + stderr (current behavior)
-    const combined = stdout + stderr;
-    const ref = combined.match(/workspace:[0-9]+/)?.[0] ?? null;
+    if (ref === null) ref = (stdout + stderr).match(/workspace:[0-9]+/)?.[0] ?? null;
+
+    if (ref !== null) probeSpawnCwd(cmux, ref, opts.cwd, opts.name);
     return ref;
   } catch {
     return null;

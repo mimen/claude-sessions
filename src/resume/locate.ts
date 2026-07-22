@@ -19,6 +19,17 @@ import { log } from "../logger.ts";
  * derived, and the walk's dirent filter skips symlinks (a Dirent for a symlink-to-dir reports
  * isDirectory() = false). encodesTo() is the single statement of the mapping rule and doubles
  * as the backstop should either of those facts ever change.
+ *
+ * NECESSARY *AND* SUFFICIENT (ADR-0092, verified against Claude Code 2.1.217): resume-by-id
+ * looks in the project folder for the cwd and, on a miss, falls back to the project folders of
+ * the git worktrees of the repo containing that cwd (telemetry: tengu_resume_worktree_fallback).
+ * Because we return a dir only when its encoded realpath equals the storage folder, we always
+ * hit the FIRST lookup and never depend on that fallback — which matters, since the fallback
+ * only reaches sibling worktrees and never walks up to a parent dir. Nothing in either lookup
+ * consults a session→worktree binding, so `--worktree` cannot affect whether a session is found
+ * and must never be added to the resume command. The harness's "Resume this session with:
+ * claude --worktree <name> --resume <id>" line is exit-time cosmetic output describing the
+ * PROCESS, not the session; it also prints on failed exits. Treat it as noise.
  */
 
 /** Mirror Claude Code's path → folder encoding. */

@@ -11,9 +11,11 @@ import {
   getSkeleton,
   subagentCounts,
   childrenOf,
-  saveCodexTitle,
+  reindexStore,
   type SessionRow,
 } from "../index/index.ts";
+import { scanStore } from "../store.ts";
+import { resolveSessionTitle } from "../title.ts";
 import { backfillTitles } from "../titler/queue.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "../resume/command.ts";
 import { resumeSessionEntry } from "../resume/resume-session.ts";
@@ -28,7 +30,7 @@ import {
 import { RoutePicker } from "./RoutePicker.tsx";
 import { resolveTarget, cmuxReachableAsync } from "../resume/target.ts";
 import { openInCmux } from "../resume/cmux.ts";
-import { focusSession, openSessionTitlesAsync } from "../cmux/liveness.ts";
+import { focusSession, openSessionTitlesAsync, pushCmuxRename } from "../cmux/liveness.ts";
 import { searchRows } from "./search.ts";
 import { buildDisplayItems, type SortMode } from "./groupByProject.ts";
 import { SessionList } from "./SessionList.tsx";
@@ -190,6 +192,13 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   const [showArchived, setShowArchived] = useState(false);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [refreshTick, setRefreshTick] = useState(0);
+  // A full store re-scan is in flight (the `R` key). Drives the header spinner and guards against
+  // overlapping refreshes. `reselectRef` carries the pre-refresh session id so the cursor snaps
+  // back to the same session after the list re-sorts (new sessions land at the top).
+  const [refreshing, setRefreshing] = useState(false);
+  const reselectRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   // Natural-language metadata command (Codex-backed). scope "all" = whole catalogue; "session" =
@@ -343,13 +352,20 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         return taskFilter === "open" || (t.inProgress > 0 && !openSet.has(r.sessionId));
       })
       .map((r) => {
-        // Precedence: live cmux title (open) → user's custom title → ROLE (a role-tagged
-        // session reads as its role, e.g. "designer", not the auto-generated skeleton title)
-        // → resolved Title. Mirrors render-tab so the TUI + cmux tab agree.
+        // One canonical resolver (src/title.ts): live cmux title → custom → role → generated
+        // index title. Carry the resolved source too, so the preview's source label/colour reflect
+        // what actually won (a custom title no longer shows as "native").
         const cat = catMap.get(r.sessionId);
-        const title =
-          openTitles.get(r.sessionId) ?? cat?.customTitle ?? cat?.role ?? r.title;
-        return title === r.title ? r : { ...r, title };
+        const resolved = resolveSessionTitle({
+          liveTitle: openTitles.get(r.sessionId),
+          customTitle: cat?.customTitle,
+          role: cat?.role,
+          indexTitle: r.title,
+          indexSource: r.titleSource === "native" || r.titleSource === "codex" ? r.titleSource : "fallback",
+        });
+        return resolved.title === r.title && resolved.source === r.titleSource
+          ? r
+          : { ...r, title: resolved.title, titleSource: resolved.source };
       });
   }, [allIndexedRows, includeSubagents, pinned, catMap, showAuxiliary, showArchived, openTitles, taskFilter, taskIds, openSet]);
 
@@ -557,6 +573,17 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
     [view, rows, catMap, epicMap, openSet, collapsedSections, expandedSessions, subCounts, childrenByParent, sort, totalCostFor, sectionCostFor],
   );
 
+  // After a store refresh re-sorts the list, keep the cursor on the session it was on — a new
+  // session landing at the top would otherwise shift the numeric selection down a row. One-shot:
+  // only fires when `R` armed reselectRef, so ordinary list changes are unaffected.
+  useEffect(() => {
+    const target = reselectRef.current;
+    if (!target) return;
+    reselectRef.current = null;
+    const idx = items.findIndex((it) => it.kind === "session" && it.row.sessionId === target);
+    if (idx >= 0) setSelected(idx);
+  }, [items]);
+
   const clampedSelected = Math.min(selected, Math.max(0, items.length - 1));
   const current = items[clampedSelected];
   const selectedRow: SessionRow | null = current?.kind === "session" ? current.row : null;
@@ -604,8 +631,8 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
     };
   }, [db, titler]);
 
-  // Spinner animation — while titling or while a Codex command is in flight.
-  const spinning = !!titling || !!command?.busy;
+  // Spinner animation — while titling, running a Codex command, or refreshing the store.
+  const spinning = !!titling || !!command?.busy || refreshing;
   useEffect(() => {
     if (!spinning) return;
     const id = setInterval(() => setFrame((f) => f + 1), 110);
@@ -798,13 +825,18 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   };
 
   const retitle = () => {
+    if (!catalogue) return;
     const item = items[clampedSelected];
     if (!item || item.kind !== "session") return;
     const r = item.row;
     setStatus(`Re-titling "${r.title}"…`);
     void titler.generate(getSkeleton(db, r.sessionId)).then((t) => {
       if (t) {
-        saveCodexTitle(db, r.sessionId, t);
+        // A human-invoked retitle is an intentional choice: store it as the durable custom title
+        // (catalogue) and sync the cmux tab — same as `ccs rename`. Never `saveCodexTitle`, which
+        // writes the rebuildable index (lost on rebuild) and is shadowed by any native title.
+        setCustomTitle(catalogue, r.sessionId, t, new Date().toISOString());
+        pushCmuxRename(r.sessionId, t);
         setStatus(`Re-titled → ${t}`);
         reload();
       } else {
@@ -812,6 +844,59 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       }
     });
   };
+
+  // Full refresh: re-scan the store and incrementally re-index changed/new transcripts — the same
+  // pass the CLI runs at launch — then reload() to re-read the index, catalogue, and live cmux
+  // state. This is what surfaces sessions started (and message/cost growth) since the TUI opened,
+  // without quitting and relaunching. Incremental: only changed files are re-parsed, so an idle
+  // refresh is a stat pass plus a re-query. selectedRow?.sessionId is captured so the cursor holds.
+  // `R` calls it loud (status feedback); the background poll calls it silent (no status churn).
+  const refreshFromStore = async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (refreshing) return; // never overlap a re-index on the same db handle
+    reselectRef.current = selectedRow?.sessionId ?? null;
+    setRefreshing(true);
+    if (!silent) setStatus(null);
+    try {
+      const scan = scanStore(config.store.path);
+      if (!scan.ok) {
+        if (mountedRef.current && !silent) setStatus(`refresh failed — ${scan.error.message}`);
+        return;
+      }
+      const changes = await reindexStore(db, scan.value, config.host.label);
+      if (!mountedRef.current) return;
+      reload();
+      if (!silent) {
+        const touched = changes.parsed + changes.removed;
+        setStatus(
+          touched === 0
+            ? "up to date"
+            : `refreshed — ${changes.parsed} new/updated${changes.removed ? `, ${changes.removed} gone` : ""}`,
+        );
+      }
+    } catch (e) {
+      if (mountedRef.current && !silent) setStatus(`refresh failed — ${(e as Error).message}`);
+    } finally {
+      if (mountedRef.current) setRefreshing(false);
+    }
+  };
+
+  // Background auto-refresh (config.tui.autoRefreshSec; 0 disables). A ref carries the latest
+  // closure so the fixed interval always sees the current selection/state, and we skip a tick
+  // while any overlay owns the screen — a silent re-index mid-transcript/route-pick/typing would
+  // repaint underneath the user for no benefit. Manual `R` is never gated by this.
+  const autoRefreshTick = () => {
+    if (transcript || routePicker || searching || command || showHelp) return;
+    void refreshFromStore({ silent: true });
+  };
+  const autoRefreshRef = useRef(autoRefreshTick);
+  autoRefreshRef.current = autoRefreshTick;
+  const autoRefreshSec = config.tui.autoRefreshSec;
+  useEffect(() => {
+    if (autoRefreshSec <= 0) return;
+    const id = setInterval(() => autoRefreshRef.current(), autoRefreshSec * 1000);
+    return () => clearInterval(id);
+  }, [autoRefreshSec]);
 
   // Run a natural-language metadata command through Codex and apply the result live.
   const submitCommand = (scope: "all" | "session", buffer: string) => {
@@ -987,6 +1072,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       setIncludeSubagents((v) => !v);
       setSelected(0);
     } else if (input === "t") retitle();
+    else if (input === "R") void refreshFromStore();
     else if (input === "i") {
       // Swap the inference engine (only meaningful when both codex + claude are installed).
       if (availableEngines.length < 2) {
@@ -1117,7 +1203,13 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         stats={stats}
         sort={sort}
         filter={query && !searching ? query : pinned ? `⚙${pinned.label} sessions — esc back to skills` : null}
-        titling={titling ? `${spin} titling ${titling.done}/${titling.total}` : null}
+        titling={
+          titling
+            ? `${spin} titling ${titling.done}/${titling.total}`
+            : refreshing
+              ? `${spin} refreshing…`
+              : null
+        }
       />
       {listMode ? <Text color={theme.headerBorder}>{"─".repeat(Math.max(0, contentWidth))}</Text> : null}
 
@@ -1200,6 +1292,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
             ["enter", "resume"],
             ["r", "resume via…"],
             ["/", "search"],
+            ["R", "refresh"],
             ["v", "transcript"],
             ["g", `view:${view}`],
             ...(taskFilter !== "all" ? [["u", `tasks:${taskFilter}`] as [string, string]] : []),

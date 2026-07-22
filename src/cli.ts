@@ -6,6 +6,7 @@ import { ensureDataDir, DB_PATH, CATALOGUE_PATH } from "./paths.ts";
 import { openIndex } from "./index/schema.ts";
 import type { Database } from "bun:sqlite";
 import { reindexStore, listByRecency, titleOf, sessionById } from "./index/index.ts";
+import { resolveSessionTitle, type TitleSource } from "./title.ts";
 import { buildCostRollup } from "./index/cost-rollup.ts";
 import { formatCost } from "./cost.ts";
 import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster } from "./catalogue/db.ts";
@@ -511,7 +512,11 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number 
     const catalogue = getAll(cat);
     const open = openSessionIds();
     const rollup = buildCostRollup(indexedRows, parentEdges(cat));
-    const srcMark = { native: "★", codex: "✎", fallback: " " } as const;
+    // Glyph reflects the source that actually won at the display layer (title.ts), so a custom
+    // title no longer prints ★ as if it were the harness's.
+    const srcMark: Record<TitleSource, string> = {
+      native: "★", custom: "✎", live: "✎", codex: "~", role: " ", fallback: " ",
+    };
     let shown = 0;
     for (const r of rows) {
       const c = catalogue.get(r.sessionId) ?? null;
@@ -521,9 +526,16 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number 
       if (!opts.auxiliary && c?.sessionClass === "auxiliary") continue;
       if (opts.loops && c?.kind !== "loop") continue;
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
+      // Same canonical resolver as the TUI, so `ls` and the browser agree (ls has no live tab title).
+      const resolved = resolveSessionTitle({
+        customTitle: c?.customTitle,
+        role: c?.role,
+        indexTitle: r.title,
+        indexSource: r.titleSource === "native" || r.titleSource === "codex" ? r.titleSource : "fallback",
+      });
       // A child in the constellation gets a ↳ marker inside the (padded) title cell, keeping columns aligned.
       const childMark = c?.parentSessionId ? "↳ " : "";
-      const title = pad(childMark + (c?.customTitle ?? r.title), 42);
+      const title = pad(childMark + resolved.title, 42);
       const isRecentUnclassified = c?.sessionClass == null && r.firstTs != null
         && Date.parse(r.firstTs) >= Date.parse(SESSION_CLASS_ROLLOUT_AT);
       const classification = c?.sessionClass === "auxiliary" ? "AUX " : isRecentUnclassified ? "UNCLASSIFIED " : "";
@@ -533,12 +545,12 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number 
       const project = pad(r.projectName, 16);
       const age = pad(formatAge(r.lastTs), 5);
       const cost = pad(formatCost(rollup.bySessionId.get(r.sessionId)?.totalCost ?? r.costUSD), 7);
-      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${key}${project} ${age} ${cost} ${r.msgCount}m`);
+      console.log(`${srcMark[resolved.source]} ${title} ${badge} ${sk}${key}${project} ${age} ${cost} ${r.msgCount}m`);
       shown++;
     }
     const hidden = rows.length - shown;
     console.log(
-      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⚙=role · ↳=child · ⊞=key · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
+      `\n${shown} sessions  (★ harness ✎ yours ~ generated · LOOP=loop · ⚙=role · ↳=child · ⊞=key · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
         (hidden > 0 && !opts.all ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
     );
   } finally {

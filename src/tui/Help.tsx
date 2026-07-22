@@ -93,6 +93,7 @@ const SESSION_GROUPS: KeyGroup[] = [
   {
     name: "Find & arrange",
     keys: [
+      ["R", "refresh — re-scan the store for new sessions & fresh activity"],
       ["/", "search — fuzzy title/project/tasks + full-text content"],
       ["U", "task filter: all → unfinished tasks → interrupted mid-task"],
       ["g", "change grouping: groups → by-state → flat → tree → cluster → epic"],

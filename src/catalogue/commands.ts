@@ -24,7 +24,7 @@ import {
   parentEdges,
 } from "./db.ts";
 import { openIndex } from "../index/schema.ts";
-import { titleOf, usageOf, listByRecency, type SessionUsage } from "../index/index.ts";
+import { titleOf, resolvedTitleOf, usageOf, listByRecency, type SessionUsage } from "../index/index.ts";
 import { buildCostRollup, type SessionCostRollup } from "../index/cost-rollup.ts";
 import { formatCost, formatTokens } from "../cost.ts";
 import { pushCmuxRename } from "../cmux/liveness.ts";
@@ -107,6 +107,18 @@ function labelFor(id: string): string {
   try {
     const title = titleOf(db, id);
     return title ? `${short} ${title}` : short;
+  } finally {
+    db.close();
+  }
+}
+
+/** The full display title for a session — custom/role layered over the generated index title
+ *  (title.ts precedence). Opens the index transiently; degrades to custom/role/"(untitled)". */
+function displayTitle(id: string, over: { customTitle?: string | null; role?: string | null }): string {
+  if (!existsSync(DB_PATH())) return over.customTitle?.trim() || over.role?.trim() || "(untitled)";
+  const db = openIndex(DB_PATH());
+  try {
+    return resolvedTitleOf(db, id, over);
   } finally {
     db.close();
   }
@@ -597,7 +609,7 @@ export function meta(sessionArg: string | undefined): number {
       return 0;
     }
     console.log(id);
-    if (row?.customTitle) console.log(`  title: ${row.customTitle}`);
+    console.log(`  title: ${displayTitle(id, { customTitle: row?.customTitle, role: row?.role })}`);
     console.log(`  kind: ${row?.kind ?? "session"}`);
     console.log(`  session class: ${row?.sessionClass ?? "unclassified"}`);
     console.log(

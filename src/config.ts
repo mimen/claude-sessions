@@ -76,6 +76,18 @@ const ConfigSchema = z.object({
       maxAttempts: z.number().int().positive().max(10).default(3),
     })
     .prefault({}),
+  tui: z
+    .object({
+      /**
+       * Background auto-refresh cadence for the browser (`ccs`), in seconds. On this interval the
+       * TUI re-scans the store and re-indexes changed transcripts, so sessions started (and fresh
+       * message/cost growth) since it opened appear unattended — the cursor holds its session.
+       * Re-index is incremental (only changed files re-parse), so an idle tick is a stat pass plus
+       * a re-query. `0` disables the poll; manual `R` still forces an immediate refresh.
+       */
+      autoRefreshSec: z.number().int().min(0).max(3600).default(12),
+    })
+    .prefault({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

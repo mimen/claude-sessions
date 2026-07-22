@@ -3,6 +3,7 @@ import type { StoredSessionFile } from "../store.ts";
 import { parseSessionFile } from "../parse.ts";
 import { deriveProject } from "../project.ts";
 import { cleanLabel } from "../label.ts";
+import { resolveSessionTitle, type TitleSource, type IndexTitleSource } from "../title.ts";
 
 /** A Session row as surfaced to the browse layer, with the Title already resolved. */
 export interface SessionRow {
@@ -18,9 +19,11 @@ export interface SessionRow {
   readonly lastTs: string | null;
   readonly msgCount: number;
   readonly fileSize: number;
-  /** Resolved: native title → codex title → cleaned-first-message fallback. */
+  /** Resolved: native title → codex title → cleaned-first-message fallback. Surfaces may override
+   *  this with a custom/role/live title via {@link resolveSessionTitle}; the widened `titleSource`
+   *  reports whichever source actually won at the display layer. */
   readonly title: string;
-  readonly titleSource: "native" | "codex" | "fallback";
+  readonly titleSource: TitleSource;
   /** True when this file is a subagent task run (every message is a sidechain). */
   readonly isSubagent: boolean;
   /** Parent Session id for a subagent run; null for normal sessions. */
@@ -457,14 +460,47 @@ export function ftsMatchIds(db: Database, query: string): Set<string> {
   }
 }
 
-/** The resolved Title for a single Session id, or null if it isn't indexed (e.g. a forward ref). */
-export function titleOf(db: Database, sessionId: string): string | null {
+/** The index-resolved generated title + which source won, or null if the Session isn't indexed.
+ *  `native_title` is the harness's last-emitted title (see the column note in `parse.ts` — it is
+ *  NOT always AI-generated); `codex_title` is ccs's own generated title; `fallback_label` is the
+ *  cleaned first message and is never null. This is the generated tail of the display precedence;
+ *  a custom/role/live title layered on top is decided by {@link resolveSessionTitle}. */
+export function indexTitleOf(
+  db: Database,
+  sessionId: string,
+): { title: string; source: IndexTitleSource } | null {
   const row = db
     .query(
-      "SELECT COALESCE(native_title, codex_title, fallback_label) AS title FROM sessions WHERE session_id = $id",
+      "SELECT native_title, codex_title, fallback_label FROM sessions WHERE session_id = $id",
     )
-    .get({ $id: sessionId }) as { title: string } | null;
-  return row?.title ?? null;
+    .get({ $id: sessionId }) as
+    | { native_title: string | null; codex_title: string | null; fallback_label: string }
+    | null;
+  if (!row) return null;
+  if (row.native_title != null) return { title: row.native_title, source: "native" };
+  if (row.codex_title != null) return { title: row.codex_title, source: "codex" };
+  return { title: row.fallback_label, source: "fallback" };
+}
+
+/** The index-resolved generated Title for a Session id, or null if it isn't indexed. */
+export function titleOf(db: Database, sessionId: string): string | null {
+  return indexTitleOf(db, sessionId)?.title ?? null;
+}
+
+/** The full DISPLAY title for a Session — the generated index title with the human's `custom_title`
+ *  or identity `role` layered on per {@link resolveSessionTitle}. `(untitled)` when not indexed. */
+export function resolvedTitleOf(
+  db: Database,
+  sessionId: string,
+  over: { customTitle?: string | null; role?: string | null },
+): string {
+  const idx = indexTitleOf(db, sessionId);
+  return resolveSessionTitle({
+    customTitle: over.customTitle,
+    role: over.role,
+    indexTitle: idx?.title ?? "(untitled)",
+    indexSource: idx?.source ?? "fallback",
+  }).title;
 }
 
 /** The stored skeleton for a Session (first/last turns) — the preview-pane content peek. */

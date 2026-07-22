@@ -30,10 +30,13 @@ Refreshed incrementally — only Sessions whose file changed are re-parsed.
 _Avoid_: database, cache, catalogue (catalogue is reserved for the future tagging layer).
 
 **Title**:
-The short, human-readable name shown for a Session in the browse list. Resolved in priority
-order: the Session's native Claude Code `ai-title` if present, else an LLM-generated title
-(Codex), else the cleaned first user message. Cached in the Index. Distinct from a Session's
-UUID (its identity).
+The short, human-readable name shown for a Session in the browse list. One canonical resolver
+(`src/title.ts`, used by every surface) picks it in priority order: the user's **custom title**
+(a deliberate human choice, durable in the catalogue) → the identity **role** name (for a
+Session embodying a durable role/cluster identity) → the **native** last-emitted title
+(Claude Code's `ai-title`) → an LLM-generated **codex** title → the cleaned first user message.
+The `native/codex/fallback` tail is the *generated* title (cached in the Index); `custom`/`role`
+are *authored*. Distinct from a Session's UUID (its identity).
 _Avoid_: label, name, summary.
 
 **Native Title**:
