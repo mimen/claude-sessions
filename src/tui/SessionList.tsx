@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
 import { theme, isRecentAge, costColor, roleColor } from "./theme.ts";
-import { dominantModel, formatCostList, formatCompactUSD } from "./format.ts";
+import { dominantModel, formatCostList, formatCompactUSD, identityRowLabel } from "./format.ts";
 import { CARET_W, GLYPH_W, PHASE_W, ROLE_W, TASKS_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
 
 /** List cost color: dimmed by default so cost doesn't shout over status/title; only a
@@ -29,7 +29,7 @@ interface SessionBadge {
   glyph: string;
   color: string;
   nudge: boolean;
-  /** Event slug this session is assigned to (catalogue.event), if any. */
+  /** Durable identity key attached to this session, if any. */
   event?: string | null;
   /** PR number (catalogue.pr_number), shown as a #-badge colored by pr state. */
   pr?: number | null;
@@ -153,6 +153,7 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
 
         const cost = totalCost?.get(r.sessionId) ?? r.costUSD;
         const model = dominantModel(r.costByModel);
+        const identityLabel = identityRowLabel(badge?.event);
 
         return (
           <Box key={index} backgroundColor={bg}>
@@ -194,9 +195,9 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                   #{badge.pr}
                 </Text>
               </Box>
-            ) : badge?.event ? (
+            ) : identityLabel ? (
               <Box flexShrink={0} marginRight={1}>
-                <Text color={sel ? theme.selFg : theme.project}>⊞{badge.event}</Text>
+                <Text color={sel ? theme.selFg : theme.project}>⊞{identityLabel}</Text>
               </Box>
             ) : null}
             {showRoleStatus ? (
