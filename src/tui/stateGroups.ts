@@ -20,8 +20,10 @@ export const SECTIONS: { key: SectionKey; name: string; glyph: string }[] = [
   { key: "archived", name: "ARCHIVED", glyph: "·" },
 ];
 
-/** Sections collapsed by default — the long tail (incl. the groups view's SOLO bucket). */
-export const DEFAULT_COLLAPSED: ReadonlySet<string> = new Set(["stale", "done", "archived", "solo"]);
+/** Sections collapsed by default — the long tail (incl. the groups view's SOLO bucket and
+ * the cluster stray bucket's `archived` sub-group; its `done` sub-group collapses via the
+ * `:done` inversion, so only `archived` needs an explicit seed here). */
+export const DEFAULT_COLLAPSED: ReadonlySet<string> = new Set(["stale", "done", "archived", "solo", "cluster::none:archived"]);
 
 const STALE_MS = 14 * 24 * 60 * 60 * 1000;
 

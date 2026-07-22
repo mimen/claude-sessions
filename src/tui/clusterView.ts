@@ -1,5 +1,5 @@
 import type { SessionRow } from "../index/index.ts";
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow, Lifecycle } from "../catalogue/db.ts";
 import { lifecycleOf } from "../catalogue/db.ts";
 import { isCoreRole } from "../catalogue/cluster-map.ts";
 import type { EpicDisplay } from "../state/groupings.ts";
@@ -153,11 +153,32 @@ export function buildClusterView(rows: readonly SessionRow[], ctx: ClusterViewCt
       }
     }
   }
-  // No-system sessions — one trailing top-level group (flat, no epic/role split).
+  // No-system sessions — the "stray" bucket. Unlike a cluster group (one merged retired
+  // fold), strays are sub-grouped by LIFECYCLE into open / parked / done / archived so the
+  // loose tail is legible on its own terms. `open` = the idle lifecycle (active is just an
+  // idle session with a live terminal, still shown by the per-row dot); `parked` leads
+  // alongside it expanded; `done` (completed) and `archived` collapse by default — done via
+  // the `:done` inversion, archived via a DEFAULT_COLLAPSED seed on `cluster::none:archived`.
   const none = bySystem.get("");
   if (none) {
-    const rowsIn = [...none.workers.values(), ...none.core.values()].flat();
-    group("cluster::none", "(no system)", "·", 0, rowsIn);
+    const strays = [...none.workers.values(), ...none.core.values()].flat();
+    if (strays.length > 0) {
+      header("cluster::none", "(no system)", "·", 0, strays.length);
+      if (!isCollapsed("cluster::none")) {
+        const lc = (r: SessionRow): Lifecycle => lifecycleOf(ctx.catMap.get(r.sessionId) ?? null);
+        const subGroup = (suffix: string, name: string, glyph: string, state: Lifecycle): void => {
+          const rowsIn = strays.filter((r) => lc(r) === state);
+          if (rowsIn.length === 0) return;
+          const key = `cluster::none:${suffix}`;
+          header(key, name, glyph, 1, rowsIn.length);
+          if (!isCollapsed(key)) for (const r of sortRows(rowsIn, sort, costOf)) pushSession(r, 1);
+        };
+        subGroup("open", "open", "○", "idle"); // active + idle (active = idle + live terminal)
+        subGroup("parked", "parked", "⏸", "parked");
+        subGroup("done", "done", "✓", "completed"); // `:done` → collapsed by default
+        subGroup("archived", "archived", "·", "archived"); // seeded collapsed in DEFAULT_COLLAPSED
+      }
+    }
   }
   return items;
 }

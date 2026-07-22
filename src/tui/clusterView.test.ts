@@ -45,8 +45,12 @@ test("buildClusterView: core tier first (★), then WORKERS grouped by epic shor
   expect(sections[tt].section.level).toBe(2);
   expect(tt).toBeGreaterThan(workers);
   expect(noEpic).toBeGreaterThan(tt);
-  // (no system) trailing, level 0.
-  expect(sections[sections.length - 1].section.name).toBe("(no system)");
+  // (no system) trailing, level 0 — now a container with lifecycle sub-groups under it.
+  const noSystem = named("(no system)");
+  expect(sections[noSystem].section.level).toBe(0);
+  // The idle stray lands in an `open` sub-group (level 1) directly after (no system).
+  expect(sections[noSystem + 1].section.name).toBe("open");
+  expect(sections[noSystem + 1].section.level).toBe(1);
 });
 
 test("buildClusterView: group with ALL sessions retired — outer count is total, inner 'done' fold has retired count", () => {
@@ -124,4 +128,52 @@ test("buildClusterView: empty groups are OMITTED entirely — no `(0)` phantom h
   const sections = items.filter((i) => i.kind === "section") as any[];
   expect(sections.find((s) => s.section.name === "Ghost")).toBeUndefined();
   expect(sections.find((s) => s.section.name === "Active")).toBeDefined();
+});
+
+test("buildClusterView: stray (no-system) bucket sub-groups by lifecycle — open / parked / done / archived", () => {
+  // Strays get a per-lifecycle split (not the merged retired fold cluster groups use):
+  // `open` (idle, incl. active) and `parked` lead expanded; `done` (completed) and
+  // `archived` are present but collapsed by default so the loose tail stays legible.
+  const catMap = new Map<string, CatalogueRow>([
+    ["s-idle", cat({ sessionId: "s-idle" })], // idle → open
+    ["s-active", cat({ sessionId: "s-active" })], // idle + live terminal → still open bucket
+    ["s-parked", cat({ sessionId: "s-parked", parkedTaskId: "task-1" })],
+    ["s-done", cat({ sessionId: "s-done", completed: true })],
+    ["s-arch", cat({ sessionId: "s-arch", archived: true })],
+  ]);
+  const items = buildClusterView(
+    [row("s-idle"), row("s-active"), row("s-parked"), row("s-done"), row("s-arch")],
+    // s-active is "open" in the live-terminal sense; archived seeded collapsed as it is in prod.
+    { catMap, epicMap: new Map(), openSet: new Set(["s-active"]), collapsedSections: new Set(["cluster::none:archived"]) },
+  );
+  const sections = items.filter((i) => i.kind === "section") as any[];
+  const named = (n: string) => sections.findIndex((s) => s.section.name === n);
+
+  // Container header, then the four lifecycle sub-groups in fixed order, all level 1.
+  const noSystem = named("(no system)");
+  expect(sections[noSystem].section.level).toBe(0);
+  for (const [name, count] of [["open", 2], ["parked", 1], ["done", 1], ["archived", 1]] as const) {
+    const i = named(name);
+    expect(i).toBeGreaterThan(noSystem);
+    expect(sections[i].section.level).toBe(1);
+    expect(sections[i].count).toBe(count);
+  }
+  expect(named("open")).toBeLessThan(named("parked"));
+  expect(named("parked")).toBeLessThan(named("done"));
+  expect(named("done")).toBeLessThan(named("archived"));
+
+  // Collapse defaults: open + parked expanded (their rows emitted), done + archived collapsed
+  // (header only, no rows). `done` collapses via the `:done` inversion even though it was not
+  // named in collapsedSections; `archived` collapses via its seed.
+  expect(sections[named("open")].collapsed).toBe(false);
+  expect(sections[named("parked")].collapsed).toBe(false);
+  expect(sections[named("done")].collapsed).toBe(true);
+  expect(sections[named("archived")].collapsed).toBe(true);
+  const idOf = (i: any) => i.kind === "session" && (i.row.sessionId as string);
+  const sessionIds = items.map(idOf).filter(Boolean);
+  expect(sessionIds).toContain("s-idle");
+  expect(sessionIds).toContain("s-active");
+  expect(sessionIds).toContain("s-parked");
+  expect(sessionIds).not.toContain("s-done"); // collapsed fold hides the row
+  expect(sessionIds).not.toContain("s-arch");
 });
