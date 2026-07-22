@@ -1082,6 +1082,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       })()}
       tasks={taskIds.has(selectedRow.sessionId) ? tasksFor(selectedRow.sessionId) : null}
       height={previewHeight}
+      width={sideBySide ? previewWidth : contentWidth}
       detailsOpen={detailsOpen}
       peekLines={peekLines}
       peekScroll={peekScroll}
@@ -1094,6 +1095,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       cost={selSection.cost}
       sectionKey={selSection.section.key}
       height={previewHeight}
+      width={sideBySide ? previewWidth : contentWidth}
     />
   ) : null;
 

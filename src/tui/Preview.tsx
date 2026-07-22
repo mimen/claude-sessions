@@ -41,6 +41,9 @@ interface PreviewProps {
   tasks?: TaskSummary | null;
   /** Total height available to the pane (border included). */
   height: number;
+  /** Total width of the pane (border included). Fixed so the box always spans its column, even when
+   *  the content is narrow (short peek / sparse metadata) — otherwise the bordered box shrinks to fit. */
+  width: number;
   /** false → compact identity strip + big scrollable content peek (default); true → full metadata
    *  dossier (every field + cost breakdown), toggled with `d`. */
   detailsOpen: boolean;
@@ -205,6 +208,7 @@ export function Preview({
   reviewAppUrl,
   tasks,
   height,
+  width,
   detailsOpen,
   peekLines,
   peekScroll,
@@ -314,7 +318,7 @@ export function Preview({
     }
 
     return (
-      <Box flexDirection="column" borderStyle="round" borderColor={theme.faint} paddingX={1} height={height} overflow="hidden">
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.faint} paddingX={1} width={width} height={height} overflow="hidden">
         {H}
         <Box marginTop={1} flexDirection="column" flexShrink={0}>
           <Text color={theme.muted} wrap="truncate-end">
@@ -337,6 +341,7 @@ export function Preview({
       borderStyle="round"
       borderColor={theme.faint}
       paddingX={1}
+      width={width}
       height={height}
       overflow="hidden"
     >

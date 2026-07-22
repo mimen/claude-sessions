@@ -169,8 +169,11 @@ export async function parseSessionFile(
         }
       }
 
+      // Only PROSE turns fill the head/tail budget, so the preview still shows FIRST/LAST
+      // *conversational* turns after it strips tool calls. A prose turn's own inline tool stubs stay
+      // in its skeleton line (FTS keeps indexing them); pure tool-only turns just don't take a slot.
       const skel = skeletonLine(obj.type, content);
-      if (skel) {
+      if (skel && humanText(content) !== "") {
         if (firstTurns.length < FIRST_TURNS) firstTurns.push(skel);
         lastTurns.push(skel);
         if (lastTurns.length > LAST_TURNS) lastTurns.shift();
