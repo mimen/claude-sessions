@@ -17,6 +17,9 @@ The default launch reads the real store under `~/.ccs/cache/`. Static renders us
 SHOT=browser go run .
 SHOT=transcript go run .
 SHOT=route go run .
+SHOT=options go run .
+SHOT=stage go run .
+SHOT=cost go run .
 SHOT=organize go run .
 SHOT=ai go run .
 SHOT=skills go run .
@@ -33,12 +36,15 @@ SHOT=skill-reader go run .
 | `g` | Cycle `default` → `tree` → `flat` |
 | `/` | Fuzzy filter title, project, and Claude task subjects |
 | `p` | Show or hide the dossier |
+| `o` | Open View Options: sort, visibility, task filter, and autorefresh settings |
+| `R` | Manually reload the read-only store snapshot while preserving selection |
 | `J` / `K` | Scroll the selected session’s normalized transcript peek |
 | `v` | Open the full transcript pager |
 | `t` | Retitle through `ccs session title` |
 | `C` | Confirm and mark done through `ccs mark --completed` |
-| `X` | Confirm and archive through `ccs mark --archived` |
-| `e` | Describe a single-session metadata edit in natural language; review validated mutations before applying them through `ccs` |
+| `e` | Fast archive, or unarchive an archived row, through `ccs mark --archived [--off]` |
+| `X` | Confirm archive/unarchive through the same `ccs mark` path |
+| `E` | Describe a single-session metadata edit in natural language; review validated mutations before applying them through `ccs` |
 | `S` | Generate a 2–3 line transcript summary in the dossier |
 | `A` | Ask the fleet a semantic question across bounded transcript excerpts; `enter` jumps to a result |
 | `D` | Generate a conservative cleanup proposal; `space` toggles entries and `y` archives the approved set through `ccs` |
@@ -47,6 +53,19 @@ SHOT=skill-reader go run .
 | `q` | Quit |
 
 Transcript pager keys: `j` / `k`, `PgUp` / `PgDn`, `g` / `G`, and `v` / `esc` to close.
+
+## View Options and autorefresh
+
+`o` opens the single settings pane for list presentation. Move with `j` / `k`, change the focused value with `space`, `enter`, or `←` / `→`, and close with `esc`. Changes apply without leaving the pane.
+
+- Sort: recency (default), recursive total cost, or indexed message count.
+- Show archived: off by default; archived rows use a dim `·` state and can be restored with `e` or confirmed `X`.
+- Show native subagents: off by default.
+- Show auxiliary managed sessions: off by default.
+- Task filter: all, unfinished, or interrupted-mid-task. Interrupted means an `in_progress` Claude task exists while the session is not live.
+- Autorefresh: on by default at 8 seconds; selectable intervals are 5s, 8s, 10s, and 30s.
+
+The Bubble Tea ticker reloads through the same read-only snapshot path as manual `R` and post-write reloads. It preserves the selected session and virtualized cursor position; disabling autorefresh does not disable manual refresh.
 
 ## Landing views
 
@@ -59,7 +78,7 @@ Named systems lead the page. Each cluster is split by role (coordinator/control,
 3. `parked`
 4. `done`
 
-Archived, auxiliary, and native subagent runs are hidden. There is deliberately no visibility-toggle mode in v1.
+Archived, auxiliary, and native subagent runs are hidden initially and can be included independently from View Options.
 
 ### Tree
 
@@ -67,13 +86,13 @@ The causal parent→child tree retains recursive self/total cost and Claude/GPT/
 
 ### Flat
 
-A pure recency list with no grouping. Fuzzy filtering works in default and flat views.
+An ungrouped list ordered by the selected recency, cost, or message-count sort. Fuzzy filtering works in default and flat views; search relevance remains primary while a query is active. The causal tree keeps its purpose-built subtree-cost ordering.
 
 ## Dossier and transcripts
 
 The right-hand dossier includes:
 
-- lifecycle, class, role, cluster, cwd, duration, age, and subagent count;
+- lifecycle, class, role, cluster, pipeline stage, optional PR number/state, cwd, duration, age, and subagent count;
 - self/recursive total cost and provider split;
 - dominant model;
 - Claude task subjects and completion count;
@@ -111,7 +130,7 @@ SQLite is never opened for writing by this program. There is no Go mutation sche
 | --- | --- |
 | Retitle | `ccs session title <id> <title>` |
 | Done / undoable AI lifecycle change | `ccs mark <id> --completed [--off]` |
-| Archive / cleanup | `ccs mark <id> --archived [--off]` |
+| Archive / unarchive / cleanup | `ccs mark <id> --archived [--off]` |
 | Parent, parked task, identity attachment | `ccs session set` / `ccs session unset` |
 | Durable identity field | `ccs identity set <key> --field=value` or `--unset=field` |
 
@@ -152,7 +171,7 @@ The skill reader opens `SKILL.md` first, lists bounded text/Markdown/JSON/TOML/Y
 ## Read-only data sources
 
 - `~/.ccs/cache/index.db`: paths, cwd/project, titles, timestamps, models, costs, transcript skeleton, subagent edges, and resume IDs.
-- `~/.ccs/cache/catalogue.db`: session lifecycle/classification/parentage plus identity cluster/role joins.
+- `~/.ccs/cache/catalogue.db`: session lifecycle/classification/parentage plus identity cluster/role joins. Pipeline stage comes from canonical `identities.stage` (with a legacy `catalogue.stage` read fallback); optional PR facts come from `identity_pr_agent` when that role schema is materialized, with legacy catalogue-column fallback.
 - `~/.cmuxterm/claude-hook-sessions.json` and `cmux tree --all --json --id-format both`: exact live state and workspace/window location.
 - `~/.claude/tasks/<session-id>/*.json`: task subjects and completion counts.
 - Session JSONL paths indexed in `index.db`: dossier peek, pager, summaries, fleet search, and cleanup evidence.
@@ -175,7 +194,6 @@ Path overrides for isolated runs/tests:
 The locked v1 excludes:
 
 - fork resume and inline↔cmux swap;
-- task/auxiliary/archive visibility toggles;
 - literal full-text grep;
 - background needs-input triage or push notifications;
 - auto-title/classify;
@@ -183,7 +201,7 @@ The locked v1 excludes:
 - inference-engine switching inside the TUI;
 - epic view.
 
-Skills organization writes (tags, categories, archive/move, opening an editor) are not ported; Skills mode is read-only in this Go v1. Alternate session sorts are also omitted: default and flat are recency-led, while tree uses causal cost ordering.
+Skills organization writes (tags, categories, archive/move, opening an editor) are not ported; Skills mode is read-only in this Go v1.
 
 ## Verification
 
@@ -201,6 +219,9 @@ Real-data proof captures:
 - `shots/transcript-peek-real.png`
 - `shots/transcript-reader-real.png`
 - `shots/resume-picker-real.png`
+- `shots/view-options-real.png`
+- `shots/stage-column-real.png`
+- `shots/cost-sort-real.png`
 - `shots/organize-real.png`
 - `shots/ai-summary-real.png`
 - `shots/skills-real.png`
