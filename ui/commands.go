@@ -19,7 +19,10 @@ type writeFinishedMsg struct {
 	preferredID string
 	status      string
 	snapshot    data.Snapshot
+	loadOptions data.LoadOptions
 	reloaded    bool
+	refresh     bool
+	silent      bool
 	err         error
 }
 
@@ -49,71 +52,85 @@ type cleanupProposedMsg struct {
 	err       error
 }
 
-func setTitleCmd(sessionID string, title string) tea.Cmd {
+func setTitleCmd(sessionID string, title string, options data.LoadOptions) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := ccscli.SetTitle(ctx, sessionID, title); err != nil {
-			return reloadAfterFailure(sessionID, err)
+			return reloadAfterFailure(options, sessionID, err)
 		}
-		return reloadAfterWrite(sessionID, "retitled → "+title)
+		return reloadAfterWrite(options, sessionID, "retitled → "+title)
 	}
 }
 
-func markCompletedCmd(sessionID string, preferredID string) tea.Cmd {
+func markCompletedCmd(sessionID string, preferredID string, options data.LoadOptions) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := ccscli.MarkCompleted(ctx, sessionID, true); err != nil {
-			return reloadAfterFailure(preferredID, err)
+			return reloadAfterFailure(options, preferredID, err)
 		}
-		return reloadAfterWrite(preferredID, "marked done")
+		return reloadAfterWrite(options, preferredID, "marked done")
 	}
 }
 
-func archiveBatchCmd(sessionIDs []string, preferredID string, status string) tea.Cmd {
+func archiveBatchCmd(sessionIDs []string, preferredID string, status string, options data.LoadOptions) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(max(30, len(sessionIDs)*10))*time.Second)
 		defer cancel()
 		if err := ccscli.ArchiveBatch(ctx, sessionIDs); err != nil {
-			return reloadAfterFailure(preferredID, err)
+			return reloadAfterFailure(options, preferredID, err)
 		}
-		return reloadAfterWrite(preferredID, status)
+		return reloadAfterWrite(options, preferredID, status)
 	}
 }
 
-func applyMutationsCmd(mutations []inference.MetadataMutation, preferredID string) tea.Cmd {
+func markArchivedCmd(sessionID string, enabled bool, preferredID string, status string, options data.LoadOptions) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := ccscli.MarkArchived(ctx, sessionID, enabled); err != nil {
+			return reloadAfterFailure(options, preferredID, err)
+		}
+		return reloadAfterWrite(options, preferredID, status)
+	}
+}
+
+func applyMutationsCmd(mutations []inference.MetadataMutation, preferredID string, options data.LoadOptions) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(max(30, len(mutations)*10))*time.Second)
 		defer cancel()
 		if err := ccscli.ApplyMutations(ctx, mutations); err != nil {
-			return reloadAfterFailure(preferredID, err)
+			return reloadAfterFailure(options, preferredID, err)
 		}
-		return reloadAfterWrite(preferredID, fmt.Sprintf("applied %d metadata changes", len(mutations)))
+		return reloadAfterWrite(options, preferredID, fmt.Sprintf("applied %d metadata changes", len(mutations)))
 	}
 }
 
-func reloadAfterWrite(preferredID string, status string) writeFinishedMsg {
-	snapshot, err := data.Load(data.DefaultLoadOptions())
+func reloadAfterWrite(options data.LoadOptions, preferredID string, status string) writeFinishedMsg {
+	snapshot, err := data.Load(options)
 	if err != nil {
-		return writeFinishedMsg{preferredID: preferredID, status: status, err: fmt.Errorf("write succeeded; reload failed: %w", err)}
+		return writeFinishedMsg{preferredID: preferredID, status: status, loadOptions: options, err: fmt.Errorf("write succeeded; reload failed: %w", err)}
 	}
-	return writeFinishedMsg{preferredID: preferredID, status: status, snapshot: snapshot, reloaded: true}
+	return writeFinishedMsg{preferredID: preferredID, status: status, snapshot: snapshot, loadOptions: options, reloaded: true}
 }
 
-func reloadAfterFailure(preferredID string, writeErr error) writeFinishedMsg {
-	snapshot, reloadErr := data.Load(data.DefaultLoadOptions())
+func reloadAfterFailure(options data.LoadOptions, preferredID string, writeErr error) writeFinishedMsg {
+	snapshot, reloadErr := data.Load(options)
 	if reloadErr != nil {
-		return writeFinishedMsg{preferredID: preferredID, err: fmt.Errorf("%w; reload after partial write also failed: %v", writeErr, reloadErr)}
+		return writeFinishedMsg{preferredID: preferredID, loadOptions: options, err: fmt.Errorf("%w; reload after partial write also failed: %v", writeErr, reloadErr)}
 	}
-	return writeFinishedMsg{preferredID: preferredID, snapshot: snapshot, reloaded: true, err: writeErr}
+	return writeFinishedMsg{preferredID: preferredID, snapshot: snapshot, loadOptions: options, reloaded: true, err: writeErr}
 }
 
 // refreshCmd re-scans the store (no write) and reloads the snapshot, keeping the
-// current selection. Bound to `R` (shift+r).
-func refreshCmd(preferredID string) tea.Cmd {
+// current selection. Manual refresh is bound to `R` (shift+r).
+func refreshCmd(options data.LoadOptions, preferredID string, silent bool) tea.Cmd {
 	return func() tea.Msg {
-		return reloadAfterWrite(preferredID, "refreshed")
+		message := reloadAfterWrite(options, preferredID, "refreshed")
+		message.refresh = true
+		message.silent = silent
+		return message
 	}
 }
 

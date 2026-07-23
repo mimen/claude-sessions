@@ -32,6 +32,7 @@ const (
 	OverlayNone Overlay = iota
 	OverlayRoute
 	OverlayHelp
+	OverlayViewOptions
 )
 
 // row is one virtualized list line: a section header or a session ref.
@@ -84,6 +85,10 @@ type Model struct {
 	mode               AppMode
 	view               View
 	overlay            Overlay
+	options            viewOptions
+	viewOptionCursor   int
+	tickerGeneration   uint64
+	refreshInFlight    bool
 	snapshot           data.Snapshot
 	rows               []row
 	cursor             int
@@ -127,11 +132,14 @@ type Model struct {
 
 // New creates a browser over an immutable real-data snapshot.
 func New(snapshot data.Snapshot) Model {
+	options := defaultViewOptions()
 	rows := buildRows(snapshot.Sessions)
 	return Model{
 		w:                  120,
 		h:                  40,
 		view:               ViewGroups,
+		options:            options,
+		tickerGeneration:   1,
 		preview:            true,
 		skillView:          skillViewCategory,
 		skillPreview:       true,
@@ -184,7 +192,11 @@ func (m Model) nextSessionID(cursor int) string {
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.loadSelectedTranscriptCmd()
+	commands := []tea.Cmd{m.loadSelectedTranscriptCmd()}
+	if m.options.autoRefresh {
+		commands = append(commands, autoRefreshCmd(m.options.refreshInterval, m.tickerGeneration))
+	}
+	return tea.Batch(commands...)
 }
 
 func (m Model) selectedSession() (data.Session, bool) {
@@ -282,15 +294,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.peekScroll = max(0, len(msg.document.Lines)-6)
 		}
 		return m, nil
+	case autoRefreshMsg:
+		if msg.generation != m.tickerGeneration || !m.options.autoRefresh {
+			return m, nil
+		}
+		nextTick := autoRefreshCmd(m.options.refreshInterval, m.tickerGeneration)
+		if m.refreshInFlight {
+			return m, nextTick
+		}
+		preferredID := ""
+		if session, ok := m.selectedSession(); ok {
+			preferredID = session.ID
+		}
+		m.refreshInFlight = true
+		return m, tea.Batch(nextTick, refreshCmd(m.options.loadOptions(), preferredID, true))
 	case writeFinishedMsg:
-		if msg.reloaded {
+		if msg.refresh {
+			m.refreshInFlight = false
+		}
+		if msg.reloaded && msg.loadOptions == m.options.loadOptions() {
 			m.replaceSnapshot(msg.snapshot, msg.preferredID)
 		}
 		if msg.err != nil {
 			m.status = msg.err.Error()
 			return m, m.loadSelectedTranscriptCmd()
 		}
-		m.status = msg.status
+		if !msg.silent {
+			m.status = msg.status
+		}
 		return m, m.loadSelectedTranscriptCmd()
 	case metadataProposedMsg:
 		if msg.err != nil {
@@ -378,6 +409,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.input != nil {
 		return m.handleInputKey(msg)
 	}
+	if m.overlay == OverlayViewOptions {
+		return m.handleViewOptionsKey(msg)
+	}
 	if m.overlay == OverlayHelp {
 		switch msg.String() {
 		case "esc", "q", "?":
@@ -460,6 +494,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p":
 		m.preview = !m.preview
 		m.status = ""
+	case "o":
+		m.overlay = OverlayViewOptions
+		m.status = ""
 	case "r":
 		return m.openRoutePicker()
 	case "t":
@@ -471,17 +508,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.confirmation = &confirmation{kind: confirmComplete, title: "Mark session done?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs mark --completed", enabled: true}}}
 		}
 	case "e":
-		// Fast archive: no confirmation (reversible via `ccs mark --archived --off`),
-		// and the cursor lands on the NEXT session so you can rip through cleanup
-		// without losing your place.
+		// Fast archive/unarchive: both directions remain owned by `ccs mark`.
 		if session, ok := m.selectedSession(); ok {
+			if session.State == "archived" {
+				m.status = "unarchiving via ccs…"
+				return m, markArchivedCmd(session.ID, false, session.ID, "unarchived → "+truncate(session.Title, 40), m.options.loadOptions())
+			}
 			m.status = "archiving via ccs…"
-			return m, archiveBatchCmd([]string{session.ID}, m.nextSessionID(m.cursor), "archived → "+truncate(session.Title, 40))
+			return m, archiveBatchCmd([]string{session.ID}, m.nextSessionID(m.cursor), "archived → "+truncate(session.Title, 40), m.options.loadOptions())
 		}
 	case "X":
-		// Archive with a confirmation, for when you want the safety prompt.
+		// Archive/unarchive with a confirmation, for when you want the safety prompt.
 		if session, ok := m.selectedSession(); ok {
-			m.confirmation = &confirmation{kind: confirmArchive, title: "Archive session?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs mark --archived", enabled: true}}}
+			if session.State == "archived" {
+				m.confirmation = &confirmation{kind: confirmUnarchive, title: "Unarchive session?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs mark --archived --off", enabled: true}}}
+			} else {
+				m.confirmation = &confirmation{kind: confirmArchive, title: "Archive session?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs mark --archived", enabled: true}}}
+			}
 		}
 	case "E":
 		if session, ok := m.selectedSession(); ok {
@@ -495,7 +538,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			preferredID = session.ID
 		}
 		m.status = "refreshing…"
-		return m, refreshCmd(preferredID)
+		m.refreshInFlight = true
+		return m, refreshCmd(m.options.loadOptions(), preferredID, false)
 	case "S":
 		if session, ok := m.selectedSession(); ok {
 			m.status = "summarizing with the inference engine…"
@@ -523,8 +567,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.rebuildRows()
 		m.searching = true
 		m.status = ""
-	case "s":
-		m.status = "recency is the only v1 sort"
 	}
 	return m, nil
 }
@@ -784,11 +826,45 @@ func (m *Model) moveRouteCursor(delta int) {
 
 func (m *Model) rebuildRows() {
 	if m.view == ViewFlat {
-		m.rows = buildFlatRows(m.snapshot.Sessions, m.query)
+		m.rows = buildFlatRows(m.snapshot.Sessions, m.query, m.options.sort, m.options.taskFilter)
 	} else {
-		m.rows = buildDefaultRows(m.snapshot.Sessions, m.query)
+		m.rows = buildDefaultRows(m.snapshot.Sessions, m.query, m.options.sort, m.options.taskFilter)
 	}
 	m.cursor = firstSessionRow(m.rows)
+}
+
+func (m *Model) rebuildRowsPreserving(preferredID string) {
+	previousCursor := m.cursor
+	m.rebuildRows()
+	if preferredID != "" {
+		if sessionIndex, ok := m.snapshot.ByID[preferredID]; ok {
+			for rowIndex, candidate := range m.rows {
+				if !candidate.header && candidate.sIdx == sessionIndex {
+					m.cursor = rowIndex
+					return
+				}
+			}
+		}
+	}
+	m.cursor = nearestSessionRow(m.rows, previousCursor)
+}
+
+func nearestSessionRow(rows []row, preferred int) int {
+	if len(rows) == 0 {
+		return 0
+	}
+	preferred = clamp(preferred, 0, len(rows)-1)
+	for distance := 0; distance < len(rows); distance++ {
+		forward := preferred + distance
+		if forward < len(rows) && !rows[forward].header {
+			return forward
+		}
+		backward := preferred - distance
+		if backward >= 0 && !rows[backward].header {
+			return backward
+		}
+	}
+	return 0
 }
 
 func clamp(value int, low int, high int) int {

@@ -9,11 +9,11 @@ import (
 )
 
 func buildRows(sessions []data.Session) []row {
-	return buildDefaultRows(sessions, "")
+	return buildDefaultRows(sessions, "", sortRecency, taskFilterAll)
 }
 
-func buildDefaultRows(sessions []data.Session, query string) []row {
-	indexes := matchingSessionIndexes(sessions, query)
+func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filter taskFilter) []row {
+	indexes := matchingSessionIndexes(sessions, query, filter)
 	byCluster := make(map[string]map[string][]int)
 	clusterRecent := make(map[string]int64)
 	noSystem := make(map[string][]int)
@@ -51,7 +51,7 @@ func buildDefaultRows(sessions []data.Session, query string) []row {
 		return clusters[i] < clusters[j]
 	})
 
-	rows := make([]row, 0, len(indexes)+len(clusters)*3+6)
+	rows := make([]row, 0, len(indexes)+len(clusters)*3+7)
 	for _, cluster := range clusters {
 		roles := make([]string, 0, len(byCluster[cluster]))
 		total := 0
@@ -59,19 +59,26 @@ func buildDefaultRows(sessions []data.Session, query string) []row {
 			roles = append(roles, role)
 			total += len(members)
 		}
-		sort.Slice(roles, func(i int, j int) bool {
-			left, right := rolePriority(roles[i]), rolePriority(roles[j])
-			if left != right {
-				return left < right
-			}
-			return roles[i] < roles[j]
-		})
 		rows = append(rows, row{header: true, key: "cluster:" + cluster, label: cluster, glyph: "◇", count: total})
-		// Sessions sit directly under the cluster header — no role sub-sections
-		// (role is already shown in its own column). Role-priority ordering is
-		// kept so members still read in a sensible order.
-		for _, role := range roles {
-			for _, idx := range byCluster[cluster][role] {
+		if mode == sortRecency || strings.TrimSpace(query) != "" {
+			sort.Slice(roles, func(i int, j int) bool {
+				left, right := rolePriority(roles[i]), rolePriority(roles[j])
+				if left != right {
+					return left < right
+				}
+				return roles[i] < roles[j]
+			})
+			for _, role := range roles {
+				for _, idx := range sortSessionIndexes(byCluster[cluster][role], sessions, mode) {
+					rows = append(rows, row{sIdx: idx, level: 1})
+				}
+			}
+		} else {
+			members := make([]int, 0, total)
+			for _, role := range roles {
+				members = append(members, byCluster[cluster][role]...)
+			}
+			for _, idx := range sortSessionIndexes(members, sessions, mode) {
 				rows = append(rows, row{sIdx: idx, level: 1})
 			}
 		}
@@ -90,6 +97,7 @@ func buildDefaultRows(sessions []data.Session, query string) []row {
 			{key: "idle", label: "idle", glyph: "○"},
 			{key: "parked", label: "parked", glyph: "⏸"},
 			{key: "done", label: "done", glyph: "✓"},
+			{key: "archived", label: "archived", glyph: "·"},
 		}
 		for _, state := range states {
 			members := noSystem[state.key]
@@ -97,7 +105,7 @@ func buildDefaultRows(sessions []data.Session, query string) []row {
 				continue
 			}
 			rows = append(rows, row{header: true, key: "no-system:" + state.key, label: state.label, glyph: state.glyph, level: 1, count: len(members)})
-			for _, idx := range members {
+			for _, idx := range sortSessionIndexes(members, sessions, mode) {
 				rows = append(rows, row{sIdx: idx, level: 1})
 			}
 		}
@@ -105,8 +113,11 @@ func buildDefaultRows(sessions []data.Session, query string) []row {
 	return rows
 }
 
-func buildFlatRows(sessions []data.Session, query string) []row {
-	indexes := matchingSessionIndexes(sessions, query)
+func buildFlatRows(sessions []data.Session, query string, mode sortMode, filter taskFilter) []row {
+	indexes := matchingSessionIndexes(sessions, query, filter)
+	if strings.TrimSpace(query) == "" {
+		indexes = sortSessionIndexes(indexes, sessions, mode)
+	}
 	rows := make([]row, 0, len(indexes))
 	for _, idx := range indexes {
 		rows = append(rows, row{sIdx: idx})
@@ -114,12 +125,37 @@ func buildFlatRows(sessions []data.Session, query string) []row {
 	return rows
 }
 
-func matchingSessionIndexes(sessions []data.Session, query string) []int {
+func sortSessionIndexes(indexes []int, sessions []data.Session, mode sortMode) []int {
+	ordered := append([]int(nil), indexes...)
+	sort.SliceStable(ordered, func(i int, j int) bool {
+		left := sessions[ordered[i]]
+		right := sessions[ordered[j]]
+		switch mode {
+		case sortCost:
+			if left.TotalCost != right.TotalCost {
+				return left.TotalCost > right.TotalCost
+			}
+		case sortMessages:
+			if left.Messages != right.Messages {
+				return left.Messages > right.Messages
+			}
+		}
+		if !left.LastAt.Equal(right.LastAt) {
+			return left.LastAt.After(right.LastAt)
+		}
+		return left.ID < right.ID
+	})
+	return ordered
+}
+
+func matchingSessionIndexes(sessions []data.Session, query string, filter taskFilter) []int {
 	query = strings.TrimSpace(strings.ToLower(query))
 	if query == "" {
-		indexes := make([]int, len(sessions))
-		for i := range sessions {
-			indexes[i] = i
+		indexes := make([]int, 0, len(sessions))
+		for i, session := range sessions {
+			if sessionMatchesTaskFilter(session, filter) {
+				indexes = append(indexes, i)
+			}
 		}
 		return indexes
 	}
@@ -129,6 +165,9 @@ func matchingSessionIndexes(sessions []data.Session, query string) []int {
 	}
 	matches := make([]scored, 0)
 	for i, session := range sessions {
+		if !sessionMatchesTaskFilter(session, filter) {
+			continue
+		}
 		haystacks := []string{session.Title, session.Project}
 		haystacks = append(haystacks, session.TaskSubjects...)
 		best := -1
@@ -152,6 +191,17 @@ func matchingSessionIndexes(sessions []data.Session, query string) []int {
 		indexes[i] = match.idx
 	}
 	return indexes
+}
+
+func sessionMatchesTaskFilter(session data.Session, filter taskFilter) bool {
+	switch filter {
+	case taskFilterUnfinished:
+		return session.TasksTotal > 0 && session.TasksDone < session.TasksTotal
+	case taskFilterInterrupted:
+		return session.TasksInProgress > 0 && session.State != "active" && session.LiveWorkspaceRef == ""
+	default:
+		return true
+	}
 }
 
 func fuzzyScore(needle string, haystack string) (int, bool) {

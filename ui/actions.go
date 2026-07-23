@@ -30,6 +30,7 @@ type confirmationKind string
 const (
 	confirmComplete  confirmationKind = "complete"
 	confirmArchive   confirmationKind = "archive"
+	confirmUnarchive confirmationKind = "unarchive"
 	confirmMutations confirmationKind = "mutations"
 	confirmCleanup   confirmationKind = "cleanup"
 )
@@ -74,7 +75,7 @@ func (m Model) handleInputKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch input.kind {
 		case inputRetitle:
 			m.status = "retitling via ccs…"
-			return m, setTitleCmd(input.sessionID, input.buffer)
+			return m, setTitleCmd(input.sessionID, input.buffer, m.options.loadOptions())
 		case inputEdit:
 			m.status = "asking the inference engine for a metadata edit…"
 			return m, metadataEditCmd(m.snapshot, input.sessionID, input.buffer)
@@ -126,12 +127,17 @@ func (m Model) handleConfirmationKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 			item := confirmation.items[0]
 			m.confirmation = nil
 			m.status = "marking done via ccs…"
-			return m, markCompletedCmd(item.sessionID, preferredID)
+			return m, markCompletedCmd(item.sessionID, preferredID, m.options.loadOptions())
 		case confirmArchive:
 			item := confirmation.items[0]
 			m.confirmation = nil
 			m.status = "archiving via ccs…"
-			return m, archiveBatchCmd([]string{item.sessionID}, preferredID, "archived 1 session")
+			return m, archiveBatchCmd([]string{item.sessionID}, preferredID, "archived 1 session", m.options.loadOptions())
+		case confirmUnarchive:
+			item := confirmation.items[0]
+			m.confirmation = nil
+			m.status = "unarchiving via ccs…"
+			return m, markArchivedCmd(item.sessionID, false, preferredID, "unarchived 1 session", m.options.loadOptions())
 		case confirmMutations:
 			mutations := make([]inference.MetadataMutation, 0, len(confirmation.items))
 			for _, item := range confirmation.items {
@@ -141,7 +147,7 @@ func (m Model) handleConfirmationKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.confirmation = nil
 			m.status = "applying validated mutations via ccs…"
-			return m, applyMutationsCmd(mutations, preferredID)
+			return m, applyMutationsCmd(mutations, preferredID, m.options.loadOptions())
 		case confirmCleanup:
 			ids := make([]string, 0, len(confirmation.items))
 			for _, item := range confirmation.items {
@@ -156,7 +162,7 @@ func (m Model) handleConfirmationKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.confirmation = nil
 			m.status = fmt.Sprintf("archiving %d approved sessions via ccs…", len(ids))
-			return m, archiveBatchCmd(ids, preferredID, fmt.Sprintf("archived %d sessions", len(ids)))
+			return m, archiveBatchCmd(ids, preferredID, fmt.Sprintf("archived %d sessions", len(ids)), m.options.loadOptions())
 		}
 	}
 	return m, nil
@@ -204,35 +210,33 @@ func (m *Model) jumpToSession(sessionID string) {
 }
 
 func (m *Model) replaceSnapshot(snapshot data.Snapshot, preferredID string) {
+	previousCursor := m.cursor
+	previousTreeCursor := m.treeCursor
 	m.snapshot = snapshot
 	m.rebuildRows()
-	if preferredID == "" {
-		return
-	}
 	if m.view == ViewTree {
-		for index, node := range snapshot.Tree {
-			if node.SessionID == preferredID {
-				m.treeCursor = index
-				return
+		if preferredID != "" {
+			for index, node := range snapshot.Tree {
+				if node.SessionID == preferredID {
+					m.treeCursor = index
+					return
+				}
 			}
 		}
-		m.treeCursor = clamp(m.treeCursor, 0, max(0, len(snapshot.Tree)-1))
+		m.treeCursor = clamp(previousTreeCursor, 0, max(0, len(snapshot.Tree)-1))
 		return
 	}
-	preferredIndex, ok := snapshot.ByID[preferredID]
-	if !ok {
-		m.cursor = clamp(m.cursor, 0, max(0, len(m.rows)-1))
-		if len(m.rows) > 0 && m.rows[m.cursor].header {
-			m.cursor = firstSessionRow(m.rows)
-		}
-		return
-	}
-	for rowIndex, candidate := range m.rows {
-		if !candidate.header && candidate.sIdx == preferredIndex {
-			m.cursor = rowIndex
-			return
+	if preferredID != "" {
+		if preferredIndex, ok := snapshot.ByID[preferredID]; ok {
+			for rowIndex, candidate := range m.rows {
+				if !candidate.header && candidate.sIdx == preferredIndex {
+					m.cursor = rowIndex
+					return
+				}
+			}
 		}
 	}
+	m.cursor = nearestSessionRow(m.rows, previousCursor)
 }
 
 func mutationDescription(mutation inference.MetadataMutation) string {

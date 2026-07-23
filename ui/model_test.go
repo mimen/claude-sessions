@@ -69,9 +69,83 @@ func TestDefaultGroupingPutsClustersBeforeNoSystemStates(t *testing.T) {
 func TestFuzzySearchIncludesTaskSubjects(t *testing.T) {
 	snapshot := testSnapshot(2)
 	snapshot.Sessions[1].TaskSubjects = []string{"Configure grok build runner"}
-	rows := buildFlatRows(snapshot.Sessions, "grk bld")
+	rows := buildFlatRows(snapshot.Sessions, "grk bld", sortRecency, taskFilterAll)
 	if len(rows) != 1 || rows[0].sIdx != 1 {
 		t.Fatalf("rows = %+v, want only session 1", rows)
+	}
+}
+
+func TestCostAndMessageSortOrderRowsDescending(t *testing.T) {
+	snapshot := testSnapshot(3)
+	snapshot.Sessions[0].TotalCost = 3
+	snapshot.Sessions[1].TotalCost = 9
+	snapshot.Sessions[2].TotalCost = 5
+	snapshot.Sessions[0].Messages = 20
+	snapshot.Sessions[1].Messages = 4
+	snapshot.Sessions[2].Messages = 12
+
+	costRows := buildFlatRows(snapshot.Sessions, "", sortCost, taskFilterAll)
+	if got := []int{costRows[0].sIdx, costRows[1].sIdx, costRows[2].sIdx}; fmt.Sprint(got) != "[1 2 0]" {
+		t.Fatalf("cost order = %v", got)
+	}
+	messageRows := buildFlatRows(snapshot.Sessions, "", sortMessages, taskFilterAll)
+	if got := []int{messageRows[0].sIdx, messageRows[1].sIdx, messageRows[2].sIdx}; fmt.Sprint(got) != "[0 2 1]" {
+		t.Fatalf("message order = %v", got)
+	}
+}
+
+func TestTaskFiltersDistinguishUnfinishedAndInterrupted(t *testing.T) {
+	snapshot := testSnapshot(3)
+	snapshot.Sessions[0].TasksDone, snapshot.Sessions[0].TasksTotal = 1, 2
+	snapshot.Sessions[0].TasksInProgress = 1
+	snapshot.Sessions[1].TasksDone, snapshot.Sessions[1].TasksTotal = 0, 1
+	snapshot.Sessions[1].TasksInProgress = 1
+	snapshot.Sessions[1].State = "active"
+	snapshot.Sessions[2].TasksDone, snapshot.Sessions[2].TasksTotal = 1, 1
+
+	unfinished := buildFlatRows(snapshot.Sessions, "", sortRecency, taskFilterUnfinished)
+	if len(unfinished) != 2 {
+		t.Fatalf("unfinished rows = %+v", unfinished)
+	}
+	interrupted := buildFlatRows(snapshot.Sessions, "", sortRecency, taskFilterInterrupted)
+	if len(interrupted) != 1 || interrupted[0].sIdx != 0 {
+		t.Fatalf("interrupted rows = %+v", interrupted)
+	}
+}
+
+func TestViewOptionSortAppliesLiveAndPreservesSelection(t *testing.T) {
+	model := New(testSnapshot(4))
+	selected, ok := model.selectedSession()
+	if !ok {
+		t.Fatal("no selected session")
+	}
+	model.view = ViewFlat
+	model.rebuildRowsPreserving(selected.ID)
+	model.viewOptionCursor = int(viewOptionSort)
+	updated, command := model.adjustViewOption(1)
+	if command != nil {
+		t.Fatal("sort adjustment unexpectedly required I/O")
+	}
+	model = updated.(Model)
+	if model.options.sort != sortCost {
+		t.Fatalf("sort = %s", model.options.sort)
+	}
+	current, ok := model.selectedSession()
+	if !ok || current.ID != selected.ID {
+		t.Fatalf("selection = %+v, want %s", current, selected.ID)
+	}
+}
+
+func TestAutoRefreshTickSchedulesReloadAndNextTick(t *testing.T) {
+	model := New(testSnapshot(2))
+	updated, command := model.Update(autoRefreshMsg{generation: model.tickerGeneration})
+	model = updated.(Model)
+	if command == nil || !model.refreshInFlight {
+		t.Fatalf("command=%v refreshInFlight=%t", command, model.refreshInFlight)
+	}
+	updated, staleCommand := model.Update(autoRefreshMsg{generation: model.tickerGeneration + 1})
+	if staleCommand != nil || updated.(Model).tickerGeneration != model.tickerGeneration {
+		t.Fatal("stale autorefresh tick was not ignored")
 	}
 }
 
@@ -92,7 +166,7 @@ func TestNarrowViewDoesNotOverflowOrPanic(t *testing.T) {
 		model := New(testSnapshot(20))
 		model.w = size[0]
 		model.h = size[1]
-		for _, overlay := range []Overlay{OverlayNone, OverlayHelp, OverlayRoute} {
+		for _, overlay := range []Overlay{OverlayNone, OverlayHelp, OverlayRoute, OverlayViewOptions} {
 			model.overlay = overlay
 			assertViewFits(t, model, fmt.Sprintf("overlay %d", overlay))
 		}
@@ -285,6 +359,22 @@ func TestPreviewClassPreservesWorkBody(t *testing.T) {
 	session := data.Session{SessionClass: "work_body"}
 	if got := previewClass(session); got != "work_body" {
 		t.Fatalf("previewClass() = %q", got)
+	}
+}
+
+func TestStageAndPRColumnsRenderAtWideWidth(t *testing.T) {
+	snapshot := testSnapshot(1)
+	snapshot.Sessions[0].Stage = "milad-review"
+	snapshot.Sessions[0].PRNumber = 42
+	snapshot.Sessions[0].PRState = "open"
+	model := New(snapshot)
+	model.w = 132
+	model.preview = false
+	view := model.View()
+	for _, wanted := range []string{"STAGE", "milad-rev", "#42"} {
+		if !strings.Contains(view, wanted) {
+			t.Fatalf("view did not contain %q", wanted)
+		}
 	}
 }
 

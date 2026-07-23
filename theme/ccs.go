@@ -65,8 +65,28 @@ func StateColor(state string) lipgloss.Color {
 		return Warning
 	case "completed", "done":
 		return Info
+	case "archived":
+		return FgMostSubtle
 	case "loop":
 		return Accent
+	default:
+		return FgMostSubtle
+	}
+}
+
+// StageColor maps the monotonic worker pipeline onto restrained progress colors.
+func StageColor(stage string) lipgloss.Color {
+	switch stage {
+	case "building":
+		return Info
+	case "milad-review":
+		return Warning
+	case "in-review":
+		return Accent
+	case "approved":
+		return Success
+	case "merged":
+		return SuccessDim
 	default:
 		return FgMostSubtle
 	}

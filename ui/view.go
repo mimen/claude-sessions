@@ -97,11 +97,11 @@ func (m Model) renderHeader(width int) string {
 		stat(data.FormatCompactUSD(stats.Spend), "spend", theme.CostColor(stats.Spend)) + separator +
 		stat(fmt.Sprintf("%d", stats.Active), "active", theme.Success) + separator +
 		stat(fmt.Sprintf("%d", stats.Parked), "parked", theme.Warning)
-	viewName := "cluster + state"
+	viewName := "cluster + state · " + m.options.sort.String()
 	if m.view == ViewTree {
 		viewName = "causal tree"
 	} else if m.view == ViewFlat {
-		viewName = "flat recency"
+		viewName = "flat · " + m.options.sort.String()
 	}
 	right := fg(theme.FgMoreSubtle).Render(viewName)
 	line1 := joinSides(left, right, width)
@@ -129,10 +129,16 @@ func joinSides(left string, right string, width int) string {
 
 func (m Model) renderList(width int, height int) string {
 	if len(m.rows) == 0 {
-		return fg(theme.FgMoreSubtle).Render("No sessions indexed. Run `ccs reindex` first.")
+		return fg(theme.FgMoreSubtle).Render("No sessions match the current view options.")
 	}
-	start, end := m.listWindow(height)
-	out := make([]string, 0, end-start)
+	header := m.renderListHeader(width)
+	rowHeight := height
+	out := make([]string, 0, height)
+	if header != "" {
+		out = append(out, header)
+		rowHeight = max(1, height-1)
+	}
+	start, end := m.listWindow(rowHeight)
 	for i := start; i < end; i++ {
 		candidate := m.rows[i]
 		selected := i == m.cursor
@@ -143,6 +149,30 @@ func (m Model) renderList(width int, height int) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+func (m Model) renderListHeader(width int) string {
+	if width < 28 {
+		return ""
+	}
+	parts := make([]string, 0, 5)
+	if width >= 70 {
+		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("STAGE", 10)))
+	}
+	if width >= 48 {
+		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("MODEL", 7)))
+	}
+	if width >= 36 {
+		parts = append(parts, fg(theme.FgMostSubtle).Render(lpad("COST", 5)))
+	}
+	parts = append(parts, fg(theme.FgMostSubtle).Render(lpad("AGE", 5)))
+	if width >= 62 {
+		parts = append(parts, fg(theme.FgMostSubtle).Render(lpad("SUB", 4)))
+	}
+	right := strings.Join(parts, fg(theme.BgBase).Render(" "))
+	leftWidth := max(1, width-lipgloss.Width(right)-1)
+	left := fg(theme.FgMostSubtle).Render(pad("SESSION", leftWidth))
+	return theme.Main.Width(width).Render(fit(left+fg(theme.BgBase).Render(" ")+right, width))
 }
 
 func (m Model) listWindow(height int) (int, int) {
@@ -180,17 +210,34 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 	backgroundSpace := func(n int) string {
 		return lipgloss.NewStyle().Background(rowBackground).Render(strings.Repeat(" ", max(0, n)))
 	}
+	rowColor := func(color lipgloss.Color) lipgloss.Color {
+		if session.State == "archived" && !selected {
+			return theme.FgMostSubtle
+		}
+		return color
+	}
 	column := func(color lipgloss.Color) lipgloss.Style {
-		return lipgloss.NewStyle().Foreground(color).Background(rowBackground)
+		return lipgloss.NewStyle().Foreground(rowColor(color)).Background(rowBackground)
 	}
 
 	caret := column(theme.Accent).Render(" ")
 	if selected {
 		caret = column(theme.Primary).Bold(true).Render("❯")
 	}
-	dot := column(theme.StateColor(session.State)).Render("●")
+	dotGlyph := "●"
+	if session.State == "archived" {
+		dotGlyph = "·"
+	}
+	dot := column(theme.StateColor(session.State)).Render(dotGlyph)
 
 	var rightParts []string
+	if width >= 70 {
+		stage := stageLabel(session.Stage)
+		if stage == "" {
+			stage = "—"
+		}
+		rightParts = append(rightParts, column(theme.StageColor(session.Stage)).Render(pad(stage, 10)))
+	}
 	if width >= 48 {
 		badge := theme.Model(session.Model)
 		rightParts = append(rightParts, column(badge.Color).Render(pad(badge.Label, 7)))
@@ -213,6 +260,9 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 	rightWidth := lipgloss.Width(right)
 
 	inline := ""
+	if session.PRNumber > 0 && width >= 64 {
+		inline += backgroundSpace(1) + column(prColor(session.PRState)).Render(fmt.Sprintf("#%d", session.PRNumber))
+	}
 	if session.Class != "" && session.Class != "UNCLASSIFIED" {
 		inline += backgroundSpace(1) + column(theme.ClassColor(session.Class)).Render(session.Class)
 	}
@@ -249,10 +299,17 @@ func (m Model) renderPreview(width int, height int) string {
 	}
 	contentWidth := max(4, width-2)
 	classification := previewClass(session)
+	badgeLine := theme.Pill(session.State, theme.StateColor(session.State)) + "  " + classChip(classification)
+	if session.Stage != "" {
+		badgeLine += "  " + theme.Pill(stageLabel(session.Stage), theme.StageColor(session.Stage))
+	}
+	if session.PRNumber > 0 {
+		badgeLine += "  " + fg(prColor(session.PRState)).Render(fmt.Sprintf("#%d", session.PRNumber))
+	}
 	lines := []string{
 		fg(theme.FgBase).Bold(true).Render(truncate(session.Title, contentWidth)),
 		fg(theme.FgMoreSubtle).Render(truncate(session.Project+" · "+session.Duration+" active", contentWidth)),
-		theme.Pill(session.State, theme.StateColor(session.State)) + "  " + classChip(classification),
+		fit(badgeLine, contentWidth),
 		fg(theme.Sep).Render(strings.Repeat("─", contentWidth)),
 	}
 	if summary := m.summaries[session.ID]; summary != "" {
@@ -300,6 +357,8 @@ func (m Model) renderPreview(width int, height int) string {
 		{"subagents", fmt.Sprintf("%d runs", session.Subagents)},
 		{"class", nonEmpty(classification, "—")},
 		{"cluster", nonEmpty(session.Cluster, "—")},
+		{"stage", nonEmpty(session.Stage, "—")},
+		{"PR", prReference(session)},
 		{"last", lastActivity(data.FormatAge(session.LastAt, m.snapshot.LoadedAt))},
 	}
 	for _, pair := range metadata {
@@ -351,6 +410,16 @@ func compactHome(path string) string {
 		}
 	}
 	return path
+}
+
+func prReference(session data.Session) string {
+	if session.PRNumber <= 0 {
+		return "—"
+	}
+	if session.PRState == "" {
+		return fmt.Sprintf("#%d", session.PRNumber)
+	}
+	return fmt.Sprintf("#%d · %s", session.PRNumber, session.PRState)
 }
 
 func lastActivity(age string) string {
@@ -430,6 +499,8 @@ func (m Model) renderOverlay() string {
 		return m.renderRoutePicker()
 	case OverlayHelp:
 		return m.renderHelp()
+	case OverlayViewOptions:
+		return m.renderViewOptions()
 	default:
 		return ""
 	}
@@ -487,9 +558,10 @@ func (m Model) renderHelp() string {
 		{"J / K", "scroll the dossier transcript peek"},
 		{"p", "show / hide preview pane"},
 		{"g", "cycle default / tree / flat"},
-		{"/", "fuzzy title / project / task filter"},
-		{"t / C / X", "retitle / mark done / archive via ccs"},
-		{"e", "AI edit one session; review mutations"},
+		{"o", "view options, filters, sort, autorefresh"},
+		{"/", "fuzzy title / project / task search"},
+		{"t / C / e / X", "retitle / done / archive toggle via ccs"},
+		{"E", "AI edit one session; review mutations"},
 		{"S", "summarize selected transcript"},
 		{"A", "ask across transcript excerpts"},
 		{"D", "AI cleanup proposal; approve checked set"},
@@ -529,8 +601,8 @@ func (m Model) renderKeybar(width int) string {
 	}
 	items := [][2]string{
 		{"Tab", "skills"}, {"↑↓", "move"}, {"enter", "resume"}, {"r", "via…"}, {"v", "transcript"},
-		{"/", "search"}, {"g", "view:" + viewLabel}, {"R", "refresh"},
-		{"e", "archive"}, {"t", "retitle"}, {"C", "done"}, {"E", "edit"},
+		{"/", "search"}, {"g", "view:" + viewLabel}, {"o", "options"}, {"R", "refresh"},
+		{"e", "archive/unarchive"}, {"t", "retitle"}, {"C", "done"}, {"E", "edit"},
 		{"S/A/D", "AI"}, {"?", "help"}, {"q", "quit"},
 	}
 	parts := make([]string, 0, len(items))
@@ -554,6 +626,26 @@ func previewClass(session data.Session) string {
 		return session.SessionClass
 	}
 	return session.Class
+}
+
+func stageLabel(stage string) string {
+	switch stage {
+	case "milad-review":
+		return "milad-rev"
+	default:
+		return stage
+	}
+}
+
+func prColor(state string) lipgloss.Color {
+	switch state {
+	case "merged":
+		return theme.Success
+	case "closed":
+		return theme.FgMostSubtle
+	default:
+		return theme.Accent
+	}
 }
 
 func classChip(class string) string {

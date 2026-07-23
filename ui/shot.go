@@ -41,6 +41,17 @@ func Shot(name string, snapshot data.Snapshot) string {
 				model.reader.scroll = max(0, len(model.reader.visual)-max(1, model.h-6))
 			}
 		}
+	case "options":
+		model.view, model.overlay = ViewGroups, OverlayViewOptions
+	case "stage":
+		model.view = ViewFlat
+		model.rebuildRows()
+		model.cursor = firstSessionRow(model.rows)
+	case "cost":
+		model.view = ViewFlat
+		model.options.sort = sortCost
+		model.rebuildRows()
+		model.cursor = firstSessionRow(model.rows)
 	case "route":
 		model.view, model.overlay = ViewGroups, OverlayRoute
 		if session, ok := model.selectedSession(); ok {

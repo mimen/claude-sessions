@@ -66,6 +66,26 @@ func TestWriteMaterializesIndexedUnattachedSessionThroughCCS(t *testing.T) {
 	}
 }
 
+func TestUnarchiveUsesMarkArchivedOff(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "calls")
+	binary := filepath.Join(t.TempDir(), "ccs")
+	script := "#!/bin/sh\nif [ \"$1\" = session ] && [ \"$3\" = --json ]; then printf '{\"state\":\"catalogued\"}'; exit 0; fi\nprintf '%s\\n' \"$*\" >> " + shellPath(logPath) + "\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCS_BINARY", binary)
+	if err := MarkArchived(context.Background(), "archived", false); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(contents); got != "mark archived --archived --off\n" {
+		t.Fatalf("calls = %q", got)
+	}
+}
+
 func TestUnsetTitleMaterializesIndexedUnattachedSession(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "calls")
 	binary := filepath.Join(t.TempDir(), "ccs")
