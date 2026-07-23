@@ -52,6 +52,20 @@ func TestBuildStatsExcludesLoopsFromActiveAndParked(t *testing.T) {
 	}
 }
 
+func TestIncludeSessionHonorsViewOptions(t *testing.T) {
+	archived := catalogueMeta{Archived: true}
+	auxiliary := catalogueMeta{SessionClass: "auxiliary"}
+	subagent := indexedSession{IsSubagent: true}
+	defaults := DefaultLoadOptions()
+	if includeSession(subagent, catalogueMeta{}, defaults) || includeSession(indexedSession{}, archived, defaults) || includeSession(indexedSession{}, auxiliary, defaults) {
+		t.Fatal("default options included a hidden session class")
+	}
+	all := LoadOptions{IncludeArchived: true, IncludeSubagents: true, IncludeAuxiliary: true}
+	if !includeSession(subagent, catalogueMeta{}, all) || !includeSession(indexedSession{}, archived, all) || !includeSession(indexedSession{}, auxiliary, all) {
+		t.Fatal("inclusive options hid a requested session class")
+	}
+}
+
 func TestBuildRollupsGuardsCycles(t *testing.T) {
 	indexed := []indexedSession{
 		{ID: "a", ResumeID: "a", CostUSD: 2, CostByModel: map[string]float64{"claude-opus-4-8": 2}},

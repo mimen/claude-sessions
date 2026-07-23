@@ -15,9 +15,10 @@ type taskRecord struct {
 }
 
 type taskSummary struct {
-	Subjects []string
-	Done     int
-	Total    int
+	Subjects   []string
+	Done       int
+	InProgress int
+	Total      int
 }
 
 func loadTaskSummaries(home string) map[string]taskSummary {
@@ -66,8 +67,11 @@ func loadTaskSummaries(home string) map[string]taskSummary {
 		summary := taskSummary{Subjects: make([]string, 0, len(tasks)), Total: len(tasks)}
 		for _, task := range tasks {
 			summary.Subjects = append(summary.Subjects, task.Subject)
-			if task.Status == "completed" {
+			switch task.Status {
+			case "completed":
 				summary.Done++
+			case "in_progress":
+				summary.InProgress++
 			}
 		}
 		out[entry.Name()] = summary

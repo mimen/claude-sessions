@@ -26,6 +26,18 @@ func (c ProviderCost) Total() float64 {
 	return c.Claude + c.GPT + c.Other
 }
 
+// LoadOptions controls which normally hidden session classes are included.
+type LoadOptions struct {
+	IncludeArchived  bool
+	IncludeSubagents bool
+	IncludeAuxiliary bool
+}
+
+// DefaultLoadOptions matches the browser's initial view.
+func DefaultLoadOptions() LoadOptions {
+	return LoadOptions{}
+}
+
 // Session is one normalized browser row backed by the CCS index and catalogue.
 type Session struct {
 	ID               string
@@ -40,6 +52,9 @@ type Session struct {
 	IdentityKind     string
 	Role             string
 	Cluster          string
+	Stage            string
+	PRNumber         int
+	PRState          string
 	Project          string
 	ProjectRoot      string
 	CWD              string
@@ -58,10 +73,12 @@ type Session struct {
 	ParentID         string
 	TaskSubjects     []string
 	TasksDone        int
+	TasksInProgress  int
 	TasksTotal       int
 	LiveWindowRef    string
 	LiveWorkspaceRef string
 	IsLoop           bool
+	IsSubagent       bool
 }
 
 // Dash contains the aggregate values rendered in the dashboard header.

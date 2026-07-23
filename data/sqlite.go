@@ -51,6 +51,9 @@ type catalogueMeta struct {
 	Cluster         string
 	Role            string
 	IdentityKind    string
+	Stage           string
+	PRNumber        int
+	PRState         string
 }
 
 func openReadOnlySQLite(path string) (*sql.DB, error) {
@@ -264,28 +267,66 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		return nil, fmt.Errorf("inspect identities: %w", err)
 	}
 	identityColumns := map[string]bool{}
-	join := ""
+	identityJoin := ""
 	if identityExists && catalogueColumns["identity_key"] {
 		identityColumns, err = tableColumns(db, "identities")
 		if err != nil {
 			return nil, fmt.Errorf("inspect identities schema: %w", err)
 		}
 		if identityColumns["identity_key"] {
-			join = " LEFT JOIN identities i ON i.identity_key = c.identity_key"
+			identityJoin = " LEFT JOIN identities i ON i.identity_key = c.identity_key"
 		}
 	}
 	identityExpr := func(name string, fallback string) string {
-		if join != "" && identityColumns[name] {
+		if identityJoin != "" && identityColumns[name] {
 			return "i." + name
 		}
 		return fallback
 	}
 	identityNumberExpr := func(name string) string {
-		if join != "" && identityColumns[name] {
+		if identityJoin != "" && identityColumns[name] {
 			return "COALESCE(i." + name + ", 0)"
 		}
 		return "0"
 	}
+
+	stageExpr := prefixedColumn(catalogueColumns, "c", "stage", "NULL")
+	if identityJoin != "" && identityColumns["stage"] {
+		stageExpr = "i.stage"
+		if catalogueColumns["stage"] {
+			stageExpr = "COALESCE(i.stage, c.stage)"
+		}
+	}
+
+	prNumberExpr := prefixedColumn(catalogueColumns, "c", "pr_number", "NULL")
+	prStateExpr := prefixedColumn(catalogueColumns, "c", "pr_state", "NULL")
+	prJoin := ""
+	prTableExists, prTableErr := hasTable(db, "identity_pr_agent")
+	if prTableErr != nil {
+		return nil, fmt.Errorf("inspect pr-agent identity attributes: %w", prTableErr)
+	}
+	if prTableExists && catalogueColumns["identity_key"] {
+		prColumns, columnsErr := tableColumns(db, "identity_pr_agent")
+		if columnsErr != nil {
+			return nil, fmt.Errorf("inspect pr-agent identity schema: %w", columnsErr)
+		}
+		if prColumns["identity_key"] {
+			prJoin = " LEFT JOIN identity_pr_agent p ON p.identity_key = c.identity_key"
+			if prColumns["pr_number"] {
+				prNumberExpr = "p.pr_number"
+				if catalogueColumns["pr_number"] {
+					prNumberExpr = "COALESCE(p.pr_number, c.pr_number)"
+				}
+			}
+			if prColumns["pr_state"] {
+				prStateExpr = "p.pr_state"
+				if catalogueColumns["pr_state"] {
+					prStateExpr = "COALESCE(p.pr_state, c.pr_state)"
+				}
+			}
+		}
+	}
+
 	selected := []string{
 		"c.session_id",
 		prefixedColumn(catalogueColumns, "c", "custom_title", "NULL"),
@@ -301,8 +342,11 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		identityNumberExpr("completed"),
 		identityNumberExpr("archived"),
 		identityExpr("parked_task_id", "NULL"),
+		stageExpr,
+		prNumberExpr,
+		prStateExpr,
 	}
-	rows, err := db.Query("SELECT " + strings.Join(selected, ", ") + " FROM catalogue c" + join)
+	rows, err := db.Query("SELECT " + strings.Join(selected, ", ") + " FROM catalogue c" + identityJoin + prJoin)
 	if err != nil {
 		return nil, fmt.Errorf("query catalogue: %w", err)
 	}
@@ -318,6 +362,9 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		var cluster sql.NullString
 		var role sql.NullString
 		var identityKind sql.NullString
+		var stage sql.NullString
+		var prNumber sql.NullInt64
+		var prState sql.NullString
 		var completed int
 		var archived int
 		var identityCompleted int
@@ -338,6 +385,9 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 			&identityCompleted,
 			&identityArchived,
 			&identityParked,
+			&stage,
+			&prNumber,
+			&prState,
 		); err != nil {
 			return nil, fmt.Errorf("scan catalogue row: %w", err)
 		}
@@ -358,6 +408,11 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		row.Cluster = normalizeInline(cluster.String)
 		row.Role = normalizeInline(role.String)
 		row.IdentityKind = normalizeInline(identityKind.String)
+		row.Stage = normalizeInline(stage.String)
+		if prNumber.Valid && prNumber.Int64 > 0 && prNumber.Int64 <= int64(^uint(0)>>1) {
+			row.PRNumber = int(prNumber.Int64)
+		}
+		row.PRState = normalizeInline(prState.String)
 		out[row.SessionID] = row
 	}
 	if err := rows.Err(); err != nil {

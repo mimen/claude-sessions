@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	snapshot, err := data.Load()
+	snapshot, err := data.Load(data.DefaultLoadOptions())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ccs-go:", err)
 		os.Exit(1)

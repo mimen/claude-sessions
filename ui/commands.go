@@ -94,7 +94,7 @@ func applyMutationsCmd(mutations []inference.MetadataMutation, preferredID strin
 }
 
 func reloadAfterWrite(preferredID string, status string) writeFinishedMsg {
-	snapshot, err := data.Load()
+	snapshot, err := data.Load(data.DefaultLoadOptions())
 	if err != nil {
 		return writeFinishedMsg{preferredID: preferredID, status: status, err: fmt.Errorf("write succeeded; reload failed: %w", err)}
 	}
@@ -102,7 +102,7 @@ func reloadAfterWrite(preferredID string, status string) writeFinishedMsg {
 }
 
 func reloadAfterFailure(preferredID string, writeErr error) writeFinishedMsg {
-	snapshot, reloadErr := data.Load()
+	snapshot, reloadErr := data.Load(data.DefaultLoadOptions())
 	if reloadErr != nil {
 		return writeFinishedMsg{preferredID: preferredID, err: fmt.Errorf("%w; reload after partial write also failed: %v", writeErr, reloadErr)}
 	}

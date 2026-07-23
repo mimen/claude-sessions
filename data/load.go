@@ -23,7 +23,7 @@ type sessionRollup struct {
 
 // Load reads one consistent-enough, read-only snapshot from the CCS caches.
 // SQLite WAL readers do not block the existing ccs process.
-func Load() (Snapshot, error) {
+func Load(options LoadOptions) (Snapshot, error) {
 	now := time.Now()
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -59,7 +59,7 @@ func Load() (Snapshot, error) {
 	byID := make(map[string]int)
 	for _, row := range indexed {
 		meta := catalogue[row.ID]
-		if row.IsSubagent || meta.Archived || meta.SessionClass == "auxiliary" {
+		if !includeSession(row, meta, options) {
 			continue
 		}
 		isOpen, liveInfo := liveState(row, live)
@@ -86,6 +86,9 @@ func Load() (Snapshot, error) {
 			IdentityKind:     meta.IdentityKind,
 			Role:             meta.Role,
 			Cluster:          meta.Cluster,
+			Stage:            meta.Stage,
+			PRNumber:         meta.PRNumber,
+			PRState:          meta.PRState,
 			Project:          row.ProjectName,
 			ProjectRoot:      row.ProjectRoot,
 			CWD:              row.CWD,
@@ -104,10 +107,12 @@ func Load() (Snapshot, error) {
 			ParentID:         meta.ParentSessionID,
 			TaskSubjects:     append([]string(nil), task.Subjects...),
 			TasksDone:        task.Done,
+			TasksInProgress:  task.InProgress,
 			TasksTotal:       task.Total,
 			LiveWindowRef:    liveInfo.WindowRef,
 			LiveWorkspaceRef: liveInfo.WorkspaceRef,
 			IsLoop:           isLoop,
+			IsSubagent:       row.IsSubagent,
 		}
 		byID[session.ID] = len(visible)
 		visible = append(visible, session)
@@ -124,6 +129,19 @@ func Load() (Snapshot, error) {
 	snapshot.Tree = buildTree(snapshot, indexed, catalogue, rollups)
 	snapshot.Stats = buildStats(home, runtimeRoot, snapshot.Sessions, indexed, catalogue, rollups)
 	return snapshot, nil
+}
+
+func includeSession(row indexedSession, meta catalogueMeta, options LoadOptions) bool {
+	if row.IsSubagent && !options.IncludeSubagents {
+		return false
+	}
+	if meta.Archived && !options.IncludeArchived {
+		return false
+	}
+	if meta.SessionClass == "auxiliary" && !options.IncludeAuxiliary {
+		return false
+	}
+	return true
 }
 
 func envOr(name string, fallback string) string {
