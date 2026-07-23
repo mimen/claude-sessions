@@ -5,7 +5,8 @@ import { Database } from "bun:sqlite";
  * (it gets dropped on schema bumps). Stored in its own SQLite file (see paths.CATALOGUE_PATH())
  * so the Index can be nuked/rebuilt without ever touching this.
  *
- * Migrations here are ADDITIVE ONLY — we never drop. `user_version` gates each step.
+ * Migrations are version-gated, presence-guarded, and applied in one transaction. Some
+ * reviewed migrations deliberately retire superseded columns after preserving their data.
  */
 
 export type Kind = "session" | "loop";
@@ -113,25 +114,34 @@ export interface PrFacts {
 }
 
 const CATALOGUE_VERSION = 37;
+const LEGACY_IDENTITY_COLUMNS = [
+  "role", "system", "cluster", "project", "event",
+  "pr_number", "pr_repo", "pr_branch", "pr_state", "pr_head_sha",
+  "gus_work", "work_unit_id", "epic_id", "grouping_id",
+  "key", "stage", "status_line",
+] as const;
+const LEGACY_IDENTITY_META_KEY = "__ccs_legacy_identity";
+
+type StoredMetaValue =
+  | string
+  | number
+  | boolean
+  | null
+  | StoredMetaValue[]
+  | { [key: string]: StoredMetaValue };
 
 export function openCatalogue(
   dbPath: string,
   options: { readonly materialize?: boolean } = {},
 ): Database {
   const db = new Database(dbPath, { create: true });
-  db.exec("PRAGMA journal_mode = WAL;");
-  db.exec("PRAGMA busy_timeout = 5000;");
-  migrate(db);
-  // ADR-D4 / B15 (2026-07-14): after migrations claim to have completed, sanity-check the
-  // schema shape before returning the db to callers. If a migration was presence-driven and
-  // its guard was false (e.g. both an old + new column present because the DB was
-  // hand-patched), we could stamp `user_version` current with a wrong shape. Catch it here.
-  const post = validateSchemaPostcondition(db);
-  if (!post.ok) {
-    // Loud + fatal: a corrupt schema surfaced this way is worse to hide. The caller (ccs cli)
-    // exits, the operator investigates. Fresh-DB path is guaranteed to pass because the v1
-    // migration creates every required column.
-    throw new Error(`catalogue schema postcondition failed: ${post.error}`);
+  try {
+    db.exec("PRAGMA busy_timeout = 5000;");
+    configureWal(db);
+    migrate(db);
+  } catch (error) {
+    db.close();
+    throw error;
   }
   // Exact-manifest transactional maintenance must not incidentally import filesystem-derived
   // identity/grouping/inbox state. It still receives required catalogue schema migrations above.
@@ -179,13 +189,28 @@ export function openCatalogue(
   return db;
 }
 
+const WAL_RETRY_WAIT = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+
+/** SQLite can bypass busy_timeout during rollback-journal → WAL conversion to avoid a lock
+ * upgrade deadlock. Retry only SQLITE_BUSY/locked failures within the same five-second budget. */
+function configureWal(db: Database): void {
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    try {
+      db.exec("PRAGMA journal_mode = WAL;");
+      return;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || !/(SQLITE_BUSY|database is locked)/i.test(detail)) throw error;
+      Atomics.wait(WAL_RETRY_WAIT, 0, 0, Math.min(50, remaining));
+    }
+  }
+}
+
 /** After migrate() has stamped user_version=CATALOGUE_VERSION, verify the actual schema
- * matches. Presence-driven migrations can skip an ALTER when a hand-patched DB already has
- * both old + new column names — the version stamp then lies. This function checks:
- *   - required columns exist
- *   - no known legacy column is present alongside its replacement (would indicate a skipped
- *     rename)
- * Returns ok on success or { ok: false, error } on any deviation. */
+ * matches. Presence-driven recovery must not stamp a malformed or only partially retired
+ * catalogue current. This checks both required columns and complete legacy-column removal. */
 function validateSchemaPostcondition(db: Database): { ok: true } | { ok: false; error: string } {
   // ADR-0089 v33: identity attrs moved to identities + identity_<role> tables. Catalogue
   // holds only per-run session state now.
@@ -200,29 +225,46 @@ function validateSchemaPostcondition(db: Database): { ok: true } | { ok: false; 
     "launch_channel",
     "forked_from_session_id",
   ];
-  const forbidden_pairs = [
-    // ADR-0059 renamed system → cluster; both should never coexist.
-    ["system", "cluster"],
-    // ADR-0070 renamed epic_id → grouping_id; both should never coexist.
-    ["epic_id", "grouping_id"],
-  ] as const;
   const cols = (db.query("PRAGMA table_info(catalogue)").all() as { name: string }[]).map((c) => c.name);
   const present = new Set(cols);
   const missing = required.filter((c) => !present.has(c));
   if (missing.length > 0) {
     return { ok: false, error: `catalogue missing required column(s): ${missing.join(", ")}` };
   }
-  for (const [legacy, current] of forbidden_pairs) {
-    if (present.has(legacy) && present.has(current)) {
-      return { ok: false, error: `catalogue has BOTH legacy "${legacy}" and current "${current}" — a rename migration was skipped` };
-    }
+  const retainedLegacy = LEGACY_IDENTITY_COLUMNS.filter((column) => present.has(column));
+  if (retainedLegacy.length > 0) {
+    return {
+      ok: false,
+      error: `catalogue retains legacy identity column(s): ${retainedLegacy.join(", ")}`,
+    };
   }
   return { ok: true };
 }
 
 function migrate(db: Database): void {
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    applyMigrations(db);
+    // Validate before COMMIT so a presence-driven migration can never stamp a malformed
+    // schema current. Any failure rolls back both DDL and PRAGMA user_version together.
+    const post = validateSchemaPostcondition(db);
+    if (!post.ok) {
+      throw new Error(`catalogue schema postcondition failed: ${post.error}`);
+    }
+    db.exec("COMMIT;");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK;");
+    } catch {
+      // Preserve the migration error; rollback failure is secondary and the connection is unusable.
+    }
+    throw error;
+  }
+}
+
+function applyMigrations(db: Database): void {
   const v = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-  // Additive migrations only — each block guarded by version. NEVER drop user data.
+  // Each block is version-gated and presence-guarded for legacy binary/retry compatibility.
   if (v < 1) {
     db.exec(`
       CREATE TABLE IF NOT EXISTS catalogue (
@@ -339,8 +381,9 @@ function migrate(db: Database): void {
   }
   if (v < 10) {
     // Additive: a short, column-friendly epic label (e.g. "Team Tokens") beside the
-    // full name — for the grouping header / a narrow column.
-    if (!hasColumn(db, "epics", "short_name")) {
+    // full name — for the grouping header / a narrow column. A current DB down-stamped to v9
+    // has already retired `epics`, so table absence means there is nothing left to migrate.
+    if (hasTable(db, "epics") && !hasColumn(db, "epics", "short_name")) {
       db.exec("ALTER TABLE epics ADD COLUMN short_name TEXT;");
     }
   }
@@ -469,8 +512,16 @@ function migrate(db: Database): void {
     // meta JSON map. For each row where these columns are non-NULL/non-zero, copy the value into
     // the meta map under "milad_review" / "build_complete" keys. After this, step 3 (v23) will
     // drop the columns. Guard on column presence (older binary can reset version, re-run).
-    if (hasColumn(db, "catalogue", "milad_review") || hasColumn(db, "catalogue", "build_complete")) {
-      const rows = db.query("SELECT session_id, milad_review, build_complete, meta FROM catalogue").all() as Array<{
+    const hasMiladReview = hasColumn(db, "catalogue", "milad_review");
+    const hasBuildComplete = hasColumn(db, "catalogue", "build_complete");
+    if (hasMiladReview || hasBuildComplete) {
+      const rows = db.query(
+        `SELECT session_id,
+                ${hasMiladReview ? "milad_review" : "NULL AS milad_review"},
+                ${hasBuildComplete ? "build_complete" : "NULL AS build_complete"},
+                meta
+         FROM catalogue`,
+      ).all() as Array<{
         session_id: string;
         milad_review: string | null;
         build_complete: number | null;
@@ -478,7 +529,7 @@ function migrate(db: Database): void {
       }>;
       const update = db.prepare("UPDATE catalogue SET meta = ? WHERE session_id = ?");
       for (const r of rows) {
-        const meta = r.meta ? JSON.parse(r.meta) : {};
+        const meta = parseCatalogueMetaObject(r.meta, r.session_id);
         let changed = false;
         if (r.milad_review !== null && meta.milad_review === undefined) {
           meta.milad_review = r.milad_review;
@@ -530,30 +581,20 @@ function migrate(db: Database): void {
       db.exec("ALTER TABLE catalogue DROP COLUMN phase;");
     }
   }
+  // ADR-0059: rename `system` to `cluster`. Reconcile by column presence even when the
+  // version is already >= 27: interrupted pre-transaction migrations could leave both names,
+  // or stamp v27 while the only populated value remained in `system`.
+  reconcileLegacyRename(db, "system", "cluster", v < 32);
   if (v < 27) {
-    // ADR-0059: rename the `system` column to `cluster` everywhere — the operation-level grouping
-    // is **cluster** in all UI/CLI/docs, so make the DB column match. SQLite 3.25+ supports RENAME COLUMN.
-    // Guard on column presence (older binary can reset version, re-run).
-    if (hasColumn(db, "catalogue", "system") && !hasColumn(db, "catalogue", "cluster")) {
-      db.exec("ALTER TABLE catalogue RENAME COLUMN system TO cluster;");
-    } else if (!hasColumn(db, "catalogue", "cluster")) {
-      // Some legacy v5 catalogues advanced user_version without ever receiving the v5
-      // `system` column. Add the renamed column directly so later migrations can read it.
-      db.exec("ALTER TABLE catalogue ADD COLUMN cluster TEXT;");
-    }
     db.exec("DROP INDEX IF EXISTS idx_catalogue_system;");
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_cluster ON catalogue(cluster);");
   }
+
+  // ADR-0070: rename `epic_id` to `grouping_id` with the same presence-driven recovery.
+  reconcileLegacyRename(db, "epic_id", "grouping_id", v < 32);
   if (v < 28) {
-    // ADR-0070: rename the `epic_id` FK column to `grouping_id` — "grouping" is the generic
-    // platform concept and "epic" is pr-watch's declared grouping TYPE (cluster.toml grouping_type),
-    // so the column shouldn't hardcode the type. SQLite 3.25+ supports RENAME COLUMN. Guard on
-    // column presence (older binary can reset version, re-run). Same shape as the v27 rename.
-    if (hasColumn(db, "catalogue", "epic_id") && !hasColumn(db, "catalogue", "grouping_id")) {
-      db.exec("ALTER TABLE catalogue RENAME COLUMN epic_id TO grouping_id;");
-      db.exec("DROP INDEX IF EXISTS idx_catalogue_epic;");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_grouping ON catalogue(grouping_id);");
-    }
+    db.exec("DROP INDEX IF EXISTS idx_catalogue_epic;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_grouping ON catalogue(grouping_id);");
   }
   if (v < 29) {
     // ADR-0062: drop the `kind` + `resume_command` columns. Both are DERIVED from the role now
@@ -572,49 +613,9 @@ function migrate(db: Database): void {
     // "whose turn is it?"; no separate axis needed. Guard on presence + fail-open.
     if (hasColumn(db, "catalogue", "activity")) db.exec("ALTER TABLE catalogue DROP COLUMN activity;");
   }
-  if (v < 31) {
-    // A few legacy catalogues carried user_version 27–30 without either side of the
-    // system→cluster rename. v31 reads cluster during its key backfill, so repair that
-    // invariant here too before selecting rows; v33 removes the legacy identity column.
-    if (!hasColumn(db, "catalogue", "cluster")) {
-      db.exec("ALTER TABLE catalogue ADD COLUMN cluster TEXT;");
-    }
-    // ADR-D1 (2026-07-14): ccs is the single source of truth for the identity KEY. Historically
-    // `key` was populated only by explicit setKey() calls (new-session, key command), so many
-    // rows had a null key even though their pr_repo+pr_number/gus_work/role columns implied one.
-    // Cluster engines (compose_board.py) re-derived the key locally and drifted. Backfill:
-    // compute deriveKey() for every row that lacks a key, populate. From v31 forward every
-    // identity-affecting mutator calls refreshDerivedKey() so the column stays authoritative.
-    const rows = db.query(
-      `SELECT session_id, key, role, cluster, pr_repo, pr_number, gus_work, work_unit_id
-       FROM catalogue`,
-    ).all() as Array<{
-      session_id: string;
-      key: string | null;
-      role: string | null;
-      cluster: string | null;
-      pr_repo: string | null;
-      pr_number: number | null;
-      gus_work: string | null;
-      work_unit_id: string | null;
-    }>;
-    const nowIso = new Date().toISOString();
-    const upd = db.query(
-      "UPDATE catalogue SET key = $k, updated_at = $now WHERE session_id = $id",
-    );
-    for (const r of rows) {
-      const derived = deriveKey({
-        workUnitId: r.work_unit_id,
-        prRepo: r.pr_repo,
-        prNumber: r.pr_number,
-        gusWork: r.gus_work,
-        role: r.role,
-      });
-      if (derived && r.key !== derived) {
-        upd.run({ $k: derived, $now: nowIso, $id: r.session_id });
-      }
-    }
-  }
+  // v31 historically derived the soon-to-be-retired `key` column. The v32 identity backfill
+  // derives its own structured key directly from source columns, and v33 drops `key`, so writing
+  // a synthetic value here would only pollute the recovery evidence preserved below.
   // ADR-0089: identity as a first-class entity. Introduces the universal tables that hold
   // durable per-work-item state (identities, groupings, inboxes, identity_state, dispositions,
   // schema_migrations). Sessions keep their columns FOR NOW — the drop of the now-redundant
@@ -715,8 +716,35 @@ function migrate(db: Database): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_identity ON catalogue(identity_key);");
   }
 
-  if (v < 32) {
-    // Backfill identities from catalogue rows. For each row that has enough info to identify
+  const hasLegacyIdentityColumns = LEGACY_IDENTITY_COLUMNS.some((column) =>
+    hasColumn(db, "catalogue", column)
+  );
+  if ((v < 33 || hasLegacyIdentityColumns) && hasColumn(db, "catalogue", "meta")) {
+    validateCatalogueMeta(db);
+  }
+
+  const legacyIdentitySourceColumns = [
+    "role",
+    "cluster",
+    "pr_repo",
+    "pr_number",
+    "gus_work",
+    "work_unit_id",
+    "grouping_id",
+    "stage",
+    "status_line",
+    "completed",
+    "archived",
+    "parked_task_id",
+    "meta",
+  ] as const;
+  const canBackfillLegacyIdentities = legacyIdentitySourceColumns.every((column) =>
+    hasColumn(db, "catalogue", column)
+  );
+  if (v < 32 && canBackfillLegacyIdentities) {
+    // Backfill identities from catalogue rows. Guard source-column presence because an old binary
+    // can down-stamp a current v33+ schema after these columns were deliberately retired.
+    // For each row that has enough info to identify
     // a work item (fleet: cluster+role+work_ref; core: cluster+role), mint an identity row and
     // point the session at it. deriveIdentityKey mirrors deriveKey's structured shape so a
     // catalogue row that already carries `key = "pr:owner/repo#12345"` maps predictably.
@@ -735,8 +763,8 @@ function migrate(db: Database): void {
       grouping_id: string | null;
       stage: string | null;
       status_line: string | null;
-      completed: number;
-      archived: number;
+      completed: number | null;
+      archived: number | null;
       parked_task_id: string | null;
       meta: string | null;
     }>;
@@ -770,8 +798,8 @@ function migrate(db: Database): void {
         $g: r.grouping_id,
         $stage: r.stage,
         $sl: r.status_line,
-        $c: r.completed,
-        $a: r.archived,
+        $c: r.completed ?? 0,
+        $a: r.archived ?? 0,
         $p: r.parked_task_id,
         $m: r.meta,
         $now: nowIso,
@@ -783,6 +811,7 @@ function migrate(db: Database): void {
   // present. Idempotent (DROP INDEX IF EXISTS + hasColumn guard) so a DB stamped v33 without
   // the drop actually applied heals on next boot. Sqlite 3.35+ DROP COLUMN.
   {
+    preserveLegacyIdentityEvidence(db);
     const legacyIndexes = [
       "idx_catalogue_event", "idx_catalogue_project", "idx_catalogue_role", "idx_catalogue_system",
       "idx_catalogue_cluster", "idx_catalogue_pr_number", "idx_catalogue_pr_repo",
@@ -790,12 +819,7 @@ function migrate(db: Database): void {
       "idx_catalogue_grouping", "idx_catalogue_work_unit",
     ];
     for (const idx of legacyIndexes) db.exec(`DROP INDEX IF EXISTS ${idx};`);
-    const legacy = [
-      "role", "cluster", "project", "event",
-      "pr_number", "pr_repo", "pr_branch", "pr_state", "pr_head_sha",
-      "gus_work", "work_unit_id", "epic_id", "grouping_id",
-      "key", "stage", "status_line",
-    ];
+    const legacy = [...LEGACY_IDENTITY_COLUMNS];
     for (const col of legacy) {
       if (hasColumn(db, "catalogue", col)) db.exec(`ALTER TABLE catalogue DROP COLUMN ${col};`);
     }
@@ -861,6 +885,137 @@ function migrate(db: Database): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_forked_from ON catalogue(forked_from_session_id);");
   }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
+}
+
+/** Reconcile an interrupted column rename by schema presence, not only user_version.
+ * Conflicting non-null values are ambiguous evidence, so fail rather than silently choose one. */
+function reconcileLegacyRename(
+  db: Database,
+  legacy: "system" | "epic_id",
+  current: "cluster" | "grouping_id",
+  ensureCurrent: boolean,
+): void {
+  const hasLegacy = hasColumn(db, "catalogue", legacy);
+  const hasCurrent = hasColumn(db, "catalogue", current);
+  if (hasLegacy && !hasCurrent) {
+    db.exec(`ALTER TABLE catalogue RENAME COLUMN ${legacy} TO ${current};`);
+    return;
+  }
+  if (hasLegacy && hasCurrent) {
+    const conflict = db.query(
+      `SELECT session_id FROM catalogue
+       WHERE ${legacy} IS NOT NULL AND ${current} IS NOT NULL AND ${legacy} <> ${current}
+       LIMIT 1`,
+    ).get() as { session_id: string } | null;
+    if (conflict) {
+      throw new Error(
+        `catalogue row ${conflict.session_id} has conflicting ${legacy} and ${current} values`,
+      );
+    }
+    db.exec(
+      `UPDATE catalogue SET ${current} = ${legacy}
+       WHERE ${current} IS NULL AND ${legacy} IS NOT NULL;`,
+    );
+    return;
+  }
+  if (!hasCurrent && ensureCurrent) {
+    db.exec(`ALTER TABLE catalogue ADD COLUMN ${current} TEXT;`);
+  }
+}
+
+function validateCatalogueMeta(db: Database): void {
+  const rows = db.query(
+    "SELECT session_id, meta FROM catalogue WHERE meta IS NOT NULL",
+  ).all() as Array<{ session_id: string; meta: string }>;
+  for (const row of rows) parseCatalogueMetaObject(row.meta, row.session_id);
+}
+
+function parseCatalogueMetaObject(
+  raw: string | null,
+  sessionId: string,
+): { [key: string]: StoredMetaValue } {
+  if (raw === null) return {};
+  let parsed: StoredMetaValue;
+  try {
+    parsed = JSON.parse(raw) as StoredMetaValue;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`catalogue meta for ${sessionId} is malformed JSON: ${detail}`);
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error(`catalogue meta for ${sessionId} must be a JSON object`);
+  }
+  return parsed as { [key: string]: StoredMetaValue };
+}
+
+/** Preserve identity-shaped values from rows that cannot be attached to an identity before
+ * v33 retires the legacy columns. Also retain explicit legacy `key` and `project` values on
+ * attached rows: both were user-set, are absent from the identity table, and cannot be rebuilt.
+ * The reserved meta object is recovery evidence, not a new identity source of truth. */
+function preserveLegacyIdentityEvidence(db: Database): void {
+  const present = LEGACY_IDENTITY_COLUMNS.filter((column) => hasColumn(db, "catalogue", column));
+  if (present.length === 0) return;
+  if (!hasColumn(db, "catalogue", "identity_key") || !hasColumn(db, "catalogue", "meta")) {
+    throw new Error("cannot preserve legacy identity data without identity_key and meta columns");
+  }
+
+  type LegacyIdentityRow = {
+    session_id: string;
+    identity_key: string | null;
+    meta: string | null;
+  } & Record<string, string | number | null>;
+  const attachedEvidenceColumns = new Set<string>(
+    present.filter((column) => column === "key" || column === "project"),
+  );
+  const evidenceWhere = [
+    "identity_key IS NULL",
+    ...[...attachedEvidenceColumns].map((column) => `${column} IS NOT NULL`),
+  ].join(" OR ");
+  const rows = db.query(
+    `SELECT session_id, identity_key, meta, ${present.join(", ")}
+     FROM catalogue
+     WHERE ${evidenceWhere}`,
+  ).all() as LegacyIdentityRow[];
+  const update = db.query("UPDATE catalogue SET meta = $meta WHERE session_id = $id");
+
+  for (const row of rows) {
+    const legacy: { [key: string]: StoredMetaValue } = {};
+    for (const column of present) {
+      if (row.identity_key !== null && !attachedEvidenceColumns.has(column)) continue;
+      const value = row[column];
+      if (value !== null && value !== undefined) legacy[column] = value;
+    }
+    if (Object.keys(legacy).length === 0) continue;
+
+    const meta = parseCatalogueMetaObject(row.meta, row.session_id);
+    const existing = meta[LEGACY_IDENTITY_META_KEY];
+    if (existing !== undefined) {
+      if (existing === null || Array.isArray(existing) || typeof existing !== "object") {
+        throw new Error(`catalogue meta for ${row.session_id} has invalid ${LEGACY_IDENTITY_META_KEY}`);
+      }
+      const existingLegacy = existing as { [key: string]: StoredMetaValue };
+      for (const [key, value] of Object.entries(legacy)) {
+        if (
+          Object.prototype.hasOwnProperty.call(existingLegacy, key) &&
+          existingLegacy[key] !== value
+        ) {
+          throw new Error(
+            `catalogue meta for ${row.session_id} conflicts with live legacy column ${key}`,
+          );
+        }
+      }
+      meta[LEGACY_IDENTITY_META_KEY] = { ...existingLegacy, ...legacy };
+    } else {
+      meta[LEGACY_IDENTITY_META_KEY] = legacy;
+    }
+    update.run({ $meta: JSON.stringify(meta), $id: row.session_id });
+  }
+}
+
+function hasTable(db: Database, table: string): boolean {
+  return db.query(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name",
+  ).get({ $name: table }) !== null;
 }
 
 /** Whether a table already has a given column (PRAGMA table_info), for idempotent ALTERs. */

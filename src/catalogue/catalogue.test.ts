@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, symlinkSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -182,6 +182,44 @@ test("opens through a symlink and writes durably to the real file", () => {
   }
 });
 
+test("concurrent opens wait for an active writer before confirming WAL", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-concurrent-open-"));
+  const path = join(root, "catalogue.db");
+  const ready = join(root, "writer-ready");
+  try {
+    const rollbackJournal = new Database(path);
+    expect(rollbackJournal.query("PRAGMA journal_mode = DELETE").get()).toEqual({
+      journal_mode: "delete",
+    });
+    rollbackJournal.close();
+    const script = `
+      import { Database } from "bun:sqlite";
+      const db = new Database(${JSON.stringify(path)});
+      db.exec("PRAGMA journal_mode = DELETE; BEGIN IMMEDIATE;");
+      await Bun.write(${JSON.stringify(ready)}, "ready");
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      db.exec("COMMIT;");
+      db.close();
+    `;
+    const writer = Bun.spawn([process.execPath, "-e", script], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    for (let attempt = 0; attempt < 100 && !existsSync(ready); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(existsSync(ready)).toBe(true);
+
+    const concurrent = openCatalogue(path);
+    expect(concurrent.query("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
+    expect(concurrent.query("PRAGMA user_version").get()).toEqual({ user_version: 37 });
+    concurrent.close();
+    expect(await writer.exited).toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("PRAGMA integrity_check reports 'ok' after a realistic write workload", () => {
   // Punch-list guarantee: sqlite integrity_check should always return 'ok'
   // for a DB written by the tool. This exercises a realistic sequence
@@ -219,6 +257,7 @@ test("v33 schema postcondition passes on a fresh migrated DB", () => {
   expect(names.has("updated_at")).toBe(true);
   // Legacy identity columns are gone:
   expect(names.has("role")).toBe(false);
+  expect(names.has("system")).toBe(false);
   expect(names.has("cluster")).toBe(false);
   expect(names.has("pr_number")).toBe(false);
   expect(names.has("gus_work")).toBe(false);
@@ -226,6 +265,54 @@ test("v33 schema postcondition passes on a fresh migrated DB", () => {
   expect(names.has("key")).toBe(false);
   expect(names.has("stage")).toBe(false);
   expect(names.has("status_line")).toBe(false);
+});
+
+test("repairs a current catalogue down-stamped to every historical version", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-downstamped-current-"));
+  try {
+    for (let version = 0; version < 37; version += 1) {
+      const path = join(root, `catalogue-v${version}.db`);
+      const current = openCatalogue(path);
+      setCustomTitle(current, "current-session", "Current row", NOW);
+      current.close();
+
+      const downstamped = new Database(path);
+      downstamped.exec(`PRAGMA user_version = ${version};`);
+      downstamped.close();
+
+      const repaired = openCatalogue(path);
+      expect(repaired.query("PRAGMA user_version").get()).toEqual({ user_version: 37 });
+      expect(getRow(repaired, "current-session")?.customTitle).toBe("Current row");
+      expect(repaired.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+      repaired.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("old-version meta backfills report malformed current rows with session context", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-downstamped-malformed-meta-"));
+  const path = join(root, "catalogue.db");
+  try {
+    const current = openCatalogue(path);
+    current.query(
+      "INSERT INTO catalogue (session_id, updated_at, meta) VALUES ('downstamp-meta-session', $now, '{bad')",
+    ).run({ $now: NOW });
+    current.exec("PRAGMA user_version = 17;");
+    current.close();
+
+    expect(() => openCatalogue(path)).toThrow(
+      /catalogue meta for downstamp-meta-session is malformed JSON/,
+    );
+
+    const after = new Database(path);
+    expect(after.query("PRAGMA user_version").get()).toEqual({ user_version: 17 });
+    expect(after.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+    after.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("repairs partially migrated catalogues missing cluster and skill", () => {
@@ -263,15 +350,30 @@ test("repairs partially migrated catalogues missing cluster and skill", () => {
           meta TEXT
         );
         CREATE INDEX idx_catalogue_role ON catalogue(role);
-        INSERT INTO catalogue (session_id, custom_title, updated_at)
-        VALUES ('partial-session', 'Retry title', '2026-07-22T00:00:00Z');
+        INSERT INTO catalogue (
+          session_id, custom_title, updated_at, role, gus_work, key, stage, status_line, meta
+        ) VALUES (
+          'partial-session', 'Retry title', '2026-07-22T00:00:00Z',
+          'event-worker', 'W-123', 'legacy-key', 'building', 'waiting', '{"existing":true}'
+        );
         PRAGMA user_version = ${version};
       `);
       legacy.close();
 
       const migrated = openCatalogue(path);
       expect(migrated.query("PRAGMA user_version").get()).toEqual({ user_version: 37 });
-      expect(getRow(migrated, "partial-session")?.customTitle).toBe("Retry title");
+      const row = getRow(migrated, "partial-session");
+      expect(row?.customTitle).toBe("Retry title");
+      expect(row?.meta).toEqual({
+        existing: true,
+        __ccs_legacy_identity: {
+          role: "event-worker",
+          gus_work: "W-123",
+          key: "legacy-key",
+          stage: "building",
+          status_line: "waiting",
+        },
+      });
       expect(migrated.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
       migrated.close();
     }
@@ -315,6 +417,238 @@ test("migrates a legacy v5 catalogue that never received the system column", () 
     expect(getRow(migrated, "legacy-session")?.customTitle).toBe("Preserved title");
     expect(migrated.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
     migrated.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("backfills system into cluster when a pre-transaction retry left both columns", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-v4-both-cluster-columns-"));
+  const path = join(root, "catalogue.db");
+  try {
+    const legacy = new Database(path);
+    legacy.exec(`
+      CREATE TABLE catalogue (
+        session_id TEXT PRIMARY KEY,
+        resume_id TEXT,
+        custom_title TEXT,
+        kind TEXT,
+        completed INTEGER,
+        archived INTEGER,
+        parked_task_id TEXT,
+        notes TEXT,
+        updated_at TEXT,
+        event TEXT,
+        parent_session_id TEXT,
+        skill TEXT,
+        project TEXT,
+        role TEXT,
+        substrate TEXT,
+        identity TEXT,
+        system TEXT,
+        cluster TEXT
+      );
+      INSERT INTO catalogue (session_id, custom_title, updated_at, role, system)
+      VALUES ('dual-column-session', 'Dual column', '2026-07-22T00:00:00Z', 'worker', 'legacy-cluster');
+      PRAGMA user_version = 4;
+    `);
+    legacy.close();
+
+    const migrated = openCatalogue(path);
+    expect(getRow(migrated, "dual-column-session")?.identityKey).toBe("legacy-cluster:worker");
+    expect(migrated.query(
+      "SELECT cluster, role FROM identities WHERE identity_key = 'legacy-cluster:worker'",
+    ).get()).toEqual({ cluster: "legacy-cluster", role: "worker" });
+    const columns = (migrated.query("PRAGMA table_info(catalogue)").all() as { name: string }[])
+      .map((column) => column.name);
+    expect(columns).not.toContain("system");
+    expect(columns).not.toContain("cluster");
+    expect(migrated.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+    migrated.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("repairs both system and cluster in an already-stamped v27 catalogue", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-v27-both-cluster-columns-"));
+  const path = join(root, "catalogue.db");
+  try {
+    const legacy = new Database(path);
+    legacy.exec(`
+      CREATE TABLE catalogue (
+        session_id TEXT PRIMARY KEY,
+        resume_id TEXT,
+        custom_title TEXT,
+        completed INTEGER,
+        archived INTEGER,
+        parked_task_id TEXT,
+        notes TEXT,
+        updated_at TEXT,
+        parent_session_id TEXT,
+        project TEXT,
+        role TEXT,
+        pr_number INTEGER,
+        pr_repo TEXT,
+        pr_branch TEXT,
+        pr_state TEXT,
+        pr_head_sha TEXT,
+        key TEXT,
+        gus_work TEXT,
+        grouping_id TEXT,
+        status_line TEXT,
+        stage TEXT,
+        work_unit_id TEXT,
+        meta TEXT,
+        system TEXT,
+        cluster TEXT
+      );
+      INSERT INTO catalogue (session_id, updated_at, role, key, project, system, cluster, meta)
+      VALUES (
+        'v27-dual-column-session', '2026-07-22T00:00:00Z', 'worker', 'custom-user-key',
+        'project-y', 'legacy-cluster', NULL, '{}'
+      );
+      PRAGMA user_version = 27;
+    `);
+    legacy.close();
+
+    const migrated = openCatalogue(path);
+    const row = getRow(migrated, "v27-dual-column-session");
+    expect(row?.identityKey).toBe("legacy-cluster:worker");
+    expect(row?.meta).toEqual({
+      __ccs_legacy_identity: {
+        key: "custom-user-key",
+        project: "project-y",
+      },
+    });
+    const columns = (migrated.query("PRAGMA table_info(catalogue)").all() as { name: string }[])
+      .map((column) => column.name);
+    expect(columns).not.toContain("system");
+    expect(columns).not.toContain("cluster");
+    expect(migrated.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+    migrated.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("migration failures roll back DDL and user_version together", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-transaction-rollback-"));
+  const path = join(root, "catalogue.db");
+  try {
+    const legacy = new Database(path);
+    legacy.exec(`
+      CREATE TABLE catalogue (
+        session_id TEXT PRIMARY KEY,
+        role TEXT,
+        skill TEXT,
+        updated_at TEXT
+      );
+      CREATE TABLE roles (role TEXT PRIMARY KEY);
+      INSERT INTO catalogue (session_id, role, skill, updated_at)
+      VALUES ('rollback-session', NULL, 'worker', '2026-07-22T00:00:00Z');
+      PRAGMA user_version = 5;
+    `);
+    legacy.close();
+
+    expect(() => openCatalogue(path)).toThrow(/cluster/);
+
+    const after = new Database(path);
+    expect(after.query("PRAGMA user_version").get()).toEqual({ user_version: 5 });
+    const columns = (after.query("PRAGMA table_info(catalogue)").all() as { name: string }[])
+      .map((column) => column.name);
+    expect(columns).toEqual(["session_id", "role", "skill", "updated_at"]);
+    expect(after.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'epics'").get()).toBeNull();
+    expect(after.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+    after.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("malformed legacy meta reports the attached session and rolls migration back", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-malformed-meta-rollback-"));
+  try {
+    const cases = [
+      { slug: "syntax", sessionId: "malformed-meta-session", sqlMeta: "'{bad'" },
+      { slug: "empty", sessionId: "empty-meta-session", sqlMeta: "''" },
+    ];
+    for (const fixture of cases) {
+      const path = join(root, `${fixture.slug}.db`);
+      const legacy = new Database(path);
+      legacy.exec(`
+        CREATE TABLE catalogue (
+          session_id TEXT PRIMARY KEY,
+          updated_at TEXT,
+          key TEXT,
+          role TEXT,
+          cluster TEXT,
+          pr_repo TEXT,
+          pr_number INTEGER,
+          gus_work TEXT,
+          work_unit_id TEXT,
+          grouping_id TEXT,
+          stage TEXT,
+          status_line TEXT,
+          completed INTEGER,
+          archived INTEGER,
+          parked_task_id TEXT,
+          meta TEXT
+        );
+        INSERT INTO catalogue (session_id, updated_at, role, cluster, meta)
+        VALUES (
+          '${fixture.sessionId}', '2026-07-22T00:00:00Z', 'worker', 'ops', ${fixture.sqlMeta}
+        );
+        PRAGMA user_version = 30;
+      `);
+      legacy.close();
+
+      expect(() => openCatalogue(path)).toThrow(
+        new RegExp(`catalogue meta for ${fixture.sessionId} is malformed JSON`),
+      );
+
+      const after = new Database(path);
+      expect(after.query("PRAGMA user_version").get()).toEqual({ user_version: 30 });
+      const columns = (after.query("PRAGMA table_info(catalogue)").all() as { name: string }[])
+        .map((column) => column.name);
+      expect(columns).toContain("cluster");
+      expect(
+        after.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'identities'").get(),
+      ).toBeNull();
+      expect(after.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+      after.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("schema postcondition failures roll back presence-driven repairs", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-postcondition-rollback-"));
+  const path = join(root, "catalogue.db");
+  try {
+    const malformed = new Database(path);
+    malformed.exec(`
+      CREATE TABLE catalogue (
+        session_id TEXT PRIMARY KEY,
+        updated_at TEXT
+      );
+      PRAGMA user_version = 37;
+    `);
+    malformed.close();
+
+    expect(() => openCatalogue(path)).toThrow(/schema postcondition failed/);
+
+    const after = new Database(path);
+    expect(after.query("PRAGMA user_version").get()).toEqual({ user_version: 37 });
+    const columns = (after.query("PRAGMA table_info(catalogue)").all() as { name: string }[])
+      .map((column) => column.name);
+    expect(columns).toEqual(["session_id", "updated_at"]);
+    expect(
+      after.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'identities'").get(),
+    ).toBeNull();
+    expect(after.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
+    after.close();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
