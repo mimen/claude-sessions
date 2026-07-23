@@ -52,6 +52,10 @@ ccs                    # launch the browser
 ccs reindex            # refresh the index from the store (incremental)
 ccs reindex --titles   # also generate missing titles (cron/launchd-friendly)
 ccs ls                 # debug: print the indexed sessions
+ccs start "continue the CCS session starter"  # route to an active session or project and launch it
+ccs start --dry-run "continue the CCS session starter"  # preview the recommendation; launch nothing
+ccs start --explain "continue the CCS session starter"  # preview candidates and routing rationale
+ccs start              # prompt for the work description interactively
 
 # CCS-managed launches declare their intent before a UUID is reserved:
 ccs session new --top-level --cwd /path/to/repo

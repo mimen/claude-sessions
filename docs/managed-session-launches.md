@@ -21,6 +21,7 @@ CCS stores two independent facts:
 
 | Need | Use | Result |
 |---|---|---|
+| Human entry point when the right session/project is not obvious | `ccs start [--dry-run\|--explain] [description...]` | One raw routing call chooses a managed resume, submits to that session's exact live surface when already open, or creates a top-level birth; uncertain choices require confirmation, while preview modes never launch or submit |
 | Short same-backend task inside the current Claude session | Native `Agent` tool | Native sidechain; CCS infers the transcript parent and hides it with auxiliary work |
 | Full Claude Code helper using a canonical model/role seat | `ccs delegate` | Persistent auxiliary child with exact creator, route, and causal parent |
 | Persistent supporting session without a seat | `ccs session new --child-of .` | Persistent auxiliary child whose spend rolls into the current session |

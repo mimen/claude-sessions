@@ -15,6 +15,7 @@ import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
 import { delegateCommand } from "./delegate/command.ts";
+import { startCommand } from "./start/command.ts";
 import { doctorCommand } from "./doctor/command.ts";
 import { launcherCommand } from "./launcher/command.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
@@ -55,6 +56,7 @@ use \`ccs identity …\`; for per-run session state (title, parent, lifecycle) u
 
 Usage:
   ccs                 Launch the session browser (TUI)
+  ccs start [--dry-run|--explain] [description...]  Route work to an active session or managed new session
   ccs reindex [--titles]   Refresh the session index (--titles: also regenerate titles headless)
   ccs ls [--auxiliary]    Print indexed sessions (with catalogue badges)
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
@@ -175,6 +177,8 @@ export async function main(argv: string[]): Promise<number> {
       return ls({ all: args.includes("--all"), loops: args.includes("--loops"), auxiliary: args.includes("--auxiliary") });
     case "tree":
       return tree({ all: args.includes("--all"), auxiliary: args.includes("--auxiliary") });
+    case "start":
+      return startCommand(args.slice(1));
     case "delegate":
       return delegateCommand(args.slice(1));
     case "doctor":

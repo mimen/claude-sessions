@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { planResumeSession, resumeSessionEntry } from "./resume-session.ts";
+import { chooseLauncher, planResumeSession, resumeSessionEntry } from "./resume-session.ts";
 import { openIndex } from "../index/schema.ts";
 import { openCatalogue, setResumeId } from "../catalogue/db.ts";
 import type { SessionRow } from "../index/index.ts";
@@ -53,6 +53,25 @@ test("closed loop session resumes RUNNING (resume_command replayed as trailing p
   ]);
 });
 
+test("one-shot prompt overrides a loop's recurring resume command", () => {
+  const plan = planResumeSession(
+    stubBridge([]),
+    row({ resumeId: "resume-1", cwd: "/tmp" }),
+    {
+      resumeCommand: "/loop 15m /pr-watch-control",
+      prompt: "Continue the session starter",
+    },
+  );
+  expect(plan.action).toBe("resume");
+  if (plan.action !== "resume") throw new Error("unreachable");
+  expect(plan.command.argv).toEqual([
+    "claude",
+    "--resume",
+    "resume-1",
+    "Continue the session starter",
+  ]);
+});
+
 test("closed worker resumes bare (no resume_command)", () => {
   const plan = planResumeSession(stubBridge([]), row({ resumeId: "resume-1", cwd: "/tmp" }), {
     resumeCommand: null,
@@ -70,6 +89,26 @@ test("liveness keys on resumeId (the id claude --resume uses), not the filename 
     null,
   );
   expect(plan.action).toBe("skip");
+});
+
+test("launcher selection reports unknown and ineligible routes without falling back", () => {
+  const launchers = [
+    { name: "claude", binary: "claude", serves: ["claude-*"] as const, env: {} },
+    { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"] as const, env: {} },
+  ];
+
+  expect(chooseLauncher(launchers, ["gpt-5.6"], { via: "missing" })).toEqual({
+    ok: false,
+    status: "unknown-launcher",
+    name: "missing",
+  });
+  const ineligible = chooseLauncher(launchers, ["gpt-5.6"], { via: "claude" });
+  expect(ineligible.ok).toBe(false);
+  if (!ineligible.ok) expect(ineligible.status).toBe("route-ineligible");
+  expect(chooseLauncher(launchers, ["gpt-5.6"], {})).toMatchObject({
+    ok: true,
+    launcher: { name: "claude-gpt" },
+  });
 });
 
 test("resumed status carries workspaceRef so callers can act on the workspace pre-hook (pin/paint)", () => {

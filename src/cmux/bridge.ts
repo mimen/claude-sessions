@@ -346,12 +346,19 @@ export function buildBridge(
     livePidAgents.set(surfaceId, agent);
   }
 
-  // sessionId -> surfaceId, only for surfaces that are actually live in the tree
+  // sessionId -> surfaceId, only for surfaces that are actually live in the tree. Preserve the
+  // first binding: parseHookStore inserts the fresh sessions[sid].surfaceId view before stale
+  // activeSessionsBySurface gaps, so a still-visible old surface must not overwrite a reattach.
   const sessionToSurface = new Map<string, string>();
   for (const [surfaceId, agent] of livePidAgents) {
-    if (surfaceToWorkspace.has(surfaceId)) {
+    if (surfaceToWorkspace.has(surfaceId) && !sessionToSurface.has(agent.sessionId)) {
       sessionToSurface.set(agent.sessionId, surfaceId);
     }
+  }
+  // Remove still-visible stale reattach surfaces from every downstream liveness view, not only
+  // locateSession. Otherwise surfaceInfo/primarySurface can still treat the abandoned body as live.
+  for (const [surfaceId, agent] of livePidAgents) {
+    if (sessionToSurface.get(agent.sessionId) !== surfaceId) livePidAgents.delete(surfaceId);
   }
 
   const byWorkspace = new Map<string, SurfaceLocation[]>();

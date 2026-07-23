@@ -29,6 +29,8 @@ import {
 /** Just the catalogue bits resume needs (kept narrow so the planner is easy to test). */
 export interface ResumeMeta {
   resumeCommand: string | null;
+  /** One-shot trailing prompt supplied by the caller; overrides the role's recurring command. */
+  prompt?: string;
   /** Launcher executable for argv[0]; null → plain `claude`. */
   binary?: string | null;
   /** Launcher env for the spawned process. */
@@ -64,7 +66,7 @@ export function planResumeSession(
   const command = buildResumeCommand(row, {
     fork: false,
     cwd,
-    resumeCommand: meta?.resumeCommand ?? null,
+    resumeCommand: meta?.prompt ?? meta?.resumeCommand ?? null,
     binary: meta?.binary ?? undefined,
     env: meta?.env,
   });
@@ -137,6 +139,8 @@ export function resumeSessionEntry(
     cmuxBin?: string;
     bridge?: Bridge;
     focus?: boolean;
+    /** One-shot trailing prompt; takes precedence over the role/session recurring resume command. */
+    prompt?: string;
     /** Launcher name to resume through; default = origin-backend route from the model history. */
     via?: string;
     /** Bypass route eligibility for an explicit `via` (loud override). */
@@ -170,6 +174,7 @@ export function resumeSessionEntry(
   const roleResume = cat?.role ? resolveRole(cat.role, cat.cluster)?.resumeCommand ?? null : null;
   const plan = planResumeSession(bridge, row, {
     resumeCommand: roleResume ?? cat?.resumeCommand ?? null,
+    prompt: opts.prompt,
     binary: chosen.launcher.binary,
     env: chosen.launcher.env,
   });
