@@ -257,10 +257,8 @@ func (m Model) renderPreview(width int, height int) string {
 	}
 	if summary := m.summaries[session.ID]; summary != "" {
 		lines = append(lines, "", sect("Summary"))
-		for _, summaryLine := range strings.Split(summary, "\n") {
-			for _, wrapped := range wrapPlain(summaryLine, contentWidth) {
-				lines = append(lines, fg(theme.FgSubtle).Render(wrapped))
-			}
+		for _, wrapped := range wrapWords(summary, contentWidth) {
+			lines = append(lines, fg(theme.FgSubtle).Render(wrapped))
 		}
 	}
 	lines = append(lines,
@@ -312,13 +310,14 @@ func (m Model) renderPreview(width int, height int) string {
 	if errText := m.transcriptErrs[session.ID]; errText != "" {
 		lines = append(lines, fg(theme.Warning).Render(truncate(errText, contentWidth)))
 	} else if document, loaded := m.transcripts[session.ID]; loaded {
+		peek := meaningfulLines(document.Lines)
 		start := m.peekScroll
 		if m.peekSession != session.ID {
-			start = max(0, len(document.Lines)-remaining)
+			start = max(0, len(peek)-remaining)
 		}
-		start = clamp(start, 0, max(0, len(document.Lines)-1))
-		end := min(len(document.Lines), start+remaining)
-		for _, transcriptLine := range document.Lines[start:end] {
+		start = clamp(start, 0, max(0, len(peek)-1))
+		end := min(len(peek), start+remaining)
+		for _, transcriptLine := range peek[start:end] {
 			lines = append(lines, renderPeekLine(transcriptLine, contentWidth))
 		}
 	} else {
@@ -530,7 +529,8 @@ func (m Model) renderKeybar(width int) string {
 	}
 	items := [][2]string{
 		{"Tab", "skills"}, {"↑↓", "move"}, {"enter", "resume"}, {"r", "via…"}, {"v", "transcript"},
-		{"/", "search"}, {"g", "view:" + viewLabel}, {"t/e", "organize"}, {"C/X", "done/archive"},
+		{"/", "search"}, {"g", "view:" + viewLabel}, {"R", "refresh"},
+		{"e", "archive"}, {"t", "retitle"}, {"C", "done"}, {"E", "edit"},
 		{"S/A/D", "AI"}, {"?", "help"}, {"q", "quit"},
 	}
 	parts := make([]string, 0, len(items))

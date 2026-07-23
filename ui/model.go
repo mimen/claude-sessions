@@ -165,6 +165,24 @@ func firstSessionRow(rows []row) int {
 	return 0
 }
 
+// nextSessionID returns the session ID of the session row after `cursor`
+// (falling back to the previous session row when at the end). Used so archiving
+// keeps the cursor on the next item — you don't lose your place mid-cleanup.
+// Returns "" when no other session exists.
+func (m Model) nextSessionID(cursor int) string {
+	for i := cursor + 1; i < len(m.rows); i++ {
+		if !m.rows[i].header {
+			return m.snapshot.Sessions[m.rows[i].sIdx].ID
+		}
+	}
+	for i := cursor - 1; i >= 0; i-- {
+		if !m.rows[i].header {
+			return m.snapshot.Sessions[m.rows[i].sIdx].ID
+		}
+	}
+	return ""
+}
+
 func (m Model) Init() tea.Cmd {
 	return m.loadSelectedTranscriptCmd()
 }
@@ -452,14 +470,32 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if session, ok := m.selectedSession(); ok {
 			m.confirmation = &confirmation{kind: confirmComplete, title: "Mark session done?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs mark --completed", enabled: true}}}
 		}
+	case "e":
+		// Fast archive: no confirmation (reversible via `ccs mark --archived --off`),
+		// and the cursor lands on the NEXT session so you can rip through cleanup
+		// without losing your place.
+		if session, ok := m.selectedSession(); ok {
+			m.status = "archiving via ccs…"
+			return m, archiveBatchCmd([]string{session.ID}, m.nextSessionID(m.cursor), "archived → "+truncate(session.Title, 40))
+		}
 	case "X":
+		// Archive with a confirmation, for when you want the safety prompt.
 		if session, ok := m.selectedSession(); ok {
 			m.confirmation = &confirmation{kind: confirmArchive, title: "Archive session?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs mark --archived", enabled: true}}}
 		}
-	case "e":
+	case "E":
 		if session, ok := m.selectedSession(); ok {
 			m.input = &textInput{kind: inputEdit, sessionID: session.ID, label: "AI metadata edit"}
 		}
+	case "R":
+		// Refresh: re-scan the store for new sessions and fresh activity, keeping
+		// the current selection.
+		preferredID := ""
+		if session, ok := m.selectedSession(); ok {
+			preferredID = session.ID
+		}
+		m.status = "refreshing…"
+		return m, refreshCmd(preferredID)
 	case "S":
 		if session, ok := m.selectedSession(); ok {
 			m.status = "summarizing with the inference engine…"
@@ -569,11 +605,12 @@ func (m *Model) scrollPeek(delta int) {
 	if !cached {
 		return
 	}
+	peek := meaningfulLines(document.Lines)
 	if m.peekSession != session.ID {
 		m.peekSession = session.ID
-		m.peekScroll = max(0, len(document.Lines)-6)
+		m.peekScroll = max(0, len(peek)-6)
 	}
-	m.peekScroll = clamp(m.peekScroll+delta, 0, max(0, len(document.Lines)-1))
+	m.peekScroll = clamp(m.peekScroll+delta, 0, max(0, len(peek)-1))
 }
 
 func (m Model) openTranscriptReader() (tea.Model, tea.Cmd) {

@@ -106,6 +106,67 @@ func wrapPlain(value string, width int) []string {
 	return out
 }
 
+// wrapWords wraps prose at word boundaries (never mid-word), falling back to a
+// hard break only for a single token longer than the width. Used for
+// human-readable text (summaries, proposal reasons) where mid-word breaks read
+// as garbled; wrapPlain stays for transcript/code where column alignment wins.
+func wrapWords(value string, width int) []string {
+	if width <= 0 {
+		return []string{""}
+	}
+	var out []string
+	for _, paragraph := range strings.Split(value, "\n") {
+		words := strings.Fields(paragraph)
+		if len(words) == 0 {
+			out = append(out, "")
+			continue
+		}
+		line := ""
+		lineLen := 0
+		for _, word := range words {
+			wl := len([]rune(word))
+			for wl > width { // a single token wider than the line: hard-break it
+				if line != "" {
+					out = append(out, line)
+					line, lineLen = "", 0
+				}
+				runes := []rune(word)
+				out = append(out, string(runes[:width]))
+				word = string(runes[width:])
+				wl = len([]rune(word))
+			}
+			switch {
+			case line == "":
+				line, lineLen = word, wl
+			case lineLen+1+wl <= width:
+				line += " " + word
+				lineLen += 1 + wl
+			default:
+				out = append(out, line)
+				line, lineLen = word, wl
+			}
+		}
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// meaningfulLines drops tool-call/result lines so the peek shows the actual
+// conversation when catching up — not "→ Bash …" / "← tool result …" noise. The
+// full `v` reader still shows everything.
+func meaningfulLines(lines []transcript.Line) []transcript.Line {
+	out := make([]transcript.Line, 0, len(lines))
+	for _, line := range lines {
+		if line.Kind == transcript.KindTool {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 func transcriptLabel(kind transcript.Kind) string {
 	switch kind {
 	case transcript.KindUser:

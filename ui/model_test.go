@@ -58,7 +58,9 @@ func TestDefaultGroupingPutsClustersBeforeNoSystemStates(t *testing.T) {
 			headers = append(headers, candidate.key)
 		}
 	}
-	want := []string{"cluster:event-watch", "cluster:event-watch:coordinator", "cluster:event-watch:worker", "no-system", "no-system:parked", "no-system:done"}
+	// Sessions sit directly under the cluster header — no role sub-sections
+	// (role is shown in its own column).
+	want := []string{"cluster:event-watch", "no-system", "no-system:parked", "no-system:done"}
 	if fmt.Sprint(headers) != fmt.Sprint(want) {
 		t.Fatalf("headers = %v, want %v", headers, want)
 	}

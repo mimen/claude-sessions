@@ -67,10 +67,11 @@ func buildDefaultRows(sessions []data.Session, query string) []row {
 			return roles[i] < roles[j]
 		})
 		rows = append(rows, row{header: true, key: "cluster:" + cluster, label: cluster, glyph: "◇", count: total})
+		// Sessions sit directly under the cluster header — no role sub-sections
+		// (role is already shown in its own column). Role-priority ordering is
+		// kept so members still read in a sensible order.
 		for _, role := range roles {
-			members := byCluster[cluster][role]
-			rows = append(rows, row{header: true, key: "cluster:" + cluster + ":" + role, label: role, glyph: roleGlyph(role), level: 1, count: len(members)})
-			for _, idx := range members {
+			for _, idx := range byCluster[cluster][role] {
 				rows = append(rows, row{sIdx: idx, level: 1})
 			}
 		}

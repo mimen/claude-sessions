@@ -109,6 +109,14 @@ func reloadAfterFailure(preferredID string, writeErr error) writeFinishedMsg {
 	return writeFinishedMsg{preferredID: preferredID, snapshot: snapshot, reloaded: true, err: writeErr}
 }
 
+// refreshCmd re-scans the store (no write) and reloads the snapshot, keeping the
+// current selection. Bound to `R` (shift+r).
+func refreshCmd(preferredID string) tea.Cmd {
+	return func() tea.Msg {
+		return reloadAfterWrite(preferredID, "refreshed")
+	}
+}
+
 func metadataEditCmd(snapshot data.Snapshot, sessionID string, instruction string) tea.Cmd {
 	return func() tea.Msg {
 		engine, err := inference.Resolve()

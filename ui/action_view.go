@@ -46,7 +46,15 @@ func (m Model) renderConfirmation() string {
 		}
 		title := fg(color).Bold(selected).Render(truncate(item.title, max(1, contentWidth-5)))
 		lines = append(lines, fit(fg(theme.Accent).Render(caret)+fg(theme.Success).Render(mark+" ")+title, contentWidth))
-		lines = append(lines, fit(fg(theme.FgMostSubtle).Render("    "+truncate(item.detail, max(1, contentWidth-4))), contentWidth))
+		if selected {
+			// Focused item shows its full reason, word-wrapped, so it's readable
+			// as you move through — the rest stay one truncated line.
+			for _, wrapped := range wrapWords(item.detail, max(1, contentWidth-4)) {
+				lines = append(lines, fit(fg(theme.FgSubtle).Render("    "+wrapped), contentWidth))
+			}
+		} else {
+			lines = append(lines, fit(fg(theme.FgMostSubtle).Render("    "+truncate(item.detail, max(1, contentWidth-4))), contentWidth))
+		}
 	}
 	if confirmation.kind == confirmCleanup {
 		lines = append(lines, "", fit(fg(theme.FgMostSubtle).Render("j/k move · space toggle · y/enter archive checked · esc cancel"), contentWidth))
