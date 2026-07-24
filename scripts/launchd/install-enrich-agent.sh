@@ -8,12 +8,17 @@ set -euo pipefail
 LABEL="com.milad.ccs.enrich"
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/${LABEL}.plist"
 DEST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
-CCS_BIN="/Users/mimen/Programming/Deployments/claude-sessions/bin/ccs"
 BUN_BIN="/opt/homebrew/bin/bun"
+# Read the checkout straight out of the plist so the two can never disagree about which ccs runs.
+CCS_BIN="$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:1' "$SRC")"
 
 # Fail before installing rather than after, so a broken job never gets scheduled.
 [[ -x "$BUN_BIN" ]] || { echo "missing bun at $BUN_BIN" >&2; exit 1; }
-[[ -f "$CCS_BIN" ]] || { echo "missing ccs at $CCS_BIN — is the deployment checkout present?" >&2; exit 1; }
+[[ -f "$CCS_BIN" ]] || { echo "missing ccs at $CCS_BIN" >&2; exit 1; }
+# The deployed ccs predates `enrich`; installing an agent that fails every 15 minutes is worse
+# than not installing one, so prove the command exists in THIS checkout before scheduling it.
+"$BUN_BIN" "$CCS_BIN" enrich --list --limit 1 >/dev/null 2>&1 \
+  || { echo "ccs at $CCS_BIN does not support 'enrich' — repoint the plist" >&2; exit 1; }
 [[ -f "${HOME}/.cli-proxy-api-key" ]] || { echo "missing gateway key at ~/.cli-proxy-api-key" >&2; exit 1; }
 
 mkdir -p "${HOME}/Library/LaunchAgents"
