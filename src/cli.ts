@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { ensureDataDir, DB_PATH, CATALOGUE_PATH } from "./paths.ts";
 import { openIndex } from "./index/schema.ts";
 import type { Database } from "bun:sqlite";
-import { listByRecency, titleOf } from "./index/index.ts";
+import { listByRecency, sessionById, titleOf } from "./index/index.ts";
 import { buildCostRollup } from "./index/cost-rollup.ts";
 import { formatCost } from "./cost.ts";
 import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster } from "./catalogue/db.ts";
@@ -15,6 +15,9 @@ import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
 import { delegateCommand } from "./delegate/command.ts";
+import { startCommand } from "./start/command.ts";
+import { doctorCommand } from "./doctor/command.ts";
+import { launcherCommand } from "./launcher/command.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { boardCommand } from "./catalogue/board-command.ts";
 import { catalogueServiceCommand } from "./catalogue-service/command.ts";
@@ -22,6 +25,7 @@ import { refreshCatalogueAuthority } from "./catalogue-service/client.ts";
 import { handoffInline } from "./resume/inline.ts";
 import type { ResumeCommand } from "./resume/command.ts";
 import { resumeSessionEntry } from "./resume/resume-session.ts";
+import { defaultRoute, loadLaunchers, resolveRoutes, type Launcher } from "./resume/launchers.ts";
 import { resumeClusterEntry, resumeMany, type ClusterResumeSummary } from "./resume/resume-cluster.ts";
 import { checkClusterGate } from "./cluster/manifest.ts";
 import { clusterInitCommand } from "./cluster/init-command.ts";
@@ -51,13 +55,16 @@ use \`ccs identity …\`; for per-run session state (title, parent, lifecycle) u
 
 Usage:
   ccs                 Launch the session browser (TUI)
+  ccs start [--dry-run|--explain] [description...]  Route work to an active session or managed new session
   ccs reindex [--titles]   Refresh through the host-local catalogue authority
   ccs catalogue-service start|status|stop|refresh   Manage the on-demand local authority
   ccs ls [--auxiliary]    Print indexed sessions (with catalogue badges)
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
-  ccs delegate <seat> --child-of <uuid|.> --cwd <dir> --prompt <task>
-                         Reserve and synchronously run an auxiliary seat
+  ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
+                         Reserve and synchronously run an auxiliary seat (fallback is explicit; never automatic)
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
+  ccs launcher install  Install the stable CCS Claude shim and shell initialization
+  ccs doctor sessions [--json]  Report post-rollout unclassified or provenance-missing sessions
 
 Identities (durable, per-work-unit — ADR-0089):
   ccs identity mint <key> --cluster=<c> --role=<r> [--grouping=<g>]
@@ -80,6 +87,7 @@ Sessions (ephemeral, per-run):
     explicit identity: --identity=<key> --cluster=<c> --role=<r> (must match stored identity; cannot combine with --key)
     flags: --cluster --role --title --cwd <dir> --prompt "..." --permission-mode <mode>
            --pr-repo owner/repo --pr-number 123 --gus-work W-... · --print-id (reserve only)
+           --via <launcher> (birth the session on a configured launcher, e.g. claude-gpt)
   ccs session bump <id> [--note "..."]            Wake the session's cmux tab
   ccs session-fields <sid> --json '{...}' [--sensor <name>]  Atomic multi-field write (ADR-0078)
   ccs historical-backfill detached-children --expect-sha256 <digest> [--apply]
@@ -117,6 +125,9 @@ Resume & tabs:
   ccs resume-cluster <c>                          Resume every not-open identity in a cluster
   ccs resume <selector>                           id | #pr | owner/repo#pr | W-number | epic | role | cluster
                                                   (pin axis with --role|--pr|--gus|--epic|--cluster|--key; --dry-run)
+                                                  All resume verbs take --via <launcher> [--force] (cross-backend
+                                                  routes; launchers = [[launcher]] in ~/.ccs/config.toml)
+  ccs routes <selector>                           Which launchers can resume each matched session, and why
   ccs sync-tabs [<selector>|.|--all]              Paint cmux tabs from catalogue metadata
   ccs reap-duplicates [--do]                      Close cmux dupes for sessions with >1 live \`claude --resume\`
 
@@ -168,8 +179,14 @@ export async function main(argv: string[]): Promise<number> {
       return ls({ all: args.includes("--all"), loops: args.includes("--loops"), auxiliary: args.includes("--auxiliary") });
     case "tree":
       return tree({ all: args.includes("--all"), auxiliary: args.includes("--auxiliary") });
+    case "start":
+      return startCommand(args.slice(1));
     case "delegate":
       return delegateCommand(args.slice(1));
+    case "doctor":
+      return doctorCommand(args.slice(1));
+    case "launcher":
+      return launcherCommand(args.slice(1));
     case "whoami":
       return whoami();
     case "meta": {
@@ -290,8 +307,10 @@ export async function main(argv: string[]): Promise<number> {
           const { suppressCommand } = await import("./state/suppress.ts");
           return suppressCommand(args.slice(2));
         }
-        case "resume":
-          return resumeCluster(args[2], args.includes("--dry-run"));
+        case "resume": {
+          const f = viaFlags(args);
+          return resumeCluster(args[2], args.includes("--dry-run"), f.via, f.force);
+        }
         case "reap-duplicates": {
           const { reapCommand } = await import("./cmux/reap.ts");
           return reapCommand(args.slice(2));
@@ -322,12 +341,18 @@ export async function main(argv: string[]): Promise<number> {
       return await sessionCommand(args.slice(1));
     case "board":
       return boardCommand(args.slice(1));
-    case "resume-session":
-      return resumeSession(args[1], args.includes("--dry-run"));
-    case "resume-cluster":
-      return resumeCluster(args[1], args.includes("--dry-run"));
+    case "resume-session": {
+      const f = viaFlags(args);
+      return resumeSession(args[1], args.includes("--dry-run"), f.via, f.force);
+    }
+    case "resume-cluster": {
+      const f = viaFlags(args);
+      return resumeCluster(args[1], args.includes("--dry-run"), f.via, f.force);
+    }
     case "resume":
       return resumeSelector(args.slice(1));
+    case "routes":
+      return routesCommand(args.slice(1));
     case "self-check": {
       // `ccs self-check <session-id>` — the turn-end sidecar (ADR-0063 v2). Runs a cheap
       // claude -p against the session's recent transcript + rubric, executes any `ccs` state
@@ -632,17 +657,40 @@ function clusterView(clusterSlug: string | undefined, expand = false, asJson = f
   }
 }
 
+/** Load the configured launcher fleet, printing the error (and failing the command) on a bad
+ * config — a silent fall-back to plain `claude` would resume gpt sessions on the wrong sub. */
+function fleetOrNull(): Launcher[] | null {
+  const r = loadLaunchers();
+  if (!r.ok) {
+    console.error(`ccs: ${r.error.message}`);
+    return null;
+  }
+  return r.value;
+}
+
+/** Shared `--via <name> [--force]` parse for the resume verbs. */
+function viaFlags(args: string[]): { via: string | undefined; force: boolean } {
+  return { via: flagValue(args, "--via"), force: args.includes("--force") };
+}
+
 /** Resume all sessions in a system (idempotent reconcile). */
 /** `ccs resume-session <id>` — the core op: re-embody one identity (ADR-0015). */
-function resumeSession(sessionId: string | undefined, dryRun: boolean): number {
+function resumeSession(
+  sessionId: string | undefined,
+  dryRun: boolean,
+  via?: string,
+  force?: boolean,
+): number {
   if (!sessionId) {
-    console.error("ccs: missing session id. Usage: ccs resume-session <id> [--dry-run]");
+    console.error("ccs: missing session id. Usage: ccs resume-session <id> [--dry-run] [--via <launcher>] [--force]");
     return 1;
   }
+  const launchers = fleetOrNull();
+  if (!launchers) return 1;
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
   try {
-    const res = resumeSessionEntry(db, cat, sessionId, { dryRun });
+    const res = resumeSessionEntry(db, cat, sessionId, { dryRun, via, force, launchers });
     switch (res.status) {
       case "resumed":
         console.log(`ccs: ${dryRun ? "would resume" : "resumed"} ${sessionId}${res.note ? ` (${res.note})` : ""}`);
@@ -664,6 +712,15 @@ function resumeSession(sessionId: string | undefined, dryRun: boolean): number {
         return 1;
       case "cwd-unreadable":
         console.error(`ccs: cannot resume ${sessionId}: ${res.error}`);
+        return 1;
+      case "route-ineligible":
+        console.error(
+          `ccs: cannot resume ${sessionId}${via ? ` via "${via}"` : ""}: ${res.reason}` +
+            (via ? " (override with --force)" : ""),
+        );
+        return 1;
+      case "unknown-launcher":
+        console.error(`ccs: unknown launcher "${res.name}" — see [[launcher]] entries in ~/.ccs/config.toml`);
         return 1;
     }
   } finally {
@@ -737,11 +794,13 @@ function printResumeClusterPreview(verb: string, s: ClusterResumeSummary): void 
 }
 
 /** `ccs resume-cluster <cluster>` — a thin loop over resume-session (ADR-0015). */
-function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
+function resumeCluster(cluster: string | undefined, dryRun: boolean, via?: string, force?: boolean): number {
   if (!cluster) {
-    console.error("ccs: missing cluster. Usage: ccs resume-cluster <cluster> [--dry-run]");
+    console.error("ccs: missing cluster. Usage: ccs resume-cluster <cluster> [--dry-run] [--via <launcher>] [--force]");
     return 1;
   }
+  const launchers = fleetOrNull();
+  if (!launchers) return 1;
   // ADR-0058 inter-layer version gate: refuse to bring a cluster online whose config declares a
   // ccs version we can't honor (major-version gap); warn-and-proceed on a minor gap or a bad
   // manifest. This is the loud failure that a silent tool↔config schema skew otherwise lacks.
@@ -754,7 +813,7 @@ function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
   try {
-    const s = resumeClusterEntry(db, cat, cluster, { dryRun });
+    const s = resumeClusterEntry(db, cat, cluster, { dryRun, via, force, launchers });
     if (s.abortedUnreadable) {
       console.error(
         `ccs: cluster "${cluster}" — cmux liveness is unreadable (cmux down, socket unauthed, or ` +
@@ -772,6 +831,7 @@ function resumeCluster(cluster: string | undefined, dryRun: boolean): number {
     console.log(
       `\nccs: cluster "${cluster}" — ${verb} ${s.resumed}, ${s.alreadyOpen} already open, ` +
         `${s.superseded} superseded, ${s.retired} retired, ${s.notIndexed} not indexed` +
+        `${s.routeIneligible ? `, ${s.routeIneligible} route-ineligible` : ""}` +
         `${s.failed ? `, ${s.failed} failed` : ""}`,
     );
     return s.failed > 0 ? 1 : 0;
@@ -797,6 +857,7 @@ export function resumeSelector(args: string[]): number {
     return 1;
   }
   const dryRun = args.includes("--dry-run");
+  const { via, force } = viaFlags(args);
   const pin: SelectorKind | undefined =
     args.includes("--role") ? "role"
     : args.includes("--pr") ? "pr"
@@ -823,7 +884,9 @@ export function resumeSelector(args: string[]): number {
       console.error(`ccs: ${sel.label} matched no sessions`);
       return 1;
     }
-    const s = resumeMany(db, cat, sel.sessionIds, { dryRun });
+    const launchers = fleetOrNull();
+    if (!launchers) return 1;
+    const s = resumeMany(db, cat, sel.sessionIds, { dryRun, via, force, launchers });
     if (s.abortedUnreadable) {
       console.error(
         `ccs: ${sel.label} — cmux liveness is unreadable (cmux down, socket unauthed, or store ` +
@@ -835,9 +898,58 @@ export function resumeSelector(args: string[]): number {
     console.log(
       `ccs: ${sel.label} (${sel.sessionIds.length} session${sel.sessionIds.length === 1 ? "" : "s"}) — ${verb} ${s.resumed}, ` +
         `${s.alreadyOpen} already open, ${s.superseded} superseded, ${s.retired} retired, ` +
-        `${s.notIndexed} not indexed${s.failed ? `, ${s.failed} failed` : ""}`,
+        `${s.notIndexed} not indexed` +
+        `${s.routeIneligible ? `, ${s.routeIneligible} route-ineligible` : ""}` +
+        `${s.failed ? `, ${s.failed} failed` : ""}`,
     );
     return s.failed > 0 ? 1 : 0;
+  } finally {
+    db.close();
+    cat.close();
+  }
+}
+
+/**
+ * `ccs routes <selector>` — the audit surface for cross-backend resume: which launchers can
+ * resume which matched session, why the ineligible ones can't, and which route is the default
+ * (origin-backend preference). Read-only; run this before trusting `resume --via`.
+ */
+function routesCommand(args: string[]): number {
+  const token = args.find((a) => !a.startsWith("--"));
+  if (!token) {
+    console.error("ccs: missing selector. Usage: ccs routes <id|#pr|W-number|epic|role|cluster>");
+    return 1;
+  }
+  const launchers = fleetOrNull();
+  if (!launchers) return 1;
+  ensureDataDir();
+  const db = openIndex(DB_PATH());
+  const cat = openCatalogue(CATALOGUE_PATH());
+  try {
+    const sel = resolveSelector(cat, db, token, {});
+    if (!sel || sel.sessionIds.length === 0) {
+      console.error(`ccs: "${token}" matched no sessions`);
+      return 1;
+    }
+    for (const sid of sel.sessionIds) {
+      const row = sessionById(db, sid);
+      if (!row) {
+        console.log(`${sid.slice(0, 8)} — not indexed (run \`ccs reindex\`)`);
+        continue;
+      }
+      const routes = resolveRoutes(launchers, row.models);
+      const def = defaultRoute(routes, row.models);
+      const models = row.models.length > 0 ? row.models.join(", ") : "(no assistant turns)";
+      console.log(`${sid.slice(0, 8)} · ${row.title}`);
+      console.log(`  models: ${models}`);
+      for (const r of routes) {
+        const mark = r.eligible ? "✓" : "✗";
+        const star = def?.launcher.name === r.launcher.name ? " (default)" : "";
+        const why = r.eligible ? "" : ` — ${r.reason}`;
+        console.log(`  ${mark} ${r.launcher.name} → ${r.launcher.binary}${star}${why}`);
+      }
+    }
+    return 0;
   } finally {
     db.close();
     cat.close();

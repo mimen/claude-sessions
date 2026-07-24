@@ -362,6 +362,45 @@ describe("buildBridge", () => {
     expect(reattachBridge.locateSession("session-reattached")?.surfaceId).toBe("surface-NEW");
   });
 
+  test("reattach prefers the fresh session pointer when the stale surface is still live", () => {
+    const reattachTree = {
+      windows: [{
+        id: "win-1",
+        ref: "window:1",
+        workspaces: [{
+          id: "ws-1",
+          ref: "workspace:1",
+          panes: [{
+            id: "pane-1",
+            ref: "pane:1",
+            index: 0,
+            surfaces: [
+              { id: "surface-OLD", ref: "surface:1", type: "terminal", index_in_pane: 0 },
+              { id: "surface-NEW", ref: "surface:2", type: "terminal", index_in_pane: 1 },
+            ],
+          }],
+        }],
+      }],
+    };
+    const reattachStore = {
+      sessions: {
+        "session-reattached": {
+          surfaceId: "surface-NEW",
+          workspaceId: "ws-1",
+          isRestorable: true,
+        },
+      },
+      activeSessionsBySurface: {
+        "surface-OLD": { sessionId: "session-reattached" },
+      },
+    };
+
+    const bridge = buildBridge(reattachTree, reattachStore);
+    expect(bridge.locateSession("session-reattached")?.surfaceId).toBe("surface-NEW");
+    expect(bridge.surfaceInfo("surface-OLD")).toBeNull();
+    expect(bridge.primarySurface("ws-1")?.surfaceId).toBe("surface-NEW");
+  });
+
   test("surface present in tree but unmapped in hook-store is NOT counted as open (ADR-task #9)", () => {
     // Build a minimal fixture: tree with one surface, hook-store with zero bindings
     const unmappedTree = {

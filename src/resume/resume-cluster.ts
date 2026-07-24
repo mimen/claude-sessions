@@ -18,6 +18,7 @@ import { liveBridge } from "../cmux/live.ts";
 import { openSessionIdsFrom, workspaceForSessionFrom } from "../cmux/liveness.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import { resumeSessionEntry, type ResumeSessionResult } from "./resume-session.ts";
+import type { Launcher } from "./launchers.ts";
 import { workUnitKey } from "../catalogue/spawn-contract.ts";
 import { resolveRole } from "../roles/role-files.ts";
 
@@ -30,6 +31,8 @@ export interface ClusterResumeSummary {
   superseded: number;
   notIndexed: number;
   failed: number;
+  /** members skipped because the requested launcher can't replay their model history */
+  routeIneligible: number;
   /** true iff the pass ABORTED because cmux liveness was unreadable — nothing was spawned (ADR-0054) */
   abortedUnreadable: boolean;
   /** Per-session outcome + enough row fields to render a useful preview (role/PR/title). The row
@@ -112,11 +115,21 @@ export function planClusterMembers(
   return members.map((m) => byId.get(m.sessionId)!);
 }
 
+interface ResumeManyOpts {
+  dryRun?: boolean;
+  cmuxBin?: string;
+  bridge?: Bridge;
+  focus?: boolean;
+  via?: string;
+  force?: boolean;
+  launchers?: readonly Launcher[];
+}
+
 export function resumeClusterEntry(
   indexDb: Database,
   catalogueDb: Database,
   cluster: string,
-  opts: { dryRun?: boolean; cmuxBin?: string; bridge?: Bridge; focus?: boolean } = {},
+  opts: ResumeManyOpts = {},
 ): ClusterResumeSummary {
   return resumeMany(indexDb, catalogueDb, sessionsForCluster(catalogueDb, cluster), opts);
 }
@@ -151,12 +164,12 @@ export function resumeMany(
   indexDb: Database,
   catalogueDb: Database,
   sessionIds: string[],
-  opts: { dryRun?: boolean; cmuxBin?: string; bridge?: Bridge; focus?: boolean } = {},
+  opts: ResumeManyOpts = {},
 ): ClusterResumeSummary {
   const bridge = opts.bridge ?? liveBridge();
   const emptySummary = (): ClusterResumeSummary => ({
     resumed: 0, alreadyOpen: 0, retired: 0, superseded: 0, notIndexed: 0, failed: 0,
-    abortedUnreadable: false, perSession: [],
+    routeIneligible: 0, abortedUnreadable: false, perSession: [],
   });
 
   // FAIL CLOSED: without readable liveness the supersede-dedup can't tell which units are already
@@ -237,6 +250,9 @@ export function resumeMany(
       cmuxBin: opts.cmuxBin,
       bridge,
       focus: opts.focus,
+      via: opts.via,
+      force: opts.force,
+      launchers: opts.launchers,
     });
     summary.perSession.push({ sessionId: p.sessionId, result: res.status, ...rowFields(p.row) });
     switch (res.status) {
@@ -244,6 +260,11 @@ export function resumeMany(
       case "already-open": summary.alreadyOpen++; pinAlreadyOpen(p.sessionId, p.row?.cluster ?? null, p.row?.role ?? null); break;
       case "not-indexed":  summary.notIndexed++;  break;
       case "spawn-failed": summary.failed++;      break;
+      // A member whose history the requested launcher can't replay is SKIPPED, not failed —
+      // e.g. `--via gpt` over a mixed cluster resumes the gpt-only members and reports the rest.
+      case "route-ineligible": summary.routeIneligible++; break;
+      // Unknown launcher names would hit every member identically; count as failures.
+      case "unknown-launcher": summary.failed++; break;
       // the shared-bridge gate above already aborts on this, but keep the pass fail-closed if a
       // per-session bridge ever comes back unreadable: count it as a failure, never a spawn.
       case "liveness-unreadable": summary.failed++; break;

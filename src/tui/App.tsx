@@ -16,6 +16,15 @@ import {
 import { backfillTitles } from "../titler/queue.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "../resume/command.ts";
 import { resumeSessionEntry } from "../resume/resume-session.ts";
+import {
+  DEFAULT_LAUNCHERS,
+  defaultRoute,
+  launchersFrom,
+  resolveRoutes,
+  type Launcher,
+  type Route,
+} from "../resume/launchers.ts";
+import { RoutePicker } from "./RoutePicker.tsx";
 import { resolveTarget, cmuxReachableAsync } from "../resume/target.ts";
 import { openInCmux } from "../resume/cmux.ts";
 import { focusSession, openSessionTitlesAsync } from "../cmux/liveness.ts";
@@ -45,7 +54,12 @@ import { buildEpicView } from "./epicView.ts";
 import { getCrashReporter } from "../crashlog.ts";
 import { tasksFor, sessionsWithTasks } from "../tasks/reader.ts";
 import { SESSION_CLASS_ROLLOUT_MS } from "../session-class.ts";
-import { productionT3Opener, resolveT3OpenCwd, type T3Opener } from "../t3/open.ts";
+import {
+  productionT3Opener,
+  resolveT3OpenCwd,
+  T3_OPEN_ENABLED,
+  type T3Opener,
+} from "../t3/open.ts";
 import {
   joinT3AttachmentsToRootSessions,
   productionT3AttachmentStatusClient,
@@ -189,6 +203,20 @@ export function App({
   const { exit } = useApp();
   const { columns: cols, rows: termRows } = useTerminalSize();
 
+  // Cross-backend launcher fleet from config `[[launcher]]`. A duplicate-name config error
+  // falls back to plain `claude` here (the CLI stays loud; the TUI must still render).
+  const launchers = useMemo<readonly Launcher[]>(() => {
+    const l = launchersFrom(config.launcher);
+    return "error" in l ? DEFAULT_LAUNCHERS : l;
+  }, [config]);
+  // The `r` overlay: route picker over the selected session (owns input while open).
+  const [routePicker, setRoutePicker] = useState<{
+    row: SessionRow;
+    routes: Route[];
+    selected: number;
+    live: boolean;
+  } | null>(null);
+
   const [includeSubagents, setIncludeSubagents] = useState(false);
   const [showAuxiliary, setShowAuxiliary] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -223,6 +251,12 @@ export function App({
   const [transcript, setTranscript] = useState<
     { title: string; lines: TranscriptLine[]; truncated: boolean; scroll: number } | null
   >(null);
+  // Preview pane: `d` swaps the compact peek view for the full metadata dossier; J/K scroll the
+  // peek over the real transcript (lazily loaded, cached per session so revisits are instant).
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [peekScroll, setPeekScroll] = useState(0);
+  const [peekLines, setPeekLines] = useState<TranscriptLine[] | null>(null);
+  const peekCache = useRef<Map<string, TranscriptLine[]>>(new Map());
 
   const reload = () => setRefreshTick((t) => t + 1);
   // cmux probes must be ASYNC in the TUI. In render they block React mid-frame; even in an
@@ -604,11 +638,22 @@ export function App({
   const clampedSelected = Math.min(selected, Math.max(0, items.length - 1));
   const current = items[clampedSelected];
   const selectedRow: SessionRow | null = current?.kind === "session" ? current.row : null;
+  // Tracks the live selection for the async peek loader, so a slow transcript read that resolves
+  // after the cursor has moved on doesn't paint the wrong session's transcript into the pane.
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedRow?.sessionId ?? null;
 
   const [skeleton, setSkeleton] = useState("");
   useEffect(() => {
     setSkeleton(selectedRow ? getSkeleton(db, selectedRow.sessionId) : "");
   }, [db, selectedRow?.sessionId]);
+
+  // Selecting a different row resets the peek to the top; reuse a cached transcript if we already
+  // read this session's file, so scrolling back into it is instant (else fall back to the skeleton).
+  useEffect(() => {
+    setPeekScroll(0);
+    setPeekLines(selectedRow ? peekCache.current.get(selectedRow.sessionId) ?? null : null);
+  }, [selectedRow?.sessionId]);
 
   // Background title drain while open (no-op when nothing needs titling).
   useEffect(() => {
@@ -762,10 +807,10 @@ export function App({
       );
   };
 
-  const doResume = (fork: boolean, forceOther: boolean) => {
+  const doResume = (fork: boolean, forceOther: boolean, via?: Launcher, rowOverride?: SessionRow) => {
     const item = items[clampedSelected];
-    if (!item || item.kind !== "session") return;
-    const r = item.row;
+    const r = rowOverride ?? (item?.kind === "session" ? item.row : null);
+    if (!r) return;
     if (r.isSubagent) {
       setStatus("subagent runs aren't resumable — they're task runs spawned by a parent session");
       return;
@@ -777,13 +822,21 @@ export function App({
       setStatus(focused ? `switched to → ${r.title}` : `already open, but couldn't switch to ${r.title}`);
       return;
     }
+    // Cross-backend route: an explicit pick from the `r` overlay wins; plain enter takes the
+    // origin-backend default from the session's model history (pure-gpt → the gpt launcher).
+    const launcher = via ?? defaultRoute(resolveRoutes(launchers, r.models), r.models)?.launcher;
+    if (!launcher) {
+      setStatus(`no configured launcher can replay [${r.models.join(", ")}] — check [[launcher]] serves globs`);
+      return;
+    }
+    const viaSuffix = launcher.name !== "claude" ? ` via ${launcher.name}` : "";
     const cwdResult = resolveResumeCwd(r);
     if ("error" in cwdResult) {
       setStatus(`can't resume: ${cwdResult.error}`);
       return;
     }
     const { cwd, note } = cwdResult;
-    const cmd = buildResumeCommand(r, { fork, cwd });
+    const cmd = buildResumeCommand(r, { fork, cwd, binary: launcher.binary, env: launcher.env });
     const target = resolveTarget(config.resume.target, reachable, forceOther);
     const prefix = note ? `${note} · ` : "";
     if (target === "cmux") {
@@ -793,18 +846,60 @@ export function App({
       // because an interactive resume wants to land in the pane. A fork has no catalogue
       // resume_command to replay, and the core doesn't fork, so keep the direct path for forks.
       if (catalogue && !fork) {
-        const res = resumeSessionEntry(db, catalogue, r.sessionId, { focus: true });
+        const res = resumeSessionEntry(db, catalogue, r.sessionId, {
+          focus: true,
+          via: launcher.name,
+          launchers,
+        });
         const ok = res.status === "resumed" || res.status === "already-open";
-        setStatus(prefix + (ok ? `opened in cmux → ${r.title}` : "cmux failed — press o to resume inline"));
+        const fail =
+          res.status === "route-ineligible"
+            ? `route ineligible: ${res.reason}`
+            : "cmux failed — press o to resume inline";
+        setStatus(prefix + (ok ? `opened in cmux${viaSuffix} → ${r.title}` : fail));
       } else {
         const ok = openInCmux(cmd, r.title);
-        setStatus(prefix + (ok ? `opened in cmux → ${r.title}${fork ? " (fork)" : ""}` : "cmux failed — press o to resume inline"));
+        setStatus(prefix + (ok ? `opened in cmux${viaSuffix} → ${r.title}${fork ? " (fork)" : ""}` : "cmux failed — press o to resume inline"));
       }
     } else {
       resumeRequest.current = cmd;
       exit();
     }
   };
+
+  // Open the `r` overlay on the selected session: summary of what you'd be resuming + one row
+  // per configured launcher. Live sessions still open it (informational) — enter focuses.
+  const openRoutePicker = () => {
+    const item = items[clampedSelected];
+    if (!item || item.kind !== "session") return;
+    const r = item.row;
+    if (r.isSubagent) {
+      setStatus("subagent runs aren't resumable — they're task runs spawned by a parent session");
+      return;
+    }
+    const routes = resolveRoutes(launchers, r.models);
+    const def = defaultRoute(routes, r.models);
+    const defIdx = def ? routes.findIndex((rt) => rt.launcher.name === def.launcher.name) : 0;
+    setRoutePicker({
+      row: r,
+      routes,
+      selected: Math.max(0, defIdx),
+      live: openSet.has(r.sessionId) || openSet.has(r.resumeId),
+    });
+  };
+
+  /** Move the picker highlight to the next ELIGIBLE route in `dir`, wrapping. */
+  const moveRoutePicker = (dir: 1 | -1) =>
+    setRoutePicker((p) => {
+      if (!p) return p;
+      const n = p.routes.length;
+      let i = p.selected;
+      for (let step = 0; step < n; step++) {
+        i = (i + dir + n) % n;
+        if (p.routes[i]!.eligible) return { ...p, selected: i };
+      }
+      return p;
+    });
 
   const activate = () => {
     const item = items[clampedSelected];
@@ -829,6 +924,33 @@ export function App({
 
   const scrollTranscript = (delta: number) =>
     setTranscript((t) => (t ? { ...t, scroll: Math.max(0, t.scroll + delta) } : t));
+
+  // Scroll the preview peek by ~half its visible height. The first scroll lazily reads the real
+  // transcript (cached per session); until then the peek shows the baked skeleton. Overshoot is
+  // clamped inside the pane, so a coarse step still lands exactly on END.
+  const scrollPeek = (dir: -1 | 1) => {
+    if (!selectedRow || !previewVisible) return;
+    const step = Math.max(1, Math.floor((previewHeight - 10) / 2));
+    if (peekLines) {
+      setPeekScroll((s) => Math.max(0, s + dir * step));
+      return;
+    }
+    const id = selectedRow.sessionId;
+    const land = () => setPeekScroll(dir > 0 ? step : 0);
+    const cached = peekCache.current.get(id);
+    if (cached) {
+      setPeekLines(cached);
+      land();
+      return;
+    }
+    void readTranscript(selectedRow.path).then(({ lines }) => {
+      peekCache.current.set(id, lines);
+      if (selectedIdRef.current === id) {
+        setPeekLines(lines);
+        land();
+      }
+    });
+  };
 
   const retitle = () => {
     const item = items[clampedSelected];
@@ -919,6 +1041,23 @@ export function App({
       return;
     }
 
+    // Route picker owns input while open.
+    if (routePicker) {
+      const chosen = routePicker.routes[routePicker.selected];
+      if (key.escape || input === "q" || input === "r") setRoutePicker(null);
+      else if (key.upArrow || input === "k") moveRoutePicker(-1);
+      else if (key.downArrow || input === "j") moveRoutePicker(1);
+      else if (key.return && routePicker.live) {
+        // Live tab: enter = focus (doResume's live guard handles it; route is irrelevant).
+        setRoutePicker(null);
+        doResume(false, false, undefined, routePicker.row);
+      } else if ((key.return || input === "f" || input === "o") && chosen?.eligible) {
+        setRoutePicker(null);
+        doResume(input === "f", input === "o", chosen.launcher, routePicker.row);
+      }
+      return;
+    }
+
     if (searching) {
       if (key.escape) {
         setSearching(false);
@@ -998,12 +1137,16 @@ export function App({
       setSort((s) => SORT_CYCLE[(SORT_CYCLE.indexOf(s) + 1) % SORT_CYCLE.length]!);
       setSelected(0);
     } else if (input === "p") setPreviewVisible((v) => !v);
+    else if (input === "d") {
+      if (selectedRow) setDetailsOpen((v) => !v);
+    } else if (input === "J") scrollPeek(1);
+    else if (input === "K") scrollPeek(-1);
     else if (input === "v") openTranscript();
     else if (input === "a") {
       setIncludeSubagents((v) => !v);
       setSelected(0);
     } else if (input === "t") retitle();
-    else if (input === "T") doOpenInT3();
+    else if (T3_OPEN_ENABLED && input === "T") doOpenInT3();
     else if (input === "i") {
       // Swap the inference engine (only meaningful when both codex + claude are installed).
       if (availableEngines.length < 2) {
@@ -1040,11 +1183,12 @@ export function App({
       setSelected(0);
     } else if (input === "f") doResume(true, false);
     else if (input === "o") doResume(false, true);
+    else if (input === "r") openRoutePicker();
     else if (key.return) activate();
   });
 
   // ---- Layout (recomputed on every resize via useTerminalSize) ----
-  const listMode = !transcript && !showHelp;
+  const listMode = !transcript && !showHelp && !routePicker;
   // Chrome = header (2) + footer (1) + rule under header (list mode only) + optional search/status.
   const chrome = 3 + (listMode ? 1 : 0) + (searching ? 1 : 0) + (command ? 1 : 0) + (status ? 1 : 0);
   const body = Math.max(3, termRows - chrome);
@@ -1098,6 +1242,10 @@ export function App({
       })()}
       tasks={taskIds.has(selectedRow.sessionId) ? tasksFor(selectedRow.sessionId) : null}
       height={previewHeight}
+      width={sideBySide ? previewWidth : contentWidth}
+      detailsOpen={detailsOpen}
+      peekLines={peekLines}
+      peekScroll={peekScroll}
     />
   ) : selSection ? (
     <SectionCard
@@ -1107,6 +1255,7 @@ export function App({
       cost={selSection.cost}
       sectionKey={selSection.section.key}
       height={previewHeight}
+      width={sideBySide ? previewWidth : contentWidth}
     />
   ) : null;
 
@@ -1153,7 +1302,16 @@ export function App({
         </Box>
       ) : null}
 
-      {transcript ? (
+      {routePicker ? (
+        <RoutePicker
+          row={routePicker.row}
+          routes={routePicker.routes}
+          defaultName={defaultRoute(routePicker.routes, routePicker.row.models)?.launcher.name ?? null}
+          selected={routePicker.selected}
+          live={routePicker.live}
+          target={resolveTarget(config.resume.target, reachable, false)}
+        />
+      ) : transcript ? (
         <Transcript
           title={transcript.title}
           lines={transcript.lines}
@@ -1200,7 +1358,8 @@ export function App({
         <KeyBar
           items={[
             ["enter", "resume"],
-            ["T", "open in T3"],
+            ["r", "resume via…"],
+            ...(T3_OPEN_ENABLED ? [["T", "open in T3"] as [string, string]] : []),
             ["/", "search"],
             ["v", "transcript"],
             ["g", `view:${view}`],

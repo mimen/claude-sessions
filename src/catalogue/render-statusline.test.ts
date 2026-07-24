@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { renderStatusline, osc8, DEFAULT_STALENESS_MS } from "./render-statusline.ts";
+import { renderStatusline, renderMeters, osc8, DEFAULT_STALENESS_MS } from "./render-statusline.ts";
 import type { CatalogueRow } from "./db.ts";
 
 const NOW = Date.parse("2026-07-10T12:00:00Z");
@@ -42,7 +42,9 @@ test("state pill without a color renders label plain", () => {
     { nowMs: NOW, statePill: { label: "in review" } },
   );
   expect(line).toContain("in review");
-  expect(line).not.toContain("\x1b[38;2;");
+  // The LABEL carries no color of its own. (The line still contains 24-bit codes — the section
+  // separator is faint-tinted — so assert on the label specifically, not the whole line.)
+  expect(line).not.toMatch(/\x1b\[38;2;[\d;]+min review/);
 });
 
 test("strips a leading #num already baked into the title (no double PR#)", () => {
@@ -86,7 +88,7 @@ test("a stale row drops the state pill (never asserts an old value)", () => {
   });
   const line = renderStatusline(stale, { nowMs: NOW, statePill: { label: "merged", color: "#34c759" } });
   expect(line).not.toContain("merged"); // the stale pill is NOT shown
-  expect(line).not.toContain("\x1b[38;2;");
+  expect(line).not.toContain("\x1b[38;2;52;199;89m"); // ...and its color never reaches the line
 });
 
 test("a fresh row within the window keeps its state pill", () => {
@@ -99,7 +101,7 @@ test("a fresh row within the window keeps its state pill", () => {
 
 test("no pill + fresh row: link only, no leading pill separator", () => {
   const line = renderStatusline(row({ prNumber: 5, prRepo: "a/b" }), { nowMs: NOW });
-  expect(line.startsWith(" · ")).toBe(false);
+  expect(line.startsWith(" ")).toBe(false); // no leading separator gap
   expect(line).toContain("#5");
 });
 
@@ -108,4 +110,109 @@ test("a bare row with no PR/work reads as the neutral 'PR' label", () => {
     nowMs: NOW, statePill: { label: "building", color: "#32ade6" },
   });
   expect(line).toContain("PR");
+});
+
+// ── meters line (line 2) ───────────────────────────────────────────────────────────────────────
+
+test("meters: model display_name is tinted with the ccs family color", () => {
+  const line = renderMeters({ modelId: "claude-opus-4-8", modelLabel: "Opus 4.8" });
+  // opus #c99a6b → 201;154;107
+  expect(line).toContain("\x1b[38;2;201;154;107mOpus 4.8\x1b[39m");
+});
+
+test("meters: a gateway GPT model keeps its teal family color", () => {
+  const line = renderMeters({ modelId: "gpt-5.6-sol-high", modelLabel: "GPT-5.6 Sol" });
+  // sol #4fb3a9 → 79;179;169
+  expect(line).toContain("\x1b[38;2;79;179;169mGPT-5.6 Sol\x1b[39m");
+});
+
+test("meters: falls back to the family short label when display_name is absent", () => {
+  const line = renderMeters({ modelId: "claude-sonnet-5" });
+  expect(line).toContain("sonnet");
+});
+
+test("meters: effort and fast-mode render together", () => {
+  const line = renderMeters({ effort: "high", fast: true });
+  expect(line).toContain("high");
+  expect(line).toContain("⚡fast");
+});
+
+test("meters: context gauge shows a bar, the percent, and the window size", () => {
+  const line = renderMeters({ ctxPercent: 42, ctxSize: 1_000_000 });
+  expect(line).toContain("ctx");
+  expect(line).toContain("█"); // gauge filled cells drawn
+  expect(line).toContain("42%");
+  expect(line).toContain("1M");
+});
+
+test("meters: a 200k window renders as 200k", () => {
+  const line = renderMeters({ ctxPercent: 8, ctxSize: 200_000 });
+  expect(line).toContain("200k");
+});
+
+test("meters: cost is graded by the ccs cost ramp", () => {
+  const line = renderMeters({ costUsd: 1.23 });
+  // $1–$100 → costLow #9aa3b2 → 154;163;178
+  expect(line).toContain("\x1b[38;2;154;163;178m$1.23\x1b[39m");
+});
+
+test("meters: sub-dollar cost renders as cents", () => {
+  const line = renderMeters({ costUsd: 0.5 });
+  expect(line).toContain("50¢");
+});
+
+test("meters: empty input yields an empty line (identity-only session)", () => {
+  expect(renderMeters({})).toBe("");
+});
+
+test("meters: null context percent omits the ctx bit (pre-first-response)", () => {
+  const line = renderMeters({ ctxPercent: null, costUsd: 2 });
+  expect(line).not.toContain("ctx");
+  expect(line).toContain("$2.00");
+});
+
+test("meters: sections are separated by a faint pipe rule", () => {
+  const line = renderMeters({ modelId: "claude-opus-4-8", modelLabel: "Opus 4.8", costUsd: 2 });
+  expect(line).toContain("│");
+  expect(line).toContain("  │  "); // air either side
+  expect(line).not.toContain("·");
+});
+
+test("meters: subagent bit spells out count + summed cost", () => {
+  const line = renderMeters({ subagentCount: 3, subagentUsd: 0.42 });
+  expect(line).toContain("3 subagents");
+  expect(line).toContain("42¢");
+});
+
+test("meters: a single subagent reads in the singular", () => {
+  const line = renderMeters({ subagentCount: 1, subagentUsd: 0.1 });
+  expect(line).toContain("1 subagent");
+  expect(line).not.toContain("1 subagents");
+});
+
+test("meters: no subagents omits the bit entirely (no dead '0 subagents')", () => {
+  const line = renderMeters({ subagentCount: 0, subagentUsd: 0, costUsd: 1 });
+  expect(line).not.toContain("subagent");
+});
+
+test("meters: subagent count renders even when their cost is zero", () => {
+  const line = renderMeters({ subagentCount: 2, subagentUsd: 0 });
+  expect(line).toContain("2 subagents");
+});
+
+test("meters: the context gauge is 16 cells wide", () => {
+  const line = renderMeters({ ctxPercent: 42, ctxSize: 1_000_000 });
+  const filled = (line.match(/█/g) ?? []).length;
+  const empty = (line.match(/░/g) ?? []).length;
+  expect(filled + empty).toBe(16);
+  expect(filled).toBe(7); // round(0.42 * 16)
+});
+
+test("identity line uses the same pipe rule (both rows stay consistent)", () => {
+  const line = renderStatusline(
+    row({ prNumber: 12080, prRepo: "heroku/dashboard", customTitle: "Fix navbar" }),
+    { nowMs: NOW, statePill: { label: "in review", color: "#bf5af2" } },
+  );
+  expect(line).toContain("  │  ");
+  expect(line).not.toContain(" · ");
 });

@@ -52,6 +52,10 @@ ccs                    # launch the browser
 ccs reindex            # refresh the index from the store (incremental)
 ccs reindex --titles   # also generate missing titles (cron/launchd-friendly)
 ccs ls                 # debug: print the indexed sessions
+ccs start "continue the CCS session starter"  # route to an active session or project and launch it
+ccs start --dry-run "continue the CCS session starter"  # preview the recommendation; launch nothing
+ccs start --explain "continue the CCS session starter"  # preview candidates and routing rationale
+ccs start              # prompt for the work description interactively
 
 # CCS-managed launches declare their intent before a UUID is reserved:
 ccs session new --top-level --cwd /path/to/repo
@@ -59,13 +63,26 @@ ccs session new --child-of . --cwd /path/to/repo
 
 # Run one canonical seat as a synchronous, causally parented helper:
 ccs delegate primary-review --child-of . --cwd /path/to/repo --prompt "Review the diff."
+
+# Explicitly select the seat's declared fallback before launch:
+ccs delegate primary-review --fallback --child-of . --cwd /path/to/repo --prompt "Review the diff."
+
+# Reserve a transcript-free automation anchor, then run synchronous attributed children:
+ANCHOR_ID="$(CCS_CREATOR_KIND=automation CCS_CREATOR_REF=imsg-server ccs session new \
+  --top-level --cwd /path/to/repo --title 'iMessage server' --print-id)"
+CCS_CREATOR_KIND=automation CCS_CREATOR_REF=imsg-server ccs delegate utility \
+  --child-of "$ANCHOR_ID" --cwd /path/to/repo --prompt "Classify this request."
 ```
 
 `--top-level` creates a visible work body. `--child-of` creates an auxiliary session whose
-cost belongs to its causal parent. Auxiliary sessions are hidden in normal list, search, and
-tree views; use `u` in the TUI or `--auxiliary` in CLI views to reveal them for one invocation.
-Canonical delegated seats live outside Claude Code's auto-discovered agent directories and are
-compiled into process-local `--agents` JSON only for the selected delegation.
+cost belongs to its causal parent. A delegate call selects the seat's fixed primary route by
+default; `--fallback` explicitly selects its declared backup before reservation. CCS never
+automatically retries a child after launch, because the child may already have changed state;
+a manual fallback invocation creates a separate auxiliary child. Auxiliary sessions are hidden in
+normal list, search, and tree views; use `u` in the TUI or `--auxiliary` in CLI views to reveal
+them for one invocation. Canonical delegated seats live outside Claude Code's auto-discovered
+agent directories and are compiled into process-local `--agents` JSON only for the selected
+delegation.
 
 ### Keys
 
@@ -83,6 +100,32 @@ compiled into process-local `--agents` JSON only for the selected delegation.
 | `t` | re-title the selected session |
 | `i` | swap inference engine (codex ⇄ claude; shown only when both are installed) |
 | `q` / `esc` | quit |
+
+## Slash commands (the `ccs` plugin)
+
+The TUI catalogues sessions from the outside. The plugin does it from inside the
+conversation, where filing the work is one command away.
+
+```sh
+/plugin marketplace add mimen/claude-sessions
+/plugin install ccs@claude-sessions
+/reload-plugins        # only needed in an already-running session
+```
+
+| command | what it does |
+|---------|--------------|
+| `/ccs:archive` | keep the title useful, mark archived, and offer a safe tab-close link |
+| `/ccs:complete` | mark the work finished while keeping the session visible in history |
+| `/ccs:unarchive` | clear archive or completion flags and return to active views |
+| `/ccs:title <words>` | set an explicit title verbatim and sync the cmux tab |
+| `/ccs:suggest-title` | generate a title from what the session actually became |
+| `/ccs:tag <entity>` | tag the session so related work is easy to find |
+| `/ccs:info` | show this session's lifecycle, cost, identity, and tags |
+
+`completed` and `archived` are different claims. Completed work stays visible in CCS
+history but completed cluster members are not resumed. Archived work leaves active
+browse/search views and cluster resumes. Both states are reversible; neither touches
+the transcript.
 
 ## Configuration
 
@@ -127,4 +170,4 @@ maxAttempts = 3
 > Set it higher in `~/.claude/settings.json` to keep history; already-pruned sessions are
 > unrecoverable. A future `ccs` archive mode will copy transcripts out before they're pruned.
 
-See `CONTEXT.md` for the glossary and `docs/adr/` for architecture decisions.
+See [`docs/managed-session-launches.md`](docs/managed-session-launches.md) for the agent and automation launch contract, `CONTEXT.md` for the glossary, and `docs/adr/` for architecture decisions.

@@ -1,4 +1,7 @@
 import type { CatalogueRow } from "./db.ts";
+import { familyOf } from "../tui/format.ts";
+import { theme, costColor, fullnessColor } from "../tui/theme.ts";
+import { formatCost } from "../cost.ts";
 
 /**
  * The Claude Code statusline renderer (ADR-0027): a pure projection of a session's ccs
@@ -22,6 +25,15 @@ export function osc8(url: string, text: string): string {
 /** How stale (ms) a row's phase may be before we render it as `unknown` instead of asserting
  * it as current. The statusline re-runs every turn, so this only bites a truly abandoned row. */
 export const DEFAULT_STALENESS_MS = 6 * 60 * 60 * 1000; // 6h
+
+/**
+ * Section separator for BOTH statusline rows: a faint pipe with air either side. The status bar
+ * has the full terminal width to play with, so sections get real breathing room; the rule divides
+ * them unambiguously where bare whitespace could read as accidental spacing. Drawn in `faint` so
+ * it recedes behind the values. In-section spacing stays a single space (`medium ⚡fast`), which
+ * keeps each section reading as one unit against the wider rule.
+ */
+const SEP = colorize("  │  ", theme.faint);
 
 /** A generic grouping's display bits — a {label, url} the CLUSTER supplied (ADR-0051). The
  * platform renders it clickable; it does NOT know the url is a GUS epic link. */
@@ -105,7 +117,102 @@ export function renderStatusline(row: CatalogueRow, ctx: StatuslineCtx): string 
   const reviewBit = ctx.reviewAppUrl ? osc8(ctx.reviewAppUrl, "↗ review-app") : null;
 
   const bits = [pillBit, linked, groupingBit, wBit, reviewBit].filter((b): b is string => !!b);
-  return bits.join(" · ");
+  return bits.join(SEP);
+}
+
+/**
+ * The live-session meters line (line 2) — rendered from the Claude Code statusline PAYLOAD, not the
+ * ccs catalogue: model badge, reasoning effort (+ fast-mode), context-window gauge, session cost.
+ * Styled in the SAME palette as the TUI list (model color from `familyOf`, cost from `costColor`,
+ * fill from `fullnessColor`) so the statusline reads as one system with ccs. Every field is optional
+ * and absent ones drop out cleanly (early session, model without effort, non-gateway model, …).
+ * Pure/testable: the caller parses the payload into this typed input.
+ */
+export interface MetersInput {
+  /** Raw model id (e.g. `claude-opus-4-8`, `gpt-5.6-sol-…`) — drives the family COLOR. */
+  modelId?: string | null;
+  /** Display label (Claude Code's `model.display_name`, e.g. `Opus 4.8`). Falls back to the family
+   * short label when absent. */
+  modelLabel?: string | null;
+  /** Reasoning effort level (`high`/`medium`/`low`), when the model exposes it. */
+  effort?: string | null;
+  /** Whether /fast is active. */
+  fast?: boolean;
+  /** Context-window used percentage (0–100), or null before the first API response of a turn. */
+  ctxPercent?: number | null;
+  /** Context-window size in tokens (200000 / 1000000) — rendered as `200k` / `1M`. */
+  ctxSize?: number | null;
+  /** Session cost so far, USD. */
+  costUsd?: number | null;
+  /** Number of subagent runs this session spawned (0/absent → the bit is omitted). */
+  subagentCount?: number | null;
+  /** Summed cost of those subagent runs, USD. */
+  subagentUsd?: number | null;
+}
+
+const METER_FAINT = theme.faint; // labels, empty gauge cells
+const METER_MUTED = theme.muted; // effort label
+
+/** `1M` / `200k` for a context-window token size. */
+function ctxWindowLabel(size: number): string {
+  if (size >= 1_000_000) return `${Math.round(size / 1_000_000)}M`;
+  if (size >= 1000) return `${Math.round(size / 1000)}k`;
+  return String(size);
+}
+
+/** A 16-cell block gauge: filled portion in the fullness color, remainder faint. Wide enough that
+ * each cell is ~6%, so the bar reads as a real meter rather than a coarse 4-step indicator. */
+function ctxGauge(pct: number): string {
+  const cells = 16;
+  const filled = Math.max(0, Math.min(cells, Math.round((pct / 100) * cells)));
+  return colorize("█".repeat(filled), fullnessColor(pct)) + colorize("░".repeat(cells - filled), METER_FAINT);
+}
+
+/** Render the meters line from a parsed payload. Returns "" when nothing is known yet (caller then
+ * emits only the identity line). Bits are joined with the same SEP gap as the identity line. */
+export function renderMeters(m: MetersInput): string {
+  const modelBit =
+    m.modelLabel || m.modelId
+      ? colorize(m.modelLabel ?? familyOf(m.modelId ?? "").label, familyOf(m.modelId ?? "").color)
+      : null;
+
+  let effortBit: string | null = null;
+  if (m.effort || m.fast) {
+    const parts: string[] = [];
+    if (m.effort) parts.push(colorize(m.effort, METER_MUTED));
+    if (m.fast) parts.push(colorize("⚡fast", theme.costMid));
+    effortBit = parts.join(" ");
+  }
+
+  let ctxBit: string | null = null;
+  if (typeof m.ctxPercent === "number") {
+    const pct = Math.max(0, Math.round(m.ctxPercent));
+    const size = m.ctxSize ? ` ${colorize(ctxWindowLabel(m.ctxSize), METER_FAINT)}` : "";
+    ctxBit = `${colorize("ctx", METER_FAINT)} ${ctxGauge(pct)} ${colorize(`${pct}%`, fullnessColor(pct))}${size}`;
+  }
+
+  const costBit =
+    typeof m.costUsd === "number" && m.costUsd > 0
+      ? colorize(formatCost(m.costUsd), costColor(m.costUsd))
+      : null;
+
+  // Subagent rollup: spelled out (`2 subagents`) rather than the TUI's `↳N` glyph — the status bar
+  // has room for plain language, and a word needs no legend the way a symbol does. The TUI list
+  // keeps `↳N` because its column is only SUB_W chars wide. Count in faint, their summed spend
+  // graded by the cost ramp. Omitted entirely for a session that spawned none.
+  let subBit: string | null = null;
+  if (typeof m.subagentCount === "number" && m.subagentCount > 0) {
+    const n = m.subagentCount;
+    const count = colorize(`${n} subagent${n === 1 ? "" : "s"}`, METER_FAINT);
+    const usd =
+      typeof m.subagentUsd === "number" && m.subagentUsd > 0
+        ? ` ${colorize(formatCost(m.subagentUsd), costColor(m.subagentUsd))}`
+        : "";
+    subBit = `${count}${usd}`;
+  }
+
+  const bits = [modelBit, effortBit, ctxBit, costBit, subBit].filter((b): b is string => !!b);
+  return bits.join(SEP);
 }
 
 /** Wrap text in 24-bit ANSI foreground color (`#RRGGBB`), reset at the end. Skips coloring when

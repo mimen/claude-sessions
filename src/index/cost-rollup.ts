@@ -76,6 +76,16 @@ export function buildCostRollup(rows: readonly SessionRow[], causalEdges: readon
     aliasToId.set(row.resumeId, row.sessionId);
   }
 
+  // Catalogue-only automation anchors have no transcript row of their own. Preserve them as
+  // zero-self-cost graph roots so their delegated children still roll up in tree/cost views.
+  const syntheticRoots = new Set<string>();
+  for (const edge of causalEdges) {
+    if (!aliasToId.has(edge.parentId)) {
+      aliasToId.set(edge.parentId, edge.parentId);
+      syntheticRoots.add(edge.parentId);
+    }
+  }
+
   const children = new Map<string, Set<string>>();
   const addEdge = (parentAlias: string, childAlias: string): void => {
     const parent = aliasToId.get(parentAlias);
@@ -95,7 +105,8 @@ export function buildCostRollup(rows: readonly SessionRow[], causalEdges: readon
   for (const row of rows) self.set(row.sessionId, breakdownFor(row));
 
   const bySessionId = new Map<string, SessionCostRollup>();
-  for (const row of rows) {
+  const roots = [...rows.map((row) => row.sessionId), ...syntheticRoots];
+  for (const rootId of roots) {
     const seen = new Set<string>();
     const visit = (id: string): CostBreakdown => {
       if (seen.has(id)) return EMPTY_BREAKDOWN;
@@ -104,14 +115,17 @@ export function buildCostRollup(rows: readonly SessionRow[], causalEdges: readon
       for (const child of children.get(id) ?? []) total = addBreakdowns(total, visit(child));
       return total;
     };
-    const total = visit(row.sessionId);
-    const own = self.get(row.sessionId) ?? EMPTY_BREAKDOWN;
-    bySessionId.set(row.sessionId, {
-      selfCost: row.costUSD,
+    const total = visit(rootId);
+    const physicalSessionIds = new Set([...seen].filter((id) => rowById.has(id)));
+    const indexedRoot = rowById.get(rootId);
+    bySessionId.set(rootId, {
+      selfCost: indexedRoot?.costUSD ?? 0,
       totalCost: total.claude + total.gpt + total.other,
       byProvider: total,
-      descendantCount: Math.max(0, seen.size - 1),
-      physicalSessionIds: new Set(seen),
+      descendantCount: indexedRoot
+        ? Math.max(0, physicalSessionIds.size - 1)
+        : physicalSessionIds.size,
+      physicalSessionIds,
     });
   }
 

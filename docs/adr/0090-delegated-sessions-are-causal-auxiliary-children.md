@@ -50,14 +50,18 @@ It does not represent cluster membership, durable identity, grouping, portfolio 
 
 `ccs delegate` is the stable launch interface for Claude and GPT seats. It:
 
-1. loads one canonical seat definition;
-2. validates the seat, provider/model, parent, cwd, and prompt;
+1. loads one canonical seat definition and selects its primary or explicitly requested fallback route;
+2. validates the selected route, parent, cwd, and prompt;
 3. reserves an auxiliary child and its causal edge before launch;
 4. compiles the seat to process-local Claude Code `--agents` JSON;
 5. invokes `claude-native` or `claude-gpt` with `--agent`, `--agents`, `--session-id`, and `-p` using argument arrays;
 6. runs synchronously and preserves stdout, stderr, and exit status.
 
 The child receives the full Claude Code environment. `--bare` and `CLAUDE_CODE_SUBAGENT_MODEL` are not used. A launch failure leaves a zero-cost auxiliary record with failure metadata rather than deleting the evidence.
+
+Every canonical seat declares a fixed primary route containing its provider, launcher, full requested model ID, and effort. It may declare a fixed fallback route with the same fields. `ccs delegate --fallback` selects that fallback before reservation and fails before reservation if the seat does not declare one. `inherit_parent` routing is invalid: a seat never inherits its provider or model from its parent.
+
+Fallback is intentionally manual. CCS never retries a failed/nonzero child automatically, because an attempted child may already have edited files, committed, sent a message, or called an API. A manual fallback invocation reserves a new sibling auxiliary child under the requested parent; it does not reuse or mutate an earlier child record.
 
 Canonical delegated seat definitions live outside auto-discovered `.claude/agents` paths. Native same-provider sidechains may later optimize the implementation behind `ccs delegate`, but they do not change its contract.
 

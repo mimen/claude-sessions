@@ -10,6 +10,12 @@ export interface ModelBadge {
 // Order matters: first prefix match wins. Muted family hues — legible but not shouting, since
 // a model tag sits on most rows and color-only would be noise (it's always paired with the label).
 const FAMILIES: ReadonlyArray<readonly [prefix: string, label: string, color: string]> = [
+  // Gateway-backed GPT models (claude-gpt launcher) — distinct teal hues so a cross-backend
+  // session is spottable at a glance in the model column.
+  ["gpt-5.6-sol", "sol", "#4fb3a9"],
+  ["gpt-5.6-terra", "terra", "#3d8f87"],
+  ["gpt-5.6-luna", "luna", "#6fcfc4"],
+  ["gpt-", "gpt", "#4fb3a9"],
   ["claude-fable", "fable", "#a689c9"],
   ["claude-mythos", "mythos", "#a689c9"],
   ["claude-opus", "opus", "#c99a6b"],
@@ -22,7 +28,7 @@ const FAMILIES: ReadonlyArray<readonly [prefix: string, label: string, color: st
   ["claude-3-haiku", "haiku", "#7ba85f"],
 ];
 
-function familyOf(modelId: string): ModelBadge {
+export function familyOf(modelId: string): ModelBadge {
   for (const [prefix, label, color] of FAMILIES) {
     if (modelId.startsWith(prefix)) return { key: label, label, color };
   }
@@ -43,6 +49,20 @@ export function dominantModel(costByModel: Readonly<Record<string, number>>): Mo
     }
   }
   return best ? familyOf(best) : null;
+}
+
+/**
+ * List-column model badge: dominant-by-spend when any cost was recorded, else the first model
+ * from the persisted model set — so an all-zero-cost session (pure-gpt: unpriced) still badges.
+ */
+export function modelBadge(
+  costByModel: Readonly<Record<string, number>>,
+  models: readonly string[],
+): ModelBadge | null {
+  const dominant = dominantModel(costByModel);
+  if (dominant) return dominant;
+  const first = models[0];
+  return first ? familyOf(first) : null;
 }
 
 /** All model families used by a Session, richest first (for the preview breakdown). */
@@ -74,6 +94,26 @@ export function formatCompactUSD(usd: number): string {
   if (usd < 1000) return `$${Math.round(usd)}`;
   if (usd < 1_000_000) return `$${(usd / 1000).toFixed(usd < 10_000 ? 1 : 0)}k`;
   return `$${(usd / 1_000_000).toFixed(1)}m`;
+}
+
+/**
+ * Compact Event Watch identity annotation for a session row. Core identities already read as
+ * their role in the hierarchy, while fleet worker refs become a scannable event label. Other
+ * clusters retain their full key because CCS has no cluster-specific display contract for them.
+ */
+export function identityRowLabel(identityKey: string | null | undefined): string | null {
+  if (!identityKey) return null;
+  if (identityKey.startsWith("event-watch:") && identityKey.split(":").length === 2) return null;
+
+  const prefix = "event-watch:event-worker:";
+  if (!identityKey.startsWith(prefix)) return identityKey;
+
+  return identityKey
+    .slice(prefix.length)
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((segment) => `${segment[0]?.toUpperCase() ?? ""}${segment.slice(1)}`)
+    .join(" ");
 }
 
 /** Human cadence from seconds: "45s" · "12m" · "1.5h" · "3.2h" · "2.1d". Blank for 0. */

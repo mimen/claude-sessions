@@ -5,6 +5,10 @@ import { type Result } from "../result.ts";
 import { encodePath, locateLaunchDir, storageFolderOf, type Located } from "../resume/locate.ts";
 
 const DEFAULT_T3_TIMEOUT_MS = 35_000;
+
+/** Activated only after T3 ships the matching `t3 session open` CLI contract. */
+export const T3_OPEN_ENABLED = false;
+
 const T3_RESULT_ERROR_CODES = [
   "t3_unavailable",
   "invalid_resume_id",

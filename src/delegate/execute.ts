@@ -1,4 +1,6 @@
-import { compileAgent, inferParentProvider, loadSeat, resolveSeatRoute, type ProviderFamily } from "./seat.ts";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
+import { compileAgent, loadSeat, resolveSeatRoute, type ProviderFamily, type SeatEffort, type SeatRouteKind } from "./seat.ts";
 import { err, ok, type Result } from "../result.ts";
 
 export interface DelegateRequest {
@@ -7,8 +9,7 @@ export interface DelegateRequest {
   readonly cwd: string;
   readonly prompt: string;
   readonly seatsRoot: string;
-  /** undefined = infer from caller environment; null = explicit parent provider unavailable. */
-  readonly parentProvider?: ProviderFamily | null;
+  readonly route?: SeatRouteKind;
 }
 
 export interface DelegateReservation {
@@ -16,10 +17,12 @@ export interface DelegateReservation {
   readonly seat: string;
   readonly parentSessionId: string;
   readonly cwd: string;
+  readonly route: SeatRouteKind;
   readonly provider: ProviderFamily;
   readonly launcher: "claude-native" | "claude-gpt";
   readonly requestedModel: string;
   readonly compiledModel: string;
+  readonly effort: SeatEffort;
 }
 
 export interface DelegateLaunchResult {
@@ -48,9 +51,24 @@ export interface DelegateExecution {
 
 function cleanEnvironment(
   environment: Readonly<Record<string, string | undefined>>,
+  parentSessionId: string,
 ): Readonly<Record<string, string | undefined>> {
-  const cleaned: Record<string, string | undefined> = { ...environment };
+  const cleaned: Record<string, string | undefined> = {
+    ...environment,
+    // The stable shim consumes this before the final harness starts. It lets automation
+    // delegates verify their catalogue reservation even though no Claude parent process exists.
+    CCS_LAUNCH_PARENT_SESSION_ID: parentSessionId,
+  };
+  const shimDirectory = join(cleaned.HOME ?? homedir(), ".ccs", "bin");
+  const pathEntries = (cleaned.PATH ?? "").split(delimiter).filter(
+    (entry) => entry.length > 0 && entry !== shimDirectory,
+  );
+  cleaned.PATH = [shimDirectory, ...pathEntries].join(delimiter);
   delete cleaned.CLAUDE_CODE_SUBAGENT_MODEL;
+  // Public creator declarations describe this one delegated birth. The command layer converts
+  // them to CCS_LAUNCH_CREATOR_* values for shim verification, then the shim removes those too.
+  delete cleaned.CCS_CREATOR_KIND;
+  delete cleaned.CCS_CREATOR_REF;
   return cleaned;
 }
 
@@ -75,14 +93,8 @@ export function executeDelegate(
 
   const loaded = loadSeat(request.seatsRoot, request.seat);
   if (!loaded.ok) return loaded;
-
-  const parentProvider = request.parentProvider === undefined
-    ? inferParentProvider(dependencies.environment)
-    : request.parentProvider;
-  if (loaded.value.routing.provider === "inherit_parent" && parentProvider === null) {
-    return err(new Error(`Cannot resolve provider for explicit parent ${request.parentSessionId}; use --child-of . or a fixed-provider seat`));
-  }
-  const routed = resolveSeatRoute(loaded.value, parentProvider ?? "claude");
+  const route = request.route ?? "primary";
+  const routed = resolveSeatRoute(loaded.value, route);
   if (!routed.ok) return routed;
 
   const sessionId = dependencies.mintSessionId();
@@ -91,10 +103,12 @@ export function executeDelegate(
     seat: loaded.value.name,
     parentSessionId: request.parentSessionId,
     cwd: request.cwd,
+    route: routed.value.route,
     provider: routed.value.provider,
     launcher: routed.value.launcher,
     requestedModel: routed.value.requestedModel,
     compiledModel: routed.value.compiledModel,
+    effort: routed.value.effort,
   };
   const reserved = dependencies.reserve(reservation);
   if (!reserved.ok) return reserved;
@@ -114,7 +128,7 @@ export function executeDelegate(
   const launched = dependencies.launch({
     argv,
     cwd: request.cwd,
-    environment: cleanEnvironment(dependencies.environment),
+    environment: cleanEnvironment(dependencies.environment, request.parentSessionId),
   });
   if (!launched.ok) {
     dependencies.recordLaunchFailure(sessionId, launched.error.message);

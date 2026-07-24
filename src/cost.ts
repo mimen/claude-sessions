@@ -17,6 +17,8 @@ export interface UsageTotals {
   readonly webSearches: number;
   /** USD per model id — unknown models appear with 0 so a pricing gap is visible, not silent. */
   readonly costByModel: Readonly<Record<string, number>>;
+  /** Sorted, deduped model ids seen in assistant turns. */
+  readonly models: readonly string[];
 }
 
 /** The shape of a transcript line the accumulator cares about (assistant lines). */
@@ -94,7 +96,7 @@ function priceFor(
 }
 
 export interface UsageAccumulator {
-  /** Feed one parsed assistant line. Lines without `message.usage` are ignored. */
+  /** Feed one parsed assistant line. Lines without usage still contribute their model id. */
   add(line: CostLine): void;
   totals(): UsageTotals;
 }
@@ -114,9 +116,13 @@ export function createUsageAccumulator(): UsageAccumulator {
   let cacheWrite1h = 0;
   let webSearches = 0;
   const costByModel: Record<string, number> = {};
+  const models = new Set<string>();
 
   return {
     add(line: CostLine): void {
+      const model = line.message?.model ?? "";
+      if (model && model !== "<synthetic>") models.add(model);
+
       const usage = line.message?.usage;
       if (!usage) return;
 
@@ -144,7 +150,6 @@ export function createUsageAccumulator(): UsageAccumulator {
       cacheWrite1h += write1h;
       webSearches += searches;
 
-      const model = line.message?.model ?? "";
       const price = model ? priceFor(model, line.timestamp) : null;
       let cost = searches * WEB_SEARCH_USD;
       if (price) {
@@ -172,6 +177,7 @@ export function createUsageAccumulator(): UsageAccumulator {
         cacheWrite1h,
         webSearches,
         costByModel,
+        models: [...models].sort(),
       };
     },
   };

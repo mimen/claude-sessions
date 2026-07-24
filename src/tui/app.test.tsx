@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { Database } from "bun:sqlite";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openIndex } from "../index/schema.ts";
@@ -11,7 +11,6 @@ import { App } from "./App.tsx";
 import { openCatalogue, setSessionClass } from "../catalogue/db.ts";
 import type { Titler } from "../titler/codex.ts";
 import type { EngineState } from "./Root.tsx";
-import { encodePath } from "../resume/locate.ts";
 
 function seed(db: Database): void {
   const ins = db.query(
@@ -88,13 +87,6 @@ function useFlatView(): () => void {
   };
 }
 
-function updateRootCwd(index: Database, cwd: string): void {
-  index.query("UPDATE sessions SET path = $path, cwd = $cwd, project_root = $cwd WHERE session_id = 'real1'").run({
-    $path: `/store/${encodePath(cwd)}/real1.jsonl`,
-    $cwd: cwd,
-  });
-}
-
 // The real binary is also verified end-to-end via a PTY smoke (script(1) → `q`): full
 // rendered frame, exits 0. This mount test covers the default filtering + render wiring.
 test("App mounts, lists real sessions, hides subagents by default", async () => {
@@ -115,9 +107,10 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
 
   const frame = lastFrame() ?? "";
   expect(frame).toContain("ccs");
-  // The real (non-subagent) session is listed — the narrow test terminal leaves one title cell
-  // after the cluster columns plus the independent CCS/T3 status glyphs.
-  expect(frame).toContain("R…");
+  // The real (non-subagent) root contributes the only visible row. The current cluster columns
+  // consume the title in Ink's narrow test viewport, so assert the row count and child rollup.
+  expect(frame).toContain("1 sessions");
+  expect(frame).toContain("↳1");
   expect(frame).not.toContain("●"); // native-only row leaves the T3 attachment column blank
   expect(frame).not.toContain("SUBAGENTONLY"); // subagent hidden by default
   expect(frame).toContain("sessions"); // dashboard header stat
@@ -260,47 +253,7 @@ test("auxiliary sessions stay hidden until the session-local u toggle reveals th
   index.close();
 });
 
-test("T opens a selected root session in T3 without exiting the TUI", async () => {
-  const restorePrefs = useFlatView();
-  const index = openIndex(":memory:");
-  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "ccs-t3-cwd-")));
-  seed(index);
-  updateRootCwd(index, cwd);
-  const resumeRequest = { current: null };
-  let received: { resumeId: string; cwd: string } | null = null;
-
-  const { lastFrame, stdin, unmount } = render(
-    createElement(App, {
-      db: index,
-      config: makeConfig(),
-      engineState: noopEngineState,
-      resumeRequest,
-      cmuxProbes: noopCmuxProbes,
-      t3StatusClient: noopT3StatusClient,
-      t3Opener: {
-        async open(request) {
-          received = request;
-          return { kind: "opened", threadId: "thread-1", projectId: "project-1", created: true };
-        },
-      },
-    }),
-  );
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  stdin.write("T");
-  await new Promise((resolve) => setTimeout(resolve, 40));
-
-  if (!received) throw new Error("T3 opener was not invoked");
-  expect(received as { resumeId: string; cwd: string }).toEqual({ resumeId: "real1", cwd });
-  expect(lastFrame() ?? "").toContain("created T3 thread");
-  expect(resumeRequest.current).toBeNull();
-
-  unmount();
-  index.close();
-  rmSync(cwd, { recursive: true, force: true });
-  restorePrefs();
-});
-
-test("T reports a strict cwd failure without invoking native resume", async () => {
+test("T3 open affordance stays dark until the matching T3 CLI ships", async () => {
   const restorePrefs = useFlatView();
   const index = openIndex(":memory:");
   seed(index);
@@ -313,77 +266,6 @@ test("T reports a strict cwd failure without invoking native resume", async () =
       config: makeConfig(),
       engineState: noopEngineState,
       resumeRequest,
-      cmuxProbes: noopCmuxProbes,
-      t3StatusClient: noopT3StatusClient,
-      t3Opener: {
-        async open() {
-          calls++;
-          return { kind: "failure", reason: "result-failure", resultCode: "source_not_found", message: "missing", stderr: undefined } as const;
-        },
-      },
-    }),
-  );
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  stdin.write("T");
-  await new Promise((resolve) => setTimeout(resolve, 40));
-
-  expect(calls).toBe(0);
-  expect(lastFrame() ?? "").toContain("can't open in T3: no verified session cwd exists on disk");
-  expect(resumeRequest.current).toBeNull();
-
-  unmount();
-  index.close();
-  restorePrefs();
-});
-
-test("T reports a typed T3 failure while keeping CCS open", async () => {
-  const restorePrefs = useFlatView();
-  const index = openIndex(":memory:");
-  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "ccs-t3-cwd-")));
-  seed(index);
-  updateRootCwd(index, cwd);
-  const resumeRequest = { current: null };
-
-  const { lastFrame, stdin, unmount } = render(
-    createElement(App, {
-      db: index,
-      config: makeConfig(),
-      engineState: noopEngineState,
-      resumeRequest,
-      cmuxProbes: noopCmuxProbes,
-      t3StatusClient: noopT3StatusClient,
-      t3Opener: {
-        async open() {
-          return { kind: "failure", reason: "result-failure", resultCode: "source_not_found", message: "source is gone", stderr: undefined } as const;
-        },
-      },
-    }),
-  );
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  stdin.write("T");
-  await new Promise((resolve) => setTimeout(resolve, 40));
-
-  expect(lastFrame() ?? "").toContain("T3 source_not_found: source is gone");
-  expect(resumeRequest.current).toBeNull();
-
-  unmount();
-  index.close();
-  rmSync(cwd, { recursive: true, force: true });
-  restorePrefs();
-});
-
-test("T rejects a selected subagent without invoking T3", async () => {
-  const restorePrefs = useFlatView();
-  const index = openIndex(":memory:");
-  seed(index);
-  let calls = 0;
-
-  const { lastFrame, stdin, unmount } = render(
-    createElement(App, {
-      db: index,
-      config: makeConfig(),
-      engineState: noopEngineState,
-      resumeRequest: { current: null },
       cmuxProbes: noopCmuxProbes,
       t3StatusClient: noopT3StatusClient,
       t3Opener: {
@@ -395,63 +277,19 @@ test("T rejects a selected subagent without invoking T3", async () => {
     }),
   );
   await new Promise((resolve) => setTimeout(resolve, 80));
-  stdin.write("a");
+
+  expect(lastFrame() ?? "").not.toContain("open in T3");
+  stdin.write("?");
   await new Promise((resolve) => setTimeout(resolve, 40));
-  stdin.write("j");
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(lastFrame() ?? "").not.toContain("open this root Claude session in T3");
+  stdin.write("?");
   stdin.write("T");
   await new Promise((resolve) => setTimeout(resolve, 40));
 
   expect(calls).toBe(0);
-  expect(lastFrame() ?? "").toContain("subagent runs can't open in T3");
+  expect(resumeRequest.current).toBeNull();
 
   unmount();
   index.close();
-  restorePrefs();
-});
-
-test("T ignores a repeated press while a prior T3 open is pending", async () => {
-  const restorePrefs = useFlatView();
-  const index = openIndex(":memory:");
-  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "ccs-t3-cwd-")));
-  seed(index);
-  updateRootCwd(index, cwd);
-  let calls = 0;
-  let resolveOpen: (value: { kind: "opened"; threadId: string; projectId: string; created: boolean }) => void = () => {};
-  const pending = new Promise<{ kind: "opened"; threadId: string; projectId: string; created: boolean }>((resolve) => {
-    resolveOpen = resolve;
-  });
-
-  const { lastFrame, stdin, unmount } = render(
-    createElement(App, {
-      db: index,
-      config: makeConfig(),
-      engineState: noopEngineState,
-      resumeRequest: { current: null },
-      cmuxProbes: noopCmuxProbes,
-      t3StatusClient: noopT3StatusClient,
-      t3Opener: {
-        async open() {
-          calls++;
-          return pending;
-        },
-      },
-    }),
-  );
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  stdin.write("T");
-  stdin.write("T");
-  await new Promise((resolve) => setTimeout(resolve, 40));
-
-  expect(calls).toBe(1);
-  expect(lastFrame() ?? "").toContain("T3 open is already in progress");
-
-  resolveOpen({ kind: "opened", threadId: "thread", projectId: "project", created: true });
-  await new Promise((resolve) => setTimeout(resolve, 40));
-  expect(lastFrame() ?? "").toContain("created T3 thread");
-
-  unmount();
-  index.close();
-  rmSync(cwd, { recursive: true, force: true });
   restorePrefs();
 });

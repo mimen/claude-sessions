@@ -21,7 +21,7 @@ function row(id: string, title: string, project = "proj"): SessionRow {
     isSubagent: false,
     parentSessionId: null,
     resumeId: id,
-    costUSD: 0, tokInput: 0, tokOutput: 0, tokCacheRead: 0, tokCacheWrite: 0, costByModel: {}, userTurns: 0, tickIntervalSec: 0,
+    costUSD: 0, tokInput: 0, tokOutput: 0, tokCacheRead: 0, tokCacheWrite: 0, costByModel: {}, models: [], userTurns: 0, tickIntervalSec: 0,
   };
 }
 

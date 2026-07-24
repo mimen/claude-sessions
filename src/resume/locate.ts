@@ -101,7 +101,8 @@ export function decodeStorageFolder(folder: string): Result<Located | null, Erro
     try {
       names = readdirSync(base, { withFileTypes: true })
         .filter((e) => e.isDirectory()) // symlinks report false here — see header
-        .map((e) => String(e.name));
+        .map((e) => String(e.name))
+        .sort();
     } catch (error) {
       // At the walk root, a readdir failure means we can't even start — fail closed.
       if (depth === 0) {
@@ -123,17 +124,23 @@ export function decodeStorageFolder(folder: string): Result<Located | null, Erro
     }
     for (const name of names) {
       if (matches.length >= MAX_MATCHES) return;
+      const enc = encodePath(name);
+      const exact = enc === remaining;
+      const prefix = remaining.startsWith(enc + "-");
+      // readdir already paid the cost of inspecting this directory. Spend the bounded node
+      // budget only on encoding-compatible branches; irrelevant siblings cannot hide a valid
+      // target merely because a shared temp/cache directory contains thousands of entries.
+      if (!exact && !prefix) continue;
       if (budget.nodes <= 0) {
         budget.exhausted = true;
         return;
       }
       budget.nodes--;
-      const enc = encodePath(name);
       const full = join(base, name);
-      if (enc === remaining) {
+      if (exact) {
         // A failed backstop check is not the end — keep scanning siblings/prefix splits.
         if (encodesTo(full, folder)) matches.push(full);
-      } else if (remaining.startsWith(enc + "-")) {
+      } else {
         walk(full, remaining.slice(enc.length + 1), depth + 1);
       }
     }

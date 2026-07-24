@@ -10,6 +10,7 @@ export function handoffInline(cmd: ResumeCommand): number {
   try {
     result = Bun.spawnSync(cmd.argv, {
       cwd: cmd.cwd,
+      env: { ...process.env, ...cmd.env },
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",
@@ -21,7 +22,7 @@ export function handoffInline(cmd: ResumeCommand): number {
   // spawnSync doesn't throw for a missing binary — it returns success:false. Catch that so we
   // don't silently report success on a no-op resume.
   if (!result.success && result.exitCode == null) {
-    console.error(`ccs: could not run "${cmd.argv.join(" ")}" — is \`claude\` on your PATH?`);
+    console.error(`ccs: could not run "${cmd.argv.join(" ")}" — is \`${cmd.argv[0]}\` on your PATH?`);
     return 127;
   }
   return result.exitCode ?? 0;

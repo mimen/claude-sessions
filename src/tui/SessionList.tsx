@@ -3,7 +3,8 @@ import { Box, Text } from "ink";
 import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
 import { theme, isRecentAge, costColor, roleColor } from "./theme.ts";
-import { dominantModel, formatCostList, formatCompactUSD } from "./format.ts";
+import { modelBadge, formatCostList, formatCompactUSD, identityRowLabel } from "./format.ts";
+import { stripSpinnerPrefix } from "./titleDisplay.ts";
 import type { T3AttachmentIndicator } from "../t3/status.ts";
 import {
   CARET_W,
@@ -48,7 +49,7 @@ interface SessionBadge {
   glyph: string;
   color: string;
   nudge: boolean;
-  /** Event slug this session is assigned to (catalogue.event), if any. */
+  /** Durable identity key attached to this session, if any. */
   event?: string | null;
   /** PR number (catalogue.pr_number), shown as a #-badge colored by pr state. */
   pr?: number | null;
@@ -173,7 +174,12 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
               : theme.title;
 
         const cost = totalCost?.get(r.sessionId) ?? r.costUSD;
-        const model = dominantModel(r.costByModel);
+        const model = modelBadge(r.costByModel, r.models);
+        const identityLabel = identityRowLabel(badge?.event);
+        const isEventWatchWorker = badge?.event?.startsWith("event-watch:event-worker:") ?? false;
+        // Strip any captured spinner frame ("✳ …", "⠂ …") baked into a stored title.
+        const displayTitle = stripSpinnerPrefix(isEventWatchWorker && identityLabel ? identityLabel : r.title);
+        const isEventWatchIdentity = badge?.event?.startsWith("event-watch:") ?? false;
 
         return (
           <Box key={index} backgroundColor={bg}>
@@ -197,7 +203,7 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                 {hasSlot ? <Text color={sel ? theme.selFg : theme.faint}>{triangle}</Text> : null}
                 {/* The PR# is shown by the badge; strip any leading #<num> from the
                     title so it never doubles (e.g. "#12137 #12137 …"). */}
-                {badge?.pr ? r.title.replace(/^(#\d+\s+)+/, "") : r.title}
+                {badge?.pr ? displayTitle.replace(/^(#\d+\s+)+/, "") : displayTitle}
               </Text>
             </Box>
             {badge?.classification ? (
@@ -223,9 +229,9 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                   #{badge.pr}
                 </Text>
               </Box>
-            ) : badge?.event ? (
+            ) : !isEventWatchWorker && identityLabel ? (
               <Box flexShrink={0} marginRight={1}>
-                <Text color={sel ? theme.selFg : theme.project}>⊞{badge.event}</Text>
+                <Text color={sel ? theme.selFg : theme.project}>{identityLabel}</Text>
               </Box>
             ) : null}
             {showRoleStatus ? (
@@ -245,7 +251,7 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                     {/* Only non-worker roles carry signal — "worker" is the default 20x over, so
                         blank it. eval/designer/control/concierge stand out, each in its own hue
                         (matching the cmux tab palette) so the role reads at a glance. */}
-                    {roleLabel(badge?.role) === "worker" ? "" : roleLabel(badge?.role)}
+                    {isEventWatchIdentity || roleLabel(badge?.role) === "worker" ? "" : roleLabel(badge?.role)}
                   </Text>
                 </Box>
               </>
@@ -296,7 +302,7 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
                 </Text>
               ) : (
                 <Text color={sel ? theme.selFg : theme.faint}>
-                  {item.childCount > 0 ? `⤷${item.childCount}` : ""}
+                  {item.childCount > 0 ? `↳${item.childCount}` : ""}
                 </Text>
               )}
             </Box>

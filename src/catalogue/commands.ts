@@ -7,6 +7,11 @@ import {
   setArchived,
   setKey,
   setParent,
+  setResumeId,
+  setSessionClass,
+  setCreatorKind,
+  setLaunchChannel,
+  setLauncherIdentity,
   setRole,
   setGusWork,
   setSessionEpic,
@@ -31,6 +36,7 @@ import { pushCmuxRename } from "../cmux/liveness.ts";
 import { resolveRole } from "../roles/role-files.ts";
 import { validateStageTransition } from "./stage-schema.ts";
 import { recomposeForSession } from "../board/recompose.ts";
+import { err, ok, type Result } from "../result.ts";
 
 /**
  * CLI surface for the catalogue. These are the primitives the in-session slash commands
@@ -42,6 +48,81 @@ const now = (): string => new Date().toISOString();
 
 /** A Claude Code session id is a UUID; used to validate a `parent` edge before storing it. */
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export type ShimBirthRegistration =
+  | { readonly status: "created" }
+  | { readonly status: "existing" }
+  | { readonly status: "missing" }
+  | { readonly status: "mismatch"; readonly reason: string };
+
+/** Register or verify a persistent birth passing through the stable Claude shim. */
+export function registerShimBirth(
+  sessionId: string,
+  cwd: string | undefined,
+  requireExisting: boolean,
+  expectedParentSessionId: string | undefined,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): Result<ShimBirthRegistration> {
+  ensureDataDir();
+  const db = openCatalogue(CATALOGUE_PATH());
+  try {
+    const current = getRow(db, sessionId);
+    if (requireExisting && !current) return ok({ status: "missing" });
+    if (current && requireExisting && expectedParentSessionId) {
+      const expectedCreatorKind = (
+        environment.CCS_LAUNCH_CREATOR_KIND
+        ?? environment.CCS_CREATOR_KIND
+        ?? (environment.CLAUDE_CODE_SESSION_ID ? "agent" : undefined)
+      )?.trim();
+      const expectedCreatorRef = (
+        environment.CCS_LAUNCH_CREATOR_REF
+        ?? environment.CCS_CREATOR_REF
+        ?? environment.CLAUDE_CODE_SESSION_ID
+      )?.trim();
+      const creatorMatches = expectedCreatorKind === "human"
+        ? current.creatorKind === "human" && current.creatorRef === null
+        : (expectedCreatorKind === "agent" || expectedCreatorKind === "automation")
+          && expectedCreatorRef !== undefined
+          && expectedCreatorRef !== ""
+          && current.creatorKind === expectedCreatorKind
+          && current.creatorRef === expectedCreatorRef;
+      if (!creatorMatches) {
+        return ok({ status: "mismatch", reason: "creator provenance does not match the managed launcher" });
+      }
+      if (current.launchChannel !== "ccs_delegate" && current.launchChannel !== "ccs_session_new") {
+        return ok({ status: "mismatch", reason: "session was not reserved by a managed nested launcher" });
+      }
+      if (current.launchChannel === "ccs_delegate" && current.parentSessionId !== expectedParentSessionId) {
+        return ok({ status: "mismatch", reason: "delegated session is not a causal child of the launching parent" });
+      }
+      if (current.launchChannel === "ccs_session_new") {
+        if (current.sessionClass === "auxiliary" && current.parentSessionId !== expectedParentSessionId) {
+          return ok({ status: "mismatch", reason: "supporting session is not a causal child of the launching parent" });
+        }
+        if (current.sessionClass !== "auxiliary" &&
+          (current.sessionClass !== "work_body" || current.parentSessionId !== null)) {
+          return ok({ status: "mismatch", reason: "managed nested root has invalid class or causal parentage" });
+        }
+      }
+    }
+    if (current) return ok({ status: "existing" });
+
+    db.transaction(() => {
+      const timestamp = now();
+      setResumeId(db, sessionId, sessionId, timestamp);
+      setSessionClass(db, sessionId, "work_body", timestamp);
+      setCreatorKind(db, sessionId, "human", timestamp);
+      setLaunchChannel(db, sessionId, "claude_shim", timestamp);
+      setLauncherIdentity(db, sessionId, environment.CLAUDE_IDENTITY ?? null, timestamp);
+      if (cwd) setMeta(db, sessionId, "launch_cwd", cwd, timestamp);
+    })();
+    return ok({ status: "created" });
+  } catch (error) {
+    return err(error instanceof Error ? error : new Error(String(error)));
+  } finally {
+    db.close();
+  }
+}
 
 /**
  * ADR-0089 step 10: mirror a session-scoped write onto the session's identity when one is

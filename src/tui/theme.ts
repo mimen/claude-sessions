@@ -4,34 +4,34 @@
  * on a dark terminal). ANSI dark tones are reserved for borders.
  */
 export const theme = {
-  accent: "cyan",
+  accent: "#68FFD6",
   /** Selected-row highlight bar. */
-  selBg: "cyan",
-  selFg: "black",
+  selBg: "#6B50FF",
+  selFg: "#FFFAF1",
   /** Title-source marks. */
-  sourceNative: "green",
-  sourceCodex: "yellow",
-  sourceFallback: "#7f8896",
+  sourceNative: "#12C78F",
+  sourceCodex: "#F5EF34",
+  sourceFallback: "#858392",
   /** Primary list text. */
-  title: "white",
-  project: "cyan",
-  branch: "#86b3ff",
+  title: "#ECEBF0",
+  project: "#68FFD6",
+  branch: "#8B75FF",
   /** Readable muted tone for secondary text (labels, counts, footer). */
   muted: "#9aa3b2",
   /** Even quieter — borders / peek text only. */
   faint: "#6b7280",
   /** Project header accent. */
-  header: "cyanBright",
+  header: "#68FFD6",
   /** Recent vs old activity. */
-  ageRecent: "greenBright",
+  ageRecent: "#12C78F",
   ageOld: "#9aa3b2",
   /** T3 attachment indicator: cobalt only for a healthy running provider; amber otherwise. */
   t3Running: "#0047ab",
   t3Unhealthy: "#d97706",
   /** Header/dashboard chrome. */
-  headerBorder: "#3a4150",
+  headerBorder: "#3A3943",
   headerLabel: "#9aa3b2",
-  headerValue: "white",
+  headerValue: "#ECEBF0",
   /**
    * Cost tiers — deliberately restrained. Most sessions read as calm neutral text; warmth is
    * reserved for genuine outliers so the eye is drawn only to real spend, not to every row.
@@ -40,6 +40,10 @@ export const theme = {
   costLow: "#9aa3b2", // $1–$100: neutral, same weight as other secondary text
   costMid: "#cbb079", // $100–$500: soft gold
   costHigh: "#e0876a", // > $500: soft coral (never pure red)
+  /** Gauge "healthy headroom" green — a fill/utilization meter (context window, rate-limit budget)
+   * while there's plenty left. Reuses the sage hue so gauges sit in the same restrained family as
+   * the cost ramp, and the top of the ramp reuses costMid/costHigh (see fullnessColor). */
+  gaugeOk: "#7ba85f",
 } as const;
 
 /** Per-role accent for the role column — pulled from `role.toml color = "#RRGGBB"` so ccs and the
@@ -82,5 +86,14 @@ export function costColor(usd: number): string {
   if (usd < 1) return theme.costNil;
   if (usd < 100) return theme.costLow;
   if (usd < 500) return theme.costMid;
+  return theme.costHigh;
+}
+
+/** Grade a 0–100 fullness/utilization percent (context window, rate-limit budget) into a theme
+ * color: calm green with headroom, soft gold as it fills, soft coral near the ceiling — the same
+ * restraint as costColor, so a gauge only draws the eye when it's genuinely getting full. */
+export function fullnessColor(pct: number): string {
+  if (pct < 60) return theme.gaugeOk;
+  if (pct < 85) return theme.costMid;
   return theme.costHigh;
 }

@@ -28,6 +28,7 @@ function config(store: string): Config {
     store: { path: store },
     host: { label: "test-host" },
     resume: { target: "auto" },
+    launcher: [],
     inference: {
       engine: "auto",
       codex: { binary: "missing-codex", model: "", reasoningEffort: "low" },

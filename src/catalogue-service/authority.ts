@@ -20,6 +20,7 @@ import {
   CLAUDE_PROVIDER_INSTANCE_ID,
   type CatalogueErrorCode,
   type CatalogueRefreshResult,
+  type CatalogueRefreshStats,
   type CatalogueRootSession,
   type CatalogueSourceStatus,
   type RootSessionPage,
@@ -56,7 +57,7 @@ export interface CatalogueAuthorityError {
 }
 
 interface RefreshSummary {
-  readonly stats: ReindexStats;
+  readonly stats: CatalogueRefreshStats;
   readonly totalBytes: number;
   readonly titles: BackfillStats | null;
 }

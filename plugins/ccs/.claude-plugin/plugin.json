@@ -1,0 +1,19 @@
+{
+  "name": "ccs",
+  "displayName": "ccs session hygiene",
+  "version": "0.2.0",
+  "description": "Slash commands that catalogue the session you're sitting in — archive, complete, title, tag — so `ccs` history stays worth reading.",
+  "author": {
+    "name": "Milad Imen",
+    "url": "https://github.com/mimen"
+  },
+  "homepage": "https://github.com/mimen/claude-sessions",
+  "repository": "https://github.com/mimen/claude-sessions.git",
+  "keywords": [
+    "ccs",
+    "sessions",
+    "lifecycle",
+    "archive",
+    "hygiene"
+  ]
+}

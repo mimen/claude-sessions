@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { T3_OPEN_ENABLED } from "../t3/open.ts";
 import { theme } from "./theme.ts";
 
 export interface KeyGroup {
@@ -76,15 +77,20 @@ const SESSION_GROUPS: KeyGroup[] = [
     name: "Resume",
     keys: [
       ["enter", "resume the session (on a section header: expand/collapse)"],
+      ["r", "resume via… — pick the launcher/backend (claude, claude-gpt, …)"],
       ["f", "fork-resume (new session id, same history)"],
       ["o", "resume via the other target (inline ↔ cmux)"],
-      ["T", "open this root Claude session in T3"],
+      ...(T3_OPEN_ENABLED
+        ? [["T", "open this root Claude session in T3"] as [string, string]]
+        : []),
     ],
   },
   {
     name: "Inspect",
     keys: [
       ["v", "read the full transcript (j/k, PgUp/PgDn, g/G)"],
+      ["J / K", "scroll the preview peek — reads the real transcript inline"],
+      ["d", "preview: full metadata dossier ⇄ compact peek"],
       ["p", "show / hide the preview pane"],
     ],
   },

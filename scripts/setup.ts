@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { $ } from "bun";
+import { installClaudeShim } from "../src/launcher/install.ts";
 
 /** One-shot onboarding: link `ccs` onto PATH and report on optional dependencies. */
 
@@ -18,6 +19,14 @@ try {
   console.log("✓ linked — `ccs` is on your PATH (via bun link)");
 } catch {
   console.log("✗ `bun link` failed. Run it manually in this directory, or add bin/ccs to your PATH.");
+}
+
+const shim = installClaudeShim();
+if (shim.ok) {
+  console.log(`✓ installed managed Claude shim → ${shim.value.shimPath}`);
+  console.log(`✓ installed shell initialization → ${shim.value.shellInitPath}`);
+} else {
+  console.log(`✗ Claude shim install failed: ${shim.error.message}`);
 }
 
 console.log("\nDependency check:");
