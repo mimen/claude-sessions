@@ -35,7 +35,7 @@ function createPreChangeIndex(dbPath: string, userVersion = 7): void {
   db.close();
 }
 
-test("openIndex preserves complete v7 rows while adding duplicate diagnostics", async () => {
+test("openIndex preserves complete v7 rows through the v10 catalogue migration", async () => {
   const root = mkdtempSync(join(tmpdir(), "ccs-index-migration-"));
   const dbPath = join(root, "index.db");
   const transcript = join(root, "legacy.jsonl");
@@ -46,7 +46,14 @@ test("openIndex preserves complete v7 rows while adding duplicate diagnostics", 
   try {
     const columns = db.query("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
     expect(columns.some((column) => column.name === "shadow_paths")).toBe(true);
+    expect(columns.some((column) => column.name === "models")).toBe(true);
     expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: SCHEMA_VERSION });
+    expect(
+      db.query("SELECT generation FROM catalogue_source_status WHERE singleton = 1").get(),
+    ).toEqual({ generation: 0 });
+    expect(db.query("SELECT COUNT(*) AS count FROM catalogue_hidden_sessions").get()).toEqual({
+      count: 0,
+    });
     expect(sessionById(db, "legacy")?.shadowPaths).toEqual([]);
     expect(db.query("SELECT resume_id, codex_title FROM sessions WHERE session_id = 'legacy'").get()).toEqual({
       resume_id: "resume-legacy",
@@ -74,7 +81,7 @@ test("openIndex preserves complete v7 rows while adding duplicate diagnostics", 
 });
 
 
-test("openIndex rebuilds incompatible pre-v6 schemas instead of stamping them as v8", () => {
+test("openIndex rebuilds incompatible pre-v6 schemas instead of stamping them as v10", () => {
   const root = mkdtempSync(join(tmpdir(), "ccs-index-pre-v6-"));
   const dbPath = join(root, "index.db");
   const legacy = new Database(dbPath, { create: true });

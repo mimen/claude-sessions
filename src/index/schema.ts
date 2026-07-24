@@ -2,8 +2,8 @@ import { Database } from "bun:sqlite";
 
 /** Bump when the schema changes. Index rows are rebuildable, but preserve them across additive upgrades. */
 // v7 recomputed cached physical cost rows after GPT gateway model pricing was introduced; v8 adds
-// shadow paths; v9 persists transcript model ids so cross-backend resume routes are safe.
-export const SCHEMA_VERSION = 9;
+// shadow paths; v9 persists transcript model ids; v10 adds catalogue authority freshness state.
+export const SCHEMA_VERSION = 10;
 
 /**
  * Open (creating if needed) the Index and ensure its schema is current. Additive migrations
@@ -42,6 +42,8 @@ export function openIndex(dbPath: string): Database {
       if (!hasColumn(db, "sessions", "models")) {
         db.exec("ALTER TABLE sessions ADD COLUMN models TEXT NOT NULL DEFAULT '[]';");
       }
+      // v10: catalogue service generation/freshness and hidden-session state.
+      createSourceStatusSchema(db);
     } else {
       // v6 cost accounting changed in v7, so its cache is stale even when its columns happen
       // to match. Pre-v6 shapes are also incomplete. Both are rebuildable from the Store.
@@ -83,6 +85,8 @@ function isV6OrV7Compatible(db: Database): boolean {
 function dropAll(db: Database): void {
   db.exec("DROP TABLE IF EXISTS sessions_fts;");
   db.exec("DROP TABLE IF EXISTS sessions;");
+  db.exec("DROP TABLE IF EXISTS catalogue_hidden_sessions;");
+  db.exec("DROP TABLE IF EXISTS catalogue_source_status;");
 }
 
 function createSchema(db: Database): void {
@@ -133,5 +137,27 @@ function createSchema(db: Database): void {
       title,
       skeleton
     );
+  `);
+  createSourceStatusSchema(db);
+}
+
+function createSourceStatusSchema(db: Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS catalogue_hidden_sessions (
+      session_id TEXT PRIMARY KEY
+    );
+    CREATE TABLE IF NOT EXISTS catalogue_source_status (
+      singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
+      generation      INTEGER NOT NULL DEFAULT 0,
+      indexed_at      TEXT,
+      refreshed_at    TEXT,
+      last_error_at   TEXT,
+      last_error      TEXT,
+      scanned         INTEGER NOT NULL DEFAULT 0,
+      parsed          INTEGER NOT NULL DEFAULT 0,
+      skipped         INTEGER NOT NULL DEFAULT 0,
+      removed         INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO catalogue_source_status (singleton) VALUES (1);
   `);
 }

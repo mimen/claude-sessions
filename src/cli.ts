@@ -1,11 +1,11 @@
 import pkg from "../package.json" with { type: "json" };
 import { loadConfig, type Config } from "./config.ts";
-import { scanStore, formatBytes, formatAge } from "./store.ts";
+import { formatBytes, formatAge } from "./store.ts";
 import { existsSync } from "node:fs";
 import { ensureDataDir, DB_PATH, CATALOGUE_PATH } from "./paths.ts";
 import { openIndex } from "./index/schema.ts";
 import type { Database } from "bun:sqlite";
-import { reindexStore, listByRecency, titleOf, sessionById } from "./index/index.ts";
+import { listByRecency, sessionById, titleOf } from "./index/index.ts";
 import { buildCostRollup } from "./index/cost-rollup.ts";
 import { formatCost } from "./cost.ts";
 import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster } from "./catalogue/db.ts";
@@ -20,9 +20,8 @@ import { doctorCommand } from "./doctor/command.ts";
 import { launcherCommand } from "./launcher/command.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { boardCommand } from "./catalogue/board-command.ts";
-import { backfillTitles } from "./titler/queue.ts";
-import { createTitler } from "./titler/codex.ts";
-import { buildEngine, resolveEngine } from "./inference/engine.ts";
+import { catalogueServiceCommand } from "./catalogue-service/command.ts";
+import { refreshCatalogueAuthority } from "./catalogue-service/client.ts";
 import { handoffInline } from "./resume/inline.ts";
 import type { ResumeCommand } from "./resume/command.ts";
 import { resumeSessionEntry } from "./resume/resume-session.ts";
@@ -57,7 +56,8 @@ use \`ccs identity …\`; for per-run session state (title, parent, lifecycle) u
 Usage:
   ccs                 Launch the session browser (TUI)
   ccs start [--dry-run|--explain] [description...]  Route work to an active session or managed new session
-  ccs reindex [--titles]   Refresh the session index (--titles: also regenerate titles headless)
+  ccs reindex [--titles]   Refresh through the host-local catalogue authority
+  ccs catalogue-service start|status|stop|refresh   Manage the on-demand local authority
   ccs ls [--auxiliary]    Print indexed sessions (with catalogue badges)
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
   ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
@@ -173,6 +173,8 @@ export async function main(argv: string[]): Promise<number> {
   switch (command) {
     case "reindex":
       return await reindex({ titles: args.includes("--titles") });
+    case "catalogue-service":
+      return await catalogueServiceCommand(args.slice(1));
     case "ls":
       return ls({ all: args.includes("--all"), loops: args.includes("--loops"), auxiliary: args.includes("--auxiliary") });
     case "tree":
@@ -390,63 +392,37 @@ function getConfig(): Config | null {
   return result.value;
 }
 
-/** Refresh the Index from the Store and report what changed. */
+/** Ask the single-writer catalogue authority to refresh the existing incremental Index. */
 async function reindex(opts: { titles: boolean }): Promise<number> {
   getCrashReporter()?.breadcrumb("cli.reindex.start");
   ensureDataDir();
-  const config = getConfig();
-  if (!config) {
-    getCrashReporter()?.breadcrumb("cli.reindex.failure", { stage: "config" });
+  const refreshed = await refreshCatalogueAuthority({ force: true, titles: opts.titles });
+  if (!refreshed.ok) {
+    getCrashReporter()?.breadcrumb("cli.reindex.failure", { stage: "catalogue-service" });
+    console.error(refreshed.error.message);
     return 1;
   }
 
-  const scan = scanStore(config.store.path);
-  if (!scan.ok) {
-    getCrashReporter()?.breadcrumb("cli.reindex.failure", { stage: "scan" });
-    console.error(scan.error.message);
-    return 1;
+  const result = refreshed.value;
+  console.log(
+    `Indexed ${result.stats.scanned} session${result.stats.scanned === 1 ? "" : "s"} ` +
+      `(${formatBytes(result.totalBytes)}) from ${result.storePath} [host: ${result.host}]`,
+  );
+  console.log(
+    `  ${result.stats.parsed} parsed, ${result.stats.skipped} unchanged, ${result.stats.removed} removed ` +
+      `(generation ${result.sourceStatus.generation})`,
+  );
+  if (result.totalCostUSD > 0) {
+    console.log(`  ${formatCost(result.totalCostUSD)} total API-equivalent spend across the store`);
   }
-
-  const db = openIndex(DB_PATH());
-  try {
-    const totalBytes = scan.value.reduce((sum, f) => sum + f.sizeBytes, 0);
-    const stats = await reindexStore(db, scan.value, config.host.label);
-    console.log(
-      `Indexed ${stats.scanned} session${stats.scanned === 1 ? "" : "s"} ` +
-        `(${formatBytes(totalBytes)}) from ${config.store.path} [host: ${config.host.label}]`,
-    );
-    console.log(`  ${stats.parsed} parsed, ${stats.skipped} unchanged, ${stats.removed} removed`);
-    if (stats.duplicates > 0) {
-      console.warn(`  warning: ${stats.duplicates} duplicate transcript path${stats.duplicates === 1 ? "" : "s"} shadowed by deterministic canonical selection`);
+  if (result.titles) {
+    if (result.titles.skippedUnavailable) {
+      console.log("  titling skipped — no inference engine (codex/claude) found on PATH");
+    } else {
+      console.log(`  ${result.titles.generated} titles generated, ${result.titles.failed} failed`);
     }
-    const spend = db.query("SELECT SUM(cost_usd) AS usd FROM sessions").get() as { usd: number | null };
-    if (spend.usd) console.log(`  ${formatCost(spend.usd)} total API-equivalent spend across the store`);
-
-    if (opts.titles) {
-      const selection = resolveEngine(config);
-      const engine = selection.name ? buildEngine(selection.name, config) : null;
-      const titler = engine ? createTitler(engine) : null;
-      process.stdout.write("Generating titles… ");
-      const title = titler
-        ? await backfillTitles(db, titler, {
-            concurrency: config.titler.concurrency,
-            maxAttempts: config.titler.maxAttempts,
-            onProgress: (done, total) => {
-              process.stdout.write(`\rGenerating titles… ${done}/${total}   `);
-            },
-          })
-        : { generated: 0, failed: 0, skippedUnavailable: true };
-      process.stdout.write("\n");
-      if (title.skippedUnavailable) {
-        console.log("  titling skipped — no inference engine (codex/claude) found on PATH");
-      } else {
-        console.log(`  ${title.generated} generated, ${title.failed} failed`);
-      }
-    }
-  } finally {
-    db.close();
   }
-  getCrashReporter()?.breadcrumb("cli.reindex.success", { scanned: scan.value.length });
+  getCrashReporter()?.breadcrumb("cli.reindex.success", { scanned: result.stats.scanned });
   return 0;
 }
 
@@ -464,24 +440,27 @@ async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promi
   const firstRun = !existsSync(DB_PATH());
   if (firstRun) console.log("First run — indexing your sessions…");
 
+  let stage: "catalogue-service" | "import" | "render" | "runtime" = "catalogue-service";
+  reporter?.breadcrumb("cli.tui.catalogue-refresh.start");
+  const refreshed = await refreshCatalogueAuthority({ force: false, titles: false });
+  if (refreshed.ok) {
+    reporter?.breadcrumb("cli.tui.catalogue-refresh.success", {
+      sessions: refreshed.value.sourceStatus.rowCount,
+      generation: refreshed.value.sourceStatus.generation,
+    });
+  } else {
+    // Preserve the TUI's existing fail-open behavior: an unavailable source refresh still permits
+    // browsing the last indexed snapshot.
+    reporter?.breadcrumb("cli.tui.catalogue-refresh.failure");
+  }
+
   const db = openIndex(DB_PATH());
   const catalogue = openCatalogue(CATALOGUE_PATH());
   const { openSkillsDb } = await import("./skills/db.ts");
   const { SKILLS_DB_PATH } = await import("./paths.ts");
   const skillsDb = openSkillsDb(SKILLS_DB_PATH());
   const resumeRequest: { current: ResumeCommand | null } = { current: null };
-  let stage: "scan" | "reindex" | "import" | "render" | "runtime" = "scan";
   try {
-    reporter?.breadcrumb("cli.tui.scan.start");
-    const scan = scanStore(config.store.path);
-    if (scan.ok) {
-      stage = "reindex";
-      await reindexStore(db, scan.value, config.host.label);
-      reporter?.breadcrumb("cli.tui.scan.success", { sessions: scan.value.length });
-    } else {
-      reporter?.breadcrumb("cli.tui.scan.failure");
-    }
-
     stage = "import";
     const { render } = await import("ink");
     const { createElement } = await import("react");

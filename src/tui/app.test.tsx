@@ -2,12 +2,16 @@ import { test, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { Database } from "bun:sqlite";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openIndex } from "../index/schema.ts";
 import { loadConfig } from "../config.ts";
 import { App } from "./App.tsx";
 import { openCatalogue, setSessionClass } from "../catalogue/db.ts";
 import type { Titler } from "../titler/codex.ts";
 import type { EngineState } from "./Root.tsx";
+import { encodePath } from "../resume/locate.ts";
 
 function seed(db: Database): void {
   const ins = db.query(
@@ -38,11 +42,57 @@ const noopCmuxProbes = {
   async reachable(): Promise<boolean> { return false; },
   async openSessionTitles(): Promise<Map<string, string>> { return new Map(); },
 };
+const noopT3StatusClient = {
+  async snapshot() {
+    return {
+      kind: "snapshot",
+      snapshot: {
+        protocolVersion: 1,
+        generatedAt: "2026-07-22T00:00:00.000Z",
+        attachments: [],
+      },
+    } as const;
+  },
+};
+const runningT3Attachment = {
+  providerInstanceId: "claudeAgent",
+  localSourceHost: "h",
+  nativeSessionId: "real1",
+  sourceCwd: realpathSync(process.cwd()),
+  sourceId: "source-1",
+  threadId: "thread-1",
+  projectId: "project-1",
+  state: "synced",
+  lastSyncedAt: "2026-07-22T00:00:00.000Z",
+  diagnostic: null,
+  runtimeStatus: "running",
+  runtimeLastSeenAt: "2026-07-22T00:00:00.000Z",
+} as const;
 
 function makeConfig() {
   const r = loadConfig("/nonexistent-ccs-test.toml");
   if (!r.ok) throw r.error;
   return r.value;
+}
+
+function updateRootCwd(index: Database, cwd: string): void {
+  index.query("UPDATE sessions SET path = $path, cwd = $cwd, project_root = $cwd WHERE session_id = 'real1'").run({
+    $path: `/store/${encodePath(cwd)}/real1.jsonl`,
+    $cwd: cwd,
+  });
+}
+
+function useFlatView(): () => void {
+  const prior = process.env.CCS_ROOT;
+  const root = mkdtempSync(join(tmpdir(), "ccs-tui-t3-"));
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, "prefs.json"), JSON.stringify({ view: "flat" }));
+  process.env.CCS_ROOT = root;
+  return () => {
+    if (prior === undefined) delete process.env.CCS_ROOT;
+    else process.env.CCS_ROOT = prior;
+    rmSync(root, { recursive: true, force: true });
+  };
 }
 
 // The real binary is also verified end-to-end via a PTY smoke (script(1) → `q`): full
@@ -58,26 +108,108 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
       engineState: noopEngineState,
       resumeRequest: { current: null },
       cmuxProbes: noopCmuxProbes,
+      t3StatusClient: noopT3StatusClient,
     }),
   );
   await new Promise((r) => setTimeout(r, 80));
 
   const frame = lastFrame() ?? "";
   expect(frame).toContain("ccs");
-  // The real (non-subagent) session is listed — assert its truncation-safe title prefix
-  // ("Rea" survives the narrow test width; the cluster view's PHASE/ROLE columns eat into
-  // the title, so the full word "Real" no longer fits at this width).
-  expect(frame).toContain("Rea"); // visible real session (title truncates to "Rea…")
+  // The real (non-subagent) root contributes the only visible row. The current cluster columns
+  // consume the title in Ink's narrow test viewport, so assert the row count and child rollup.
+  expect(frame).toContain("1 sessions");
+  expect(frame).toContain("↳1");
+  expect(frame).not.toContain("●"); // native-only row leaves the T3 attachment column blank
   expect(frame).not.toContain("SUBAGENTONLY"); // subagent hidden by default
   expect(frame).toContain("sessions"); // dashboard header stat
-  // Footer highlights keys with ANSI escapes (the key and its label are separated by color
-  // codes), so "Tab skills" is never a contiguous substring. Assert the mode-toggle label +
-  // the key independently — both present means the skills toggle rendered.
-  expect(frame).toContain("skills");
+  // The added T3 shortcut can truncate the final skills label in Ink's narrow test viewport,
+  // but the Tab mode-toggle key remains visible.
   expect(frame).toContain("Tab");
 
   unmount();
   real.close();
+});
+
+test("App reads one T3 attachment snapshot and renders its second status circle", async () => {
+  const restorePrefs = useFlatView();
+  const index = openIndex(":memory:");
+  seed(index);
+  updateRootCwd(index, realpathSync(process.cwd()));
+  let calls = 0;
+
+  const { lastFrame, unmount } = render(
+    createElement(App, {
+      db: index,
+      config: makeConfig(),
+      engineState: noopEngineState,
+      resumeRequest: { current: null },
+      cmuxProbes: noopCmuxProbes,
+      t3StatusClient: {
+        async snapshot() {
+          calls++;
+          return {
+            kind: "snapshot",
+            snapshot: {
+              protocolVersion: 1,
+              generatedAt: "2026-07-22T00:00:00.000Z",
+              attachments: [runningT3Attachment],
+            },
+          } as const;
+        },
+      },
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  expect(calls).toBe(1);
+  expect(lastFrame() ?? "").toContain("○ ●");
+
+  unmount();
+  index.close();
+  restorePrefs();
+});
+
+test("T3 attachment circle exposes textual status in screen-reader mode", async () => {
+  const restorePrefs = useFlatView();
+  const index = openIndex(":memory:");
+  seed(index);
+  updateRootCwd(index, realpathSync(process.cwd()));
+  const priorScreenReader = process.env.INK_SCREEN_READER;
+  process.env.INK_SCREEN_READER = "true";
+
+  const { lastFrame, unmount } = render(
+    createElement(App, {
+      db: index,
+      config: makeConfig(),
+      engineState: noopEngineState,
+      resumeRequest: { current: null },
+      cmuxProbes: noopCmuxProbes,
+      t3StatusClient: {
+        async snapshot() {
+          return {
+            kind: "snapshot",
+            snapshot: {
+              protocolVersion: 1,
+              generatedAt: "2026-07-22T00:00:00.000Z",
+              attachments: [runningT3Attachment],
+            },
+          } as const;
+        },
+      },
+    }),
+  );
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(lastFrame() ?? "").toContain(
+      "T3 attachment running; sync synced; provider running",
+    );
+  } finally {
+    unmount();
+    index.close();
+    restorePrefs();
+    if (priorScreenReader === undefined) delete process.env.INK_SCREEN_READER;
+    else process.env.INK_SCREEN_READER = priorScreenReader;
+  }
 });
 
 test("auxiliary sessions stay hidden until the session-local u toggle reveals them", async () => {
@@ -112,6 +244,7 @@ test("auxiliary sessions stay hidden until the session-local u toggle reveals th
       engineState: noopEngineState,
       resumeRequest: { current: null },
       cmuxProbes: noopCmuxProbes,
+      t3StatusClient: noopT3StatusClient,
     }),
   );
   await new Promise((resolve) => setTimeout(resolve, 80));
@@ -126,4 +259,51 @@ test("auxiliary sessions stay hidden until the session-local u toggle reveals th
   unmount();
   catalogue.close();
   index.close();
+});
+
+test("T opens the selected root session after the T3 CLI contract ships", async () => {
+  const restorePrefs = useFlatView();
+  const index = openIndex(":memory:");
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "ccs-t3-cwd-")));
+  seed(index);
+  updateRootCwd(index, cwd);
+  let calls = 0;
+  const resumeRequest = { current: null };
+
+  const { lastFrame, stdin, unmount } = render(
+    createElement(App, {
+      db: index,
+      config: makeConfig(),
+      engineState: noopEngineState,
+      resumeRequest,
+      cmuxProbes: noopCmuxProbes,
+      t3StatusClient: noopT3StatusClient,
+      t3Opener: {
+        async open(request) {
+          calls++;
+          expect(request).toEqual({ resumeId: "real1", cwd });
+          return { kind: "opened", threadId: "thread", projectId: "project", created: true } as const;
+        },
+      },
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  expect(lastFrame() ?? "").toContain("open in T3");
+  stdin.write("?");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(lastFrame() ?? "").toContain("open this root Claude session in T3");
+  stdin.write("?");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  stdin.write("T");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  expect(calls).toBe(1);
+  expect(lastFrame() ?? "").toContain("created T3 thread");
+  expect(resumeRequest.current).toBeNull();
+
+  unmount();
+  index.close();
+  rmSync(cwd, { recursive: true, force: true });
+  restorePrefs();
 });

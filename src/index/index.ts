@@ -99,6 +99,10 @@ export async function reindexStore(
   db: Database,
   files: readonly StoredSessionFile[],
   host: string,
+  options: {
+    readonly manageTransaction?: boolean;
+    readonly beforeCommit?: (stats: ReindexStats) => void;
+  } = {},
 ): Promise<ReindexStats> {
   const existing = new Map<string, ExistingMeta>();
   for (const row of db.query("SELECT session_id, file_mtime, file_size, path, shadow_paths, codex_title FROM sessions").all() as Array<{
@@ -128,6 +132,54 @@ export async function reindexStore(
     const ranked = [...candidates].sort(compareTranscriptFiles);
     return { sessionId, file: ranked[0]!, shadowPaths: ranked.slice(1).map((candidate) => candidate.path) };
   });
+  const stats: ReindexStats = {
+    scanned: files.length,
+    parsed: 0,
+    skipped: 0,
+    removed: 0,
+    duplicates: files.length - canonical.length,
+  };
+  const seen = new Set<string>();
+  const diagnostics: Array<{
+    readonly sessionId: string;
+    readonly path: string;
+    readonly shadowPathsJson: string;
+  }> = [];
+  const parsedCandidates: Array<{
+    readonly file: StoredSessionFile;
+    readonly shadowPathsJson: string;
+    readonly parsed: Awaited<ReturnType<typeof parseSessionFile>>;
+  }> = [];
+
+  // Transcript parsing is intentionally outside the publication transaction. The daemon is the
+  // only index writer; holding BEGIN IMMEDIATE while awaiting filesystem reads would block every
+  // other CCS process that opens the catalogue for normal reads or registration work.
+  for (const candidate of canonical) {
+    const { sessionId, file, shadowPaths } = candidate;
+    seen.add(sessionId);
+    const previous = existing.get(sessionId);
+    const shadowPathsJson = JSON.stringify(shadowPaths);
+    if (
+      previous &&
+      previous.file_mtime === file.mtimeMs &&
+      previous.file_size === file.sizeBytes &&
+      previous.path === file.path
+    ) {
+      if (previous.shadow_paths !== shadowPathsJson) {
+        diagnostics.push({ sessionId, path: file.path, shadowPathsJson });
+      }
+      stats.skipped++;
+      continue;
+    }
+
+    try {
+      const parsed = await parseSessionFile(file.path, sessionId);
+      parsedCandidates.push({ file, shadowPathsJson, parsed });
+      stats.parsed++;
+    } catch {
+      stats.skipped++;
+    }
+  }
 
   const upsert = db.query(`
     INSERT INTO sessions (
@@ -158,90 +210,85 @@ export async function reindexStore(
   const refreshDiagnostics = db.query(
     "UPDATE sessions SET path = $path, shadow_paths = $shadow_paths WHERE session_id = $session_id",
   );
+  const readCodexTitle = db.query(
+    "SELECT codex_title AS codexTitle FROM sessions WHERE session_id = $id",
+  );
   const ftsDelete = db.query("DELETE FROM sessions_fts WHERE session_id = $id");
   const ftsInsert = db.query(
     "INSERT INTO sessions_fts (session_id, title, skeleton) VALUES ($id, $title, $skeleton)",
   );
 
-  const stats: ReindexStats = {
-    scanned: files.length,
-    parsed: 0,
-    skipped: 0,
-    removed: 0,
-    duplicates: files.length - canonical.length,
-  };
-  const seen = new Set<string>();
+  const manageTransaction = options.manageTransaction !== false;
+  if (manageTransaction) db.exec("BEGIN IMMEDIATE;");
+  try {
+    for (const diagnostic of diagnostics) {
+      refreshDiagnostics.run({
+        $session_id: diagnostic.sessionId,
+        $path: diagnostic.path,
+        $shadow_paths: diagnostic.shadowPathsJson,
+      });
+    }
 
-  for (const candidate of canonical) {
-    const { sessionId, file, shadowPaths } = candidate;
-    seen.add(sessionId);
-    const prev = existing.get(sessionId);
-    const shadowPathsJson = JSON.stringify(shadowPaths);
-    if (prev && prev.file_mtime === file.mtimeMs && prev.file_size === file.sizeBytes && prev.path === file.path) {
-      // Diagnostics must refresh when changed, but an unchanged reindex stays read-only.
-      if (prev.shadow_paths !== shadowPathsJson) {
-        refreshDiagnostics.run({ $session_id: sessionId, $path: file.path, $shadow_paths: shadowPathsJson });
+    for (const candidate of parsedCandidates) {
+      const { file, shadowPathsJson, parsed } = candidate;
+      const project = deriveProject(parsed.cwd);
+      const fallback = cleanLabel(parsed.userTexts);
+
+      upsert.run({
+        $session_id: parsed.sessionId,
+        $host: host,
+        $path: file.path,
+        $cwd: parsed.cwd,
+        $project_root: project.root,
+        $project_name: project.name,
+        $branch: parsed.gitBranch,
+        $version: parsed.version,
+        $first_ts: parsed.firstTs,
+        $last_ts: parsed.lastTs,
+        $msg_count: parsed.msgCount,
+        $file_mtime: file.mtimeMs,
+        $file_size: file.sizeBytes,
+        $native_title: parsed.nativeTitle,
+        $fallback_label: fallback,
+        $skeleton: parsed.skeleton,
+        $is_subagent: parsed.isSubagent ? 1 : 0,
+        $parent_session_id: parsed.parentSessionId,
+        $resume_id: parsed.resumeId,
+        $cost_usd: parsed.usage.costUSD,
+        $tok_input: parsed.usage.input,
+        $tok_output: parsed.usage.output,
+        $tok_cache_read: parsed.usage.cacheRead,
+        $tok_cache_write: parsed.usage.cacheWrite5m + parsed.usage.cacheWrite1h,
+        $cost_by_model: JSON.stringify(parsed.usage.costByModel),
+        $models: JSON.stringify(parsed.usage.models),
+        $user_turns: parsed.userTurns,
+        $tick_interval_sec: parsed.tickIntervalSec,
+        $shadow_paths: shadowPathsJson,
+      });
+      const currentTitle = readCodexTitle.get({ $id: parsed.sessionId }) as {
+        codexTitle: string | null;
+      } | null;
+      const ftsTitle = parsed.nativeTitle ?? currentTitle?.codexTitle ?? fallback;
+      ftsDelete.run({ $id: parsed.sessionId });
+      ftsInsert.run({ $id: parsed.sessionId, $title: ftsTitle, $skeleton: parsed.skeleton });
+    }
+
+    const removeRow = db.query("DELETE FROM sessions WHERE session_id = $id");
+    for (const sessionId of existing.keys()) {
+      if (!seen.has(sessionId)) {
+        removeRow.run({ $id: sessionId });
+        ftsDelete.run({ $id: sessionId });
+        stats.removed++;
       }
-      stats.skipped++;
-      continue;
     }
 
-    let parsed;
-    try {
-      parsed = await parseSessionFile(file.path, sessionId);
-    } catch {
-      stats.skipped++;
-      continue;
-    }
-    const project = deriveProject(parsed.cwd);
-    const fallback = cleanLabel(parsed.userTexts);
-
-    upsert.run({
-      $session_id: parsed.sessionId,
-      $host: host,
-      $path: file.path,
-      $cwd: parsed.cwd,
-      $project_root: project.root,
-      $project_name: project.name,
-      $branch: parsed.gitBranch,
-      $version: parsed.version,
-      $first_ts: parsed.firstTs,
-      $last_ts: parsed.lastTs,
-      $msg_count: parsed.msgCount,
-      $file_mtime: file.mtimeMs,
-      $file_size: file.sizeBytes,
-      $native_title: parsed.nativeTitle,
-      $fallback_label: fallback,
-      $skeleton: parsed.skeleton,
-      $is_subagent: parsed.isSubagent ? 1 : 0,
-      $parent_session_id: parsed.parentSessionId,
-      $resume_id: parsed.resumeId,
-      $cost_usd: parsed.usage.costUSD,
-      $tok_input: parsed.usage.input,
-      $tok_output: parsed.usage.output,
-      $tok_cache_read: parsed.usage.cacheRead,
-      $tok_cache_write: parsed.usage.cacheWrite5m + parsed.usage.cacheWrite1h,
-      $cost_by_model: JSON.stringify(parsed.usage.costByModel),
-      $models: JSON.stringify(parsed.usage.models),
-      $user_turns: parsed.userTurns,
-      $tick_interval_sec: parsed.tickIntervalSec,
-      $shadow_paths: shadowPathsJson,
-    });
-    const ftsTitle = parsed.nativeTitle ?? prev?.codex_title ?? fallback;
-    ftsDelete.run({ $id: parsed.sessionId });
-    ftsInsert.run({ $id: parsed.sessionId, $title: ftsTitle, $skeleton: parsed.skeleton });
-    stats.parsed++;
+    options.beforeCommit?.(stats);
+    if (manageTransaction) db.exec("COMMIT;");
+    return stats;
+  } catch (cause) {
+    if (manageTransaction) db.exec("ROLLBACK;");
+    throw cause;
   }
-
-  const removeRow = db.query("DELETE FROM sessions WHERE session_id = $id");
-  for (const sessionId of existing.keys()) {
-    if (!seen.has(sessionId)) {
-      removeRow.run({ $id: sessionId });
-      ftsDelete.run({ $id: sessionId });
-      stats.removed++;
-    }
-  }
-  return stats;
 }
 
 /** Stable winner: largest, then newest, then lexicographically smallest absolute path. */
@@ -280,18 +327,32 @@ export function titleCandidates(db: Database, maxAttempts: number): TitleCandida
 
 /** Persist a generated Title, stamp the message count at titling, and refresh the FTS row. */
 export function saveCodexTitle(db: Database, sessionId: string, title: string): void {
-  db.query(
-    `UPDATE sessions
-     SET codex_title = $title, title_msg_count = msg_count, title_attempts = 0
-     WHERE session_id = $id`,
-  ).run({ $id: sessionId, $title: title });
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    db.query(
+      `UPDATE sessions
+       SET codex_title = $title, title_msg_count = msg_count, title_attempts = 0
+       WHERE session_id = $id`,
+    ).run({ $id: sessionId, $title: title });
 
-  // Resolved FTS title = native (none here, by definition) → codex title.
-  db.query("DELETE FROM sessions_fts WHERE session_id = $id").run({ $id: sessionId });
-  db.query(
-    `INSERT INTO sessions_fts (session_id, title, skeleton)
-     SELECT session_id, $title, skeleton FROM sessions WHERE session_id = $id`,
-  ).run({ $id: sessionId, $title: title });
+    // Resolved FTS title = native (none here, by definition) → codex title.
+    db.query("DELETE FROM sessions_fts WHERE session_id = $id").run({ $id: sessionId });
+    db.query(
+      `INSERT INTO sessions_fts (session_id, title, skeleton)
+       SELECT session_id, $title, skeleton FROM sessions WHERE session_id = $id`,
+    ).run({ $id: sessionId, $title: title });
+    // Title sorting is part of catalogue protocol v1. Invalidate generation-bound cursors whenever
+    // a titler-owned visible value changes, even when the source file itself is unchanged.
+    db.query(
+      `UPDATE catalogue_source_status
+       SET generation = generation + 1, indexed_at = $now
+       WHERE singleton = 1`,
+    ).run({ $now: new Date().toISOString() });
+    db.exec("COMMIT;");
+  } catch (cause) {
+    db.exec("ROLLBACK;");
+    throw cause;
+  }
 }
 
 /** Record a failed titling attempt so a stuck Session eventually stops being retried. */

@@ -1,4 +1,5 @@
-import { statSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
+import { relative, sep } from "node:path";
 import { Glob } from "bun";
 import { type Result, ok, err } from "./result.ts";
 
@@ -20,17 +21,30 @@ export interface StoredSessionFile {
 export function scanStore(storePath: string): Result<StoredSessionFile[]> {
   const files: StoredSessionFile[] = [];
   try {
+    const canonicalStore = realpathSync(storePath);
     const glob = new Glob("**/*.jsonl");
-    for (const path of glob.scanSync({ cwd: storePath, absolute: true })) {
-      const stat = statSync(path);
-      if (!stat.isFile()) continue;
-      const name = path.slice(path.lastIndexOf("/") + 1);
-      files.push({
-        path,
-        sessionId: name.replace(/\.jsonl$/, ""),
-        sizeBytes: stat.size,
-        mtimeMs: stat.mtimeMs,
-      });
+    for (const discoveredPath of glob.scanSync({ cwd: canonicalStore, absolute: true })) {
+      try {
+        // Never let a symlink escape the configured Claude projects root. A directory symlink can
+        // still yield apparently regular descendants, so check both the discovered node and the
+        // fully canonical path.
+        if (lstatSync(discoveredPath).isSymbolicLink()) continue;
+        const path = realpathSync(discoveredPath);
+        const fromStore = relative(canonicalStore, path);
+        if (fromStore === "" || fromStore === ".." || fromStore.startsWith(`..${sep}`)) continue;
+        const stat = statSync(path);
+        if (!stat.isFile()) continue;
+        const name = path.slice(path.lastIndexOf("/") + 1);
+        files.push({
+          path,
+          sessionId: name.replace(/\.jsonl$/, ""),
+          sizeBytes: stat.size,
+          mtimeMs: stat.mtimeMs,
+        });
+      } catch {
+        // A source can disappear or be replaced while discovery is running. Skip that entry; the
+        // next incremental refresh will reconcile it without discarding every other source.
+      }
     }
   } catch (e) {
     return err(new Error(`Failed to scan store at ${storePath}: ${(e as Error).message}`));

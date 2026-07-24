@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { T3_OPEN_ENABLED } from "../t3/open.ts";
 import { theme } from "./theme.ts";
 
 export interface KeyGroup {
@@ -79,6 +80,9 @@ const SESSION_GROUPS: KeyGroup[] = [
       ["r", "resume via… — pick the launcher/backend (claude, claude-gpt, …)"],
       ["f", "fork-resume (new session id, same history)"],
       ["o", "resume via the other target (inline ↔ cmux)"],
+      ...(T3_OPEN_ENABLED
+        ? [["T", "open this root Claude session in T3"] as [string, string]]
+        : []),
     ],
   },
   {
