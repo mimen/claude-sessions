@@ -25,6 +25,21 @@ func Shot(name string, snapshot data.Snapshot) string {
 			return strings.Contains(strings.ToLower(session.Title), "research best tui")
 		})
 		loadShotTranscript(&model)
+	case "dossier":
+		// Pick a session whose enrichment has something to show — a wrong working directory or an
+		// open thread — since a clean one renders the least interesting version of this panel.
+		model.view, model.preview = ViewGroups, true
+		// Prefer a misplaced session: the cwd note is the one enrichment field that reports a
+		// defect rather than describing the session, so it is the version of this panel most
+		// worth having a proof of.
+		selectShotSession(&model, func(session data.Session) bool {
+			return session.Enrichment.Present() && !session.Enrichment.CWDCorrect
+		})
+		if session, ok := model.selectedSession(); !ok || !session.Enrichment.Present() {
+			selectShotSession(&model, func(session data.Session) bool {
+				return session.Enrichment.Present()
+			})
+		}
 	case "nopreview":
 		model.view, model.preview = ViewGroups, false
 	case "tree":

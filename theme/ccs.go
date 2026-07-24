@@ -92,6 +92,28 @@ func StageColor(stage string) lipgloss.Color {
 	}
 }
 
+// RecommendationColor maps an enrichment's recommended next action onto the same restrained
+// palette the rest of the dossier uses.
+//
+// The colors encode how much the row wants from you, not how the session "did": `handoff` is the
+// loudest because it is the only value that needs a person to move it, `continue` is neutral
+// because live work is the normal case, and both closing verbs are dim — they are chores, and a
+// wall of alarm-colored finished sessions would train the eye to ignore the panel.
+func RecommendationColor(recommendation string) lipgloss.Color {
+	switch recommendation {
+	case "continue":
+		return Info
+	case "complete":
+		return Success
+	case "archive":
+		return FgMostSubtle
+	case "handoff":
+		return Warning
+	default:
+		return FgMostSubtle
+	}
+}
+
 // ClassColor maps a classification badge to a color.
 func ClassColor(class string) lipgloss.Color {
 	switch class {
