@@ -87,7 +87,8 @@ Sessions (ephemeral, per-run):
     explicit identity: --identity=<key> --cluster=<c> --role=<r> (must match stored identity; cannot combine with --key)
     flags: --cluster --role --title --cwd <dir> --prompt "..." --permission-mode <mode>
            --pr-repo owner/repo --pr-number 123 --gus-work W-... · --print-id (reserve only)
-           --via <launcher> (birth the session on a configured launcher, e.g. claude-gpt)
+           --via <launcher> (birth a policy-less session on a configured launcher, e.g. claude-gpt)
+           role.toml model policy: canonical IDs compile launcher + --model; it rejects --via
   ccs session bump <id> [--note "..."]            Wake the session's cmux tab
   ccs session-fields <sid> --json '{...}' [--sensor <name>]  Atomic multi-field write (ADR-0078)
   ccs historical-backfill detached-children --expect-sha256 <digest> [--apply]

@@ -39,6 +39,7 @@ import { checkClusterGate } from "../cluster/manifest.ts";
 import { shellQuote } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
 import { launcherByName, loadLaunchers, type Launcher } from "./launchers.ts";
+import { compileRoleModelLaunch } from "./role-model-launch.ts";
 import { execFileSync } from "node:child_process";
 import { spawnContractError, type SpawnFacts, type WorktreeState } from "../catalogue/spawn-contract.ts";
 import { interpretSpawnLocation, syntheticRow, type SpawnLocationConfig } from "../catalogue/spawn-location.ts";
@@ -111,6 +112,9 @@ export interface NewSessionOpts {
    * `claude` — e.g. `--via gpt` births the session on the gateway backend. No eligibility
    * check: a fresh session has no model history yet. */
   via?: string;
+  /** Derived launch provenance for a model-policy role; never role truth or resume input. */
+  launchModel?: string;
+  launchLauncher?: string;
 }
 
 /** Parse a --pr-number value to a positive integer, or undefined (0 / non-numeric = "no PR yet"). */
@@ -303,6 +307,9 @@ function writeSessionMetadataTransaction(db: Database, id: string, opts: NewSess
   if (opts.creatorKind) setCreatorKind(db, id, opts.creatorKind, now);
   if (opts.creatorRef) setCreatorRef(db, id, opts.creatorRef, now);
   if (opts.launchChannel) setLaunchChannel(db, id, opts.launchChannel, now);
+  // Resolved birth route is audit-only metadata. Resume always routes from transcript history.
+  if (opts.launchModel) setMeta(db, id, "launch_model", opts.launchModel, now);
+  if (opts.launchLauncher) setMeta(db, id, "launch_launcher", opts.launchLauncher, now);
   if (opts.forkedFromSessionId) setForkedFromSessionId(db, id, opts.forkedFromSessionId, now);
   setLauncherIdentity(db, id, opts.launcherIdentity ?? null, now);
   if (opts.gusWork) setGusWork(db, id, opts.gusWork, now);
@@ -362,7 +369,10 @@ function supersedeWorkUnitSiblings(db: Database, workUnitId: string, keepId: str
 /** Build the launch invocation. Prompt (if any) is a trailing positional arg. `binary` comes
  * from the `--via` launcher; default is plain `claude`. */
 export function buildLaunchArgv(id: string, opts: NewSessionOpts, binary = "claude"): string[] {
-  const argv = [binary, "--session-id", id];
+  const argv = [binary];
+  // Model is a birth-only option and deliberately precedes --session-id in both transports.
+  if (opts.launchModel) argv.push("--model", opts.launchModel);
+  argv.push("--session-id", id);
   if (opts.permissionMode) argv.push("--permission-mode", opts.permissionMode);
   if (opts.prompt) argv.push(opts.prompt);
   return argv;
@@ -412,6 +422,7 @@ export function inlineLaunchEnvironment(
  * out) or null. The determinism gate: a misconfigured spawn fails LOUD, never half-born.
  */
 export function validateSpawn(opts: NewSessionOpts, roleDef: RoleDef | null): string | null {
+  if (roleDef?.manifestError) return `role "${roleDef.role}" has invalid role.toml: ${roleDef.manifestError}`;
   // A --role must name a real registry role (else its home_dir/arming can't be resolved).
   if (opts.role && !roleDef && !opts.identity) {
     return `role "${opts.role.replace(/^\//, "")}" is not in the registry — define it with \`ccs roles upsert\` first`;
@@ -530,10 +541,21 @@ export function newSession(args: string[]): number {
 
   const cwd = opts.cwd ?? process.cwd();
 
+  // A role may declare only a canonical model. Compiler-owned policy derives the executable and
+  // launch spelling; accepting --via here would let caller input contradict that role policy.
+  const roleLaunch = roleDef?.model ? compileRoleModelLaunch(roleDef.model) : null;
+  if (roleLaunch && opts.via) {
+    console.error("ccs new-session: --via cannot be combined with a role-declared model policy");
+    return 2;
+  }
+
   // Resolve the `--via` launcher BEFORE minting anything — an unknown name must fail loud
-  // with no half-born session. Without --via the launch is plain `claude`, as always.
-  let launcher: Launcher = { name: "claude", binary: "claude", serves: ["*"], env: {} };
-  if (opts.via) {
+  // with no half-born session. Policy-less roles retain this established behavior exactly.
+  let launcher: Launcher = roleLaunch?.launcher ?? { name: "claude", binary: "claude", serves: ["*"], env: {} };
+  if (roleLaunch) {
+    opts.launchModel = roleLaunch.launchModel;
+    opts.launchLauncher = roleLaunch.launcher.name;
+  } else if (opts.via) {
     const launchersRes = loadLaunchers();
     if (!launchersRes.ok) {
       console.error(`ccs new-session: ${launchersRes.error.message}`);
@@ -582,7 +604,10 @@ export function newSession(args: string[]): number {
     ]
       .filter(Boolean)
       .join(" ");
-    console.error(`ccs: reserved ${id.slice(0, 8)}…${tagged ? ` (${tagged})` : ""} — launch with: claude --session-id ${id}`);
+    console.error(
+      `ccs: reserved ${id.slice(0, 8)}…${tagged ? ` (${tagged})` : ""} — launch with: ` +
+      buildLaunchArgv(id, opts, launcher.binary).map(shellQuote).join(" "),
+    );
     console.log(id);
     return 0;
   }

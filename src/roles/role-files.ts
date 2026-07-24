@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import type { RoleDef, Kind, WorkUnitAnchorType, StageSchema } from "../catalogue/db.ts";
+import { ROLE_MODEL_IDS, parseRoleModel, type RoleModelId } from "../resume/role-model-launch.ts";
 
 /**
  * File-backed role definitions (ADR-0048/0050/0074): a role is a directory in a cluster package;
@@ -40,20 +41,29 @@ interface RoleToml {
   /** Role accent color as `#RRGGBB` hex — ONE source of truth for both the ccs TUI role column
    * and the cmux tab color (so they render identical bytes). Malformed → treated as absent. */
   color?: unknown;
+  /** Optional canonical model ID. Launcher/provider routing is derived by ccs. */
+  model?: unknown;
 }
 
 /** Read a role dir into a RoleDef. `dir` is the role's home; `cluster` is its grouping or null. */
 export function readRoleDir(dir: string, role: string, cluster: string | null): RoleDef | null {
   if (!existsSync(dir)) return null;
   let toml: RoleToml = {};
+  let tomlError: string | null = null;
   const tomlPath = join(dir, "role.toml");
   if (existsSync(tomlPath)) {
     try {
       toml = parseToml(readFileSync(tomlPath, "utf8")) as RoleToml;
     } catch {
-      toml = {}; // malformed toml → treat as empty manifest (fail-open; lint surfaces it)
+      // Keep role discovery non-throwing, but expose malformed source to birth preflight so it
+      // cannot silently become a policy-less native launch.
+      tomlError = `malformed role.toml: ${tomlPath}`;
     }
   }
+  const model: RoleModelId | null = parseRoleModel(toml.model);
+  const modelError = toml.model === undefined || model !== null
+    ? null
+    : `model must be one of: ${ROLE_MODEL_IDS.join(", ")}`;
   const kind: Kind | null = toml.kind === "loop" ? "loop" : toml.kind === "session" ? "session" : null;
   // ADR-0069: work_unit anchor type is authoritative; fall back to the interim ADR-0062 topology
   // (core→none, fleet→freeform) for a role.toml not yet migrated. null when neither is declared.
@@ -81,6 +91,8 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
     stageSchema,
     pinOnResume: toml.pin_on_resume === true,
     color: typeof toml.color === "string" && /^#[0-9a-fA-F]{6}$/.test(toml.color) ? toml.color : null,
+    model,
+    manifestError: tomlError ?? modelError,
     // ADR-0074: skills + commands read from PROJECT-LOCAL .claude/ (Claude Code discovers them
     // from the role's cwd), with a fallback to the legacy top-level locations (so nothing breaks
     // before the config-side file moves). Hooks remain in .ccs-hooks (never project-local).

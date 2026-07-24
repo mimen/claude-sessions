@@ -6,6 +6,7 @@ import { openCatalogue, getRow, lifecycleOf, identityKeyOf, setCluster, stampPrF
 import { getIdentity } from "../catalogue/identities.ts";
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import {
+  buildLaunchArgv,
   inlineLaunchEnvironment,
   inlineLaunchOutcome,
   launchEnvironmentOverrides,
@@ -277,6 +278,35 @@ test("writeSessionMetadata: explicit metadata rolls back if a later write fails"
   }
 });
 
+test("newSession: invalid role model and policy --via conflict fail before reservation", () => {
+  const root = withEventRole();
+  const roleToml = join(process.env.CCS_CONFIG_ROOT!, "clusters", "event-watch", "roles", "event-worker", "role.toml");
+  writeFileSync(roleToml, 'kind = "session"\nwork_unit = "none"\nmodel = "gpt-5.6-terra[1m]"\n');
+  expect(newSession(["--cluster=event-watch", "--role=event-worker", "--top-level", "--print-id"])).toBe(2);
+
+  writeFileSync(roleToml, 'kind = "session"\nwork_unit = "none"\nmodel = "gpt-5.6-terra"\n');
+  expect(newSession(["--cluster=event-watch", "--role=event-worker", "--top-level", "--via=claude", "--print-id"])).toBe(2);
+
+  const check = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    expect(check.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 0 });
+  } finally { check.close(); }
+});
+
+test("newSession: model-policy reservation records resolved launch provenance", () => {
+  const root = withEventRole();
+  const roleToml = join(process.env.CCS_CONFIG_ROOT!, "clusters", "event-watch", "roles", "event-worker", "role.toml");
+  writeFileSync(roleToml, 'kind = "session"\nwork_unit = "none"\nmodel = "gpt-5.6-sol"\n');
+  expect(newSession(["--cluster=event-watch", "--role=event-worker", "--top-level", "--print-id"])).toBe(0);
+  const check = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const row = check.query("SELECT session_id FROM catalogue").get() as { session_id: string };
+    const stored = getRow(check, row.session_id)!;
+    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-sol[1m]");
+    expect(getMeta(stored, "launch_launcher")).toBe("claude-gpt");
+  } finally { check.close(); }
+});
+
 test("newSession: explicit --print-id registers only a matching pre-minted identity", () => {
   const root = withEventRole();
   const key = "event-watch:event-worker:gio";
@@ -492,7 +522,7 @@ import type { RoleDef } from "../catalogue/db.ts";
 
 const loopDef: RoleDef = {
   role: "control", cluster: "pr-watch", kind: "loop", workUnit: "none", homeDir: "/tmp",
-  resumeCommand: "/loop 15m /pr-watch-control", stageSchema: null, pinOnResume: false, color: null, skills: [], commands: [], hooks: [], updatedAt: null,
+  resumeCommand: "/loop 15m /pr-watch-control", stageSchema: null, pinOnResume: false, color: null, model: null, manifestError: null, skills: [], commands: [], hooks: [], updatedAt: null,
 };
 
 test("writeSessionMetadata: --role without --cluster inherits cluster from role registry + mints identity", () => {
@@ -525,6 +555,12 @@ test("writeSessionMetadata: --role without --cluster inherits cluster from role 
   }
 });
 
+test("buildLaunchArgv: model option precedes session ID and policy-less argv is unchanged", () => {
+  expect(buildLaunchArgv("id", { printId: false, inline: false, launchModel: "gpt-5.6-terra[1m]" }, "claude-gpt"))
+    .toEqual(["claude-gpt", "--model", "gpt-5.6-terra[1m]", "--session-id", "id"]);
+  expect(buildLaunchArgv("id", { printId: false, inline: false })).toEqual(["claude", "--session-id", "id"]);
+});
+
 test("validateSpawn: unknown role errors", () => {
   expect(validateSpawn(parseOpts(["--role", "ghost"]), null)).toContain("not in the registry");
 });
@@ -547,7 +583,7 @@ test("validateSpawn: standalone role (no cluster in role def, no --cluster arg) 
   // Rejection prevents latent data-integrity issues.
   const standaloneRoleDef: RoleDef = {
     role: "debug", kind: "session", cluster: null, workUnit: null, homeDir: "/tmp",
-    resumeCommand: null, stageSchema: null, pinOnResume: false, color: null, skills: [], commands: [], hooks: [], updatedAt: null,
+    resumeCommand: null, stageSchema: null, pinOnResume: false, color: null, model: null, manifestError: null, skills: [], commands: [], hooks: [], updatedAt: null,
   };
   const err = validateSpawn({ printId: false, inline: false, role: "debug" }, standaloneRoleDef);
   expect(err).toContain("standalone role");
