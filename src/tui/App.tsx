@@ -363,34 +363,39 @@ export function App({
   const [t3Attachments, setT3Attachments] = useState<readonly T3AttachmentStatus[]>([]);
   useEffect(() => {
     let alive = true;
-    getCrashReporter()?.breadcrumb("tui.t3.attachment-status.start");
-    void t3StatusClient.snapshot().then(
-      (outcome) => {
-        if (!alive) {
-          getCrashReporter()?.breadcrumb("tui.t3.attachment-status.cancelled");
-          return;
-        }
-        if (outcome.kind === "snapshot") {
-          setT3Attachments(outcome.snapshot.attachments);
-          getCrashReporter()?.breadcrumb("tui.t3.attachment-status.success", {
-            count: outcome.snapshot.attachments.length,
+    const refreshAttachments = () => {
+      getCrashReporter()?.breadcrumb("tui.t3.attachment-status.start");
+      void t3StatusClient.snapshot().then(
+        (outcome) => {
+          if (!alive) {
+            getCrashReporter()?.breadcrumb("tui.t3.attachment-status.cancelled");
+            return;
+          }
+          if (outcome.kind === "snapshot") {
+            setT3Attachments(outcome.snapshot.attachments);
+            getCrashReporter()?.breadcrumb("tui.t3.attachment-status.success", {
+              count: outcome.snapshot.attachments.length,
+            });
+            return;
+          }
+          getCrashReporter()?.breadcrumb("tui.t3.attachment-status.failure", {
+            reason: outcome.reason,
           });
-          return;
-        }
-        setT3Attachments([]);
-        getCrashReporter()?.breadcrumb("tui.t3.attachment-status.failure", {
-          reason: outcome.reason,
-        });
-      },
-      () => {
-        if (!alive) return;
-        setT3Attachments([]);
-        getCrashReporter()?.breadcrumb("tui.t3.attachment-status.failure", {
-          reason: "client-rejection",
-        });
-      },
-    );
-    return () => { alive = false; };
+        },
+        () => {
+          if (!alive) return;
+          getCrashReporter()?.breadcrumb("tui.t3.attachment-status.failure", {
+            reason: "client-rejection",
+          });
+        },
+      );
+    };
+    refreshAttachments();
+    const timer = setInterval(refreshAttachments, 15_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
   }, [t3StatusClient]);
 
   // Which sessions have a Claude Code task dir at all — one readdir, so the per-row
@@ -749,8 +754,21 @@ export function App({
       return;
     }
     const row = item.row;
+    const catalogueRow = catMap.get(row.sessionId);
     if (row.isSubagent) {
       setStatus("subagent runs can't open in T3 — select their root Claude session");
+      return;
+    }
+    if (catalogueRow?.sessionClass === "auxiliary") {
+      setStatus("auxiliary runs can't open in T3 — select their root Claude session");
+      return;
+    }
+    if ((catalogueRow?.substrate ?? "claude-code") !== "claude-code") {
+      setStatus("only native Claude Code sessions can open in T3");
+      return;
+    }
+    if (!row.resumeId.trim()) {
+      setStatus("this session has no native Claude resume id");
       return;
     }
 

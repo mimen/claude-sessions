@@ -99,7 +99,10 @@ export async function reindexStore(
   db: Database,
   files: readonly StoredSessionFile[],
   host: string,
-  options: { readonly manageTransaction?: boolean } = {},
+  options: {
+    readonly manageTransaction?: boolean;
+    readonly beforeCommit?: (stats: ReindexStats) => void;
+  } = {},
 ): Promise<ReindexStats> {
   const existing = new Map<string, ExistingMeta>();
   for (const row of db.query("SELECT session_id, file_mtime, file_size, path, shadow_paths, codex_title FROM sessions").all() as Array<{
@@ -129,6 +132,54 @@ export async function reindexStore(
     const ranked = [...candidates].sort(compareTranscriptFiles);
     return { sessionId, file: ranked[0]!, shadowPaths: ranked.slice(1).map((candidate) => candidate.path) };
   });
+  const stats: ReindexStats = {
+    scanned: files.length,
+    parsed: 0,
+    skipped: 0,
+    removed: 0,
+    duplicates: files.length - canonical.length,
+  };
+  const seen = new Set<string>();
+  const diagnostics: Array<{
+    readonly sessionId: string;
+    readonly path: string;
+    readonly shadowPathsJson: string;
+  }> = [];
+  const parsedCandidates: Array<{
+    readonly file: StoredSessionFile;
+    readonly shadowPathsJson: string;
+    readonly parsed: Awaited<ReturnType<typeof parseSessionFile>>;
+  }> = [];
+
+  // Transcript parsing is intentionally outside the publication transaction. The daemon is the
+  // only index writer; holding BEGIN IMMEDIATE while awaiting filesystem reads would block every
+  // other CCS process that opens the catalogue for normal reads or registration work.
+  for (const candidate of canonical) {
+    const { sessionId, file, shadowPaths } = candidate;
+    seen.add(sessionId);
+    const previous = existing.get(sessionId);
+    const shadowPathsJson = JSON.stringify(shadowPaths);
+    if (
+      previous &&
+      previous.file_mtime === file.mtimeMs &&
+      previous.file_size === file.sizeBytes &&
+      previous.path === file.path
+    ) {
+      if (previous.shadow_paths !== shadowPathsJson) {
+        diagnostics.push({ sessionId, path: file.path, shadowPathsJson });
+      }
+      stats.skipped++;
+      continue;
+    }
+
+    try {
+      const parsed = await parseSessionFile(file.path, sessionId);
+      parsedCandidates.push({ file, shadowPathsJson, parsed });
+      stats.parsed++;
+    } catch {
+      stats.skipped++;
+    }
+  }
 
   const upsert = db.query(`
     INSERT INTO sessions (
@@ -159,6 +210,9 @@ export async function reindexStore(
   const refreshDiagnostics = db.query(
     "UPDATE sessions SET path = $path, shadow_paths = $shadow_paths WHERE session_id = $session_id",
   );
+  const readCodexTitle = db.query(
+    "SELECT codex_title AS codexTitle FROM sessions WHERE session_id = $id",
+  );
   const ftsDelete = db.query("DELETE FROM sessions_fts WHERE session_id = $id");
   const ftsInsert = db.query(
     "INSERT INTO sessions_fts (session_id, title, skeleton) VALUES ($id, $title, $skeleton)",
@@ -167,45 +221,16 @@ export async function reindexStore(
   const manageTransaction = options.manageTransaction !== false;
   if (manageTransaction) db.exec("BEGIN IMMEDIATE;");
   try {
-    const stats: ReindexStats = {
-      scanned: files.length,
-      parsed: 0,
-      skipped: 0,
-      removed: 0,
-      duplicates: files.length - canonical.length,
-    };
-    const seen = new Set<string>();
+    for (const diagnostic of diagnostics) {
+      refreshDiagnostics.run({
+        $session_id: diagnostic.sessionId,
+        $path: diagnostic.path,
+        $shadow_paths: diagnostic.shadowPathsJson,
+      });
+    }
 
-    for (const candidate of canonical) {
-      const { sessionId, file, shadowPaths } = candidate;
-      seen.add(sessionId);
-      const prev = existing.get(sessionId);
-      const shadowPathsJson = JSON.stringify(shadowPaths);
-      if (
-        prev &&
-        prev.file_mtime === file.mtimeMs &&
-        prev.file_size === file.sizeBytes &&
-        prev.path === file.path
-      ) {
-        // Diagnostics must refresh when changed, but an unchanged reindex stays read-only.
-        if (prev.shadow_paths !== shadowPathsJson) {
-          refreshDiagnostics.run({
-            $session_id: sessionId,
-            $path: file.path,
-            $shadow_paths: shadowPathsJson,
-          });
-        }
-        stats.skipped++;
-        continue;
-      }
-
-      let parsed;
-      try {
-        parsed = await parseSessionFile(file.path, sessionId);
-      } catch {
-        stats.skipped++;
-        continue;
-      }
+    for (const candidate of parsedCandidates) {
+      const { file, shadowPathsJson, parsed } = candidate;
       const project = deriveProject(parsed.cwd);
       const fallback = cleanLabel(parsed.userTexts);
 
@@ -240,10 +265,12 @@ export async function reindexStore(
         $tick_interval_sec: parsed.tickIntervalSec,
         $shadow_paths: shadowPathsJson,
       });
-      const ftsTitle = parsed.nativeTitle ?? prev?.codex_title ?? fallback;
+      const currentTitle = readCodexTitle.get({ $id: parsed.sessionId }) as {
+        codexTitle: string | null;
+      } | null;
+      const ftsTitle = parsed.nativeTitle ?? currentTitle?.codexTitle ?? fallback;
       ftsDelete.run({ $id: parsed.sessionId });
       ftsInsert.run({ $id: parsed.sessionId, $title: ftsTitle, $skeleton: parsed.skeleton });
-      stats.parsed++;
     }
 
     const removeRow = db.query("DELETE FROM sessions WHERE session_id = $id");
@@ -255,6 +282,7 @@ export async function reindexStore(
       }
     }
 
+    options.beforeCommit?.(stats);
     if (manageTransaction) db.exec("COMMIT;");
     return stats;
   } catch (cause) {

@@ -86,15 +86,10 @@ export function createCatalogueHttpHandler(options: CatalogueHttpOptions): (requ
     try {
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/v1/health") {
-        const prepared = await options.authority.prepareRead(false, {
-          startBackground: false,
-          waitForInFlight: true,
-        });
-        if (!prepared.ok) return failure(prepared.error);
         const body: CatalogueHealthResult = {
           protocolVersion: CATALOGUE_PROTOCOL_VERSION,
           service: options.service,
-          sourceStatus: prepared.value,
+          sourceStatus: options.authority.sourceStatus(),
         };
         return json(body);
       }

@@ -160,20 +160,22 @@ export class CatalogueAuthority {
     options: { readonly startBackground?: boolean; readonly waitForInFlight?: boolean } = {},
   ): Promise<Result<CatalogueSourceStatus, CatalogueAuthorityError>> {
     if (this.#refreshPromise) {
-      if (requireFresh || options.waitForInFlight === true) {
+      const status = this.sourceStatus();
+      const waitForBootstrap = status.freshness === "uninitialized" && status.rowCount === 0;
+      if (requireFresh || options.waitForInFlight === true || waitForBootstrap) {
         const inFlight = await this.#refreshPromise;
-        if (!inFlight.ok && requireFresh) return inFlight;
+        if (!inFlight.ok && (requireFresh || waitForBootstrap)) return inFlight;
       } else {
-        // A refresh owns the single SQLite connection across its async parse phase. Returning the
-        // existing status is safe; entering a visibility-sync transaction here is not.
-        return ok(this.sourceStatus());
+        // Parsing does not hold a write transaction, so stale readers can safely return the last
+        // committed snapshot while a refresh prepares its next atomic publication.
+        return ok(status);
       }
     }
     this.#refreshVisibilityIfChanged();
     const status = this.sourceStatus();
     if (status.freshness === "fresh") return ok(status);
 
-    if (requireFresh || status.freshness === "uninitialized" && status.rowCount === 0) {
+    if (requireFresh || (status.freshness === "uninitialized" && status.rowCount === 0)) {
       const refreshed = await this.refresh({ force: false, titles: false });
       if (!refreshed.ok) return refreshed;
       return ok(this.sourceStatus());
@@ -185,12 +187,11 @@ export class CatalogueAuthority {
 
   async query(query: RootSessionQuery): Promise<Result<RootSessionPage, CatalogueAuthorityError>> {
     const requireFresh = query.freshness === "require-fresh";
-    // If another request is already refreshing, wait rather than reading rows while reindexStore is
-    // publishing them. The first stale reader still returns its cached page immediately; only
-    // followers wait for that one in-flight refresh.
+    // Require-fresh readers and empty-store bootstrap followers wait for the in-flight refresh.
+    // Other allow-stale readers return the last committed generation while parsing continues.
     const prepared = await this.prepareRead(requireFresh, {
       startBackground: false,
-      waitForInFlight: true,
+      waitForInFlight: requireFresh,
     });
     if (!prepared.ok) return prepared;
     const snapshotStatus = this.sourceStatus();
@@ -353,20 +354,14 @@ export class CatalogueAuthority {
     }
 
     const totalBytes = scan.value.reduce((sum, file) => sum + file.sizeBytes, 0);
-    let stats: ReindexStats;
-    this.#db.exec("BEGIN IMMEDIATE;");
-    try {
-      stats = await reindexStore(this.#db, scan.value, this.#config.host.label, {
-        manageTransaction: false,
-      });
-      const visibilityChanged = this.#syncHiddenSessions(false);
-      this.#catalogueDataVersion = this.#readCatalogueDataVersion();
-      this.#markRefreshSuccess(stats, visibilityChanged);
-      this.#db.exec("COMMIT;");
-    } catch (cause) {
-      this.#db.exec("ROLLBACK;");
-      throw cause;
-    }
+    const catalogueDataVersionBeforePublication = this.#readCatalogueDataVersion();
+    const stats = await reindexStore(this.#db, scan.value, this.#config.host.label, {
+      beforeCommit: (publishedStats) => {
+        const visibilityChanged = this.#syncHiddenSessions(false);
+        this.#markRefreshSuccess(publishedStats, visibilityChanged);
+      },
+    });
+    this.#catalogueDataVersion = catalogueDataVersionBeforePublication;
 
     let titles: BackfillStats | null = null;
     if (options.titles) {

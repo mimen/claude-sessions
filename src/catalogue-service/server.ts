@@ -267,23 +267,36 @@ export async function runCatalogueDaemon(
   } satisfies CatalogueHealthResult["service"];
 
   try {
+    const handleRequest = createCatalogueHttpHandler({
+      authority,
+      service,
+      onRequestStart: () => {
+        activeRequests++;
+        lastActivityAt = Date.now();
+        scheduleIdleCheck();
+      },
+      onRequestEnd: () => {
+        activeRequests = Math.max(0, activeRequests - 1);
+        lastActivityAt = Date.now();
+        scheduleIdleCheck();
+      },
+      onShutdown: requestStop,
+    });
     server = Bun.serve({
       unix: socketPath,
-      fetch: createCatalogueHttpHandler({
-        authority,
-        service,
-        onRequestStart: () => {
-          activeRequests++;
-          lastActivityAt = Date.now();
-          scheduleIdleCheck();
-        },
-        onRequestEnd: () => {
-          activeRequests = Math.max(0, activeRequests - 1);
-          lastActivityAt = Date.now();
-          scheduleIdleCheck();
-        },
-        onShutdown: requestStop,
-      }),
+      fetch: (request, bunServer) => {
+        const pathname = new URL(request.url).pathname;
+        if (pathname === "/_control/refresh") {
+          bunServer.timeout(request, 0);
+        } else if (
+          pathname === "/v1/source-status" ||
+          pathname === "/v1/root-sessions/query" ||
+          pathname === "/v1/source/lookup"
+        ) {
+          bunServer.timeout(request, 255);
+        }
+        return handleRequest(request);
+      },
     });
     chmodSync(socketPath, 0o600);
   } catch (cause) {

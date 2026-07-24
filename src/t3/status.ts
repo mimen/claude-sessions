@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import type { SessionRow } from "../index/index.ts";
 import { CLAUDE_PROVIDER_INSTANCE_ID } from "../catalogue-service/protocol.ts";
 
@@ -85,6 +86,7 @@ export interface T3SourceIdentity {
   readonly providerInstanceId: string;
   readonly localSourceHost: string;
   readonly nativeSessionId: string;
+  readonly sourceCwd: string;
 }
 
 export type T3AttachmentIndicator =
@@ -198,7 +200,7 @@ export const productionT3AttachmentStatusClient: T3AttachmentStatusClient = {
 
 /** Stable composite identity shared with T3's attachment join. */
 export function t3SourceIdentityKey(identity: T3SourceIdentity): string {
-  return `${identity.providerInstanceId}\0${identity.localSourceHost}\0${identity.nativeSessionId}`;
+  return `${identity.providerInstanceId}\0${identity.localSourceHost}\0${identity.nativeSessionId}\0${identity.sourceCwd}`;
 }
 
 /**
@@ -214,12 +216,20 @@ export function joinT3AttachmentsToRootSessions(
   );
   const bySessionId = new Map<string, T3AttachmentStatus>();
   for (const row of rows) {
-    if (row.isSubagent || row.resumeId.trim().length === 0) continue;
+    if (row.isSubagent || row.resumeId.trim().length === 0 || !row.cwd) continue;
+    let sourceCwd = row.cwd;
+    try {
+      sourceCwd = realpathSync(row.cwd);
+    } catch {
+      // Indexed rows can outlive their working directory. Preserve exact identity matching for
+      // snapshots captured before the path vanished, while live paths use canonical realpaths.
+    }
     const attachment = byIdentity.get(
       t3SourceIdentityKey({
         providerInstanceId: CLAUDE_PROVIDER_INSTANCE_ID,
         localSourceHost: row.host,
         nativeSessionId: row.resumeId,
+        sourceCwd,
       }),
     );
     if (attachment) bySessionId.set(row.sessionId, attachment);

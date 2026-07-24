@@ -171,6 +171,7 @@ test("attachment snapshot joins only local root rows with the same source identi
       row(),
       row({ sessionId: "wrong-host", host: "other-host" }),
       row({ sessionId: "wrong-resume", resumeId: "other-native-id" }),
+      row({ sessionId: "wrong-cwd", cwd: "/workspace/other" }),
       row({ sessionId: "subagent", isSubagent: true }),
       row({ sessionId: "not-resumable", resumeId: "" }),
     ],

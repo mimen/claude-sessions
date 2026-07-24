@@ -1,8 +1,6 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { SessionRow } from "../index/index.ts";
-import { type Result } from "../result.ts";
-import { encodePath, locateLaunchDir, storageFolderOf, type Located } from "../resume/locate.ts";
 
 const DEFAULT_T3_TIMEOUT_MS = 35_000;
 
@@ -93,57 +91,34 @@ export function buildT3OpenArgv(request: T3OpenRequest, binary = process.env.T3_
 }
 
 /**
- * Resolve a launch cwd that is safe to hand to T3. Unlike native Resume, this never guesses a
- * project root or home directory: it accepts only the recorded cwd when its realpath maps to the
- * session storage folder, or an unambiguous, non-exhausted locator result that still verifies.
+ * Resolve the exact recorded source CWD that catalogue protocol v1 will verify. A reconstructed
+ * launch directory can be safe for native resume while still differing from the indexed row, so
+ * Open-in-T3 deliberately refuses fallback discovery.
  */
 export function resolveT3OpenCwd(
   row: SessionRow,
   seams: T3CwdResolverSeams = productionT3CwdResolverSeams,
 ): T3CwdResolution {
-  const folder = storageFolderOf(row.path);
-
-  if (row.cwd && isAbsolute(row.cwd)) {
-    try {
-      const recorded = seams.realpath(row.cwd);
-      if (encodePath(recorded) === folder) return { ok: true, cwd: recorded };
-    } catch (caught) {
-      const error = caught as Error | JsonValue;
-      if (!isMissingPathError(error)) return { ok: false, reason: `cannot verify recorded cwd: ${messageOf(error)}` };
-    }
+  if (!row.cwd || !isAbsolute(row.cwd)) {
+    return { ok: false, reason: "session has no recorded absolute cwd" };
   }
-
-  const locatedResult = seams.locateLaunchDir(row.path);
-  if (!locatedResult.ok) return { ok: false, reason: `cannot locate session cwd: ${locatedResult.error.message}` };
-  if (!locatedResult.value) return { ok: false, reason: "no verified session cwd exists on disk" };
-
-  const located = locatedResult.value;
-  if (located.ambiguousWith) {
-    return { ok: false, reason: `session cwd is ambiguous (${located.dir} or ${located.ambiguousWith})` };
-  }
-  if (located.exhausted) return { ok: false, reason: "session cwd search exhausted before it could prove a unique match" };
-  if (!isAbsolute(located.dir)) return { ok: false, reason: "located session cwd is not absolute" };
 
   try {
-    const resolved = seams.realpath(located.dir);
-    if (encodePath(resolved) !== folder) return { ok: false, reason: "located session cwd no longer matches its storage folder" };
-    return { ok: true, cwd: resolved };
+    return { ok: true, cwd: seams.realpath(row.cwd) };
   } catch (caught) {
     const error = caught as Error | JsonValue;
-    return { ok: false, reason: `cannot verify located session cwd: ${messageOf(error)}` };
+    return { ok: false, reason: `cannot verify recorded cwd: ${messageOf(error)}` };
   }
 }
 
 export interface T3CwdResolverSeams {
   realpath(path: string): string;
-  locateLaunchDir(path: string): Result<Located | null, Error>;
 }
 
 export type T3CwdResolution = { readonly ok: true; readonly cwd: string } | { readonly ok: false; readonly reason: string };
 
 const productionT3CwdResolverSeams: T3CwdResolverSeams = {
   realpath: (path) => realpathSync(path),
-  locateLaunchDir,
 };
 
 /** Invoke T3 asynchronously and classify its complete process/result envelope. */
@@ -280,10 +255,6 @@ function isJsonObject(value: JsonValue | undefined): value is JsonObject {
 
 function isT3ResultErrorCode(code: string): code is T3ResultErrorCode {
   return (T3_RESULT_ERROR_CODES as readonly string[]).includes(code);
-}
-
-function isMissingPathError(error: Error | JsonValue): boolean {
-  return error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT";
 }
 
 function isMissingExecutable(message: string): boolean {

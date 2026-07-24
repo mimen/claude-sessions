@@ -8,14 +8,13 @@ import { getRow, lifecycleOf, openCatalogue } from "../catalogue/db.ts";
 import type { SurfaceLocation } from "../cmux/bridge.ts";
 import { liveBridge } from "../cmux/live.ts";
 import { workspaceForSessionFrom } from "../cmux/liveness.ts";
-import { loadConfig } from "../config.ts";
-import { reindexStore, sessionById } from "../index/index.ts";
+import { refreshCatalogueAuthority } from "../catalogue-service/client.ts";
+import { sessionById } from "../index/index.ts";
 import { openIndex } from "../index/schema.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir, expandHome } from "../paths.ts";
 import { newSession } from "../resume/new-session.ts";
 import { loadLaunchers } from "../resume/launchers.ts";
 import { resumeSessionEntry } from "../resume/resume-session.ts";
-import { scanStore } from "../store.ts";
 import { buildStartCandidates, type StartCandidates } from "./candidates.ts";
 import { buildStartChoices, choiceDetail, choiceLabel, type StartChoice } from "./choices.ts";
 import { routeStart, type StartRouteDecision } from "./gateway.ts";
@@ -107,18 +106,14 @@ function parseInvocation(args: readonly string[]): StartInvocation {
 
 async function loadStartCandidates(description: string): Promise<StartCandidates> {
   ensureDataDir();
-  const configResult = loadConfig();
-  if (!configResult.ok) throw configResult.error;
+  const refreshed = await refreshCatalogueAuthority({ force: false, titles: false });
+  if (!refreshed.ok) {
+    console.error(`ccs start: index refresh skipped: ${refreshed.error.message}`);
+  }
 
   const indexDb = openIndex(DB_PATH());
   const catalogueDb = openCatalogue(CATALOGUE_PATH());
   try {
-    const scan = scanStore(configResult.value.store.path);
-    if (scan.ok) {
-      await reindexStore(indexDb, scan.value, configResult.value.host.label);
-    } else {
-      console.error(`ccs start: index refresh skipped: ${scan.error.message}`);
-    }
     return buildStartCandidates(indexDb, catalogueDb, description, process.cwd());
   } finally {
     indexDb.close();

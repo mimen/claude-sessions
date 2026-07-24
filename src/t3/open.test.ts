@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import type { SessionRow } from "../index/index.ts";
-import { err, ok } from "../result.ts";
-import { encodePath, type Located } from "../resume/locate.ts";
+import { encodePath } from "../resume/locate.ts";
 import {
   buildT3OpenArgv,
   openT3Session,
@@ -65,13 +64,8 @@ function textStream(text: string): ReadableStream<Uint8Array> {
 function resolver(overrides: Partial<T3CwdResolverSeams> = {}): T3CwdResolverSeams {
   return {
     realpath: (path) => path,
-    locateLaunchDir: () => ok(null),
     ...overrides,
   };
-}
-
-function located(dir: string, overrides: Partial<Located> = {}): Located {
-  return { dir, ambiguousWith: null, exhausted: false, ...overrides };
 }
 
 test("buildT3OpenArgv uses the exact argv contract and no shell string", () => {
@@ -161,35 +155,12 @@ test("resolveT3OpenCwd accepts only a recorded cwd verified against its storage 
   const recorded = resolveT3OpenCwd(row(), resolver());
   expect(recorded).toEqual({ ok: true, cwd: "/recorded" });
 
-  const mismatched = resolveT3OpenCwd(
-    row({ cwd: "/different" }),
-    resolver({ locateLaunchDir: () => ok(null) }),
+  const canonical = resolveT3OpenCwd(
+    row({ cwd: "/recorded-link" }),
+    resolver({ realpath: () => "/recorded" }),
   );
-  expect(mismatched).toEqual({ ok: false, reason: "no verified session cwd exists on disk" });
-});
+  expect(canonical).toEqual({ ok: true, cwd: "/recorded" });
 
-test("resolveT3OpenCwd permits only verified, unambiguous, non-exhausted locator results", () => {
-  const fallback = resolveT3OpenCwd(
-    row({ cwd: null }),
-    resolver({ locateLaunchDir: () => ok(located("/recorded")) }),
-  );
-  expect(fallback).toEqual({ ok: true, cwd: "/recorded" });
-
-  const ambiguous = resolveT3OpenCwd(
-    row({ cwd: null }),
-    resolver({ locateLaunchDir: () => ok(located("/recorded", { ambiguousWith: "/recorded-other" })) }),
-  );
-  expect(ambiguous.ok ? "accepted" : ambiguous.reason).toContain("ambiguous");
-
-  const exhausted = resolveT3OpenCwd(
-    row({ cwd: null }),
-    resolver({ locateLaunchDir: () => ok(located("/recorded", { exhausted: true })) }),
-  );
-  expect(exhausted.ok ? "accepted" : exhausted.reason).toContain("exhausted");
-
-  const ioError = resolveT3OpenCwd(
-    row({ cwd: null }),
-    resolver({ locateLaunchDir: () => err(new Error("permission denied")) }),
-  );
-  expect(ioError.ok ? "accepted" : ioError.reason).toContain("cannot locate session cwd");
+  const missing = resolveT3OpenCwd(row({ cwd: null }), resolver());
+  expect(missing).toEqual({ ok: false, reason: "session has no recorded absolute cwd" });
 });
