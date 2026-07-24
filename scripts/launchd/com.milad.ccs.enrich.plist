@@ -21,11 +21,10 @@
      15-minute interval it drains in roughly two hours without ever presenting the gateway
      with a burst. Steady state is a handful of sessions or none.
 
-     CHECKOUT: this points at the feat/session-enrichment worktree, not the deployment at
-     ~/Programming/Deployments/claude-sessions, because the deployed ccs predates `enrich` and
-     would fail every run with "Unknown command: enrich". REPOINT THIS at the deployment the
-     moment the branch is deployed there — a launchd job aimed at a worktree breaks if the
-     worktree is ever removed.
+     CHECKOUT: the deployment, never a worktree — a scheduled job aimed at a worktree dies the
+     moment that worktree is removed. The installer proves `ccs enrich` exists in whatever
+     checkout this plist names before scheduling it, because an agent that fails on every run
+     fails silently into a log nobody reads.
 
      Install:   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.milad.ccs.enrich.plist
      Remove:    launchctl bootout gui/$(id -u)/com.milad.ccs.enrich
@@ -38,7 +37,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/bun</string>
-        <string>/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/session-enrichment/bin/ccs</string>
+        <string>/Users/mimen/Programming/Deployments/claude-sessions/bin/ccs</string>
         <string>enrich</string>
         <string>--sweep</string>
         <string>--limit</string>
