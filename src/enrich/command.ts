@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { openIndex } from "../index/schema.ts";
-import { sessionById } from "../index/index.ts";
+import { sessionById, type SessionRow } from "../index/index.ts";
+import { err, ok, type Result } from "../result.ts";
 import { openCatalogue } from "../catalogue/db.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { loadEnrichmentLocations, LOCATION_REGISTRY_PATH } from "./locations.ts";
@@ -121,6 +122,13 @@ async function runSweep(
   const stats = await sweep(index, catalogue, {
     limit,
     concurrency,
+    // Always to stderr, in both modes: this is the only record a scheduled run leaves behind.
+    onFailure: (sessionId, error) => {
+      // Truncated: a malformed generation can echo an entire garbled tool call into the message,
+      // and one such line can bury a whole run's worth of log.
+      const detail = error.message.replace(/\s+/g, " ").slice(0, 200);
+      console.error(`ccs enrich: ${sessionId.slice(0, 8)}… failed: ${detail}`);
+    },
     onProgress: asJson ? undefined : (done, count) => {
       process.stdout.write(`\rEnriching… ${done}/${count}`);
     },
@@ -150,11 +158,12 @@ async function runOne(
     console.error("No session id (pass one, or run inside a Claude session for `.`).");
     return 1;
   }
-  const row = sessionById(index, sessionId);
-  if (!row) {
-    console.error(`ccs enrich: ${sessionId.slice(0, 8)}… is not in the index (run \`ccs reindex\`).`);
+  const resolved = resolveIndexedSession(index, sessionId);
+  if (!resolved.ok) {
+    console.error(`ccs enrich: ${resolved.error.message}`);
     return 1;
   }
+  const row = resolved.value;
   warnIfNoRegistry();
   const result = await enrichOne(catalogue, index, row, loadEnrichmentLocations());
   if (!result.ok) {
@@ -176,6 +185,33 @@ async function runOne(
     console.log(`cwd: ${row.cwd ?? "(unknown)"} → should be ${where}`);
   }
   return 0;
+}
+
+/**
+ * Resolve an id or a unique short prefix to an indexed session.
+ *
+ * Prefixes matter because `--list` prints the same 8-character form every other ccs surface
+ * shows, and a command whose own output can't be pasted back into it is a papercut on every use.
+ * An ambiguous prefix is refused rather than guessed — enrichment writes to whichever session it
+ * picks, so silently choosing one of two candidates would corrupt a row the user never named.
+ */
+function resolveIndexedSession(index: ReturnType<typeof openIndex>, id: string): Result<SessionRow> {
+  const exact = sessionById(index, id);
+  if (exact) return ok(exact);
+
+  const matches = index
+    .query("SELECT session_id FROM sessions WHERE session_id LIKE $prefix LIMIT 5")
+    .all({ $prefix: `${id}%` }) as { session_id: string }[];
+  if (matches.length === 1) {
+    const row = sessionById(index, matches[0]!.session_id);
+    if (row) return ok(row);
+  }
+  if (matches.length > 1) {
+    return err(new Error(
+      `"${id}" matches ${matches.length} sessions (${matches.map((m) => m.session_id.slice(0, 12)).join(", ")}) — use a longer prefix.`,
+    ));
+  }
+  return err(new Error(`${id.slice(0, 8)}… is not in the index (run \`ccs reindex\`).`));
 }
 
 /**

@@ -34,8 +34,21 @@ export const RECOMMENDATION_ACTIONS: Readonly<Record<Recommendation, string>> = 
   handoff: "the handoff skill (pass the thread to another session or person)",
 };
 
-const MAX_SUMMARY = 600;
-const MAX_LINE = 300;
+/**
+ * Field budgets.
+ *
+ * These are a backstop against a runaway generation filling a catalogue column, NOT a style
+ * guide — so they sit well above the length actually asked for in the schema descriptions, which
+ * is where the model is told to be brief. An earlier revision had them at 600/300 without telling
+ * the model anything, and rejected two thirds of real sessions for writing three ordinary
+ * sentences: a limit the model is never shown is a limit it cannot respect.
+ */
+const MAX_SUMMARY = 1_200;
+const MAX_LINE = 500;
+
+/** What the model is ASKED for, as opposed to what the parser will tolerate. */
+const TARGET_SUMMARY_CHARS = 700;
+const TARGET_LINE_CHARS = 250;
 
 /**
  * The raw shape the model must return. Field-level limits are enforced here so a runaway
@@ -115,11 +128,15 @@ export function enrichmentJsonSchema(): { readonly [key: string]: JsonSchemaValu
     properties: {
       summary: {
         type: "string",
-        description: "Two or three sentences: what this session was for and where it actually ended up. Concrete, no filler.",
+        description:
+          "What this session was for and where it actually ended up. Concrete, no filler. " +
+          `Two or three sentences, at most ${TARGET_SUMMARY_CHARS} characters — longer answers are rejected.`,
       },
       outstanding: {
         type: "string",
-        description: "One line naming what is still unfinished or unanswered. Empty string when nothing is open.",
+        description:
+          "One line naming what is still unfinished or unanswered. Empty string when nothing is open. " +
+          `At most ${TARGET_LINE_CHARS} characters.`,
       },
       recommendation: {
         type: "string",
@@ -128,7 +145,10 @@ export function enrichmentJsonSchema(): { readonly [key: string]: JsonSchemaValu
           "continue = live work worth resuming. complete = it succeeded and is done. " +
           "archive = abandoned or a dead end. handoff = needs to pass to another session or person.",
       },
-      reason: { type: "string", description: "One line justifying the recommendation." },
+      reason: {
+        type: "string",
+        description: `One line justifying the recommendation. At most ${TARGET_LINE_CHARS} characters.`,
+      },
       junk: {
         type: "boolean",
         description:
