@@ -30,6 +30,7 @@
  *   completed            -> setCompleted (boolean)
  *   archived             -> setArchived (boolean)
  *   meta                 -> setMeta per key (object of key→value; null values delete)
+ *   enrichment           -> setEnrichment (REQUIRES --sensor; whole object, written atomically)
  *
  * Usage:
  *   ccs session-fields <sid> --json '{"cluster":"pr-watch","gusWork":"W-...","stage":"building"}' --sensor catalogue-sync
@@ -37,13 +38,16 @@
  * Returns exit 0 on success. Prints a JSON summary of applied fields (or the first field's
  * validation error on non-zero exit).
  */
+import { z } from "zod";
 import { openCatalogue, getRow,
   setCustomTitle, setRole, setProject, setCluster, setGusWork, setWorkUnitId,
   setStatusLine, setParked, setParent, setKey, setCompleted, setArchived,
-  setMeta, setStage,
+  setMeta, setStage, setEnrichment,
   setSessionEpic,
 } from "./db.ts";
 import { validateStageTransition } from "./stage-schema.ts";
+import { EnrichmentPayloadSchema, validateEnrichment } from "./enrichment-schema.ts";
+import { loadEnrichmentLocations, locationKeySet } from "../enrich/locations.ts";
 import { resolveRole } from "../roles/role-files.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { recomposeForSession } from "../board/recompose.ts";
@@ -66,6 +70,18 @@ const BOOL_FIELDS: Record<string, (db: any, sid: string, v: boolean, now: string
   completed: setCompleted,
   archived: setArchived,
 };
+
+/**
+ * The enrichment object as an external sensor writes it: the model's assertions plus the message
+ * count they were made against. `atMessages` is required because staleness is meaningless without
+ * it — a summary that doesn't say which version of the transcript it describes can never be known
+ * to be out of date. `at` defaults to now, since a writer persisting immediately has no reason to
+ * carry a timestamp.
+ */
+const EnrichmentWriteSchema = EnrichmentPayloadSchema.extend({
+  atMessages: z.number().int().nonnegative(),
+  at: z.string().min(1).optional(),
+});
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -131,6 +147,30 @@ export function sessionFieldsCommand(args: string[]): number {
       if (field === "stage") {
         setStage(db, sid, value === null ? null : (value as string), now);
         applied.push(`stage=${value ?? "null"} (sensor=${sensor})`);
+        continue;
+      }
+      if (field === "enrichment") {
+        // Enrichment is sensor-produced OBSERVED state, so it carries the same guard as `stage`
+        // (ADR-0079): a worker must not be able to write its own flattering summary and
+        // recommendation into the catalogue through the bulk primitive.
+        if (!sensor) {
+          console.error("ccs session-fields: writing 'enrichment' requires --sensor <name> (observed state, not self-reported).");
+          return 2;
+        }
+        const parsed = EnrichmentWriteSchema.safeParse(value);
+        if (!parsed.success) {
+          console.error(`ccs session-fields: enrichment: ${z.prettifyError(parsed.error)}`);
+          return 1;
+        }
+        // The same coherence check the enrich command applies, against this machine's registry —
+        // otherwise an external writer could store a location key that resolves to nothing here.
+        const problem = validateEnrichment(parsed.data, locationKeySet(loadEnrichmentLocations()));
+        if (problem) {
+          console.error(`ccs session-fields: enrichment: ${problem}`);
+          return 1;
+        }
+        setEnrichment(db, sid, { ...parsed.data, at: parsed.data.at ?? now }, now);
+        applied.push(`enrichment=${parsed.data.recommendation} (sensor=${sensor})`);
         continue;
       }
       if (field === "meta") {
