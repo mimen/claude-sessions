@@ -91,6 +91,18 @@ test("liveness keys on resumeId (the id claude --resume uses), not the filename 
   expect(plan.action).toBe("skip");
 });
 
+test("resume plan never injects a role birth model", () => {
+  // A role policy may later change, but replay is history-routed and has no --model override.
+  const plan = planResumeSession(stubBridge([]), row({ models: ["gpt-5.6-sol[1m]"] }), {
+    binary: "claude-gpt",
+    resumeCommand: null,
+  });
+  expect(plan.action).toBe("resume");
+  if (plan.action !== "resume") throw new Error("unreachable");
+  expect(plan.command.argv).toEqual(["claude-gpt", "--resume", "resume-1"]);
+  expect(plan.command.argv).not.toContain("--model");
+});
+
 test("launcher selection reports unknown and ineligible routes without falling back", () => {
   const launchers = [
     { name: "claude", binary: "claude", serves: ["claude-*"] as const, env: {} },

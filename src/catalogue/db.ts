@@ -1522,6 +1522,10 @@ export interface RoleDef {
    * (`color = "#7d7dff"`); null when no color is set (TUI falls back to faint, cmux-paint to
    * whatever it declares). Kept as hex so ccs and cmux render literally identical bytes. */
   color: string | null;
+  /** Optional canonical model policy authored in role.toml; launch routing is derived from it. */
+  model: import("../resume/role-model-launch.ts").RoleModelId | null;
+  /** A malformed manifest/model is observable to readers and blocks a fresh birth. */
+  manifestError: string | null;
   /** Skills / commands / hooks to materialize into ~/.claude for this role (ADR-0034). */
   skills: string[];
   commands: string[];

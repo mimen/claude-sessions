@@ -31,6 +31,7 @@ test("readRoleDir: role.toml carries only kind + resume_command; rest is derived
     expect(def.cluster).toBe("pr-watch");      // = parent path
     expect(def.kind).toBe("loop");             // from toml
     expect(def.resumeCommand).toBe("/loop 15m /x");
+    expect(def.model).toBeNull();
     expect(def.homeDir).toBe(roleDir(root, "pr-watch", "control")); // computed, not stored
     expect(def.skills).toEqual(["pr-watch-control"]);      // file-presence
     expect(def.commands).toEqual(["pr-watch-control"]);    // *.md base-name
@@ -140,11 +141,25 @@ test("rolesForClusterFromFiles: only that cluster's roles", () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("malformed role.toml → fail-open (empty manifest), doesn't throw", () => {
+test("malformed role.toml remains observable for birth preflight", () => {
   const root = pkg((r) => writeRole(r, "c", "broken", "this is { not toml"));
   try {
     const def = resolveRole("broken", root)!;
     expect(def.kind).toBeNull();
+    expect(def.manifestError).toContain("malformed role.toml");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("readRoleDir parses canonical model policy and rejects aliases", () => {
+  const root = pkg((r) => {
+    writeRole(r, "c", "terra", 'kind = "session"\nmodel = "gpt-5.6-terra"');
+    writeRole(r, "c", "alias", 'kind = "session"\nmodel = "gpt-5.6-terra[1m]"');
+  });
+  try {
+    expect(resolveRole("terra", root)!.model).toBe("gpt-5.6-terra");
+    expect(resolveRole("terra", root)!.manifestError).toBeNull();
+    expect(resolveRole("alias", root)!.model).toBeNull();
+    expect(resolveRole("alias", root)!.manifestError).toContain("model must be one of");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
