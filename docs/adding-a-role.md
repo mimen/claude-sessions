@@ -156,11 +156,18 @@ EOF
 # cmux tab appearance override
 cat > .ccs-hooks/cmux-paint.json <<'EOF'
 {
-  "color": "#00ff00",
-  "icon": "📊"
+  "title_template": "Metrics · {work_ref_humanized}",
+  "color": "#00ff00"
 }
 EOF
 ```
+
+`cmux-paint.json` can set a static `title`, or a `title_template` containing
+`{work_ref_humanized}`. The placeholder reads the work reference from a structured
+`<cluster>:<role>:<work_ref>` identity key and humanizes hyphen/underscore-delimited words.
+A static `title` wins when both are present; an unknown placeholder or missing work reference
+keeps the normal computed title. Role `color` from `role.toml` remains the default unless this
+paint file overrides it.
 
 Common hook types:
 - **claude-md** (`.md`) — injected into the session's CLAUDE.md context at SessionStart (merge strategy: `sections`)

@@ -1,3 +1,5 @@
+import { humanizeSlug, workRefOfIdentityKey } from "../catalogue/identity-key.ts";
+
 /** Display helpers for the TUI: model badges and compact money formatting. */
 
 /** A model family, derived from a model id, with a short label and a stable color. */
@@ -105,15 +107,10 @@ export function identityRowLabel(identityKey: string | null | undefined): string
   if (!identityKey) return null;
   if (identityKey.startsWith("event-watch:") && identityKey.split(":").length === 2) return null;
 
-  const prefix = "event-watch:event-worker:";
-  if (!identityKey.startsWith(prefix)) return identityKey;
+  if (!identityKey.startsWith("event-watch:event-worker:")) return identityKey;
 
-  return identityKey
-    .slice(prefix.length)
-    .split(/[-_]+/)
-    .filter(Boolean)
-    .map((segment) => `${segment[0]?.toUpperCase() ?? ""}${segment.slice(1)}`)
-    .join(" ");
+  const workRef = workRefOfIdentityKey(identityKey);
+  return workRef ? humanizeSlug(workRef) : identityKey;
 }
 
 /** Human cadence from seconds: "45s" · "12m" · "1.5h" · "3.2h" · "2.1d". Blank for 0. */

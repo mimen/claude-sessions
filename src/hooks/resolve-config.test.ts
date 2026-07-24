@@ -99,10 +99,10 @@ test("claude-md: sections merge across levels with floor protection", () => {
 test("most-specific: role's config wins over cluster's", () => {
   const f = fixture();
   try {
-    f.write(f.clusterDir, "cmux-paint", "json", JSON.stringify({ tab: "generic" }));
-    f.write(f.roleHome, "cmux-paint", "json", JSON.stringify({ tab: "worker" }));
+    f.write(f.clusterDir, "cmux-paint", "json", JSON.stringify({ title: "generic" }));
+    f.write(f.roleHome, "cmux-paint", "json", JSON.stringify({ title_template: "{work_ref_humanized}" }));
     const r = resolveConfig(row({ cluster: "pr-watch", role: "pr-agent" }), "cmux-paint", f.ctx);
-    expect(r.effective).toEqual({ tab: "worker" });
+    expect(r.effective).toEqual({ title_template: "{work_ref_humanized}" });
   } finally { f.cleanup(); }
 });
 

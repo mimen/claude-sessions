@@ -99,7 +99,7 @@ export function pushRenderOps(
       /* config unreadable → whatever paint already set (or nothing) */
     }
   }
-  const ops = applyPaintOverride(renderTab(row, row.kind, { grouping }), paintWithRoleColor);
+  const ops = applyPaintOverride(renderTab(row, row.kind, { grouping }), paintWithRoleColor, row);
   try {
     execFileSync(cmuxBin, ["rename-workspace", "--workspace", ref, "--", ops.title], {
       timeout: 4000,
