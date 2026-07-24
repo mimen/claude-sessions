@@ -170,6 +170,7 @@ func (m Model) adjustViewOption(direction int) (tea.Model, tea.Cmd) {
 		m.refreshInFlight = true
 		command = refreshCmd(m.options.loadOptions(), preferredID, true)
 	}
+	m.savePrefs()
 	return m, command
 }
 

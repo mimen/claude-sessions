@@ -143,7 +143,7 @@ func (m Model) renderList(width int, height int) string {
 		candidate := m.rows[i]
 		selected := i == m.cursor
 		if candidate.header {
-			out = append(out, m.renderSection(width, candidate))
+			out = append(out, m.renderSection(width, candidate, selected))
 		} else {
 			out = append(out, m.renderSessionRow(width, m.snapshot.Sessions[candidate.sIdx], candidate.level, selected))
 		}
@@ -182,24 +182,49 @@ func (m Model) listWindow(height int) (int, int) {
 	return start, min(len(m.rows), start+visible)
 }
 
-func (m Model) renderSection(width int, candidate row) string {
+func (m Model) renderSection(width int, candidate row, selected bool) string {
+	rowBackground := theme.BgBase
+	if selected {
+		rowBackground = theme.BgLow
+	}
+	tint := func(c lipgloss.Color) lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(c).Background(rowBackground)
+	}
+
 	label := strings.ToUpper(sanitizePlain(candidate.label))
 	indent := strings.Repeat("  ", candidate.level)
 	glyph := candidate.glyph
 	if glyph != "" {
 		glyph += " "
 	}
-	count := fmt.Sprintf(" (%d) ", candidate.count)
+	// Fold marker makes collapsibility discoverable without reading the help.
+	folded := m.collapsed[candidate.key]
+	marker := "▾ "
+	if folded {
+		marker = "▸ "
+	}
+	count := fmt.Sprintf(" (%d)%s", candidate.count, map[bool]string{true: " ⋯ ", false: " "}[folded])
+
 	color := theme.Accent
 	if candidate.level > 0 {
 		color = theme.FgSubtle
 	}
-	nameText := fg(color).Bold(true).Render(glyph + label)
-	countText := fg(theme.FgMoreSubtle).Render(count)
-	used := 2 + lipgloss.Width(indent) + lipgloss.Width(glyph+label) + lipgloss.Width(count)
+	caret := "  "
+	if selected {
+		caret = tint(theme.Primary).Bold(true).Render("❯ ")
+		color = theme.FgBase
+	} else {
+		caret = tint(theme.FgMostSubtle).Render(caret)
+	}
+
+	markerText := tint(theme.FgMoreSubtle).Render(marker)
+	nameText := tint(color).Bold(true).Render(glyph + label)
+	countText := tint(theme.FgMoreSubtle).Render(count)
+	used := 2 + lipgloss.Width(indent) + lipgloss.Width(marker) + lipgloss.Width(glyph+label) + lipgloss.Width(count)
 	ruleLen := max(0, width-used)
-	line := fg(theme.FgMostSubtle).Render("  "+indent) + nameText + countText + fg(theme.Sep).Render(strings.Repeat("─", ruleLen))
-	return theme.Main.Width(width).Render(fit(line, width))
+	line := caret + tint(theme.FgMostSubtle).Render(indent) + markerText + nameText + countText +
+		tint(theme.Sep).Render(strings.Repeat("─", ruleLen))
+	return lipgloss.NewStyle().Background(rowBackground).Width(width).Render(fit(line, width))
 }
 
 func (m Model) renderSessionRow(width int, session data.Session, level int, selected bool) string {
@@ -298,6 +323,60 @@ func cleanTitle(title string) string {
 	return strings.TrimLeft(title, " \t*·•")
 }
 
+// renderSectionCard fills the detail pane when the cursor sits on a section
+// header, so focusing a divider shows something useful (count, spend, state)
+// instead of an empty panel.
+func (m Model) renderSectionCard(contentWidth int, header row) string {
+	folded := m.collapsed[header.key]
+	var spend float64
+	var active int
+	for _, candidate := range m.rows {
+		if candidate.header {
+			continue
+		}
+		session := m.snapshot.Sessions[candidate.sIdx]
+		if !strings.HasPrefix(sectionKeyFor(session), header.key) {
+			continue
+		}
+		spend += session.TotalCost
+		if session.State == "active" {
+			active++
+		}
+	}
+	state := "expanded"
+	if folded {
+		state = "collapsed"
+	}
+	lines := []string{
+		fg(theme.FgBase).Bold(true).Render(truncate(strings.ToUpper(sanitizePlain(header.label)), contentWidth)),
+		fg(theme.FgMoreSubtle).Render(fmt.Sprintf("section · %s", state)),
+		fg(theme.Sep).Render(strings.Repeat("─", contentWidth)),
+		"",
+		fg(theme.FgMostSubtle).Render(pad("sessions", 10)) + fg(theme.FgBase).Render(fmt.Sprintf("%d", header.count)),
+	}
+	if !folded {
+		lines = append(lines,
+			fg(theme.FgMostSubtle).Render(pad("active", 10))+fg(theme.Success).Render(fmt.Sprintf("%d", active)),
+			fg(theme.FgMostSubtle).Render(pad("spend", 10))+fg(theme.CostColor(spend)).Render(nonEmpty(data.FormatCost(spend), "$0")),
+		)
+	}
+	lines = append(lines, "", fg(theme.FgMostSubtle).Render("enter / space  fold ⇄ unfold"))
+	return strings.Join(lines, "\n")
+}
+
+// sectionKeyFor derives the section a session belongs to, matching the keys
+// buildDefaultRows emits.
+func sectionKeyFor(session data.Session) string {
+	if session.Cluster != "" {
+		return "cluster:" + session.Cluster
+	}
+	state := session.State
+	if state == "completed" {
+		state = "done"
+	}
+	return "no-system:" + state
+}
+
 // previewContentWidth is the usable text width inside the preview pane. The pane
 // has left-2/right-1 padding, so any line laid out wider than this overflows and
 // wraps onto a second line.
@@ -316,6 +395,9 @@ func (m Model) previewPaneWidth() int {
 func (m Model) renderPreview(width int, height int) string {
 	session, ok := m.selectedSession()
 	if !ok {
+		if header, isHeader := m.selectedHeader(); isHeader {
+			return m.renderSectionCard(previewContentWidth(width), header)
+		}
 		return fg(theme.FgMoreSubtle).Render("no session selected")
 	}
 	contentWidth := previewContentWidth(width)
@@ -594,6 +676,9 @@ func (m Model) renderHelp() string {
 		{"J / K", "scroll the dossier transcript peek"},
 		{"p", "show / hide preview pane"},
 		{"g", "cycle default / tree / flat"},
+		{"→ / l", "expand section (on a header)"},
+		{"← / h", "collapse section"},
+		{"space", "fold ⇄ unfold the section"},
 		{"o", "view options, filters, sort, autorefresh"},
 		{"/", "fuzzy title / project / task search"},
 		{"t / C / e / X", "retitle / done / archive toggle via ccs"},
@@ -637,7 +722,7 @@ func (m Model) renderKeybar(width int) string {
 	}
 	items := [][2]string{
 		{"Tab", "skills"}, {"↑↓", "move"}, {"enter", "resume"}, {"r", "via…"}, {"v", "transcript"},
-		{"/", "search"}, {"g", "view:" + viewLabel}, {"o", "options"}, {"R", "refresh"},
+		{"/", "search"}, {"g", "view:" + viewLabel}, {"←→", "fold"}, {"o", "options"}, {"R", "refresh"},
 		{"e", "archive/unarchive"}, {"t", "retitle"}, {"C", "done"}, {"E", "edit"},
 		{"S/A/D", "AI"}, {"?", "help"}, {"q", "quit"},
 	}

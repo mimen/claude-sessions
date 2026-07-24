@@ -91,6 +91,7 @@ type Model struct {
 	refreshInFlight    bool
 	snapshot           data.Snapshot
 	rows               []row
+	collapsed          map[string]bool
 	cursor             int
 	treeCursor         int
 	preview            bool
@@ -134,7 +135,7 @@ type Model struct {
 func New(snapshot data.Snapshot) Model {
 	options := defaultViewOptions()
 	rows := buildRows(snapshot.Sessions)
-	return Model{
+	model := Model{
 		w:                  120,
 		h:                  40,
 		view:               ViewGroups,
@@ -154,6 +155,11 @@ func New(snapshot data.Snapshot) Model {
 		readerLoading:      make(map[string]bool),
 		summaries:          make(map[string]string),
 	}
+	// Restore the previous session's view/options/folds, then rebuild rows so the
+	// restored collapse state and sort are reflected on first paint.
+	model.applyPrefs()
+	model.rebuildRows()
+	return model
 }
 
 // Handoff returns the inline resume command selected before the TUI exited.
@@ -490,7 +496,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.rebuildRows()
 		m.status = ""
+		m.savePrefs()
 		return m, m.loadSelectedTranscriptCmd()
+	case "right", "l":
+		if header, ok := m.selectedHeader(); ok {
+			m.setCollapsed(header.key, false)
+		}
+	case "left", "h":
+		m.toggleCollapseAtCursor()
+	case " ":
+		m.toggleCollapseAtCursor()
 	case "p":
 		m.preview = !m.preview
 		m.status = ""
@@ -553,6 +568,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.overlay = OverlayHelp
 	case "enter":
+		// On a section header, enter folds/unfolds instead of resuming.
+		if header, ok := m.selectedHeader(); ok {
+			m.setCollapsed(header.key, !m.collapsed[header.key])
+			return m, nil
+		}
 		return m.resumeDefault()
 	case "J":
 		m.scrollPeek(1)
@@ -796,17 +816,60 @@ func (m *Model) moveSelection(delta int) {
 	m.moveCursor(delta)
 }
 
+// moveCursor steps one row. Headers ARE selectable (so they can be folded), so
+// this is a simple clamped step rather than a skip-to-next-session scan.
 func (m *Model) moveCursor(delta int) {
 	if len(m.rows) == 0 {
 		return
 	}
-	candidate := m.cursor + delta
-	for candidate >= 0 && candidate < len(m.rows) {
-		if !m.rows[candidate].header {
-			m.cursor = candidate
+	m.cursor = clamp(m.cursor+delta, 0, len(m.rows)-1)
+}
+
+// selectedHeader returns the header row under the cursor, if any.
+func (m Model) selectedHeader() (row, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.rows) || !m.rows[m.cursor].header {
+		return row{}, false
+	}
+	return m.rows[m.cursor], true
+}
+
+// setCollapsed folds/unfolds the section under the cursor, keeping the cursor on
+// that same header afterwards so folding never loses your place.
+func (m *Model) setCollapsed(key string, value bool) {
+	if key == "" {
+		return
+	}
+	if m.collapsed == nil {
+		m.collapsed = make(map[string]bool)
+	}
+	if value {
+		m.collapsed[key] = true
+	} else {
+		delete(m.collapsed, key)
+	}
+	m.rebuildRows()
+	for index, candidate := range m.rows {
+		if candidate.header && candidate.key == key {
+			m.cursor = index
+			break
+		}
+	}
+	m.savePrefs()
+}
+
+// toggleCollapseAtCursor folds a header, or when the cursor is on a session,
+// folds that session's enclosing section (so you can collapse without hunting
+// for the header first).
+func (m *Model) toggleCollapseAtCursor() {
+	if header, ok := m.selectedHeader(); ok {
+		m.setCollapsed(header.key, !m.collapsed[header.key])
+		return
+	}
+	for index := m.cursor - 1; index >= 0; index-- {
+		if m.rows[index].header {
+			m.setCollapsed(m.rows[index].key, true)
 			return
 		}
-		candidate += delta
 	}
 }
 
@@ -828,7 +891,7 @@ func (m *Model) rebuildRows() {
 	if m.view == ViewFlat {
 		m.rows = buildFlatRows(m.snapshot.Sessions, m.query, m.options.sort, m.options.taskFilter)
 	} else {
-		m.rows = buildDefaultRows(m.snapshot.Sessions, m.query, m.options.sort, m.options.taskFilter)
+		m.rows = buildDefaultRows(m.snapshot.Sessions, m.query, m.options.sort, m.options.taskFilter, m.collapsed)
 	}
 	m.cursor = firstSessionRow(m.rows)
 }

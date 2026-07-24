@@ -9,10 +9,14 @@ import (
 )
 
 func buildRows(sessions []data.Session) []row {
-	return buildDefaultRows(sessions, "", sortRecency, taskFilterAll)
+	return buildDefaultRows(sessions, "", sortRecency, taskFilterAll, nil)
 }
 
-func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filter taskFilter) []row {
+// buildDefaultRows lays out the grouped view. `collapsed` maps a section key to
+// true when that section is folded — its descendants are omitted from the row
+// list entirely (so virtualization and cursor math stay simple), while the
+// header row still reports the full member count.
+func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filter taskFilter, collapsed map[string]bool) []row {
 	indexes := matchingSessionIndexes(sessions, query, filter)
 	byCluster := make(map[string]map[string][]int)
 	clusterRecent := make(map[string]int64)
@@ -59,7 +63,11 @@ func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filt
 			roles = append(roles, role)
 			total += len(members)
 		}
-		rows = append(rows, row{header: true, key: "cluster:" + cluster, label: cluster, glyph: "◇", count: total})
+		clusterKey := "cluster:" + cluster
+		rows = append(rows, row{header: true, key: clusterKey, label: cluster, glyph: "◇", count: total})
+		if collapsed[clusterKey] {
+			continue
+		}
 		if mode == sortRecency || strings.TrimSpace(query) != "" {
 			sort.Slice(roles, func(i int, j int) bool {
 				left, right := rolePriority(roles[i]), rolePriority(roles[j])
@@ -90,6 +98,9 @@ func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filt
 	}
 	if noSystemCount > 0 {
 		rows = append(rows, row{header: true, key: "no-system", label: "(no-system)", glyph: "·", count: noSystemCount})
+		if collapsed["no-system"] {
+			return rows
+		}
 		states := []struct {
 			key, label, glyph string
 		}{
@@ -104,9 +115,15 @@ func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filt
 			if len(members) == 0 {
 				continue
 			}
-			rows = append(rows, row{header: true, key: "no-system:" + state.key, label: state.label, glyph: state.glyph, level: 1, count: len(members)})
+			stateKey := "no-system:" + state.key
+			rows = append(rows, row{header: true, key: stateKey, label: state.label, glyph: state.glyph, level: 1, count: len(members)})
+			if collapsed[stateKey] {
+				continue
+			}
+			// Sessions sit one level deeper than their state header so the
+			// nesting reads as a real hierarchy rather than a flat list.
 			for _, idx := range sortSessionIndexes(members, sessions, mode) {
-				rows = append(rows, row{sIdx: idx, level: 1})
+				rows = append(rows, row{sIdx: idx, level: 2})
 			}
 		}
 	}

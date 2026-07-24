@@ -1,0 +1,9 @@
+# Build output for the self-rebuilding `ccs-go` launcher (see ~/.local/bin/ccs-go).
+.bin/
+
+# Local binaries from ad-hoc `go build -o`.
+/ccsspike
+/ccs-go
+
+# Git worktrees used by delegated sessions.
+.worktrees/
