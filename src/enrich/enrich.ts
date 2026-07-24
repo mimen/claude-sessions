@@ -29,6 +29,12 @@ export interface SweepOptions extends EnrichOptions {
   /** Stop after this many sessions. The first run over a cold store is the case this exists for. */
   readonly limit?: number;
   readonly onProgress?: (done: number, total: number, sessionId: string) => void;
+  /**
+   * Called once per failed session. The sweep's own counters say only "failed 12", which is
+   * useless in an unattended launchd log — a broken gateway, an expired key, and one pathological
+   * transcript all look identical until the reason is surfaced.
+   */
+  readonly onFailure?: (sessionId: string, error: Error) => void;
   readonly isCancelled?: () => boolean;
   readonly now?: () => Date;
   /** Injected in tests; production reads the machine's registry. */
@@ -157,8 +163,12 @@ export async function sweep(
       // Re-check cancellation before touching stats/progress: a caller that cancelled mid-call is
       // usually about to close the database this loop would otherwise keep reporting against.
       if (options.isCancelled?.()) return;
-      if (result.ok) stats.enriched++;
-      else stats.failed++;
+      if (result.ok) {
+        stats.enriched++;
+      } else {
+        stats.failed++;
+        options.onFailure?.(candidate.row.sessionId, result.error);
+      }
       done++;
       options.onProgress?.(done, candidates.length, candidate.row.sessionId);
     }
