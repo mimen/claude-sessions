@@ -56,9 +56,9 @@ function parseVersion(output: string): CmuxVersion | null {
 }
 
 /** Probe cmux version synchronously for existing non-TUI callers. */
-export function cmuxVersion(): CmuxVersion | null {
+export function cmuxVersion(cmuxBin = "cmux"): CmuxVersion | null {
   try {
-    return parseVersion(execFileSync("cmux", ["--version"], {
+    return parseVersion(execFileSync(cmuxBin, ["--version"], {
       encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: VERSION_TIMEOUT_MS,
     }));
   } catch {
@@ -66,9 +66,9 @@ export function cmuxVersion(): CmuxVersion | null {
   }
 }
 
-function readTree(): TreeResult {
+function readTree(cmuxBin = "cmux"): TreeResult {
   try {
-    const output = execFileSync("cmux", ["tree", "--all", "--json", "--id-format", "both"], {
+    const output = execFileSync(cmuxBin, ["tree", "--all", "--json", "--id-format", "both"], {
       encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: TREE_TIMEOUT_MS,
     });
     return { tree: JSON.parse(output) as CmuxTree, ok: true };
@@ -112,10 +112,10 @@ function recordProbe(event: string, durationMs: number, version: CmuxVersion | n
 }
 
 /** Build a bridge from live cmux state synchronously for CLI/resume callers. */
-export function liveBridge(): Bridge {
+export function liveBridge(cmuxBin = "cmux"): Bridge {
   const started = Date.now();
-  const version = cmuxVersion();
-  const treeResult = readTree();
+  const version = cmuxVersion(cmuxBin);
+  const treeResult = readTree(cmuxBin);
   const storeResult = readHookStore();
   const bridge = finaliseBridge(version, treeResult, storeResult);
   recordProbe("cmux.bridge.sync.end", Date.now() - started, version, treeResult.ok, storeResult.ok, bridge.readable);

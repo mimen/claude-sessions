@@ -15,6 +15,7 @@ test("bin/ccs --help module-loads under an isolated runtime root", () => {
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain("ccs — find and resume any Claude Code session");
+    expect(result.stdout.toString()).toContain("ccs close-current-workspace [--do]");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

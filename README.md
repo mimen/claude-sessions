@@ -115,7 +115,8 @@ conversation, where filing the work is one command away.
 | command | what it does |
 |---------|--------------|
 | `/ccs:archive` | keep the title useful, mark archived, and offer a safe tab-close link |
-| `/ccs:complete` | mark the work finished while keeping the session visible in history |
+| `/ccs:complete` | mark the work finished, keep it in history, then safely close its workspace |
+| `/ccs:close-workspace` | close only the current session's sole-surface workspace after exact identity checks |
 | `/ccs:unarchive` | clear archive or completion flags and return to active views |
 | `/ccs:title <words>` | set an explicit title verbatim and sync the cmux tab |
 | `/ccs:suggest-title` | generate a title from what the session actually became |

@@ -129,6 +129,7 @@ Resume & tabs:
                                                   routes; launchers = [[launcher]] in ~/.ccs/config.toml)
   ccs routes <selector>                           Which launchers can resume each matched session, and why
   ccs sync-tabs [<selector>|.|--all]              Paint cmux tabs from catalogue metadata
+  ccs close-current-workspace [--do]              Prove or close only this session's cmux workspace
   ccs reap-duplicates [--do]                      Close cmux dupes for sessions with >1 live \`claude --resume\`
 
 Inbox & state:
@@ -269,6 +270,10 @@ export async function main(argv: string[]): Promise<number> {
     case "bump-session": {
       const { bumpSessionCommand } = await import("./inbox/bump-session-command.ts");
       return bumpSessionCommand(args.slice(1));
+    }
+    case "close-current-workspace": {
+      const { closeCurrentWorkspaceCommand } = await import("./cmux/close-current.ts");
+      return closeCurrentWorkspaceCommand(args.slice(1));
     }
     case "reap-duplicates": {
       // `ccs reap-duplicates [--do]` — find sessions with >1 live `claude --resume <sid>` proc

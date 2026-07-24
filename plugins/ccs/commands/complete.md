@@ -1,5 +1,5 @@
 ---
-description: Mark the current session completed in the CCS catalogue while keeping it visible in history
+description: Mark the current session completed in CCS, then safely close its cmux workspace
 argument-hint: "[optional title hint]"
 allowed-tools: Bash(ccs:*)
 ---
@@ -42,6 +42,20 @@ reports the lifecycle as `archived` (precedence is archived > completed > parked
    responsibility, which is a policy decision belonging to the owning cluster, not to a
    session that happens to have finished a task.
 
-5. **Report** the title (kept or changed) and the new lifecycle. Do not offer to close the
-   tab — completing says the work landed, not that you're leaving. Mention `/ccs:archive`
-   if it should also leave active views.
+5. **Preflight the final workspace close.** Run:
+   ```
+   ccs close-current-workspace
+   ```
+   If it refuses, report the completed title, lifecycle, and structured refusal reason,
+   then stop. Completion remains recorded; never guess or close through cmux directly.
+
+6. **Announce, then close as the final action.** If preflight reports `authorized`, state
+   one concise line with the completed title and lifecycle and say the workspace is closing.
+   Then run:
+   ```
+   ccs close-current-workspace --do
+   ```
+   This command takes two fresh live-state snapshots and only closes the stable workspace
+   UUID when the current session is its sole live surface. Do not invoke another tool or
+   produce a follow-up message after this command. The workspace disappearing before the
+   command returns is the expected success behavior.
