@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
 
 /** Bump when the schema changes; the Index is a pure cache, so we just rebuild on mismatch. */
-// v7 recomputes cached physical cost rows after GPT gateway model pricing was introduced.
-export const SCHEMA_VERSION = 7;
+// v8 adds the catalogue authority's persisted generation/freshness row.
+export const SCHEMA_VERSION = 8;
 
 /**
  * Open (creating if needed) the Index and ensure its schema is current. If the on-disk
@@ -17,7 +17,11 @@ export function openIndex(dbPath: string): Database {
   db.exec("PRAGMA busy_timeout = 5000;");
 
   const current = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-  if (current !== SCHEMA_VERSION) {
+  if (current === 7) {
+    // v8 is an additive service-status table. Preserve the expensive session cache on upgrade.
+    createSourceStatusSchema(db);
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+  } else if (current !== SCHEMA_VERSION) {
     dropAll(db);
     createSchema(db);
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
@@ -28,6 +32,8 @@ export function openIndex(dbPath: string): Database {
 function dropAll(db: Database): void {
   db.exec("DROP TABLE IF EXISTS sessions_fts;");
   db.exec("DROP TABLE IF EXISTS sessions;");
+  db.exec("DROP TABLE IF EXISTS catalogue_hidden_sessions;");
+  db.exec("DROP TABLE IF EXISTS catalogue_source_status;");
 }
 
 function createSchema(db: Database): void {
@@ -76,5 +82,27 @@ function createSchema(db: Database): void {
       title,
       skeleton
     );
+  `);
+  createSourceStatusSchema(db);
+}
+
+function createSourceStatusSchema(db: Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS catalogue_hidden_sessions (
+      session_id TEXT PRIMARY KEY
+    );
+    CREATE TABLE IF NOT EXISTS catalogue_source_status (
+      singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
+      generation      INTEGER NOT NULL DEFAULT 0,
+      indexed_at      TEXT,
+      refreshed_at    TEXT,
+      last_error_at   TEXT,
+      last_error      TEXT,
+      scanned         INTEGER NOT NULL DEFAULT 0,
+      parsed          INTEGER NOT NULL DEFAULT 0,
+      skipped         INTEGER NOT NULL DEFAULT 0,
+      removed         INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO catalogue_source_status (singleton) VALUES (1);
   `);
 }

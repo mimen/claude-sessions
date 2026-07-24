@@ -1,9 +1,11 @@
 /**
  * Shared column widths for the list + its header row, so the two never drift. Numeric columns
- * are right-aligned; the model column is left-aligned text. Left gutter = caret(1) + glyph(2).
+ * are right-aligned; the model column is left-aligned text. Left gutter = caret(1) + CCS
+ * status glyph(2) + T3 attachment glyph(2).
  */
 export const CARET_W = 1;
 export const GLYPH_W = 2;
+export const T3_GLYPH_W = 2;
 /** Status column (lifecycle × live open-state) — e.g. active/idle/parked/done. */
 export const STATUS_W = 8;
 /** Stage column (per-system worker pipeline stage) — building/milad-review/in-review/approved/merged. */

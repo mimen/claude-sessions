@@ -2,7 +2,19 @@ import React from "react";
 import { Box, Text } from "ink";
 import { theme } from "./theme.ts";
 import type { SortMode } from "./groupByProject.ts";
-import { CARET_W, GLYPH_W, PHASE_W, ROLE_W, TASKS_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
+import {
+  CARET_W,
+  GLYPH_W,
+  T3_GLYPH_W,
+  PHASE_W,
+  ROLE_W,
+  TASKS_W,
+  MODEL_W,
+  COST_W,
+  AGE_W,
+  SUB_W,
+  TITLE_MR,
+} from "./columns.ts";
 
 const ARROW = "▾";
 
@@ -32,7 +44,7 @@ export function ListHeader({ sort, view, showTasks }: { sort: SortMode; view: "g
   const roleStatus = view === "cluster";
   return (
     <Box>
-      <Box width={CARET_W + GLYPH_W} flexShrink={0} />
+      <Box width={CARET_W + GLYPH_W + T3_GLYPH_W} flexShrink={0} />
       <Box flexGrow={1} flexShrink={1} marginRight={TITLE_MR} overflow="hidden">
         <Text color={theme.faint}>{tree ? "CONSTELLATION" : "SESSION"}</Text>
       </Box>

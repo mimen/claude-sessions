@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { useTerminalSize } from "./useTerminalSize.ts";
 import type { Database } from "bun:sqlite";
@@ -11,7 +11,6 @@ import {
   getSkeleton,
   subagentCounts,
   childrenOf,
-  saveCodexTitle,
   type SessionRow,
 } from "../index/index.ts";
 import { backfillTitles } from "../titler/queue.ts";
@@ -46,6 +45,16 @@ import { buildEpicView } from "./epicView.ts";
 import { getCrashReporter } from "../crashlog.ts";
 import { tasksFor, sessionsWithTasks } from "../tasks/reader.ts";
 import { SESSION_CLASS_ROLLOUT_MS } from "../session-class.ts";
+import { productionT3Opener, resolveT3OpenCwd, type T3Opener } from "../t3/open.ts";
+import {
+  joinT3AttachmentsToRootSessions,
+  productionT3AttachmentStatusClient,
+  t3AttachmentIndicator,
+  type T3AttachmentIndicator,
+  type T3AttachmentStatus,
+  type T3AttachmentStatusClient,
+} from "../t3/status.ts";
+import { recordCatalogueTitleFailure, saveCatalogueTitle } from "../catalogue-service/client.ts";
 
 /**
  * State label + hex color for the TUI stage column (ADR-0077). Reads the first pill from the
@@ -108,8 +117,10 @@ export interface SessionBadge {
   prState?: string | null;
   /** Role (catalogue.skill), shown in the role column. */
   role?: string | null;
-  /** Status label (lifecycle × live open-state), shown in the status column. */
+  /** Status label (lifecycle × live open-state), shown in the first glyph column. */
   status?: string | null;
+  /** T3 attachment state, shown independently in the second glyph column. */
+  t3Attachment?: T3AttachmentIndicator | null;
   /** Composed state pill label from the cluster's board.json (ADR-0077). */
   phase?: string | null;
   /** Optional hex color matching the cmux tab pill — the TUI renders the label in this color. */
@@ -153,11 +164,27 @@ interface AppProps {
   onClearPinned?: () => void;
   /** Optional test seam; production defaults to non-blocking cmux probes. */
   cmuxProbes?: TuiCmuxProbes;
+  /** Optional async T3 client seam. T3 open never owns or changes a native Claude session. */
+  t3Opener?: T3Opener;
+  /** Optional one-snapshot T3 attachment client seam. */
+  t3StatusClient?: T3AttachmentStatusClient;
 }
 
 const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
-export function App({ db, catalogue, config, engineState, resumeRequest, onSwitchMode, pinned, onClearPinned, cmuxProbes = productionCmuxProbes }: AppProps): React.ReactElement {
+export function App({
+  db,
+  catalogue,
+  config,
+  engineState,
+  resumeRequest,
+  onSwitchMode,
+  pinned,
+  onClearPinned,
+  cmuxProbes = productionCmuxProbes,
+  t3Opener = productionT3Opener,
+  t3StatusClient = productionT3AttachmentStatusClient,
+}: AppProps): React.ReactElement {
   const { titler, engine, active: activeEngine, available: availableEngines, cycle: cycleEngine } = engineState;
   const { exit } = useApp();
   const { columns: cols, rows: termRows } = useTerminalSize();
@@ -189,6 +216,10 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
   const [titling, setTitling] = useState<{ done: number; total: number } | null>(null);
   const [frame, setFrame] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
+  // Refs update synchronously in Ink's key handler, so back-to-back `T` keystrokes cannot
+  // race a React render and launch duplicate T3 opens.
+  const t3OpenInFlight = useRef(false);
+  const t3OpenSequence = useRef(0);
   const [transcript, setTranscript] = useState<
     { title: string; lines: TranscriptLine[]; truncated: boolean; scroll: number } | null
   >(null);
@@ -292,10 +323,50 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
     return () => { alive = false; };
   }, [catalogue, refreshTick, cmuxProbes]);
   const openSet = useMemo(() => new Set(openTitles.keys()), [openTitles]);
+
+  // T3 exposes one read-only process-wide snapshot. Fetch it once per App mount, then perform the
+  // source-identity join in memory; never query T3 storage or spawn one command per visible row.
+  const [t3Attachments, setT3Attachments] = useState<readonly T3AttachmentStatus[]>([]);
+  useEffect(() => {
+    let alive = true;
+    getCrashReporter()?.breadcrumb("tui.t3.attachment-status.start");
+    void t3StatusClient.snapshot().then(
+      (outcome) => {
+        if (!alive) {
+          getCrashReporter()?.breadcrumb("tui.t3.attachment-status.cancelled");
+          return;
+        }
+        if (outcome.kind === "snapshot") {
+          setT3Attachments(outcome.snapshot.attachments);
+          getCrashReporter()?.breadcrumb("tui.t3.attachment-status.success", {
+            count: outcome.snapshot.attachments.length,
+          });
+          return;
+        }
+        setT3Attachments([]);
+        getCrashReporter()?.breadcrumb("tui.t3.attachment-status.failure", {
+          reason: outcome.reason,
+        });
+      },
+      () => {
+        if (!alive) return;
+        setT3Attachments([]);
+        getCrashReporter()?.breadcrumb("tui.t3.attachment-status.failure", {
+          reason: "client-rejection",
+        });
+      },
+    );
+    return () => { alive = false; };
+  }, [t3StatusClient]);
+
   // Which sessions have a Claude Code task dir at all — one readdir, so the per-row
   // tasksFor() probe only ever runs for sessions that can have tasks (103/166 here).
   const taskIds = useMemo(() => sessionsWithTasks(), [refreshTick]);
   const allIndexedRows = useMemo(() => listByRecency(db, true), [db, refreshTick]);
+  const t3AttachmentBySession = useMemo(
+    () => joinT3AttachmentsToRootSessions(allIndexedRows, t3Attachments),
+    [allIndexedRows, t3Attachments],
+  );
   const costRollup = useMemo(
     () => buildCostRollup(allIndexedRows, catalogue ? parentEdges(catalogue) : []),
     [allIndexedRows, catalogue, refreshTick],
@@ -374,6 +445,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       if (nudge) color = "yellowBright";
       const pill = stagePillFor(c, r.sessionId);
       const tasks = taskIds.has(r.sessionId) ? tasksFor(r.sessionId) : null;
+      const t3Attachment = t3AttachmentBySession.get(r.sessionId);
       m.set(r.sessionId, {
         glyph, color, nudge,
         event: identityKeyOf(c),
@@ -381,6 +453,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         prState: c?.prState ?? null,
         role: c?.role ?? null,
         status: describeDisposition(lc, open).label,
+        t3Attachment: t3Attachment ? t3AttachmentIndicator(t3Attachment) : null,
         phase: pill?.label ?? null,
         phaseColor: pill?.color ?? null,
         taskDone: tasks?.completed ?? null,
@@ -394,7 +467,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       });
     }
     return m;
-  }, [baseRows, catMap, openSet, taskIds]);
+  }, [baseRows, catMap, openSet, taskIds, t3AttachmentBySession]);
   const subCounts = useMemo(() => subagentCounts(db), [db, refreshTick]);
   const totalCostFor = React.useCallback(
     (r: SessionRow): number => costRollup.bySessionId.get(r.sessionId)?.totalCost ?? r.costUSD,
@@ -548,6 +621,14 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         concurrency: config.titler.concurrency,
         maxAttempts: config.titler.maxAttempts,
         isCancelled: () => !alive, // stop persisting once the app unmounts (DB is about to close)
+        persistTitle: async (sessionId, title) => {
+          const saved = await saveCatalogueTitle(sessionId, title);
+          if (!saved.ok) throw new Error(saved.error.message);
+        },
+        persistFailure: async (sessionId) => {
+          const saved = await recordCatalogueTitleFailure(sessionId);
+          if (!saved.ok) throw new Error(saved.error.message);
+        },
         onProgress: (done, total) => {
           if (!alive) return;
           setTitling(done < total ? { done, total } : null);
@@ -610,6 +691,75 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       else next.delete(item.row.sessionId);
       return next;
     });
+  };
+
+  const doOpenInT3 = () => {
+    const item = items[clampedSelected];
+    if (!item) {
+      setStatus("select a root session to open in T3");
+      return;
+    }
+    if (item.kind !== "session") {
+      setStatus("select a root session to open in T3");
+      return;
+    }
+    const row = item.row;
+    if (row.isSubagent) {
+      setStatus("subagent runs can't open in T3 — select their root Claude session");
+      return;
+    }
+
+    if (t3OpenInFlight.current) {
+      setStatus("T3 open is already in progress");
+      return;
+    }
+
+    const cwdResult = resolveT3OpenCwd(row);
+    if (!cwdResult.ok) {
+      setStatus(`can't open in T3: ${cwdResult.reason}`);
+      return;
+    }
+
+    t3OpenInFlight.current = true;
+    const requestSequence = ++t3OpenSequence.current;
+    setStatus(`opening in T3 → ${row.title}…`);
+    void Promise.resolve()
+      .then(() => t3Opener.open({ resumeId: row.resumeId, cwd: cwdResult.cwd }))
+      .then(
+        (result) => {
+          if (requestSequence !== t3OpenSequence.current) return;
+          t3OpenInFlight.current = false;
+          if (result.kind === "opened") {
+            setStatus(result.created ? `created T3 thread → ${row.title}` : `opened existing T3 thread → ${row.title}`);
+            return;
+          }
+          switch (result.reason) {
+            case "missing-executable":
+              setStatus("T3 isn't installed or on PATH — set T3_BIN to override");
+              return;
+            case "timeout":
+              setStatus("T3 timed out while opening the session");
+              return;
+            case "malformed-output":
+              setStatus("T3 returned malformed JSON");
+              return;
+            case "nonzero":
+              setStatus(`T3 exited with status ${result.exitCode ?? "unknown"}${result.stderr ? `: ${result.stderr}` : ""}`);
+              return;
+            case "result-failure":
+              setStatus(`T3 ${result.resultCode ?? "request_failed"}: ${result.message}`);
+              return;
+            case "spawn-failure":
+              setStatus(`couldn't start T3: ${result.message}`);
+              return;
+          }
+        },
+        () => {
+          if (requestSequence !== t3OpenSequence.current) return;
+          t3OpenInFlight.current = false;
+          setStatus("couldn't start T3");
+        },
+      );
   };
 
   const doResume = (fork: boolean, forceOther: boolean) => {
@@ -685,14 +835,18 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
     if (!item || item.kind !== "session") return;
     const r = item.row;
     setStatus(`Re-titling "${r.title}"…`);
-    void titler.generate(getSkeleton(db, r.sessionId)).then((t) => {
-      if (t) {
-        saveCodexTitle(db, r.sessionId, t);
-        setStatus(`Re-titled → ${t}`);
-        reload();
-      } else {
+    void titler.generate(getSkeleton(db, r.sessionId)).then(async (t) => {
+      if (!t) {
         setStatus("Re-title failed.");
+        return;
       }
+      const saved = await saveCatalogueTitle(r.sessionId, t);
+      if (!saved.ok) {
+        setStatus(`Re-title failed: ${saved.error.message}`);
+        return;
+      }
+      setStatus(`Re-titled → ${t}`);
+      reload();
     });
   };
 
@@ -849,6 +1003,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
       setIncludeSubagents((v) => !v);
       setSelected(0);
     } else if (input === "t") retitle();
+    else if (input === "T") doOpenInT3();
     else if (input === "i") {
       // Swap the inference engine (only meaningful when both codex + claude are installed).
       if (availableEngines.length < 2) {
@@ -1045,6 +1200,7 @@ export function App({ db, catalogue, config, engineState, resumeRequest, onSwitc
         <KeyBar
           items={[
             ["enter", "resume"],
+            ["T", "open in T3"],
             ["/", "search"],
             ["v", "transcript"],
             ["g", `view:${view}`],

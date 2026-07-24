@@ -4,12 +4,31 @@ import type { DisplayItem } from "./groupByProject.ts";
 import { formatAge } from "../store.ts";
 import { theme, isRecentAge, costColor, roleColor } from "./theme.ts";
 import { dominantModel, formatCostList, formatCompactUSD } from "./format.ts";
-import { CARET_W, GLYPH_W, PHASE_W, ROLE_W, TASKS_W, MODEL_W, COST_W, AGE_W, SUB_W, TITLE_MR } from "./columns.ts";
+import type { T3AttachmentIndicator } from "../t3/status.ts";
+import {
+  CARET_W,
+  GLYPH_W,
+  T3_GLYPH_W,
+  PHASE_W,
+  ROLE_W,
+  TASKS_W,
+  MODEL_W,
+  COST_W,
+  AGE_W,
+  SUB_W,
+  TITLE_MR,
+} from "./columns.ts";
 
 /** List cost color: dimmed by default so cost doesn't shout over status/title; only a
  * genuine outlier (≥ the high tier) keeps its warning color. */
 function listCostColor(usd: number): string {
   return usd >= 500 ? costColor(usd) : theme.faint;
+}
+
+/** T3 glyph color with selected-row contrast taking precedence over attachment health. */
+export function t3AttachmentColor(indicator: T3AttachmentIndicator, selected: boolean): string {
+  if (selected) return theme.selFg;
+  return indicator.kind === "running" ? theme.t3Running : theme.t3Unhealthy;
 }
 
 /** Abbreviate a catalogue role (skill) for the narrow role column. */
@@ -36,8 +55,10 @@ interface SessionBadge {
   prState?: string | null;
   /** Role (catalogue.skill), shown in the role column. */
   role?: string | null;
-  /** Status label (lifecycle × live open-state), shown in the status column. */
+  /** Status label (lifecycle × live open-state), shown in the first glyph column. */
   status?: string | null;
+  /** T3 attachment status, shown independently in the second glyph column. */
+  t3Attachment?: T3AttachmentIndicator | null;
   /** Composed state pill label (worker's pipeline state), shown in the stage column. */
   phase?: string | null;
   /** Optional hex color for the stage-column text — matches the cmux tab pill. */
@@ -157,11 +178,19 @@ export function SessionList({ items, selected, height, width, deco, totalCost, s
         return (
           <Box key={index} backgroundColor={bg}>
             <Text color={sel ? theme.selFg : theme.accent}>{sel ? "❯" : " "}</Text>
-            {dot ? (
-              <Box width={GLYPH_W} flexShrink={0}>
-                <Text color={dotColor}>{dot}</Text>
-              </Box>
-            ) : null}
+            <Box width={GLYPH_W} flexShrink={0}>
+              {dot ? <Text color={dotColor}>{dot}</Text> : null}
+            </Box>
+            <Box width={T3_GLYPH_W} flexShrink={0}>
+              {badge?.t3Attachment ? (
+                <Text
+                  color={t3AttachmentColor(badge.t3Attachment, sel)}
+                  aria-label={badge.t3Attachment.label}
+                >
+                  ●
+                </Text>
+              ) : null}
+            </Box>
             <Box flexGrow={1} flexShrink={1} marginRight={TITLE_MR} overflow="hidden">
               <Text wrap="truncate-end" color={titleColor} bold={sel}>
                 {"  ".repeat(item.depth)}

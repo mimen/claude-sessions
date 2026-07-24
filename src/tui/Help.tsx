@@ -78,6 +78,7 @@ const SESSION_GROUPS: KeyGroup[] = [
       ["enter", "resume the session (on a section header: expand/collapse)"],
       ["f", "fork-resume (new session id, same history)"],
       ["o", "resume via the other target (inline ↔ cmux)"],
+      ["T", "open this root Claude session in T3"],
     ],
   },
   {

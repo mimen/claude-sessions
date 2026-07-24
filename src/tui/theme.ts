@@ -25,6 +25,9 @@ export const theme = {
   /** Recent vs old activity. */
   ageRecent: "greenBright",
   ageOld: "#9aa3b2",
+  /** T3 attachment indicator: cobalt only for a healthy running provider; amber otherwise. */
+  t3Running: "#0047ab",
+  t3Unhealthy: "#d97706",
   /** Header/dashboard chrome. */
   headerBorder: "#3a4150",
   headerLabel: "#9aa3b2",

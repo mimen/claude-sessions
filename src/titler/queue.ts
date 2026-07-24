@@ -22,6 +22,9 @@ export interface BackfillOptions {
   /** When this returns true, stop persisting/scheduling work (e.g. the TUI is exiting and
    *  about to close the DB). Prevents writes to a torn-down database. */
   isCancelled?: () => boolean;
+  /** Production TUI seam: persistence is delegated to the single-writer catalogue authority. */
+  persistTitle?: (sessionId: string, title: string) => Promise<void>;
+  persistFailure?: (sessionId: string) => Promise<void>;
 }
 
 /**
@@ -56,10 +59,12 @@ export async function backfillTitles(
       // exited and closed the database while we were waiting.
       if (opts.isCancelled?.()) return;
       if (title) {
-        saveCodexTitle(db, candidate.sessionId, title);
+        if (opts.persistTitle) await opts.persistTitle(candidate.sessionId, title);
+        else saveCodexTitle(db, candidate.sessionId, title);
         stats.generated++;
       } else {
-        recordTitleFailure(db, candidate.sessionId);
+        if (opts.persistFailure) await opts.persistFailure(candidate.sessionId);
+        else recordTitleFailure(db, candidate.sessionId);
         stats.failed++;
       }
       done++;

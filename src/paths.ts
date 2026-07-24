@@ -1,6 +1,7 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { chmodSync, mkdirSync } from "node:fs";
 
 /**
  * Filesystem locations the tool owns. Everything here is RUNTIME/derived (session state +
@@ -28,6 +29,23 @@ export const SKILLS_DB_PATH = () => join(DATA_DIR(), "skills.db");
 /** Small JSON of remembered UI prefs (e.g. last TUI view), so the browser reopens as left. */
 export const PREFS_PATH = () => join(runtimeRoot(), "prefs.json");
 
+/** Runtime-only ownership files for the on-demand native-session catalogue daemon. */
+const RUN_DIR = () => join(runtimeRoot(), "run");
+function defaultCatalogueSocketPath(): string {
+  const preferred = join(RUN_DIR(), "native-catalogue-v1.sock");
+  // macOS sockaddr_un.sun_path is only 104 bytes. Keep the fallback in a private per-user
+  // directory rather than directly in the shared temp root: socket modes are not a reliable
+  // access boundary on every Unix platform.
+  if (Buffer.byteLength(preferred) < 100) return preferred;
+  const digest = createHash("sha256").update(runtimeRoot()).digest("hex").slice(0, 16);
+  const uid = typeof process.getuid === "function" ? process.getuid() : "user";
+  return join(tmpdir(), `ccs-${uid}-${digest}`, "native-catalogue-v1.sock");
+}
+export const CATALOGUE_SERVICE_SOCKET_PATH = () =>
+  process.env.CCS_CATALOGUE_SOCKET ?? defaultCatalogueSocketPath();
+export const CATALOGUE_SERVICE_LOCK_PATH = () => join(RUN_DIR(), "native-catalogue.lock");
+export const CATALOGUE_SERVICE_LOG_PATH = () => join(RUN_DIR(), "native-catalogue.log");
+
 /** Default Store: the single directory Claude Code centralises all Sessions into. */
 export const DEFAULT_STORE_PATH = join(homedir(), ".claude", "projects");
 
@@ -41,6 +59,18 @@ export const DEFAULT_TASKS_PATH = join(homedir(), ".claude", "tasks");
 /** Create the data dir lazily. Idempotent. */
 export function ensureDataDir(): void {
   mkdirSync(DATA_DIR(), { recursive: true });
+}
+
+/** Create the daemon run directory as user-private host-local state. */
+export function ensureRunDir(): void {
+  const path = RUN_DIR();
+  mkdirSync(path, { recursive: true, mode: 0o700 });
+  chmodSync(path, 0o700);
+  const socketParent = dirname(defaultCatalogueSocketPath());
+  if (socketParent !== path) {
+    mkdirSync(socketParent, { recursive: true, mode: 0o700 });
+    chmodSync(socketParent, 0o700);
+  }
 }
 
 /** Expand a leading `~` to the home directory; pass other paths through. */

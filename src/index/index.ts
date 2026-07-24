@@ -88,6 +88,7 @@ export async function reindexStore(
   db: Database,
   files: readonly StoredSessionFile[],
   host: string,
+  options: { readonly manageTransaction?: boolean } = {},
 ): Promise<ReindexStats> {
   const existing = new Map<string, ExistingMeta>();
   for (const row of db.query("SELECT session_id, file_mtime, file_size FROM sessions").all() as Array<{
@@ -130,10 +131,15 @@ export async function reindexStore(
     "INSERT INTO sessions_fts (session_id, title, skeleton) VALUES ($id, $title, $skeleton)",
   );
 
-  const stats: ReindexStats = { scanned: files.length, parsed: 0, skipped: 0, removed: 0 };
-  const seen = new Set<string>();
+  // Publish one generation as one SQLite snapshot. Readers on other WAL connections keep seeing
+  // the previous complete index until COMMIT; a daemon crash rolls the whole refresh back.
+  const manageTransaction = options.manageTransaction !== false;
+  if (manageTransaction) db.exec("BEGIN IMMEDIATE;");
+  try {
+    const stats: ReindexStats = { scanned: files.length, parsed: 0, skipped: 0, removed: 0 };
+    const seen = new Set<string>();
 
-  for (const file of files) {
+    for (const file of files) {
     seen.add(file.sessionId);
     const prev = existing.get(file.sessionId);
     if (prev && prev.file_mtime === file.mtimeMs && prev.file_size === file.sizeBytes) {
@@ -192,15 +198,20 @@ export async function reindexStore(
 
   // Remove rows whose files have disappeared from the Store.
   const removeRow = db.query("DELETE FROM sessions WHERE session_id = $id");
-  for (const sessionId of existing.keys()) {
-    if (!seen.has(sessionId)) {
-      removeRow.run({ $id: sessionId });
-      ftsDelete.run({ $id: sessionId });
-      stats.removed++;
+    for (const sessionId of existing.keys()) {
+      if (!seen.has(sessionId)) {
+        removeRow.run({ $id: sessionId });
+        ftsDelete.run({ $id: sessionId });
+        stats.removed++;
+      }
     }
-  }
 
-  return stats;
+    if (manageTransaction) db.exec("COMMIT;");
+    return stats;
+  } catch (cause) {
+    if (manageTransaction) db.exec("ROLLBACK;");
+    throw cause;
+  }
 }
 
 /** A Session needing a generated Title, with the skeleton to feed the Titler. */
@@ -232,18 +243,32 @@ export function titleCandidates(db: Database, maxAttempts: number): TitleCandida
 
 /** Persist a generated Title, stamp the message count at titling, and refresh the FTS row. */
 export function saveCodexTitle(db: Database, sessionId: string, title: string): void {
-  db.query(
-    `UPDATE sessions
-     SET codex_title = $title, title_msg_count = msg_count, title_attempts = 0
-     WHERE session_id = $id`,
-  ).run({ $id: sessionId, $title: title });
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    db.query(
+      `UPDATE sessions
+       SET codex_title = $title, title_msg_count = msg_count, title_attempts = 0
+       WHERE session_id = $id`,
+    ).run({ $id: sessionId, $title: title });
 
-  // Resolved FTS title = native (none here, by definition) → codex title.
-  db.query("DELETE FROM sessions_fts WHERE session_id = $id").run({ $id: sessionId });
-  db.query(
-    `INSERT INTO sessions_fts (session_id, title, skeleton)
-     SELECT session_id, $title, skeleton FROM sessions WHERE session_id = $id`,
-  ).run({ $id: sessionId, $title: title });
+    // Resolved FTS title = native (none here, by definition) → codex title.
+    db.query("DELETE FROM sessions_fts WHERE session_id = $id").run({ $id: sessionId });
+    db.query(
+      `INSERT INTO sessions_fts (session_id, title, skeleton)
+       SELECT session_id, $title, skeleton FROM sessions WHERE session_id = $id`,
+    ).run({ $id: sessionId, $title: title });
+    // Title sorting is part of catalogue protocol v1. Invalidate generation-bound cursors whenever
+    // a titler-owned visible value changes, even when the source file itself is unchanged.
+    db.query(
+      `UPDATE catalogue_source_status
+       SET generation = generation + 1, indexed_at = $now
+       WHERE singleton = 1`,
+    ).run({ $now: new Date().toISOString() });
+    db.exec("COMMIT;");
+  } catch (cause) {
+    db.exec("ROLLBACK;");
+    throw cause;
+  }
 }
 
 /** Record a failed titling attempt so a stuck Session eventually stops being retried. */

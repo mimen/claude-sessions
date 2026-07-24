@@ -76,6 +76,27 @@ test("titles only sessions without a native title", async () => {
   expect(codex.title.startsWith("Title ")).toBe(true);
 });
 
+test("delegates persistence when a single-writer callback is supplied", async () => {
+  const db = tmpDb();
+  seed(db, [{ id: "delegated" }]);
+  const { titler } = trackingTitler();
+  const saved: Array<{ sessionId: string; title: string }> = [];
+
+  const stats = await backfillTitles(db, titler, {
+    concurrency: 1,
+    maxAttempts: 3,
+    persistTitle: async (sessionId, title) => {
+      saved.push({ sessionId, title });
+    },
+  });
+
+  expect(stats.generated).toBe(1);
+  expect(saved).toHaveLength(1);
+  expect(saved[0]?.sessionId).toBe("delegated");
+  expect(db.query("SELECT codex_title AS title FROM sessions WHERE session_id = 'delegated'").get())
+    .toEqual({ title: null });
+});
+
 test("respects the concurrency cap", async () => {
   const db = tmpDb();
   seed(db, Array.from({ length: 10 }, (_, i) => ({ id: `s${i}` })));
