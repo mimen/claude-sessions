@@ -58,6 +58,9 @@ Usage:
   ccs start [--dry-run|--explain] [description...]  Route work to an active session or managed new session
   ccs reindex [--titles]   Refresh through the host-local catalogue authority
   ccs catalogue-service start|status|stop|refresh   Manage the on-demand local authority
+  ccs enrich [<id>|.] [--json]                    Summarise one session (what it was, what's open, what to do)
+  ccs enrich --sweep [--limit N] [--concurrency N]  Enrich every stale session
+  ccs enrich --list [--limit N] [--json]          Show what the sweep would do, without calling the model
   ccs ls [--auxiliary]    Print indexed sessions (with catalogue badges)
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
   ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
@@ -177,6 +180,10 @@ export async function main(argv: string[]): Promise<number> {
       return await reindex({ titles: args.includes("--titles") });
     case "catalogue-service":
       return await catalogueServiceCommand(args.slice(1));
+    case "enrich": {
+      const { enrichCommand } = await import("./enrich/command.ts");
+      return await enrichCommand(args.slice(1));
+    }
     case "ls":
       return ls({ all: args.includes("--all"), loops: args.includes("--loops"), auxiliary: args.includes("--auxiliary") });
     case "tree":

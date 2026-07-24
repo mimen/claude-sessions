@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import type { Enrichment, Recommendation } from "./enrichment-schema.ts";
 
 /**
  * The Catalogue: durable, user-authored session metadata that the Index cache cannot hold
@@ -97,6 +98,25 @@ export interface CatalogueRow {
    *  started this body. Distinct from `identityKey` (our durable work-unit key); this is a
    *  provenance breadcrumb from the invocation environment. Optional for pre-v34 fixtures. */
   launcherIdentity?: string | null;
+  /** OBSERVED state from one inference pass over the transcript (v38). Null until first enriched.
+   *  Distinct from lifecycle, which is stored INTENT — the gap between them is the signal. */
+  enrichment?: StoredEnrichment | null;
+  /** Failed enrichment attempts. Capped so one unparseable session never retries forever. */
+  enrichmentAttempts?: number;
+}
+
+/** An enrichment as hydrated off a catalogue row. Mirrors `Enrichment` with nullable suggestions. */
+export interface StoredEnrichment {
+  readonly summary: string;
+  readonly outstanding: string;
+  readonly recommendation: Recommendation;
+  readonly reason: string;
+  readonly junk: boolean;
+  readonly cwdCorrect: boolean;
+  readonly suggestedLocation: string | null;
+  readonly suggestedCwd: string | null;
+  readonly atMessages: number;
+  readonly at: string;
 }
 
 /** Effective substrate for a row (defaults unset rows to claude-code). */
@@ -113,7 +133,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 37;
+const CATALOGUE_VERSION = 38;
 const LEGACY_IDENTITY_COLUMNS = [
   "role", "system", "cluster", "project", "event",
   "pr_number", "pr_repo", "pr_branch", "pr_state", "pr_head_sha",
@@ -224,6 +244,11 @@ function validateSchemaPostcondition(db: Database): { ok: true } | { ok: false; 
     "creator_ref",
     "launch_channel",
     "forked_from_session_id",
+    // v38 enrichment. Only the two provenance columns are asserted: they are what the sweep's
+    // staleness check reads, so a partially-applied v38 that kept them would still be safe to
+    // run against, while one that lost them would silently re-enrich the whole store.
+    "enrichment_at",
+    "enrichment_at_messages",
   ];
   const cols = (db.query("PRAGMA table_info(catalogue)").all() as { name: string }[]).map((c) => c.name);
   const present = new Set(cols);
@@ -884,6 +909,49 @@ function applyMigrations(db: Database): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_launch_channel ON catalogue(launch_channel);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_forked_from ON catalogue(forked_from_session_id);");
   }
+  if (v < 38) {
+    // Session enrichment: one structured inference pass per session, stored as first-class
+    // columns rather than a `meta` blob. Columns (not meta) because enrichment is real state that
+    // the statusline, `ccs ls`, and external readers all query — meta is explicitly scratch state
+    // that ccs stores without interpreting, and this is the opposite of that.
+    //
+    // No backfill: null enrichment_at means "never enriched", which is exactly what the sweep's
+    // staleness check needs to find its first-run candidates.
+    for (const [column, type] of [
+      ["enrichment_summary", "TEXT"],
+      ["enrichment_outstanding", "TEXT"],
+      ["enrichment_reason", "TEXT"],
+      // Junk = "was never worth starting", kept separate from `archive` so a failed real attempt
+      // and an accidental one-line probe stay distinguishable after both are archived.
+      ["enrichment_junk", "INTEGER"],
+      ["enrichment_cwd_correct", "INTEGER"],
+      // A key from the shared location registry. Free-text cwd is the escape hatch for work with
+      // no registered home — which is itself the signal that one should be registered.
+      ["enrichment_suggested_location", "TEXT"],
+      ["enrichment_suggested_cwd", "TEXT"],
+      // Message count at generation. Staleness is `current - this`, so the sweep re-runs only
+      // sessions that actually advanced rather than everything on a timer.
+      ["enrichment_at_messages", "INTEGER"],
+      ["enrichment_at", "TEXT"],
+      ["enrichment_attempts", "INTEGER"],
+    ] as const) {
+      if (!hasColumn(db, "catalogue", column)) {
+        db.exec(`ALTER TABLE catalogue ADD COLUMN ${column} ${type};`);
+      }
+    }
+    // Constrained separately from the loop above: the CHECK keeps a malformed write out of the
+    // column even when it arrives through `ccs session-fields` rather than the enrich command.
+    if (!hasColumn(db, "catalogue", "enrichment_recommendation")) {
+      db.exec(
+        "ALTER TABLE catalogue ADD COLUMN enrichment_recommendation TEXT " +
+        "CHECK (enrichment_recommendation IN ('continue', 'complete', 'archive', 'handoff') " +
+        "OR enrichment_recommendation IS NULL);",
+      );
+    }
+    // The two queries this feature runs constantly: "what needs my attention" and "what is stale".
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_enrichment_recommendation ON catalogue(enrichment_recommendation);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_enrichment_at ON catalogue(enrichment_at);");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -1132,6 +1200,32 @@ function rowFrom(r: Record<string, unknown> | null, db?: Database): CatalogueRow
     identityKey,
     substrate: (r.substrate as string) ?? null,
     launcherIdentity: (r.launcher_identity as string) ?? null,
+    enrichment: enrichmentFrom(r),
+    enrichmentAttempts: (r.enrichment_attempts as number) ?? 0,
+  };
+}
+
+/**
+ * Hydrate the v38 enrichment columns, or null when the session has never been enriched.
+ *
+ * `enrichment_at` is the presence key rather than, say, the summary: it is written in the same
+ * statement as everything else, so a row that has it has all of it, and a pre-v38 row (or a row
+ * whose columns exist but were never written) reads as null instead of a half-built object.
+ */
+function enrichmentFrom(r: Record<string, unknown>): StoredEnrichment | null {
+  const at = (r.enrichment_at as string) ?? null;
+  if (!at) return null;
+  return {
+    summary: (r.enrichment_summary as string) ?? "",
+    outstanding: (r.enrichment_outstanding as string) ?? "",
+    recommendation: (r.enrichment_recommendation as Recommendation) ?? "continue",
+    reason: (r.enrichment_reason as string) ?? "",
+    junk: !!r.enrichment_junk,
+    cwdCorrect: !!r.enrichment_cwd_correct,
+    suggestedLocation: (r.enrichment_suggested_location as string) || null,
+    suggestedCwd: (r.enrichment_suggested_cwd as string) || null,
+    atMessages: (r.enrichment_at_messages as number) ?? 0,
+    at,
   };
 }
 
@@ -1363,6 +1457,67 @@ export function setStage(db: Database, sessionId: string, stage: string | null, 
 /** A short freeform status a session writes about itself (≤2 lines on its tab). null clears it. */
 export function setStatusLine(db: Database, sessionId: string, statusLine: string | null, now: string): void {
   set(db, sessionId, "status_line", statusLine, now);
+}
+
+/**
+ * Write a complete enrichment in ONE statement (v38).
+ *
+ * Deliberately not eleven `set()` calls: enrichment is a single observation, and a half-written
+ * one is worse than none — `enrichment_at` is the presence key `enrichmentFrom` reads, so a crash
+ * between column writes could otherwise leave a row claiming to be enriched with an empty summary.
+ * A successful write also zeroes the attempt counter, so a session that recovers after transient
+ * failures gets its full retry budget back.
+ */
+export function setEnrichment(
+  db: Database,
+  sessionId: string,
+  enrichment: Enrichment,
+  now: string,
+): void {
+  ensureRow(db, sessionId, now);
+  db.query(
+    `UPDATE catalogue SET
+       enrichment_summary = $summary,
+       enrichment_outstanding = $outstanding,
+       enrichment_recommendation = $recommendation,
+       enrichment_reason = $reason,
+       enrichment_junk = $junk,
+       enrichment_cwd_correct = $cwdCorrect,
+       enrichment_suggested_location = $suggestedLocation,
+       enrichment_suggested_cwd = $suggestedCwd,
+       enrichment_at_messages = $atMessages,
+       enrichment_at = $at,
+       enrichment_attempts = 0,
+       updated_at = $now
+     WHERE session_id = $id`,
+  ).run({
+    $summary: enrichment.summary,
+    $outstanding: enrichment.outstanding,
+    $recommendation: enrichment.recommendation,
+    $reason: enrichment.reason,
+    $junk: enrichment.junk ? 1 : 0,
+    $cwdCorrect: enrichment.cwdCorrect ? 1 : 0,
+    $suggestedLocation: enrichment.suggestedLocation || null,
+    $suggestedCwd: enrichment.suggestedCwd || null,
+    $atMessages: enrichment.atMessages,
+    $at: enrichment.at,
+    $now: now,
+    $id: sessionId,
+  });
+}
+
+/**
+ * Count one failed enrichment attempt. Mirrors `recordTitleFailure` in the index: a session the
+ * model can't parse (or that keeps timing out) burns its budget and is then skipped forever,
+ * rather than consuming a slot in every sweep for the rest of time.
+ */
+export function recordEnrichmentFailure(db: Database, sessionId: string, now: string): void {
+  ensureRow(db, sessionId, now);
+  db.query(
+    `UPDATE catalogue
+       SET enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1, updated_at = $now
+     WHERE session_id = $id`,
+  ).run({ $now: now, $id: sessionId });
 }
 
 /**

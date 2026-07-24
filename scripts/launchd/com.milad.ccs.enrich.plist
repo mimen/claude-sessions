@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Session enrichment sweep.
+
+     Keeps `ccs enrich` output warm so opening a session browser shows current summaries
+     instead of backfilling for minutes. Enrichment is cheap by design: the sweep only calls
+     the model for sessions that actually advanced (see src/enrich/staleness.ts), so a steady
+     state run usually does nothing at all.
+
+     LAPTOP ONLY, deliberately:
+       - the model gateway (homebrew.mxcl.cliproxyapi) runs here;
+       - the catalogue and index are machine-local (~/.ccs/cache), so a Mini-side sweep would
+         enrich a different store.
+
+     Absolute paths throughout because launchd does NOT source a shell profile: its PATH is
+     /usr/gnu/bin:/usr/local/bin:/bin:/usr/bin, which contains neither bun nor ccs. The
+     `#!/usr/bin/env bun` shebang on bin/ccs would fail here, so bun is invoked directly.
+
+     --limit bounds each run. A cold store has ~340 sessions to backfill; at 40 per run on a
+     15-minute interval it drains in roughly two hours without ever presenting the gateway
+     with a burst. Steady state is a handful of sessions or none.
+
+     Install:   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.milad.ccs.enrich.plist
+     Remove:    launchctl bootout gui/$(id -u)/com.milad.ccs.enrich
+     Run now:   launchctl kickstart -k gui/$(id -u)/com.milad.ccs.enrich
+     Logs:      ~/Library/Logs/com.milad.ccs.enrich.log
+-->
+<dict>
+    <key>Label</key>
+    <string>com.milad.ccs.enrich</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/bun</string>
+        <string>/Users/mimen/Programming/Deployments/claude-sessions/bin/ccs</string>
+        <string>enrich</string>
+        <string>--sweep</string>
+        <string>--limit</string>
+        <string>40</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- One sweep at a time. A run that outlives the interval must not have a second one
+         started on top of it, or two workers would enrich the same stale set concurrently. -->
+    <key>AbandonProcessGroup</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/mimen/Library/Logs/com.milad.ccs.enrich.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mimen/Library/Logs/com.milad.ccs.enrich.log</string>
+</dict>
+</plist>
