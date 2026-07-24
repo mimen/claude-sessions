@@ -58,7 +58,7 @@ const runningT3Attachment = {
   providerInstanceId: "claudeAgent",
   localSourceHost: "h",
   nativeSessionId: "real1",
-  sourceCwd: "/c",
+  sourceCwd: realpathSync(process.cwd()),
   sourceId: "source-1",
   threadId: "thread-1",
   projectId: "project-1",
@@ -134,6 +134,7 @@ test("App reads one T3 attachment snapshot and renders its second status circle"
   const restorePrefs = useFlatView();
   const index = openIndex(":memory:");
   seed(index);
+  updateRootCwd(index, realpathSync(process.cwd()));
   let calls = 0;
 
   const { lastFrame, unmount } = render(
@@ -172,6 +173,7 @@ test("T3 attachment circle exposes textual status in screen-reader mode", async 
   const restorePrefs = useFlatView();
   const index = openIndex(":memory:");
   seed(index);
+  updateRootCwd(index, realpathSync(process.cwd()));
   const priorScreenReader = process.env.INK_SCREEN_READER;
   process.env.INK_SCREEN_READER = "true";
 

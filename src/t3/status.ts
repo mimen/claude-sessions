@@ -210,19 +210,35 @@ export function t3SourceIdentityKey(identity: T3SourceIdentity): string {
 export function joinT3AttachmentsToRootSessions(
   rows: readonly SessionRow[],
   attachments: readonly T3AttachmentStatus[],
+  resolveSourceCwd: (cwd: string) => string = realpathSync,
 ): Map<string, T3AttachmentStatus> {
+  const bySessionId = new Map<string, T3AttachmentStatus>();
+  if (attachments.length === 0) return bySessionId;
+
   const byIdentity = new Map(
     attachments.map((attachment) => [t3SourceIdentityKey(attachment), attachment] as const),
   );
-  const bySessionId = new Map<string, T3AttachmentStatus>();
+  const candidateRoots = new Set(
+    attachments
+      .filter((attachment) => attachment.providerInstanceId === CLAUDE_PROVIDER_INSTANCE_ID)
+      .map((attachment) => `${attachment.localSourceHost}\0${attachment.nativeSessionId}`),
+  );
   for (const row of rows) {
-    if (row.isSubagent || row.resumeId.trim().length === 0 || !row.cwd) continue;
-    let sourceCwd = row.cwd;
+    if (
+      row.isSubagent ||
+      row.resumeId.trim().length === 0 ||
+      !row.cwd ||
+      !candidateRoots.has(`${row.host}\0${row.resumeId}`)
+    ) {
+      continue;
+    }
+    let sourceCwd: string;
     try {
-      sourceCwd = realpathSync(row.cwd);
+      sourceCwd = resolveSourceCwd(row.cwd);
     } catch {
-      // Indexed rows can outlive their working directory. Preserve exact identity matching for
-      // snapshots captured before the path vanished, while live paths use canonical realpaths.
+      // T3 stores a canonical source CWD. A vanished path cannot be joined without weakening the
+      // identity and potentially conflating sessions that share a host and native resume id.
+      continue;
     }
     const attachment = byIdentity.get(
       t3SourceIdentityKey({

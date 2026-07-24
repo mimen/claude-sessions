@@ -179,10 +179,28 @@ test("attachment snapshot joins only local root rows with the same source identi
       matching,
       attachment({ sourceId: "wrong-provider", providerInstanceId: "other-provider" }),
     ],
+    (cwd) => cwd,
   );
 
   expect([...joined.keys()]).toEqual(["local-row"]);
   expect(joined.get("local-row")).toBe(matching);
+});
+
+test("attachment join skips canonicalization when no snapshot can match", () => {
+  let resolutions = 0;
+  expect(
+    joinT3AttachmentsToRootSessions([row()], [], (cwd) => {
+      resolutions++;
+      return cwd;
+    }),
+  ).toEqual(new Map());
+  expect(resolutions).toBe(0);
+
+  expect(
+    joinT3AttachmentsToRootSessions([row()], [attachment()], () => {
+      throw new Error("working directory vanished");
+    }),
+  ).toEqual(new Map());
 });
 
 test("attachment indicator reserves cobalt for a healthy running provider", () => {

@@ -289,6 +289,8 @@ export async function runCatalogueDaemon(
         if (pathname === "/_control/refresh") {
           bunServer.timeout(request, 0);
         } else if (
+          pathname === "/_control/title" ||
+          pathname === "/_control/title-failure" ||
           pathname === "/v1/source-status" ||
           pathname === "/v1/root-sessions/query" ||
           pathname === "/v1/source/lookup"

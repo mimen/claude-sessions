@@ -361,8 +361,14 @@ export function App({
   // T3 exposes one read-only process-wide snapshot. Fetch it once per App mount, then perform the
   // source-identity join in memory; never query T3 storage or spawn one command per visible row.
   const [t3Attachments, setT3Attachments] = useState<readonly T3AttachmentStatus[]>([]);
+  const consecutiveT3StatusFailures = useRef(0);
   useEffect(() => {
     let alive = true;
+    const recordFailure = (reason: string) => {
+      consecutiveT3StatusFailures.current += 1;
+      if (consecutiveT3StatusFailures.current >= 4) setT3Attachments([]);
+      getCrashReporter()?.breadcrumb("tui.t3.attachment-status.failure", { reason });
+    };
     const refreshAttachments = () => {
       getCrashReporter()?.breadcrumb("tui.t3.attachment-status.start");
       void t3StatusClient.snapshot().then(
@@ -372,21 +378,18 @@ export function App({
             return;
           }
           if (outcome.kind === "snapshot") {
+            consecutiveT3StatusFailures.current = 0;
             setT3Attachments(outcome.snapshot.attachments);
             getCrashReporter()?.breadcrumb("tui.t3.attachment-status.success", {
               count: outcome.snapshot.attachments.length,
             });
             return;
           }
-          getCrashReporter()?.breadcrumb("tui.t3.attachment-status.failure", {
-            reason: outcome.reason,
-          });
+          recordFailure(outcome.reason);
         },
         () => {
           if (!alive) return;
-          getCrashReporter()?.breadcrumb("tui.t3.attachment-status.failure", {
-            reason: "client-rejection",
-          });
+          recordFailure("client-rejection");
         },
       );
     };

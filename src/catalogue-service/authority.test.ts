@@ -19,6 +19,7 @@ interface Fixture {
   readonly cwdB: string;
   readonly fileA: string;
   readonly fileB: string;
+  readonly cataloguePath: string;
   readonly authority: CatalogueAuthority;
   advance(ms: number): void;
 }
@@ -106,6 +107,7 @@ function fixture(): Fixture {
     cwdB,
     fileA,
     fileB,
+    cataloguePath,
     authority,
     advance(ms: number): void {
       now += ms;
@@ -228,6 +230,31 @@ describe("CatalogueAuthority", () => {
           message: "The catalogue changed or the query filters differ; restart from the first page.",
         },
       });
+    } finally {
+      await f.authority.close();
+    }
+  });
+
+  test("non-forced refresh publishes external catalogue visibility changes while fresh", async () => {
+    const f = fixture();
+    try {
+      const initial = await f.authority.query(query());
+      expect(initial.ok).toBe(true);
+      if (!initial.ok) return;
+      expect(initial.value.sourceStatus).toMatchObject({ generation: 1, rowCount: 2 });
+
+      const catalogue = openCatalogue(f.cataloguePath);
+      catalogue
+        .query(
+          "INSERT INTO catalogue (session_id, session_class, updated_at) VALUES ($id, 'auxiliary', $now)",
+        )
+        .run({ $id: UUID_A, $now: "2026-07-22T12:01:00.000Z" });
+      catalogue.close();
+
+      const refreshed = await f.authority.controlRefresh({ force: false, titles: false });
+      expect(refreshed.ok).toBe(true);
+      if (!refreshed.ok) return;
+      expect(refreshed.value.sourceStatus).toMatchObject({ generation: 2, rowCount: 1 });
     } finally {
       await f.authority.close();
     }

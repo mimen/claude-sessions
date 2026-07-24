@@ -242,6 +242,7 @@ export class CatalogueAuthority {
       clearTimeout(this.#refreshScheduled);
       this.#refreshScheduled = null;
     }
+    if (!this.#refreshPromise) this.#refreshVisibilityIfChanged();
     const current = this.sourceStatus();
     if (!options.force && current.freshness === "fresh" && !options.titles) {
       return ok({
