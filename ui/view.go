@@ -281,7 +281,7 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 	if selected {
 		titleColor = theme.FgBase
 	}
-	title := column(titleColor).Bold(selected).Render(pad(session.Title, titleWidth))
+	title := column(titleColor).Bold(selected).Render(pad(cleanTitle(session.Title), titleWidth))
 
 	line := caret + backgroundSpace(1) + backgroundSpace(lipgloss.Width(indent)) + dot + backgroundSpace(1) + title + inline
 	if right != "" {
@@ -292,12 +292,33 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 
 // ---- preview dossier ----
 
+// cleanTitle strips leading decorative markers (*, ·, •) and whitespace some
+// session titles carry, so the list reads cleanly.
+func cleanTitle(title string) string {
+	return strings.TrimLeft(title, " \t*·•")
+}
+
+// previewContentWidth is the usable text width inside the preview pane. The pane
+// has left-2/right-1 padding, so any line laid out wider than this overflows and
+// wraps onto a second line.
+func previewContentWidth(paneWidth int) int {
+	return max(4, paneWidth-3)
+}
+
+// previewPaneWidth derives the preview pane width from the terminal width, using
+// the same split as View(), so off-screen callers (scroll math) agree with it.
+func (m Model) previewPaneWidth() int {
+	innerW := m.w - 4
+	listW := innerW * 58 / 100
+	return innerW - listW - 3
+}
+
 func (m Model) renderPreview(width int, height int) string {
 	session, ok := m.selectedSession()
 	if !ok {
 		return fg(theme.FgMoreSubtle).Render("no session selected")
 	}
-	contentWidth := max(4, width-2)
+	contentWidth := previewContentWidth(width)
 	classification := previewClass(session)
 	badgeLine := theme.Pill(session.State, theme.StateColor(session.State)) + "  " + classChip(classification)
 	if session.Stage != "" {
@@ -307,7 +328,7 @@ func (m Model) renderPreview(width int, height int) string {
 		badgeLine += "  " + fg(prColor(session.PRState)).Render(fmt.Sprintf("#%d", session.PRNumber))
 	}
 	lines := []string{
-		fg(theme.FgBase).Bold(true).Render(truncate(session.Title, contentWidth)),
+		fg(theme.FgBase).Bold(true).Render(truncate(cleanTitle(session.Title), contentWidth)),
 		fg(theme.FgMoreSubtle).Render(truncate(session.Project+" · "+session.Duration+" active", contentWidth)),
 		fit(badgeLine, contentWidth),
 		fg(theme.Sep).Render(strings.Repeat("─", contentWidth)),
@@ -362,6 +383,9 @@ func (m Model) renderPreview(width int, height int) string {
 		{"last", lastActivity(data.FormatAge(session.LastAt, m.snapshot.LoadedAt))},
 	}
 	for _, pair := range metadata {
+		if value := strings.TrimSpace(pair[1]); value == "" || value == "—" {
+			continue // hide fields that don't apply to this session (class, cluster, stage, PR)
+		}
 		lines = append(lines, fg(theme.FgMostSubtle).Render(pad(pair[0], 10))+fg(theme.FgSubtle).Render(truncate(pair[1], max(1, contentWidth-11))))
 	}
 	lines = append(lines, "", sect("Transcript")+fg(theme.FgMostSubtle).Render("  J/K peek · v full"))
@@ -369,16 +393,14 @@ func (m Model) renderPreview(width int, height int) string {
 	if errText := m.transcriptErrs[session.ID]; errText != "" {
 		lines = append(lines, fg(theme.Warning).Render(truncate(errText, contentWidth)))
 	} else if document, loaded := m.transcripts[session.ID]; loaded {
-		peek := meaningfulLines(document.Lines)
+		peek := renderPeekRows(meaningfulLines(document.Lines), contentWidth)
 		start := m.peekScroll
 		if m.peekSession != session.ID {
 			start = max(0, len(peek)-remaining)
 		}
 		start = clamp(start, 0, max(0, len(peek)-1))
 		end := min(len(peek), start+remaining)
-		for _, transcriptLine := range peek[start:end] {
-			lines = append(lines, renderPeekLine(transcriptLine, contentWidth))
-		}
+		lines = append(lines, peek[start:end]...)
 	} else {
 		lines = append(lines, fg(theme.FgMostSubtle).Render("loading recent transcript…"))
 	}
@@ -457,7 +479,7 @@ func (m Model) renderTree(width int, height int) string {
 			role = fg(theme.Info).Render(" ◆ " + sanitizePlain(node.Role))
 		}
 		plainPrefixWidth := lipgloss.Width(indent) + lipgloss.Width(branch) + lipgloss.Width(idText) + 1 + lipgloss.Width(role)
-		title := fg(theme.FgBase).Render(truncate(node.Title, max(1, width-plainPrefixWidth)))
+		title := fg(theme.FgBase).Render(truncate(cleanTitle(node.Title), max(1, width-plainPrefixWidth)))
 		head := indent + branch + id + " " + title + role
 		if selected {
 			head = lipgloss.NewStyle().Background(theme.BgLow).Width(width).Render(fit(head, width))
@@ -512,7 +534,7 @@ func (m Model) renderRoutePicker() string {
 	contentWidth := max(1, panelWidth-8)
 	lines := []string{
 		fit(fg(theme.Keyword).Bold(true).Render("Resume via…"), contentWidth),
-		fg(theme.FgMoreSubtle).Render(truncate(session.Title, contentWidth)),
+		fg(theme.FgMoreSubtle).Render(truncate(cleanTitle(session.Title), contentWidth)),
 		"",
 	}
 	if m.routeLoading {

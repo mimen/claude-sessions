@@ -127,12 +127,15 @@ func (m Model) handleConfirmationKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 			item := confirmation.items[0]
 			m.confirmation = nil
 			m.status = "marking done via ccs…"
-			return m, markCompletedCmd(item.sessionID, preferredID, m.options.loadOptions())
+			// Cursor moves to the NEXT session, not down into the done section,
+			// so you can keep cleaning up in place.
+			return m, markCompletedCmd(item.sessionID, m.nextSessionID(m.cursor), m.options.loadOptions())
 		case confirmArchive:
 			item := confirmation.items[0]
 			m.confirmation = nil
 			m.status = "archiving via ccs…"
-			return m, archiveBatchCmd([]string{item.sessionID}, preferredID, "archived 1 session", m.options.loadOptions())
+			// Same as the fast `e` archive: land on the next session, not a jump.
+			return m, archiveBatchCmd([]string{item.sessionID}, m.nextSessionID(m.cursor), "archived 1 session", m.options.loadOptions())
 		case confirmUnarchive:
 			item := confirmation.items[0]
 			m.confirmation = nil

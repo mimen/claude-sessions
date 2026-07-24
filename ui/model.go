@@ -647,7 +647,7 @@ func (m *Model) scrollPeek(delta int) {
 	if !cached {
 		return
 	}
-	peek := meaningfulLines(document.Lines)
+	peek := renderPeekRows(meaningfulLines(document.Lines), previewContentWidth(m.previewPaneWidth()))
 	if m.peekSession != session.ID {
 		m.peekSession = session.ID
 		m.peekScroll = max(0, len(peek)-6)

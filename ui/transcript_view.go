@@ -159,7 +159,12 @@ func wrapWords(value string, width int) []string {
 func meaningfulLines(lines []transcript.Line) []transcript.Line {
 	out := make([]transcript.Line, 0, len(lines))
 	for _, line := range lines {
-		if line.Kind == transcript.KindTool {
+		// Drop tool calls/results and blank/separator lines entirely — the peek
+		// is a tight list of recent messages with no gaps between them.
+		if line.Kind == transcript.KindTool || line.Kind == transcript.KindMeta {
+			continue
+		}
+		if strings.TrimSpace(line.Text) == "" {
 			continue
 		}
 		out = append(out, line)
@@ -178,17 +183,48 @@ func transcriptLabel(kind transcript.Kind) string {
 	}
 }
 
-func renderPeekLine(line transcript.Line, width int) string {
-	label := transcriptLabel(line.Kind)
-	color := theme.FgSubtle
-	switch line.Kind {
+func peekColor(kind transcript.Kind) lipgloss.Color {
+	switch kind {
 	case transcript.KindUser:
-		color = theme.Accent
+		return theme.Accent
 	case transcript.KindAssistant:
-		color = theme.FgBase
-	case transcript.KindTool:
-		color = theme.FgMostSubtle
+		return theme.FgBase
+	default:
+		return theme.FgSubtle
 	}
-	prefix := fg(theme.FgMostSubtle).Render(pad(label, 4))
-	return fit(prefix+lipgloss.NewStyle().Foreground(color).Background(theme.BgBase).Render(truncate(line.Text, max(1, width-4))), width)
+}
+
+// renderPeekRows expands recent messages into full, word-wrapped display rows:
+// the "you"/"ai" label sits on the first row, continuations indent under it. No
+// truncation — the peek shows whole messages (scroll with J/K). Embedded
+// newlines are flattened first so wrapping is clean at the pane width.
+// maxPeekLinesPerMessage caps how tall a single message gets in the peek so one
+// long message can't swallow the whole pane; the last shown line gets an ellipsis.
+const maxPeekLinesPerMessage = 3
+
+func renderPeekRows(msgs []transcript.Line, width int) []string {
+	rows := make([]string, 0, len(msgs)*maxPeekLinesPerMessage)
+	textWidth := max(1, width-4)
+	for _, line := range msgs {
+		label := transcriptLabel(line.Kind)
+		color := peekColor(line.Kind)
+		text := strings.Join(strings.Fields(line.Text), " ")
+		wrapped := wrapWords(text, textWidth)
+		if len(wrapped) > maxPeekLinesPerMessage {
+			wrapped = wrapped[:maxPeekLinesPerMessage]
+			last := []rune(wrapped[maxPeekLinesPerMessage-1])
+			if len(last) >= textWidth {
+				last = last[:textWidth-1]
+			}
+			wrapped[maxPeekLinesPerMessage-1] = string(last) + "…"
+		}
+		for i, w := range wrapped {
+			prefix := theme.Main.Render("    ")
+			if i == 0 {
+				prefix = fg(theme.FgMostSubtle).Render(pad(label, 4))
+			}
+			rows = append(rows, fit(prefix+lipgloss.NewStyle().Foreground(color).Background(theme.BgBase).Render(w), width))
+		}
+	}
+	return rows
 }
