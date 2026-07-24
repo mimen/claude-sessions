@@ -54,6 +54,7 @@ type catalogueMeta struct {
 	Stage           string
 	PRNumber        int
 	PRState         string
+	Enrichment      Enrichment
 }
 
 func openReadOnlySQLite(path string) (*sql.DB, error) {
@@ -345,6 +346,19 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		stageExpr,
 		prNumberExpr,
 		prStateExpr,
+		// Catalogue v38. Each goes through prefixedColumn so a pre-v38 catalogue — an older CCS on
+		// this machine, or a store that has not been opened by a v38 binary yet — still loads:
+		// the columns read as NULL and the dossier shows "not enriched yet" instead of failing.
+		prefixedColumn(catalogueColumns, "c", "enrichment_summary", "NULL"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_outstanding", "NULL"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_recommendation", "NULL"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_reason", "NULL"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_junk", "0"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_cwd_correct", "1"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_suggested_location", "NULL"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_suggested_cwd", "NULL"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_at_messages", "0"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_at", "NULL"),
 	}
 	rows, err := db.Query("SELECT " + strings.Join(selected, ", ") + " FROM catalogue c" + identityJoin + prJoin)
 	if err != nil {
@@ -370,6 +384,9 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		var identityCompleted int
 		var identityArchived int
 		var identityParked sql.NullString
+		var enrichSummary, enrichOutstanding, enrichRecommendation sql.NullString
+		var enrichReason, enrichSuggestedLoc, enrichSuggestedCWD, enrichAt sql.NullString
+		var enrichJunk, enrichCWDCorrect, enrichAtMessages sql.NullInt64
 		if err := rows.Scan(
 			&row.SessionID,
 			&customTitle,
@@ -388,6 +405,16 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 			&stage,
 			&prNumber,
 			&prState,
+			&enrichSummary,
+			&enrichOutstanding,
+			&enrichRecommendation,
+			&enrichReason,
+			&enrichJunk,
+			&enrichCWDCorrect,
+			&enrichSuggestedLoc,
+			&enrichSuggestedCWD,
+			&enrichAtMessages,
+			&enrichAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan catalogue row: %w", err)
 		}
@@ -413,6 +440,24 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 			row.PRNumber = int(prNumber.Int64)
 		}
 		row.PRState = normalizeInline(prState.String)
+		// Recommendation gates the whole struct: a row without one was never enriched, and a
+		// half-populated Enrichment would render as a confident empty summary.
+		if rec := normalizeInline(enrichRecommendation.String); rec != "" {
+			row.Enrichment = Enrichment{
+				// Summary is the one field kept multi-line — normalizeInline would collapse the
+				// paragraph the dossier wraps itself.
+				Summary:        strings.TrimSpace(enrichSummary.String),
+				Outstanding:    normalizeInline(enrichOutstanding.String),
+				Recommendation: rec,
+				Reason:         normalizeInline(enrichReason.String),
+				Junk:           enrichJunk.Int64 != 0,
+				CWDCorrect:     enrichCWDCorrect.Int64 != 0,
+				SuggestedLoc:   normalizeInline(enrichSuggestedLoc.String),
+				SuggestedCWD:   normalizeInline(enrichSuggestedCWD.String),
+				AtMessages:     int(enrichAtMessages.Int64),
+				At:             parseTime(enrichAt.String),
+			}
+		}
 		out[row.SessionID] = row
 	}
 	if err := rows.Err(); err != nil {

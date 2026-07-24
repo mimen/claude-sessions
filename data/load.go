@@ -89,6 +89,7 @@ func Load(options LoadOptions) (Snapshot, error) {
 			Stage:            meta.Stage,
 			PRNumber:         meta.PRNumber,
 			PRState:          meta.PRState,
+			Enrichment:       meta.Enrichment,
 			Project:          row.ProjectName,
 			ProjectRoot:      row.ProjectRoot,
 			CWD:              row.CWD,

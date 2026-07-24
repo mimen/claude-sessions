@@ -333,8 +333,13 @@ func (m Model) renderPreview(width int, height int) string {
 		fit(badgeLine, contentWidth),
 		fg(theme.Sep).Render(strings.Repeat("─", contentWidth)),
 	}
+	// Enrichment leads: it is the stored answer to "what is this and what do I do with it", and
+	// it is what the panel is for. Everything below is supporting detail.
+	lines = append(lines, renderEnrichment(session, contentWidth)...)
+	// A live `s` summary sits underneath rather than replacing it — it is generated on demand and
+	// lost on quit, so it can only ever be a second opinion on the durable one.
 	if summary := m.summaries[session.ID]; summary != "" {
-		lines = append(lines, "", sect("Summary"))
+		lines = append(lines, "", sect("Live summary"))
 		for _, wrapped := range wrapWords(summary, contentWidth) {
 			lines = append(lines, fg(theme.FgSubtle).Render(wrapped))
 		}
@@ -387,6 +392,15 @@ func (m Model) renderPreview(width int, height int) string {
 			continue // hide fields that don't apply to this session (class, cluster, stage, PR)
 		}
 		lines = append(lines, fg(theme.FgMostSubtle).Render(pad(pair[0], 10))+fg(theme.FgSubtle).Render(truncate(pair[1], max(1, contentWidth-11))))
+	}
+	// The peek was the old answer to "what is this session" and it was a poor one — a scrolling
+	// window of recent turns you had to read to learn anything. Where an enrichment exists it has
+	// already answered that question above, so the peek is retired to `v` rather than competing
+	// for the same space. It stays as the fallback for sessions the sweep has not reached, which
+	// would otherwise show a dossier with nothing in it.
+	if session.Enrichment.Present() {
+		lines = append(lines, "", fg(theme.FgMostSubtle).Render("v  full transcript"))
+		return strings.Join(lines, "\n")
 	}
 	lines = append(lines, "", sect("Transcript")+fg(theme.FgMostSubtle).Render("  J/K peek · v full"))
 	remaining := max(1, height-len(lines))
