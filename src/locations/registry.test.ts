@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
@@ -595,6 +596,40 @@ test("register through the runtime symlink preserves the machine-adapter-managed
   expect(lstatSync(runtimeLink).isSymbolicLink()).toBe(true);
   expect(readFileSync(shared, "utf8")).toContain(`default_host = "${LAPTOP_HOST}"`);
   expect(readFileSync(shared, "utf8")).toContain('key = "project"');
+});
+
+test("register leaves a dangling managed registry symlink untouched", () => {
+  const root = tempRoot();
+  const runtimeDir = join(root, "runtime");
+  mkdirSync(runtimeDir);
+  const missingTarget = join(root, "managed", "locations.toml");
+  const runtimeLink = join(runtimeDir, "locations.toml");
+  symlinkSync(missingTarget, runtimeLink);
+  const cwd = join(root, "project");
+  mkdirSync(cwd);
+  initRepo(cwd);
+
+  const registered = registerLocation(runtimeLink, {
+    defaultHost: MINI_HOST,
+    key: "project",
+    name: "Project",
+    aliases: [],
+    cwd,
+    kind: "repo",
+    eligibleHosts: [LAPTOP_HOST],
+    preferredHost: null,
+    defaultHarness: null,
+    defaultModel: null,
+  }, TEST_REGISTRATION_POLICY);
+
+  expect(registered.ok).toBe(false);
+  if (!registered.ok) {
+    expect(registered.error.message).toContain("Managed location registry symlink");
+    expect(registered.error.message).toContain("restore the managed target");
+  }
+  expect(lstatSync(runtimeLink).isSymbolicLink()).toBe(true);
+  expect(readlinkSync(runtimeLink)).toBe(missingTarget);
+  expect(() => readFileSync(runtimeLink, "utf8")).toThrow();
 });
 
 test("register refuses a missing cwd and selector collisions", () => {
