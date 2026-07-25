@@ -142,6 +142,26 @@ test("synthetic model is excluded from models and cost breakdown", () => {
   expect(acc.totals().models).toEqual([]);
 });
 
+test("lastModel keeps arrival order that the sorted models list throws away", () => {
+  const acc = createUsageAccumulator();
+  acc.add({ message: { model: "gpt-5.6-sol" } });
+  acc.add({ message: { model: "claude-opus-5" } });
+  // Sorted, so "claude-opus-5" leads — but the session ENDED on gpt, which is what routing needs.
+  expect(acc.totals().models).toEqual(["claude-opus-5", "gpt-5.6-sol"]);
+  expect(acc.totals().lastModel).toBe("claude-opus-5");
+
+  acc.add({ message: { model: "gpt-5.6-sol" } });
+  expect(acc.totals().lastModel).toBe("gpt-5.6-sol");
+});
+
+test("lastModel is null with no assistant turns, and ignores synthetic lines", () => {
+  const acc = createUsageAccumulator();
+  expect(acc.totals().lastModel).toBeNull();
+  acc.add({ message: { model: "gpt-5.6-sol" } });
+  acc.add(line({ requestId: "r1", model: "<synthetic>", usage: { input_tokens: 0 } }));
+  expect(acc.totals().lastModel).toBe("gpt-5.6-sol");
+});
+
 test("formatCost renders compact column values", () => {
   expect(formatCost(0)).toBe("");
   expect(formatCost(0.004)).toBe("1¢");
