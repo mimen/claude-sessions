@@ -36,6 +36,7 @@ type indexedSession struct {
 	CostUSD         float64
 	CostByModel     map[string]float64
 	Models          []string
+	LastModel       string
 	Skeleton        string
 }
 
@@ -154,6 +155,7 @@ func loadIndex(path string) ([]indexedSession, error) {
 		selectColumn(columns, "cost_usd", "0"),
 		selectColumn(columns, "cost_by_model", "'{}'"),
 		selectColumn(columns, "models", "'[]'"),
+		selectColumn(columns, "last_model", "''"),
 		selectColumn(columns, "skeleton", "''"),
 	}
 	query := "SELECT " + strings.Join(selected, ", ") +
@@ -176,6 +178,7 @@ func loadIndex(path string) ([]indexedSession, error) {
 		var subagent int
 		var costJSON string
 		var modelsJSON string
+		var lastModel sql.NullString
 		if err := rows.Scan(
 			&row.ID,
 			&row.Host,
@@ -196,6 +199,7 @@ func loadIndex(path string) ([]indexedSession, error) {
 			&row.CostUSD,
 			&costJSON,
 			&modelsJSON,
+			&lastModel,
 			&row.Skeleton,
 		); err != nil {
 			return nil, fmt.Errorf("scan index row: %w", err)
@@ -222,6 +226,7 @@ func loadIndex(path string) ([]indexedSession, error) {
 		row.Title, row.TitleSource = resolveIndexTitle(row.NativeTitle, row.CodexTitle, row.FallbackTitle)
 		row.CostByModel = parseCostByModel(costJSON)
 		row.Models = parseModels(modelsJSON)
+		row.LastModel = normalizeInline(lastModel.String)
 		if row.ResumeID == "" {
 			row.ResumeID = row.ID
 		}

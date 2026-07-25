@@ -99,6 +99,7 @@ func Load(options LoadOptions) (Snapshot, error) {
 			LastAt:           row.LastAt,
 			Messages:         row.Messages,
 			Models:           append([]string(nil), row.Models...),
+			LastModel:        row.LastModel,
 			Model:            model,
 			SelfCost:         rollup.Self,
 			TotalCost:        rollup.Total,

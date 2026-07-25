@@ -24,7 +24,7 @@ serves = ["gpt-*"]
 		t.Fatal(err)
 	}
 	t.Setenv("CCS_ROOT", root)
-	routes, err := LoadRoutes([]string{"gpt-5.6-sol"})
+	routes, err := LoadRoutes([]string{"gpt-5.6-sol"}, "gpt-5.6-sol")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,18 +60,21 @@ serves = ["gpt-*"]
 	tests := []struct {
 		name         string
 		models       []string
+		lastModel    string
 		wantDefault  string
 		wantServedBy []string
 	}{
-		{name: "claude history", models: []string{"claude-fable-5"}, wantDefault: "claude-native", wantServedBy: []string{"claude-native"}},
-		{name: "gpt history", models: []string{"gpt-5.6-sol"}, wantDefault: "claude-gpt", wantServedBy: []string{"claude-gpt"}},
-		{name: "already crossed", models: []string{"gpt-5.6-sol", "claude-fable-5"}, wantDefault: ""},
+		{name: "claude history", models: []string{"claude-fable-5"}, lastModel: "claude-fable-5", wantDefault: "claude-native", wantServedBy: []string{"claude-native"}},
+		{name: "gpt history", models: []string{"gpt-5.6-sol"}, lastModel: "gpt-5.6-sol", wantDefault: "claude-gpt", wantServedBy: []string{"claude-gpt"}},
+		{name: "native to gpt mixed history", models: []string{"claude-fable-5", "gpt-5.6-sol"}, lastModel: "gpt-5.6-sol", wantDefault: "claude-gpt", wantServedBy: []string{"claude-gpt"}},
+		{name: "gpt to native mixed history", models: []string{"gpt-5.6-sol", "claude-fable-5"}, lastModel: "claude-fable-5", wantDefault: "claude-native", wantServedBy: []string{"claude-native"}},
+		{name: "stale crossed row", models: []string{"gpt-5.6-sol", "claude-fable-5"}, wantDefault: ""},
 		{name: "no history yet", models: nil, wantDefault: ""},
 		{name: "blank history", models: []string{"", "  "}, wantDefault: ""},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			routes, err := LoadRoutes(test.models)
+			routes, err := LoadRoutes(test.models, test.lastModel)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -108,15 +111,15 @@ func TestDefaultLauncherPrefersTheMostSpecificServingGlob(t *testing.T) {
 		{Name: "claude", Binary: "claude", Serves: []string{"*"}},
 		{Name: "claude-gpt", Binary: "claude-gpt", Serves: []string{"gpt-*"}},
 	}
-	if index := defaultLauncher(entries, []string{"gpt-5.6-sol"}); index != 1 {
+	if index := defaultLauncher(entries, []string{"gpt-5.6-sol"}, "gpt-5.6-sol"); index != 1 {
 		t.Fatalf("defaultLauncher() = %d, want 1", index)
 	}
-	// A catch-all still serves a mixed history; only a fleet with no catch-all
-	// leaves the origin unresolved.
-	if index := defaultLauncher(entries, []string{"gpt-5.6-sol", "claude-fable-5"}); index != 0 {
+	// A stale row with no final model falls back to the whole history. A catch-all
+	// still serves it; only a fleet with no catch-all leaves the origin unresolved.
+	if index := defaultLauncher(entries, []string{"gpt-5.6-sol", "claude-fable-5"}, ""); index != 0 {
 		t.Fatalf("mixed defaultLauncher() = %d, want 0", index)
 	}
-	if index := defaultLauncher(entries[1:], []string{"gpt-5.6-sol", "claude-fable-5"}); index != -1 {
+	if index := defaultLauncher(entries[1:], []string{"gpt-5.6-sol", "claude-fable-5"}, ""); index != -1 {
 		t.Fatalf("unserved defaultLauncher() = %d, want -1", index)
 	}
 

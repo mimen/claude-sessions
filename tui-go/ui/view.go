@@ -687,8 +687,8 @@ func (m Model) renderRoutePicker() string {
 		fit(fg(theme.Keyword).Bold(true).Render("Resume via…"), contentWidth),
 		fg(theme.FgMoreSubtle).Render(truncate(cleanTitle(session.Title), contentWidth)),
 	}
-	// The model history is the whole basis of the preselection, so show it: it is
-	// the one fact that makes an informed harness override possible.
+	// The final model determines the preselection when indexed; the full history
+	// remains useful context when the operator deliberately overrides the harness.
 	if len(session.Models) > 0 {
 		lines = append(lines, fg(theme.FgMostSubtle).Render(truncate("history · "+strings.Join(session.Models, ", "), contentWidth)))
 	}
@@ -709,8 +709,8 @@ func (m Model) renderRoutePicker() string {
 				bar = fg(theme.Primary).Bold(true).Render("❯ ")
 				nameColor = theme.FgBase
 			}
-			// ✓ this harness serves the whole history · ~ a cross-harness resume,
-			// which is allowed · ✗ the target itself is unavailable.
+			// ✓ this harness serves the automatic replay target · ~ a cross-harness
+			// resume, which is allowed · ✗ the target itself is unavailable.
 			mark := fg(theme.Success).Render("✓")
 			if !launcher.Serves {
 				mark = fg(theme.Accent).Render("~")

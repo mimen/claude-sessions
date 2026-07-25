@@ -772,7 +772,7 @@ func (m Model) resumeDefault() (tea.Model, tea.Cmd) {
 		m.status = "focusing live session…"
 		return m, focusLiveCmd(session)
 	}
-	routes, err := data.LoadRoutes(session.Models)
+	routes, err := data.LoadRoutes(session.Models, session.LastModel)
 	if err != nil {
 		m.status = "can't resolve origin backend: " + err.Error()
 		return m, nil
@@ -842,15 +842,15 @@ func (m Model) openRoutePicker() (tea.Model, tea.Cmd) {
 
 func loadRoutesCmd(session data.Session) tea.Cmd {
 	return func() tea.Msg {
-		routes, err := data.LoadRoutes(session.Models)
+		routes, err := data.LoadRoutes(session.Models, session.LastModel)
 		return routesLoadedMsg{sessionID: session.ID, routes: routes, err: err}
 	}
 }
 
-// defaultRouteIndex preselects the origin backend for this session's history.
-// When the history carries no signal — no models yet, or a history already
-// spanning harnesses — it falls back to the harness chosen last, then to the
-// first route. Preselection only; every route stays selectable.
+// defaultRouteIndex preselects the origin backend for the session's replay
+// target. When that target carries no signal — no models yet, or a stale row
+// whose whole history spans harnesses — it falls back to the harness chosen
+// last, then to the first route. Preselection only; every route stays selectable.
 func defaultRouteIndex(routes []data.Launcher, preferred string) int {
 	for i, route := range routes {
 		if route.Default {
