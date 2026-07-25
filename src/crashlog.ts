@@ -156,9 +156,10 @@ export function summarizeArgv(argv: readonly string[]): CrashFacts {
       flags.push(arg.slice(0, 2));
     }
   }
-  const structuralCommands = new Set(["reindex", "ls", "tree", "whoami", "meta", "rename", "mark", "tag", "key", "parent", "project", "set-cluster", "role", "gus-work", "epic", "status", "name", "stage", "new-session", "delegate", "sync-tabs", "hook", "hooks", "catch-up", "context-check", "decide", "bump-session", "close-current-workspace", "reap-duplicates", "statusline", "inbox", "state", "grouping", "roles", "sync-roles", "cluster", "catalogue", "identity", "session-fields", "session", "board", "resume-session", "resume-cluster", "resume", "self-check", "skills"]);
+  const structuralCommands = new Set(["reindex", "ls", "tree", "whoami", "meta", "rename", "mark", "tag", "key", "parent", "project", "set-cluster", "role", "gus-work", "epic", "status", "name", "stage", "new-session", "delegate", "sync-tabs", "hook", "hooks", "catch-up", "context-check", "decide", "bump-session", "finish-current", "close-current-workspace", "reap-duplicates", "statusline", "inbox", "state", "grouping", "roles", "sync-roles", "cluster", "catalogue", "identity", "session-fields", "session", "board", "resume-session", "resume-cluster", "resume", "self-check", "skills"]);
   const structuralSubcommands: Readonly<Record<string, ReadonlySet<string>>> = {
     hook: new Set(["run", "explain", "lint"]),
+    "finish-current": new Set(["complete", "archive"]),
     cluster: new Set(["init", "board", "catch-up", "decide", "resume", "reap-duplicates", "sync-roles"]),
     session: new Set(["new", "set", "unset", "title", "complete", "archive", "uncomplete", "unarchive"]),
     identity: new Set(["mint", "set", "ls", "complete", "archive", "uncomplete", "path", "sessions", "lineage", "resolve"]),

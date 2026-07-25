@@ -8,7 +8,7 @@ import type { Database } from "bun:sqlite";
 import { listByRecency, sessionById, titleOf } from "./index/index.ts";
 import { buildCostRollup } from "./index/cost-rollup.ts";
 import { formatCost } from "./cost.ts";
-import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster } from "./catalogue/db.ts";
+import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster, displayTitle } from "./catalogue/db.ts";
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson, isCoreRole } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
@@ -58,6 +58,9 @@ Usage:
   ccs start [--dry-run|--explain] [description...]  Route work to an active session or managed new session
   ccs reindex [--titles]   Refresh through the host-local catalogue authority
   ccs catalogue-service start|status|stop|refresh   Manage the on-demand local authority
+  ccs enrich [<id>|.] [--json]                    Summarise one session (what it was, what's open, what to do)
+  ccs enrich --sweep [--limit N] [--concurrency N]  Enrich every stale session
+  ccs enrich --list [--limit N] [--json]          Show what the sweep would do, without calling the model
   ccs ls [--auxiliary]    Print indexed sessions (with catalogue badges)
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
   ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
@@ -130,6 +133,7 @@ Resume & tabs:
                                                   routes; launchers = [[launcher]] in ~/.ccs/config.toml)
   ccs routes <selector>                           Which launchers can resume each matched session, and why
   ccs sync-tabs [<selector>|.|--all]              Paint cmux tabs from catalogue metadata
+  ccs finish-current <complete|archive> [--do]    Preflight, or record lifecycle + enrich + close this workspace
   ccs close-current-workspace [--do]              Prove or close only this session's cmux workspace
   ccs reap-duplicates [--do]                      Close cmux dupes for sessions with >1 live \`claude --resume\`
 
@@ -177,6 +181,10 @@ export async function main(argv: string[]): Promise<number> {
       return await reindex({ titles: args.includes("--titles") });
     case "catalogue-service":
       return await catalogueServiceCommand(args.slice(1));
+    case "enrich": {
+      const { enrichCommand } = await import("./enrich/command.ts");
+      return await enrichCommand(args.slice(1));
+    }
     case "ls":
       return ls({ all: args.includes("--all"), loops: args.includes("--loops"), auxiliary: args.includes("--auxiliary") });
     case "tree":
@@ -271,6 +279,10 @@ export async function main(argv: string[]): Promise<number> {
     case "bump-session": {
       const { bumpSessionCommand } = await import("./inbox/bump-session-command.ts");
       return bumpSessionCommand(args.slice(1));
+    }
+    case "finish-current": {
+      const { finishCurrentCommand } = await import("./cmux/finish-current.ts");
+      return finishCurrentCommand(args.slice(1));
     }
     case "close-current-workspace": {
       const { closeCurrentWorkspaceCommand } = await import("./cmux/close-current.ts");
@@ -520,7 +532,7 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number 
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
       // A child in the constellation gets a ↳ marker inside the (padded) title cell, keeping columns aligned.
       const childMark = c?.parentSessionId ? "↳ " : "";
-      const title = pad(childMark + (c?.customTitle ?? r.title), 42);
+      const title = pad(childMark + displayTitle(c ?? null, r.title), 42);
       const isRecentUnclassified = c?.sessionClass == null && r.firstTs != null
         && Date.parse(r.firstTs) >= Date.parse(SESSION_CLASS_ROLLOUT_AT);
       const classification = c?.sessionClass === "auxiliary" ? "AUX " : isRecentUnclassified ? "UNCLASSIFIED " : "";

@@ -56,6 +56,9 @@ ccs start "continue the CCS session starter"  # route to an active session or pr
 ccs start --dry-run "continue the CCS session starter"  # preview the recommendation; launch nothing
 ccs start --explain "continue the CCS session starter"  # preview candidates and routing rationale
 ccs start              # prompt for the work description interactively
+ccs finish-current complete          # dry-run the exact current workspace close only
+ccs finish-current complete --do     # catalogue, complete, enrich detached, then safely close
+ccs finish-current archive --do      # catalogue, archive, enrich detached, then safely close
 
 # CCS-managed launches declare their intent before a UUID is reserved:
 ccs session new --top-level --cwd /path/to/repo
@@ -114,8 +117,8 @@ conversation, where filing the work is one command away.
 
 | command | what it does |
 |---------|--------------|
-| `/ccs:archive` | keep the title useful, mark archived, and offer a safe tab-close link |
-| `/ccs:complete` | mark the work finished, keep it in history, then safely close its workspace |
+| `/ccs:archive` | synchronously archive, launch detached enrichment, then safely close its workspace |
+| `/ccs:complete` | synchronously complete, launch detached enrichment, then safely close its workspace |
 | `/ccs:close-workspace` | close only the current session's sole-surface workspace after exact identity checks |
 | `/ccs:unarchive` | clear archive or completion flags and return to active views |
 | `/ccs:title <words>` | set an explicit title verbatim and sync the cmux tab |
@@ -127,6 +130,13 @@ conversation, where filing the work is one command away.
 history but completed cluster members are not resumed. Archived work leaves active
 browse/search views and cluster resumes. Both states are reversible; neither touches
 the transcript.
+
+`ccs finish-current <complete|archive>` is a close preflight only: it performs no catalogue,
+lifecycle, or enrichment mutation. With `--do`, it validates the explicit current session UUID,
+ensures the catalogue row, records the per-session lifecycle, launches `ccs enrich <uuid>` through
+`/usr/bin/nohup` with per-session runtime logging, then hands closure to the existing two-snapshot
+stable-UUID guard. A lifecycle failure stops before enrichment or close; an enrichment launch
+failure warns and still closes because the stale row remains eligible for `ccs enrich --sweep`.
 
 ## Configuration
 

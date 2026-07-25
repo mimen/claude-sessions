@@ -39,7 +39,7 @@ import { SectionCard } from "./SectionCard.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { readTranscript, type TranscriptLine } from "../transcript.ts";
 import { theme } from "./theme.ts";
-import { getAll, lifecycleOf, parentEdges, setCompleted, setArchived, setCustomTitle, identityKeyOf, type CatalogueRow } from "../catalogue/db.ts";
+import { displayTitle, getAll, lifecycleOf, parentEdges, setCompleted, setArchived, setCustomTitle, identityKeyOf, type CatalogueRow } from "../catalogue/db.ts";
 import { buildCostRollup, type CostRollup } from "../index/cost-rollup.ts";
 import { boardIndex } from "../board/indexer.ts";
 import { allGroupingsAcrossClusters } from "../state/groupings.ts";
@@ -428,11 +428,13 @@ export function App({
       })
       .map((r) => {
         // Precedence: live cmux title (open) → user's custom title → ROLE (a role-tagged
-        // session reads as its role, e.g. "designer", not the auto-generated skeleton title)
-        // → resolved Title. Mirrors render-tab so the TUI + cmux tab agree.
+        // session reads as its role, e.g. "designer", not the generated session title)
+        // → enrichment → resolved index title. Mirrors render-tab while the tab is live.
         const cat = catMap.get(r.sessionId);
-        const title =
-          openTitles.get(r.sessionId) ?? cat?.customTitle ?? cat?.role ?? r.title;
+        const title = openTitles.get(r.sessionId)
+          ?? cat?.customTitle
+          ?? cat?.role
+          ?? displayTitle(cat ?? null, r.title);
         return title === r.title ? r : { ...r, title };
       });
   }, [allIndexedRows, includeSubagents, pinned, catMap, showAuxiliary, showArchived, openTitles, taskFilter, taskIds, openSet]);

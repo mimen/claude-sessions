@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { ensureDataDir, CATALOGUE_PATH, DB_PATH } from "../paths.ts";
 import {
   openCatalogue,
+  ensureRow,
   setCustomTitle,
   setCompleted,
   setArchived,
@@ -201,6 +202,22 @@ export function whoami(): number {
   }
   console.log(id);
   return 0;
+}
+
+/** Create the minimal catalogue row required before a validated command-layer mutation. */
+export function ensureSessionRow(sessionId: string): Result<void> {
+  try {
+    ensureDataDir();
+    const db = openCatalogue(CATALOGUE_PATH());
+    try {
+      ensureRow(db, sessionId, now());
+      return ok(undefined);
+    } finally {
+      db.close();
+    }
+  } catch (cause) {
+    return err(cause instanceof Error ? cause : new Error(String(cause)));
+  }
 }
 
 export function rename(sessionArg: string | undefined, name: string | undefined): number {

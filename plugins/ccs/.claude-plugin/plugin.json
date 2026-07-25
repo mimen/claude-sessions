@@ -1,7 +1,7 @@
 {
   "name": "ccs",
   "displayName": "ccs session hygiene",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Slash commands that catalogue and safely close the session you're sitting in — archive, complete, close, title, tag — so `ccs` history stays worth reading.",
   "author": {
     "name": "Milad Imen",
