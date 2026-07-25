@@ -150,12 +150,20 @@ type TreeNode struct {
 	Providers ProviderCost
 }
 
-// Launcher is one real CCS launcher with its eligibility verdict.
+// Launcher is one resume route: a configured CCS launcher paired with a handoff
+// target (inline in this terminal, or a new cmux workspace).
 type Launcher struct {
-	Name     string
-	Backend  string
-	Env      map[string]string
-	Target   string
+	Name    string
+	Backend string
+	Env     map[string]string
+	Target  string
+	// Serves reports whether this launcher's serves globs cover every model in the
+	// session's history. It is advisory: it picks the preselected route and nothing
+	// else. Both wrappers are the same Claude Code harness over the same
+	// Anthropic-format transcript, so choosing the other one is the operator's call.
+	Serves bool
+	// Eligible reports whether the route can run at all — the only real block, and
+	// currently only ever false for cmux when cmux is not installed.
 	Eligible bool
 	Default  bool
 	Reason   string

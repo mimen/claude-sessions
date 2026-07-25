@@ -100,6 +100,7 @@ type Model struct {
 	routeLoading       bool
 	routeSession       string
 	routeError         string
+	lastLauncher       string
 	query              string
 	searching          bool
 	transcripts        map[string]transcript.Document
@@ -280,7 +281,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.routeError = msg.err.Error()
 			return m, nil
 		}
-		m.routeCursor = defaultRouteIndex(m.routes)
+		m.routeCursor = defaultRouteIndex(m.routes, m.lastLauncher)
 		return m, nil
 	case cmuxOpenedMsg:
 		if msg.err != nil {
@@ -472,6 +473,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			m.moveRouteCursor(1)
 		case "enter":
+			// Only a missing target blocks a route. A harness that does not serve
+			// the session's model history stays pickable: crossing harnesses is
+			// the point of this picker, and needs no force flag.
 			if !m.routeLoading && m.routeCursor >= 0 && m.routeCursor < len(m.routes) && m.routes[m.routeCursor].Eligible {
 				return m.activateRoute(m.routes[m.routeCursor])
 			}
@@ -764,9 +768,9 @@ func (m Model) resumeDefault() (tea.Model, tea.Cmd) {
 		m.status = "can't resolve origin backend: " + err.Error()
 		return m, nil
 	}
-	index := defaultRouteIndex(routes)
-	if index < 0 || index >= len(routes) || !routes[index].Eligible {
-		m.status = "no configured launcher can replay this session"
+	index := defaultRouteIndex(routes, m.lastLauncher)
+	if index < 0 || index >= len(routes) {
+		m.status = "no launcher is configured"
 		return m, nil
 	}
 	return m.activateRoute(routes[index])
@@ -778,6 +782,12 @@ func (m Model) activateRoute(route data.Launcher) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.overlay = OverlayNone
+	// Remember the harness, not the target: it seeds the preselection for the next
+	// session whose history gives no origin signal.
+	if route.Name != "" && route.Name != m.lastLauncher {
+		m.lastLauncher = route.Name
+		m.savePrefs()
+	}
 	if session.LiveWorkspaceRef != "" {
 		m.status = "focusing live session…"
 		return m, focusLiveCmd(session)
@@ -828,14 +838,18 @@ func loadRoutesCmd(session data.Session) tea.Cmd {
 	}
 }
 
-func defaultRouteIndex(routes []data.Launcher) int {
+// defaultRouteIndex preselects the origin backend for this session's history.
+// When the history carries no signal — no models yet, or a history already
+// spanning harnesses — it falls back to the harness chosen last, then to the
+// first route. Preselection only; every route stays selectable.
+func defaultRouteIndex(routes []data.Launcher, preferred string) int {
 	for i, route := range routes {
-		if route.Default && route.Eligible {
+		if route.Default {
 			return i
 		}
 	}
 	for i, route := range routes {
-		if route.Eligible {
+		if route.Target == "inline" && route.Name == preferred {
 			return i
 		}
 	}
@@ -911,18 +925,14 @@ func (m *Model) toggleCollapseAtCursor() {
 	}
 }
 
+// moveRouteCursor wraps through every route. Nothing is skipped: an unserved
+// harness is a legitimate destination, and a missing cmux still deserves to be
+// visible with its reason rather than silently absent.
 func (m *Model) moveRouteCursor(delta int) {
 	if m.routeLoading || len(m.routes) == 0 {
 		return
 	}
-	candidate := m.routeCursor
-	for step := 0; step < len(m.routes); step++ {
-		candidate = (candidate + delta + len(m.routes)) % len(m.routes)
-		if m.routes[candidate].Eligible {
-			m.routeCursor = candidate
-			return
-		}
-	}
+	m.routeCursor = (m.routeCursor + delta + len(m.routes)) % len(m.routes)
 }
 
 func (m *Model) rebuildRows() {

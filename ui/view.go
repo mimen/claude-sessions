@@ -686,8 +686,13 @@ func (m Model) renderRoutePicker() string {
 	lines := []string{
 		fit(fg(theme.Keyword).Bold(true).Render("Resume via…"), contentWidth),
 		fg(theme.FgMoreSubtle).Render(truncate(cleanTitle(session.Title), contentWidth)),
-		"",
 	}
+	// The model history is the whole basis of the preselection, so show it: it is
+	// the one fact that makes an informed harness override possible.
+	if len(session.Models) > 0 {
+		lines = append(lines, fg(theme.FgMostSubtle).Render(truncate("history · "+strings.Join(session.Models, ", "), contentWidth)))
+	}
+	lines = append(lines, "")
 	if m.routeLoading {
 		lines = append(lines, fit(fg(theme.FgMoreSubtle).Render("loading real routes…"), contentWidth))
 	} else if m.routeError != "" {
@@ -704,18 +709,27 @@ func (m Model) renderRoutePicker() string {
 				bar = fg(theme.Primary).Bold(true).Render("❯ ")
 				nameColor = theme.FgBase
 			}
+			// ✓ this harness serves the whole history · ~ a cross-harness resume,
+			// which is allowed · ✗ the target itself is unavailable.
 			mark := fg(theme.Success).Render("✓")
+			if !launcher.Serves {
+				mark = fg(theme.Accent).Render("~")
+			}
 			if !launcher.Eligible {
 				mark = fg(theme.FgMostSubtle).Render("✗")
 				nameColor = theme.FgMostSubtle
 			}
-			name := lipgloss.NewStyle().Foreground(nameColor).Background(theme.BgBase).Bold(selected).Render(pad(launcher.Name, 12))
-			backend := fg(theme.FgMoreSubtle).Render(pad(launcher.Backend, 22))
-			lines = append(lines, fit(bar+mark+" "+name+backend, contentWidth))
+			name := lipgloss.NewStyle().Foreground(nameColor).Background(theme.BgBase).Bold(selected).Render(pad(launcher.Name, 14))
+			target := fg(theme.FgMoreSubtle).Render(pad(launcher.Target, 8))
+			backend := fg(theme.FgMoreSubtle).Render(pad(launcher.Backend, 16))
+			lines = append(lines, fit(bar+mark+" "+name+target+backend, contentWidth))
 			lines = append(lines, fit(fg(theme.FgMostSubtle).Render("     "+truncate(launcher.Reason, max(1, contentWidth-5))), contentWidth))
 		}
 	}
-	lines = append(lines, "", fit(fg(theme.FgMostSubtle).Render("enter resume · inline routes hand off after exit · esc cancel"), contentWidth))
+	lines = append(lines,
+		"",
+		fit(fg(theme.FgMostSubtle).Render("j/k any harness · enter resume · esc cancel"), contentWidth),
+		fit(fg(theme.FgMostSubtle).Render("~ crosses harnesses; no force flag needed"), contentWidth))
 	lines = clipPanelLines(lines, max(1, m.h-4))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).BorderForeground(theme.Primary).
@@ -726,7 +740,7 @@ func (m Model) renderHelp() string {
 	groups := [][2]string{
 		{"↑↓ / j k", "move selection"},
 		{"enter", "resume inline on the origin backend"},
-		{"r", "pick claude / claude-gpt / cmux"},
+		{"r", "choose any harness × inline / cmux"},
 		{"v", "read the full transcript"},
 		{"J / K", "scroll the dossier transcript peek"},
 		{"p", "show / hide preview pane"},
@@ -776,7 +790,7 @@ func (m Model) renderKeybar(width int) string {
 		viewLabel = "flat"
 	}
 	items := [][2]string{
-		{"Tab", "skills"}, {"↑↓", "move"}, {"enter", "resume"}, {"r", "via…"}, {"v", "transcript"},
+		{"Tab", "skills"}, {"↑↓", "move"}, {"enter", "resume"}, {"r", "harness…"}, {"v", "transcript"},
 		{"/", "search"}, {"g", "view:" + viewLabel}, {"←→", "fold"}, {"o", "options"}, {"R", "refresh"},
 		{"e", "archive/unarchive"}, {"t", "retitle"}, {"C", "done"}, {"E", "edit"},
 		{"S/A/D", "AI"}, {"?", "help"}, {"q", "quit"},

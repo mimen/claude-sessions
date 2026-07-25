@@ -80,7 +80,7 @@ func Shot(name string, snapshot data.Snapshot) string {
 			model.routeSession = session.ID
 			model.routeLoading = false
 			model.routes = routes
-			model.routeCursor = defaultRouteIndex(routes)
+			model.routeCursor = defaultRouteIndex(routes, model.lastLauncher)
 			if err != nil {
 				model.routeError = err.Error()
 			}

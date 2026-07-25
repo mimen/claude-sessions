@@ -25,6 +25,7 @@ type persistedPrefs struct {
 	AutoRefresh     bool     `json:"autoRefresh"`
 	RefreshInterval string   `json:"refreshInterval"`
 	Preview         bool     `json:"preview"`
+	Launcher        string   `json:"launcher"`
 	Collapsed       []string `json:"collapsed"`
 }
 
@@ -121,6 +122,7 @@ func (m *Model) applyPrefs() {
 		m.options.refreshInterval = parsed
 	}
 	m.preview = stored.Preview
+	m.lastLauncher = stored.Launcher
 	m.collapsed = make(map[string]bool, len(stored.Collapsed))
 	for _, key := range stored.Collapsed {
 		m.collapsed[key] = true
@@ -162,6 +164,7 @@ func (m Model) savePrefs() {
 		AutoRefresh:     m.options.autoRefresh,
 		RefreshInterval: m.options.refreshInterval.String(),
 		Preview:         m.preview,
+		Launcher:        m.lastLauncher,
 		Collapsed:       keys,
 	}
 	encoded, err := json.MarshalIndent(payload, "", "  ")

@@ -32,7 +32,7 @@ SHOT=skill-reader go run .
 | --- | --- |
 | `↑` / `↓`, `j` / `k` | Move the selected session |
 | `enter` | Focus an already-live cmux session, otherwise exit the TUI and resume inline on its origin backend |
-| `r` | Pick an eligible launcher or a focused cmux workspace (`claude`, `claude-gpt`, configured launchers, `cmux`) |
+| `r` | Choose the harness and target for this resume: every configured launcher (`claude-native`, `claude-gpt`, …) × inline or a focused cmux workspace |
 | `g` | Cycle `default` → `tree` → `flat` |
 | `/` | Fuzzy filter title, project, and Claude task subjects |
 | `p` | Show or hide the dossier |
@@ -120,7 +120,7 @@ Claude’s transcript storage folder is authoritative: its name must equal Claud
 
 Inline resume is stored in the final Bubble Tea model, the alternate screen exits, and only then does the launcher inherit stdin/stdout/stderr. This prevents the TUI and interactive Claude process from owning the terminal simultaneously.
 
-Launcher eligibility and origin-backend selection mirror CCS model-glob semantics. A pure GPT history selects the most specific eligible `gpt-*` launcher; mixed/unknown histories fall back to an eligible catch-all. If `claude-gpt` is installed and no launcher config exists, it is exposed automatically alongside `claude`. `cmux` creates a new focused workspace with safe shell quoting and launcher environment variables. A session already live in cmux is focused by its exact surface-derived workspace/window refs instead of duplicated.
+The harness is the operator's choice, not the transcript's. `serves` globs from `~/.ccs/config.toml` only pick the *preselected* route — a pure GPT history preselects the most specific `gpt-*` launcher, a pure Claude history its `claude-*` one — and never block a route. Resuming a Claude session on `claude-gpt` (or the reverse) is one `j`/`k` away in the `r` picker, with no force flag: transcripts are stored in Anthropic format whatever produced them, and both wrappers are the same Claude Code harness. A history with no origin signal — no models yet, or one already spanning harnesses — preselects the harness chosen last, persisted in `prefs.json`. If `claude-gpt` is installed and no launcher config exists, it is exposed automatically alongside `claude`. Every launcher is also offered against `cmux`, which creates a new focused workspace with safe shell quoting and launcher environment variables. A session already live in cmux is focused by its exact surface-derived workspace/window refs instead of duplicated.
 
 ## Write ownership
 

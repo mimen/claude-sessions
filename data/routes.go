@@ -22,11 +22,17 @@ type launcherEntry struct {
 	Env    map[string]string `toml:"env"`
 }
 
-// LoadRoutes reads the real launcher fleet from CCS config and applies the same
-// pure eligibility/default-route semantics as ccs routes. It deliberately does
-// not shell out: the current CLI's read command opens migration-capable database
-// handles, while this browser promises that route inspection is read-only.
+// LoadRoutes reads the real launcher fleet from CCS config and pairs every
+// launcher with both handoff targets. It deliberately does not shell out: the
+// current CLI's read command opens migration-capable database handles, while
+// this browser promises that route inspection is read-only.
+//
+// Unlike `ccs resume`, serves globs never gate a route here. Transcripts are
+// stored in Anthropic format whatever produced them and both wrappers are the
+// same Claude Code harness, so replaying a claude session on claude-gpt (or the
+// reverse) is a choice the operator makes — serves only picks the DEFAULT.
 func LoadRoutes(models []string) ([]Launcher, error) {
+	models = normalizeModels(models)
 	entries, err := loadLauncherEntries()
 	if err != nil {
 		return nil, err
@@ -65,41 +71,60 @@ func LoadRoutes(models []string) ([]Launcher, error) {
 		}
 		entry.Serves = patterns
 		unmatched := unmatchedModels(patterns, models)
-		eligible := len(unmatched) == 0
-		reason := "can replay the full model history"
-		if !eligible {
-			reason = fmt.Sprintf("history contains %s, not matched by serves=[%s]", strings.Join(unmatched, ", "), strings.Join(patterns, ", "))
+		serves := len(unmatched) == 0
+		reason := "replays the full model history"
+		if !serves {
+			reason = fmt.Sprintf("cross-harness: %s not in serves=[%s]", strings.Join(unmatched, ", "), strings.Join(patterns, ", "))
 		}
 		routes = append(routes, Launcher{
 			Name:     entry.Name,
 			Backend:  entry.Binary,
 			Env:      copyStringMap(entry.Env),
 			Target:   "inline",
-			Eligible: eligible,
+			Serves:   serves,
+			Eligible: true,
 			Reason:   reason,
 		})
 	}
-	defaultIndex := defaultLauncher(entries, routes, models)
-	if defaultIndex >= 0 {
+	if defaultIndex := defaultLauncher(entries, models); defaultIndex >= 0 {
 		routes[defaultIndex].Default = true
-		routes[defaultIndex].Reason = "origin-backend default"
-		origin := routes[defaultIndex]
-		cmuxEligible := true
-		cmuxReason := "new focused workspace via " + origin.Name
-		if _, lookErr := exec.LookPath("cmux"); lookErr != nil {
-			cmuxEligible = false
-			cmuxReason = "cmux is not installed on PATH"
+		routes[defaultIndex].Reason = "origin backend for this history"
+	}
+	// Every launcher also gets a cmux target, so the harness stays a free choice
+	// when the resume is handed to a new workspace instead of this terminal.
+	cmuxEligible := true
+	cmuxMissing := ""
+	if _, lookErr := exec.LookPath("cmux"); lookErr != nil {
+		cmuxEligible = false
+		cmuxMissing = "cmux is not installed on PATH"
+	}
+	for index := range entries {
+		origin := routes[index]
+		reason := "new focused workspace via " + origin.Name
+		if cmuxMissing != "" {
+			reason = cmuxMissing
 		}
 		routes = append(routes, Launcher{
-			Name:     "cmux",
+			Name:     origin.Name,
 			Backend:  origin.Backend,
 			Env:      copyStringMap(origin.Env),
 			Target:   "cmux",
+			Serves:   origin.Serves,
 			Eligible: cmuxEligible,
-			Reason:   cmuxReason,
+			Reason:   reason,
 		})
 	}
 	return routes, nil
+}
+
+func normalizeModels(models []string) []string {
+	cleaned := make([]string, 0, len(models))
+	for _, model := range models {
+		if model = normalizeInline(model); model != "" {
+			cleaned = append(cleaned, model)
+		}
+	}
+	return cleaned
 }
 
 func loadLauncherEntries() ([]launcherEntry, error) {
@@ -171,11 +196,20 @@ func matchesModel(pattern string, model string) bool {
 	return last == "" || strings.HasSuffix(model, last)
 }
 
-func defaultLauncher(entries []launcherEntry, routes []Launcher, models []string) int {
+// defaultLauncher picks the origin backend: among the launchers that serve every
+// model in the history, the one matching it most specifically (so a pure-gpt
+// history prefers the gpt launcher over a catch-all). It returns -1 when the
+// history carries no signal — no models yet, or no launcher covers all of them,
+// which is exactly what a session already resumed cross-harness looks like. The
+// caller then falls back to the harness the operator last chose.
+func defaultLauncher(entries []launcherEntry, models []string) int {
+	if len(models) == 0 {
+		return -1
+	}
 	best := -1
 	bestScore := -1
-	for i, route := range routes {
-		if !route.Eligible {
+	for i := range entries {
+		if len(unmatchedModels(entries[i].Serves, models)) > 0 {
 			continue
 		}
 		score := int(^uint(0) >> 1)
@@ -187,9 +221,6 @@ func defaultLauncher(entries []launcherEntry, routes []Launcher, models []string
 				}
 			}
 			score = minInt(score, perModel)
-		}
-		if len(models) == 0 {
-			score = 0
 		}
 		if score > bestScore {
 			best = i

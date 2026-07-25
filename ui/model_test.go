@@ -13,6 +13,7 @@ import (
 	"ccsspike/skills"
 	"ccsspike/transcript"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -353,6 +354,150 @@ serves = ["gpt-*"]
 	if !ok || strings.Join(handoff.Argv, " ") != "claude-gpt --resume internal-id" {
 		t.Fatalf("handoff = %+v, ok=%v", handoff, ok)
 	}
+}
+
+// writeHarnessConfig points CCS_ROOT at a two-harness fleet with no catch-all,
+// and isolates preferences so a run never reads or writes the real ones.
+func writeHarnessConfig(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+	config := `
+[[launcher]]
+name = "claude-native"
+binary = "claude-native"
+serves = ["claude-*"]
+
+[[launcher]]
+name = "claude-gpt"
+binary = "claude-gpt"
+serves = ["gpt-*"]
+`
+	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCS_ROOT", root)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+}
+
+// openHarnessPicker opens `r` on the only session and settles the loaded routes.
+func openHarnessPicker(t *testing.T, model Model) Model {
+	t.Helper()
+	updated, command := model.openRoutePicker()
+	if command == nil {
+		t.Fatal("route picker loaded no routes")
+	}
+	message, ok := command().(routesLoadedMsg)
+	if !ok || message.err != nil {
+		t.Fatalf("routes message = %+v", message)
+	}
+	updated, _ = updated.(Model).Update(message)
+	return updated.(Model)
+}
+
+// The picker is a free choice of harness: a claude-only history can be replayed
+// on claude-gpt and the reverse, with no force flag and no extra confirmation.
+func TestRoutePickerResumesOnAnyHarness(t *testing.T) {
+	tests := []struct {
+		name     string
+		models   []string
+		steps    int
+		wantArgv string
+	}{
+		{name: "origin harness", models: []string{"claude-fable-5"}, wantArgv: "claude-native --resume internal-id"},
+		{name: "claude history crossed to gpt", models: []string{"claude-fable-5"}, steps: 1, wantArgv: "claude-gpt --resume internal-id"},
+		{name: "gpt history crossed to native", models: []string{"gpt-5.6-sol"}, steps: -1, wantArgv: "claude-native --resume internal-id"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			writeHarnessConfig(t)
+			snapshot := testSnapshot(1)
+			snapshot.Sessions[0].CWD = t.TempDir()
+			snapshot.Sessions[0].ResumeID = "internal-id"
+			snapshot.Sessions[0].Models = test.models
+			model := openHarnessPicker(t, New(snapshot))
+
+			key := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}
+			if test.steps < 0 {
+				key = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}}
+			}
+			for step := 0; step < abs(test.steps); step++ {
+				updated, _ := model.Update(key)
+				model = updated.(Model)
+			}
+			updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			if command == nil {
+				t.Fatal("enter on the selected harness did not hand off")
+			}
+			handoff, ok := updated.(Model).Handoff()
+			if !ok || strings.Join(handoff.Argv, " ") != test.wantArgv {
+				t.Fatalf("handoff = %+v ok=%v, want %q", handoff, ok, test.wantArgv)
+			}
+		})
+	}
+}
+
+// A history that already spans harnesses has no origin backend, so the harness
+// chosen last is the preselection — which is exactly the state a cross-harness
+// resume leaves behind.
+func TestChosenHarnessPersistsAndSeedsCrossedHistories(t *testing.T) {
+	writeHarnessConfig(t)
+	snapshot := testSnapshot(1)
+	snapshot.Sessions[0].CWD = t.TempDir()
+	snapshot.Sessions[0].ResumeID = "internal-id"
+	snapshot.Sessions[0].Models = []string{"claude-fable-5"}
+	model := openHarnessPicker(t, New(snapshot))
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	updated, _ = updated.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := updated.(Model).lastLauncher; got != "claude-gpt" {
+		t.Fatalf("lastLauncher = %q, want claude-gpt", got)
+	}
+
+	snapshot.Sessions[0].Models = []string{"claude-fable-5", "gpt-5.6-sol"}
+	restored := New(snapshot)
+	if restored.lastLauncher != "claude-gpt" {
+		t.Fatalf("restored lastLauncher = %q", restored.lastLauncher)
+	}
+	restored = openHarnessPicker(t, restored)
+	if restored.routes[restored.routeCursor].Name != "claude-gpt" {
+		t.Fatalf("preselected %+v, want claude-gpt", restored.routes[restored.routeCursor])
+	}
+}
+
+func TestDefaultRouteIndexPrefersOriginThenLastHarness(t *testing.T) {
+	crossed := []data.Launcher{
+		{Name: "claude-native", Target: "inline"},
+		{Name: "claude-gpt", Target: "inline"},
+		{Name: "claude-native", Target: "cmux"},
+		{Name: "claude-gpt", Target: "cmux"},
+	}
+	origin := append([]data.Launcher(nil), crossed...)
+	origin[0].Default = true
+
+	tests := []struct {
+		name      string
+		routes    []data.Launcher
+		preferred string
+		want      int
+	}{
+		{name: "origin outranks the preference", routes: origin, preferred: "claude-gpt", want: 0},
+		{name: "preference resolves a crossed history", routes: crossed, preferred: "claude-gpt", want: 1},
+		{name: "preference never selects a cmux target", routes: crossed[2:], preferred: "claude-gpt", want: 0},
+		{name: "unknown preference falls back to the first route", routes: crossed, preferred: "gone", want: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := defaultRouteIndex(test.routes, test.preferred); got != test.want {
+				t.Fatalf("defaultRouteIndex() = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func abs(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func TestPreviewClassPreservesWorkBody(t *testing.T) {
