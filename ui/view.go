@@ -165,6 +165,11 @@ func (m Model) renderListHeader(width int) string {
 	if width >= 36 {
 		parts = append(parts, fg(theme.FgMostSubtle).Render(lpad("COST", 5)))
 	}
+	// 66, not 80: with the preview pane open the list only gets ~58% of the
+	// terminal, so a 132-wide window leaves this column just 74 to work with.
+	if width >= 66 {
+		parts = append(parts, fg(theme.FgMostSubtle).Render(lpad("MEM", 4)))
+	}
 	parts = append(parts, fg(theme.FgMostSubtle).Render(lpad("AGE", 5)))
 	if width >= 62 {
 		parts = append(parts, fg(theme.FgMostSubtle).Render(lpad("SUB", 4)))
@@ -269,6 +274,19 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 	}
 	if width >= 36 {
 		rightParts = append(rightParts, column(theme.CostColor(session.TotalCost)).Render(lpad(data.FormatCostList(session.TotalCost), 5)))
+	}
+	// Live memory sits next to spend: both answer "what is this costing me", one
+	// in dollars already burned and one in RAM held right now. Sessions with no
+	// running process render blank rather than "0", so the column reads as an
+	// attribute of live sessions instead of a claim about dead ones.
+	// 66, not 80: with the preview pane open the list only gets ~58% of the
+	// terminal, so a 132-wide window leaves this column just 74 to work with.
+	if width >= 66 {
+		if stat, live := m.procStatFor(session); live {
+			rightParts = append(rightParts, column(theme.FootprintColor(stat.Footprint)).Render(lpad(data.FormatFootprint(stat.Footprint), 4)))
+		} else {
+			rightParts = append(rightParts, backgroundSpace(4))
+		}
 	}
 	age := data.FormatAge(session.LastAt, m.snapshot.LoadedAt)
 	if width >= 28 {
@@ -441,6 +459,7 @@ func (m Model) renderPreview(width int, height int) string {
 	if session.ProviderCost.Other > 0 {
 		lines = append(lines, costBar(contentWidth, "Other ", session.ProviderCost.Other, session.TotalCost, theme.FgMostSubtle))
 	}
+	lines = append(lines, m.renderProcessSection(session, contentWidth)...)
 	lines = append(lines, "", sect("Model"))
 	badge := theme.Model(session.Model)
 	if session.Model == "" {
@@ -501,6 +520,42 @@ func (m Model) renderPreview(width int, height int) string {
 		lines = append(lines, fg(theme.FgMostSubtle).Render("loading recent transcript…"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// renderProcessSection reports what the session currently costs the machine.
+// It returns nothing for a session with no running process, so the dossier does
+// not carry an empty panel for the majority of rows, which are history.
+//
+// The heaviest-process line is the payload. A session's own Claude process is
+// unremarkable at a few hundred MB; the memory that shows up in Activity Monitor
+// as an anonymous `ugrep` or `node` belongs to a tool subprocess, and nothing
+// outside this view connects the two.
+func (m Model) renderProcessSection(session data.Session, contentWidth int) []string {
+	stat, live := m.procStatFor(session)
+	if !live {
+		return nil
+	}
+	headline := fg(theme.FootprintColor(stat.Footprint)).Bold(true).Render(data.FormatFootprint(stat.Footprint)) +
+		fg(theme.FgMoreSubtle).Render(" now · "+data.FormatFootprint(stat.Peak)+" peak")
+	processes := "1 process"
+	if stat.ProcessCount != 1 {
+		processes = fmt.Sprintf("%d processes", stat.ProcessCount)
+	}
+	lines := []string{
+		"",
+		sect("Live process"),
+		fit(headline, contentWidth),
+		fg(theme.FgMostSubtle).Render(fmt.Sprintf("pid %d · %s", stat.RootPID, processes)),
+	}
+	// Only name the heaviest process when it is not the Claude process itself —
+	// "claude is using claude's memory" is noise, a runaway child is the signal.
+	if !stat.HeaviestIsRoot && stat.HeaviestName != "" {
+		label := truncate(stat.HeaviestName, max(1, contentWidth-16))
+		lines = append(lines, fg(theme.FgMostSubtle).Render(pad("heaviest", 10))+
+			fg(theme.FgSubtle).Render(label)+
+			fg(theme.FootprintColor(stat.HeaviestFootprint)).Render(" "+data.FormatFootprint(stat.HeaviestFootprint)))
+	}
+	return lines
 }
 
 func costBar(width int, label string, value float64, total float64, color lipgloss.Color) string {

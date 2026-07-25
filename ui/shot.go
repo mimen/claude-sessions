@@ -13,6 +13,12 @@ import (
 func Shot(name string, snapshot data.Snapshot) string {
 	model := New(snapshot)
 	model.w, model.h = 132, 40
+	// Shots render real data, and the memory column is only meaningful against
+	// live processes. Sample once here — the ticker that keeps it fresh only
+	// runs under a real bubbletea program.
+	if home, err := os.UserHomeDir(); err == nil {
+		model.procStats = data.SampleProcStats(home)
+	}
 	model.cursor = nthSessionRow(model.rows, 3)
 	model.treeCursor = min(3, max(0, len(snapshot.Tree)-1))
 	loadShotTranscript(&model)

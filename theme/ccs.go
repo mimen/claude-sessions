@@ -20,6 +20,23 @@ func CostColor(usd float64) lipgloss.Color {
 	}
 }
 
+// FootprintColor grades live memory on the same restrained scale as CostColor,
+// reusing its exact palette so the two resource columns read as siblings. A
+// working Claude session sits in the hundreds of MB, so the scale only warms
+// well above that — an idle fleet should stay grey.
+func FootprintColor(bytes uint64) lipgloss.Color {
+	switch {
+	case bytes < 1<<30:
+		return lipgloss.Color("#5B6472") // barely-there
+	case bytes < 4<<30:
+		return lipgloss.Color("#9AA3B2") // neutral secondary
+	case bytes < 12<<30:
+		return lipgloss.Color("#C99A6B") // soft gold
+	default:
+		return lipgloss.Color("#E0876A") // soft coral (never pure red)
+	}
+}
+
 // ModelBadge is a short family label + stable color, keyed off a model id.
 type ModelBadge struct {
 	Label string

@@ -129,6 +129,12 @@ type Model struct {
 	skillReader        *skillReader
 	handoff            *resume.Command
 	status             string
+	// procStats is live per-session process cost, keyed by Claude session ID.
+	// It rides its own fast ticker rather than the snapshot refresh: sampling it
+	// costs ~20ms against the kernel, while a snapshot reload reads sqlite and
+	// transcripts. Nothing here is persisted — a session missing from the map
+	// simply has no live process right now.
+	procStats map[string]data.ProcStat
 }
 
 // New creates a browser over an immutable real-data snapshot.
@@ -154,6 +160,7 @@ func New(snapshot data.Snapshot) Model {
 		transcriptLoadedAt: make(map[string]time.Time),
 		readerLoading:      make(map[string]bool),
 		summaries:          make(map[string]string),
+		procStats:          make(map[string]data.ProcStat),
 	}
 	// Restore the previous session's view/options/folds, then rebuild rows so the
 	// restored collapse state and sort are reflected on first paint.
@@ -200,7 +207,9 @@ func (m Model) nextSessionID(cursor int) string {
 func (m Model) Init() tea.Cmd {
 	commands := []tea.Cmd{m.loadSelectedTranscriptCmd()}
 	if m.options.autoRefresh {
-		commands = append(commands, autoRefreshCmd(m.options.refreshInterval, m.tickerGeneration))
+		commands = append(commands,
+			autoRefreshCmd(m.options.refreshInterval, m.tickerGeneration),
+			procSampleCmd(m.tickerGeneration))
 	}
 	return tea.Batch(commands...)
 }
@@ -220,6 +229,24 @@ func (m Model) selectedSession() (data.Session, bool) {
 		return data.Session{}, false
 	}
 	return m.snapshot.Sessions[idx], true
+}
+
+// procStatFor returns live process cost for a session, or false when it has no
+// running process.
+//
+// Claude's marker files report the session's own internal ID, which for a
+// resumed session is the ResumeID rather than the transcript filename CCS keys
+// on — so both are tried before giving up.
+func (m Model) procStatFor(session data.Session) (data.ProcStat, bool) {
+	if stat, ok := m.procStats[session.ID]; ok {
+		return stat, true
+	}
+	if session.ResumeID != "" && session.ResumeID != session.ID {
+		if stat, ok := m.procStats[session.ResumeID]; ok {
+			return stat, true
+		}
+	}
+	return data.ProcStat{}, false
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -300,6 +327,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.peekScroll = max(0, len(msg.document.Lines)-6)
 		}
 		return m, nil
+	case procSampledMsg:
+		if msg.generation != m.tickerGeneration || !m.options.autoRefresh {
+			return m, nil
+		}
+		// Only replace on a successful sample. A transient read failure should
+		// leave the last known figures on screen rather than blanking the
+		// column, which would read as "this session died".
+		if msg.stats != nil {
+			m.procStats = msg.stats
+		}
+		return m, procSampleCmd(m.tickerGeneration)
 	case autoRefreshMsg:
 		if msg.generation != m.tickerGeneration || !m.options.autoRefresh {
 			return m, nil

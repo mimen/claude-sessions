@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -107,6 +108,31 @@ func autoRefreshCmd(interval time.Duration, generation uint64) tea.Cmd {
 	})
 }
 
+// procInterval is deliberately faster than any snapshot refresh interval:
+// sampling the process table costs ~20ms and touches only the kernel, whereas a
+// snapshot reload reads sqlite and transcripts. Memory is the one column that is
+// worthless when stale.
+const procInterval = 2 * time.Second
+
+type procSampledMsg struct {
+	generation uint64
+	stats      map[string]data.ProcStat
+}
+
+// procSampleCmd samples live process cost off the UI goroutine and schedules the
+// next tick. It shares tickerGeneration with the snapshot refresh so pausing
+// auto-refresh pauses the whole display, rather than leaving one column moving
+// under a frozen list.
+func procSampleCmd(generation uint64) tea.Cmd {
+	return tea.Tick(procInterval, func(time.Time) tea.Msg {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return procSampledMsg{generation: generation}
+		}
+		return procSampledMsg{generation: generation, stats: data.SampleProcStats(home)}
+	})
+}
+
 func (m Model) handleViewOptionsKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "esc":
@@ -179,7 +205,9 @@ func (m *Model) resetAutoRefreshTicker() tea.Cmd {
 	if !m.options.autoRefresh {
 		return nil
 	}
-	return autoRefreshCmd(m.options.refreshInterval, m.tickerGeneration)
+	return tea.Batch(
+		autoRefreshCmd(m.options.refreshInterval, m.tickerGeneration),
+		procSampleCmd(m.tickerGeneration))
 }
 
 func cycleIndex(current int, count int, direction int) int {
