@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnCmux, type SpawnCmuxOpts } from "./spawn-cmux.ts";
+import { shellQuote } from "./command.ts";
+import {
+  buildCmuxNewWorkspaceArgv,
+  spawnCmux,
+  type SpawnCmuxOpts,
+} from "./spawn-cmux.ts";
 
 /**
  * Test strategy: inject a fake cmuxBin that's a tiny bash script echoing the exact
@@ -11,17 +16,14 @@ import { spawnCmux, type SpawnCmuxOpts } from "./spawn-cmux.ts";
  * a real cmux binary or mocking Bun.spawnSync.
  */
 
-function withFakeCmux<T>(
-  handler: (scriptPath: string, calls: string[]) => void,
-  fn: (cmuxPath: string, callsFile: string) => T,
-): T {
+function withFakeCmux<T>(fn: (cmuxPath: string, callsFile: string) => T): T {
   const tmpDir = mkdtempSync(join(tmpdir(), "ccs-spawn-cmux-"));
   const cmuxPath = join(tmpDir, "fake-cmux");
   const callsFile = join(tmpDir, "calls.log");
 
-  // Write a bash script that logs its invocation and runs the handler's output logic
+  // NUL-delimit every argv item so assertions preserve spaces, equals signs, and empty strings.
   const script = `#!/bin/bash
-echo "$@" >> "${callsFile}"
+printf '%s\\0' "$@" > "${callsFile}"
 exit 0
 `;
   writeFileSync(cmuxPath, script, { mode: 0o755 });
@@ -33,14 +35,19 @@ exit 0
   }
 }
 
+function readCmuxArgv(callsFile: string): string[] {
+  const argv = readFileSync(callsFile, "utf8").split("\0");
+  if (argv.at(-1) === "") argv.pop();
+  return argv;
+}
+
 describe("spawnCmux", () => {
   test("constructs argv: new-workspace --cwd <cwd> --name <name> --command <shell-quoted argv>", () => {
     withFakeCmux(
-      (_scriptPath, _calls) => {},
       (cmuxPath, callsFile) => {
         // Inject a fake cmux that succeeds and prints a workspace ref
         const script = `#!/bin/bash
-echo "$@" >> "${callsFile}"
+printf '%s\\0' "$@" > "${callsFile}"
 echo "workspace:42"
 exit 0
 `;
@@ -56,26 +63,24 @@ exit 0
         const ref = spawnCmux(opts);
         expect(ref).toBe("workspace:42");
 
-        // Verify the args passed to the fake cmux (echo "$@" doesn't preserve the structure
-        // of the --command arg, but we can verify the key components are present)
-        const calls = readFileSync(callsFile, "utf8").trim();
-        expect(calls).toContain("new-workspace");
-        expect(calls).toContain("--cwd /tmp/test-dir");
-        expect(calls).toContain("--name my-session");
-        expect(calls).toContain("--command");
-        expect(calls).toContain("claude");
-        expect(calls).toContain("--resume");
-        expect(calls).toContain("s123");
+        expect(readCmuxArgv(callsFile)).toEqual([
+          "new-workspace",
+          "--cwd",
+          "/tmp/test-dir",
+          "--name",
+          "my-session",
+          "--command",
+          "claude --resume s123",
+        ]);
       },
     );
   });
 
   test("appends --focus true when opts.focus is true", () => {
     withFakeCmux(
-      (_scriptPath, _calls) => {},
       (cmuxPath, callsFile) => {
         const script = `#!/bin/bash
-echo "$@" >> "${callsFile}"
+printf '%s\\0' "$@" > "${callsFile}"
 echo "workspace:99"
 exit 0
 `;
@@ -92,19 +97,17 @@ exit 0
         const ref = spawnCmux(opts);
         expect(ref).toBe("workspace:99");
 
-        const calls = readFileSync(callsFile, "utf8").trim();
-        expect(calls).toContain("--focus");
-        expect(calls).toContain("true");
+        const calls = readCmuxArgv(callsFile);
+        expect(calls.slice(-2)).toEqual(["--focus", "true"]);
       },
     );
   });
 
   test("shell-quotes argv with spaces and special chars", () => {
     withFakeCmux(
-      (_scriptPath, _calls) => {},
       (cmuxPath, callsFile) => {
         const script = `#!/bin/bash
-echo "$@" >> "${callsFile}"
+printf '%s\\0' "$@" > "${callsFile}"
 echo "workspace:100"
 exit 0
 `;
@@ -120,20 +123,185 @@ exit 0
         const ref = spawnCmux(opts);
         expect(ref).toBe("workspace:100");
 
-        const calls = readFileSync(callsFile, "utf8").trim();
-        // The prompt arg has spaces and special chars, should be present
-        expect(calls).toContain("/pr-watch check PR #123");
-        expect(calls).toContain("--command");
+        const calls = readCmuxArgv(callsFile);
+        const commandIndex = calls.indexOf("--command");
+        expect(calls[commandIndex + 1]).toBe("claude --resume s789 '/pr-watch check PR #123'");
       },
     );
   });
 
-  test("returns workspace ref from JSON output (future-proofed structured output)", () => {
+  test("passes a very long PATH separately from the complete launcher command", () => {
     withFakeCmux(
-      (_scriptPath, _calls) => {},
       (cmuxPath, callsFile) => {
         const script = `#!/bin/bash
-echo "$@" >> "${callsFile}"
+printf '%s\\0' "$@" > "${callsFile}"
+echo "workspace:101"
+exit 0
+`;
+        writeFileSync(cmuxPath, script, { mode: 0o755 });
+
+        const longPath = Array.from(
+          { length: 2048 },
+          (_, index) => `/opt/ccs/toolchains/${index}/bin`,
+        ).join(":");
+        const ref = spawnCmux({
+          argv: [
+            "claude-gpt",
+            "--model",
+            "gpt-5.6-sol",
+            "--session-id",
+            "12345678-1234-4123-8123-123456789abc",
+            "finish the complete launch",
+          ],
+          cwd: "/tmp/test-dir",
+          name: "long-path",
+          env: { PATH: longPath },
+          cmuxBin: cmuxPath,
+        });
+
+        expect(ref).toBe("workspace:101");
+        const calls = readCmuxArgv(callsFile);
+        const commandIndex = calls.indexOf("--command");
+        const command = calls[commandIndex + 1];
+        expect(command).toBe(
+          "env -u CCS_CMUX_STAGED_ENV_0 PATH=\"$CCS_CMUX_STAGED_ENV_0\" " +
+          "claude-gpt --model gpt-5.6-sol --session-id " +
+          "12345678-1234-4123-8123-123456789abc 'finish the complete launch'; " +
+          "unset CCS_CMUX_STAGED_ENV_0",
+        );
+        expect(command).not.toContain(longPath);
+        expect(calls.filter((arg) => arg === "--env")).toHaveLength(1);
+        const envIndex = calls.indexOf("--env");
+        expect(calls[envIndex + 1]).toBe(`CCS_CMUX_STAGED_ENV_0=${longPath}`);
+      },
+    );
+  });
+
+  test("preserves empty and special launcher environment values as single argv items", () => {
+    withFakeCmux(
+      (cmuxPath, callsFile) => {
+        const script = `#!/bin/bash
+printf '%s\\0' "$@" > "${callsFile}"
+echo "workspace:102"
+exit 0
+`;
+        writeFileSync(cmuxPath, script, { mode: 0o755 });
+
+        const specialValue = "value with spaces=and=equals 'and quotes'";
+        const ref = spawnCmux({
+          argv: ["claude", "--session-id", "complete-session-id"],
+          cwd: "/tmp/test-dir",
+          name: "special-env",
+          env: {
+            CCS_CREATOR_KIND: "",
+            SPECIAL_VALUE: specialValue,
+          },
+          cmuxBin: cmuxPath,
+        });
+
+        expect(ref).toBe("workspace:102");
+        expect(readCmuxArgv(callsFile)).toEqual([
+          "new-workspace",
+          "--cwd",
+          "/tmp/test-dir",
+          "--name",
+          "special-env",
+          "--command",
+          "env -u CCS_CMUX_STAGED_ENV_0 -u CCS_CMUX_STAGED_ENV_1 " +
+            "CCS_CREATOR_KIND=\"$CCS_CMUX_STAGED_ENV_0\" " +
+            "SPECIAL_VALUE=\"$CCS_CMUX_STAGED_ENV_1\" " +
+            "claude --session-id complete-session-id; " +
+            "unset CCS_CMUX_STAGED_ENV_0 CCS_CMUX_STAGED_ENV_1",
+          "--env",
+          "CCS_CMUX_STAGED_ENV_0=",
+          "--env",
+          `CCS_CMUX_STAGED_ENV_1=${specialValue}`,
+        ]);
+      },
+    );
+  });
+
+  test("removes staging variables from the launcher and interactive shell environments", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "ccs-staged-env-"));
+    const launcherPath = join(tmpDir, "capture-launch-env");
+    const childEnvironmentPath = join(tmpDir, "child.env");
+    const shellEnvironmentPath = join(tmpDir, "shell.env");
+    writeFileSync(launcherPath, "#!/bin/bash\n/usr/bin/env > \"$1\"\n", { mode: 0o755 });
+
+    try {
+      const built = buildCmuxNewWorkspaceArgv({
+        argv: [launcherPath, childEnvironmentPath],
+        cwd: tmpDir,
+        name: "environment-scope",
+        env: {
+          CCS_LAUNCH_CREATOR_REF: "parent with spaces='quoted'",
+          OPENAI_API_KEY: "",
+        },
+      });
+      expect(built.ok).toBe(true);
+      if (!built.ok) return;
+
+      const commandIndex = built.value.indexOf("--command");
+      const command = built.value[commandIndex + 1];
+      const workspaceEnvironment = { ...process.env };
+      delete workspaceEnvironment.CCS_LAUNCH_CREATOR_REF;
+      delete workspaceEnvironment.OPENAI_API_KEY;
+      for (let index = 0; index < built.value.length; index++) {
+        if (built.value[index] !== "--env") continue;
+        const pair = built.value[index + 1] ?? "";
+        const equals = pair.indexOf("=");
+        workspaceEnvironment[pair.slice(0, equals)] = pair.slice(equals + 1);
+      }
+
+      const result = Bun.spawnSync(
+        ["/bin/bash", "-c", `${command}; /usr/bin/env > ${shellQuote(shellEnvironmentPath)}`],
+        { env: workspaceEnvironment, stdout: "pipe", stderr: "pipe" },
+      );
+      expect(result.success).toBe(true);
+
+      const childEnvironment = readFileSync(childEnvironmentPath, "utf8");
+      expect(childEnvironment).toContain("CCS_LAUNCH_CREATOR_REF=parent with spaces='quoted'\n");
+      expect(childEnvironment).toContain("OPENAI_API_KEY=\n");
+      expect(childEnvironment).not.toContain("CCS_CMUX_STAGED_ENV_");
+
+      const shellEnvironment = readFileSync(shellEnvironmentPath, "utf8");
+      expect(shellEnvironment).not.toContain("CCS_LAUNCH_CREATOR_REF=");
+      expect(shellEnvironment).not.toContain("OPENAI_API_KEY=");
+      expect(shellEnvironment).not.toContain("CCS_CMUX_STAGED_ENV_");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects invalid environment keys before invoking cmux", () => {
+    for (const key of ["", "1INVALID", "INVALID-NAME", "INVALID=NAME"]) {
+      const built = buildCmuxNewWorkspaceArgv({
+        argv: ["claude"],
+        cwd: "/tmp/test-dir",
+        name: "invalid-env",
+        env: { [key]: "value" },
+      });
+      expect(built.ok).toBe(false);
+    }
+
+    withFakeCmux((cmuxPath, callsFile) => {
+      const ref = spawnCmux({
+        argv: ["claude"],
+        cwd: "/tmp/test-dir",
+        name: "invalid-env",
+        env: { "INVALID-NAME": "value" },
+        cmuxBin: cmuxPath,
+      });
+      expect(ref).toBeNull();
+      expect(existsSync(callsFile)).toBe(false);
+    });
+  });
+
+  test("returns workspace ref from JSON output (future-proofed structured output)", () => {
+    withFakeCmux(
+      (cmuxPath, callsFile) => {
+        const script = `#!/bin/bash
+printf '%s\\0' "$@" > "${callsFile}"
 echo '{"ref": "workspace:200", "name": "my-session"}'
 exit 0
 `;
@@ -154,10 +322,9 @@ exit 0
 
   test("returns workspace ref from JSON output with 'id' field (alternate structure)", () => {
     withFakeCmux(
-      (_scriptPath, _calls) => {},
       (cmuxPath, callsFile) => {
         const script = `#!/bin/bash
-echo "$@" >> "${callsFile}"
+printf '%s\\0' "$@" > "${callsFile}"
 echo '{"id": "workspace:300"}'
 exit 0
 `;
@@ -178,10 +345,9 @@ exit 0
 
   test("regex fallback: parses workspace:N from plain text stdout", () => {
     withFakeCmux(
-      (_scriptPath, _calls) => {},
       (cmuxPath, callsFile) => {
         const script = `#!/bin/bash
-echo "$@" >> "${callsFile}"
+printf '%s\\0' "$@" > "${callsFile}"
 echo "Created workspace:500"
 exit 0
 `;
@@ -202,10 +368,9 @@ exit 0
 
   test("regex fallback: parses workspace:N from stderr if not in stdout", () => {
     withFakeCmux(
-      (_scriptPath, _calls) => {},
       (cmuxPath, callsFile) => {
         const script = `#!/bin/bash
-echo "$@" >> "${callsFile}"
+printf '%s\\0' "$@" > "${callsFile}"
 echo "workspace:600" >&2
 exit 0
 `;
@@ -226,10 +391,9 @@ exit 0
 
   test("returns null on non-zero exit", () => {
     withFakeCmux(
-      (_scriptPath, _calls) => {},
       (cmuxPath, callsFile) => {
         const script = `#!/bin/bash
-echo "$@" >> "${callsFile}"
+printf '%s\\0' "$@" > "${callsFile}"
 echo "Error: cmux failed" >&2
 exit 1
 `;
@@ -250,10 +414,9 @@ exit 1
 
   test("returns null when no workspace ref found in output", () => {
     withFakeCmux(
-      (_scriptPath, _calls) => {},
       (cmuxPath, callsFile) => {
         const script = `#!/bin/bash
-echo "$@" >> "${callsFile}"
+printf '%s\\0' "$@" > "${callsFile}"
 echo "success but no ref"
 exit 0
 `;
@@ -283,10 +446,9 @@ exit 0
 
   test("uses process.env.CMUX_BIN when cmuxBin not provided", () => {
     withFakeCmux(
-      (_scriptPath, _calls) => {},
       (cmuxPath, callsFile) => {
         const script = `#!/bin/bash
-echo "$@" >> "${callsFile}"
+printf '%s\\0' "$@" > "${callsFile}"
 echo "workspace:800"
 exit 0
 `;
