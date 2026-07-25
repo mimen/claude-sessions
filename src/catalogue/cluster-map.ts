@@ -85,7 +85,7 @@ export function toMember(
   return {
     sessionId: row.sessionId,
     role: row.role ?? "(unroled)",
-    title: row.customTitle,
+    title: row.customTitle ?? row.enrichment?.title ?? null,
     cwd,
     resumeId,
     gusWork: row.gusWork,

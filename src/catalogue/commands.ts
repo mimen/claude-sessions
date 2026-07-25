@@ -679,6 +679,7 @@ export function meta(sessionArg: string | undefined): number {
     }
     console.log(id);
     if (row?.customTitle) console.log(`  title: ${row.customTitle}`);
+    if (row?.enrichment?.title) console.log(`  enriched title: ${row.enrichment.title}`);
     console.log(`  kind: ${row?.kind ?? "session"}`);
     console.log(`  session class: ${row?.sessionClass ?? "unclassified"}`);
     console.log(

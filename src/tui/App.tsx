@@ -432,7 +432,10 @@ export function App({
         // → resolved Title. Mirrors render-tab so the TUI + cmux tab agree.
         const cat = catMap.get(r.sessionId);
         const title =
-          openTitles.get(r.sessionId) ?? cat?.customTitle ?? cat?.role ?? r.title;
+          openTitles.get(r.sessionId) ?? cat?.customTitle ?? cat?.role ??
+          // Enrichment names the session from how it ended; r.title is a guess made from its
+          // opening turns. Both lose to a live cmux title, a human title, and a role.
+          cat?.enrichment?.title ?? r.title;
         return title === r.title ? r : { ...r, title };
       });
   }, [allIndexedRows, includeSubagents, pinned, catMap, showAuxiliary, showArchived, openTitles, taskFilter, taskIds, openSet]);

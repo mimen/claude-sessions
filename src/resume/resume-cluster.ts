@@ -193,7 +193,7 @@ export function resumeMany(
     role: row?.role ?? null,
     prNumber: row?.prNumber ?? null,
     prRepo: row?.prRepo ?? null,
-    title: row?.customTitle ?? null,
+    title: row?.customTitle ?? row?.enrichment?.title ?? null,
     shortname: typeof row?.meta?.shortname === "string" ? row.meta.shortname : null,
   });
   // Role-level opt-in `pin_on_resume` (role.toml). Memoized on the (cluster, role)

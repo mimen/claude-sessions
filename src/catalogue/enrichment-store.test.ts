@@ -3,7 +3,8 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue, getRow, setEnrichment, recordEnrichmentFailure, setCompleted } from "./db.ts";
+import { openCatalogue, getRow, setEnrichment, recordEnrichmentFailure, setCompleted, setCustomTitle, displayTitle } from "./db.ts";
+import { renderTab } from "./render-tab.ts";
 import type { Enrichment } from "./enrichment-schema.ts";
 
 const NOW = "2026-07-24T12:00:00.000Z";
@@ -156,5 +157,40 @@ describe("enrichment migrations", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("enriched titles reach the surfaces that show a session's name", () => {
+  test("displayTitle prefers a human title, then enrichment, then the index", () => {
+    const db = openCatalogue(":memory:");
+    setEnrichment(db, "s1", ENRICHMENT, NOW);
+
+    // No human title: enrichment beats the index's guess from the opening turns.
+    expect(displayTitle(getRow(db, "s1"), "index-guess")).toBe(ENRICHMENT.title);
+
+    // A human title always wins — a model must not rename what someone named.
+    setCustomTitle(db, "s1", "My name for this", NOW);
+    expect(displayTitle(getRow(db, "s1"), "index-guess")).toBe("My name for this");
+
+    // Unenriched and unnamed: the index title stands.
+    expect(displayTitle(getRow(db, "never-seen"), "index-guess")).toBe("index-guess");
+    db.close();
+  });
+
+  test("a cmux tab falls back to the enriched title instead of a bare session id", () => {
+    // The gap this closes: an unnamed session's tab read "a1b2c3d4", which tells you nothing.
+    const db = openCatalogue(":memory:");
+    setEnrichment(db, "a1b2c3d4-1111-2222-3333-444455556666", ENRICHMENT, NOW);
+    const row = getRow(db, "a1b2c3d4-1111-2222-3333-444455556666")!;
+    expect(renderTab(row, "session", {}).title).toBe(ENRICHMENT.title);
+    db.close();
+  });
+
+  test("a deliberate label still outranks enrichment on a tab", () => {
+    const db = openCatalogue(":memory:");
+    setEnrichment(db, "s1", ENRICHMENT, NOW);
+    setCustomTitle(db, "s1", "Chosen name", NOW);
+    expect(renderTab(getRow(db, "s1")!, "session", {}).title).toBe("Chosen name");
+    db.close();
   });
 });

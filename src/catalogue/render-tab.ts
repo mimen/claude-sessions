@@ -198,8 +198,11 @@ function lookupBoardRow(row: CatalogueRow): BoardRow | null {
 function renderLoop(row: CatalogueRow): TabRenderOps {
   // role is the canonical label (ADR-0015). A loop's tab reads best as its
   // role name (control/scout/eval), falling back to custom title / key / id.
+  // Role stays canonical for loops (ADR-0015) — a loop reads best as control/scout/eval. Enrichment
+  // only rescues the id fallback.
   const title =
-    row.customTitle || row.role || identityKeyOf(row) || row.sessionId.slice(0, 8);
+    row.customTitle || row.role || identityKeyOf(row) || row.enrichment?.title?.trim() ||
+    row.sessionId.slice(0, 8);
   const description = buildLoopDescription(row);
   const color = "Purple";
   // A loop's pill is just the generic lifecycle pill (parked/done). The old role-specific
@@ -234,6 +237,11 @@ function buildSessionTitle(row: CatalogueRow): string {
   const key = identityKeyOf(row);
   if (key) return key;
   if (row.role) return row.role; // a role-tagged session with no title reads as its role
+  // Enrichment sits just above the bare id, not above the labels a human or a cluster chose
+  // deliberately (customTitle, shortname, identity key, role). It replaces "a1b2c3d4" — the
+  // one case where the tab currently tells you nothing at all.
+  const enriched = row.enrichment?.title?.trim();
+  if (enriched) return enriched;
   return row.sessionId.slice(0, 8);
 }
 

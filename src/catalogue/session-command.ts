@@ -119,6 +119,7 @@ function doRead(idArg: string, rest: string[]): number {
       console.log(`session ${sid}`);
       console.log(`  state:        catalogued`);
       console.log(`  title:        ${row.customTitle ?? "-"}`);
+      console.log(`  enriched:     ${row.enrichment?.title ?? "-"}`);
       console.log(`  parent:       ${row.parentSessionId ?? "-"}`);
       console.log(`  parked:       ${row.parkedTaskId ?? "-"}`);
       console.log(`  identity_key: ${identityKey ?? "(loose)"}`);
