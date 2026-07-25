@@ -16,7 +16,8 @@
 import type { Bridge, SurfaceSession } from "../cmux/bridge.ts";
 import { type Result, err, ok } from "../result.ts";
 import { shellQuote } from "./command.ts";
-import { defaultRoute, resolveRoutes, type Launcher } from "./launchers.ts";
+import { defaultRoute, matchesModel, resolveRoutes, type Launcher } from "./launchers.ts";
+import { ROLE_MODEL_IDS, compileRoleModelValue } from "./role-model-launch.ts";
 
 /** Process-side facts a plan is built from — all injected so planning stays pure. */
 export interface RespawnEnv {
@@ -154,6 +155,31 @@ export function originLauncher(
   if (history.lastModel === "" && history.models.length === 0) return null;
   const routes = resolveRoutes(launchers, history.models, history.lastModel);
   return defaultRoute(routes, history.models, history.lastModel)?.launcher ?? null;
+}
+
+/**
+ * Validate a user-authored canonical model through the birth-model compiler, then return the
+ * launcher spelling. Canonical IDs remain provider-neutral at the boundary; GPT's required `[1m]`
+ * suffix is compiler-owned and appears only in the executable plan.
+ */
+export function compileRespawnModel(
+  model: string,
+  target: Launcher,
+): Result<string, RespawnRefusal> {
+  const compiled = compileRoleModelValue(model);
+  if (!compiled) {
+    return refuse(
+      "model-unknown",
+      `unknown model "${model}" — canonical models: ${ROLE_MODEL_IDS.join(", ")}`,
+    );
+  }
+  if (!target.serves.some((pattern) => matchesModel(pattern, compiled.model))) {
+    return refuse(
+      "model-unknown",
+      `model "${model}" is not served by launcher "${target.name}"`,
+    );
+  }
+  return ok(compiled.launchModel);
 }
 
 /**

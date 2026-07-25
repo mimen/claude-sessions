@@ -24,6 +24,17 @@ test("prices input/output tokens at the model's rates", () => {
   expect(acc.totals().output).toBe(1_000_000);
 });
 
+test("prices current Claude Opus 5 turns after a native swap", () => {
+  const acc = createUsageAccumulator();
+  acc.add(line({
+    requestId: "opus-5",
+    model: "claude-opus-5",
+    usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 },
+  }));
+  expect(acc.totals().costUSD).toBeCloseTo(30, 6);
+  expect(acc.totals().costByModel["claude-opus-5"]).toBeCloseTo(30, 6);
+});
+
 test("prices observed GPT gateway model ids at their API-equivalent rates", () => {
   const acc = createUsageAccumulator();
   acc.add(line({ requestId: "sol", model: "gpt-5.6-sol", usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } }));

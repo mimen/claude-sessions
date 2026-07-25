@@ -22,6 +22,7 @@ function surfaceSession(over: Partial<SurfaceSession> = {}): SurfaceSession {
     sessionId: SESSION,
     workspaceId: "ws-1",
     cwd: "/somewhere/the/agent/wandered",
+    transcriptPath: "/store/session.jsonl",
     agentLifecycle: "running",
     isRestorable: true,
     pid: 4242,
@@ -90,11 +91,19 @@ test("NO --model is passed, so a settings alias re-resolves to whatever shipped 
   );
 });
 
-test("--model pins one when you explicitly want that", () => {
-  const res = plan(env(), stubBridge(surfaceSession()), FLEET, claudeHistory, { model: "sonnet" });
+test("--model pins a canonical model with its compiled launcher spelling", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), FLEET, gptHistory, {
+    model: "gpt-5.6-terra",
+  });
   if (!res.ok) throw new Error("unreachable");
-  expect(res.value.model).toBe("sonnet");
-  expect(res.value.command).toContain("--model sonnet");
+  expect(res.value.model).toBe("gpt-5.6-terra[1m]");
+  expect(res.value.command).toContain("--model 'gpt-5.6-terra[1m]'");
+});
+
+test("--model rejects aliases before constructing a restart command", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), FLEET, claudeHistory, { model: "sonnet" });
+  if (res.ok) throw new Error("unreachable");
+  expect(res.error.code).toBe("model-unknown");
 });
 
 test("restart uses the LAUNCH dir, not cmux's drifted cwd", () => {

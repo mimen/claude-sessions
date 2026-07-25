@@ -68,6 +68,7 @@ const PRICES: ReadonlyArray<readonly [prefix: string, input: number, output: num
   ["gpt-5.5", 5, 30],
   ["claude-fable-5", 10, 50],
   ["claude-mythos", 10, 50],
+  ["claude-opus-5", 5, 25],
   ["claude-opus-4-8", 5, 25],
   ["claude-opus-4-7", 5, 25],
   ["claude-opus-4-6", 5, 25],

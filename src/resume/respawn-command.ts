@@ -17,26 +17,82 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { Bridge } from "../cmux/bridge.ts";
 import { liveBridge } from "../cmux/live.ts";
-import { sessionById } from "../index/index.ts";
+import { sessionById, type SessionRow } from "../index/index.ts";
 import { openIndex } from "../index/schema.ts";
+import { parseSessionFile } from "../parse.ts";
+import { type Result, err, ok } from "../result.ts";
 import { resolveResumeCwd } from "./command.ts";
-import { loadLaunchers } from "./launchers.ts";
-import { locateLaunchDir } from "./locate.ts";
+import { loadLaunchers, type Launcher } from "./launchers.ts";
+import { encodesTo, locateLaunchDir, storageFolderOf } from "./locate.ts";
 import { describeRestart, planRestart } from "./restart.ts";
-import { runRespawn, type ModelHistory, type RespawnIo, type RespawnPlan } from "./respawn.ts";
+import {
+  runRespawn,
+  type ModelHistory,
+  type RespawnEnv,
+  type RespawnIo,
+  type RespawnPlan,
+  type RespawnRefusal,
+} from "./respawn.ts";
+import { ROLE_MODEL_IDS, compileRoleModelValue } from "./role-model-launch.ts";
 import { describeSwap, planSwap } from "./swap-harness.ts";
 
-function flagValue(args: readonly string[], name: string): string | undefined {
-  const i = args.indexOf(name);
-  return i >= 0 ? args[i + 1] : undefined;
+interface ParsedRespawnArgs {
+  readonly perform: boolean;
+  readonly target?: string;
+  readonly model?: string;
+}
+
+/** Strictly parse the small command surface before probing liveness or constructing a plan. */
+function parseRespawnArgs(
+  args: readonly string[],
+  targetFlag: "--to" | "--on",
+): Result<ParsedRespawnArgs, Error> {
+  let perform = false;
+  let target: string | undefined;
+  let model: string | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--do") {
+      if (perform) return err(new Error("--do may be specified only once"));
+      perform = true;
+      continue;
+    }
+    if (arg !== targetFlag && arg !== "--model") {
+      return err(new Error(`unknown argument "${arg}"`));
+    }
+
+    const value = args[i + 1];
+    if (!value || value.startsWith("-")) {
+      return err(new Error(`${arg} requires a non-flag value`));
+    }
+    i++;
+
+    if (arg === targetFlag) {
+      if (target !== undefined) return err(new Error(`${targetFlag} may be specified only once`));
+      target = value;
+      continue;
+    }
+
+    if (model !== undefined) return err(new Error("--model may be specified only once"));
+    if (!compileRoleModelValue(value)) {
+      return err(new Error(`--model must be one of: ${ROLE_MODEL_IDS.join(", ")}`));
+    }
+    model = value;
+  }
+
+  return ok({
+    perform,
+    ...(target === undefined ? {} : { target }),
+    ...(model === undefined ? {} : { model }),
+  });
 }
 
 /**
  * Find a session's transcript without the index — `~/.claude/projects/<encoded-cwd>/<sid>.jsonl`.
- * Needed because a session becomes respawnable the moment it starts, long before it is indexed,
- * and the transcript's own location is the only authority on which directory `--resume` works
- * from.
+ * Needed because a session becomes respawnable the moment it starts, long before it is indexed.
  */
 function findTranscript(sessionId: string): string | null {
   const projects = join(homedir(), ".claude", "projects");
@@ -48,29 +104,96 @@ function findTranscript(sessionId: string): string | null {
   return null;
 }
 
-/**
- * The directory the respawned process must start in.
- *
- * NEVER cmux's recorded cwd: its hooks track where the session currently is, which drifts as the
- * agent cd's around, while the transcript stays filed under the launch directory. Relaunching from
- * a drifted cwd is exactly the "No conversation found with session ID" failure.
- */
-function resolveRespawnCwd(sessionId: string, dbPath: string): { cwd: string } | { error: string } {
+function indexedRow(sessionId: string, dbPath: string): SessionRow | null {
   const db = openIndex(dbPath);
   try {
-    const row = sessionById(db, sessionId);
-    // The indexed path gets the full treatment: verify the recorded cwd still encodes to the
-    // transcript's storage folder, and walk for the right directory when it doesn't.
-    if (row) return resolveResumeCwd(row);
+    return sessionById(db, sessionId);
   } finally {
     db.close();
   }
-  const path = findTranscript(sessionId);
-  if (!path) return { error: `no transcript found for session ${sessionId}` };
-  const located = locateLaunchDir(path);
-  if (!located.ok) return { error: `cannot locate launch directory: ${located.error.message}` };
-  if (!located.value) return { error: `no existing directory encodes to ${path}` };
-  return { cwd: located.value.dir };
+}
+
+interface RespawnEvidence {
+  readonly history: ModelHistory;
+  readonly resumeCwd: string;
+}
+
+/**
+ * Read the current process's transcript directly before inferring its harness. The index remains a
+ * useful path/cwd fallback, but never supplies model history here: a just-swapped session can append
+ * a new-provider turn before the incremental index notices the file change.
+ */
+async function currentRespawnEvidence(
+  sessionId: string,
+  surfaceId: string | null,
+  bridge: Bridge,
+  dbPath: string,
+  scanForTranscript: (sessionId: string) => string | null,
+): Promise<Result<RespawnEvidence, Error>> {
+  const bound = surfaceId ? bridge.surfaceInfo(surfaceId) : null;
+  const processTranscript = bound?.sessionId === sessionId ? bound.transcriptPath : null;
+  let row: SessionRow | null = null;
+  let readError: Error | null = null;
+  const attempted = new Set<string>();
+
+  const parseCandidate = async (
+    candidate: string | null | undefined,
+  ): Promise<{
+    readonly path: string;
+    readonly parsed: Awaited<ReturnType<typeof parseSessionFile>>;
+  } | null> => {
+    if (!candidate || attempted.has(candidate)) return null;
+    attempted.add(candidate);
+    if (!existsSync(candidate)) return null;
+    try {
+      return { path: candidate, parsed: await parseSessionFile(candidate, sessionId) };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      readError = new Error(`cannot read current transcript: ${message}`);
+      return null;
+    }
+  };
+
+  // Prefer the live hook's exact file. If it is absent or unreadable, the index's canonical path is
+  // the next-best locator — but parse that file now, never trust the row's cached model fields.
+  // Only enumerate the broad projects tree after both precise locators fail.
+  let transcript = await parseCandidate(processTranscript);
+  if (!transcript) {
+    row = indexedRow(sessionId, dbPath);
+    transcript = await parseCandidate(row?.path);
+  }
+  transcript ??= await parseCandidate(scanForTranscript(sessionId));
+  if (!transcript) {
+    return readError ? err(readError) : err(new Error(`no transcript found for session ${sessionId}`));
+  }
+  const { path, parsed } = transcript;
+
+  let resumeCwd: string | null = null;
+  if (parsed.cwd && existsSync(parsed.cwd) && encodesTo(parsed.cwd, storageFolderOf(path))) {
+    resumeCwd = parsed.cwd;
+  } else {
+    const located = locateLaunchDir(path);
+    if (!located.ok) return err(new Error(`cannot locate launch directory: ${located.error.message}`));
+    resumeCwd = located.value?.dir ?? null;
+  }
+
+  // Preserve the established missing-anchor/project fallback when an indexed row exists, but make
+  // it resolve against the exact transcript and freshly parsed cwd rather than stale index facts.
+  if (!resumeCwd) row ??= indexedRow(sessionId, dbPath);
+  if (!resumeCwd && row) {
+    const resolved = resolveResumeCwd({ ...row, path, cwd: parsed.cwd ?? row.cwd });
+    if ("error" in resolved) return err(new Error(resolved.error));
+    resumeCwd = resolved.cwd;
+  }
+  if (!resumeCwd) return err(new Error(`no existing directory encodes to ${path}`));
+
+  return ok({
+    history: {
+      models: parsed.usage.models,
+      lastModel: parsed.usage.lastModel ?? "",
+    },
+    resumeCwd,
+  });
 }
 
 /** Real cmux IO. `respawn-pane` is a socket call to the cmux app, so it outlives this process. */
@@ -84,103 +207,145 @@ function cmuxIo(): RespawnIo {
           { stdio: "pipe", timeout: 10_000 },
         );
         return { ok: true };
-      } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      } catch (cause) {
+        return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
       }
     },
   };
 }
 
-/** Shared shell: gather state, plan via the caller's planner, print, and optionally fire. */
-function respawnCommand(
-  args: string[],
+export interface RespawnCommandDependencies {
+  readonly loadLauncherFleet?: () => Result<Launcher[]>;
+  readonly readBridge?: () => Bridge;
+  readonly scanForTranscript?: (sessionId: string) => string | null;
+  readonly respawnIo?: RespawnIo;
+  readonly environment?: RespawnEnv;
+  readonly stdout?: (message: string) => void;
+  readonly stderr?: (message: string) => void;
+}
+
+interface RespawnPlanInput {
+  readonly environment: RespawnEnv;
+  readonly history: ModelHistory;
+  readonly resumeCwd: string | undefined;
+  readonly launchers: readonly Launcher[];
+  readonly bridge: Bridge;
+}
+
+/** Shared shell: gather fresh state, plan via the caller's planner, print, and optionally fire. */
+async function respawnCommand(
+  parsedArgs: ParsedRespawnArgs,
   dbPath: string,
-  plan: (input: {
-    sessionId: string | null;
-    history: ModelHistory;
-    resumeCwd: string | undefined;
-    launchers: readonly import("./launchers.ts").Launcher[];
-  }) => ReturnType<typeof planSwap>,
-  describe: (p: RespawnPlan) => string,
-): number {
-  const launchers = loadLaunchers();
-  if (!launchers.ok) {
-    console.error(`ccs: ${launchers.error.message}`);
+  plan: (input: RespawnPlanInput) => Result<RespawnPlan, RespawnRefusal>,
+  describe: (plan: RespawnPlan) => string,
+  dependencies: RespawnCommandDependencies,
+): Promise<number> {
+  const writeOut = dependencies.stdout ?? ((message: string): void => console.log(message));
+  const writeErr = dependencies.stderr ?? ((message: string): void => console.error(message));
+  const launcherResult = (dependencies.loadLauncherFleet ?? loadLaunchers)();
+  if (!launcherResult.ok) {
+    writeErr(`ccs: ${launcherResult.error.message}`);
     return 1;
   }
 
-  const sessionId = process.env.CLAUDE_CODE_SESSION_ID ?? null;
-  // A missing index row is normal, not an error — it only costs the ability to infer the origin
-  // harness, which each planner handles in its own way.
+  const environment = dependencies.environment ?? {
+    sessionId: process.env.CLAUDE_CODE_SESSION_ID ?? null,
+    surfaceId: process.env.CMUX_SURFACE_ID ?? null,
+    workspaceId: process.env.CMUX_WORKSPACE_ID ?? null,
+  };
+  const bridge = (dependencies.readBridge ?? liveBridge)();
+
   let history: ModelHistory = { models: [], lastModel: "" };
   let resumeCwd: string | undefined;
-  if (sessionId) {
-    const db = openIndex(dbPath);
-    try {
-      const row = sessionById(db, sessionId);
-      if (row) history = { models: row.models, lastModel: row.lastModel };
-    } finally {
-      db.close();
-    }
-    const resolved = resolveRespawnCwd(sessionId, dbPath);
-    if ("error" in resolved) {
-      console.error(`ccs: refusing to respawn — ${resolved.error}`);
+  if (environment.sessionId) {
+    const evidence = await currentRespawnEvidence(
+      environment.sessionId,
+      environment.surfaceId,
+      bridge,
+      dbPath,
+      dependencies.scanForTranscript ?? findTranscript,
+    );
+    if (!evidence.ok) {
+      writeErr(`ccs: refusing to respawn — ${evidence.error.message}`);
       return 1;
     }
-    resumeCwd = resolved.cwd;
+    history = evidence.value.history;
+    resumeCwd = evidence.value.resumeCwd;
   }
 
-  const planned = plan({ sessionId, history, resumeCwd, launchers: launchers.value });
+  const planned = plan({
+    environment,
+    history,
+    resumeCwd,
+    launchers: launcherResult.value,
+    bridge,
+  });
   if (!planned.ok) {
-    console.error(`ccs: refusing to respawn — ${planned.error.message}`);
+    writeErr(`ccs: refusing to respawn — ${planned.error.message}`);
     return planned.error.code === "liveness-unreadable" ? 2 : 1;
   }
 
-  console.log(describe(planned.value));
-  if (!args.includes("--do")) {
-    console.log("\npreflight only — pass --do to run it");
+  writeOut(describe(planned.value));
+  if (!parsedArgs.perform) {
+    writeOut("\npreflight only — pass --do to run it");
     return 0;
   }
 
   // Past this point cmux hangs up this very process, so nothing below is guaranteed to print.
-  const done = runRespawn(planned.value, cmuxIo());
+  const done = runRespawn(planned.value, dependencies.respawnIo ?? cmuxIo());
   if (!done.ok) {
-    console.error(`ccs: respawn failed — ${done.error.message}`);
+    writeErr(`ccs: respawn failed — ${done.error.message}`);
     return 2;
   }
   return 0;
 }
 
-const envOf = (sessionId: string | null) => ({
-  sessionId,
-  surfaceId: process.env.CMUX_SURFACE_ID ?? null,
-  workspaceId: process.env.CMUX_WORKSPACE_ID ?? null,
-});
-
-export function swapHarnessCommand(args: string[], dbPath: string): number {
+export async function swapHarnessCommand(
+  args: string[],
+  dbPath: string,
+  dependencies: RespawnCommandDependencies = {},
+): Promise<number> {
+  const parsed = parseRespawnArgs(args, "--to");
+  const writeErr = dependencies.stderr ?? ((message: string): void => console.error(message));
+  if (!parsed.ok) {
+    writeErr(`ccs: ${parsed.error.message}`);
+    return 1;
+  }
   return respawnCommand(
-    args,
+    parsed.value,
     dbPath,
-    ({ sessionId, history, resumeCwd, launchers }) =>
-      planSwap(envOf(sessionId), liveBridge(), launchers, history, {
-        to: flagValue(args, "--to"),
-        model: flagValue(args, "--model"),
+    ({ environment, history, resumeCwd, launchers, bridge }) =>
+      planSwap(environment, bridge, launchers, history, {
+        to: parsed.value.target,
+        model: parsed.value.model,
         resumeCwd,
       }),
     describeSwap,
+    dependencies,
   );
 }
 
-export function restartCommand(args: string[], dbPath: string): number {
+export async function restartCommand(
+  args: string[],
+  dbPath: string,
+  dependencies: RespawnCommandDependencies = {},
+): Promise<number> {
+  const parsed = parseRespawnArgs(args, "--on");
+  const writeErr = dependencies.stderr ?? ((message: string): void => console.error(message));
+  if (!parsed.ok) {
+    writeErr(`ccs: ${parsed.error.message}`);
+    return 1;
+  }
   return respawnCommand(
-    args,
+    parsed.value,
     dbPath,
-    ({ sessionId, history, resumeCwd, launchers }) =>
-      planRestart(envOf(sessionId), liveBridge(), launchers, history, {
-        on: flagValue(args, "--on"),
-        model: flagValue(args, "--model"),
+    ({ environment, history, resumeCwd, launchers, bridge }) =>
+      planRestart(environment, bridge, launchers, history, {
+        on: parsed.value.target,
+        model: parsed.value.model,
         resumeCwd,
       }),
     describeRestart,
+    dependencies,
   );
 }

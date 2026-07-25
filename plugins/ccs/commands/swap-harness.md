@@ -1,6 +1,6 @@
 ---
 description: Move this session to the other harness (claude-native <-> claude-gpt) in place, keeping its tab, title, and history
-argument-hint: "[--to <launcher>] [--model <model>]"
+argument-hint: "[--to <launcher>] [--model <canonical-model-id>]"
 allowed-tools: Bash(ccs:*)
 ---
 
@@ -45,7 +45,7 @@ id other than the one `ccs` proves is the current one.
 
 3. **Show the user the plan and confirm the model.** The defaults are `opus` for `claude-native`
    and `gpt-5.6-sol` for `claude-gpt`. If they want a different one, re-run the preflight with
-   `--model` rather than editing anything by hand.
+   a canonical birth-model ID in `--model`; launcher spellings such as `[1m]` are compiled by ccs.
 
 4. **Swap.** Once the user is happy with the printed plan:
 

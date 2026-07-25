@@ -35,7 +35,7 @@ function createPreChangeIndex(dbPath: string, userVersion = 7): void {
   db.close();
 }
 
-test("openIndex preserves complete v7 rows through the v10 catalogue migration", async () => {
+test("openIndex preserves complete v7 rows through current additive migrations", async () => {
   const root = mkdtempSync(join(tmpdir(), "ccs-index-migration-"));
   const dbPath = join(root, "index.db");
   const transcript = join(root, "legacy.jsonl");
@@ -81,7 +81,50 @@ test("openIndex preserves complete v7 rows through the v10 catalogue migration",
 });
 
 
-test("openIndex rebuilds incompatible pre-v6 schemas instead of stamping them as v10", () => {
+test("v12 invalidates unchanged v11 rows so reindex backfills last_model", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-index-v11-backfill-"));
+  const dbPath = join(root, "index.db");
+  const transcript = join(root, "unchanged.jsonl");
+  writeFileSync(transcript, [
+    { type: "user", cwd: root, message: { content: "swap" } },
+    { type: "assistant", message: { model: "claude-opus-5", content: "native" } },
+    { type: "assistant", message: { model: "gpt-5.6-sol", content: "gateway" } },
+  ].map((line) => JSON.stringify(line)).join("\n") + "\n");
+
+  const legacy = openIndex(dbPath);
+  legacy.query(`INSERT INTO sessions (
+    session_id, host, path, cwd, project_root, project_name, fallback_label,
+    file_mtime, file_size, codex_title, skeleton, resume_id, models, last_model
+  ) VALUES (
+    'unchanged', 'host', $path, $cwd, $cwd, 'repo', 'fallback',
+    123, 456, 'preserved title', 'old skeleton', 'unchanged',
+    '["claude-opus-5","gpt-5.6-sol"]', ''
+  )`).run({ $path: transcript, $cwd: root });
+  legacy.exec("PRAGMA user_version = 11;");
+  legacy.close();
+
+  const db = openIndex(dbPath);
+  try {
+    expect(db.query("SELECT file_mtime FROM sessions WHERE session_id = 'unchanged'").get())
+      .toEqual({ file_mtime: -1 });
+    const stats = await reindexStore(db, [{
+      path: transcript,
+      sessionId: "unchanged",
+      sizeBytes: 456,
+      mtimeMs: 123,
+    }], "host");
+    expect(stats.parsed).toBe(1);
+    expect(sessionById(db, "unchanged")?.lastModel).toBe("gpt-5.6-sol");
+    expect(db.query("SELECT codex_title FROM sessions WHERE session_id = 'unchanged'").get())
+      .toEqual({ codex_title: "preserved title" });
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test("openIndex rebuilds incompatible pre-v6 schemas instead of stamping them as current", () => {
   const root = mkdtempSync(join(tmpdir(), "ccs-index-pre-v6-"));
   const dbPath = join(root, "index.db");
   const legacy = new Database(dbPath, { create: true });

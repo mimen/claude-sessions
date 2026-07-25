@@ -12,7 +12,9 @@
 import type { Bridge } from "../cmux/bridge.ts";
 import { ok, type Result } from "../result.ts";
 import { launcherByName, type Launcher } from "./launchers.ts";
+import { compileRoleModelValue } from "./role-model-launch.ts";
 import {
+  compileRespawnModel,
   describeRespawn,
   originLauncher,
   proveSurface,
@@ -86,13 +88,18 @@ export function planSwap(
   }
 
   // A swap always pins a model: the point is to land on a specific backend's model, and the
-  // settings alias would resolve to the harness you just left.
-  const model = opts.model ?? DEFAULT_SWAP_MODEL[target.name];
-  if (!model) {
+  // settings alias would resolve to the harness you just left. User overrides are canonical model
+  // IDs and always compile through the birth-model contract. The native `opus` default deliberately
+  // remains a settings alias; the canonical GPT default compiles to its launcher-only `[1m]` form.
+  const requestedModel = opts.model ?? DEFAULT_SWAP_MODEL[target.name];
+  if (!requestedModel) {
     return refuse("model-unknown", `no default model for launcher "${target.name}" — pass --model`);
   }
+  const shouldCompile = opts.model !== undefined || compileRoleModelValue(requestedModel) !== null;
+  const compiled = shouldCompile ? compileRespawnModel(requestedModel, target) : ok(requestedModel);
+  if (!compiled.ok) return compiled;
 
-  return ok(respawnPlan(proven.value, origin, target, model));
+  return ok(respawnPlan(proven.value, origin, target, compiled.value));
 }
 
 export function describeSwap(plan: RespawnPlan): string {

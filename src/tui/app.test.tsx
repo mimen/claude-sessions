@@ -310,9 +310,7 @@ test("auxiliary sessions stay hidden until the session-local u toggle reveals th
   expect(lastFrame() ?? "").toContain("UNCLASSIFIED");
 
   stdin.write("u");
-  await new Promise((resolve) => setTimeout(resolve, 40));
-  const revealed = lastFrame() ?? "";
-  expect(revealed).toContain("AUX");
+  await waitForFrame(lastFrame, "AUX");
 
   unmount();
   catalogue.close();
