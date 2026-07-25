@@ -4,11 +4,13 @@ import {
   preflightRemoteSession,
   renderRemoteBirthCommand,
   renderRemoteLoginCommand,
+  renderRemotePreflightCommand,
   renderRemoteSessionCommand,
   renderSshArgs,
   type CommandOptions,
   type CommandResult,
   type CommandRunner,
+  type RemotePreflightRequest,
   type RemoteSessionRequest,
 } from "./remote-session.ts";
 
@@ -41,6 +43,37 @@ function commandResult(overrides: Partial<CommandResult> = {}): CommandResult {
   };
 }
 
+function preflightRequest(overrides: Partial<RemotePreflightRequest> = {}): RemotePreflightRequest {
+  return {
+    targetHost: "Milads-Mac-mini",
+    sshAlias: "macmini",
+    locationKey: "ccs",
+    route: {
+      launcher: "claude-gpt",
+      model: "gpt-5.6-sol",
+      launchModel: "gpt-5.6-sol[1m]",
+    },
+    model: "gpt-5.6-sol",
+    requiredCapabilities: ["always-on", "shared-vault"],
+    ...overrides,
+  };
+}
+
+function preflightPayload(overrides: Readonly<Record<string, object | string | readonly string[]>> = {}): string {
+  return JSON.stringify({
+    status: "ready",
+    host: "Milads-Mac-mini",
+    location: { key: "ccs", name: "CCS", cwd: "/remote/ccs" },
+    route: {
+      launcher: "claude-gpt",
+      model: "gpt-5.6-sol",
+      launchModel: "gpt-5.6-sol[1m]",
+    },
+    required_capabilities: ["always-on", "shared-vault"],
+    ...overrides,
+  });
+}
+
 function request(overrides: Partial<RemoteSessionRequest> = {}): RemoteSessionRequest {
   return {
     targetHost: "Milads-Mac-mini",
@@ -68,21 +101,9 @@ test("SSH preflight uses a login shell with bounded noninteractive connection op
   ]);
 });
 
-test("remote preflight checks ccs, registry readability, and target-host location resolution", () => {
-  const runner = new FakeRunner([commandResult({
-    stdout: `login noise\n{
-      "key": "ccs",
-      "name": "CCS",
-      "cwd": "/remote/ccs",
-      "current_host": "Milads-Mac-mini",
-      "host_eligible": true
-    }\n`,
-  })]);
-  const result = preflightRemoteSession({
-    targetHost: "Milads-Mac-mini",
-    sshAlias: "macmini",
-    locationKey: "ccs",
-  }, runner);
+test("remote preflight carries the exact model route and capabilities into target-side validation", () => {
+  const runner = new FakeRunner([commandResult({ stdout: `login noise\n${preflightPayload()}\n` })]);
+  const result = preflightRemoteSession(preflightRequest(), runner);
 
   expect(result.ok).toBe(true);
   if (result.ok) expect(result.value.cwd).toBe("/remote/ccs");
@@ -93,8 +114,24 @@ test("remote preflight checks ccs, registry readability, and target-host locatio
   expect(call.args.at(-1)).toContain("command -v ccs");
   expect(call.args.at(-1)).toContain("$HOME/.ccs/locations.toml");
   expect(call.args.at(-1)).toContain("$HOME/.ccs/hosts.toml");
-  expect(call.args.at(-1)).toContain("ccs location show ccs --json --host Milads-Mac-mini");
+  expect(call.args.at(-1)).toContain("ccs session preflight --top-level --json");
+  expect(call.args.at(-1)).toContain("--location=ccs");
+  expect(call.args.at(-1)).toContain("--host=Milads-Mac-mini");
+  expect(call.args.at(-1)).toContain("--model=gpt-5.6-sol");
+  expect(call.args.at(-1)).toContain("--require-capability=always-on");
+  expect(call.args.at(-1)).toContain("--require-capability=shared-vault");
   expect(call.options.timeoutMs).toBe(12_000);
+});
+
+test("remote preflight carries explicit legacy launchers without inventing a model", () => {
+  const command = renderRemotePreflightCommand(preflightRequest({
+    route: { launcher: "claude-gpt", model: null, launchModel: null },
+    via: "claude-gpt",
+    model: null,
+  }));
+  expect(command).toContain("--via=claude-gpt");
+  expect(command).not.toContain("--model=");
+  expect(command.match(/--require-capability=/g)).toHaveLength(2);
 });
 
 test("remote preflight reports missing prerequisites and timeouts without retrying", () => {
@@ -102,11 +139,7 @@ test("remote preflight reports missing prerequisites and timeouts without retryi
     status: 21,
     stderr: "CCS_PREFLIGHT_CCS_MISSING\n",
   })]);
-  const missingResult = preflightRemoteSession({
-    targetHost: "Milads-Mac-mini",
-    sshAlias: "macmini",
-    locationKey: "ccs",
-  }, missing);
+  const missingResult = preflightRemoteSession(preflightRequest(), missing);
   expect(missingResult.ok).toBe(false);
   if (!missingResult.ok) expect(missingResult.error.message).toContain("does not expose ccs");
   expect(missing.calls).toHaveLength(1);
@@ -115,11 +148,7 @@ test("remote preflight reports missing prerequisites and timeouts without retryi
     status: 23,
     stderr: "CCS_PREFLIGHT_HOSTS_MISSING\n",
   })]);
-  const missingHostsResult = preflightRemoteSession({
-    targetHost: "Milads-Mac-mini",
-    sshAlias: "macmini",
-    locationKey: "ccs",
-  }, missingHosts);
+  const missingHostsResult = preflightRemoteSession(preflightRequest(), missingHosts);
   expect(missingHostsResult.ok).toBe(false);
   if (!missingHostsResult.ok) expect(missingHostsResult.error.message).toContain("hosts.toml");
   expect(missingHosts.calls).toHaveLength(1);
@@ -127,68 +156,63 @@ test("remote preflight reports missing prerequisites and timeouts without retryi
   const timeoutError = new Error("spawnSync ssh ETIMEDOUT") as NodeJS.ErrnoException;
   timeoutError.code = "ETIMEDOUT";
   const timedOut = new FakeRunner([commandResult({ status: null, error: timeoutError })]);
-  const timeoutResult = preflightRemoteSession({
-    targetHost: "Milads-Mac-mini",
-    sshAlias: "macmini",
-    locationKey: "ccs",
-  }, timedOut);
+  const timeoutResult = preflightRemoteSession(preflightRequest(), timedOut);
   expect(timeoutResult.ok).toBe(false);
   if (!timeoutResult.ok) expect(timeoutResult.error.message).toContain("timed out");
   expect(timedOut.calls).toHaveLength(1);
 });
 
 test("remote preflight rejects an SSH alias that reaches the wrong canonical host", () => {
-  const runner = new FakeRunner([commandResult({
-    stdout: JSON.stringify({
-      key: "ccs",
-      name: "CCS",
-      cwd: "/remote/ccs",
-      current_host: "Milads-M3-2",
-      host_eligible: true,
-    }),
-  })]);
-  const result = preflightRemoteSession({
-    targetHost: "Milads-Mac-mini",
-    sshAlias: "macmini",
-    locationKey: "ccs",
-  }, runner);
+  const runner = new FakeRunner([commandResult({ stdout: preflightPayload({ host: "Milads-M3-2" }) })]);
+  const result = preflightRemoteSession(preflightRequest(), runner);
   expect(result.ok).toBe(false);
   if (!result.ok) expect(result.error.message).toContain('reached host "Milads-M3-2"');
 });
 
-test("remote preflight accepts canonical host casing drift and surfaces location validation errors", () => {
-  const casing = new FakeRunner([commandResult({
-    stdout: JSON.stringify({
-      key: "ccs",
-      name: "CCS",
-      cwd: "/remote/ccs",
-      current_host: "milads-MAC-mini",
-      host_eligible: true,
-    }),
-  })]);
-  expect(preflightRemoteSession({
-    targetHost: "Milads-Mac-mini",
-    sshAlias: "macmini",
-    locationKey: "ccs",
-  }, casing).ok).toBe(true);
+test("remote preflight accepts canonical host casing drift and surfaces target validation errors", () => {
+  const casing = new FakeRunner([commandResult({ stdout: preflightPayload({ host: "milads-MAC-mini" }) })]);
+  expect(preflightRemoteSession(preflightRequest(), casing).ok).toBe(true);
 
   const invalid = new FakeRunner([commandResult({
-    stdout: JSON.stringify({
-      key: "ccs",
-      name: "CCS",
-      cwd: "/remote/ccs",
-      current_host: "Milads-Mac-mini",
-      host_eligible: false,
-      validation_error: "location ccs cwd is not the Git repository root",
-    }),
+    status: 2,
+    stderr: "ccs session preflight: location ccs cwd is not the Git repository root\n",
   })]);
-  const result = preflightRemoteSession({
-    targetHost: "Milads-Mac-mini",
-    sshAlias: "macmini",
-    locationKey: "ccs",
-  }, invalid);
+  const result = preflightRemoteSession(preflightRequest(), invalid);
   expect(result.ok).toBe(false);
   if (!result.ok) expect(result.error.message).toContain("cwd is not the Git repository root");
+});
+
+test("remote preflight rejects route drift and non-strict receipts", () => {
+  const drifted = new FakeRunner([commandResult({
+    stdout: preflightPayload({
+      route: { launcher: "claude", model: "claude-fable-5", launchModel: "claude-fable-5" },
+    }),
+  })]);
+  const drift = preflightRemoteSession(preflightRequest(), drifted);
+  expect(drift.ok).toBe(false);
+  if (!drift.ok) expect(drift.error.message).toContain("resolved route");
+
+  const extraField = new FakeRunner([commandResult({ stdout: preflightPayload({ unexpected: "stale" }) })]);
+  const strict = preflightRemoteSession(preflightRequest(), extraField);
+  expect(strict.ok).toBe(false);
+  if (!strict.ok) expect(strict.error.message).toContain("invalid receipt");
+});
+
+test("unknown launchers, stale models, and missing capabilities fail in one target preflight", () => {
+  for (const detail of [
+    'unknown launcher "old-gateway"',
+    'unsupported --model "gpt-5.7-sol"',
+    'lacks required capability "browser-auth"',
+  ]) {
+    const runner = new FakeRunner([commandResult({
+      status: 2,
+      stderr: `ccs session preflight: ${detail}\n`,
+    })]);
+    const result = preflightRemoteSession(preflightRequest(), runner);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain(detail);
+    expect(runner.calls).toHaveLength(1);
+  }
 });
 
 test("remote managed birth quotes provenance and dash-leading prompts without a parent", () => {

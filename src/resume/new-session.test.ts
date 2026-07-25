@@ -15,6 +15,7 @@ import {
   launchEnvironmentOverrides,
   newSession,
   parseOpts,
+  preflightNewSession,
   writeSessionMetadata,
   type NewSessionOpts,
   type RemoteSessionDependencies,
@@ -879,6 +880,14 @@ test("newSession: remote host uses preflight and one cmux transport without loca
     targetHost: "Milads-Mac-mini",
     sshAlias: "macmini",
     locationKey: "ccs",
+    route: {
+      launcher: "claude-gpt",
+      model: "gpt-5.6-sol",
+      launchModel: "gpt-5.6-sol[1m]",
+    },
+    via: undefined,
+    model: "gpt-5.6-sol",
+    requiredCapabilities: ["always-on", "shared-vault"],
   }]);
   expect(launchRequests[0]).toMatchObject({
     targetHost: "Milads-Mac-mini",
@@ -903,9 +912,11 @@ test("newSession: remote explicit routes outrank an invalid location default", (
   configureTestHosts(root);
   process.env.CCS_ROOT = root;
 
+  const preflights: Array<Parameters<RemoteSessionDependencies["preflight"]>[0]> = [];
   const launches: Array<Parameters<RemoteSessionDependencies["launch"]>[0]> = [];
   const dependencies: RemoteSessionDependencies = {
     preflight(request) {
+      preflights.push(request);
       return { ok: true, value: {
         targetHost: request.targetHost,
         locationKey: request.locationKey,
@@ -933,6 +944,17 @@ test("newSession: remote explicit routes outrank an invalid location default", (
   expect(newSession([
     "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--via=claude",
   ], dependencies)).toBe(0);
+  expect(preflights).toHaveLength(2);
+  expect(preflights[0]).toMatchObject({
+    route: { launcher: "claude", model: "claude-fable-5", launchModel: "claude-fable-5" },
+    model: "claude-fable-5",
+    via: undefined,
+  });
+  expect(preflights[1]).toMatchObject({
+    route: { launcher: "claude", model: null, launchModel: null },
+    model: null,
+    via: "claude",
+  });
   expect(launches).toHaveLength(2);
   expect(launches[0]).toMatchObject({ model: "claude-fable-5", via: undefined });
   expect(launches[1]).toMatchObject({ model: undefined, via: "claude" });
@@ -964,6 +986,85 @@ test("newSession: remote route and capability failures stop before preflight or 
     "--location=ccs",
     "--model=not-a-model",
   ], unused)).toBe(2);
+  expect(existsSync(join(root, "cache", "catalogue.db"))).toBe(false);
+});
+
+test("session preflight resolves launchers, models, and capabilities with target-side authorities only", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-target-preflight-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  configureTestLocation(root, cwd, null, "Milads-Mac-mini");
+  configureTestHosts(root);
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "Milads-Mac-mini"\n[routing]\nregistry = "${join(root, "locations.toml")}"\nhosts = "${join(root, "hosts.toml")}"\n\n[[launcher]]\nname = "target-gpt"\nbinary = "claude-gpt"\nserves = ["*"]\n`);
+  process.env.CCS_ROOT = root;
+
+  const success = captureJsonReceipt(() => preflightNewSession([
+    "--top-level",
+    "--host=Milads-Mac-mini",
+    "--location=ccs",
+    "--via=target-gpt",
+    "--require-capability=always-on",
+  ]));
+  expect(success.exitCode).toBe(0);
+  expect(success.receipt).toMatchObject({
+    status: "ready",
+    host: "Milads-Mac-mini",
+    route: { launcher: "target-gpt", model: null, launchModel: null },
+    required_capabilities: ["always-on"],
+  });
+
+  expect(preflightNewSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--via=old-gateway",
+  ])).toBe(2);
+  expect(preflightNewSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--model=gpt-5.7-sol",
+  ])).toBe(2);
+  expect(preflightNewSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--require-capability=browser-auth",
+  ])).toBe(2);
+  expect(existsSync(join(root, "cache", "catalogue.db"))).toBe(false);
+});
+
+test("newSession: target route preflight failures create no remote workspace", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-remote-preflight-failure-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  configureTestLocation(root, cwd, null, "Milads-Mac-mini");
+  configureTestHosts(root);
+  process.env.CCS_ROOT = root;
+
+  let preflightCalls = 0;
+  let workspaceCreations = 0;
+  const blockers = [
+    new Error('unknown launcher "old-gateway"'),
+    new Error('unsupported --model "gpt-5.6-sol" on target'),
+    new Error('host "Milads-Mac-mini" lacks required capability "shared-vault"'),
+  ];
+  const dependencies: RemoteSessionDependencies = {
+    preflight() {
+      const error = blockers[preflightCalls++];
+      if (!error) throw new Error("unexpected preflight call");
+      return { ok: false, error };
+    },
+    launch() {
+      workspaceCreations++;
+      throw new Error("workspace creation must not run after failed preflight");
+    },
+  };
+
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--via=old-gateway",
+  ], dependencies)).toBe(2);
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--model=gpt-5.6-sol",
+  ], dependencies)).toBe(2);
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--require-capability=shared-vault",
+  ], dependencies)).toBe(2);
+  expect(preflightCalls).toBe(3);
+  expect(workspaceCreations).toBe(0);
   expect(existsSync(join(root, "cache", "catalogue.db"))).toBe(false);
 });
 
