@@ -38,6 +38,8 @@ export interface SessionRow {
   readonly costByModel: Readonly<Record<string, number>>;
   /** Model ids seen in this file's assistant turns — drives cross-backend resume routing. */
   readonly models: readonly string[];
+  /** Model of the last assistant turn; "" when unobserved (pre-v11 row) or no assistant turns. */
+  readonly lastModel: string;
   /** Real prompts / ticks (human/loop turns, excluding tool-result lines). */
   readonly userTurns: number;
   /** Median seconds between ticks — a loop's cadence (0 if fewer than two ticks). */
@@ -85,6 +87,7 @@ const SELECT_COLS = `
   tok_cache_write AS tokCacheWrite,
   cost_by_model AS costByModelJson,
   models AS modelsJson,
+  last_model AS lastModel,
   user_turns AS userTurns,
   tick_interval_sec AS tickIntervalSec,
   shadow_paths AS shadowPathsJson
@@ -187,13 +190,13 @@ export async function reindexStore(
       first_ts, last_ts, msg_count, file_mtime, file_size,
       native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id,
       cost_usd, tok_input, tok_output, tok_cache_read, tok_cache_write, cost_by_model,
-      models, user_turns, tick_interval_sec, shadow_paths
+      models, last_model, user_turns, tick_interval_sec, shadow_paths
     ) VALUES (
       $session_id, $host, $path, $cwd, $project_root, $project_name, $branch, $version,
       $first_ts, $last_ts, $msg_count, $file_mtime, $file_size,
       $native_title, $fallback_label, $skeleton, $is_subagent, $parent_session_id, $resume_id,
       $cost_usd, $tok_input, $tok_output, $tok_cache_read, $tok_cache_write, $cost_by_model,
-      $models, $user_turns, $tick_interval_sec, $shadow_paths
+      $models, $last_model, $user_turns, $tick_interval_sec, $shadow_paths
     ) ON CONFLICT(session_id) DO UPDATE SET
       host = $host, path = $path, cwd = $cwd,
       project_root = $project_root, project_name = $project_name,
@@ -204,7 +207,8 @@ export async function reindexStore(
       is_subagent = $is_subagent, parent_session_id = $parent_session_id, resume_id = $resume_id,
       cost_usd = $cost_usd, tok_input = $tok_input, tok_output = $tok_output,
       tok_cache_read = $tok_cache_read, tok_cache_write = $tok_cache_write,
-      cost_by_model = $cost_by_model, models = $models, user_turns = $user_turns,
+      cost_by_model = $cost_by_model, models = $models, last_model = $last_model,
+      user_turns = $user_turns,
       tick_interval_sec = $tick_interval_sec, shadow_paths = $shadow_paths
   `);
   const refreshDiagnostics = db.query(
@@ -261,6 +265,7 @@ export async function reindexStore(
         $tok_cache_write: parsed.usage.cacheWrite5m + parsed.usage.cacheWrite1h,
         $cost_by_model: JSON.stringify(parsed.usage.costByModel),
         $models: JSON.stringify(parsed.usage.models),
+        $last_model: parsed.usage.lastModel ?? "",
         $user_turns: parsed.userTurns,
         $tick_interval_sec: parsed.tickIntervalSec,
         $shadow_paths: shadowPathsJson,
