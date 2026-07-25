@@ -71,6 +71,8 @@ func sortFromString(value string) sortMode {
 		return sortCost
 	case "messages":
 		return sortMessages
+	case "memory":
+		return sortMemory
 	default:
 		return sortRecency
 	}

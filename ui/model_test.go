@@ -70,7 +70,7 @@ func TestDefaultGroupingPutsClustersBeforeNoSystemStates(t *testing.T) {
 func TestFuzzySearchIncludesTaskSubjects(t *testing.T) {
 	snapshot := testSnapshot(2)
 	snapshot.Sessions[1].TaskSubjects = []string{"Configure grok build runner"}
-	rows := buildFlatRows(snapshot.Sessions, "grk bld", sortRecency, taskFilterAll)
+	rows := buildFlatRows(snapshot.Sessions, "grk bld", sortRecency, taskFilterAll, nil)
 	if len(rows) != 1 || rows[0].sIdx != 1 {
 		t.Fatalf("rows = %+v, want only session 1", rows)
 	}
@@ -85,13 +85,64 @@ func TestCostAndMessageSortOrderRowsDescending(t *testing.T) {
 	snapshot.Sessions[1].Messages = 4
 	snapshot.Sessions[2].Messages = 12
 
-	costRows := buildFlatRows(snapshot.Sessions, "", sortCost, taskFilterAll)
+	costRows := buildFlatRows(snapshot.Sessions, "", sortCost, taskFilterAll, nil)
 	if got := []int{costRows[0].sIdx, costRows[1].sIdx, costRows[2].sIdx}; fmt.Sprint(got) != "[1 2 0]" {
 		t.Fatalf("cost order = %v", got)
 	}
-	messageRows := buildFlatRows(snapshot.Sessions, "", sortMessages, taskFilterAll)
+	messageRows := buildFlatRows(snapshot.Sessions, "", sortMessages, taskFilterAll, nil)
 	if got := []int{messageRows[0].sIdx, messageRows[1].sIdx, messageRows[2].sIdx}; fmt.Sprint(got) != "[0 2 1]" {
 		t.Fatalf("message order = %v", got)
+	}
+}
+
+func TestMemorySortOrdersByLiveFootprint(t *testing.T) {
+	snapshot := testSnapshot(3)
+	tests := []struct {
+		name       string
+		footprints map[string]uint64
+		useNil     bool
+		want       []int
+	}{
+		{
+			name: "descending footprint",
+			footprints: map[string]uint64{
+				snapshot.Sessions[0].ID: 3,
+				snapshot.Sessions[1].ID: 9,
+				snapshot.Sessions[2].ID: 5,
+			},
+			want: []int{1, 2, 0},
+		},
+		{
+			name: "sessions without a process sort last",
+			footprints: map[string]uint64{
+				snapshot.Sessions[2].ID: 1,
+			},
+			want: []int{2, 0, 1},
+		},
+		{
+			name:   "nil accessor is safe",
+			useNil: true,
+			want:   []int{0, 1, 2},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var footprint func(data.Session) uint64
+			if !test.useNil {
+				footprint = func(session data.Session) uint64 {
+					return test.footprints[session.ID]
+				}
+			}
+			rows := buildFlatRows(snapshot.Sessions, "", sortMemory, taskFilterAll, footprint)
+			got := make([]int, len(rows))
+			for index, candidate := range rows {
+				got[index] = candidate.sIdx
+			}
+			if fmt.Sprint(got) != fmt.Sprint(test.want) {
+				t.Fatalf("memory order = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 
@@ -104,17 +155,18 @@ func TestTaskFiltersDistinguishUnfinishedAndInterrupted(t *testing.T) {
 	snapshot.Sessions[1].State = "active"
 	snapshot.Sessions[2].TasksDone, snapshot.Sessions[2].TasksTotal = 1, 1
 
-	unfinished := buildFlatRows(snapshot.Sessions, "", sortRecency, taskFilterUnfinished)
+	unfinished := buildFlatRows(snapshot.Sessions, "", sortRecency, taskFilterUnfinished, nil)
 	if len(unfinished) != 2 {
 		t.Fatalf("unfinished rows = %+v", unfinished)
 	}
-	interrupted := buildFlatRows(snapshot.Sessions, "", sortRecency, taskFilterInterrupted)
+	interrupted := buildFlatRows(snapshot.Sessions, "", sortRecency, taskFilterInterrupted, nil)
 	if len(interrupted) != 1 || interrupted[0].sIdx != 0 {
 		t.Fatalf("interrupted rows = %+v", interrupted)
 	}
 }
 
 func TestViewOptionSortAppliesLiveAndPreservesSelection(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	model := New(testSnapshot(4))
 	selected, ok := model.selectedSession()
 	if !ok {
@@ -324,6 +376,7 @@ func TestFleetCandidateRankingUsesIndexedSkeleton(t *testing.T) {
 }
 
 func TestDefaultResumeUsesOriginBackendAndResumeID(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := t.TempDir()
 	config := `
 [[launcher]]

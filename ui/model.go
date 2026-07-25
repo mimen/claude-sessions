@@ -336,7 +336,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// leave the last known figures on screen rather than blanking the
 		// column, which would read as "this session died".
 		if msg.stats != nil {
+			preferredID := ""
+			if m.options.sort == sortMemory {
+				if session, ok := m.selectedSession(); ok {
+					preferredID = session.ID
+				}
+			}
 			m.procStats = msg.stats
+			if m.options.sort == sortMemory {
+				m.rebuildRowsPreserving(preferredID)
+			}
 		}
 		return m, procSampleCmd(m.tickerGeneration)
 	case autoRefreshMsg:
@@ -936,10 +945,17 @@ func (m *Model) moveRouteCursor(delta int) {
 }
 
 func (m *Model) rebuildRows() {
+	footprint := func(session data.Session) uint64 {
+		stat, ok := m.procStatFor(session)
+		if !ok {
+			return 0
+		}
+		return stat.Footprint
+	}
 	if m.view == ViewFlat {
-		m.rows = buildFlatRows(m.snapshot.Sessions, m.query, m.options.sort, m.options.taskFilter)
+		m.rows = buildFlatRows(m.snapshot.Sessions, m.query, m.options.sort, m.options.taskFilter, footprint)
 	} else {
-		m.rows = buildDefaultRows(m.snapshot.Sessions, m.query, m.options.sort, m.options.taskFilter, m.collapsed)
+		m.rows = buildDefaultRows(m.snapshot.Sessions, m.query, m.options.sort, m.options.taskFilter, m.collapsed, footprint)
 	}
 	m.cursor = firstSessionRow(m.rows)
 }

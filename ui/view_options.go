@@ -19,6 +19,7 @@ const (
 	sortRecency sortMode = iota
 	sortCost
 	sortMessages
+	sortMemory
 )
 
 func (mode sortMode) String() string {
@@ -27,6 +28,8 @@ func (mode sortMode) String() string {
 		return "cost"
 	case sortMessages:
 		return "messages"
+	case sortMemory:
+		return "memory"
 	default:
 		return "recency"
 	}
@@ -163,7 +166,7 @@ func (m Model) adjustViewOption(direction int) (tea.Model, tea.Cmd) {
 
 	switch viewOptionRow(m.viewOptionCursor) {
 	case viewOptionSort:
-		m.options.sort = sortMode(cycleIndex(int(m.options.sort), int(sortMessages)+1, direction))
+		m.options.sort = sortMode(cycleIndex(int(m.options.sort), int(sortMemory)+1, direction))
 		m.rebuildRowsPreserving(preferredID)
 	case viewOptionArchived:
 		m.options.showArchived = !m.options.showArchived

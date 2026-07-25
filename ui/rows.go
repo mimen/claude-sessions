@@ -9,14 +9,14 @@ import (
 )
 
 func buildRows(sessions []data.Session) []row {
-	return buildDefaultRows(sessions, "", sortRecency, taskFilterAll, nil)
+	return buildDefaultRows(sessions, "", sortRecency, taskFilterAll, nil, nil)
 }
 
 // buildDefaultRows lays out the grouped view. `collapsed` maps a section key to
 // true when that section is folded — its descendants are omitted from the row
 // list entirely (so virtualization and cursor math stay simple), while the
 // header row still reports the full member count.
-func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filter taskFilter, collapsed map[string]bool) []row {
+func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filter taskFilter, collapsed map[string]bool, footprint func(data.Session) uint64) []row {
 	indexes := matchingSessionIndexes(sessions, query, filter)
 	byCluster := make(map[string]map[string][]int)
 	clusterRecent := make(map[string]int64)
@@ -77,7 +77,7 @@ func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filt
 				return roles[i] < roles[j]
 			})
 			for _, role := range roles {
-				for _, idx := range sortSessionIndexes(byCluster[cluster][role], sessions, mode) {
+				for _, idx := range sortSessionIndexes(byCluster[cluster][role], sessions, mode, footprint) {
 					rows = append(rows, row{sIdx: idx, level: 1})
 				}
 			}
@@ -86,7 +86,7 @@ func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filt
 			for _, role := range roles {
 				members = append(members, byCluster[cluster][role]...)
 			}
-			for _, idx := range sortSessionIndexes(members, sessions, mode) {
+			for _, idx := range sortSessionIndexes(members, sessions, mode, footprint) {
 				rows = append(rows, row{sIdx: idx, level: 1})
 			}
 		}
@@ -122,7 +122,7 @@ func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filt
 			}
 			// Sessions sit one level deeper than their state header so the
 			// nesting reads as a real hierarchy rather than a flat list.
-			for _, idx := range sortSessionIndexes(members, sessions, mode) {
+			for _, idx := range sortSessionIndexes(members, sessions, mode, footprint) {
 				rows = append(rows, row{sIdx: idx, level: 2})
 			}
 		}
@@ -130,10 +130,10 @@ func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filt
 	return rows
 }
 
-func buildFlatRows(sessions []data.Session, query string, mode sortMode, filter taskFilter) []row {
+func buildFlatRows(sessions []data.Session, query string, mode sortMode, filter taskFilter, footprint func(data.Session) uint64) []row {
 	indexes := matchingSessionIndexes(sessions, query, filter)
 	if strings.TrimSpace(query) == "" {
-		indexes = sortSessionIndexes(indexes, sessions, mode)
+		indexes = sortSessionIndexes(indexes, sessions, mode, footprint)
 	}
 	rows := make([]row, 0, len(indexes))
 	for _, idx := range indexes {
@@ -142,7 +142,7 @@ func buildFlatRows(sessions []data.Session, query string, mode sortMode, filter 
 	return rows
 }
 
-func sortSessionIndexes(indexes []int, sessions []data.Session, mode sortMode) []int {
+func sortSessionIndexes(indexes []int, sessions []data.Session, mode sortMode, footprint func(data.Session) uint64) []int {
 	ordered := append([]int(nil), indexes...)
 	sort.SliceStable(ordered, func(i int, j int) bool {
 		left := sessions[ordered[i]]
@@ -155,6 +155,15 @@ func sortSessionIndexes(indexes []int, sessions []data.Session, mode sortMode) [
 		case sortMessages:
 			if left.Messages != right.Messages {
 				return left.Messages > right.Messages
+			}
+		case sortMemory:
+			var leftFootprint, rightFootprint uint64
+			if footprint != nil {
+				leftFootprint = footprint(left)
+				rightFootprint = footprint(right)
+			}
+			if leftFootprint != rightFootprint {
+				return leftFootprint > rightFootprint
 			}
 		}
 		if !left.LastAt.Equal(right.LastAt) {
