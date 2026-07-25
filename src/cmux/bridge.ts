@@ -91,6 +91,8 @@ export interface SurfaceSession {
   workspaceId: string | null;
   /** the session's cwd as cmux recorded it, if any */
   cwd: string | null;
+  /** Exact transcript path reported by the hooks for this live process, when available. */
+  transcriptPath: string | null;
   /** cmux's agent lifecycle hint (running/needsInput/…), if recorded */
   agentLifecycle: string | null;
   /** whether cmux believes this session can be resumed */
@@ -151,6 +153,7 @@ interface HookSessionEntry {
   surfaceId?: string | null;
   workspaceId?: string | null;
   cwd?: string | null;
+  transcriptPath?: string | null;
   agentLifecycle?: string | null;
   isRestorable?: boolean;
   pid?: number | null;
@@ -255,6 +258,7 @@ export function parseHookStore(store: CmuxHookStore): Map<string, SurfaceSession
     sessionId,
     workspaceId: detail.workspaceId ?? null,
     cwd: detail.cwd ?? null,
+    transcriptPath: detail.transcriptPath ?? null,
     agentLifecycle: detail.agentLifecycle ?? null,
     isRestorable: detail.isRestorable ?? false,
     pid: typeof detail.pid === "number" ? detail.pid : null,

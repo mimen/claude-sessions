@@ -18,9 +18,7 @@ import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "../res
 import { resumeSessionEntry } from "../resume/resume-session.ts";
 import {
   DEFAULT_LAUNCHERS,
-  defaultRoute,
   launchersFrom,
-  resolveRoutes,
   type Launcher,
   type Route,
 } from "../resume/launchers.ts";
@@ -69,6 +67,7 @@ import {
   type T3AttachmentStatusClient,
 } from "../t3/status.ts";
 import { recordCatalogueTitleFailure, saveCatalogueTitle } from "../catalogue-service/client.ts";
+import { routesForSession } from "./session-routes.ts";
 
 /**
  * State label + hex color for the TUI stage column (ADR-0077). Reads the first pill from the
@@ -213,6 +212,7 @@ export function App({
   const [routePicker, setRoutePicker] = useState<{
     row: SessionRow;
     routes: Route[];
+    defaultName: string | null;
     selected: number;
     live: boolean;
   } | null>(null);
@@ -846,8 +846,8 @@ export function App({
       return;
     }
     // Cross-backend route: an explicit pick from the `r` overlay wins; plain enter takes the
-    // origin-backend default from the session's model history (pure-gpt → the gpt launcher).
-    const launcher = via ?? defaultRoute(resolveRoutes(launchers, r.models), r.models)?.launcher;
+    // origin-backend default from the session's final model turn.
+    const launcher = via ?? routesForSession(launchers, r).defaultRoute?.launcher;
     if (!launcher) {
       setStatus(`no configured launcher can replay [${r.models.join(", ")}] — check [[launcher]] serves globs`);
       return;
@@ -900,12 +900,15 @@ export function App({
       setStatus("subagent runs aren't resumable — they're task runs spawned by a parent session");
       return;
     }
-    const routes = resolveRoutes(launchers, r.models);
-    const def = defaultRoute(routes, r.models);
-    const defIdx = def ? routes.findIndex((rt) => rt.launcher.name === def.launcher.name) : 0;
+    const routing = routesForSession(launchers, r);
+    const defaultName = routing.defaultRoute?.launcher.name ?? null;
+    const defIdx = defaultName
+      ? routing.routes.findIndex((route) => route.launcher.name === defaultName)
+      : 0;
     setRoutePicker({
       row: r,
-      routes,
+      routes: routing.routes,
+      defaultName,
       selected: Math.max(0, defIdx),
       live: openSet.has(r.sessionId) || openSet.has(r.resumeId),
     });
@@ -1329,7 +1332,7 @@ export function App({
         <RoutePicker
           row={routePicker.row}
           routes={routePicker.routes}
-          defaultName={defaultRoute(routePicker.routes, routePicker.row.models)?.launcher.name ?? null}
+          defaultName={routePicker.defaultName}
           selected={routePicker.selected}
           live={routePicker.live}
           target={resolveTarget(config.resume.target, reachable, false)}

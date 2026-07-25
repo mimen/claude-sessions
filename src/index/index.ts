@@ -38,7 +38,7 @@ export interface SessionRow {
   readonly costByModel: Readonly<Record<string, number>>;
   /** Model ids seen in this file's assistant turns — drives cross-backend resume routing. */
   readonly models: readonly string[];
-  /** Model of the last assistant turn; "" when unobserved (pre-v11 row) or no assistant turns. */
+  /** Model of the last assistant turn; "" when not yet backfilled or no assistant turns. */
   readonly lastModel: string;
   /** Real prompts / ticks (human/loop turns, excluding tool-result lines). */
   readonly userTurns: number;

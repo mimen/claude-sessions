@@ -100,7 +100,7 @@ function replayTargets(models: readonly string[], lastModel: string): readonly s
 
 /**
  * Verdict per launcher, in config order. Eligible iff the session's replay target (its last
- * model, or its whole history for a pre-v10 row) matches at least one of the launcher's serves
+ * model, or its whole history for a pre-v11 row) matches at least one of the launcher's serves
  * globs. No assistant turns yet → eligible everywhere.
  */
 export function resolveRoutes(
@@ -126,7 +126,7 @@ export function resolveRoutes(
  * globs match the replay target most specifically wins (so a session that last ran on gpt
  * defaults to the gpt launcher over a catch-all native one). Score = the weakest target's best
  * matching-glob specificity; tie → config order. Null only when no route is eligible (a config
- * without a catch-all launcher, against a pre-v10 row whose history is mixed).
+ * without a catch-all launcher, against a pre-v11 row whose history is mixed).
  */
 export function defaultRoute(
   routes: readonly Route[],

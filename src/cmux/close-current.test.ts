@@ -51,6 +51,7 @@ function binding(overrides: Partial<SurfaceSession> = {}): SurfaceSession {
     sessionId: SESSION_ID,
     workspaceId: WORKSPACE_ID,
     cwd: null,
+    transcriptPath: null,
     agentLifecycle: "running",
     isRestorable: true,
     lastPermissionMode: null,

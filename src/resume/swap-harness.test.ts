@@ -30,6 +30,7 @@ function surfaceSession(over: Partial<SurfaceSession> = {}): SurfaceSession {
     // Deliberately NOT the launch dir: cmux records where the session currently is, and every
     // test here asserts that the plan ignores this in favour of the caller-resolved cwd.
     cwd: "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/swap-harness",
+    transcriptPath: "/store/session.jsonl",
     agentLifecycle: "running",
     isRestorable: true,
     pid: 4242,
@@ -83,13 +84,15 @@ test("a gpt session swaps to claude-native on opus", () => {
   expect(res.value.model).toBe("opus");
 });
 
-test("a claude session swaps to claude-gpt on gpt-5.6-sol", () => {
+test("a claude session swaps to claude-gpt with the canonical default compiled to [1m]", () => {
   const res = plan(env(), stubBridge(surfaceSession()), FLEET, claudeHistory);
   expect(res.ok).toBe(true);
   if (!res.ok) throw new Error("unreachable");
   expect(res.value.from?.name).toBe("claude-native");
   expect(res.value.to.name).toBe("claude-gpt");
-  expect(res.value.model).toBe(DEFAULT_SWAP_MODEL["claude-gpt"]!);
+  expect(DEFAULT_SWAP_MODEL["claude-gpt"]).toBe("gpt-5.6-sol");
+  expect(res.value.model).toBe("gpt-5.6-sol[1m]");
+  expect(res.value.command).toContain("--model 'gpt-5.6-sol[1m]'");
 });
 
 test("a session already swapped once can swap back (mixed history routes on its last model)", () => {
@@ -113,7 +116,7 @@ test("...but an explicit --to swaps it anyway, with the origin left unclaimed", 
   if (!res.ok) throw new Error("unreachable");
   expect(res.value.from).toBeNull();
   expect(res.value.to.name).toBe("claude-gpt");
-  expect(res.value.model).toBe("gpt-5.6-sol");
+  expect(res.value.model).toBe("gpt-5.6-sol[1m]");
 });
 
 // --- the cwd trap ---------------------------------------------------------------
@@ -144,14 +147,22 @@ test("no recorded permission mode → the flag is omitted, not guessed", () => {
   expect(res.value.permissionMode).toBeNull();
 });
 
-test("--model overrides the per-harness default", () => {
+test("--model accepts a canonical override and compiles its launcher spelling", () => {
   const res = plan(env(), stubBridge(surfaceSession()), FLEET, claudeHistory, {
-    model: "gpt-5.6-terra(xhigh)[1m]",
+    model: "gpt-5.6-terra",
   });
   if (!res.ok) throw new Error("unreachable");
-  expect(res.value.model).toBe("gpt-5.6-terra(xhigh)[1m]");
-  // The parenthesised effort suffix must survive shell quoting intact.
-  expect(res.value.command).toContain(`--model 'gpt-5.6-terra(xhigh)[1m]'`);
+  expect(res.value.model).toBe("gpt-5.6-terra[1m]");
+  expect(res.value.command).toContain(`--model 'gpt-5.6-terra[1m]'`);
+});
+
+test("--model rejects launcher spellings instead of bypassing the canonical compiler", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), FLEET, claudeHistory, {
+    model: "gpt-5.6-terra[1m]",
+  });
+  if (res.ok) throw new Error("unreachable");
+  expect(res.error.code).toBe("model-unknown");
+  expect(res.error.message).toContain("canonical models");
 });
 
 test("launcher env vars are exported ahead of the binary", () => {

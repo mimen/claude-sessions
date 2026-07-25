@@ -1,6 +1,6 @@
 ---
 description: Relaunch this session in place on the same harness — picks up a newly released model, a newer Claude Code, and a fresh process
-argument-hint: "[--model <model>]"
+argument-hint: "[--model <canonical-model-id>]"
 allowed-tools: Bash(ccs:*)
 ---
 
@@ -51,7 +51,8 @@ than the one `ccs` proves is the current one.
    ```
 
    Only pass `--model` if the user explicitly asked to pin one — the default absence is what makes
-   the newest model get picked up.
+   the newest model get picked up. The value must be a canonical birth-model ID; ccs compiles any
+   launcher-specific spelling before respawn.
 
 4. **Expect no reply.** `--do` replaces the process running this very command, so the tool call
    will usually return nothing and the conversation will not continue in this turn. That is the

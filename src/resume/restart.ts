@@ -17,6 +17,7 @@ import type { Bridge } from "../cmux/bridge.ts";
 import { ok, type Result } from "../result.ts";
 import { launcherByName, type Launcher } from "./launchers.ts";
 import {
+  compileRespawnModel,
   describeRespawn,
   originLauncher,
   proveSurface,
@@ -71,7 +72,10 @@ export function planRestart(
     );
   }
 
-  return ok(respawnPlan(proven.value, origin, target, opts.model ?? null));
+  if (!opts.model) return ok(respawnPlan(proven.value, origin, target, null));
+  const compiled = compileRespawnModel(opts.model, target);
+  if (!compiled.ok) return compiled;
+  return ok(respawnPlan(proven.value, origin, target, compiled.value));
 }
 
 export function describeRestart(plan: RespawnPlan): string {

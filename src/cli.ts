@@ -134,12 +134,12 @@ Resume & tabs:
                                                   All resume verbs take --via <launcher> [--force] (cross-backend
                                                   routes; launchers = [[launcher]] in ~/.ccs/config.toml)
   ccs routes <selector>                           Which launchers can resume each matched session, and why
-  ccs swap-harness [--to <launcher>] [--model <m>] [--do]
+  ccs swap-harness [--to <launcher>] [--model <canonical-id>] [--do]
                                                   Move THIS session to the other harness in place
                                                   (cmux respawn-pane; same tab, nothing closed).
                                                   Bare form is a preflight. Defaults: claude-native
                                                   → opus, claude-gpt → gpt-5.6-sol
-  ccs restart [--on <launcher>] [--model <m>] [--do]
+  ccs restart [--on <launcher>] [--model <canonical-id>] [--do]
                                                   Relaunch THIS session on the SAME harness, in
                                                   place — picks up a newly released model, a newer
                                                   Claude Code, and a fresh process. Bare form is a
@@ -388,7 +388,7 @@ export async function main(argv: string[]): Promise<number> {
       // resume verb: nothing is closed, so already-open/not-indexed/route-eligibility don't apply.
       const { swapHarnessCommand } = await import("./resume/respawn-command.ts");
       ensureDataDir();
-      return swapHarnessCommand(args.slice(1), DB_PATH());
+      return await swapHarnessCommand(args.slice(1), DB_PATH());
     }
     case "restart": {
       // The same in-place respawn, onto the SAME harness. Picks up a newly released model (Claude
@@ -396,7 +396,7 @@ export async function main(argv: string[]): Promise<number> {
       // and a fresh process — without losing the conversation.
       const { restartCommand } = await import("./resume/respawn-command.ts");
       ensureDataDir();
-      return restartCommand(args.slice(1), DB_PATH());
+      return await restartCommand(args.slice(1), DB_PATH());
     }
     case "self-check": {
       // `ccs self-check <session-id>` — the turn-end sidecar (ADR-0063 v2). Runs a cheap

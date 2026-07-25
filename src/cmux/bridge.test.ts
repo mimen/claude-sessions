@@ -139,11 +139,18 @@ describe("parseHookStore", () => {
 
   test("newest session-history record wins independent of object order and carries its metadata", () => {
     const older = { surfaceId: "surface-X", updatedAt: 100, workspaceId: "old-ws" };
-    const newer = { surfaceId: "surface-X", updatedAt: 200, workspaceId: "new-ws", cwd: "/new" };
+    const newer = {
+      surfaceId: "surface-X",
+      updatedAt: 200,
+      workspaceId: "new-ws",
+      cwd: "/new",
+      transcriptPath: "/store/new.jsonl",
+    };
     const first = parseHookStore({ sessions: { old: older, new: newer } });
     const reversed = parseHookStore({ sessions: { new: newer, old: older } });
     expect(first.get("surface-X")).toEqual({
-      sessionId: "new", workspaceId: "new-ws", cwd: "/new", agentLifecycle: null,
+      sessionId: "new", workspaceId: "new-ws", cwd: "/new",
+      transcriptPath: "/store/new.jsonl", agentLifecycle: null,
       isRestorable: false, pid: null, updatedAt: 200, lastPermissionMode: null,
     });
     expect(reversed.get("surface-X")).toEqual(first.get("surface-X"));
@@ -181,8 +188,8 @@ describe("parseHookStore", () => {
       },
     });
     expect(m.get("surface-Y")).toEqual({
-      sessionId: "partial", workspaceId: "ws-2", cwd: "/tmp", agentLifecycle: null,
-      isRestorable: true, pid: null,
+      sessionId: "partial", workspaceId: "ws-2", cwd: "/tmp", transcriptPath: null,
+      agentLifecycle: null, isRestorable: true, pid: null,
       lastPermissionMode: null,
     });
     expect(m.get("surface-Z")?.sessionId).toBe("missing");
