@@ -31,8 +31,10 @@ type launcherEntry struct {
 // stored in Anthropic format whatever produced them and both wrappers are the
 // same Claude Code harness, so replaying a claude session on claude-gpt (or the
 // reverse) is a choice the operator makes — serves only picks the DEFAULT.
-func LoadRoutes(models []string) ([]Launcher, error) {
+func LoadRoutes(models []string, lastModel string) ([]Launcher, error) {
 	models = normalizeModels(models)
+	lastModel = normalizeInline(lastModel)
+	targets := replayTargets(models, lastModel)
 	entries, err := loadLauncherEntries()
 	if err != nil {
 		return nil, err
@@ -70,9 +72,12 @@ func LoadRoutes(models []string) ([]Launcher, error) {
 			patterns = []string{"*"}
 		}
 		entry.Serves = patterns
-		unmatched := unmatchedModels(patterns, models)
+		unmatched := unmatchedModels(patterns, targets)
 		serves := len(unmatched) == 0
 		reason := "replays the full model history"
+		if lastModel != "" {
+			reason = "replays the final model"
+		}
 		if !serves {
 			reason = fmt.Sprintf("cross-harness: %s not in serves=[%s]", strings.Join(unmatched, ", "), strings.Join(patterns, ", "))
 		}
@@ -86,9 +91,12 @@ func LoadRoutes(models []string) ([]Launcher, error) {
 			Reason:   reason,
 		})
 	}
-	if defaultIndex := defaultLauncher(entries, models); defaultIndex >= 0 {
+	if defaultIndex := defaultLauncher(entries, models, lastModel); defaultIndex >= 0 {
 		routes[defaultIndex].Default = true
 		routes[defaultIndex].Reason = "origin backend for this history"
+		if lastModel != "" {
+			routes[defaultIndex].Reason = "origin backend for the final model"
+		}
 	}
 	// Every launcher also gets a cmux target, so the harness stays a free choice
 	// when the resume is handed to a new workspace instead of this terminal.
@@ -125,6 +133,16 @@ func normalizeModels(models []string) []string {
 		}
 	}
 	return cleaned
+}
+
+// replayTargets returns the final transcript model when the index recorded it.
+// Stale rows without last_model retain the legacy whole-history behavior until
+// reindexing backfills their final model.
+func replayTargets(models []string, lastModel string) []string {
+	if lastModel = normalizeInline(lastModel); lastModel != "" {
+		return []string{lastModel}
+	}
+	return normalizeModels(models)
 }
 
 func loadLauncherEntries() ([]launcherEntry, error) {
@@ -196,24 +214,24 @@ func matchesModel(pattern string, model string) bool {
 	return last == "" || strings.HasSuffix(model, last)
 }
 
-// defaultLauncher picks the origin backend: among the launchers that serve every
-// model in the history, the one matching it most specifically (so a pure-gpt
-// history prefers the gpt launcher over a catch-all). It returns -1 when the
-// history carries no signal — no models yet, or no launcher covers all of them,
-// which is exactly what a session already resumed cross-harness looks like. The
+// defaultLauncher picks the origin backend: among the launchers that serve the
+// replay target, the one matching it most specifically wins. The replay target
+// is the final model when known, otherwise the legacy whole model history. It
+// returns -1 when the target carries no signal or no launcher covers it; the
 // caller then falls back to the harness the operator last chose.
-func defaultLauncher(entries []launcherEntry, models []string) int {
-	if len(models) == 0 {
+func defaultLauncher(entries []launcherEntry, models []string, lastModel string) int {
+	targets := replayTargets(models, lastModel)
+	if len(targets) == 0 {
 		return -1
 	}
 	best := -1
 	bestScore := -1
 	for i := range entries {
-		if len(unmatchedModels(entries[i].Serves, models)) > 0 {
+		if len(unmatchedModels(entries[i].Serves, targets)) > 0 {
 			continue
 		}
 		score := int(^uint(0) >> 1)
-		for _, model := range models {
+		for _, model := range targets {
 			perModel := -1
 			for _, pattern := range entries[i].Serves {
 				if matchesModel(pattern, model) {

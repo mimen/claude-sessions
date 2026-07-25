@@ -76,7 +76,7 @@ func Shot(name string, snapshot data.Snapshot) string {
 	case "route":
 		model.view, model.overlay = ViewGroups, OverlayRoute
 		if session, ok := model.selectedSession(); ok {
-			routes, err := data.LoadRoutes(session.Models)
+			routes, err := data.LoadRoutes(session.Models, session.LastModel)
 			model.routeSession = session.ID
 			model.routeLoading = false
 			model.routes = routes

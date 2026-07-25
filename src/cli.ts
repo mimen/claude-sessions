@@ -134,6 +134,16 @@ Resume & tabs:
                                                   All resume verbs take --via <launcher> [--force] (cross-backend
                                                   routes; launchers = [[launcher]] in ~/.ccs/config.toml)
   ccs routes <selector>                           Which launchers can resume each matched session, and why
+  ccs swap-harness [--to <launcher>] [--model <canonical-id>] [--do]
+                                                  Move THIS session to the other harness in place
+                                                  (cmux respawn-pane; same tab, nothing closed).
+                                                  Bare form is a preflight. Defaults: claude-native
+                                                  → opus, claude-gpt → gpt-5.6-sol
+  ccs restart [--on <launcher>] [--model <canonical-id>] [--do]
+                                                  Relaunch THIS session on the SAME harness, in
+                                                  place — picks up a newly released model, a newer
+                                                  Claude Code, and a fresh process. Bare form is a
+                                                  preflight; passes no --model so aliases re-resolve
   ccs sync-tabs [<selector>|.|--all]              Paint cmux tabs from catalogue metadata
   ccs finish-current <complete|archive> [--do]    Preflight, or record lifecycle + enrich + close this workspace
   ccs close-current-workspace [--do]              Prove or close only this session's cmux workspace
@@ -373,6 +383,21 @@ export async function main(argv: string[]): Promise<number> {
       return resumeSelector(args.slice(1));
     case "routes":
       return routesCommand(args.slice(1));
+    case "swap-harness": {
+      // In-place harness change for the CURRENT session (cmux respawn-pane). Deliberately not a
+      // resume verb: nothing is closed, so already-open/not-indexed/route-eligibility don't apply.
+      const { swapHarnessCommand } = await import("./resume/respawn-command.ts");
+      ensureDataDir();
+      return await swapHarnessCommand(args.slice(1), DB_PATH());
+    }
+    case "restart": {
+      // The same in-place respawn, onto the SAME harness. Picks up a newly released model (Claude
+      // Code resolves aliases at startup, so a long-lived session never sees one), a newer binary,
+      // and a fresh process — without losing the conversation.
+      const { restartCommand } = await import("./resume/respawn-command.ts");
+      ensureDataDir();
+      return await restartCommand(args.slice(1), DB_PATH());
+    }
     case "self-check": {
       // `ccs self-check <session-id>` — the turn-end sidecar (ADR-0063 v2). Runs a cheap
       // claude -p against the session's recent transcript + rubric, executes any `ccs` state
@@ -972,11 +997,14 @@ function routesCommand(args: string[]): number {
         console.log(`${sid.slice(0, 8)} — not indexed (run \`ccs reindex\`)`);
         continue;
       }
-      const routes = resolveRoutes(launchers, row.models);
-      const def = defaultRoute(routes, row.models);
+      const routes = resolveRoutes(launchers, row.models, row.lastModel);
+      const def = defaultRoute(routes, row.models, row.lastModel);
       const models = row.models.length > 0 ? row.models.join(", ") : "(no assistant turns)";
+      // Show the replay target when it narrows the history, so an eligible verdict against a
+      // mixed session reads as deliberate rather than as the globs having gone slack.
+      const last = row.lastModel !== "" && row.models.length > 1 ? `  (last: ${row.lastModel})` : "";
       console.log(`${sid.slice(0, 8)} · ${row.title}`);
-      console.log(`  models: ${models}`);
+      console.log(`  models: ${models}${last}`);
       for (const r of routes) {
         const mark = r.eligible ? "✓" : "✗";
         const star = def?.launcher.name === r.launcher.name ? " (default)" : "";

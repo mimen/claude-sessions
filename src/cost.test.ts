@@ -24,6 +24,17 @@ test("prices input/output tokens at the model's rates", () => {
   expect(acc.totals().output).toBe(1_000_000);
 });
 
+test("prices current Claude Opus 5 turns after a native swap", () => {
+  const acc = createUsageAccumulator();
+  acc.add(line({
+    requestId: "opus-5",
+    model: "claude-opus-5",
+    usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 },
+  }));
+  expect(acc.totals().costUSD).toBeCloseTo(30, 6);
+  expect(acc.totals().costByModel["claude-opus-5"]).toBeCloseTo(30, 6);
+});
+
 test("prices observed GPT gateway model ids at their API-equivalent rates", () => {
   const acc = createUsageAccumulator();
   acc.add(line({ requestId: "sol", model: "gpt-5.6-sol", usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } }));
@@ -140,6 +151,26 @@ test("synthetic model is excluded from models and cost breakdown", () => {
   expect(acc.totals().costUSD).toBe(0);
   expect(Object.keys(acc.totals().costByModel)).toEqual([]);
   expect(acc.totals().models).toEqual([]);
+});
+
+test("lastModel keeps arrival order that the sorted models list throws away", () => {
+  const acc = createUsageAccumulator();
+  acc.add({ message: { model: "gpt-5.6-sol" } });
+  acc.add({ message: { model: "claude-opus-5" } });
+  // Sorted, so "claude-opus-5" leads — but the session ENDED on gpt, which is what routing needs.
+  expect(acc.totals().models).toEqual(["claude-opus-5", "gpt-5.6-sol"]);
+  expect(acc.totals().lastModel).toBe("claude-opus-5");
+
+  acc.add({ message: { model: "gpt-5.6-sol" } });
+  expect(acc.totals().lastModel).toBe("gpt-5.6-sol");
+});
+
+test("lastModel is null with no assistant turns, and ignores synthetic lines", () => {
+  const acc = createUsageAccumulator();
+  expect(acc.totals().lastModel).toBeNull();
+  acc.add({ message: { model: "gpt-5.6-sol" } });
+  acc.add(line({ requestId: "r1", model: "<synthetic>", usage: { input_tokens: 0 } }));
+  expect(acc.totals().lastModel).toBe("gpt-5.6-sol");
 });
 
 test("formatCost renders compact column values", () => {

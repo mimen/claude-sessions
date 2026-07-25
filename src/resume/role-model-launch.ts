@@ -41,3 +41,9 @@ export function compileRoleModelLaunch(model: RoleModelId): RoleModelLaunch {
       };
   }
 }
+
+/** Parse and compile one untrusted canonical model value through the birth-model contract. */
+export function compileRoleModelValue(value: string): RoleModelLaunch | null {
+  const model = parseRoleModel(value);
+  return model ? compileRoleModelLaunch(model) : null;
+}

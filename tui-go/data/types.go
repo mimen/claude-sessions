@@ -64,6 +64,7 @@ type Session struct {
 	LastAt           time.Time
 	Messages         int
 	Models           []string
+	LastModel        string
 	Model            string
 	SelfCost         float64
 	TotalCost        float64
@@ -157,8 +158,9 @@ type Launcher struct {
 	Backend string
 	Env     map[string]string
 	Target  string
-	// Serves reports whether this launcher's serves globs cover every model in the
-	// session's history. It is advisory: it picks the preselected route and nothing
+	// Serves reports whether this launcher's serves globs cover the session's replay
+	// target: its final model, or the whole history when that field is unavailable.
+	// It is advisory: it picks the preselected route and nothing
 	// else. Both wrappers are the same Claude Code harness over the same
 	// Anthropic-format transcript, so choosing the other one is the operator's call.
 	Serves bool

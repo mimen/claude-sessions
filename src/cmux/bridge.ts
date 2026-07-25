@@ -91,6 +91,8 @@ export interface SurfaceSession {
   workspaceId: string | null;
   /** the session's cwd as cmux recorded it, if any */
   cwd: string | null;
+  /** Exact transcript path reported by the hooks for this live process, when available. */
+  transcriptPath: string | null;
   /** cmux's agent lifecycle hint (running/needsInput/…), if recorded */
   agentLifecycle: string | null;
   /** whether cmux believes this session can be resumed */
@@ -102,6 +104,12 @@ export interface SurfaceSession {
   pid: number | null;
   /** cmux's Unix-seconds update timestamp, when the store recorded a finite number. */
   updatedAt?: number;
+  /**
+   * The permission mode the session was last running under, as cmux's hooks recorded it. Relaunch
+   * paths carry it forward so restarting a session never silently widens or narrows its
+   * permissions; null when cmux never recorded one.
+   */
+  lastPermissionMode: string | null;
 }
 
 // --- parse `cmux tree --all --json --id-format both` ----------------------------
@@ -145,10 +153,12 @@ interface HookSessionEntry {
   surfaceId?: string | null;
   workspaceId?: string | null;
   cwd?: string | null;
+  transcriptPath?: string | null;
   agentLifecycle?: string | null;
   isRestorable?: boolean;
   pid?: number | null;
   updatedAt?: number;
+  lastPermissionMode?: string | null;
 }
 /** One entry in `activeSessionsBySurface[surfaceUUID]` — the CURRENT surface→session binding. */
 interface ActiveSurfaceBinding {
@@ -248,9 +258,11 @@ export function parseHookStore(store: CmuxHookStore): Map<string, SurfaceSession
     sessionId,
     workspaceId: detail.workspaceId ?? null,
     cwd: detail.cwd ?? null,
+    transcriptPath: detail.transcriptPath ?? null,
     agentLifecycle: detail.agentLifecycle ?? null,
     isRestorable: detail.isRestorable ?? false,
     pid: typeof detail.pid === "number" ? detail.pid : null,
+    lastPermissionMode: detail.lastPermissionMode ?? null,
     ...(timestampIsValid(detail.updatedAt) ? { updatedAt: detail.updatedAt } : {}),
   });
   for (const [surfaceId, winner] of winners) map.set(surfaceId, materialize(winner.sessionId, winner.detail));

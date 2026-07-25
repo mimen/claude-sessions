@@ -37,6 +37,7 @@ function row(overrides: Partial<SessionRow> = {}): SessionRow {
     tokCacheWrite: 0,
     costByModel: {},
     models: [],
+    lastModel: "",
     userTurns: 1,
     tickIntervalSec: 0,
     ...overrides,

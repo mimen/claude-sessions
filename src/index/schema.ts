@@ -2,8 +2,10 @@ import { Database } from "bun:sqlite";
 
 /** Bump when the schema changes. Index rows are rebuildable, but preserve them across additive upgrades. */
 // v7 recomputed cached physical cost rows after GPT gateway model pricing was introduced; v8 adds
-// shadow paths; v9 persists transcript model ids; v10 adds catalogue authority freshness state.
-export const SCHEMA_VERSION = 10;
+// shadow paths; v9 persists transcript model ids; v10 adds catalogue authority freshness state;
+// v11 adds the last model id; v12 invalidates unchanged rows so v11's additive column is actually
+// backfilled on the next incremental reindex.
+export const SCHEMA_VERSION = 12;
 
 /**
  * Open (creating if needed) the Index and ensure its schema is current. Additive migrations
@@ -44,6 +46,18 @@ export function openIndex(dbPath: string): Database {
       }
       // v10: catalogue service generation/freshness and hidden-session state.
       createSourceStatusSchema(db);
+      // v11: the last model drives route eligibility. Empty means "not observed yet" and makes
+      // routing fall back to the whole `models` set, so a pre-v11 row keeps the older verdict
+      // rather than silently becoming eligible everywhere.
+      if (!hasColumn(db, "sessions", "last_model")) {
+        db.exec("ALTER TABLE sessions ADD COLUMN last_model TEXT NOT NULL DEFAULT '';");
+      }
+      // v12: v11 preserved each row's file_mtime/file_size while adding last_model='', so the
+      // incremental reindex skipped every unchanged transcript and never populated the new field.
+      // Mark rows stale once; reindex reparses them while preserving titler-owned columns.
+      if (current < 12) {
+        db.exec("UPDATE sessions SET file_mtime = -1;");
+      }
     } else {
       // v6 cost accounting changed in v7, so its cache is stale even when its columns happen
       // to match. Pre-v6 shapes are also incomplete. Both are rebuildable from the Store.
@@ -121,6 +135,7 @@ function createSchema(db: Database): void {
       tok_cache_write INTEGER NOT NULL DEFAULT 0,
       cost_by_model   TEXT NOT NULL DEFAULT '{}',
       models          TEXT NOT NULL DEFAULT '[]',
+      last_model      TEXT NOT NULL DEFAULT '',
       user_turns      INTEGER NOT NULL DEFAULT 0,
       tick_interval_sec INTEGER NOT NULL DEFAULT 0,
       shadow_paths    TEXT NOT NULL DEFAULT '[]'

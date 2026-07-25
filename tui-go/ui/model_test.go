@@ -375,7 +375,7 @@ func TestFleetCandidateRankingUsesIndexedSkeleton(t *testing.T) {
 	}
 }
 
-func TestDefaultResumeUsesOriginBackendAndResumeID(t *testing.T) {
+func TestDefaultResumeUsesFinalModelBackendAndResumeID(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := t.TempDir()
 	config := `
@@ -393,19 +393,33 @@ serves = ["gpt-*"]
 		t.Fatal(err)
 	}
 	t.Setenv("CCS_ROOT", root)
-	snapshot := testSnapshot(1)
-	snapshot.Sessions[0].CWD = t.TempDir()
-	snapshot.Sessions[0].ResumeID = "internal-id"
-	snapshot.Sessions[0].Models = []string{"gpt-5.6-sol"}
-	model := New(snapshot)
-	updated, command := model.resumeDefault()
-	if command == nil {
-		t.Fatal("resumeDefault returned no quit command")
+
+	tests := []struct {
+		name      string
+		models    []string
+		lastModel string
+		wantArgv  string
+	}{
+		{name: "native to gpt", models: []string{"claude-fable-5", "gpt-5.6-sol"}, lastModel: "gpt-5.6-sol", wantArgv: "claude-gpt --resume internal-id"},
+		{name: "gpt to native", models: []string{"gpt-5.6-sol", "claude-fable-5"}, lastModel: "claude-fable-5", wantArgv: "claude --resume internal-id"},
 	}
-	final := updated.(Model)
-	handoff, ok := final.Handoff()
-	if !ok || strings.Join(handoff.Argv, " ") != "claude-gpt --resume internal-id" {
-		t.Fatalf("handoff = %+v, ok=%v", handoff, ok)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot := testSnapshot(1)
+			snapshot.Sessions[0].CWD = t.TempDir()
+			snapshot.Sessions[0].ResumeID = "internal-id"
+			snapshot.Sessions[0].Models = test.models
+			snapshot.Sessions[0].LastModel = test.lastModel
+			model := New(snapshot)
+			updated, command := model.resumeDefault()
+			if command == nil {
+				t.Fatal("resumeDefault returned no quit command")
+			}
+			handoff, ok := updated.(Model).Handoff()
+			if !ok || strings.Join(handoff.Argv, " ") != test.wantArgv {
+				t.Fatalf("handoff = %+v, ok=%v, want %q", handoff, ok, test.wantArgv)
+			}
+		})
 	}
 }
 
@@ -489,10 +503,9 @@ func TestRoutePickerResumesOnAnyHarness(t *testing.T) {
 	}
 }
 
-// A history that already spans harnesses has no origin backend, so the harness
-// chosen last is the preselection — which is exactly the state a cross-harness
-// resume leaves behind.
-func TestChosenHarnessPersistsAndSeedsCrossedHistories(t *testing.T) {
+// A stale row with no final model retains the legacy whole-history behavior, so
+// the harness chosen last seeds the preselection when the history spans harnesses.
+func TestChosenHarnessPersistsAndSeedsStaleCrossedHistories(t *testing.T) {
 	writeHarnessConfig(t)
 	snapshot := testSnapshot(1)
 	snapshot.Sessions[0].CWD = t.TempDir()
@@ -506,6 +519,7 @@ func TestChosenHarnessPersistsAndSeedsCrossedHistories(t *testing.T) {
 	}
 
 	snapshot.Sessions[0].Models = []string{"claude-fable-5", "gpt-5.6-sol"}
+	snapshot.Sessions[0].LastModel = ""
 	restored := New(snapshot)
 	if restored.lastLauncher != "claude-gpt" {
 		t.Fatalf("restored lastLauncher = %q", restored.lastLauncher)
