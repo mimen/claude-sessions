@@ -21,7 +21,15 @@
      15-minute interval it drains in roughly two hours without ever presenting the gateway
      with a burst. Steady state is a handful of sessions or none.
 
-     CHECKOUT: the deployment, never a worktree — a scheduled job aimed at a worktree dies the
+     CHECKOUT: STOPGAP — points at the feature worktree, not the deployment.
+
+     The deployed line (deploy/go-tui) was moved to the Go TUI "without pulling master's
+     conflicting enrichment work", so the deployment has no `ccs enrich` at all, and it is
+     pinned to index schema v10 while the live index cache is v11. Aiming here keeps
+     enrichment running without overwriting another session's deploy branch.
+
+     RESTORE THIS to ~/Programming/Deployments/claude-sessions/bin/ccs once the enrichment
+     line and the go-tui line are reconciled — a scheduled job aimed at a worktree dies the
      moment that worktree is removed. The installer proves `ccs enrich` exists in whatever
      checkout this plist names before scheduling it, because an agent that fails on every run
      fails silently into a log nobody reads.
@@ -37,7 +45,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/bun</string>
-        <string>/Users/mimen/Programming/Deployments/claude-sessions/bin/ccs</string>
+        <string>/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/session-enrichment/bin/ccs</string>
         <string>enrich</string>
         <string>--sweep</string>
         <string>--limit</string>
