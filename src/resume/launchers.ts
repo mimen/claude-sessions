@@ -82,43 +82,71 @@ function literalLength(pattern: string): number {
 }
 
 /**
- * Verdict per launcher, in config order. Eligible iff EVERY model in the session's history
- * matches at least one of the launcher's serves globs. An empty model set (no assistant
- * turns yet) is eligible everywhere.
+ * The model ids a launcher must be able to replay for a session.
+ *
+ * Routing keys on the LAST model, not the whole history. A transcript that changed harness
+ * mid-session only has to be replayable by the harness it ENDED on — which both backends do
+ * fine, transcripts being stored in Anthropic format regardless of origin. Keying on the whole
+ * set instead made any mixture permanently unresumable by every launcher, which is what made a
+ * harness swap a one-way door.
+ *
+ * `lastModel` is "" on rows indexed before schema v10, where arrival order was never recorded.
+ * Those fall back to the whole set — the older, stricter verdict — so a binary upgrade changes
+ * nothing until the next reindex rather than silently making every stale row eligible anywhere.
  */
-export function resolveRoutes(launchers: readonly Launcher[], models: readonly string[]): Route[] {
+function replayTargets(models: readonly string[], lastModel: string): readonly string[] {
+  return lastModel === "" ? models : [lastModel];
+}
+
+/**
+ * Verdict per launcher, in config order. Eligible iff the session's replay target (its last
+ * model, or its whole history for a pre-v10 row) matches at least one of the launcher's serves
+ * globs. No assistant turns yet → eligible everywhere.
+ */
+export function resolveRoutes(
+  launchers: readonly Launcher[],
+  models: readonly string[],
+  lastModel = "",
+): Route[] {
+  const targets = replayTargets(models, lastModel);
   return launchers.map((launcher) => {
-    const unmatched = models.filter((m) => !launcher.serves.some((p) => matchesModel(p, m)));
+    const unmatched = targets.filter((m) => !launcher.serves.some((p) => matchesModel(p, m)));
     if (unmatched.length === 0) return { launcher, eligible: true, reason: null };
+    const subject = lastModel === "" ? "history contains" : "last model is";
     return {
       launcher,
       eligible: false,
-      reason: `history contains ${unmatched.join(", ")}, not matched by serves=[${launcher.serves.join(", ")}]`,
+      reason: `${subject} ${unmatched.join(", ")}, not matched by serves=[${launcher.serves.join(", ")}]`,
     };
   });
 }
 
 /**
  * Default route = ORIGIN-BACKEND preference: among eligible routes, the launcher whose serves
- * globs match the history most specifically wins (so a pure-gpt session defaults to the gpt
- * launcher over catch-all native; mixed histories only match "*" launchers → native). Score =
- * the weakest model's best matching-glob specificity; tie → config order. Null only when no
- * route is eligible (a config without a catch-all launcher).
+ * globs match the replay target most specifically wins (so a session that last ran on gpt
+ * defaults to the gpt launcher over a catch-all native one). Score = the weakest target's best
+ * matching-glob specificity; tie → config order. Null only when no route is eligible (a config
+ * without a catch-all launcher, against a pre-v10 row whose history is mixed).
  */
-export function defaultRoute(routes: readonly Route[], models: readonly string[]): Route | null {
+export function defaultRoute(
+  routes: readonly Route[],
+  models: readonly string[],
+  lastModel = "",
+): Route | null {
+  const targets = replayTargets(models, lastModel);
   let best: Route | null = null;
   let bestScore = -1;
   for (const route of routes) {
     if (!route.eligible) continue;
     let score = Number.MAX_SAFE_INTEGER;
-    for (const m of models) {
+    for (const m of targets) {
       let perModel = -1;
       for (const p of route.launcher.serves) {
         if (matchesModel(p, m)) perModel = Math.max(perModel, literalLength(p));
       }
       score = Math.min(score, perModel);
     }
-    if (models.length === 0) score = 0;
+    if (targets.length === 0) score = 0;
     if (score > bestScore) {
       bestScore = score;
       best = route;

@@ -144,7 +144,7 @@ describe("parseHookStore", () => {
     const reversed = parseHookStore({ sessions: { new: newer, old: older } });
     expect(first.get("surface-X")).toEqual({
       sessionId: "new", workspaceId: "new-ws", cwd: "/new", agentLifecycle: null,
-      isRestorable: false, pid: null, updatedAt: 200,
+      isRestorable: false, pid: null, updatedAt: 200, lastPermissionMode: null,
     });
     expect(reversed.get("surface-X")).toEqual(first.get("surface-X"));
   });
@@ -183,6 +183,7 @@ describe("parseHookStore", () => {
     expect(m.get("surface-Y")).toEqual({
       sessionId: "partial", workspaceId: "ws-2", cwd: "/tmp", agentLifecycle: null,
       isRestorable: true, pid: null,
+      lastPermissionMode: null,
     });
     expect(m.get("surface-Z")?.sessionId).toBe("missing");
   });

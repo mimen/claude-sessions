@@ -102,6 +102,12 @@ export interface SurfaceSession {
   pid: number | null;
   /** cmux's Unix-seconds update timestamp, when the store recorded a finite number. */
   updatedAt?: number;
+  /**
+   * The permission mode the session was last running under, as cmux's hooks recorded it. Relaunch
+   * paths carry it forward so restarting a session never silently widens or narrows its
+   * permissions; null when cmux never recorded one.
+   */
+  lastPermissionMode: string | null;
 }
 
 // --- parse `cmux tree --all --json --id-format both` ----------------------------
@@ -149,6 +155,7 @@ interface HookSessionEntry {
   isRestorable?: boolean;
   pid?: number | null;
   updatedAt?: number;
+  lastPermissionMode?: string | null;
 }
 /** One entry in `activeSessionsBySurface[surfaceUUID]` — the CURRENT surface→session binding. */
 interface ActiveSurfaceBinding {
@@ -251,6 +258,7 @@ export function parseHookStore(store: CmuxHookStore): Map<string, SurfaceSession
     agentLifecycle: detail.agentLifecycle ?? null,
     isRestorable: detail.isRestorable ?? false,
     pid: typeof detail.pid === "number" ? detail.pid : null,
+    lastPermissionMode: detail.lastPermissionMode ?? null,
     ...(timestampIsValid(detail.updatedAt) ? { updatedAt: detail.updatedAt } : {}),
   });
   for (const [surfaceId, winner] of winners) map.set(surfaceId, materialize(winner.sessionId, winner.detail));
