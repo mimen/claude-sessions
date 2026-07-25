@@ -38,15 +38,13 @@ import { resolveRole } from "../roles/role-files.ts";
 import { checkClusterGate } from "../cluster/manifest.ts";
 import { shellQuote } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
-import { launcherByName, loadLaunchers, type Launcher } from "./launchers.ts";
+import type { Launcher } from "./launchers.ts";
+import type { BirthModelId } from "./role-model-launch.ts";
 import {
-  compileLocationModelLaunch,
-  compileModelLaunch,
-  compileRoleModelLaunch,
-  parseBirthModel,
-  type BirthModelId,
-  type ModelLaunch,
-} from "./role-model-launch.ts";
+  compileExactBirthRoute,
+  resolveBirthRoute,
+  type ExactBirthRoute,
+} from "./birth-route.ts";
 import { execFileSync } from "node:child_process";
 import { spawnContractError, type SpawnFacts, type WorktreeState } from "../catalogue/spawn-contract.ts";
 import { interpretSpawnLocation, syntheticRow, type SpawnLocationConfig } from "../catalogue/spawn-location.ts";
@@ -58,7 +56,7 @@ import { loadConfig, type Config } from "../config.ts";
 import {
   activeHostByCanonicalName,
   loadHostRegistry,
-  type HostRegistryEntry,
+  validateHostCapabilities,
 } from "../hosts/registry.ts";
 import {
   effectiveLocationDefaults,
@@ -277,6 +275,104 @@ export function applyLocationDefaults(opts: NewSessionOpts, loadedConfig?: Confi
   return resultOk(resolved.value);
 }
 
+export interface NewSessionPreflightReceipt {
+  readonly status: "ready";
+  readonly host: string;
+  readonly location: {
+    readonly key: string;
+    readonly name: string;
+    readonly cwd: string;
+  };
+  readonly route: ExactBirthRoute;
+  readonly required_capabilities: readonly string[];
+}
+
+/** Validate one loose top-level birth on this machine without reserving a session or creating a workspace. */
+export function preflightNewSession(args: string[]): number {
+  const parsed = parseOpts(args);
+  if (!parsed.ok) {
+    console.error(`ccs session preflight: ${parsed.error.message}`);
+    return 2;
+  }
+  const opts = parsed.value;
+  if (!opts.topLevel || opts.childOf) {
+    console.error("ccs session preflight: require --top-level without --child-of");
+    return 2;
+  }
+  if (!opts.location) {
+    console.error("ccs session preflight: require --location");
+    return 2;
+  }
+  if (opts.cwd || opts.inline || opts.printId || opts.identity || opts.cluster || opts.role || opts.project || opts.key) {
+    console.error("ccs session preflight: only loose top-level location births are supported");
+    return 2;
+  }
+
+  const config = loadConfig();
+  if (!config.ok) {
+    console.error(`ccs session preflight: ${config.error.message}`);
+    return 2;
+  }
+  if (opts.host && !sameCanonicalHost(opts.host, config.value.host.label)) {
+    console.error(
+      `ccs session preflight: reached host "${config.value.host.label}", expected "${opts.host}"`,
+    );
+    return 2;
+  }
+
+  const location = applyLocationDefaults(opts, config.value);
+  if (!location.ok) {
+    console.error(`ccs session preflight: ${location.error.message}`);
+    return 2;
+  }
+  if (!location.value) {
+    console.error("ccs session preflight: require --location");
+    return 2;
+  }
+
+  const hosts = loadHostRegistry(config.value.routing.hosts);
+  if (!hosts.ok) {
+    console.error(`ccs session preflight: ${hosts.error.message}`);
+    return 2;
+  }
+  const host = activeHostByCanonicalName(hosts.value, config.value.host.label);
+  if (!host) {
+    console.error(`ccs session preflight: current host "${config.value.host.label}" is not active in the host registry`);
+    return 2;
+  }
+  const capabilities = validateHostCapabilities(host, opts.requiredCapabilities ?? []);
+  if (!capabilities.ok) {
+    console.error(`ccs session preflight: ${capabilities.error.message}`);
+    return 2;
+  }
+
+  const route = resolveBirthRoute({
+    model: opts.model,
+    via: opts.via,
+    locationKey: location.value.key,
+    defaultHarness: opts.locationDefaultHarness,
+    defaultModel: opts.locationDefaultModel,
+  });
+  if (!route.ok) {
+    console.error(`ccs session preflight: ${route.error.message}`);
+    return 2;
+  }
+
+  const receipt: NewSessionPreflightReceipt = {
+    status: "ready",
+    host: host.name,
+    location: {
+      key: location.value.key,
+      name: location.value.name,
+      cwd: location.value.cwd,
+    },
+    route: route.value.exact,
+    required_capabilities: opts.requiredCapabilities ?? [],
+  };
+  console.log(JSON.stringify(receipt));
+  return 0;
+}
+
 export interface RoutedRemoteSessionRequest extends RemoteSessionRequest {
   readonly model?: BirthModelId;
   readonly requiredCapabilities?: readonly string[];
@@ -296,60 +392,11 @@ function sameCanonicalHost(left: string, right: string): boolean {
   return left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase();
 }
 
-function normalizeCapability(value: string): string {
-  return value.trim().toLocaleLowerCase();
-}
-
-function validateRequiredCapabilities(
-  host: HostRegistryEntry,
-  requiredCapabilities: readonly string[],
-): Result<void> {
-  if (requiredCapabilities.length === 0) return resultOk(undefined);
-  const invalid = requiredCapabilities.find((capability) => normalizeCapability(capability).length === 0);
-  if (invalid !== undefined) return resultErr(new Error("--require-capability must not be empty"));
-  const available = new Map(host.capabilities.map((capability) => [normalizeCapability(capability), capability]));
-  const missing = requiredCapabilities.filter((capability) => !available.has(normalizeCapability(capability)));
-  if (missing.length === 0) return resultOk(undefined);
-  const renderedAvailable = host.capabilities.length > 0 ? host.capabilities.join(", ") : "none";
-  return resultErr(new Error(
-    `host "${host.name}" lacks required capability ${missing.map((value) => `"${value}"`).join(", ")} ` +
-      `(available: ${renderedAvailable})`,
-  ));
-}
-
-function compileExplicitModelLaunch(opts: NewSessionOpts): Result<ModelLaunch | null> {
-  if (!opts.model) return resultOk(null);
-  if (opts.via) {
-    return resultErr(new Error("--model cannot be combined with --via; the model determines its launcher"));
-  }
-  const model = parseBirthModel(opts.model);
-  if (!model) return resultErr(new Error(`unsupported --model "${opts.model}"`));
-  return resultOk(compileModelLaunch(model));
-}
-
-function compileDefaultLocationLaunch(
-  locationKey: string,
-  defaultHarness: string | null | undefined,
-  defaultModel: string | null | undefined,
-): Result<ModelLaunch | null> {
-  if (!defaultHarness && !defaultModel) return resultOk(null);
-  if (!defaultHarness || !defaultModel) {
-    return resultErr(new Error(
-      `location "${locationKey}" must resolve both default_harness and default_model, or neither`,
-    ));
-  }
-  const compiled = compileLocationModelLaunch(defaultHarness, defaultModel);
-  if (!compiled.ok) {
-    return resultErr(new Error(`location "${locationKey}" has an invalid launch route: ${compiled.error.message}`));
-  }
-  return resultOk(compiled.value);
-}
-
-function recordCompiledLaunch(opts: NewSessionOpts, launch: ModelLaunch | null): void {
-  if (!launch) return;
-  opts.launchCanonicalModel = launch.model;
-  opts.launchModel = launch.launchModel;
-  opts.launchLauncher = launch.launcher.name;
+function recordExactLaunch(opts: NewSessionOpts, route: ExactBirthRoute): void {
+  if (!route.model || !route.launchModel) return;
+  opts.launchCanonicalModel = route.model;
+  opts.launchModel = route.launchModel;
+  opts.launchLauncher = route.launcher;
 }
 
 function unsupportedRemoteBirthOption(opts: NewSessionOpts): string | null {
@@ -402,7 +449,7 @@ export function launchRemoteNewSession(
     console.error(`ccs new-session: unknown or inactive remote host "${targetHost}"`);
     return 2;
   }
-  const capabilities = validateRequiredCapabilities(host, opts.requiredCapabilities ?? []);
+  const capabilities = validateHostCapabilities(host, opts.requiredCapabilities ?? []);
   if (!capabilities.ok) {
     console.error(`ccs new-session: ${capabilities.error.message}`);
     return 2;
@@ -423,27 +470,19 @@ export function launchRemoteNewSession(
     console.error(`ccs new-session: ${eligible.error.message}`);
     return 2;
   }
-  const explicitModel = compileExplicitModelLaunch(opts);
-  if (!explicitModel.ok) {
-    console.error(`ccs new-session: ${explicitModel.error.message}`);
+  const defaults = effectiveLocationDefaults(locations.value, location);
+  const exactRoute = compileExactBirthRoute({
+    model: opts.model,
+    via: opts.via,
+    locationKey: location.key,
+    defaultHarness: defaults.defaultHarness,
+    defaultModel: defaults.defaultModel,
+  });
+  if (!exactRoute.ok) {
+    console.error(`ccs new-session: ${exactRoute.error.message}`);
     return 2;
   }
-  const defaults = effectiveLocationDefaults(locations.value, location);
-  let locationLaunch: ModelLaunch | null = null;
-  if (!explicitModel.value && !opts.via) {
-    const compiledDefault = compileDefaultLocationLaunch(
-      location.key,
-      defaults.defaultHarness,
-      defaults.defaultModel,
-    );
-    if (!compiledDefault.ok) {
-      console.error(`ccs new-session: ${compiledDefault.error.message}`);
-      return 2;
-    }
-    locationLaunch = compiledDefault.value;
-  }
-  const compiledLaunch = explicitModel.value ?? locationLaunch;
-  recordCompiledLaunch(opts, compiledLaunch);
+  recordExactLaunch(opts, exactRoute.value);
 
   const creator = resolveNewSessionCreator(process.env);
   if (!creator.ok) {
@@ -454,6 +493,10 @@ export function launchRemoteNewSession(
     targetHost: host.name,
     sshAlias: host.sshAlias,
     locationKey: location.key,
+    route: exactRoute.value,
+    via: opts.via,
+    model: exactRoute.value.model,
+    requiredCapabilities: opts.requiredCapabilities ?? [],
   });
   if (!preflight.ok) {
     console.error(`ccs new-session: ${preflight.error.message}`);
@@ -468,7 +511,7 @@ export function launchRemoteNewSession(
     prompt: opts.prompt,
     permissionMode: opts.permissionMode,
     via: opts.via,
-    model: compiledLaunch?.model,
+    model: exactRoute.value.model ?? undefined,
     requiredCapabilities: opts.requiredCapabilities ?? [],
     creatorKind: creator.value.kind,
     creatorRef: creator.value.ref,
@@ -779,16 +822,20 @@ export function newSession(
       console.error(`ccs new-session: current host "${config.value.host.label}" is not active in the host registry`);
       return 2;
     }
-    const capabilities = validateRequiredCapabilities(host, opts.requiredCapabilities ?? []);
+    const capabilities = validateHostCapabilities(host, opts.requiredCapabilities ?? []);
     if (!capabilities.ok) {
       console.error(`ccs new-session: ${capabilities.error.message}`);
       return 2;
     }
     selectedHost = host.name;
   }
-  const explicitModelLaunch = compileExplicitModelLaunch(opts);
-  if (!explicitModelLaunch.ok) {
-    console.error(`ccs new-session: ${explicitModelLaunch.error.message}`);
+  const explicitRouteValidation = compileExactBirthRoute({
+    model: opts.model,
+    via: opts.via,
+    locationKey: opts.locationKey ?? opts.location ?? "unregistered cwd",
+  });
+  if (!explicitRouteValidation.ok) {
+    console.error(`ccs new-session: ${explicitRouteValidation.error.message}`);
     return 2;
   }
   const intentError = resolveLaunchIntent(opts);
@@ -894,48 +941,22 @@ export function newSession(
 
   const cwd = opts.cwd ?? process.cwd();
 
-  // A role may declare only a canonical model. Compiler-owned policy derives the executable and
-  // launch spelling; accepting --via here would let caller input contradict that role policy.
-  const roleLaunch = roleDef?.model ? compileRoleModelLaunch(roleDef.model) : null;
-  if (roleLaunch && (opts.via || explicitModelLaunch.value)) {
-    console.error("ccs new-session: --via/--model cannot be combined with a role-declared model policy");
+  // Route precedence is explicit: role policy, explicit canonical model, caller launcher,
+  // then the location/registry exact default. The same resolver powers target-side remote preflight.
+  const resolvedRoute = resolveBirthRoute({
+    roleModel: roleDef?.model,
+    model: opts.model,
+    via: opts.via,
+    locationKey: opts.locationKey ?? opts.location ?? "unregistered cwd",
+    defaultHarness: opts.locationDefaultHarness,
+    defaultModel: opts.locationDefaultModel,
+  });
+  if (!resolvedRoute.ok) {
+    console.error(`ccs new-session: ${resolvedRoute.error.message}`);
     return 2;
   }
-
-  // Route precedence is explicit: role policy, explicit canonical model, caller launcher,
-  // then the location/registry exact default. Lower-priority defaults are compiled only when selected,
-  // so a stale default cannot block a valid higher-priority route.
-  let locationLaunch: ModelLaunch | null = null;
-  if (!roleLaunch && !explicitModelLaunch.value && !opts.via) {
-    const compiledDefault = compileDefaultLocationLaunch(
-      opts.locationKey ?? opts.location ?? "unregistered cwd",
-      opts.locationDefaultHarness,
-      opts.locationDefaultModel,
-    );
-    if (!compiledDefault.ok) {
-      console.error(`ccs new-session: ${compiledDefault.error.message}`);
-      return 2;
-    }
-    locationLaunch = compiledDefault.value;
-  }
-  const compiledLaunch = roleLaunch ?? explicitModelLaunch.value ?? locationLaunch;
-  let launcher: Launcher = compiledLaunch?.launcher ?? { name: "claude", binary: "claude", serves: ["*"], env: {} };
-  if (compiledLaunch) {
-    recordCompiledLaunch(opts, compiledLaunch);
-  } else if (opts.via) {
-    const launchersRes = loadLaunchers();
-    if (!launchersRes.ok) {
-      console.error(`ccs new-session: ${launchersRes.error.message}`);
-      return 2;
-    }
-    const found = launcherByName(launchersRes.value, opts.via);
-    if (!found) {
-      const known = launchersRes.value.map((l) => l.name).join(", ");
-      console.error(`ccs new-session: unknown launcher "${opts.via}" (configured: ${known})`);
-      return 2;
-    }
-    launcher = found;
-  }
+  const launcher: Launcher = resolvedRoute.value.launcher;
+  recordExactLaunch(opts, resolvedRoute.value.exact);
 
   // Explicit identity births must reject before an id is minted or a catalogue row is created.
   // Keep this connection through registration so validation and the atomic metadata write observe

@@ -3,7 +3,8 @@ import { z } from "zod";
 import type { CreatorKind } from "../catalogue/db.ts";
 import { type Result, err, ok } from "../result.ts";
 import { shellQuote } from "./command.ts";
-import type { BirthModelId } from "./role-model-launch.ts";
+import { BIRTH_MODEL_IDS, type BirthModelId } from "./role-model-launch.ts";
+import type { ExactBirthRoute } from "./birth-route.ts";
 
 export interface CommandResult {
   readonly status: number | null;
@@ -37,19 +38,42 @@ const DEFAULT_RUNNER: CommandRunner = {
   },
 };
 
-const RemoteLocationPayloadSchema = z.object({
-  key: z.string().min(1),
-  name: z.string().min(1),
-  cwd: z.string().min(1),
-  current_host: z.string().min(1),
-  host_eligible: z.boolean(),
-  validation_error: z.string().nullable().optional(),
-}).passthrough();
+const ExactBirthRouteSchema = z.object({
+  launcher: z.string().min(1),
+  model: z.enum(BIRTH_MODEL_IDS).nullable(),
+  launchModel: z.string().min(1).nullable(),
+}).strict().superRefine((route, context) => {
+  if ((route.model === null) !== (route.launchModel === null)) {
+    context.addIssue({
+      code: "custom",
+      message: "model and launchModel must either both be present or both be null",
+    });
+  }
+});
 
-export interface RemotePreflightRequest {
+const RemotePreflightPayloadSchema = z.object({
+  status: z.literal("ready"),
+  host: z.string().min(1),
+  location: z.object({
+    key: z.string().min(1),
+    name: z.string().min(1),
+    cwd: z.string().min(1),
+  }).strict(),
+  route: ExactBirthRouteSchema,
+  required_capabilities: z.array(z.string().min(1)),
+}).strict();
+
+interface RemoteTargetRequest {
   readonly targetHost: string;
   readonly sshAlias: string;
   readonly locationKey: string;
+}
+
+export interface RemotePreflightRequest extends RemoteTargetRequest {
+  readonly route: ExactBirthRoute;
+  readonly via?: string;
+  readonly model?: BirthModelId | null;
+  readonly requiredCapabilities: readonly string[];
 }
 
 export interface RemotePreflight {
@@ -59,7 +83,7 @@ export interface RemotePreflight {
   readonly cwd: string;
 }
 
-export interface RemoteSessionRequest extends RemotePreflightRequest {
+export interface RemoteSessionRequest extends RemoteTargetRequest {
   readonly title: string;
   readonly prompt?: string;
   readonly permissionMode?: string;
@@ -124,18 +148,39 @@ export function renderSshArgs(sshAlias: string, remoteCommand: string): string[]
   ];
 }
 
-/** Verify the remote managed-birth prerequisites without creating a workspace or session. */
+function sameExactRoute(left: ExactBirthRoute, right: ExactBirthRoute): boolean {
+  return left.launcher === right.launcher && left.model === right.model && left.launchModel === right.launchModel;
+}
+
+/** Render the target-side no-birth validation through the same route resolver used by session new. */
+export function renderRemotePreflightCommand(request: RemotePreflightRequest): string {
+  const args = [
+    "ccs",
+    "session",
+    "preflight",
+    "--top-level",
+    "--json",
+    `--location=${request.locationKey}`,
+    `--host=${request.targetHost}`,
+  ];
+  if (request.via) args.push(`--via=${request.via}`);
+  if (request.model) args.push(`--model=${request.model}`);
+  for (const capability of request.requiredCapabilities) {
+    args.push(`--require-capability=${capability}`);
+  }
+  return args.map(shellQuote).join(" ");
+}
+
+/** Verify the exact remote managed-birth route without creating a workspace or session. */
 export function preflightRemoteSession(
   request: RemotePreflightRequest,
   runner: CommandRunner = DEFAULT_RUNNER,
 ): Result<RemotePreflight> {
-  const locationArg = shellQuote(request.locationKey);
-  const hostArg = shellQuote(request.targetHost);
   const check = [
     "if ! command -v ccs >/dev/null 2>&1; then printf '%s\\n' CCS_PREFLIGHT_CCS_MISSING >&2; exit 21; fi",
     "if ! test -r \"$HOME/.ccs/locations.toml\"; then printf '%s\\n' CCS_PREFLIGHT_REGISTRY_MISSING >&2; exit 22; fi",
     "if ! test -r \"$HOME/.ccs/hosts.toml\"; then printf '%s\\n' CCS_PREFLIGHT_HOSTS_MISSING >&2; exit 23; fi",
-    `exec ccs location show ${locationArg} --json --host ${hostArg}`,
+    `exec ${renderRemotePreflightCommand(request)}`,
   ].join("; ");
   const result = runner.run("ssh", renderSshArgs(request.sshAlias, check), { timeoutMs: 12_000 });
   if (timedOut(result)) return err(new Error(`SSH preflight timed out for host "${request.targetHost}"`));
@@ -150,33 +195,40 @@ export function preflightRemoteSession(
     if (detail.includes("CCS_PREFLIGHT_HOSTS_MISSING")) {
       return err(new Error(`remote host "${request.targetHost}" cannot read ~/.ccs/hosts.toml`));
     }
-    return err(new Error(`remote location preflight failed on "${request.targetHost}": ${detail}`));
+    return err(new Error(`remote launch preflight failed on "${request.targetHost}": ${detail}`));
   }
 
   const json = extractJsonObject(result.stdout);
-  const parsed = RemoteLocationPayloadSchema.safeParse(json);
+  const parsed = RemotePreflightPayloadSchema.safeParse(json);
   if (!parsed.success) {
-    return err(new Error(`remote location preflight returned an invalid receipt for "${request.targetHost}"`));
+    return err(new Error(`remote launch preflight returned an invalid receipt for "${request.targetHost}"`));
   }
-  if (parsed.data.key !== request.locationKey) {
+  if (parsed.data.location.key !== request.locationKey) {
     return err(new Error(
-      `remote location preflight returned key "${parsed.data.key}", expected "${request.locationKey}"`,
+      `remote launch preflight returned location "${parsed.data.location.key}", expected "${request.locationKey}"`,
     ));
   }
-  if (!parsed.data.host_eligible) {
-    const detail = parsed.data.validation_error?.trim() || `location "${request.locationKey}" is not eligible`;
-    return err(new Error(`remote location validation failed on "${request.targetHost}": ${detail}`));
-  }
-  if (!sameCanonicalHost(parsed.data.current_host, request.targetHost)) {
+  if (!sameCanonicalHost(parsed.data.host, request.targetHost)) {
     return err(new Error(
-      `SSH alias "${request.sshAlias}" reached host "${parsed.data.current_host}", expected "${request.targetHost}"`,
+      `SSH alias "${request.sshAlias}" reached host "${parsed.data.host}", expected "${request.targetHost}"`,
     ));
+  }
+  if (!sameExactRoute(parsed.data.route, request.route)) {
+    return err(new Error(
+      `remote launch preflight resolved route ${JSON.stringify(parsed.data.route)}, expected ${JSON.stringify(request.route)}`,
+    ));
+  }
+  if (
+    parsed.data.required_capabilities.length !== request.requiredCapabilities.length ||
+    parsed.data.required_capabilities.some((capability, index) => capability !== request.requiredCapabilities[index])
+  ) {
+    return err(new Error(`remote launch preflight returned different capability requirements for "${request.targetHost}"`));
   }
   return ok({
     targetHost: request.targetHost,
     locationKey: request.locationKey,
-    locationName: parsed.data.name,
-    cwd: parsed.data.cwd,
+    locationName: parsed.data.location.name,
+    cwd: parsed.data.location.cwd,
   });
 }
 

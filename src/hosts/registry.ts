@@ -113,3 +113,21 @@ export function activeHostByCanonicalName(
     host.status === "active" && normalizeIdentifier(host.name) === normalizedName
   ) ?? null;
 }
+
+/** Validate requested capabilities against one canonical active-host registry entry. */
+export function validateHostCapabilities(
+  host: HostRegistryEntry,
+  requiredCapabilities: readonly string[],
+): Result<void> {
+  if (requiredCapabilities.length === 0) return ok(undefined);
+  const invalid = requiredCapabilities.find((capability) => normalizeIdentifier(capability).length === 0);
+  if (invalid !== undefined) return err(new Error("--require-capability must not be empty"));
+  const available = new Set(host.capabilities.map(normalizeIdentifier));
+  const missing = requiredCapabilities.filter((capability) => !available.has(normalizeIdentifier(capability)));
+  if (missing.length === 0) return ok(undefined);
+  const renderedAvailable = host.capabilities.length > 0 ? host.capabilities.join(", ") : "none";
+  return err(new Error(
+    `host "${host.name}" lacks required capability ${missing.map((value) => `"${value}"`).join(", ")} ` +
+      `(available: ${renderedAvailable})`,
+  ));
+}

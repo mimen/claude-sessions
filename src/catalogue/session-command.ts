@@ -26,7 +26,7 @@ import { sessionById } from "../index/index.ts";
 import type { Database } from "bun:sqlite";
 import { getIdentity } from "./identities.ts";
 import { registerShimBirth, rename, mark } from "./commands.ts";
-import { newSession } from "../resume/new-session.ts";
+import { newSession, preflightNewSession } from "../resume/new-session.ts";
 import { pushCmuxRename } from "../cmux/liveness.ts";
 
 function now(): string {
@@ -71,6 +71,7 @@ export async function sessionCommand(args: string[]): Promise<number> {
     case "uncomplete": return doLifecycle(args.slice(1), ["--completed", "--off"]);
     case "unarchive":  return doLifecycle(args.slice(1), ["--archived", "--off"]);
     case "new":      return newSession(args.slice(1));
+    case "preflight": return preflightNewSession(args.slice(1));
     case "shim-register": return doShimRegister(args.slice(1));
     case "bump":     return await doBump(args.slice(1));
     case "--help":
