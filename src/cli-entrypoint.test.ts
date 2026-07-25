@@ -14,7 +14,10 @@ test("bin/ccs --help module-loads under an isolated runtime root", () => {
       stderr: "pipe",
     });
     expect(result.exitCode).toBe(0);
-    expect(result.stdout.toString()).toContain("ccs — find and resume any Claude Code session");
+    const stdout = result.stdout.toString();
+    expect(stdout).toContain("ccs — find and resume any Claude Code session");
+    expect(stdout).toContain("ccs finish <sessionId> <complete|archive> [--do]");
+    expect(stdout).toContain("ccs finish-current <complete|archive> [--do]");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

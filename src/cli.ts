@@ -21,6 +21,7 @@ import { launcherCommand } from "./launcher/command.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { boardCommand } from "./catalogue/board-command.ts";
 import { catalogueServiceCommand } from "./catalogue-service/command.ts";
+import { sidebarCommand } from "./sidebar/command.ts";
 import { refreshCatalogueAuthority } from "./catalogue-service/client.ts";
 import { handoffInline } from "./resume/inline.ts";
 import type { ResumeCommand } from "./resume/command.ts";
@@ -58,6 +59,7 @@ Usage:
   ccs start [--dry-run|--explain] [description...]  Route work to an active session or managed new session
   ccs reindex [--titles]   Refresh through the host-local catalogue authority
   ccs catalogue-service start|status|stop|refresh   Manage the on-demand local authority
+  ccs sidebar serve|url   Productivity sidebar web host for the cmux Dock
   ccs ls [--auxiliary]    Print indexed sessions (with catalogue badges)
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
   ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
@@ -129,6 +131,9 @@ Resume & tabs:
                                                   routes; launchers = [[launcher]] in ~/.ccs/config.toml)
   ccs routes <selector>                           Which launchers can resume each matched session, and why
   ccs sync-tabs [<selector>|.|--all]              Paint cmux tabs from catalogue metadata
+  ccs finish <sessionId> <complete|archive> [--do]  Preflight, or record lifecycle + enrich + safely close any session
+  ccs finish-current <complete|archive> [--do]    Current-session compatibility wrapper used by the CCS skills
+  ccs close-current-workspace [--do]              Prove or close only this session's cmux workspace
   ccs reap-duplicates [--do]                      Close cmux dupes for sessions with >1 live \`claude --resume\`
 
 Inbox & state:
@@ -175,6 +180,8 @@ export async function main(argv: string[]): Promise<number> {
       return await reindex({ titles: args.includes("--titles") });
     case "catalogue-service":
       return await catalogueServiceCommand(args.slice(1));
+    case "sidebar":
+      return await sidebarCommand(args.slice(1));
     case "ls":
       return ls({ all: args.includes("--all"), loops: args.includes("--loops"), auxiliary: args.includes("--auxiliary") });
     case "tree":
@@ -269,6 +276,18 @@ export async function main(argv: string[]): Promise<number> {
     case "bump-session": {
       const { bumpSessionCommand } = await import("./inbox/bump-session-command.ts");
       return bumpSessionCommand(args.slice(1));
+    }
+    case "finish": {
+      const { finishSessionCommand } = await import("./cmux/finish-current.ts");
+      return await finishSessionCommand(args.slice(1));
+    }
+    case "finish-current": {
+      const { finishCurrentCommand } = await import("./cmux/finish-current.ts");
+      return await finishCurrentCommand(args.slice(1));
+    }
+    case "close-current-workspace": {
+      const { closeCurrentWorkspaceCommand } = await import("./cmux/close-current.ts");
+      return closeCurrentWorkspaceCommand(args.slice(1));
     }
     case "reap-duplicates": {
       // `ccs reap-duplicates [--do]` — find sessions with >1 live `claude --resume <sid>` proc

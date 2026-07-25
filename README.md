@@ -45,6 +45,9 @@ Update later with `git pull`.
   `auto`), or — when both are installed — the in-TUI `i` toggle (persisted across runs).
 - **cmux** (optional) — when reachable, resume opens a named cmux workspace.
 
+For the optional live-workspace custom sidebar, see the [CCS cmux sidebar install and usage guide](integrations/cmux/README.md).
+For the richer session work queue that runs in the cmux Dock, see the [productivity sidebar guide](src/sidebar/README.md) (`ccs sidebar serve`).
+
 ## Usage
 
 ```sh

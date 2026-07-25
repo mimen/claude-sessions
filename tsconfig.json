@@ -20,5 +20,8 @@
 
     "skipLibCheck": true
   },
-  "include": ["src", "bin", "scripts"]
+  "include": ["src", "bin", "scripts"],
+  // The sidebar's browser code needs the DOM lib, which the Bun-targeted program must not have;
+  // it is typechecked by its own project instead (see `typecheck:web`).
+  "exclude": ["src/sidebar/web"]
 }

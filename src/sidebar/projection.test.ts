@@ -1,0 +1,532 @@
+import { describe, expect, test } from "bun:test";
+import {
+  cleanSessionName,
+  directoriesToResolve,
+  directoryLabel,
+  modelOf,
+  projectSidebar,
+  sectionForStatus,
+  sidebarLifecycleOf,
+  type IndexedSessionInput,
+  type LiveSessionInput,
+  type LiveWorkspaceInput,
+  type ProjectionInput,
+  type SidebarRow,
+  type SidebarSessionRow,
+} from "./projection.ts";
+import { familyOf } from "../tui/format.ts";
+
+/** Narrow to the session rows an assertion is about; sessionless workspaces carry no model. */
+function sessionRows(rows: readonly SidebarRow[]): SidebarSessionRow[] {
+  return rows.filter((row): row is SidebarSessionRow => row.kind === "session");
+}
+
+function workspace(overrides: Partial<LiveWorkspaceInput> = {}): LiveWorkspaceInput {
+  return {
+    workspaceId: "ws-plain",
+    workspaceRef: "workspace:9",
+    workspaceTitle: "zsh",
+    windowId: "win-uuid",
+    windowRef: "window:1",
+    pinned: false,
+    focused: false,
+    shortcut: null,
+    cwd: null,
+    surfaceKinds: ["terminal"],
+    ...overrides,
+  };
+}
+
+function live(overrides: Partial<LiveSessionInput> = {}): LiveSessionInput {
+  return {
+    sessionId: "live-1",
+    workspaceId: "ws-uuid",
+    workspaceRef: "workspace:1",
+    windowId: "win-uuid",
+    windowRef: "window:1",
+    workspaceTitle: "Design the sidebar",
+    pinned: false,
+    focused: false,
+    shortcut: null,
+    cwd: "/Users/m/Repos/claude-sessions",
+    status: { label: "Running", icon: "bolt.fill", color: "#4C8DFF" },
+    statusAvailability: "published",
+    updatedAt: 1_700_000_000,
+    ...overrides,
+  };
+}
+
+function indexed(overrides: Partial<IndexedSessionInput> = {}): IndexedSessionInput {
+  return {
+    sessionId: "live-1",
+    resumeId: "live-1",
+    title: "Indexed title",
+    cwd: "/Users/m/Repos/claude-sessions",
+    lastTs: "2026-07-24T20:00:00.000Z",
+    models: ["gpt-5.6-sol"],
+    costByModel: {},
+    ...overrides,
+  };
+}
+
+function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
+  return {
+    live: [],
+    indexed: [],
+    checkouts: new Map(),
+    livenessReadable: true,
+    now: 1_700_000_500_000,
+    ...overrides,
+  };
+}
+
+describe("modelOf", () => {
+  test("resolves gateway models to their short name and provider", () => {
+    expect(modelOf("gpt-5.6-sol")).toMatchObject({ label: "Sol", provider: "openai" });
+    expect(modelOf("gpt-5.6-terra")).toMatchObject({ label: "Terra", provider: "openai" });
+  });
+
+  test("resolves Claude families to their short name and provider", () => {
+    expect(modelOf("claude-opus-5")).toMatchObject({ label: "Opus", provider: "anthropic" });
+    expect(modelOf("claude-fable-5")).toMatchObject({ label: "Fable", provider: "anthropic" });
+  });
+
+  test("keeps an unknown model id visible rather than hiding it", () => {
+    expect(modelOf("some-new-model")).toMatchObject({ label: "some-new-model", provider: "unknown" });
+  });
+});
+
+describe("sidebarLifecycleOf", () => {
+  test("maps terminal catalogue states and collapses idle or parked to active", () => {
+    expect(sidebarLifecycleOf("idle")).toBe("active");
+    expect(sidebarLifecycleOf("parked")).toBe("active");
+    expect(sidebarLifecycleOf("completed")).toBe("completed");
+    expect(sidebarLifecycleOf("archived")).toBe("archived");
+  });
+});
+
+describe("model colours", () => {
+  test("takes its colour from CCS rather than a copy that can drift", () => {
+    for (const id of [
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "claude-fable-5",
+      "claude-opus-5",
+      "claude-sonnet-5",
+      "claude-haiku-4-5",
+      "some-unrecognised-model",
+    ]) {
+      expect(modelOf(id).color).toBe(familyOf(id).color);
+    }
+  });
+});
+
+describe("sectionForStatus", () => {
+  test("routes cmux's own status words", () => {
+    expect(sectionForStatus({ label: "Needs input", icon: null, color: null })).toBe("needs-you");
+    expect(sectionForStatus({ label: "Running", icon: null, color: null })).toBe("working");
+    expect(sectionForStatus({ label: "Idle", icon: null, color: null })).toBe("ready");
+  });
+
+  test("keeps a successful no-status result distinct from an unreadable command", () => {
+    expect(sectionForStatus(null, "absent")).toBe("ready");
+    expect(sectionForStatus({ label: "", icon: null, color: null }, "published")).toBe("ready");
+    expect(sectionForStatus(null, "unreadable")).toBe("needs-you");
+  });
+});
+
+describe("cleanSessionName", () => {
+  test("drops cmux's activity glyphs, which the status pill already says", () => {
+    expect(cleanSessionName("✳ Reduce idle session RAM usage")).toBe("Reduce idle session RAM usage");
+    expect(cleanSessionName("⠐ Design Cmux sidebar integration")).toBe("Design Cmux sidebar integration");
+    expect(cleanSessionName("⠂ Debug managed session verification")).toBe("Debug managed session verification");
+  });
+
+  test("leaves an ordinary title untouched", () => {
+    expect(cleanSessionName("Messaging App CRM")).toBe("Messaging App CRM");
+    expect(cleanSessionName("  Add safe close-workspace command ")).toBe("Add safe close-workspace command");
+  });
+
+  test("keeps a title that is only glyphs rather than blanking the row", () => {
+    expect(cleanSessionName("✳")).toBe("✳");
+  });
+});
+
+describe("directoryLabel", () => {
+  test("reduces a path to its final segment", () => {
+    expect(directoryLabel("/Users/m/Repos/claude-sessions")).toBe("claude-sessions");
+    expect(directoryLabel("/Users/m/Repos/claude-sessions/")).toBe("claude-sessions");
+  });
+
+  test("returns null when there is no directory", () => {
+    expect(directoryLabel(null)).toBeNull();
+    expect(directoryLabel("/")).toBeNull();
+  });
+});
+
+describe("projectSidebar", () => {
+  test("builds a live row from cmux state joined to the index", () => {
+    const snapshot = projectSidebar(input({
+      live: [live()],
+      indexed: [indexed()],
+      checkouts: new Map([["/Users/m/Repos/claude-sessions", { project: "claude-sessions", worktree: "cmux-t3-sidebar-v1", branch: "wt" }]]),
+    }));
+
+    expect(snapshot.rows).toHaveLength(1);
+    expect(snapshot.rows[0]).toMatchObject({
+      sessionId: "live-1",
+      lifecycle: "active",
+      name: "Design the sidebar",
+      directory: "claude-sessions",
+      worktree: "cmux-t3-sidebar-v1",
+      section: "working",
+      workspaceRef: "workspace:1",
+    });
+    expect(sessionRows(snapshot.rows)[0]?.model).toMatchObject({ label: "Sol" });
+    expect(snapshot.rows[0]?.status).toMatchObject({ label: "Running", icon: "bolt.fill" });
+  });
+
+  test("publishes the canonical catalogue id for a live resume alias", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ sessionId: "resume-id" })],
+      indexed: [indexed({ sessionId: "canonical-id", resumeId: "resume-id" })],
+      canonicalSessionIds: new Map([
+        ["canonical-id", "canonical-id"],
+        ["resume-id", "canonical-id"],
+      ]),
+    }));
+
+    expect(sessionRows(snapshot.rows)[0]?.sessionId).toBe("canonical-id");
+  });
+
+  test("shows the project with no worktree line in the main checkout", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ cwd: "/Users/m/Repos/claude-sessions" })],
+      checkouts: new Map([["/Users/m/Repos/claude-sessions", { project: "claude-sessions", worktree: null, branch: "main" }]]),
+    }));
+
+    expect(snapshot.rows[0]).toMatchObject({ directory: "claude-sessions", worktree: null });
+  });
+
+  test("names the project above the worktree, not the worktree folder", () => {
+    const cwd = "/Users/m/Repos/claude-sessions/.claude/worktrees/sidebar-v2";
+    const snapshot = projectSidebar(input({
+      live: [live({ cwd })],
+      checkouts: new Map([[cwd, { project: "claude-sessions", worktree: "sidebar-v2", branch: "wt" }]]),
+    }));
+
+    expect(snapshot.rows[0]).toMatchObject({ directory: "claude-sessions", worktree: "sidebar-v2" });
+  });
+
+  test("reads several worktrees of one repository as the same project", () => {
+    const first = "/Users/m/Repos/app/.claude/worktrees/one";
+    const second = "/Users/m/Repos/app/.claude/worktrees/two";
+    const snapshot = projectSidebar(input({
+      live: [live({ sessionId: "a", cwd: first }), live({ sessionId: "b", cwd: second })],
+      checkouts: new Map([
+        [first, { project: "app", worktree: "one", branch: null }],
+        [second, { project: "app", worktree: "two", branch: null }],
+      ]),
+    }));
+
+    expect(snapshot.rows.map((row) => row.directory)).toEqual(["app", "app"]);
+    expect(snapshot.rows.map((row) => row.worktree)).toEqual(["one", "two"]);
+  });
+
+  test("falls back to the folder name outside a git checkout", () => {
+    const snapshot = projectSidebar(input({ live: [live({ cwd: "/Users/m/scratch/notes" })] }));
+
+    expect(snapshot.rows[0]).toMatchObject({ directory: "notes", worktree: null });
+  });
+
+  test("prefers the live cmux workspace title over the indexed title", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ workspaceTitle: "Live title" })],
+      indexed: [indexed({ title: "Stale indexed title" })],
+    }));
+
+    expect(snapshot.rows[0]?.name).toBe("Live title");
+  });
+
+  test("falls back to the indexed title when cmux has no workspace title", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ workspaceTitle: null })],
+      indexed: [indexed({ title: "Indexed title" })],
+    }));
+
+    expect(snapshot.rows[0]?.name).toBe("Indexed title");
+  });
+
+  test("preserves cmux ordering for live rows", () => {
+    const snapshot = projectSidebar(input({
+      live: [
+        live({ sessionId: "a", workspaceTitle: "A", updatedAt: 1_000 }),
+        live({ sessionId: "b", workspaceTitle: "B", updatedAt: 9_000 }),
+      ],
+    }));
+
+    expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual(["a", "b"]);
+  });
+
+  test("shelves recent sessions that are not live", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ sessionId: "live-1" })],
+      indexed: [
+        indexed({ sessionId: "live-1", resumeId: "live-1" }),
+        indexed({ sessionId: "old-1", resumeId: "old-1", title: "Earlier work", cwd: "/Users/m/Repos/other" }),
+      ],
+    }));
+
+    expect(snapshot.rows).toHaveLength(2);
+    expect(snapshot.rows[1]).toMatchObject({
+      sessionId: "old-1",
+      name: "Earlier work",
+      section: "recent",
+      status: null,
+      workspaceRef: null,
+    });
+  });
+
+  test("active scope excludes completed and archived live or shelved rows", () => {
+    const snapshot = projectSidebar(input({
+      live: [
+        live({ sessionId: "active-live", workspaceTitle: "Active live" }),
+        live({ sessionId: "completed-live", workspaceTitle: "Completed live" }),
+      ],
+      indexed: [
+        indexed({ sessionId: "active-live", resumeId: "active-live" }),
+        indexed({ sessionId: "completed-live", resumeId: "completed-live" }),
+        indexed({ sessionId: "active-closed", resumeId: "active-closed" }),
+        indexed({ sessionId: "archived-closed", resumeId: "archived-closed" }),
+      ],
+      lifecycles: new Map([
+        ["completed-live", "completed"],
+        ["archived-closed", "archived"],
+      ]),
+      scope: "active",
+    }));
+
+    expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual(["active-live", "active-closed"]);
+    expect(sessionRows(snapshot.rows).every((row) => row.lifecycle === "active")).toBeTrue();
+  });
+
+  test("completed scope is newest first and keeps a completed live session reachable", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ sessionId: "completed-live", workspaceRef: "workspace:44" })],
+      indexed: [
+        indexed({
+          sessionId: "completed-live",
+          resumeId: "completed-live",
+          lastTs: "2026-07-24T20:00:00.000Z",
+        }),
+        indexed({
+          sessionId: "completed-newer",
+          resumeId: "completed-newer",
+          lastTs: "2026-07-24T21:00:00.000Z",
+        }),
+        indexed({
+          sessionId: "active-newest",
+          resumeId: "active-newest",
+          lastTs: "2026-07-24T22:00:00.000Z",
+        }),
+      ],
+      lifecycles: new Map([
+        ["completed-live", "completed"],
+        ["completed-newer", "completed"],
+      ]),
+      scope: "completed",
+    }));
+
+    expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual([
+      "completed-newer",
+      "completed-live",
+    ]);
+    expect(sessionRows(snapshot.rows).every((row) => row.lifecycle === "completed")).toBeTrue();
+    expect(snapshot.rows[1]).toMatchObject({
+      workspaceRef: "workspace:44",
+      statusAvailability: "published",
+    });
+  });
+
+  test("completed scope keeps a live row even without an index join or remaining history capacity", () => {
+    const newerClosed = indexed({
+      sessionId: "completed-closed",
+      resumeId: "completed-closed",
+      lastTs: "2026-07-24T23:00:00.000Z",
+    });
+    const snapshot = projectSidebar(input({
+      live: [live({
+        sessionId: "completed-live",
+        workspaceRef: "workspace:45",
+        updatedAt: 1_700_000_000,
+      })],
+      indexed: [newerClosed],
+      lifecycles: new Map([
+        ["completed-live", "completed"],
+        ["completed-closed", "completed"],
+      ]),
+      scope: "completed",
+      historyLimit: 1,
+    }));
+
+    expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual(["completed-live"]);
+    expect(snapshot.rows[0]).toMatchObject({
+      lifecycle: "completed",
+      workspaceRef: "workspace:45",
+    });
+  });
+
+  test("archived scope lists only archived rows and respects the history cap", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [
+        indexed({
+          sessionId: "archived-newer",
+          resumeId: "archived-newer",
+          lastTs: "2026-07-24T21:00:00.000Z",
+        }),
+        indexed({
+          sessionId: "completed",
+          resumeId: "completed",
+          lastTs: "2026-07-24T22:00:00.000Z",
+        }),
+        indexed({
+          sessionId: "archived-older",
+          resumeId: "archived-older",
+          lastTs: "2026-07-24T20:00:00.000Z",
+        }),
+      ],
+      lifecycles: new Map([
+        ["archived-newer", "archived"],
+        ["completed", "completed"],
+        ["archived-older", "archived"],
+      ]),
+      scope: "archived",
+      historyLimit: 1,
+    }));
+
+    expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual(["archived-newer"]);
+    expect(sessionRows(snapshot.rows)[0]?.lifecycle).toBe("archived");
+  });
+
+  test("does not represent lifecycle history as closed when liveness is unreadable", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [indexed({ sessionId: "completed", resumeId: "completed" })],
+      lifecycles: new Map([["completed", "completed"]]),
+      scope: "completed",
+      livenessReadable: false,
+    }));
+
+    expect(snapshot.rows).toEqual([]);
+    expect(snapshot.livenessReadable).toBeFalse();
+  });
+
+  test("does not shelve a live session addressed by its resume id", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ sessionId: "resume-id" })],
+      indexed: [indexed({ sessionId: "file-id", resumeId: "resume-id", title: "Same session" })],
+    }));
+
+    expect(snapshot.rows).toHaveLength(1);
+    expect(snapshot.rows[0]?.section).toBe("working");
+  });
+
+  test("does not shelve a live non-primary surface that has no visible live row", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ sessionId: "primary" })],
+      liveSessionIds: new Set(["primary", "secondary-resume-id"]),
+      indexed: [
+        indexed({ sessionId: "primary", resumeId: "primary" }),
+        indexed({
+          sessionId: "secondary-file-id",
+          resumeId: "secondary-resume-id",
+          title: "Secondary pane",
+        }),
+      ],
+    }));
+
+    expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual(["primary"]);
+  });
+
+  test("marks a failed status read without claiming Ready or synthesizing a pill", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ status: null, statusAvailability: "unreadable" })],
+    }));
+
+    expect(snapshot.rows[0]).toMatchObject({
+      section: "needs-you",
+      status: null,
+      statusAvailability: "unreadable",
+    });
+  });
+
+  test("caps the resume shelf", () => {
+    const many = Array.from({ length: 20 }, (_, i) =>
+      indexed({ sessionId: `s-${i}`, resumeId: `s-${i}`, title: `Session ${i}` }));
+
+    const snapshot = projectSidebar(input({ indexed: many, recentLimit: 3 }));
+
+    expect(snapshot.rows).toHaveLength(3);
+  });
+
+  test("omits the resume shelf when liveness is unreadable", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [indexed({ sessionId: "old-1", resumeId: "old-1" })],
+      livenessReadable: false,
+    }));
+
+    expect(snapshot.rows).toHaveLength(0);
+    expect(snapshot.livenessReadable).toBe(false);
+  });
+
+  test("uses cmux recency for live rows and indexed recency for shelved rows", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ updatedAt: 1_700_000_400 })],
+      indexed: [
+        indexed(),
+        indexed({ sessionId: "old-1", resumeId: "old-1", lastTs: "2026-07-24T19:00:00.000Z" }),
+      ],
+    }));
+
+    expect(snapshot.rows[0]?.lastActivityAt).toBe(1_700_000_400_000);
+    expect(snapshot.rows[1]?.lastActivityAt).toBe(Date.parse("2026-07-24T19:00:00.000Z"));
+  });
+
+  test("shows a model even when no cost was recorded", () => {
+    const snapshot = projectSidebar(input({
+      live: [live()],
+      indexed: [indexed({ models: ["claude-opus-5"], costByModel: {} })],
+    }));
+
+    expect(sessionRows(snapshot.rows)[0]?.model).toMatchObject({ label: "Opus" });
+  });
+
+  test("picks the dominant model by spend when several were used", () => {
+    const snapshot = projectSidebar(input({
+      live: [live()],
+      indexed: [indexed({
+        models: ["claude-haiku-4-5", "claude-opus-5"],
+        costByModel: { "claude-haiku-4-5": 0.2, "claude-opus-5": 4.1 },
+      })],
+    }));
+
+    expect(sessionRows(snapshot.rows)[0]?.model).toMatchObject({ label: "Opus" });
+  });
+
+  test("leaves the model absent when the session is not indexed", () => {
+    const snapshot = projectSidebar(input({ live: [live()] }));
+
+    expect(sessionRows(snapshot.rows)[0]?.model).toBeNull();
+  });
+});
+
+describe("directoriesToResolve", () => {
+  test("collects live and recent directories without duplicates", () => {
+    const directories = directoriesToResolve(
+      [live({ cwd: "/a" }), live({ sessionId: "two", cwd: "/a" })],
+      [indexed({ cwd: "/b" }), indexed({ sessionId: "x", cwd: null })],
+    );
+
+    expect(directories).toEqual(["/a", "/b"]);
+  });
+});
