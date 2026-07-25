@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"ccsspike/data"
+	"github.com/mimen/claude-sessions/tui-go/data"
 )
 
 func TestEncodePathMatchesClaudeStorageEncoding(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"ccsspike/data"
-	"ccsspike/inference"
+	"github.com/mimen/claude-sessions/tui-go/data"
+	"github.com/mimen/claude-sessions/tui-go/inference"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

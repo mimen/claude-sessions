@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"ccsspike/data"
-	"ccsspike/theme"
+	"github.com/mimen/claude-sessions/tui-go/data"
+	"github.com/mimen/claude-sessions/tui-go/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"

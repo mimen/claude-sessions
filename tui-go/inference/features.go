@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"ccsspike/data"
+	"github.com/mimen/claude-sessions/tui-go/data"
 )
 
 // MetadataMutation is a validated, resolved session/identity mutation.

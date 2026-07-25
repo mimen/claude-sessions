@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"ccsspike/ccscli"
-	"ccsspike/data"
-	"ccsspike/inference"
-	"ccsspike/transcript"
+	"github.com/mimen/claude-sessions/tui-go/ccscli"
+	"github.com/mimen/claude-sessions/tui-go/data"
+	"github.com/mimen/claude-sessions/tui-go/inference"
+	"github.com/mimen/claude-sessions/tui-go/transcript"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

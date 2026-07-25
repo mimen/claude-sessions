@@ -46,6 +46,7 @@ import { sessionFieldsCommand } from "./catalogue/session-fields-command.ts";
 import { historicalDetachedChildBackfillCommand } from "./catalogue/historical-detached-child-backfill.ts";
 import { getCrashReporter, installCrashLog, summarizeArgv } from "./crashlog.ts";
 import { SESSION_CLASS_ROLLOUT_AT } from "./session-class.ts";
+import { launchGoTui } from "./tui-go/launch.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -54,7 +55,8 @@ For durable per-work-unit writes (stage, status_line, meta.*, grouping, PR facts
 use \`ccs identity …\`; for per-run session state (title, parent, lifecycle) use \`ccs session …\`.
 
 Usage:
-  ccs                 Launch the session browser (TUI)
+  ccs                 Launch the session browser (Go TUI — the default)
+  ccs classic         Launch the legacy Ink TUI (DEPRECATED; will be removed)
   ccs start [--dry-run|--explain] [description...]  Route work to an active session or managed new session
   ccs reindex [--titles]   Refresh through the host-local catalogue authority
   ccs catalogue-service start|status|stop|refresh   Manage the on-demand local authority
@@ -391,8 +393,23 @@ export async function main(argv: string[]): Promise<number> {
       const { skillsCommand } = await import("./skills/command.ts");
       return await skillsCommand(args.slice(1));
     }
-    case undefined:
+    case "classic": {
+      // The original Ink/React TUI, kept reachable during the Go migration.
+      // DEPRECATED: it is no longer the default and will be removed once the Go
+      // TUI closes the remaining parity gaps (see docs/ccs-vs-ccs-go.md).
+      console.error(
+        "ccs classic: the Ink TUI is deprecated and will be removed — plain `ccs` now runs the Go TUI.",
+      );
+      return await launchTui(args[1] === "skills" ? "skills" : "sessions");
+    }
+    case undefined: {
+      // Default interface: the Go TUI. Falls back to the classic Ink TUI only
+      // when the Go build genuinely can't run, so `ccs` always opens something.
+      const code = launchGoTui();
+      if (code !== null) return code;
+      console.error("ccs: falling back to the classic TUI.");
       return await launchTui();
+    }
     default:
       console.error(`Unknown command: ${command}\n`);
       console.error(HELP);

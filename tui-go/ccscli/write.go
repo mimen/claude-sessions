@@ -11,7 +11,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"ccsspike/inference"
+	"github.com/mimen/claude-sessions/tui-go/inference"
 )
 
 // Run executes one ccs command without involving a shell.

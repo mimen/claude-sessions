@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"ccsspike/data"
-	"ccsspike/resume"
-	"ccsspike/ui"
+	"github.com/mimen/claude-sessions/tui-go/data"
+	"github.com/mimen/claude-sessions/tui-go/resume"
+	"github.com/mimen/claude-sessions/tui-go/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

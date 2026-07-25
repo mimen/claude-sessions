@@ -4,9 +4,9 @@ import (
 	"os"
 	"strings"
 
-	"ccsspike/data"
-	"ccsspike/skills"
-	"ccsspike/transcript"
+	"github.com/mimen/claude-sessions/tui-go/data"
+	"github.com/mimen/claude-sessions/tui-go/skills"
+	"github.com/mimen/claude-sessions/tui-go/transcript"
 )
 
 // Shot renders a named real-data view at the fixed design-spec size.

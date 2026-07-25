@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"ccsspike/inference"
+	"github.com/mimen/claude-sessions/tui-go/inference"
 )
 
 func TestApplyMutationShellsToCCS(t *testing.T) {

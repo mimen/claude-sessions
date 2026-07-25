@@ -3,7 +3,7 @@ package inference
 import (
 	"testing"
 
-	"ccsspike/data"
+	"github.com/mimen/claude-sessions/tui-go/data"
 )
 
 func TestValidateMutationResolvesNumberedParent(t *testing.T) {

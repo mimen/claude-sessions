@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode"
 
-	"ccsspike/data"
-	"ccsspike/theme"
+	"github.com/mimen/claude-sessions/tui-go/data"
+	"github.com/mimen/claude-sessions/tui-go/theme"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"

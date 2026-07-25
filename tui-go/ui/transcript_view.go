@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"ccsspike/theme"
-	"ccsspike/transcript"
+	"github.com/mimen/claude-sessions/tui-go/theme"
+	"github.com/mimen/claude-sessions/tui-go/transcript"
 
 	"github.com/charmbracelet/lipgloss"
 )

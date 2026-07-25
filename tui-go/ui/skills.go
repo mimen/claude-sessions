@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"ccsspike/skills"
+	"github.com/mimen/claude-sessions/tui-go/skills"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"ccsspike/data"
+	"github.com/mimen/claude-sessions/tui-go/data"
 )
 
 // procTestModel builds a two-session browser where the first session has a live

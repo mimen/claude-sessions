@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"ccsspike/data"
+	"github.com/mimen/claude-sessions/tui-go/data"
 )
 
 // Command is a fully resolved resume invocation.

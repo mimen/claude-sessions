@@ -1,4 +1,4 @@
-module ccsspike
+module github.com/mimen/claude-sessions/tui-go
 
 go 1.25.0
 

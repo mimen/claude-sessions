@@ -3,10 +3,10 @@ package ui
 import (
 	"time"
 
-	"ccsspike/data"
-	"ccsspike/resume"
-	"ccsspike/skills"
-	"ccsspike/transcript"
+	"github.com/mimen/claude-sessions/tui-go/data"
+	"github.com/mimen/claude-sessions/tui-go/resume"
+	"github.com/mimen/claude-sessions/tui-go/skills"
+	"github.com/mimen/claude-sessions/tui-go/transcript"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

@@ -6,8 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"ccsspike/data"
-	"ccsspike/theme"
+	"github.com/mimen/claude-sessions/tui-go/data"
+	"github.com/mimen/claude-sessions/tui-go/theme"
 )
 
 // Enrichment is what the dossier leads with, because it answers the question you actually opened

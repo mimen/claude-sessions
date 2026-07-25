@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"ccsspike/data"
-	"ccsspike/inference"
-	"ccsspike/skills"
-	"ccsspike/transcript"
+	"github.com/mimen/claude-sessions/tui-go/data"
+	"github.com/mimen/claude-sessions/tui-go/inference"
+	"github.com/mimen/claude-sessions/tui-go/skills"
+	"github.com/mimen/claude-sessions/tui-go/transcript"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"

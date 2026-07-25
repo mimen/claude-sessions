@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"ccsspike/data"
+	"github.com/mimen/claude-sessions/tui-go/data"
 )
 
 const (
