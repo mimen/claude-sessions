@@ -28,6 +28,7 @@ afterEach(() => {
 });
 
 const VALID = {
+  title: "Enrichment sweep",
   summary: "Shipped the enrichment sweep.",
   outstanding: "",
   recommendation: "complete",

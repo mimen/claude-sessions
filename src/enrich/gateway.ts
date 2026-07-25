@@ -27,6 +27,27 @@ import { renderLocationCatalogue, locationKeySet, type EnrichmentLocation } from
 const DEFAULT_GATEWAY_URL = "http://127.0.0.1:8317";
 
 /**
+ * A failure of the transport, not of the session.
+ *
+ * The distinction is load-bearing because enrichment gives each session a small, permanent budget
+ * of attempts: a transcript the model genuinely cannot handle should stop costing calls forever.
+ * But a rate limit says nothing about the session — and a single cooldown once burnt an attempt
+ * on forty perfectly enrichable sessions in one sweep, which is a slow path to permanently
+ * excluding half the store for reasons that had nothing to do with it.
+ *
+ * So: transient failures are retried freely and never counted. Only a response the model actually
+ * produced, and that we then rejected, spends budget.
+ */
+export class TransientGatewayError extends Error {
+  readonly transient = true;
+}
+
+/** HTTP statuses that mean "ask again later", not "this request was wrong". */
+function isTransientStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+/**
  * Sol at medium effort. Enrichment is a read-and-classify task over a bounded payload, not a
  * reasoning problem, so the fleet's high-effort ceiling would buy nothing on ~340 sessions.
  * Effort rides in the model string, matching the gateway's existing convention.
@@ -153,7 +174,9 @@ export async function requestEnrichment(
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    return err(new Error(`gateway request failed: ${detail}`));
+    // A timeout, a refused connection, or a gateway that isn't running. None of these are the
+    // session's fault, and all of them resolve on their own.
+    return err(new TransientGatewayError(`gateway request failed: ${detail}`));
   }
 
   let text: string;
@@ -164,7 +187,8 @@ export async function requestEnrichment(
     return err(new Error(`gateway response body failed: ${detail}`));
   }
   if (!response.ok) {
-    return err(new Error(`gateway returned HTTP ${response.status}: ${text.slice(0, 300)}`));
+    const message = `gateway returned HTTP ${response.status}: ${text.slice(0, 300)}`;
+    return err(isTransientStatus(response.status) ? new TransientGatewayError(message) : new Error(message));
   }
 
   let envelope;
@@ -177,7 +201,12 @@ export async function requestEnrichment(
     return err(new Error(`gateway response shape was invalid: ${z.prettifyError(envelope.error)}`));
   }
   if (envelope.data.type === "error") {
-    return err(new Error(`gateway error: ${envelope.data.error?.message ?? text.slice(0, 300)}`));
+    const detail = envelope.data.error?.message ?? text.slice(0, 300);
+    // The gateway can return HTTP 200 with an error envelope — rate limits arrive this way when a
+    // provider is cooling down, so the status code alone is not enough to classify it.
+    const transient = /rate.?limit|cooling down|overloaded|timeout|temporar/i.test(detail);
+    const message = `gateway error: ${detail}`;
+    return err(transient ? new TransientGatewayError(message) : new Error(message));
   }
 
   const known = locationKeySet(locations);

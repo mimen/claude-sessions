@@ -58,6 +58,12 @@ describe("summarizeArgv", () => {
       flags: "--do",
       argumentCount: 2,
     });
+    expect(summarizeArgv(["finish-current", "complete", "--do"])).toEqual({
+      command: "finish-current",
+      subcommand: "complete",
+      flags: "--do",
+      argumentCount: 3,
+    });
     expect(summarizeArgv(["custom-secret-command", "also-secret"])).toMatchObject({ command: null, subcommand: null });
   });
 });

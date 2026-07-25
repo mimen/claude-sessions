@@ -47,8 +47,8 @@
     <integer>900</integer>
     <key>RunAtLoad</key>
     <true/>
-    <!-- One sweep at a time. A run that outlives the interval must not have a second one
-         started on top of it, or two workers would enrich the same stale set concurrently. -->
+    <!-- launchd runs one instance per label, so a sweep that outlives the interval cannot overlap.
+         Keep child processes in the job's process group so launchd owns their cleanup too. -->
     <key>AbandonProcessGroup</key>
     <false/>
     <key>StandardOutPath</key>

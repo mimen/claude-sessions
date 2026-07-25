@@ -9,6 +9,7 @@ import type { Enrichment } from "./enrichment-schema.ts";
 const NOW = "2026-07-24T12:00:00.000Z";
 
 const ENRICHMENT: Enrichment = {
+  title: "Catalogue v38 enrichment",
   summary: "Migrated the catalogue to v38 and shipped the enrich command.",
   outstanding: "The launchd agent is not installed yet.",
   recommendation: "continue",
@@ -27,6 +28,7 @@ describe("enrichment storage", () => {
     setEnrichment(db, "s1", ENRICHMENT, NOW);
     const stored = getRow(db, "s1")?.enrichment;
     expect(stored).toEqual({
+      title: ENRICHMENT.title,
       summary: ENRICHMENT.summary,
       outstanding: ENRICHMENT.outstanding,
       recommendation: "continue",
@@ -100,7 +102,7 @@ describe("enrichment storage", () => {
   });
 });
 
-describe("v38 migration", () => {
+describe("enrichment migrations", () => {
   test("upgrades a v37 catalogue in place, preserving existing rows", () => {
     const dir = mkdtempSync(join(tmpdir(), "ccs-enrich-migration-"));
     const path = join(dir, "catalogue.db");
@@ -119,14 +121,14 @@ describe("v38 migration", () => {
         "enrichment_summary", "enrichment_outstanding", "enrichment_recommendation",
         "enrichment_reason", "enrichment_junk", "enrichment_cwd_correct",
         "enrichment_suggested_location", "enrichment_suggested_cwd",
-        "enrichment_at_messages", "enrichment_at", "enrichment_attempts",
+        "enrichment_at_messages", "enrichment_at", "enrichment_attempts", "enrichment_title",
       ]) {
         rewind.exec(`ALTER TABLE catalogue DROP COLUMN ${column};`);
       }
       rewind.close();
 
       const upgraded = openCatalogue(path);
-      expect(upgraded.query("PRAGMA user_version").get()).toEqual({ user_version: 38 });
+      expect(upgraded.query("PRAGMA user_version").get()).toEqual({ user_version: 39 });
       expect(getRow(upgraded, "legacy")?.completed).toBe(true);
       expect(getRow(upgraded, "legacy")?.enrichment).toBeNull();
       setEnrichment(upgraded, "legacy", ENRICHMENT, NOW);
@@ -149,7 +151,7 @@ describe("v38 migration", () => {
       rewind.close();
 
       const reopened = openCatalogue(path);
-      expect(reopened.query("PRAGMA user_version").get()).toEqual({ user_version: 38 });
+      expect(reopened.query("PRAGMA user_version").get()).toEqual({ user_version: 39 });
       reopened.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

@@ -21,6 +21,7 @@ const REQUEST: EnrichmentRequest = {
 };
 
 const ANSWER = {
+  title: "Session enrichment",
   summary: "Designed and built the enrichment subsystem.",
   outstanding: "Launchd agent still to install.",
   recommendation: "continue",

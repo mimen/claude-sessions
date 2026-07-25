@@ -11,6 +11,7 @@ const NOW = new Date("2026-07-24T12:00:00.000Z");
 
 function enrichedAt(at: string, atMessages: number): StoredEnrichment {
   return {
+    title: "t",
     summary: "s",
     outstanding: "",
     recommendation: "continue",

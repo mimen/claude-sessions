@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { openIndex } from "../index/schema.ts";
 import { loadConfig } from "../config.ts";
 import { App } from "./App.tsx";
-import { openCatalogue, setSessionClass } from "../catalogue/db.ts";
+import { openCatalogue, setEnrichment, setSessionClass } from "../catalogue/db.ts";
 import type { Titler } from "../titler/codex.ts";
 import type { EngineState } from "./Root.tsx";
 import { encodePath } from "../resume/locate.ts";
@@ -82,6 +82,22 @@ function updateRootCwd(index: Database, cwd: string): void {
   });
 }
 
+async function waitForFrame(
+  lastFrame: () => string | undefined,
+  includes: string,
+  excludes?: string,
+): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    const frame = lastFrame() ?? "";
+    if (frame.includes(includes) && (!excludes || !frame.includes(excludes))) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  const frame = lastFrame() ?? "";
+  expect(frame).toContain(includes);
+  if (excludes) expect(frame).not.toContain(excludes);
+}
+
 function useFlatView(): () => void {
   const prior = process.env.CCS_ROOT;
   const root = mkdtempSync(join(tmpdir(), "ccs-tui-t3-"));
@@ -128,6 +144,48 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
 
   unmount();
   real.close();
+});
+
+test("App shows enrichment titles when no live, custom, or role title overrides them", async () => {
+  const restorePrefs = useFlatView();
+  const index = openIndex(":memory:");
+  const catalogue = openCatalogue(":memory:");
+  seed(index);
+  const now = "2026-07-24T12:00:00.000Z";
+  setEnrichment(catalogue, "real1", {
+    title: "Enriched outcome title",
+    summary: "The session completed its intended work.",
+    outstanding: "",
+    recommendation: "complete",
+    reason: "The implementation and verification are finished.",
+    junk: false,
+    cwdCorrect: true,
+    suggestedLocation: "",
+    suggestedCwd: "",
+    atMessages: 5,
+    at: now,
+  }, now);
+
+  const { lastFrame, unmount } = render(
+    createElement(App, {
+      db: index,
+      catalogue,
+      config: makeConfig(),
+      engineState: noopEngineState,
+      resumeRequest: { current: null },
+      cmuxProbes: noopCmuxProbes,
+      t3StatusClient: noopT3StatusClient,
+    }),
+  );
+  try {
+    await waitForFrame(lastFrame, "Enriched outcome title");
+    expect(lastFrame() ?? "").not.toContain("Real Session One");
+  } finally {
+    unmount();
+    catalogue.close();
+    index.close();
+    restorePrefs();
+  }
 });
 
 test("App reads one T3 attachment snapshot and renders its second status circle", async () => {
@@ -287,16 +345,14 @@ test("T opens the selected root session after the T3 CLI contract ships", async 
       },
     }),
   );
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  await waitForFrame(lastFrame, "open in T3");
 
-  expect(lastFrame() ?? "").toContain("open in T3");
   stdin.write("?");
-  await new Promise((resolve) => setTimeout(resolve, 40));
-  expect(lastFrame() ?? "").toContain("open this root Claude session in T3");
+  await waitForFrame(lastFrame, "open this root Claude session in T3");
   stdin.write("?");
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await waitForFrame(lastFrame, "T open in T3", "open this root Claude session in T3");
   stdin.write("T");
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await waitForFrame(lastFrame, "created T3 thread");
 
   expect(calls).toBe(1);
   expect(lastFrame() ?? "").toContain("created T3 thread");

@@ -46,6 +46,13 @@ export const RECOMMENDATION_ACTIONS: Readonly<Record<Recommendation, string>> = 
 const MAX_SUMMARY = 1_200;
 const MAX_LINE = 500;
 
+/**
+ * Titles are rendered in a fixed-width list column and truncated hard, so a long one is not
+ * merely verbose — it is invisible past the cutoff. The asked-for length is well under the cap.
+ */
+const MAX_TITLE = 120;
+const TARGET_TITLE_CHARS = 60;
+
 /** What the model is ASKED for, as opposed to what the parser will tolerate. */
 const TARGET_SUMMARY_CHARS = 700;
 const TARGET_LINE_CHARS = 250;
@@ -56,6 +63,15 @@ const TARGET_LINE_CHARS = 250;
  * `validateEnrichment` below, which also needs the location registry.
  */
 export const EnrichmentPayloadSchema = z.object({
+  /**
+   * A better name for the session than the ones generated before it happened.
+   *
+   * The existing titles come from the first message (a fallback label), or from Claude Code's own
+   * early `ai-title`, or from the codex titler — all of which see the opening of a session and
+   * guess where it is going. Enrichment reads how it actually ended, so it is simply better
+   * positioned. This never overwrites a title a human set; see `enrichment_title` in db.ts.
+   */
+  title: z.string().trim().min(1).max(MAX_TITLE),
   summary: z.string().trim().min(1).max(MAX_SUMMARY),
   outstanding: z.string().trim().max(MAX_LINE),
   recommendation: z.enum(RECOMMENDATIONS),
@@ -122,10 +138,18 @@ export function enrichmentJsonSchema(): { readonly [key: string]: JsonSchemaValu
     type: "object",
     additionalProperties: false,
     required: [
-      "summary", "outstanding", "recommendation", "reason",
+      "title", "summary", "outstanding", "recommendation", "reason",
       "junk", "cwdCorrect", "suggestedLocation", "suggestedCwd",
     ],
     properties: {
+      title: {
+        type: "string",
+        description:
+          "A short, specific name for what this session actually turned out to be — the name it " +
+          "would have been given if anyone had known in advance. Name the concrete thing worked " +
+          "on, not the activity: 'Transactional catalogue migrations', not 'Debugging session'. " +
+          `No trailing punctuation, no quotes, at most ${TARGET_TITLE_CHARS} characters.`,
+      },
       summary: {
         type: "string",
         description:

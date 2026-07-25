@@ -7,6 +7,10 @@ import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { loadEnrichmentLocations, LOCATION_REGISTRY_PATH } from "./locations.ts";
 import { enrichCandidates, enrichOne, sweep } from "./enrich.ts";
 import { stalenessLabel } from "./staleness.ts";
+import { refreshCatalogueAuthority } from "../catalogue-service/client.ts";
+
+/** Terminal dim, kept local — this file is the only place ccs enrich styles anything. */
+const fgDim = (text: string): string => `\x1b[2m${text}\x1b[0m`;
 
 /**
  * `ccs enrich` — generate the cached per-session summaries that make a large store legible.
@@ -21,9 +25,64 @@ import { stalenessLabel } from "./staleness.ts";
  * that has gone wrong.
  */
 
-function flagValue(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
+export interface ParsedEnrichArgs {
+  readonly mode: "one" | "sweep" | "list";
+  readonly asJson: boolean;
+  readonly limitRaw?: string;
+  readonly concurrencyRaw?: string;
+  readonly sessionArg?: string;
+}
+
+/** Parse flags without ever mistaking a flag value for the session-id positional. */
+export function parseEnrichArgs(args: readonly string[]): Result<ParsedEnrichArgs> {
+  let mode: ParsedEnrichArgs["mode"] = "one";
+  let asJson = false;
+  let limitRaw: string | undefined;
+  let concurrencyRaw: string | undefined;
+  let sessionArg: string | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--json") {
+      asJson = true;
+      continue;
+    }
+    if (arg === "--sweep" || arg === "--list") {
+      const nextMode = arg === "--sweep" ? "sweep" : "list";
+      if (mode !== "one") return err(new Error("pass --sweep or --list once, not both"));
+      mode = nextMode;
+      continue;
+    }
+    if (arg === "--limit" || arg === "--concurrency") {
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) {
+        return err(new Error(`${arg} requires a value`));
+      }
+      if (arg === "--limit") {
+        if (limitRaw !== undefined) return err(new Error("pass --limit only once"));
+        limitRaw = value;
+      } else {
+        if (concurrencyRaw !== undefined) return err(new Error("pass --concurrency only once"));
+        concurrencyRaw = value;
+      }
+      i++;
+      continue;
+    }
+    if (arg.startsWith("-")) return err(new Error(`unknown flag: ${arg}`));
+    if (sessionArg !== undefined) return err(new Error("pass at most one session id"));
+    sessionArg = arg;
+  }
+
+  if (mode !== "one" && sessionArg !== undefined) {
+    return err(new Error(`a session id cannot be combined with --${mode}`));
+  }
+  if (mode === "one" && (limitRaw !== undefined || concurrencyRaw !== undefined)) {
+    return err(new Error("--limit and --concurrency require --sweep or --list"));
+  }
+  if (mode === "list" && concurrencyRaw !== undefined) {
+    return err(new Error("--concurrency applies only to --sweep"));
+  }
+  return ok({ mode, asJson, limitRaw, concurrencyRaw, sessionArg });
 }
 
 function positiveInt(raw: string | undefined, label: string): number | undefined | null {
@@ -37,19 +96,25 @@ function positiveInt(raw: string | undefined, label: string): number | undefined
 }
 
 export async function enrichCommand(args: string[]): Promise<number> {
-  const wantsSweep = args.includes("--sweep");
-  const wantsList = args.includes("--list");
-  const asJson = args.includes("--json");
-
-  if (wantsSweep && wantsList) {
-    console.error("ccs enrich: pass --sweep or --list, not both");
+  const parsed = parseEnrichArgs(args);
+  if (!parsed.ok) {
+    console.error(`ccs enrich: ${parsed.error.message}`);
     return 1;
   }
 
-  const limit = positiveInt(flagValue(args, "--limit"), "limit");
+  const limit = positiveInt(parsed.value.limitRaw, "limit");
   if (limit === null) return 1;
-  const concurrency = positiveInt(flagValue(args, "--concurrency"), "concurrency");
+  const concurrency = positiveInt(parsed.value.concurrencyRaw, "concurrency");
   if (concurrency === null) return 1;
+
+  // Explicit enrichment should see the closing exchange and should work for sessions that have not
+  // reached the index yet. This runs inside the detached child, so its refresh never delays close.
+  if (parsed.value.mode === "one") {
+    const refreshed = await refreshCatalogueAuthority({ force: true, titles: false });
+    if (!refreshed.ok) {
+      console.warn(`ccs enrich: index refresh failed (${refreshed.error.message}); using the existing index.`);
+    }
+  }
 
   if (!existsSync(DB_PATH())) {
     console.error("ccs enrich: no session index yet — run `ccs reindex` first.");
@@ -60,9 +125,11 @@ export async function enrichCommand(args: string[]): Promise<number> {
   const index = openIndex(DB_PATH());
   const catalogue = openCatalogue(CATALOGUE_PATH());
   try {
-    if (wantsList) return listStale(index, catalogue, limit, asJson);
-    if (wantsSweep) return await runSweep(index, catalogue, limit, concurrency, asJson);
-    return await runOne(index, catalogue, args, asJson);
+    if (parsed.value.mode === "list") return listStale(index, catalogue, limit, parsed.value.asJson);
+    if (parsed.value.mode === "sweep") {
+      return await runSweep(index, catalogue, limit, concurrency, parsed.value.asJson);
+    }
+    return await runOne(index, catalogue, parsed.value.sessionArg, parsed.value.asJson);
   } finally {
     index.close();
     catalogue.close();
@@ -138,6 +205,9 @@ async function runSweep(
   } else {
     process.stdout.write("\r");
     console.log(`Enriched ${stats.enriched}, failed ${stats.failed}${stats.remaining > 0 ? `, ${stats.remaining} left for the next run` : ""}.`);
+    if (stats.abortedReason) {
+      console.log(`Stopped early — the gateway is unavailable: ${stats.abortedReason.slice(0, 160)}`);
+    }
   }
   // A sweep in which everything failed is a broken gateway or a bad key, not a quiet no-op —
   // exit non-zero so a scheduled run surfaces in launchd's logs instead of looking healthy.
@@ -147,13 +217,12 @@ async function runSweep(
 async function runOne(
   index: ReturnType<typeof openIndex>,
   catalogue: ReturnType<typeof openCatalogue>,
-  args: string[],
+  sessionArg: string | undefined,
   asJson: boolean,
 ): Promise<number> {
-  const arg = args.find((a) => !a.startsWith("--"));
-  const sessionId = !arg || arg === "." || arg === "self"
+  const sessionId = !sessionArg || sessionArg === "." || sessionArg === "self"
     ? process.env.CLAUDE_CODE_SESSION_ID ?? null
-    : arg;
+    : sessionArg;
   if (!sessionId) {
     console.error("No session id (pass one, or run inside a Claude session for `.`).");
     return 1;
@@ -175,7 +244,9 @@ async function runOne(
     return 0;
   }
   const e = result.value;
-  console.log(`${row.title}  [${row.sessionId.slice(0, 8)}…]`);
+  // Show the enriched title, not the indexed one — it is usually the visible improvement.
+  console.log(`${e.title}  [${row.sessionId.slice(0, 8)}…]`);
+  if (e.title !== row.title) console.log(fgDim(`was: ${row.title}`));
   console.log(e.summary);
   if (e.outstanding) console.log(`open: ${e.outstanding}`);
   console.log(`recommend: ${e.recommendation} — ${e.reason}`);

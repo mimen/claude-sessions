@@ -35,7 +35,14 @@ export interface StalenessInput {
   readonly now: Date;
 }
 
-export type StaleReason = "never-enriched" | "advanced" | "aged" | "fresh" | "attempts-exhausted";
+export type StaleReason =
+  | "never-enriched"
+  | "advanced"
+  | "aged"
+  | "fresh"
+  | "attempts-exhausted"
+  /** Stored before a field this version expects existed — re-run to fill it in. */
+  | "incomplete";
 
 export interface StalenessVerdict {
   readonly stale: boolean;
@@ -67,6 +74,12 @@ export function enrichmentStaleness(input: StalenessInput): StalenessVerdict {
   const messagesSince = Math.max(0, messageCount - enrichment.atMessages);
   if (attempts >= MAX_ENRICHMENT_ATTEMPTS) {
     return { stale: false, reason: "attempts-exhausted", messagesSince };
+  }
+  // An enrichment written before a field existed is incomplete, not fresh. Treating it as stale
+  // makes the sweep its own backfill: the store heals itself on the normal schedule instead of
+  // needing a one-off migration script that re-runs every session at once.
+  if (!enrichment.title) {
+    return { stale: true, reason: "incomplete", messagesSince };
   }
   if (messagesSince >= STALE_AFTER_MESSAGES) {
     return { stale: true, reason: "advanced", messagesSince };
