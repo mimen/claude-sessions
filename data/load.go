@@ -173,6 +173,12 @@ func resolveDisplayTitle(row indexedSession, meta catalogueMeta, liveTitle strin
 	if meta.CustomTitle != "" {
 		return meta.CustomTitle, "custom"
 	}
+	// Enrichment outranks everything below it because it is the only title written with knowledge
+	// of how the session ended; the index's own titles are guesses made from the opening turns.
+	// It never outranks a name a human chose.
+	if title := strings.TrimSpace(meta.Enrichment.Title); title != "" {
+		return title, "enriched"
+	}
 	if role := strings.TrimSpace(meta.Role); role != "" {
 		return role, "role"
 	}

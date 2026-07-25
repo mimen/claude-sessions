@@ -21,6 +21,7 @@ func v38Catalogue(t *testing.T, rows ...string) string {
 		`CREATE TABLE catalogue (
 			session_id TEXT PRIMARY KEY,
 			identity_key TEXT,
+			enrichment_title TEXT,
 			enrichment_summary TEXT,
 			enrichment_outstanding TEXT,
 			enrichment_recommendation TEXT,
@@ -47,11 +48,11 @@ func v38Catalogue(t *testing.T, rows ...string) string {
 
 func TestLoadCatalogueReadsEnrichment(t *testing.T) {
 	path := v38Catalogue(t, `INSERT INTO catalogue (
-		session_id, enrichment_summary, enrichment_outstanding, enrichment_recommendation,
+		session_id, enrichment_title, enrichment_summary, enrichment_outstanding, enrichment_recommendation,
 		enrichment_reason, enrichment_junk, enrichment_cwd_correct,
 		enrichment_suggested_location, enrichment_at_messages, enrichment_at
 	) VALUES (
-		'session-1', 'Built the sweep.', 'Agent not installed.', 'continue',
+		'session-1', 'Enrichment sweep', 'Built the sweep.', 'Agent not installed.', 'continue',
 		'Work is mid-flight.', 0, 0, 'repos-ccs', 412, '2026-07-24T12:00:00Z'
 	)`)
 
@@ -62,6 +63,9 @@ func TestLoadCatalogueReadsEnrichment(t *testing.T) {
 	enrichment := catalogue["session-1"].Enrichment
 	if !enrichment.Present() {
 		t.Fatal("enrichment should be present")
+	}
+	if enrichment.Title != "Enrichment sweep" {
+		t.Fatalf("title = %q", enrichment.Title)
 	}
 	if enrichment.Summary != "Built the sweep." || enrichment.Recommendation != "continue" {
 		t.Fatalf("enrichment = %+v", enrichment)
@@ -137,5 +141,33 @@ func TestEnrichmentStaleBy(t *testing.T) {
 	}
 	if got := (Enrichment{}).StaleBy(500); got != 0 {
 		t.Fatalf("an absent enrichment has no staleness, got %d", got)
+	}
+}
+
+func TestResolveDisplayTitlePrefersHumanThenEnrichment(t *testing.T) {
+	indexed := indexedSession{Title: "Fallback from the first message", TitleSource: "fallback"}
+	enriched := catalogueMeta{Enrichment: Enrichment{Recommendation: "continue", Title: "Transactional catalogue migrations"}}
+
+	// Enrichment beats the index: the index guessed from the opening turns, enrichment read the end.
+	if title, source := resolveDisplayTitle(indexed, enriched, ""); title != "Transactional catalogue migrations" || source != "enriched" {
+		t.Fatalf("enrichment should win over the index, got %q/%q", title, source)
+	}
+
+	// A human-authored title always wins. A model must never quietly rename what someone named.
+	human := enriched
+	human.CustomTitle = "My name for this"
+	if title, source := resolveDisplayTitle(indexed, human, ""); title != "My name for this" || source != "custom" {
+		t.Fatalf("custom title must win, got %q/%q", title, source)
+	}
+
+	// No enrichment: fall through to whatever the index resolved.
+	if title, _ := resolveDisplayTitle(indexed, catalogueMeta{}, ""); title != "Fallback from the first message" {
+		t.Fatalf("unenriched session should keep its index title, got %q", title)
+	}
+
+	// A blank enriched title is not a title.
+	blank := catalogueMeta{Enrichment: Enrichment{Recommendation: "continue", Title: "   "}}
+	if title, _ := resolveDisplayTitle(indexed, blank, ""); title != "Fallback from the first message" {
+		t.Fatalf("blank enriched title must not win, got %q", title)
 	}
 }

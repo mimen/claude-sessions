@@ -349,6 +349,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		// Catalogue v38. Each goes through prefixedColumn so a pre-v38 catalogue — an older CCS on
 		// this machine, or a store that has not been opened by a v38 binary yet — still loads:
 		// the columns read as NULL and the dossier shows "not enriched yet" instead of failing.
+		prefixedColumn(catalogueColumns, "c", "enrichment_title", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "enrichment_summary", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "enrichment_outstanding", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "enrichment_recommendation", "NULL"),
@@ -384,7 +385,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		var identityCompleted int
 		var identityArchived int
 		var identityParked sql.NullString
-		var enrichSummary, enrichOutstanding, enrichRecommendation sql.NullString
+		var enrichTitle, enrichSummary, enrichOutstanding, enrichRecommendation sql.NullString
 		var enrichReason, enrichSuggestedLoc, enrichSuggestedCWD, enrichAt sql.NullString
 		var enrichJunk, enrichCWDCorrect, enrichAtMessages sql.NullInt64
 		if err := rows.Scan(
@@ -405,6 +406,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 			&stage,
 			&prNumber,
 			&prState,
+			&enrichTitle,
 			&enrichSummary,
 			&enrichOutstanding,
 			&enrichRecommendation,
@@ -444,6 +446,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		// half-populated Enrichment would render as a confident empty summary.
 		if rec := normalizeInline(enrichRecommendation.String); rec != "" {
 			row.Enrichment = Enrichment{
+				Title: normalizeInline(enrichTitle.String),
 				// Summary is the one field kept multi-line — normalizeInline would collapse the
 				// paragraph the dossier wraps itself.
 				Summary:        strings.TrimSpace(enrichSummary.String),

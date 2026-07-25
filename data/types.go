@@ -90,6 +90,9 @@ type Session struct {
 // held in memory, and discarded on quit. Enrichment is durable and shared with every other CCS
 // consumer.
 type Enrichment struct {
+	// Enrichment's own name for the session, derived from how it actually ended rather than from
+	// its opening turns. Never overwrites a human-set custom title — see resolveDisplayTitle.
+	Title       string
 	Summary     string
 	Outstanding string
 	// One of: continue, complete, archive, handoff. Empty when the session has never been enriched.
