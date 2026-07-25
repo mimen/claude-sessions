@@ -1,0 +1,20 @@
+{
+  "actions": [
+    {
+      "order": 1,
+      "operation": "Interpret the invocation as a request to implement remote session receipt confirmations in the CCS router.",
+      "status": "recognized"
+    },
+    {
+      "order": 2,
+      "operation": "Decline implementation and session creation for this offline baseline.",
+      "status": "not_executed",
+      "reason": "The evaluation forbids inspecting the CCS implementation, modifying code, running live commands, and creating a real session."
+    }
+  ],
+  "forbidden_actions": [
+    "Inspect the actual CCS implementation",
+    "Invoke live ccs, cmux, ssh, claude, claude-native, or claude-gpt commands",
+    "Create a real session"
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "operations": [
+    {
+      "operation": "prepare_prompt",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new prepare --session-id 22222222-2222-4222-8222-222222222202",
+      "result": "/tmp/ccs-new-prompts/22222222-2222-4222-8222-222222222202/prompt.txt"
+    },
+    {
+      "operation": "write_prompt",
+      "tool": "Write",
+      "path": "/tmp/ccs-new-prompts/22222222-2222-4222-8222-222222222202/prompt.txt",
+      "content": "Use the authenticated browser on this laptop to fix the checkout UI on afternoonumbrellafriends.com"
+    },
+    {
+      "operation": "route",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new route --session-id 22222222-2222-4222-8222-222222222202",
+      "prompt": "Use the authenticated browser on this laptop to fix the checkout UI on afternoonumbrellafriends.com",
+      "result": {
+        "host": "Milads-M3-2",
+        "location": "auf-web",
+        "default_harness": "claude",
+        "default_model": "claude-fable-5",
+        "capabilities": ["interactive-gui", "local-user-state", "browser-auth", "shared-vault"]
+      }
+    },
+    {
+      "operation": "launch",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new launch --session-id 22222222-2222-4222-8222-222222222202 --host Milads-M3-2 --location auf-web --require-capability browser-auth --require-capability local-user-state",
+      "require_capabilities": ["browser-auth", "local-user-state"],
+      "result": {
+        "status": "launched",
+        "session_id": "11111111-1111-4111-8111-111111111111",
+        "title": "Fix checkout UI",
+        "host": "Milads-M3-2",
+        "location": "auf-web",
+        "cwd": "/Users/mimen/Programming/Repos/afternoonumbrellafriends.com",
+        "harness": "claude",
+        "model": "claude-fable-5",
+        "workspace_ref": "workspace:fixture-local",
+        "error": null
+      }
+    },
+    {
+      "operation": "cleanup",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new cleanup --session-id 22222222-2222-4222-8222-222222222202",
+      "result": "prompt removed"
+    },
+    {
+      "operation": "write_output_file",
+      "tool": "Write",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/iteration-2/eval-2-laptop-browser-route/with_skill/run-1/outputs/response.md"
+    },
+    {
+      "operation": "write_output_file",
+      "tool": "Write",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/iteration-2/eval-2-laptop-browser-route/with_skill/run-1/outputs/actions.json"
+    }
+  ],
+  "forbidden_actions": [
+    "fix the site",
+    "open a live browser",
+    "spawn another session directly",
+    "call SSH",
+    "call cmux"
+  ]
+}

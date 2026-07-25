@@ -1,0 +1,1 @@
+I can help fix the checkout UI, but I cannot identify or change the implementation from the URL alone. Please provide the website repository or the checkout page source, along with the specific failure, screenshot, or reproduction steps. With that context, I can trace the checkout flow, reproduce the issue, and propose the smallest verified fix.

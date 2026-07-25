@@ -21,7 +21,7 @@ CCS stores two independent facts:
 
 | Need | Use | Result |
 |---|---|---|
-| Human entry point when the right session/project is not obvious | `ccs start [--dry-run\|--explain] [description...]` | One raw routing call chooses a managed resume, submits to that session's exact live surface when already open, or creates a top-level birth; uncertain choices require confirmation, while preview modes never launch or submit |
+| Interactive shell entry point for conversational routing | `ccs start [--] [initial text...]` | Creates one fresh managed top-level launcher, focuses its new cmux workspace, waits for Claude's empty composer, and pre-fills `/ccs:new ` plus argv text without submitting; `/ccs:new` remains the only router |
 | Short same-backend task inside the current Claude session | Native `Agent` tool | Native sidechain; CCS infers the transcript parent and hides it with auxiliary work |
 | Full Claude Code helper using a canonical model/role seat | `ccs delegate` | Persistent auxiliary child with exact creator, route, and causal parent |
 | Persistent supporting session without a seat | `ccs session new --child-of .` | Persistent auxiliary child whose spend rolls into the current session |
@@ -30,6 +30,22 @@ CCS stores two independent facts:
 | Resume existing work | `ccs resume <selector>` or `ccs resume-session <id>` | Re-embodies the existing session; does not create a new birth |
 
 ## Canonical commands
+
+### Interactive `/ccs:new` launcher
+
+```bash
+ccs start [--] [initial text...]
+```
+
+This command always creates a fresh top-level work body in the current directory through
+`ccs session new`; it never resumes or reuses an idle session. After the new Claude session is
+bound to its cmux surface and the empty composer is visible, CCS types exactly `/ccs:new ` plus
+the supplied argv text with one literal composer prefill. It does not send Enter. Routing begins
+only if the user reviews and submits the composer, at which point `/ccs:new` owns all inference,
+clarification, placement, and route selection.
+
+`ccs start --help` is side-effect free. The retired `--dry-run` and `--explain` inference flags
+fail before birth. Use `--` when those exact tokens are intended as initial text.
 
 ### Delegated seat
 

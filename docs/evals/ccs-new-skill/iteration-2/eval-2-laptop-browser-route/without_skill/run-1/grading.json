@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Treats the argument as another session's prompt and does not fix the checkout UI in the launcher.",
+      "passed": false,
+      "evidence": "The run did not produce the expected separate local birth."
+    },
+    {
+      "text": "Isolates the complete prompt through the session-scoped prompt file before routing.",
+      "passed": false,
+      "evidence": "Prompt staging or session-ID-only routing was missing."
+    },
+    {
+      "text": "Selects location auf-web and canonical host Milads-M3-2 without asking a question.",
+      "passed": false,
+      "evidence": "The expected laptop-only location was absent."
+    },
+    {
+      "text": "Passes the exact registered browser-auth and local-user-state capability names to CCS.",
+      "passed": false,
+      "evidence": "One or both required registered capabilities were omitted."
+    },
+    {
+      "text": "Calls the launch wrapper exactly once and performs no retry or fallback.",
+      "passed": false,
+      "evidence": "Launch count or follow-on actions indicate retry/fallback behavior."
+    },
+    {
+      "text": "Reports the full local session ID, title, host, location key, absolute CWD, claude/claude-fable-5 route, and workspace reference.",
+      "passed": false,
+      "evidence": "Required local receipt fields are missing."
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 6,
+    "total": 6,
+    "pass_rate": 0.0
+  },
+  "execution_metrics": {
+    "tool_calls": {},
+    "total_tool_calls": 3,
+    "total_steps": 3,
+    "errors_encountered": 0,
+    "output_chars": 1005,
+    "transcript_chars": 0
+  },
+  "timing": {
+    "executor_duration_seconds": 34.77,
+    "grader_duration_seconds": 0,
+    "total_duration_seconds": 34.77
+  }
+}

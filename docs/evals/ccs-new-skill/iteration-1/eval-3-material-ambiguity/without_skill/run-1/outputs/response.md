@@ -1,0 +1,1 @@
+I can do that, but I need the scope pinned down first. Which event workflow docs should change, and which website or repository/pages are in scope? Please also specify the intended workflow updates, or point me to the source of truth.

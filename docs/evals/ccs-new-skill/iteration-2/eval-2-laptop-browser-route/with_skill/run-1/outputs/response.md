@@ -1,0 +1,7 @@
+- session ID: `11111111-1111-4111-8111-111111111111`
+- title: `Fix checkout UI`
+- current machine: `Milads-M3-2`
+- registered location key: `auf-web`
+- absolute CWD: `/Users/mimen/Programming/Repos/afternoonumbrellafriends.com`
+- harness/model route: `claude` / `claude-fable-5`
+- workspace reference: `workspace:fixture-local`

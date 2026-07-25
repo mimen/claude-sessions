@@ -1,0 +1,12 @@
+{
+  "eval_id": 3,
+  "eval_name": "Material location ambiguity",
+  "prompt": "/ccs:new Update the event workflow docs and website",
+  "assertions": [
+    "Treats the argument as another session's prompt and does not update docs or website files in the launcher.",
+    "Calls the route wrapper exactly once with the complete prompt.",
+    "Does not call launch, register, ccs start, raw Claude, SSH, or low-level cmux commands.",
+    "Produces one AskUserQuestion-style single-select picker with Events workspace recommended first and AUF Web as the other option.",
+    "Defines both location choices in plain one-sentence descriptions and makes clear that the answer changes the launch location and host."
+  ]
+}

@@ -1,0 +1,1 @@
+Offline baseline only: I would not create a CCS session or modify the router here. Implementing remote session receipt confirmations would require inspecting the CCS implementation, editing code, and running tests, all of which are excluded by this evaluation.

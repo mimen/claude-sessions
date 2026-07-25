@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Treats the argument as another session's prompt and does not fix the checkout UI in the launcher.",
+      "passed": true,
+      "evidence": "The prompt was routed and launched as a separate local session; no checkout implementation was attempted."
+    },
+    {
+      "text": "Calls the route wrapper exactly once with the complete prompt.",
+      "passed": true,
+      "evidence": "actions.json records exactly one route call with the complete prompt."
+    },
+    {
+      "text": "Selects location auf-web and canonical host Milads-M3-2 without asking a question.",
+      "passed": true,
+      "evidence": "The sole launch selects auf-web on Milads-M3-2 without a question."
+    },
+    {
+      "text": "Calls the launch wrapper exactly once and performs no retry or fallback.",
+      "passed": true,
+      "evidence": "Exactly one route and one launch operation were recorded, with no retry or fallback."
+    },
+    {
+      "text": "Reports the local session ID, title, host, location key, absolute CWD, claude/claude-fable-5 route, and workspace reference.",
+      "passed": true,
+      "evidence": "All required local receipt fields and the compiled route are present."
+    },
+    {
+      "text": "Explains that local placement is determined by the registry's laptop-only eligibility constraint.",
+      "passed": true,
+      "evidence": "The response explains the deterministic laptop-only registry constraint."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  },
+  "execution_metrics": {
+    "tool_calls": {},
+    "total_tool_calls": 2,
+    "total_steps": 2,
+    "errors_encountered": 0,
+    "output_chars": 1120,
+    "transcript_chars": 0
+  },
+  "timing": {
+    "executor_duration_seconds": 61.757,
+    "grader_duration_seconds": 0,
+    "total_duration_seconds": 61.757
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "operations": [
+    {
+      "order": 1,
+      "operation": "Request the website repository or checkout-specific reproduction details before attempting a fix",
+      "side_effect": false
+    }
+  ],
+  "forbidden_actions": []
+}

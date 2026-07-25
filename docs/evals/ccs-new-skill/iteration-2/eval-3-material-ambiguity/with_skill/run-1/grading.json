@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Treats the argument as another session's prompt and does not update docs or website files in the launcher.",
+      "passed": true,
+      "evidence": "The run produced only a route-choice picker and did not execute the task."
+    },
+    {
+      "text": "Isolates and routes the complete prompt exactly once.",
+      "passed": true,
+      "evidence": "The exact prompt was staged and routed once through the synthetic session ID."
+    },
+    {
+      "text": "Does not call launch, register, ccs start, raw Claude, SSH, or low-level cmux commands.",
+      "passed": true,
+      "evidence": "No launch, registration, legacy starter, raw model, SSH, or cmux operation occurred."
+    },
+    {
+      "text": "Produces one AskUserQuestion-style single-select picker with Events workspace recommended first and AUF Web as the other option.",
+      "passed": true,
+      "evidence": "One single-select picker recommends Events first and includes AUF Web second."
+    },
+    {
+      "text": "Defines both location choices in plain one-sentence descriptions and makes clear that the answer changes the launch location and host.",
+      "passed": true,
+      "evidence": "Both choices are defined and the host/location consequence is explicit."
+    },
+    {
+      "text": "Keeps the session-scoped prompt available while waiting for the user's location choice and does not launch early.",
+      "passed": true,
+      "evidence": "The staged prompt remains available while awaiting the user's answer, and no launch occurred."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  },
+  "execution_metrics": {
+    "tool_calls": {},
+    "total_tool_calls": 4,
+    "total_steps": 4,
+    "errors_encountered": 0,
+    "output_chars": 2215,
+    "transcript_chars": 0
+  },
+  "timing": {
+    "executor_duration_seconds": 99.785,
+    "grader_duration_seconds": 0,
+    "total_duration_seconds": 99.785
+  }
+}

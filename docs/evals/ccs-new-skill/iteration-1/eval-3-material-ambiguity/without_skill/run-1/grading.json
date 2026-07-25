@@ -1,0 +1,48 @@
+{
+  "expectations": [
+    {
+      "text": "Treats the argument as another session's prompt and does not update docs or website files in the launcher.",
+      "passed": false,
+      "evidence": "The response does not evidence separate-session routing or appears to act on the task."
+    },
+    {
+      "text": "Calls the route wrapper exactly once with the complete prompt.",
+      "passed": false,
+      "evidence": "Missing, repeated, or incomplete route call."
+    },
+    {
+      "text": "Does not call launch, register, ccs start, raw Claude, SSH, or low-level cmux commands.",
+      "passed": true,
+      "evidence": "No launch, registration, legacy starter, raw model, SSH, or cmux operation appears in actions.json."
+    },
+    {
+      "text": "Produces one AskUserQuestion-style single-select picker with Events workspace recommended first and AUF Web as the other option.",
+      "passed": false,
+      "evidence": "The expected AskUserQuestion-style option set/order is absent."
+    },
+    {
+      "text": "Defines both location choices in plain one-sentence descriptions and makes clear that the answer changes the launch location and host.",
+      "passed": false,
+      "evidence": "Choice descriptions or the launch consequence are incomplete."
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 4,
+    "total": 5,
+    "pass_rate": 0.2
+  },
+  "execution_metrics": {
+    "tool_calls": {},
+    "total_tool_calls": 1,
+    "total_steps": 1,
+    "errors_encountered": 0,
+    "output_chars": 487,
+    "transcript_chars": 0
+  },
+  "timing": {
+    "executor_duration_seconds": 28.857,
+    "grader_duration_seconds": 0,
+    "total_duration_seconds": 28.857
+  }
+}

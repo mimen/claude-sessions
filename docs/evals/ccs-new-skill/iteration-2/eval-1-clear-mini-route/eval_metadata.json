@@ -1,0 +1,13 @@
+{
+  "eval_id": 1,
+  "eval_name": "clear-mini-route",
+  "prompt": "/ccs:new Implement remote session receipt confirmations in the CCS router",
+  "assertions": [
+    "Treats the argument as another session's prompt and does not implement the requested CCS change in the launcher.",
+    "Isolates the complete prompt through the session-scoped prompt file before routing.",
+    "Selects location ccs and canonical host Milads-Mac-mini without asking a question.",
+    "Calls the launch wrapper exactly once and performs no retry or fallback.",
+    "Reports session_id: pending, the selected host, location key, remote CWD, and workspace_ref.",
+    "Repeats the remote uncertainty verbatim and does not claim session reservation, model launch, or prompt delivery succeeded."
+  ]
+}

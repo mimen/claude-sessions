@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Uses caller_context rather than the ordinary registered ccs checkout.",
+      "passed": false,
+      "evidence": "Launch did not use the caller worktree directly."
+    },
+    {
+      "text": "Selects the current canonical laptop host and exact linked-worktree absolute CWD.",
+      "passed": false,
+      "evidence": "Host or CWD did not preserve local worktree state."
+    },
+    {
+      "text": "Passes local-user-state as a required registered capability.",
+      "passed": false,
+      "evidence": "The local-state capability was missing."
+    },
+    {
+      "text": "Passes the registry-wide canonical gpt-5.6-sol model for the direct-CWD birth.",
+      "passed": false,
+      "evidence": "The registry-wide model was not passed explicitly."
+    },
+    {
+      "text": "Calls launch exactly once and reports the full structured local receipt.",
+      "passed": false,
+      "evidence": "Launch count or worktree receipt fields are incomplete."
+    },
+    {
+      "text": "Does not register the linked worktree or any task-local path.",
+      "passed": true,
+      "evidence": "The linked worktree was not registered."
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 5,
+    "total": 6,
+    "pass_rate": 0.16666666666666666
+  },
+  "execution_metrics": {
+    "tool_calls": {},
+    "total_tool_calls": 0,
+    "total_steps": 0,
+    "errors_encountered": 0,
+    "output_chars": 191,
+    "transcript_chars": 0
+  },
+  "timing": {
+    "executor_duration_seconds": 86.76,
+    "grader_duration_seconds": 0,
+    "total_duration_seconds": 86.76
+  }
+}

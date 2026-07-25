@@ -29,6 +29,7 @@ function config(store: string): Config {
     store: { path: store },
     host: { label: "test-host" },
     resume: { target: "auto" },
+    routing: { registry: "", hosts: "" },
     launcher: [],
     inference: {
       engine: "auto",

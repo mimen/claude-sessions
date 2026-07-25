@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Does not invent a different CWD or perform the README work in the launcher.",
+      "passed": false,
+      "evidence": "The explicit path was changed, ignored, or worked on directly."
+    },
+    {
+      "text": "Launches the exact explicit path locally with the registry-wide gpt-5.6-sol model.",
+      "passed": false,
+      "evidence": "The explicit path or model route was wrong."
+    },
+    {
+      "text": "Calls launch exactly once before any registration call.",
+      "passed": false,
+      "evidence": "Registration happened early or launch count was wrong."
+    },
+    {
+      "text": "Registers the exact launched CWD only after status launched is returned.",
+      "passed": false,
+      "evidence": "No successful launch receipt preceded registration."
+    },
+    {
+      "text": "Uses a stable kebab-case key and the current host eligibility in registration.",
+      "passed": false,
+      "evidence": "Registration key or host eligibility was missing."
+    },
+    {
+      "text": "Reports the full local receipt and the new registry entry.",
+      "passed": false,
+      "evidence": "Receipt or registration fields are incomplete."
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 6,
+    "total": 6,
+    "pass_rate": 0.0
+  },
+  "execution_metrics": {
+    "tool_calls": {},
+    "total_tool_calls": 0,
+    "total_steps": 0,
+    "errors_encountered": 0,
+    "output_chars": 136,
+    "transcript_chars": 0
+  },
+  "timing": {
+    "executor_duration_seconds": 26.795,
+    "grader_duration_seconds": 0,
+    "total_duration_seconds": 26.795
+  }
+}

@@ -1,422 +1,302 @@
-import type { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
-import { realpathSync, statSync } from "node:fs";
-import { resolve } from "node:path";
-import { createInterface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
-import { getRow, lifecycleOf, openCatalogue } from "../catalogue/db.ts";
 import type { SurfaceLocation } from "../cmux/bridge.ts";
 import { liveBridge } from "../cmux/live.ts";
 import { workspaceForSessionFrom } from "../cmux/liveness.ts";
-import { refreshCatalogueAuthority } from "../catalogue-service/client.ts";
-import { sessionById } from "../index/index.ts";
-import { openIndex } from "../index/schema.ts";
-import { CATALOGUE_PATH, DB_PATH, ensureDataDir, expandHome } from "../paths.ts";
-import { newSession } from "../resume/new-session.ts";
-import { loadLaunchers } from "../resume/launchers.ts";
-import { resumeSessionEntry } from "../resume/resume-session.ts";
-import { buildStartCandidates, type StartCandidates } from "./candidates.ts";
-import { buildStartChoices, choiceDetail, choiceLabel, type StartChoice } from "./choices.ts";
-import { routeStart, type StartRouteDecision } from "./gateway.ts";
+import {
+  newSession,
+  type LocalLaunchReceipt,
+} from "../resume/new-session.ts";
+import { err as resultErr, ok as resultOk, type Result } from "../result.ts";
 
-export const START_AUTO_CONFIDENCE = 0.8;
+const START_HELP = `ccs start — open a fresh launcher for /ccs:new
 
-type StartMode = "execute" | "dry-run" | "explain";
+Usage:
+  ccs start [initial text...]
+  ccs start -- [initial text beginning with a dash...]
 
-interface StartInvocation {
-  readonly descriptionArgs: readonly string[];
-  readonly mode: StartMode;
+Creates one fresh CCS-managed top-level Claude session in the current directory, focuses its
+new cmux workspace, waits for the empty composer, and pre-fills /ccs:new plus any supplied
+text. It never submits Enter, routes the request, runs inference, resumes an idle session, or
+executes the prompt.
+
+Options:
+  -h, --help    Show this help
+
+The obsolete inference flags --dry-run and --explain are rejected. /ccs:new is the only router.
+`;
+
+const ROUTER_PREFIX = "/ccs:new ";
+const LAUNCHER_TITLE = "/ccs:new launcher";
+const DISCOVERY_TIMEOUT_MS = 20_000;
+const READINESS_TIMEOUT_MS = 30_000;
+const POLL_INTERVAL_MS = 150;
+
+export interface LauncherBirthRequest {
+  readonly topLevel: true;
+  readonly cwd: string;
+  readonly title: string;
+  readonly focus: true;
 }
+
+export interface LauncherBirth {
+  readonly sessionId: string;
+  readonly workspaceRef: string;
+}
+
+export interface PollClock {
+  readonly now: () => number;
+  readonly sleep: (milliseconds: number) => Promise<void>;
+}
+
+export type WorkspaceLocator = (sessionId: string) => Result<SurfaceLocation | null>;
+export type ComposerReader = (location: SurfaceLocation) => Result<string>;
 
 export interface StartCommandDependencies {
-  readonly loadCandidates?: (description: string) => Promise<StartCandidates>;
-  readonly route?: typeof routeStart;
-  readonly execute?: (choice: StartChoice, description: string) => Promise<number>;
+  readonly cwd?: () => string;
+  readonly birth?: (request: LauncherBirthRequest) => Result<LauncherBirth>;
+  readonly discover?: (birth: LauncherBirth) => Promise<Result<SurfaceLocation>>;
+  readonly waitUntilReady?: (location: SurfaceLocation) => Promise<Result<void>>;
+  readonly prefill?: (location: SurfaceLocation, text: string) => Result<void>;
 }
 
-/** Natural-language entry point that routes to a managed resume or managed new-session birth. */
+type StartInvocation =
+  | { readonly mode: "help" }
+  | { readonly mode: "launch"; readonly prefill: string };
+
+const REAL_CLOCK: PollClock = {
+  now: () => Date.now(),
+  sleep: async (milliseconds) => Bun.sleep(milliseconds),
+};
+
+/** Deterministic interactive shortcut. /ccs:new remains the only routing surface. */
 export async function startCommand(
   args: string[],
   dependencies: StartCommandDependencies = {},
 ): Promise<number> {
   const invocation = parseInvocation(args);
-  const description = await descriptionFrom(invocation.descriptionArgs);
-  if (!description) return 2;
-
-  let candidates: StartCandidates;
-  try {
-    candidates = await (dependencies.loadCandidates ?? loadStartCandidates)(description);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    console.error(`ccs start: ${detail}`);
-    return 1;
+  if (!invocation.ok) {
+    console.error(`ccs start: ${invocation.error.message}`);
+    return 2;
   }
-  process.stderr.write("ccs start: routing…\n");
-  const routed = await (dependencies.route ?? routeStart)({ description, candidates });
-  const decision = routed.ok ? routed.value : fallbackDecision(candidates, routed.error);
-  if (!routed.ok) console.error(`ccs start: ${routed.error.message}`);
-
-  const choices = buildStartChoices(decision, candidates);
-  const recommended = choices[0];
-  if (!recommended) {
-    console.error("ccs start: no resumable sessions or valid project directories were found");
-    return 1;
-  }
-
-  const aboveAutoThreshold = decision.confidence >= START_AUTO_CONFIDENCE
-    && decision.action !== "ask_directory";
-  const autoEligible = aboveAutoThreshold && autoChoiceStillEligible(recommended);
-  if (invocation.mode !== "execute") {
-    printPreview(invocation.mode, decision, recommended, choices, candidates, autoEligible);
+  if (invocation.value.mode === "help") {
+    console.log(START_HELP);
     return 0;
   }
 
-  const execute = dependencies.execute ?? executeChoice;
-  if (autoEligible) {
-    console.error(`ccs start: ${decision.reason} (${Math.round(decision.confidence * 100)}% confidence)`);
-    return execute(recommended, description);
-  }
-  if (aboveAutoThreshold) {
-    console.error("ccs start: the recommended target changed while routing; confirmation is now required");
-  }
-
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.error(`ccs start: confirmation required below ${Math.round(START_AUTO_CONFIDENCE * 100)}% confidence`);
-    console.error(`Recommendation: ${choiceLabel(recommended)} — ${choiceDetail(recommended)}`);
-    return 1;
-  }
-
-  console.log(`\nRecommendation: ${decision.reason} (${Math.round(decision.confidence * 100)}% confidence)\n`);
-  const selected = await promptForChoice(choices);
-  if (!selected) {
-    console.error("ccs start: cancelled");
-    return 0;
-  }
-  return execute(selected, description);
-}
-
-function parseInvocation(args: readonly string[]): StartInvocation {
-  const explain = args.includes("--explain");
-  const dryRun = args.includes("--dry-run");
-  return {
-    mode: explain ? "explain" : dryRun ? "dry-run" : "execute",
-    descriptionArgs: args.filter((arg) => arg !== "--dry-run" && arg !== "--explain"),
+  const cwd = dependencies.cwd?.() ?? process.cwd();
+  const birthRequest: LauncherBirthRequest = {
+    topLevel: true,
+    cwd,
+    title: LAUNCHER_TITLE,
+    focus: true,
   };
-}
+  const birth = (dependencies.birth ?? birthManagedLauncher)(birthRequest);
+  if (!birth.ok) return stageFailure("managed birth", birth.error);
 
-async function loadStartCandidates(description: string): Promise<StartCandidates> {
-  ensureDataDir();
-  const refreshed = await refreshCatalogueAuthority({ force: false, titles: false });
-  if (!refreshed.ok) {
-    console.error(`ccs start: index refresh skipped: ${refreshed.error.message}`);
-  }
+  const discovered = await (dependencies.discover ?? discoverLauncherWorkspace)(birth.value);
+  if (!discovered.ok) return stageFailure("workspace discovery", discovered.error);
 
-  const indexDb = openIndex(DB_PATH());
-  const catalogueDb = openCatalogue(CATALOGUE_PATH());
-  try {
-    return buildStartCandidates(indexDb, catalogueDb, description, process.cwd());
-  } finally {
-    indexDb.close();
-    catalogueDb.close();
-  }
-}
+  const ready = await (dependencies.waitUntilReady ?? waitForComposerReady)(discovered.value);
+  if (!ready.ok) return stageFailure("composer readiness", ready.error);
 
-function printPreview(
-  mode: Exclude<StartMode, "execute">,
-  decision: StartRouteDecision,
-  recommended: StartChoice,
-  choices: readonly StartChoice[],
-  candidates: StartCandidates,
-  autoEligible: boolean,
-): void {
-  console.log(`ccs start ${mode === "explain" ? "explain" : "dry-run"}`);
-  console.log(`route: ${decision.action}`);
-  console.log(`confidence: ${Math.round(decision.confidence * 100)}%`);
-  console.log(`reason: ${decision.reason}`);
-  console.log(`recommendation: ${choiceLabel(recommended)}`);
-  console.log(`target: ${choiceDetail(recommended)}`);
-  console.log(`execution: ${autoEligible ? "would auto-launch" : "would require confirmation"}`);
-  console.log("session side effects: none");
-  if (mode !== "explain") return;
+  const prefilled = (dependencies.prefill ?? prefillComposer)(discovered.value, invocation.value.prefill);
+  if (!prefilled.ok) return stageFailure("composer prefill", prefilled.error);
 
-  console.log(
-    `candidates: ${candidates.autoResumeSessions.length} active sessions, ` +
-      `${candidates.manualOnlySessions.length} manual-only sessions, ${candidates.projects.length} projects`,
+  console.error(
+    `ccs start: launcher ready in ${discovered.value.workspaceRef}; ` +
+      "/ccs:new is prefilled and has not been submitted",
   );
-  for (const [index, choice] of choices.entries()) {
-    console.log(`${index + 1}. ${choiceLabel(choice)} — ${choiceDetail(choice)}`);
-  }
+  return 0;
 }
 
-async function descriptionFrom(args: readonly string[]): Promise<string | null> {
-  const supplied = args.join(" ").trim();
-  if (supplied) return supplied;
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.error("usage: ccs start [description...] (description is required without a TTY)");
-    return null;
+function parseInvocation(args: readonly string[]): Result<StartInvocation> {
+  const separator = args.indexOf("--");
+  const optionsEnd = separator === -1 ? args.length : separator;
+  const optionRegion = args.slice(0, optionsEnd);
+  if (optionRegion.includes("--help") || optionRegion.includes("-h")) {
+    return resultOk({ mode: "help" });
   }
-  const answer = await promptLine("What are you about to work on? ");
-  if (!answer.trim()) {
-    console.error("ccs start: description cannot be empty");
-    return null;
+  for (const obsolete of ["--dry-run", "--explain"]) {
+    if (optionRegion.includes(obsolete)) {
+      return resultErr(new Error(
+        `${obsolete} is obsolete; /ccs:new is the only router and ccs start never runs inference`,
+      ));
+    }
   }
-  return answer.trim();
+
+  const textArgs = separator === -1
+    ? [...args]
+    : [...args.slice(0, separator), ...args.slice(separator + 1)];
+  const prefill = `${ROUTER_PREFIX}${textArgs.join(" ")}`;
+  const safe = validatePrefillText(prefill);
+  return safe.ok ? resultOk({ mode: "launch", prefill }) : safe;
 }
 
-async function promptForChoice(choices: readonly StartChoice[]): Promise<StartChoice | null> {
-  choices.forEach((choice, index) => {
-    const recommended = index === 0 ? "  recommended" : "";
-    console.log(`${index + 1}. ${choiceLabel(choice)}${recommended}`);
-    console.log(`   ${choiceDetail(choice)}`);
-  });
+/** Launch through the established managed session-new path and observe its exact local receipt. */
+export function birthManagedLauncher(request: LauncherBirthRequest): Result<LauncherBirth> {
+  const observed: { receipt?: LocalLaunchReceipt } = {};
+  let exitCode: number;
+  try {
+    exitCode = newSession([
+      "--top-level",
+      "--cwd",
+      request.cwd,
+      "--title",
+      request.title,
+    ], undefined, {
+      focus: request.focus,
+      onLocalLaunch: (receipt) => { observed.receipt = receipt; },
+    });
+  } catch {
+    return resultErr(new Error("the managed session-new path threw before returning a launch receipt"));
+  }
+
+  if (exitCode !== 0) {
+    return resultErr(new Error(
+      observed.receipt?.error ?? `the managed session-new path exited ${exitCode}`,
+    ));
+  }
+  const receipt = observed.receipt;
+  if (!receipt) return resultErr(new Error("the managed session-new path returned no local launch receipt"));
+  if (receipt.status !== "launched" || !receipt.workspace_ref) {
+    return resultErr(new Error(receipt.error ?? "cmux did not return a workspace reference"));
+  }
+  return resultOk({ sessionId: receipt.session_id, workspaceRef: receipt.workspace_ref });
+}
+
+/** Wait until cmux binds the fresh session UUID to its exact live surface. */
+export async function discoverLauncherWorkspace(
+  birth: LauncherBirth,
+  locator: WorkspaceLocator = locateLiveWorkspace,
+  clock: PollClock = REAL_CLOCK,
+  timeoutMs = DISCOVERY_TIMEOUT_MS,
+): Promise<Result<SurfaceLocation>> {
+  const deadline = clock.now() + timeoutMs;
+  let lastError: Error | null = null;
   while (true) {
-    const answer = (await promptLine("\nChoose [1, q to cancel]: ")).trim().toLowerCase();
-    if (answer === "q" || answer === "quit") return null;
-    if (answer === "") return choices[0] ?? null;
-    const index = Number.parseInt(answer, 10) - 1;
-    const selected = choices[index];
-    if (selected) return selected;
-    console.error(`Enter a number from 1 to ${choices.length}, or q.`);
-  }
-}
-
-async function executeChoice(choice: StartChoice, description: string): Promise<number> {
-  switch (choice.kind) {
-    case "new":
-      return newSession([
-        "--top-level",
-        "--cwd",
-        choice.project.path,
-        "--prompt",
-        safeTrailingPrompt(description),
-      ]);
-    case "directory": {
-      const directory = await promptForDirectory();
-      if (!directory) {
-        console.error("ccs start: cancelled");
-        return 0;
-      }
-      return newSession([
-        "--top-level",
-        "--cwd",
-        directory,
-        "--prompt",
-        safeTrailingPrompt(description),
-      ]);
+    const located = locator(birth.sessionId);
+    if (located.ok && located.value) return resultOk(located.value);
+    if (!located.ok) lastError = located.error;
+    if (clock.now() >= deadline) {
+      const detail = lastError ? `; last probe failed: ${lastError.message}` : "";
+      return resultErr(new Error(
+        `fresh session ${birth.sessionId} never appeared on a live cmux surface ` +
+          `(birth workspace ${birth.workspaceRef})${detail}`,
+      ));
     }
-    case "resume":
-      return resumeChoice(choice, description);
+    await clock.sleep(POLL_INTERVAL_MS);
   }
 }
 
-function autoChoiceStillEligible(choice: StartChoice): boolean {
-  if (choice.kind === "directory") return false;
-  if (choice.kind === "new") return verifiedDirectory(choice.project.path) !== null;
-  return readAutoResumeEligibility(choice.session.id);
-}
-
-/** Fail closed when the final catalogue read cannot prove automatic-resume eligibility. */
-export function readAutoResumeEligibility(
-  sessionId: string,
-  openDatabase: () => Database = () => openCatalogue(CATALOGUE_PATH()),
-): boolean {
-  let catalogueDb: Database | null = null;
+function locateLiveWorkspace(sessionId: string): Result<SurfaceLocation | null> {
   try {
-    catalogueDb = openDatabase();
-    return autoResumeStillEligible(catalogueDb, sessionId);
+    const bridge = liveBridge();
+    if (!bridge.readable) return resultErr(new Error("cmux tree or Claude hook state is unreadable"));
+    return resultOk(workspaceForSessionFrom(bridge, sessionId));
   } catch {
-    return false;
-  } finally {
-    catalogueDb?.close();
+    return resultErr(new Error("cmux workspace lookup failed"));
   }
 }
 
-/** Revalidate the active-work-only contract immediately before an automatic resume. */
-export function autoResumeStillEligible(catalogueDb: Database, sessionId: string): boolean {
-  const row = getRow(catalogueDb, sessionId);
-  return row?.sessionClass === "work_body"
-    && row.kind !== "loop"
-    && lifecycleOf(row) === "idle";
-}
-
-function resumeChoice(choice: Extract<StartChoice, { readonly kind: "resume" }>, description: string): number {
-  const launcherResult = loadLaunchers();
-  if (!launcherResult.ok) {
-    console.error(`ccs start: ${launcherResult.error.message}`);
-    return 1;
-  }
-  const indexDb = openIndex(DB_PATH());
-  const catalogueDb = openCatalogue(CATALOGUE_PATH());
-  try {
-    const row = sessionById(indexDb, choice.session.id);
-    const result = resumeSessionEntry(indexDb, catalogueDb, choice.session.id, {
-      focus: true,
-      prompt: safeTrailingPrompt(description),
-      launchers: launcherResult.value,
-    });
-    switch (result.status) {
-      case "resumed":
-        console.error(`ccs start: resumed ${choice.session.title}`);
-        if (result.note) console.error(`ccs start: ${result.note}`);
-        return 0;
-      case "already-open": {
-        const ids = row ? [row.sessionId, row.resumeId] : [choice.session.id];
-        if (deliverToOpenSession(ids, description)) {
-          console.error(`ccs start: submitted the description to ${choice.session.title}`);
-          return 0;
-        }
-        console.error(`ccs start: ${choice.session.title} is already open, but its prompt could not be submitted`);
-        return 1;
-      }
-      case "not-indexed":
-        console.error(`ccs start: session ${choice.session.id} is no longer indexed`);
-        return 1;
-      case "spawn-failed":
-        console.error(`ccs start: failed to spawn a workspace for ${choice.session.title}`);
-        return 1;
-      case "liveness-unreadable":
-        console.error("ccs start: cmux liveness is unreadable; refusing to risk a duplicate resume");
-        return 1;
-      case "route-ineligible":
-        console.error(`ccs start: no eligible launcher can resume this session: ${result.reason}`);
-        return 1;
-      case "unknown-launcher":
-        console.error(`ccs start: configured launcher ${result.name} is unavailable`);
-        return 1;
-      case "cwd-unreadable":
-        console.error(`ccs start: ${result.error}`);
-        return 1;
+/** Wait for the fresh Claude surface to expose an empty composer before typing into it. */
+export async function waitForComposerReady(
+  location: SurfaceLocation,
+  reader: ComposerReader = readComposer,
+  clock: PollClock = REAL_CLOCK,
+  timeoutMs = READINESS_TIMEOUT_MS,
+): Promise<Result<void>> {
+  const deadline = clock.now() + timeoutMs;
+  let lastError: Error | null = null;
+  while (true) {
+    const screen = reader(location);
+    if (screen.ok && composerIsReady(screen.value)) return resultOk(undefined);
+    if (!screen.ok) lastError = screen.error;
+    if (clock.now() >= deadline) {
+      const detail = lastError ? `; last read failed: ${lastError.message}` : "";
+      return resultErr(new Error(
+        `Claude composer did not become ready on ${location.surfaceRef}${detail}`,
+      ));
     }
-  } finally {
-    indexDb.close();
-    catalogueDb.close();
+    await clock.sleep(POLL_INTERVAL_MS);
   }
 }
 
-function deliverToOpenSession(sessionIds: readonly string[], description: string): boolean {
-  const bridge = liveBridge();
-  if (!bridge.readable) return false;
-  const location = sessionIds
-    .map((sessionId) => workspaceForSessionFrom(bridge, sessionId))
-    .find((candidate) => candidate !== null);
-  if (!location) return false;
+function readComposer(location: SurfaceLocation): Result<string> {
   const cmux = process.env.CMUX_BIN ?? "cmux";
-  const submission = cmuxSubmissionText(description);
-  if (!submission) return false;
   try {
-    // Target the exact Claude surface: a workspace can contain unrelated terminal/browser panes.
-    // The single final newline submits in the same call, so no half-entered prompt can remain.
-    execFileSync(cmux, cmuxSendArgs(location, submission), {
-      timeout: 5_000,
-      stdio: "ignore",
-    });
-  } catch {
-    return false;
-  }
-  try {
-    execFileSync(cmux, ["select-workspace", "--workspace", location.workspaceRef, "--window", location.windowRef], {
-      timeout: 3_000,
-      stdio: "ignore",
-    });
-    execFileSync(cmux, [
-      "focus-pane",
-      "--pane",
-      location.paneId,
-      "--workspace",
-      location.workspaceRef,
+    const output = execFileSync(cmux, [
+      "read-screen",
+      "--surface",
+      location.surfaceId,
       "--window",
-      location.windowRef,
+      location.windowId,
+      "--lines",
+      "40",
     ], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
       timeout: 3_000,
-      stdio: "ignore",
     });
-    execFileSync(cmux, ["focus-window", "--window", location.windowRef], {
-      timeout: 3_000,
-      stdio: "ignore",
-    });
+    return resultOk(output);
   } catch {
-    // Submission already succeeded; focusing is best-effort and must not turn success into failure.
+    return resultErr(new Error(`could not read ${location.surfaceRef}`));
   }
-  return true;
 }
 
-export function cmuxSendArgs(
-  location: Pick<SurfaceLocation, "surfaceRef" | "windowRef">,
-  submission: string,
+/** Claude's empty input row is the readiness evidence required before prefill. */
+export function composerIsReady(screen: string): boolean {
+  const plain = screen.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+  return plain.split(/\r?\n/).some((line) => /^\s*❯\s*$/.test(line));
+}
+
+/** The one and only composer mutation: one literal send call, with no submit key. */
+export function prefillComposer(location: SurfaceLocation, text: string): Result<void> {
+  const safe = validatePrefillText(text);
+  if (!safe.ok) return safe;
+  const cmux = process.env.CMUX_BIN ?? "cmux";
+  try {
+    execFileSync(cmux, composerPrefillArgs(location, text), {
+      stdio: "ignore",
+      timeout: 5_000,
+    });
+    return resultOk(undefined);
+  } catch {
+    return resultErr(new Error(`cmux send failed for ${location.surfaceRef}`));
+  }
+}
+
+export function composerPrefillArgs(
+  location: Pick<SurfaceLocation, "surfaceId" | "windowId">,
+  text: string,
 ): string[] {
   return [
     "send",
     "--surface",
-    location.surfaceRef,
+    location.surfaceId,
     "--window",
-    location.windowRef,
+    location.windowId,
     "--",
-    submission,
+    text,
   ];
 }
 
-/** Keep free text positional even when it begins with a CLI flag token. */
-export function safeTrailingPrompt(description: string): string {
-  return description.startsWith("-") ? ` ${description}` : description;
-}
-
-/** Build one safe cmux payload containing exactly one final submit event. */
-export function cmuxSubmissionText(description: string): string | null {
-  const oneLine = description
-    .replace(/[\r\n]+/g, " ")
-    .replace(/\\[nrt]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return oneLine ? `${oneLine}\n` : null;
-}
-
-async function promptForDirectory(): Promise<string | null> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
-  while (true) {
-    const answer = (await promptLine("Directory (blank to cancel): ")).trim();
-    if (!answer) return null;
-    const directory = verifiedDirectory(resolve(expandHome(answer)));
-    if (directory) return directory;
-    console.error(`Not an existing directory: ${answer}`);
+/** Reject input that cmux send would reinterpret as Enter, Tab, or another control key. */
+export function validatePrefillText(text: string): Result<void> {
+  for (const character of text) {
+    const code = character.charCodeAt(0);
+    if (code <= 31 || code === 127) {
+      return resultErr(new Error("initial text contains a control character that cannot be prefilled without a key event"));
+    }
   }
+  if (/\\[nrt]/.test(text)) {
+    return resultErr(new Error(
+      "initial text contains a cmux escape (\\n, \\r, or \\t) that would synthesize a key event",
+    ));
+  }
+  return resultOk(undefined);
 }
 
-async function promptLine(question: string): Promise<string> {
-  const terminal = createInterface({ input, output });
-  try {
-    return await terminal.question(question);
-  } finally {
-    terminal.close();
-  }
-}
-
-function fallbackDecision(candidates: StartCandidates, error: Error): StartRouteDecision {
-  const current = candidates.projects.find((project) => project.source === "current") ?? candidates.projects[0];
-  if (current) {
-    return {
-      action: "new",
-      confidence: 0,
-      reason: `Automatic routing unavailable; defaulting to ${current.name} for human confirmation`,
-      sessionId: null,
-      projectId: current.id,
-      alternativeSessionIds: candidates.autoResumeSessions.slice(0, 3).map((session) => session.id),
-    };
-  }
-  return {
-    action: "ask_directory",
-    confidence: 0,
-    reason: `Automatic routing unavailable: ${error.message}`,
-    sessionId: null,
-    projectId: null,
-    alternativeSessionIds: candidates.autoResumeSessions.slice(0, 3).map((session) => session.id),
-  };
-}
-
-function verifiedDirectory(path: string): string | null {
-  try {
-    const real = realpathSync(path);
-    return statSync(real).isDirectory() ? real : null;
-  } catch {
-    return null;
-  }
+function stageFailure(stage: string, error: Error): number {
+  console.error(`ccs start: ${stage} failed: ${error.message}`);
+  return 1;
 }

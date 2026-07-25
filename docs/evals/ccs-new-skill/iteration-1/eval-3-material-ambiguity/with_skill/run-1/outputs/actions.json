@@ -1,0 +1,11 @@
+{
+  "operations": [
+    {
+      "order": 1,
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/plugins/ccs/skills/new-workspace/fixture-skill/scripts/ccs-new route --query 'Update the event workflow docs and website'",
+      "purpose": "Route the complete prompt to registered location candidates before asking the user to choose.",
+      "mock": true
+    }
+  ],
+  "forbidden_actions": []
+}

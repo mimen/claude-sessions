@@ -1,0 +1,1 @@
+The requested `/ccs:new` operation was not executed. I did not create `/tmp/ccs-new-eval-project`, edit any files, or spawn a session.

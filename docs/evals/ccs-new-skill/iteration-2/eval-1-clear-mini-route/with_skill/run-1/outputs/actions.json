@@ -1,0 +1,102 @@
+{
+  "operations": [
+    {
+      "operation": "prepare",
+      "command": "/scripts/ccs-new prepare --session-id 11111111-1111-4111-8111-111111111101",
+      "status": "failed",
+      "exit_code": 127,
+      "error": "no such file or directory: /scripts/ccs-new"
+    },
+    {
+      "operation": "prepare",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new prepare --session-id 11111111-1111-4111-8111-111111111101",
+      "status": "succeeded",
+      "output": "/tmp/ccs-new-prompts/11111111-1111-4111-8111-111111111101/prompt.txt"
+    },
+    {
+      "operation": "write",
+      "path": "/tmp/ccs-new-prompts/11111111-1111-4111-8111-111111111101/prompt.txt",
+      "content": "Implement remote session receipt confirmations in the CCS router"
+    },
+    {
+      "operation": "route",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new route --session-id 11111111-1111-4111-8111-111111111101",
+      "status": "succeeded",
+      "result": {
+        "request": "fixture",
+        "host": "Milads-M3-2",
+        "fresh_only": true,
+        "default_harness": "claude-gpt",
+        "default_model": "gpt-5.6-sol",
+        "registered_hosts": [
+          {
+            "name": "Milads-Mac-mini",
+            "capabilities": ["always-on", "headless", "ssh", "shared-vault"]
+          },
+          {
+            "name": "Milads-M3-2",
+            "capabilities": ["interactive-gui", "local-user-state", "browser-auth", "shared-vault"]
+          }
+        ],
+        "caller_context": {
+          "cwd": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router",
+          "git": {
+            "root": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router",
+            "branch": "feat/ccs-new-router",
+            "dirty": true,
+            "gitDir": "/fixture/worktrees/ccs-new-router",
+            "commonDir": "/fixture/.git",
+            "linkedWorktree": true
+          }
+        },
+        "candidates": [
+          {
+            "key": "ccs",
+            "host": "Milads-M3-2",
+            "current_host": "Milads-M3-2",
+            "name": "CCS",
+            "aliases": ["session router"],
+            "cwd": "/Users/mimen/Programming/Repos/claude-sessions",
+            "kind": "repo",
+            "eligible_hosts": ["Milads-M3-2", "Milads-Mac-mini"],
+            "preferred_host": "Milads-Mac-mini",
+            "host_capabilities": ["interactive-gui", "local-user-state", "browser-auth", "shared-vault"],
+            "declared_default_harness": null,
+            "declared_default_model": null,
+            "default_harness": "claude-gpt",
+            "default_model": "gpt-5.6-sol",
+            "status": "active",
+            "host_eligible": true,
+            "validation_error": null,
+            "score": 1,
+            "existing_session_warnings": []
+          }
+        ]
+      }
+    },
+    {
+      "operation": "launch",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new launch --session-id 11111111-1111-4111-8111-111111111101 --host Milads-Mac-mini --location ccs",
+      "status": "succeeded",
+      "result": {
+        "status": "workspace_created",
+        "session_id": "pending",
+        "title": "Remote session receipt confirmations",
+        "host": "Milads-Mac-mini",
+        "location": "ccs",
+        "cwd": "/Users/mimen1994/Programming/Repos/claude-sessions",
+        "harness": "claude-gpt",
+        "model": "gpt-5.6-sol",
+        "launch_model": "gpt-5.6-sol[1m]",
+        "workspace_ref": "workspace:fixture-mini",
+        "uncertainty": "Remote workspace creation succeeded, but session reservation and prompt delivery are not yet receipt-confirmed. Inspect this workspace before any retry."
+      }
+    },
+    {
+      "operation": "cleanup",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new cleanup --session-id 11111111-1111-4111-8111-111111111101",
+      "status": "succeeded",
+      "output": ""
+    }
+  ]
+}
