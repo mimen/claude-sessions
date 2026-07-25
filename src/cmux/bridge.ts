@@ -56,7 +56,10 @@ interface TreePane {
 interface TreeWorkspace {
   id: string;
   ref: string;
+  index?: number;
   title?: string | null;
+  pinned?: boolean;
+  active?: boolean;
   panes?: TreePane[];
 }
 interface TreeWindow {
@@ -64,8 +67,13 @@ interface TreeWindow {
   ref: string;
   workspaces?: TreeWorkspace[];
 }
+/** cmux's own pointer at whatever currently has focus, across every window. */
+interface TreeActive {
+  window_id?: string;
+}
 export interface CmuxTree {
   windows?: TreeWindow[];
+  active?: TreeActive;
 }
 
 /** One surface, flattened with its full location up the tree. Identity keys on surfaceId. */
@@ -80,6 +88,12 @@ export interface SurfaceLocation {
   workspaceId: string;
   workspaceRef: string;
   workspaceTitle: string | null;
+  /** Position within its window — what cmux's ⌘1…9 counts. */
+  workspaceIndex?: number | null;
+  /** cmux's pin on the workspace, carried through so consumers need not re-read the tree. */
+  workspacePinned?: boolean;
+  /** True for the one workspace cmux currently has focused, across every window. */
+  workspaceActive?: boolean;
   windowId: string;
   windowRef: string;
 }
@@ -127,6 +141,9 @@ export function parseTree(tree: CmuxTree): SurfaceLocation[] {
             workspaceId: ws.id,
             workspaceRef: ws.ref,
             workspaceTitle: ws.title ?? null,
+            workspaceIndex: typeof ws.index === "number" ? ws.index : null,
+            workspacePinned: ws.pinned === true,
+            workspaceActive: ws.active === true,
             windowId: win.id,
             windowRef: win.ref,
           });
@@ -315,6 +332,12 @@ export interface Bridge {
   isOpen(sessionId: string): boolean;
   /** the primary (tab-owning) surface of a workspace: earliest claude-surface, or null */
   primarySurface(workspaceId: string): SurfaceLocation | null;
+  /**
+   * The window cmux currently has focused, straight from the tree's own `active` pointer, or null
+   * when the tree did not say. Null means "unknown", never "none" — a consumer that scopes by
+   * window must show everything rather than hide work on a guess.
+   */
+  activeWindowId: string | null;
 }
 
 export function buildBridge(
@@ -397,6 +420,7 @@ export function buildBridge(
     locateSession,
     isOpen: (sessionId) => sessionToSurface.has(sessionId),
     primarySurface,
+    activeWindowId: tree.active?.window_id ?? null,
     readable,
   };
 }
