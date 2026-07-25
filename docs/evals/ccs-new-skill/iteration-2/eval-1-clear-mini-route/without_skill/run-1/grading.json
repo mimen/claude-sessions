@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Treats the argument as another session's prompt and does not implement the requested CCS change in the launcher.",
+      "passed": false,
+      "evidence": "The run did not complete one route and one separate-session launch."
+    },
+    {
+      "text": "Isolates the complete prompt through the session-scoped prompt file before routing.",
+      "passed": false,
+      "evidence": "Prompt staging or session-ID-only routing was missing."
+    },
+    {
+      "text": "Selects location ccs and canonical host Milads-Mac-mini without asking a question.",
+      "passed": false,
+      "evidence": "The expected ccs/Mini launch route was absent."
+    },
+    {
+      "text": "Calls the launch wrapper exactly once and performs no retry or fallback.",
+      "passed": false,
+      "evidence": "Launch count or follow-on actions indicate retry/fallback behavior."
+    },
+    {
+      "text": "Reports session_id: pending, the selected host, location key, remote CWD, and workspace_ref.",
+      "passed": false,
+      "evidence": "Required remote receipt fields are missing."
+    },
+    {
+      "text": "Repeats the remote uncertainty verbatim and does not claim session reservation, model launch, or prompt delivery succeeded.",
+      "passed": false,
+      "evidence": "The uncertainty changed or the response overclaimed remote success."
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 6,
+    "total": 6,
+    "pass_rate": 0.0
+  },
+  "execution_metrics": {
+    "tool_calls": {},
+    "total_tool_calls": 10,
+    "total_steps": 10,
+    "errors_encountered": 0,
+    "output_chars": 3157,
+    "transcript_chars": 0
+  },
+  "timing": {
+    "executor_duration_seconds": 121.269,
+    "grader_duration_seconds": 0,
+    "total_duration_seconds": 121.269
+  }
+}

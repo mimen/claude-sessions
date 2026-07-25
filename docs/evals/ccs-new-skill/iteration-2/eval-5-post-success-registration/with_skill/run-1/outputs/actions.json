@@ -1,0 +1,90 @@
+{
+  "session_id": "55555555-5555-4555-8555-555555555505",
+  "operations": [
+    {
+      "step": 1,
+      "operation": "prepare",
+      "command": "fixture-skill/scripts/ccs-new prepare --session-id '55555555-5555-4555-8555-555555555505'",
+      "result": {
+        "prompt_path": "/tmp/ccs-new-prompts/55555555-5555-4555-8555-555555555505/prompt.txt"
+      }
+    },
+    {
+      "step": 2,
+      "operation": "write_prompt",
+      "path": "/tmp/ccs-new-prompts/55555555-5555-4555-8555-555555555505/prompt.txt",
+      "prompt": "In /tmp/ccs-new-eval-project, add a small README note",
+      "result": "written exactly as user data"
+    },
+    {
+      "step": 3,
+      "operation": "route",
+      "command": "fixture-skill/scripts/ccs-new route --session-id '55555555-5555-4555-8555-555555555505'",
+      "result": {
+        "request": "fixture",
+        "host": "Milads-M3-2",
+        "fresh_only": true,
+        "default_harness": "claude-gpt",
+        "default_model": "gpt-5.6-sol",
+        "registered_hosts": [
+          {
+            "name": "Milads-Mac-mini",
+            "capabilities": ["always-on", "headless", "ssh", "shared-vault"]
+          },
+          {
+            "name": "Milads-M3-2",
+            "capabilities": ["interactive-gui", "local-user-state", "browser-auth", "shared-vault"]
+          }
+        ],
+        "caller_context": {
+          "cwd": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router",
+          "git": {
+            "root": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router",
+            "branch": "feat/ccs-new-router",
+            "dirty": true,
+            "gitDir": "/fixture/worktrees/ccs-new-router",
+            "commonDir": "/fixture/.git",
+            "linkedWorktree": true
+          }
+        },
+        "candidates": []
+      }
+    },
+    {
+      "step": 4,
+      "operation": "launch",
+      "command": "fixture-skill/scripts/ccs-new launch --session-id '55555555-5555-4555-8555-555555555505' --host 'Milads-M3-2' --cwd '/tmp/ccs-new-eval-project' --title 'Add README note' --model 'gpt-5.6-sol' --require-capability 'local-user-state'",
+      "result": {
+        "status": "launched",
+        "session_id": "33333333-3333-4333-8333-333333333333",
+        "title": "Add README note",
+        "host": "Milads-M3-2",
+        "location": null,
+        "cwd": "/tmp/ccs-new-eval-project",
+        "harness": "claude-gpt",
+        "model": "gpt-5.6-sol",
+        "launch_model": "gpt-5.6-sol[1m]",
+        "workspace_ref": "workspace:fixture-explicit",
+        "error": null
+      }
+    },
+    {
+      "step": 5,
+      "operation": "register",
+      "command": "fixture-skill/scripts/ccs-new register 'ccs-new-eval-project' --cwd '/tmp/ccs-new-eval-project' --eligible-host 'Milads-M3-2'",
+      "result": {
+        "status": "registered",
+        "key": "ccs-new-eval-project",
+        "cwd": "/tmp/ccs-new-eval-project",
+        "eligible_hosts": ["Milads-M3-2"]
+      },
+      "precondition": "launch result status was launched"
+    },
+    {
+      "step": 6,
+      "operation": "cleanup",
+      "command": "fixture-skill/scripts/ccs-new cleanup --session-id '55555555-5555-4555-8555-555555555505'",
+      "result": "completed with no output"
+    }
+  ]
+}

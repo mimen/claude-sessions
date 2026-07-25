@@ -1,9 +1,50 @@
-import { hostname } from "node:os";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
-import { CONFIG_PATH, DEFAULT_STORE_PATH, expandHome } from "./paths.ts";
+import { CONFIG_PATH, DEFAULT_STORE_PATH, HOST_REGISTRY_PATH, LOCATION_REGISTRY_PATH, expandHome } from "./paths.ts";
 import { type Result, ok, err } from "./result.ts";
+
+interface HostIdentityRuntime {
+  readonly platform: NodeJS.Platform;
+  readonly hostname: () => string;
+  readonly execFileSync: (file: string, args: readonly string[]) => string;
+}
+
+const DEFAULT_HOST_IDENTITY_RUNTIME: HostIdentityRuntime = {
+  platform: process.platform,
+  hostname,
+  execFileSync: (file, args) =>
+    execFileSync(file, [...args], {
+      encoding: "utf8",
+      timeout: 3_000,
+    }),
+};
+
+const darwinHostLabels = new WeakMap<HostIdentityRuntime, string>();
+
+function resolveHostLabel(configuredLabel: string, runtime: HostIdentityRuntime): Result<string> {
+  if (configuredLabel.trim()) return ok(configuredLabel);
+  if (runtime.platform !== "darwin") return ok(runtime.hostname());
+  const cached = darwinHostLabels.get(runtime);
+  if (cached) return ok(cached);
+
+  let output: string;
+  try {
+    output = runtime.execFileSync("/usr/sbin/scutil", ["--get", "LocalHostName"]);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    return err(new Error(`/usr/sbin/scutil --get LocalHostName failed: ${detail}`));
+  }
+
+  const localHostName = output.trim();
+  if (!localHostName) {
+    return err(new Error("/usr/sbin/scutil --get LocalHostName returned a blank value"));
+  }
+  darwinHostLabels.set(runtime, localHostName);
+  return ok(localHostName);
+}
 
 /**
  * User config lives at ~/.ccs/config.toml (ADR-0049 — runtime home). Every key is optional;
@@ -17,12 +58,20 @@ const ConfigSchema = z.object({
     .prefault({}),
   host: z
     .object({
-      label: z.string().default(hostname()),
+      label: z.string().default(""),
     })
     .prefault({}),
   resume: z
     .object({
       target: z.enum(["auto", "cmux", "inline"]).default("auto"),
+    })
+    .prefault({}),
+  routing: z
+    .object({
+      /** Shared, curated launch-location registry; empty resolves to the CCS runtime default. */
+      registry: z.string().default(""),
+      /** Shared canonical-host to SSH-alias registry; empty resolves to the CCS runtime default. */
+      hosts: z.string().default(""),
     })
     .prefault({}),
   /**
@@ -81,7 +130,10 @@ const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 /** Load and validate config, applying defaults. `store.path` is `~`-expanded. */
-export function loadConfig(path: string = CONFIG_PATH()): Result<Config> {
+export function loadConfig(
+  path: string = CONFIG_PATH(),
+  hostIdentityRuntime: HostIdentityRuntime = DEFAULT_HOST_IDENTITY_RUNTIME,
+): Result<Config> {
   let raw: unknown = {};
   try {
     const text = readFileSync(path, "utf8");
@@ -99,6 +151,16 @@ export function loadConfig(path: string = CONFIG_PATH()): Result<Config> {
   }
 
   const config = parsed.data;
+  const hostLabel = resolveHostLabel(config.host.label, hostIdentityRuntime);
+  if (!hostLabel.ok) return err(hostLabel.error);
+
+  config.host.label = hostLabel.value;
   config.store.path = expandHome(config.store.path);
+  config.routing.registry = config.routing.registry
+    ? expandHome(config.routing.registry)
+    : LOCATION_REGISTRY_PATH();
+  config.routing.hosts = config.routing.hosts
+    ? expandHome(config.routing.hosts)
+    : HOST_REGISTRY_PATH();
   return ok(config);
 }

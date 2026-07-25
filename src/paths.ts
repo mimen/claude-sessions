@@ -17,6 +17,10 @@ export function runtimeRoot(): string {
 /** The tool's own data dir under the runtime root. `cache/` holds the SQLite (state + caches). */
 const DATA_DIR = () => join(runtimeRoot(), "cache");
 export const CONFIG_PATH = () => join(runtimeRoot(), "config.toml");
+/** Validated launch-location registry, normally a machine-adapter-managed link to shared config. */
+export const LOCATION_REGISTRY_PATH = () => join(runtimeRoot(), "locations.toml");
+/** Validated remote-host registry, normally a machine-adapter-managed link to shared config. */
+export const HOST_REGISTRY_PATH = () => join(runtimeRoot(), "hosts.toml");
 export const DB_PATH = () => join(DATA_DIR(), "index.db");
 /**
  * Catalogue: session metadata (rename, loop, lifecycle, tags). A SEPARATE file from the Index

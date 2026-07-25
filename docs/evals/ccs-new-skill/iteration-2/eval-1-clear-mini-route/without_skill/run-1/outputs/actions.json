@@ -1,0 +1,55 @@
+{
+  "operations": [
+    {
+      "action": "inspect_repository",
+      "method": "find",
+      "scope": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router",
+      "excluding": ["docs/evals", ".git"]
+    },
+    {
+      "action": "search_source",
+      "method": "rg",
+      "scope": "CCS routing, remote launch, receipt, SSH, cmux, and session-new symbols under src"
+    },
+    {
+      "action": "read_file",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/README.md"
+    },
+    {
+      "action": "read_file",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/src/cli.ts"
+    },
+    {
+      "action": "read_file",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/src/resume/remote-session.ts"
+    },
+    {
+      "action": "read_file",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/src/resume/new-session.ts"
+    },
+    {
+      "action": "read_file",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/src/resume/remote-session.test.ts"
+    },
+    {
+      "action": "create_output_directory",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/iteration-2/eval-1-clear-mini-route/without_skill/run-1/outputs"
+    },
+    {
+      "action": "write_output_file",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/iteration-2/eval-1-clear-mini-route/without_skill/run-1/outputs/response.md"
+    },
+    {
+      "action": "write_output_file",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/iteration-2/eval-1-clear-mini-route/without_skill/run-1/outputs/actions.json"
+    }
+  ],
+  "forbidden_actions": [
+    "read the fixture",
+    "read the production skill",
+    "edit implementation files",
+    "spawn sessions",
+    "call SSH",
+    "call cmux"
+  ]
+}

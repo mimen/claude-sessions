@@ -16,6 +16,7 @@ import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, pro
 import { newSession } from "./resume/new-session.ts";
 import { delegateCommand } from "./delegate/command.ts";
 import { startCommand } from "./start/command.ts";
+import { locationCommand } from "./locations/command.ts";
 import { doctorCommand } from "./doctor/command.ts";
 import { launcherCommand } from "./launcher/command.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
@@ -57,7 +58,8 @@ use \`ccs identity …\`; for per-run session state (title, parent, lifecycle) u
 Usage:
   ccs                 Launch the session browser (Go TUI — the default)
   ccs classic         Launch the legacy Ink TUI (DEPRECATED; will be removed)
-  ccs start [--dry-run|--explain] [description...]  Route work to an active session or managed new session
+  ccs start [--] [text...]  Open a fresh managed launcher with /ccs:new prefilled, not submitted
+  ccs location list|show|match|register|retire      Manage curated session launch locations
   ccs reindex [--titles]   Refresh through the host-local catalogue authority
   ccs catalogue-service start|status|stop|refresh   Manage the on-demand local authority
   ccs enrich [<id>|.] [--json]                    Summarise one session (what it was, what's open, what to do)
@@ -90,10 +92,13 @@ Sessions (ephemeral, per-run):
   ccs session complete|archive|uncomplete|unarchive <id>   Per-session lifecycle
   ccs session new <--top-level|--child-of <uuid|.>> [flags]  Mint id, classify at birth, launch \`claude --session-id\`
     explicit identity: --identity=<key> --cluster=<c> --role=<r> (must match stored identity; cannot combine with --key)
-    flags: --cluster --role --title --cwd <dir> --prompt "..." --permission-mode <mode>
+    flags: --cluster --role --title --cwd <dir> --location <key> --host <canonical-host>
+           --prompt "..." --permission-mode <mode> --require-capability <name> (repeatable)
+           --model <canonical-model-id> (derives launcher; cannot combine with --via)
            --pr-repo owner/repo --pr-number 123 --gus-work W-... · --print-id (reserve only)
-           --via <launcher> (birth a policy-less session on a configured launcher, e.g. claude-gpt)
-           role.toml model policy: canonical IDs compile launcher + --model; it rejects --via
+           --json (structured detached-launch receipt with full session id and workspace ref)
+           --via <launcher> (legacy policy-less launcher selection, e.g. claude-gpt)
+           role.toml model policy: canonical IDs compile launcher + --model; it rejects --via/--model
   ccs session bump <id> [--note "..."]            Wake the session's cmux tab
   ccs session-fields <sid> --json '{...}' [--sensor <name>]  Atomic multi-field write (ADR-0078)
   ccs historical-backfill detached-children --expect-sha256 <digest> [--apply]
@@ -178,16 +183,20 @@ export async function main(argv: string[]): Promise<number> {
   reporter.invocation(invocation);
   reporter.breadcrumb("cli.start", invocation);
 
+  const command = args[0];
+  // `ccs start` treats trailing dash-leading argv as composer text. Dispatch it before global
+  // help/version scanning so only its own explicit parser decides what those tokens mean.
+  if (command === "start") return startCommand(args.slice(1));
+
   if (args.includes("--version") || args.includes("-v")) {
     console.log(pkg.version);
     return 0;
   }
-  if (args.includes("--help") || args.includes("-h") || args[0] === "help") {
+  if (args.includes("--help") || args.includes("-h") || command === "help") {
     console.log(HELP);
     return 0;
   }
 
-  const command = args[0];
   switch (command) {
     case "reindex":
       return await reindex({ titles: args.includes("--titles") });
@@ -201,8 +210,8 @@ export async function main(argv: string[]): Promise<number> {
       return ls({ all: args.includes("--all"), loops: args.includes("--loops"), auxiliary: args.includes("--auxiliary") });
     case "tree":
       return tree({ all: args.includes("--all"), auxiliary: args.includes("--auxiliary") });
-    case "start":
-      return startCommand(args.slice(1));
+    case "location":
+      return locationCommand(args.slice(1));
     case "delegate":
       return delegateCommand(args.slice(1));
     case "doctor":
