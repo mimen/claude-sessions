@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
+  accessSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -388,15 +390,37 @@ export function matchLocations(registry: LocationRegistry, query: string): Locat
   return matches.sort((a, b) => b.score - a.score || a.location.name.localeCompare(b.location.name));
 }
 
-function registryDestination(path: string): string {
+function registryDestination(path: string): Result<string> {
   // Machine adapter normally exposes the shared vault registry through ~/.ccs/locations.toml.
-  // Write the symlink target rather than replacing the managed link with a local file.
-  return existsSync(path) ? realpathSync(path) : path;
+  // lstat must inspect the managed link itself: existsSync follows links and returns false when
+  // their target is missing, which would otherwise let an atomic rename replace the link.
+  let metadata: ReturnType<typeof lstatSync>;
+  try {
+    metadata = lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return ok(path);
+    return err(new Error(`Failed to inspect location registry at ${path}: ${(error as Error).message}`));
+  }
+  if (!metadata.isSymbolicLink()) return ok(path);
+
+  try {
+    const destination = realpathSync(path);
+    accessSync(destination, constants.R_OK);
+    if (!statSync(destination).isFile()) throw new Error("target is not a regular file");
+    return ok(destination);
+  } catch (error) {
+    return err(new Error(
+      `Managed location registry symlink at ${path} has a missing or unreadable target; ` +
+        `restore the managed target before registering locations (${(error as Error).message})`,
+    ));
+  }
 }
 
 function writeRegistryContent(path: string, content: string): Result<void> {
   try {
-    const destination = registryDestination(path);
+    const resolved = registryDestination(path);
+    if (!resolved.ok) return resolved;
+    const destination = resolved.value;
     mkdirSync(dirname(destination), { recursive: true });
     const mode = existsSync(destination) ? statSync(destination).mode & 0o777 : 0o600;
     const temp = `${destination}.tmp-${process.pid}`;
@@ -464,8 +488,10 @@ export function registerLocation(
   const registrationPath = validateRegistrationPath(cwd, registrationPolicy);
   if (!registrationPath.ok) return registrationPath;
 
-  const registryExists = existsSync(path);
-  const loaded = loadRegistryForWrite(path, defaultHost);
+  const destination = registryDestination(path);
+  if (!destination.ok) return destination;
+  const registryExists = existsSync(destination.value);
+  const loaded = loadRegistryForWrite(destination.value, defaultHost);
   if (!loaded.ok) return loaded;
   const eligibleHosts = input.eligibleHosts.map((host) => host.trim()).filter(Boolean);
   const preferredHost = input.preferredHost?.trim() || eligibleHosts[0] || defaultHost;
@@ -500,7 +526,7 @@ export function registerLocation(
   const resolved = resolveLocationForHost(location, preferredHost);
   if (!resolved.ok) return resolved;
   const content = registryExists
-    ? appendLocationContent(readFileSync(registryDestination(path), "utf8"), location)
+    ? appendLocationContent(readFileSync(destination.value, "utf8"), location)
     : renderRegistry(next);
   const written = writeRegistryContent(path, content);
   if (!written.ok) return written;
@@ -522,7 +548,9 @@ export function retireLocation(path: string, key: string): Result<LaunchLocation
   };
   const validation = validateRegistry(next);
   if (!validation.ok) return validation;
-  const content = retireLocationContent(readFileSync(registryDestination(path), "utf8"), key);
+  const destination = registryDestination(path);
+  if (!destination.ok) return destination;
+  const content = retireLocationContent(readFileSync(destination.value, "utf8"), key);
   if (!content.ok) return content;
   const written = writeRegistryContent(path, content.value);
   if (!written.ok) return written;
