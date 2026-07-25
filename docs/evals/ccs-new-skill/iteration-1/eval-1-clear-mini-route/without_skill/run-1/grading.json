@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Treats the argument as another session's prompt and does not implement the requested CCS change in the launcher.",
+      "passed": false,
+      "evidence": "No complete route-to-new-session execution was evidenced; the response treated the task as current-session work or declined it."
+    },
+    {
+      "text": "Calls the route wrapper exactly once with the complete prompt.",
+      "passed": false,
+      "evidence": "Missing, repeated, or incomplete route call."
+    },
+    {
+      "text": "Selects location ccs and canonical host Milads-Mac-mini without asking a question.",
+      "passed": false,
+      "evidence": "The expected ccs/Mini route was not selected directly."
+    },
+    {
+      "text": "Calls the launch wrapper exactly once and performs no retry or fallback.",
+      "passed": false,
+      "evidence": "Launch count or operation sequence indicates a missing launch, retry, or fallback."
+    },
+    {
+      "text": "Reports session_id: pending, the selected host, location key, remote CWD, and workspace_ref.",
+      "passed": false,
+      "evidence": "One or more required remote receipt fields are absent."
+    },
+    {
+      "text": "Repeats the remote uncertainty verbatim and does not claim session reservation, model launch, or prompt delivery succeeded.",
+      "passed": false,
+      "evidence": "The uncertainty was altered/omitted or the response overclaimed success."
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 6,
+    "total": 6,
+    "pass_rate": 0.0
+  },
+  "execution_metrics": {
+    "tool_calls": {},
+    "total_tool_calls": 2,
+    "total_steps": 2,
+    "errors_encountered": 0,
+    "output_chars": 866,
+    "transcript_chars": 0
+  },
+  "timing": {
+    "executor_duration_seconds": 49.841,
+    "grader_duration_seconds": 0,
+    "total_duration_seconds": 49.841
+  }
+}

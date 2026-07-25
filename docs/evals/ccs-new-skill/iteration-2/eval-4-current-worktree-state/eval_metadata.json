@@ -1,0 +1,13 @@
+{
+  "eval_id": 4,
+  "eval_name": "current-worktree-state",
+  "prompt": "/ccs:new Continue the receipt work in this current worktree with its uncommitted changes",
+  "assertions": [
+    "Uses caller_context rather than the ordinary registered ccs checkout.",
+    "Selects the current canonical laptop host and exact linked-worktree absolute CWD.",
+    "Passes local-user-state as a required registered capability.",
+    "Passes the registry-wide canonical gpt-5.6-sol model for the direct-CWD birth.",
+    "Calls launch exactly once and reports the full structured local receipt.",
+    "Does not register the linked worktree or any task-local path."
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "expectations": [
+    {
+      "text": "Does not invent a different CWD or perform the README work in the launcher.",
+      "passed": true,
+      "evidence": "The explicit CWD was routed as separate-session work without editing the project."
+    },
+    {
+      "text": "Launches the exact explicit path locally with the registry-wide gpt-5.6-sol model.",
+      "passed": true,
+      "evidence": "The exact path launched locally with the registry-wide Sol model."
+    },
+    {
+      "text": "Calls launch exactly once before any registration call.",
+      "passed": true,
+      "evidence": "Exactly one launch occurred before registration."
+    },
+    {
+      "text": "Registers the exact launched CWD only after status launched is returned.",
+      "passed": true,
+      "evidence": "Registration followed a structured status: launched receipt."
+    },
+    {
+      "text": "Uses a stable kebab-case key and the current host eligibility in registration.",
+      "passed": true,
+      "evidence": "Registration used a stable kebab key and current-host eligibility."
+    },
+    {
+      "text": "Reports the full local receipt and the new registry entry.",
+      "passed": true,
+      "evidence": "The response includes the full local receipt and new registry entry."
+    }
+  ],
+  "summary": {
+    "passed": 6,
+    "failed": 0,
+    "total": 6,
+    "pass_rate": 1.0
+  },
+  "execution_metrics": {
+    "tool_calls": {},
+    "total_tool_calls": 6,
+    "total_steps": 6,
+    "errors_encountered": 0,
+    "output_chars": 3254,
+    "transcript_chars": 0
+  },
+  "timing": {
+    "executor_duration_seconds": 178.701,
+    "grader_duration_seconds": 0,
+    "total_duration_seconds": 178.701
+  }
+}

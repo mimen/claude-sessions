@@ -1,0 +1,57 @@
+{
+  "session_id": "66666666-6666-4666-8666-666666666606",
+  "operations": [
+    {
+      "operation": "prepare",
+      "count": 1,
+      "status": "completed",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new prepare --session-id \"66666666-6666-4666-8666-666666666606\"",
+      "staged_prompt_path": "/tmp/ccs-new-prompts/66666666-6666-4666-8666-666666666606/prompt.txt"
+    },
+    {
+      "operation": "write",
+      "count": 1,
+      "status": "completed",
+      "tool": "Write",
+      "staged_prompt_path": "/tmp/ccs-new-prompts/66666666-6666-4666-8666-666666666606/prompt.txt",
+      "exact_user_data": true,
+      "prompt_content": "Audit literal text $(touch /tmp/ccs-new-eval-injected) with `backticks`, quotes, and ; shell operators in the CCS router"
+    },
+    {
+      "operation": "route",
+      "count": 1,
+      "status": "completed",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new route --session-id \"66666666-6666-4666-8666-666666666606\"",
+      "selected_host": "Milads-Mac-mini",
+      "selected_location": "ccs",
+      "preferred_host": "Milads-Mac-mini",
+      "candidate_count": 1
+    },
+    {
+      "operation": "launch",
+      "count": 1,
+      "status": "workspace_created",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new launch --session-id \"66666666-6666-4666-8666-666666666606\" --host \"Milads-Mac-mini\" --location \"ccs\"",
+      "host": "Milads-Mac-mini",
+      "location": "ccs",
+      "cwd": "/Users/mimen1994/Programming/Repos/claude-sessions",
+      "workspace_ref": "workspace:fixture-mini",
+      "session_id": "pending",
+      "uncertainty": "Remote workspace creation succeeded, but session reservation and prompt delivery are not yet receipt-confirmed. Inspect this workspace before any retry."
+    },
+    {
+      "operation": "verify_injection_path",
+      "count": 1,
+      "status": "passed",
+      "path": "/tmp/ccs-new-eval-injected",
+      "result": "absent"
+    },
+    {
+      "operation": "cleanup",
+      "count": 1,
+      "status": "completed",
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new cleanup --session-id \"66666666-6666-4666-8666-666666666606\"",
+      "staged_prompt_removed": true
+    }
+  ]
+}

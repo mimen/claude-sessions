@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>CCS New Session Router</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+      --line: color-mix(in srgb, currentColor 16%, transparent);
+      --line-strong: color-mix(in srgb, currentColor 32%, transparent);
+      --surface: color-mix(in srgb, currentColor 5%, transparent);
+      --surface-2: color-mix(in srgb, currentColor 8%, transparent);
+      --accent: #2f6bff;
+      --warn: #b6791b;
+      font-family: var(--font);
+      line-height: 1.62;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --accent: #86a9ff; --warn: #e2b155; }
+    }
+    * { box-sizing: border-box; }
+    body { max-width: 900px; margin: 0 auto; padding: 2.5rem 1.25rem 6rem; }
+    h1, h2, h3, h4 { line-height: 1.22; }
+    h1 { font-size: 2.1rem; margin: 0.3rem 0 0; letter-spacing: -0.01em; }
+    h2 { font-size: 1.4rem; margin: 0 0 0.8rem; letter-spacing: -0.01em; }
+    h3 { font-size: 1.08rem; margin: 1.6rem 0 0.6rem; }
+    p { margin: 0.7rem 0; }
+    a { color: var(--accent); text-underline-offset: 2px; }
+    .eyebrow { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin: 0 0 0.15rem; }
+    .muted { opacity: 0.68; }
+    .path { font-family: var(--mono); font-size: 0.82rem; word-break: break-all; }
+    code { font-family: var(--mono); background: var(--surface-2); padding: 0.08rem 0.32rem; border-radius: 0.25rem; font-size: 0.9em; }
+    pre { font-family: var(--mono); overflow-x: auto; padding: 1rem 1.1rem; background: var(--surface); border: 1px solid var(--line); border-radius: 0.6rem; font-size: 0.84rem; line-height: 1.5; }
+    pre code { background: none; padding: 0; font-size: 1em; }
+    section { padding: 2rem 0 0; margin: 2rem 0 0; border-top: 1px solid var(--line); }
+    header { padding-bottom: 0.5rem; }
+    .banner { border: 1px solid var(--line); border-left: 0.32rem solid var(--accent); background: var(--surface); border-radius: 0 0.6rem 0.6rem 0; padding: 1rem 1.15rem; margin: 1.4rem 0; }
+    .banner .status { font-weight: 700; margin: 0 0 0.3rem; }
+    .lede { font-size: 1.12rem; }
+    .stance { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.8rem; margin: 1.2rem 0; }
+    .stance div { border: 1px solid var(--line); border-radius: 0.6rem; padding: 0.9rem 1rem; background: var(--surface); }
+    .stance b { display: block; margin-bottom: 0.25rem; }
+    .stance p { margin: 0; font-size: 0.92rem; }
+    .flow { list-style: none; margin: 1.2rem 0 0; padding: 0; position: relative; }
+    .flow li { display: flex; gap: 1rem; padding-bottom: 1.2rem; position: relative; }
+    .flow li:not(:last-child)::before { content: ""; position: absolute; left: 0.92rem; top: 1.95rem; bottom: -0.15rem; width: 2px; background: var(--line-strong); }
+    .flow .n { flex: none; width: 1.85rem; height: 1.85rem; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 0.9rem; position: relative; z-index: 1; }
+    @media (prefers-color-scheme: dark) { .flow .n { color: #0b1020; } }
+    .flow .b { display: block; margin-bottom: 0.1rem; }
+    .opts { display: grid; gap: 0.9rem; margin: 1.2rem 0 0; }
+    .opt { border: 1px solid var(--line); border-left: 0.32rem solid var(--line-strong); border-radius: 0 0.5rem 0.5rem 0; padding: 0.9rem 1.1rem; background: var(--surface); }
+    .opt p { margin: 0.4rem 0; font-size: 0.95rem; }
+    .opt p:first-child { margin-top: 0; }
+    .opt p:last-child { margin-bottom: 0; }
+    .opt .kept b { color: var(--accent); }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 0.8rem; margin: 1.2rem 0; }
+    .stat { border: 1px solid var(--line); border-radius: 0.6rem; padding: 1rem; background: var(--surface); }
+    .stat b { display: block; font-size: 1.75rem; line-height: 1.1; color: var(--accent); letter-spacing: -0.01em; }
+    .stat span { display: block; margin-top: 0.35rem; font-size: 0.85rem; }
+    .stat .sub { opacity: 0.66; font-size: 0.78rem; margin-top: 0.15rem; }
+    .callout { border: 1px solid var(--line); border-left: 0.32rem solid var(--accent); background: var(--surface); border-radius: 0 0.5rem 0.5rem 0; padding: 0.9rem 1.15rem; margin: 1.1rem 0; }
+    .callout.warn { border-left-color: var(--warn); }
+    .callout h3 { margin: 0 0 0.4rem; font-size: 1rem; }
+    .callout ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
+    .callout li { margin: 0.35rem 0; }
+    .ladder { margin: 1rem 0; padding-left: 1.35rem; }
+    .ladder li { margin: 0.35rem 0; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.92rem; }
+    th, td { text-align: left; vertical-align: top; padding: 0.6rem 0.7rem; border: 1px solid var(--line); }
+    th { background: var(--surface-2); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .refs { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: 0.55rem; }
+    .refs li { font-size: 0.9rem; }
+    ul.plain { margin: 0.8rem 0; padding-left: 1.15rem; }
+    ul.plain li { margin: 0.4rem 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <p class="eyebrow">Decision record &middot; read only</p>
+    <h1><code>/ccs:new</code> session router</h1>
+    <p class="lede">One command turns an initial prompt into a correctly placed, correctly routed, CCS-managed top-level session. Local births return a concrete session and workspace; remote births report exactly what is known and leave the session ID pending when target-side delivery cannot yet be confirmed.</p>
+    <div class="banner">
+      <p class="status">Status: implementation and release-blocker fixes are committed and locally validated. Router integration and installation remain pending.</p>
+      <p class="muted" style="margin:0;">The swap-harness dependency is merged. The router branch is not yet pushed or merged, and no runtime link, installed plugin, live session, remote workspace, or Dock control has been changed.</p>
+    </div>
+    <p class="path muted">Artifact: /Users/mimen/Programming/Repos/claude-sessions/docs/plans/ccs-new-session-router.html</p>
+  </header>
+
+  <section>
+    <p class="eyebrow">01 &middot; The change</p>
+    <h2>What <code>/ccs:new</code> changes</h2>
+    <p>Today, turning an idea into a running session goes through <code>ccs start</code>, a one-shot inference step that guesses a resume payload before launching. Measured on 2026-07-24, <code>ccs start --explain "Implement a fast new-session router for CCS"</code> took 3.75 seconds, produced an invalid resume payload, and fell back to 0% confidence.</p>
+    <p><code>/ccs:new</code> replaces that guess. It is a user-invoked CCS plugin skill (<code>plugins/ccs/skills/new/SKILL.md</code>, reached as <code>/ccs:new</code> through the installed <code>ccs</code> plugin) that reads a deterministic launch-location registry first and only asks a question when the destination is genuinely ambiguous. The invoking session is a launcher: it reads the prompt as a routing request and never performs the prompt as work. Routing, validation, and birth mechanics live in typed CCS code, so no second prompt-only router exists.</p>
+    <p><code>/ccs:new</code> becomes the single conversational router. <code>ccs start</code> remains as a deterministic shell shortcut: it opens a fresh CCS-managed top-level launcher and pre-fills <code>/ccs:new </code> in the Claude composer without pressing Enter, ready for the user to finish or edit the request. It contains no routing inference of its own. A local router receipt names the reserved session and workspace; a remote receipt names the SSH workspace and remains explicitly uncertain about target-side reservation and prompt delivery.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">02 &middot; Walkthrough</p>
+    <h2>The launch flow, end to end</h2>
+    <p>A submitted <code>/ccs:new</code> run moves through eight stages. The model already running the skill does the interpreting and any asking. A bundled deterministic wrapper only reads the registry, validates candidates, and returns structured JSON. There is no extra inference call. The optional <code>ccs start</code> entry point stops one step earlier: it creates the launcher and leaves the skill text unsubmitted for human completion.</p>
+    <ol class="flow">
+      <li><span class="n">1</span><div><b class="b">Interpret, do not execute.</b> The invoking session reads the initial prompt as a request to place and route a new session, not as work to carry out.</div></li>
+      <li><span class="n">2</span><div><b class="b">Match the registry.</b> Resolve exact keys, aliases, explicit paths, and deterministic token overlap against registered launch locations.</div></li>
+      <li><span class="n">3</span><div><b class="b">Inspect candidate facts.</b> Read the current host's canonical path and Git state, the authored eligible hosts and capabilities, and existing-session warnings. After a remote host is selected, CCS runs one bounded SSH preflight on that target before creating any workspace.</div></li>
+      <li><span class="n">4</span><div><b class="b">Clarify only when it matters.</b> If one candidate clearly dominates, launch it. Otherwise the current session presents the small candidate set through <code>AskUserQuestion</code>. No seam model participates.</div></li>
+      <li><span class="n">5</span><div><b class="b">Choose placement.</b> Prefer the Mac Mini only when location eligibility, required capabilities, and task-local-state checks pass. If remote preflight fails before any workspace exists, a laptop launch requires a separate explicit user choice after the concrete blocker is shown. Any remote workspace evidence forbids fallback.</div></li>
+      <li><span class="n">6</span><div><b class="b">Resolve the route.</b> Pick harness and exact target model from the canonical routing policy through the birth compiler. Because this is a user-managed root session, use <code>ccs session new --top-level</code>, not <code>ccs delegate</code>.</div></li>
+      <li><span class="n">7</span><div><b class="b">Create one managed birth.</b> Locally, CCS reserves the UUID and opens one detached cmux workspace with the prompt in the launcher argv. Remotely, CCS opens one local <code>cmux ssh</code> workspace whose command performs the Mini-side managed birth. Nothing is submitted twice.</div></li>
+      <li><span class="n">8</span><div><b class="b">Register if eligible, then report.</b> A durable explicit path may be registered only after a structured local <code>status: launched</code> receipt. The report states the machine, cwd, route, and available workspace or session identity without claiming target-side prompt delivery when it is not receipt-confirmed.</div></li>
+    </ol>
+  </section>
+
+  <section>
+    <p class="eyebrow">03 &middot; Design stance</p>
+    <h2>Three commitments the design holds to</h2>
+    <div class="stance">
+      <div><b>Interpret, don't execute</b><p>The launcher routes the prompt; it never runs it as work.</p></div>
+      <div><b>Thin skill, typed core</b><p>The skill owns the conversation; CCS code owns routing, validation, and births. No second router in prose.</p></div>
+      <div><b>Latency is a feature</b><p>Deterministic registry lookup first, one bounded target preflight when remote, and no extra model call.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">04 &middot; Alternatives</p>
+    <h2>Choices that lost, and why</h2>
+    <div class="opts">
+      <div class="opt">
+        <p class="lost"><b>Rejected:</b> a separate inference call (a lightweight seam model such as Luna) to interpret the prompt.</p>
+        <p class="kept"><b>Chosen:</b> the model already running <code>/ccs:new</code> interprets; a dedicated always-alive launcher may run Terra at medium effort.</p>
+        <p class="why muted"><b>Why:</b> an extra model call adds latency for no gain. Residual interpretation belongs to the session that already holds the context.</p>
+      </div>
+      <div class="opt">
+        <p class="lost"><b>Rejected:</b> reading routes from the legacy <code>ClaudeConfig/claudes</code> launch identities.</p>
+        <p class="kept"><b>Chosen:</b> one curated <code>locations.toml</code> registry; <code>claudes</code> remains intact until every surviving direct-launch capability has a tested replacement, then moves to the vault archive.</p>
+        <p class="why muted"><b>Why:</b> outdated identities would compete with the new surface and reintroduce folklore routes.</p>
+      </div>
+      <div class="opt">
+        <p class="lost"><b>Rejected:</b> birthing the session with <code>ccs delegate</code>.</p>
+        <p class="kept"><b>Chosen:</b> <code>ccs session new --top-level</code>.</p>
+        <p class="why muted"><b>Why:</b> the result is an independently managed root work body, not a subordinate auxiliary child.</p>
+      </div>
+      <div class="opt">
+        <p class="lost"><b>Rejected:</b> creating the Mac Mini workspace directly in the Mini's own cmux now.</p>
+        <p class="kept"><b>Chosen:</b> an interim <code>cmux ssh</code> workspace plus a Mini-side <code>ccs session new --inline</code> birth.</p>
+        <p class="why muted"><b>Why:</b> the Mini cmux socket requires authentication and its expected password source is absent, so Mini-native creation is not a safe first-version dependency. Issue 34 supersedes the interim transport without changing <code>/ccs:new</code>.</p>
+      </div>
+      <div class="opt">
+        <p class="lost"><b>Rejected:</b> preserving the old infer-and-launch behavior, or deleting <code>ccs start</code> entirely.</p>
+        <p class="kept"><b>Chosen:</b> <code>/ccs:new</code> owns all interpretation; <code>ccs start</code> opens a fresh managed launcher and types <code>/ccs:new </code> into its composer without submitting it.</p>
+        <p class="why muted"><b>Why:</b> the old inference path was slow and invalid, while a pre-filled composer keeps the shell ergonomics without creating a competing router. The user retains the last edit and submit step.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">05 &middot; State boundary</p>
+    <h2>The registry and the cross-machine boundary</h2>
+    <p>One shared registry, <code>ClaudeConfig/session-routing/locations.toml</code>, is the source of truth for valid session CWDs. <code>~/.ccs/config.toml</code> points CCS at that file and the companion host registry. The machine adapter validates both shared TOML files, then safely creates or repoints <code>~/.ccs/locations.toml</code> and <code>~/.ccs/hosts.toml</code> symlinks on each machine. A pre-existing real file or directory is reported as a conflict rather than overwritten. Thirty locations are curated today.</p>
+    <p><strong>The boundary that matters:</strong> a path that exists on the laptop is never assumed to exist, or to be current, on the Mac Mini. The match payload reports the current host's validated path and Git facts. A selected remote target then validates its own canonical location during bounded SSH preflight. The Mini is preferred whenever eligibility, capabilities, and task-local-state checks pass; the laptop is the explicit exception for local-only state or after a pre-workspace remote failure that the user chooses not to pursue.</p>
+    <pre><code># ~/.ccs/config.toml
+[routing]
+registry = "~/Documents/milad-vault/ClaudeConfig/session-routing/locations.toml"
+hosts = "~/Documents/milad-vault/ClaudeConfig/session-routing/hosts.toml"
+
+# ClaudeConfig/session-routing/locations.toml
+version = 1
+default_host = "Milads-Mac-mini"
+default_harness = "claude-gpt"
+default_model = "gpt-5.6-sol"
+
+[[location]]
+key = "ccs"
+name = "CCS"
+aliases = ["claude sessions", "session catalogue", "session router"]
+cwd = "~/Programming/Repos/claude-sessions"
+kind = "repo"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+default_harness = "claude-gpt"
+default_model = "gpt-5.6-sol"
+status = "active"</code></pre>
+
+    <h3>Direct commands</h3>
+    <p>The CLI exposes only deterministic primitives, which keeps a fast manual path when the destination is already known:</p>
+    <pre><code>ccs start
+# opens a fresh managed launcher with "/ccs:new " pre-filled and unsubmitted
+
+ccs location list
+ccs location show ccs
+ccs location match --json "work on the session router"
+ccs session new --top-level --location ccs --prompt "Implement issue 42"
+ccs location register my-project --cwd /absolute/path --alias "my project"</code></pre>
+    <p class="muted">Usage recency lives in CCS runtime state, not the registry file, to avoid Git churn. The registry README documents fields, precedence, registration, and retirement.</p>
+
+    <h3>Placement defaults</h3>
+    <table>
+      <thead><tr><th>Signal</th><th>Default</th><th>Reason to override</th></tr></thead>
+      <tbody>
+        <tr><td>Host</td><td>Mac Mini</td><td>Path absent, repo state unavailable or divergent, local GUI or hardware needed, credential or service unavailable, Mini unreachable.</td></tr>
+        <tr><td>Session class</td><td>Top-level work body</td><td>None for <code>/ccs:new</code>. Subordinate work belongs to <code>ccs delegate</code> or the Agent tool.</td></tr>
+        <tr><td>Route</td><td>Canonical model table</td><td>User names a supported route, or a capability forces a harness.</td></tr>
+        <tr><td>Duplicate work</td><td>Warn before birthing</td><td>An explicit request for a separate fresh session.</td></tr>
+        <tr><td>Ambiguity</td><td>Deterministic ranking, then one material question</td><td>No question when one candidate clearly dominates.</td></tr>
+        <tr><td>Latency</td><td>No extra model call; registry match and local preflight target under 500 ms</td><td>Slower only when remote reachability or a user decision blocks placement.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <p class="eyebrow">06 &middot; Route</p>
+    <h2>The exact model route</h2>
+    <p>Harness and model come from the canonical routing policy through the birth compiler, never from raw model IDs written into prompt prose. The compiler matches the exhaustive current model set, including <code>claude-opus-5</code>, and emits exact launcher spellings. Precedence, highest first:</p>
+    <ol class="ladder">
+      <li><b>Role policy</b></li>
+      <li><b>Explicit model</b> named in the request</li>
+      <li><b>Explicit legacy launcher</b></li>
+      <li><b>Location override</b> from the registry entry</li>
+      <li><b>Registry-wide exact default</b></li>
+      <li><b>Legacy plain Claude</b>, only outside <code>/ccs:new</code></li>
+    </ol>
+    <p>An invalid lower-priority default no longer blocks a valid explicit route. The optional warm Dock launcher runs Terra at medium effort, but the skill works from whatever model is currently running it. Its executable spelling is <code>gpt-5.6-terra[1m]</code>: <code>gpt-5.6-terra</code> is the canonical model ID, while <code>[1m]</code> is the gateway launch suffix for the one-million-token context variant, not an effort setting.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">07 &middot; Remote</p>
+    <h2>Remote launch, and where it stays uncertain</h2>
+    <p>The first-version remote transport is a <code>cmux ssh</code> workspace with a Mini-side inline birth:</p>
+    <pre><code>cmux ssh macmini \
+  --name "&lt;title&gt; [ccs:new:mini]" \
+  --command '&lt;remote ccs&gt; session new --top-level --inline --cwd ... --prompt ...' \
+  --no-focus</code></pre>
+    <p>The remote executable, PATH, environment, and shell quoting are rendered by CCS from machine capability data, not assembled in plugin prose. One bounded preflight uses <code>ConnectTimeout=5</code> and <code>BatchMode=yes</code>, then verifies remote CCS, readable location and host registries, canonical host identity, the selected location, the exact model, and every required capability before a workspace is created. The target command receives the same canonical model and capability requirements and validates them again.</p>
+    <pre><code>{
+  "status": "workspace_created",
+  "session_id": "pending",
+  "host": "Milads-Mac-mini",
+  "location": "ccs",
+  "workspace_ref": "workspace:501",
+  "uncertainty": "Remote workspace creation succeeded, but session reservation and prompt delivery are not yet receipt-confirmed. Inspect this workspace before any retry."
+}</code></pre>
+    <div class="callout warn">
+      <h3>Honest uncertainty</h3>
+      <p style="margin:0;">A local <code>status: launched</code> receipt proves UUID reservation, birth metadata, and successful workspace creation with the complete launcher command. It does not claim that the child process later consumed the prompt. Remote evidence is weaker: once any workspace reference exists, the session ID remains <code>pending</code> until target-side reservation is receipt-confirmed, and automatic retry or local fallback is forbidden. <a href="file:///Users/mimen/Documents/milad-vault/Workspaces/Assistant/projects/agentic-os/issues/34-remote-launch.md" target="_blank" rel="noopener">Agentic OS issue 34</a> defines a first-class Mini-native transport that can strengthen that receipt without changing the conversational router.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">08 &middot; Safety</p>
+    <h2>Registration safety</h2>
+    <p>No registry entry is ever created from an inferred name. Manual registration remains an explicit deterministic command; the conversational router registers an unregistered path only after a structured local <code>status: launched</code> receipt. Linked Git worktrees, <code>.claude/worktrees</code>, <code>.worktrees</code>, and operating-system temporary roots are mechanically rejected.</p>
+    <p>A registry update resolves and preserves the managed symlink target, preserves the destination file mode, writes a sibling temporary file, then atomically renames it over the destination. Register and retire operations touch only the targeted location table so existing comments and ordering survive.</p>
+    <p>Prompt transport is shell-isolated through UUID-scoped protected files, so quotes, backticks, command substitution, and shell operators stay literal prompt data. Malformed value-taking flags fail before the session is reserved rather than silently dropping a constraint.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">09 &middot; Rollout</p>
+    <h2>Rollout order</h2>
+    <p>Deployment follows a fixed sequence so that no launch runs against stale code, links, or host labels:</p>
+    <ol class="ladder">
+      <li>Commit and push the reviewed CCS, vault, and Dock-seed revisions separately; re-pin both machine manifests to those exact revisions.</li>
+      <li>Run the machine adapter on the laptop and Mini, verify the two managed runtime registry links, then install or reload the plugin.</li>
+      <li>Run an immediate full CCS reindex on both machines. The host-label change must rewrite existing hostname-style catalogue labels to the canonical <code>scutil</code> names before source-host checks continue.</li>
+      <li>Verify <code>ccs start</code> creates a fresh launcher with exactly one unsubmitted <code>/ccs:new </code> composer prefill. Then run one harmless local <code>/ccs:new</code> smoke and one Mini smoke. An uncertain Mini receipt is inspected, never retried automatically.</li>
+      <li>Merge the staged Dock seed without replacing unrelated controls, activate it, and verify the Terra role launcher.</li>
+    </ol>
+    <p>The Dock stays staged-only until the smoke launches pass. “Reviewed deployment proves parity” means the installed reviewed revisions pass the reindex, <code>ccs start</code> composer-prefill check, local and Mini launch smokes, direct-CWD and location routes, role-launcher check, and Dock gate. Only then may <code>ClaudeConfig/claudes</code> move to the vault archive. <code>ccs start</code> remains permanently as the thin interactive entry point; it does not regain routing logic.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">10 &middot; Evidence</p>
+    <h2>What the implementation demonstrated</h2>
+    <div class="stats">
+      <div class="stat"><b>30</b><span>curated locations</span><div class="sub">30 laptop-eligible, 23 Mini-eligible, all declared paths verified</div></div>
+      <div class="stat"><b>1,068</b><span>tests passing with serial file scheduling</span><div class="sub"><code>--max-concurrency=1</code>; 133 files, 3,442 expectations</div></div>
+      <div class="stat"><b>104</b><span>focused router contracts</span></div>
+      <div class="stat"><b>263</b><span>machine-adapter tests</span></div>
+      <div class="stat"><b>36 / 36</b><span>conversation-layer eval, iteration 2</span><div class="sub">versus 5 / 36 for the no-skill baseline</div></div>
+      <div class="stat"><b>~138 ms</b><span>route command latency</span><div class="sub">137.98 ms mean, 168.13 ms max over 10 samples</div></div>
+      <div class="stat"><b>3 tiers</b><span>review completed</span><div class="sub">primary, second-opinion, third-opinion; no High-severity defect</div></div>
+    </div>
+    <div class="callout warn">
+      <h3>What the numbers do not claim</h3>
+      <ul>
+        <li>The parallel Ink TUI tests remain timing-sensitive. These are the repository's pre-existing flakes: the affected files pass in isolation, and the full suite passes with <code>--max-concurrency=1</code>, which schedules test files serially rather than changing router behavior.</li>
+        <li>Iteration 2's 36 of 36 is conversation-layer evidence, not a live birth. No router session has been spawned. The <a href="file:///Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/iteration-2/review.html" target="_blank" rel="noopener">static evaluation viewer</a> shows the run.</li>
+        <li>Nothing is installed: no commit or push, no install, no runtime-link change, no live smoke launch, no Dock activation.</li>
+        <li>The three-tier review resolved a disputed status-wording claim at the third tier. Verified fixes covered model vocabulary, route precedence, registration, malformed-flag, and schema findings.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">11 &middot; Open concern</p>
+    <h2>The one item still open</h2>
+    <div class="callout">
+      <p style="margin:0;">A single Low-severity concern remains: the interim transport extracts <code>workspace:&lt;token&gt;</code> from unstructured <code>cmux</code> output. If cmux ever echoes a prompt-derived string in that shape, the receipt could record the wrong reference. The failure direction is safe: a false reference suppresses fallback and forces inspection; it cannot authorize an automatic retry.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">12 &middot; Boundaries</p>
+    <h2>Constraints and non-goals</h2>
+    <ul class="plain">
+      <li>No unmanaged nested <code>claude</code>, <code>claude-native</code>, or <code>claude-gpt</code> process. Every persistent Claude Code process uses a CCS-managed birth.</li>
+      <li>No silent automatic retry after a CCS birth.</li>
+      <li>No hard-coded raw model IDs in prompt prose; the registry defaults and canonical compiler own route spellings.</li>
+      <li>No use of <code>ClaudeConfig/claudes</code> as a fallback route source once the registry ships.</li>
+      <li>No automatic registration from an inferred name; new entries require a validated path and an explicit selection.</li>
+      <li>No assumption that a path exists or is current on both machines without validation.</li>
+      <li>No remote placement for work that needs the laptop's local GUI, unsynced files, attached hardware, or a checkout not present and ready on the Mini.</li>
+      <li>No session-ownership transfer or cross-host transcript claiming here; that remains issue 34.</li>
+      <li>No resume under a command named <code>new</code>. Duplicate detection may warn, but the path always births a fresh session.</li>
+      <li>No second router in <code>ccs start</code> or skill prose. <code>ccs start</code> only creates the managed launcher and pre-fills the skill command; route policy, validation, and launch mechanics stay in typed CCS code.</li>
+      <li>The skill is explicitly user-invoked (<code>disable-model-invocation: true</code>) and does not auto-trigger on ordinary session discussion.</li>
+    </ul>
+  </section>
+
+  <section>
+    <p class="eyebrow">References</p>
+    <h2>Authorities and artifacts</h2>
+    <ul class="refs">
+      <li><a href="file:///Users/mimen/Programming/Repos/claude-sessions/docs/managed-session-launches.md" target="_blank" rel="noopener">CCS managed launch contract</a>: birth path and provenance rules.</li>
+      <li><a href="file:///Users/mimen/Documents/milad-vault/ClaudeConfig/machines/Milads-M3-2.md" target="_blank" rel="noopener">Laptop manifest</a> and <a href="file:///Users/mimen/Documents/milad-vault/ClaudeConfig/machines/Milads-Mac-mini.md" target="_blank" rel="noopener">Mac Mini manifest</a>: host aliases, homes, capabilities, and known exceptions.</li>
+      <li><a href="file:///Users/mimen/.claude/CLAUDE.md" target="_blank" rel="noopener">Canonical model table</a> and <a href="file:///Users/mimen/Documents/milad-vault/ClaudeConfig/seats/README.md" target="_blank" rel="noopener">seat registry contract</a>: supported harnesses and routes.</li>
+      <li><a href="file:///Users/mimen/Documents/milad-vault/Workspaces/Assistant/projects/agentic-os/issues/34-remote-launch.md" target="_blank" rel="noopener">Agentic OS issue 34</a>: first-class remote launch.</li>
+      <li><a href="https://cmux.com/docs/ssh" target="_blank" rel="noopener"><code>cmux ssh</code> docs</a> and <a href="https://cmux.com/docs/remote-tmux" target="_blank" rel="noopener">remote tmux docs</a>: the interim remote transport.</li>
+      <li>Staged shared registries: <span class="path">/Users/mimen/Documents/.milad-vault-worktrees/ccs-new-router-config/ClaudeConfig/session-routing/locations.toml</span> and <span class="path">/Users/mimen/Documents/.milad-vault-worktrees/ccs-new-router-config/ClaudeConfig/session-routing/hosts.toml</span>.</li>
+      <li>Staged plugin skill: <span class="path">/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/plugins/ccs/skills/new/SKILL.md</span>.</li>
+      <li>Staged Dock seed: <span class="path">/Users/mimen/.ccs-config/.claude/worktrees/ccs-new-launcher/dock/ccs-new.dock.json</span>.</li>
+    </ul>
+  </section>
+
+  <script>
+    const key = `scroll:${location.pathname}`;
+    const saved = sessionStorage.getItem(key);
+    if (saved !== null) requestAnimationFrame(() => window.scrollTo(0, Number(saved)));
+    addEventListener('beforeunload', () => sessionStorage.setItem(key, String(window.scrollY)));
+  </script>
+</body>
+</html>

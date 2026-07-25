@@ -38,8 +38,13 @@ import { resolveRole } from "../roles/role-files.ts";
 import { checkClusterGate } from "../cluster/manifest.ts";
 import { shellQuote } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
-import { launcherByName, loadLaunchers, type Launcher } from "./launchers.ts";
-import { compileRoleModelLaunch } from "./role-model-launch.ts";
+import type { Launcher } from "./launchers.ts";
+import type { BirthModelId } from "./role-model-launch.ts";
+import {
+  compileExactBirthRoute,
+  resolveBirthRoute,
+  type ExactBirthRoute,
+} from "./birth-route.ts";
 import { execFileSync } from "node:child_process";
 import { spawnContractError, type SpawnFacts, type WorktreeState } from "../catalogue/spawn-contract.ts";
 import { interpretSpawnLocation, syntheticRow, type SpawnLocationConfig } from "../catalogue/spawn-location.ts";
@@ -47,6 +52,29 @@ import { resolveConfig } from "../hooks/resolve-config.ts";
 import { liveResolveCtx } from "../hooks/compose-claude-md.ts";
 import { runSpawnActions } from "../hooks/spawn-actions.ts";
 import { resolveNewSessionCreator } from "../session-provenance.ts";
+import { loadConfig, type Config } from "../config.ts";
+import {
+  activeHostByCanonicalName,
+  loadHostRegistry,
+  validateHostCapabilities,
+} from "../hosts/registry.ts";
+import {
+  effectiveLocationDefaults,
+  loadLocationRegistry,
+  locationByKey,
+  resolveLocationForHost,
+  validateLocationHostEligibility,
+  type LaunchLocation,
+} from "../locations/registry.ts";
+import { type Result, err as resultErr, ok as resultOk } from "../result.ts";
+import {
+  launchRemoteSession,
+  preflightRemoteSession,
+  type RemoteLaunchOutcome,
+  type RemotePreflight,
+  type RemotePreflightRequest,
+  type RemoteSessionRequest,
+} from "./remote-session.ts";
 
 /**
  * `ccs new-session` — mint a session id, bind its catalogue metadata AT BIRTH, then either
@@ -99,6 +127,16 @@ export interface NewSessionOpts {
   prNumber?: number;
   prRepo?: string;
   cwd?: string;
+  /** Curated launch-location key. Resolved before any session id or catalogue row is created. */
+  location?: string;
+  /** Canonical placement host. Omitted or current host preserves the local launch path. */
+  host?: string;
+  /** Resolved location identity retained for birth metadata. */
+  locationKey?: string;
+  /** Effective registry/location harness default, retained for pre-birth route compilation. */
+  locationDefaultHarness?: string;
+  /** Effective registry/location model default, retained as launch-location provenance. */
+  locationDefaultModel?: string;
   prompt?: string;
   /** Passed through to `claude --permission-mode <mode>` when launching. */
   permissionMode?: string;
@@ -108,11 +146,16 @@ export interface NewSessionOpts {
    * surface). Default is DETACHED into a fresh cmux workspace — inline hijacks the caller's
    * CMUX_SURFACE_ID and rebinds their tab to the new session (ADR-0042). */
   inline: boolean;
-  /** Launch through a configured launcher (`[[launcher]]` in config.toml) instead of plain
-   * `claude` — e.g. `--via gpt` births the session on the gateway backend. No eligibility
-   * check: a fresh session has no model history yet. */
+  /** Launch through a configured launcher when no exact model policy is supplied. */
   via?: string;
-  /** Derived launch provenance for a model-policy role; never role truth or resume input. */
+  /** Explicit canonical model request for a policy-less top-level birth. */
+  model?: string;
+  /** Host capabilities inferred by the conversational router and revalidated by CCS. */
+  requiredCapabilities?: readonly string[];
+  /** Emit a structured local launch receipt. Remote launches always emit their pending receipt. */
+  json?: boolean;
+  /** Derived launch provenance for a model-policy role, explicit model, or location default. */
+  launchCanonicalModel?: BirthModelId;
   launchModel?: string;
   launchLauncher?: string;
 }
@@ -126,49 +169,60 @@ function prNumberFrom(raw: string | undefined): number | undefined {
 
 const VALUE_FLAGS = new Set([
   "--cluster", "--identity", "--role", "--skill", "--project", "--key", "--title", "--parent", "--child-of",
-  "--gus-work", "--pr-number", "--pr-repo", "--cwd", "--prompt", "--permission-mode", "--via",
+  "--gus-work", "--pr-number", "--pr-repo", "--cwd", "--location", "--host", "--prompt", "--permission-mode", "--via", "--model", "--require-capability",
 ]);
-const BOOLEAN_FLAGS = new Set(["--print-id", "--top-level", "--inline"]);
+const BOOLEAN_FLAGS = new Set(["--print-id", "--top-level", "--inline", "--json"]);
 
 interface ParsedOptions {
   values: Map<string, string>;
+  allValues: Map<string, string[]>;
   booleans: Set<string>;
 }
 
 /** Parse known options in order so text supplied to another flag is never reinterpreted as a flag. */
-function parseOptions(args: string[]): ParsedOptions {
+function parseOptions(args: string[]): Result<ParsedOptions> {
   const values = new Map<string, string>();
+  const allValues = new Map<string, string[]>();
   const booleans = new Set<string>();
+  const record = (flag: string, value: string): void => {
+    values.set(flag, value);
+    allValues.set(flag, [...(allValues.get(flag) ?? []), value]);
+  };
   for (let index = 0; index < args.length; index++) {
     const token = args[index]!;
     const equals = token.indexOf("=");
     const flag = equals === -1 ? token : token.slice(0, equals);
     if (VALUE_FLAGS.has(flag)) {
       if (equals !== -1) {
-        values.set(flag, token.slice(equals + 1));
+        const value = token.slice(equals + 1);
+        if (!value) return resultErr(new Error(`${flag} requires a value`));
+        record(flag, value);
         continue;
       }
       const value = args[index + 1];
-      // Prompts are free-form and may intentionally begin with `--`; all other option values use
-      // the conventional non-flag token form so a missing value does not swallow the next option.
-      if (value !== undefined && (flag === "--prompt" || !value.startsWith("--"))) {
-        values.set(flag, value);
-        index++;
+      if (value === undefined || (flag !== "--prompt" && value.startsWith("--"))) {
+        return resultErr(new Error(`${flag} requires a value`));
       }
+      // Prompts are free-form and may intentionally begin with `--`; all other option values use
+      // the conventional non-flag token form so a missing value cannot swallow the next option.
+      record(flag, value);
+      index++;
       continue;
     }
     if (BOOLEAN_FLAGS.has(token)) booleans.add(token);
   }
-  return { values, booleans };
+  return resultOk({ values, allValues, booleans });
 }
 
 function normalizedRole(role: string): string {
   return role.replace(/^\//, "");
 }
 
-export function parseOpts(args: string[]): NewSessionOpts {
-  const { values, booleans } = parseOptions(args);
-  return {
+export function parseOpts(args: string[]): Result<NewSessionOpts> {
+  const parsed = parseOptions(args);
+  if (!parsed.ok) return parsed;
+  const { values, allValues, booleans } = parsed.value;
+  return resultOk({
     cluster: values.get("--cluster"),
     identity: values.get("--identity"),
     // `--role` reads best for the fleet ("this is a pr-agent"); `--skill` is accepted as a synonym.
@@ -184,13 +238,291 @@ export function parseOpts(args: string[]): NewSessionOpts {
     prNumber: prNumberFrom(values.get("--pr-number")),
     prRepo: values.get("--pr-repo"),
     cwd: values.get("--cwd"),
+    location: values.get("--location"),
+    host: values.get("--host"),
     prompt: values.get("--prompt"),
     permissionMode: values.get("--permission-mode"),
     printId: booleans.has("--print-id"),
     topLevel: booleans.has("--top-level"),
     inline: booleans.has("--inline"),
     via: values.get("--via"),
+    model: values.get("--model"),
+    requiredCapabilities: allValues.get("--require-capability") ?? [],
+    json: booleans.has("--json"),
+  });
+}
+
+/** Apply one registered launch location before any birth reservation occurs. */
+export function applyLocationDefaults(opts: NewSessionOpts, loadedConfig?: Config): Result<LaunchLocation | null> {
+  if (!opts.location) return resultOk(null);
+  if (opts.cwd) return resultErr(new Error("--location cannot be combined with --cwd"));
+  const config = loadedConfig ? resultOk(loadedConfig) : loadConfig();
+  if (!config.ok) return resultErr(config.error);
+  const registryPath = config.value.routing.registry;
+  if (!registryPath) return resultErr(new Error("--location requires [routing].registry in ~/.ccs/config.toml"));
+  const registry = loadLocationRegistry(registryPath);
+  if (!registry.ok) return resultErr(registry.error);
+  const location = locationByKey(registry.value, opts.location);
+  if (!location) return resultErr(new Error(`unknown launch location "${opts.location}"`));
+  const resolved = resolveLocationForHost(location, config.value.host.label);
+  if (!resolved.ok) return resultErr(resolved.error);
+  const defaults = effectiveLocationDefaults(registry.value, location);
+  opts.cwd = resolved.value.cwd;
+  opts.locationKey = resolved.value.key;
+  opts.locationDefaultHarness = defaults.defaultHarness ?? undefined;
+  opts.locationDefaultModel = defaults.defaultModel ?? undefined;
+  if (!opts.title) opts.title = resolved.value.name;
+  return resultOk(resolved.value);
+}
+
+export interface NewSessionPreflightReceipt {
+  readonly status: "ready";
+  readonly host: string;
+  readonly location: {
+    readonly key: string;
+    readonly name: string;
+    readonly cwd: string;
   };
+  readonly route: ExactBirthRoute;
+  readonly required_capabilities: readonly string[];
+}
+
+/** Validate one loose top-level birth on this machine without reserving a session or creating a workspace. */
+export function preflightNewSession(args: string[]): number {
+  const parsed = parseOpts(args);
+  if (!parsed.ok) {
+    console.error(`ccs session preflight: ${parsed.error.message}`);
+    return 2;
+  }
+  const opts = parsed.value;
+  if (!opts.topLevel || opts.childOf) {
+    console.error("ccs session preflight: require --top-level without --child-of");
+    return 2;
+  }
+  if (!opts.location) {
+    console.error("ccs session preflight: require --location");
+    return 2;
+  }
+  if (opts.cwd || opts.inline || opts.printId || opts.identity || opts.cluster || opts.role || opts.project || opts.key) {
+    console.error("ccs session preflight: only loose top-level location births are supported");
+    return 2;
+  }
+
+  const config = loadConfig();
+  if (!config.ok) {
+    console.error(`ccs session preflight: ${config.error.message}`);
+    return 2;
+  }
+  if (opts.host && !sameCanonicalHost(opts.host, config.value.host.label)) {
+    console.error(
+      `ccs session preflight: reached host "${config.value.host.label}", expected "${opts.host}"`,
+    );
+    return 2;
+  }
+
+  const location = applyLocationDefaults(opts, config.value);
+  if (!location.ok) {
+    console.error(`ccs session preflight: ${location.error.message}`);
+    return 2;
+  }
+  if (!location.value) {
+    console.error("ccs session preflight: require --location");
+    return 2;
+  }
+
+  const hosts = loadHostRegistry(config.value.routing.hosts);
+  if (!hosts.ok) {
+    console.error(`ccs session preflight: ${hosts.error.message}`);
+    return 2;
+  }
+  const host = activeHostByCanonicalName(hosts.value, config.value.host.label);
+  if (!host) {
+    console.error(`ccs session preflight: current host "${config.value.host.label}" is not active in the host registry`);
+    return 2;
+  }
+  const capabilities = validateHostCapabilities(host, opts.requiredCapabilities ?? []);
+  if (!capabilities.ok) {
+    console.error(`ccs session preflight: ${capabilities.error.message}`);
+    return 2;
+  }
+
+  const route = resolveBirthRoute({
+    model: opts.model,
+    via: opts.via,
+    locationKey: location.value.key,
+    defaultHarness: opts.locationDefaultHarness,
+    defaultModel: opts.locationDefaultModel,
+  });
+  if (!route.ok) {
+    console.error(`ccs session preflight: ${route.error.message}`);
+    return 2;
+  }
+
+  const receipt: NewSessionPreflightReceipt = {
+    status: "ready",
+    host: host.name,
+    location: {
+      key: location.value.key,
+      name: location.value.name,
+      cwd: location.value.cwd,
+    },
+    route: route.value.exact,
+    required_capabilities: opts.requiredCapabilities ?? [],
+  };
+  console.log(JSON.stringify(receipt));
+  return 0;
+}
+
+export interface RoutedRemoteSessionRequest extends RemoteSessionRequest {
+  readonly model?: BirthModelId;
+  readonly requiredCapabilities?: readonly string[];
+}
+
+export interface RemoteSessionDependencies {
+  readonly preflight: (request: RemotePreflightRequest) => Result<RemotePreflight>;
+  readonly launch: (request: RoutedRemoteSessionRequest) => RemoteLaunchOutcome;
+}
+
+const DEFAULT_REMOTE_SESSION_DEPENDENCIES: RemoteSessionDependencies = {
+  preflight: preflightRemoteSession,
+  launch: launchRemoteSession,
+};
+
+function sameCanonicalHost(left: string, right: string): boolean {
+  return left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase();
+}
+
+function recordExactLaunch(opts: NewSessionOpts, route: ExactBirthRoute): void {
+  if (!route.model || !route.launchModel) return;
+  opts.launchCanonicalModel = route.model;
+  opts.launchModel = route.launchModel;
+  opts.launchLauncher = route.launcher;
+}
+
+function unsupportedRemoteBirthOption(opts: NewSessionOpts): string | null {
+  if (opts.inline) return "remote --host placement owns target-side --inline; do not pass --inline locally";
+  if (opts.printId) return "remote --host placement does not support --print-id until the session-ID receipt seam lands";
+  if (opts.cwd) return "remote --host placement requires --location and cannot use a source-side --cwd";
+  if (opts.identity || opts.cluster || opts.role || opts.project || opts.key || opts.gusWork || opts.prNumber || opts.prRepo) {
+    return "remote --host placement currently supports loose top-level location births only";
+  }
+  return null;
+}
+
+/** Place one top-level managed body on a registered remote host without reserving anything locally. */
+export function launchRemoteNewSession(
+  opts: NewSessionOpts,
+  config: Config,
+  dependencies: RemoteSessionDependencies = DEFAULT_REMOTE_SESSION_DEPENDENCIES,
+): number {
+  const targetHost = opts.host?.trim();
+  if (!targetHost) {
+    console.error("ccs new-session: --host requires a canonical host name");
+    return 2;
+  }
+  if (!opts.location) {
+    console.error("ccs new-session: remote --host placement requires --location");
+    return 2;
+  }
+  const intentError = resolveLaunchIntent(opts);
+  if (intentError) {
+    console.error(`ccs new-session: ${intentError}`);
+    return 2;
+  }
+  if (!opts.topLevel) {
+    console.error("ccs new-session: remote --host placement currently supports --top-level only");
+    return 2;
+  }
+  const optionError = unsupportedRemoteBirthOption(opts);
+  if (optionError) {
+    console.error(`ccs new-session: ${optionError}`);
+    return 2;
+  }
+
+  const hosts = loadHostRegistry(config.routing.hosts);
+  if (!hosts.ok) {
+    console.error(`ccs new-session: ${hosts.error.message}`);
+    return 2;
+  }
+  const host = activeHostByCanonicalName(hosts.value, targetHost);
+  if (!host) {
+    console.error(`ccs new-session: unknown or inactive remote host "${targetHost}"`);
+    return 2;
+  }
+  const capabilities = validateHostCapabilities(host, opts.requiredCapabilities ?? []);
+  if (!capabilities.ok) {
+    console.error(`ccs new-session: ${capabilities.error.message}`);
+    return 2;
+  }
+
+  const locations = loadLocationRegistry(config.routing.registry);
+  if (!locations.ok) {
+    console.error(`ccs new-session: ${locations.error.message}`);
+    return 2;
+  }
+  const location = locationByKey(locations.value, opts.location);
+  if (!location) {
+    console.error(`ccs new-session: unknown launch location "${opts.location}"`);
+    return 2;
+  }
+  const eligible = validateLocationHostEligibility(location, host.name);
+  if (!eligible.ok) {
+    console.error(`ccs new-session: ${eligible.error.message}`);
+    return 2;
+  }
+  const defaults = effectiveLocationDefaults(locations.value, location);
+  const exactRoute = compileExactBirthRoute({
+    model: opts.model,
+    via: opts.via,
+    locationKey: location.key,
+    defaultHarness: defaults.defaultHarness,
+    defaultModel: defaults.defaultModel,
+  });
+  if (!exactRoute.ok) {
+    console.error(`ccs new-session: ${exactRoute.error.message}`);
+    return 2;
+  }
+  recordExactLaunch(opts, exactRoute.value);
+
+  const creator = resolveNewSessionCreator(process.env);
+  if (!creator.ok) {
+    console.error(`ccs new-session: ${creator.error.message}`);
+    return 2;
+  }
+  const preflight = dependencies.preflight({
+    targetHost: host.name,
+    sshAlias: host.sshAlias,
+    locationKey: location.key,
+    route: exactRoute.value,
+    via: opts.via,
+    model: exactRoute.value.model,
+    requiredCapabilities: opts.requiredCapabilities ?? [],
+  });
+  if (!preflight.ok) {
+    console.error(`ccs new-session: ${preflight.error.message}`);
+    return 2;
+  }
+
+  const outcome = dependencies.launch({
+    targetHost: host.name,
+    sshAlias: host.sshAlias,
+    locationKey: location.key,
+    title: opts.title ?? preflight.value.locationName,
+    prompt: opts.prompt,
+    permissionMode: opts.permissionMode,
+    via: opts.via,
+    model: exactRoute.value.model ?? undefined,
+    requiredCapabilities: opts.requiredCapabilities ?? [],
+    creatorKind: creator.value.kind,
+    creatorRef: creator.value.ref,
+    remoteCwd: preflight.value.cwd,
+  });
+  console.log(JSON.stringify(outcome.receipt, null, 2));
+  if (!outcome.ok) {
+    console.error(`ccs new-session: ${outcome.error.message}`);
+    return 2;
+  }
+  return 0;
 }
 
 /** Validate explicit-birth flags that must not be filled by role defaults. */
@@ -302,12 +634,15 @@ function writeSessionMetadataTransaction(db: Database, id: string, opts: NewSess
   if (opts.project) setProject(db, id, opts.project, now);
   if (opts.key) setKey(db, id, opts.key, now);
   if (opts.title) setCustomTitle(db, id, opts.title, now);
+  if (opts.locationKey) setMeta(db, id, "launch_location", opts.locationKey, now);
+  if (opts.locationDefaultModel) setMeta(db, id, "launch_location_model", opts.locationDefaultModel, now);
   if (opts.parent) setParent(db, id, opts.parent, now);
   setSessionClass(db, id, opts.topLevel ? "work_body" : opts.parent ? "auxiliary" : null, now);
   if (opts.creatorKind) setCreatorKind(db, id, opts.creatorKind, now);
   if (opts.creatorRef) setCreatorRef(db, id, opts.creatorRef, now);
   if (opts.launchChannel) setLaunchChannel(db, id, opts.launchChannel, now);
   // Resolved birth route is audit-only metadata. Resume always routes from transcript history.
+  if (opts.launchCanonicalModel) setMeta(db, id, "launch_model_id", opts.launchCanonicalModel, now);
   if (opts.launchModel) setMeta(db, id, "launch_model", opts.launchModel, now);
   if (opts.launchLauncher) setMeta(db, id, "launch_launcher", opts.launchLauncher, now);
   if (opts.forkedFromSessionId) setForkedFromSessionId(db, id, opts.forkedFromSessionId, now);
@@ -444,11 +779,76 @@ export function validateSpawn(opts: NewSessionOpts, roleDef: RoleDef | null): st
   return null;
 }
 
-export function newSession(args: string[]): number {
-  const opts = parseOpts(args);
+export interface NewSessionLaunchControls {
+  /** Focus the fresh detached cmux workspace as part of creation. */
+  readonly focus?: boolean;
+  /** Observe the exact local detached-launch receipt without parsing console output. */
+  readonly onLocalLaunch?: (receipt: LocalLaunchReceipt) => void;
+}
+
+export function newSession(
+  args: string[],
+  remoteDependencies: RemoteSessionDependencies = DEFAULT_REMOTE_SESSION_DEPENDENCIES,
+  launchControls: NewSessionLaunchControls = {},
+): number {
+  const parsed = parseOpts(args);
+  if (!parsed.ok) {
+    console.error(`ccs new-session: ${parsed.error.message}`);
+    return 2;
+  }
+  const opts = parsed.value;
+  const config = loadConfig();
+  if (!config.ok) {
+    console.error(`ccs new-session: ${config.error.message}`);
+    return 2;
+  }
+  if (opts.host !== undefined && !sameCanonicalHost(opts.host, config.value.host.label)) {
+    return launchRemoteNewSession(opts, config.value, remoteDependencies);
+  }
+  const location = applyLocationDefaults(opts, config.value);
+  if (!location.ok) {
+    console.error(`ccs new-session: ${location.error.message}`);
+    return 2;
+  }
+  let selectedHost = config.value.host.label;
+  if ((opts.requiredCapabilities?.length ?? 0) > 0) {
+    const hosts = loadHostRegistry(config.value.routing.hosts);
+    if (!hosts.ok) {
+      console.error(`ccs new-session: ${hosts.error.message}`);
+      return 2;
+    }
+    const host = activeHostByCanonicalName(hosts.value, config.value.host.label);
+    if (!host) {
+      console.error(`ccs new-session: current host "${config.value.host.label}" is not active in the host registry`);
+      return 2;
+    }
+    const capabilities = validateHostCapabilities(host, opts.requiredCapabilities ?? []);
+    if (!capabilities.ok) {
+      console.error(`ccs new-session: ${capabilities.error.message}`);
+      return 2;
+    }
+    selectedHost = host.name;
+  }
+  const explicitRouteValidation = compileExactBirthRoute({
+    model: opts.model,
+    via: opts.via,
+    locationKey: opts.locationKey ?? opts.location ?? "unregistered cwd",
+  });
+  if (!explicitRouteValidation.ok) {
+    console.error(`ccs new-session: ${explicitRouteValidation.error.message}`);
+    return 2;
+  }
   const intentError = resolveLaunchIntent(opts);
   if (intentError) {
     console.error(`ccs new-session: ${intentError}`);
+    return 2;
+  }
+  if (opts.json && opts.printId) {
+    console.error("ccs new-session: --json cannot be combined with --print-id");
+    return 2;
+  }
+  if (opts.json && opts.inline) {
+    console.error("ccs new-session: --json is for detached local receipts; inline owns the terminal");
     return 2;
   }
   const creator = resolveNewSessionCreator(process.env, opts.parent);
@@ -541,34 +941,22 @@ export function newSession(args: string[]): number {
 
   const cwd = opts.cwd ?? process.cwd();
 
-  // A role may declare only a canonical model. Compiler-owned policy derives the executable and
-  // launch spelling; accepting --via here would let caller input contradict that role policy.
-  const roleLaunch = roleDef?.model ? compileRoleModelLaunch(roleDef.model) : null;
-  if (roleLaunch && opts.via) {
-    console.error("ccs new-session: --via cannot be combined with a role-declared model policy");
+  // Route precedence is explicit: role policy, explicit canonical model, caller launcher,
+  // then the location/registry exact default. The same resolver powers target-side remote preflight.
+  const resolvedRoute = resolveBirthRoute({
+    roleModel: roleDef?.model,
+    model: opts.model,
+    via: opts.via,
+    locationKey: opts.locationKey ?? opts.location ?? "unregistered cwd",
+    defaultHarness: opts.locationDefaultHarness,
+    defaultModel: opts.locationDefaultModel,
+  });
+  if (!resolvedRoute.ok) {
+    console.error(`ccs new-session: ${resolvedRoute.error.message}`);
     return 2;
   }
-
-  // Resolve the `--via` launcher BEFORE minting anything — an unknown name must fail loud
-  // with no half-born session. Policy-less roles retain this established behavior exactly.
-  let launcher: Launcher = roleLaunch?.launcher ?? { name: "claude", binary: "claude", serves: ["*"], env: {} };
-  if (roleLaunch) {
-    opts.launchModel = roleLaunch.launchModel;
-    opts.launchLauncher = roleLaunch.launcher.name;
-  } else if (opts.via) {
-    const launchersRes = loadLaunchers();
-    if (!launchersRes.ok) {
-      console.error(`ccs new-session: ${launchersRes.error.message}`);
-      return 2;
-    }
-    const found = launcherByName(launchersRes.value, opts.via);
-    if (!found) {
-      const known = launchersRes.value.map((l) => l.name).join(", ");
-      console.error(`ccs new-session: unknown launcher "${opts.via}" (configured: ${known})`);
-      return 2;
-    }
-    launcher = found;
-  }
+  const launcher: Launcher = resolvedRoute.value.launcher;
+  recordExactLaunch(opts, resolvedRoute.value.exact);
 
   // Explicit identity births must reject before an id is minted or a catalogue row is created.
   // Keep this connection through registration so validation and the atomic metadata write observe
@@ -642,14 +1030,30 @@ export function newSession(args: string[]): number {
   // DEFAULT: spawn DETACHED into a fresh cmux workspace. The new surface gets its OWN
   // CMUX_SURFACE_ID, so the new session's SessionStart hook binds THAT surface — never
   // rebinding the caller's (the hijack ADR-0042 documents). Deterministic: own surface or fail.
-  return spawnDetached(
+  const title = opts.title || opts.role || id.slice(0, 8);
+  const detached = spawnDetached(
     id,
     argv,
     cwd,
-    opts.title || opts.role || id.slice(0, 8),
+    title,
     opts.identity,
     launchEnvironmentOverrides(opts, launcher.env),
+    launchControls.focus ?? false,
   );
+  const receipt = buildLocalLaunchReceipt({
+    id,
+    title,
+    host: selectedHost,
+    location: opts.locationKey ?? null,
+    cwd,
+    harness: opts.launchLauncher ?? launcher.name,
+    model: opts.launchCanonicalModel ?? null,
+    launchModel: opts.launchModel ?? null,
+    outcome: detached,
+  });
+  launchControls.onLocalLaunch?.(receipt);
+  if (opts.json) console.log(JSON.stringify(receipt, null, 2));
+  return detached.exitCode;
 }
 
 export function inlineLaunchOutcome(
@@ -742,6 +1146,52 @@ function probeWorktree(cwd: string): WorktreeState {
   }
 }
 
+export interface LocalLaunchReceipt {
+  readonly status: "launched" | "workspace_failed";
+  readonly session_id: string;
+  readonly title: string;
+  readonly host: string;
+  readonly location: string | null;
+  readonly cwd: string;
+  readonly harness: string;
+  readonly model: BirthModelId | null;
+  readonly launch_model: string | null;
+  readonly workspace_ref: string | null;
+  readonly error: string | null;
+}
+
+interface DetachedLaunchOutcome {
+  readonly exitCode: number;
+  readonly workspaceRef: string | null;
+  readonly error: string | null;
+}
+
+export function buildLocalLaunchReceipt(input: {
+  readonly id: string;
+  readonly title: string;
+  readonly host: string;
+  readonly location: string | null;
+  readonly cwd: string;
+  readonly harness: string;
+  readonly model: BirthModelId | null;
+  readonly launchModel: string | null;
+  readonly outcome: DetachedLaunchOutcome;
+}): LocalLaunchReceipt {
+  return {
+    status: input.outcome.workspaceRef ? "launched" : "workspace_failed",
+    session_id: input.id,
+    title: input.title,
+    host: input.host,
+    location: input.location,
+    cwd: input.cwd,
+    harness: input.harness,
+    model: input.model,
+    launch_model: input.launchModel,
+    workspace_ref: input.outcome.workspaceRef,
+    error: input.outcome.error,
+  };
+}
+
 /**
  * Spawn a session into a NEW cmux workspace (its own surface) via the shared spawnCmux primitive —
  * the SAME detached-spawn + CMUX_SURFACE_ID env-scrub (ADR-0042) used by resume, so a born-fresh
@@ -754,13 +1204,15 @@ function spawnDetached(
   name: string,
   identity: string | undefined,
   env: Readonly<Record<string, string>> = {},
-): number {
-  const ref = spawnCmux({ argv, cwd, name, env });
+  focus = false,
+): DetachedLaunchOutcome {
+  const ref = spawnCmux({ argv, cwd, name, env, focus });
   if (ref === null) {
-    console.error(`ccs: failed to spawn cmux workspace for ${id.slice(0, 8)} (cwd ${cwd})`);
+    const error = `failed to spawn cmux workspace for session ${id} (cwd ${cwd})`;
+    console.error(`ccs: ${error}`);
     reportRecoverableExplicitBirth(id, identity);
-    return 1;
+    return { exitCode: 1, workspaceRef: null, error };
   }
-  console.error(`ccs: spawned ${name} → ${ref} (session ${id.slice(0, 8)}, cwd ${cwd})`);
-  return 0;
+  console.error(`ccs: spawned ${name} → ${ref} (session ${id}, cwd ${cwd})`);
+  return { exitCode: 0, workspaceRef: ref, error: null };
 }

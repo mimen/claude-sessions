@@ -1,0 +1,15 @@
+{
+  "operations": [
+    {
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/plugins/ccs/skills/new-workspace/fixture-skill/scripts/ccs-new route --query 'Implement remote session receipt confirmations in the CCS router'",
+      "purpose": "Route the requested prompt to a registered location and host.",
+      "mock": true
+    },
+    {
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/plugins/ccs/skills/new-workspace/fixture-skill/scripts/ccs-new launch --host 'Milads-Mac-mini' --location 'ccs' --prompt 'Implement remote session receipt confirmations in the CCS router'",
+      "purpose": "Launch exactly one managed remote fixture session for the selected location.",
+      "mock": true
+    }
+  ],
+  "forbidden_actions": []
+}

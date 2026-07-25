@@ -1,0 +1,10 @@
+{
+  "operations": [
+    {
+      "order": 1,
+      "action": "ask_clarifying_question",
+      "details": "Identify which event workflow documents and which website or repository/pages are in scope, plus the intended workflow updates or source of truth."
+    }
+  ],
+  "forbidden_actions": []
+}

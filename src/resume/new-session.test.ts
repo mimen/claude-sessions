@@ -1,18 +1,24 @@
-import { expect, test, afterEach } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { expect, test, afterEach, spyOn } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openCatalogue, getRow, lifecycleOf, identityKeyOf, setCluster, stampPrFacts, setWorkUnitId, getMeta, _resetRoleResumeCache } from "../catalogue/db.ts";
 import { getIdentity } from "../catalogue/identities.ts";
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import {
+  applyLocationDefaults,
   buildLaunchArgv,
+  buildLocalLaunchReceipt,
   inlineLaunchEnvironment,
   inlineLaunchOutcome,
   launchEnvironmentOverrides,
   newSession,
   parseOpts,
+  preflightNewSession,
   writeSessionMetadata,
+  type NewSessionOpts,
+  type RemoteSessionDependencies,
 } from "./new-session.ts";
 
 const NOW = "2026-07-08T00:00:00.000Z";
@@ -25,6 +31,7 @@ afterEach(() => {
   delete process.env.CCS_CREATOR_KIND; delete process.env.CCS_CREATOR_REF;
   delete process.env.CCS_LAUNCH_CREATOR_KIND; delete process.env.CCS_LAUNCH_CREATOR_REF;
   delete process.env.CCS_LAUNCH_PARENT_SESSION_ID;
+  delete process.env.CMUX_BIN;
 });
 /** Temp config+runtime roots with a pr-anchored role, for the work-unit spawn path. */
 function withPrRole(): void {
@@ -51,6 +58,63 @@ function withEventRole(): string {
   return rt;
 }
 
+function initGitRepo(cwd: string): void {
+  execFileSync("git", ["init", "-q", cwd]);
+}
+
+function configureTestLocation(
+  runtimeRoot: string,
+  cwd: string,
+  route: { harness: string; model: string } | null,
+  eligibleHost = "Milads-M3-2",
+): void {
+  initGitRepo(cwd);
+  const routeToml = route
+    ? `default_harness = "${route.harness}"\ndefault_model = "${route.model}"\n`
+    : "";
+  const registry = join(runtimeRoot, "locations.toml");
+  writeFileSync(registry, `version = 1\ndefault_host = "${eligibleHost}"\n\n[[location]]\nkey = "ccs"\nname = "CCS"\ncwd = "${cwd}"\nkind = "repo"\neligible_hosts = ["${eligibleHost}"]\npreferred_host = "${eligibleHost}"\n${routeToml}status = "active"\n`);
+  writeFileSync(join(runtimeRoot, "config.toml"), `[host]\nlabel = "Milads-M3-2"\n[routing]\nregistry = "${registry}"\n`);
+}
+
+function configureTestHosts(runtimeRoot: string, status: "active" | "retired" = "active"): void {
+  writeFileSync(join(runtimeRoot, "hosts.toml"), `version = 1\n\n[[host]]\nname = "Milads-Mac-mini"\nssh_alias = "macmini"\ncapabilities = ["always-on", "headless", "ssh", "shared-vault"]\nstatus = "${status}"\n`);
+}
+
+function configureLocalTestHost(runtimeRoot: string): void {
+  writeFileSync(join(runtimeRoot, "hosts.toml"), `version = 1\n\n[[host]]\nname = "Milads-M3-2"\nssh_alias = "milads-m3"\ncapabilities = ["interactive-gui", "local-user-state", "browser-auth", "shared-vault"]\nstatus = "active"\n`);
+}
+
+function configureFakeCmux(runtimeRoot: string, outcome: "success" | "failure"): string {
+  const executable = join(runtimeRoot, `fake-cmux-${outcome}`);
+  const body = outcome === "success"
+    ? "#!/usr/bin/env bash\nprintf '%s\\n' 'OK workspace:777'\n"
+    : "#!/usr/bin/env bash\nprintf '%s\\n' 'cmux unavailable' >&2\nexit 1\n";
+  writeFileSync(executable, body);
+  chmodSync(executable, 0o755);
+  return executable;
+}
+
+function captureJsonReceipt(run: () => number): { readonly exitCode: number; readonly receipt: Record<string, unknown> } {
+  const messages: string[] = [];
+  const log = spyOn(console, "log").mockImplementation((message?: unknown): void => {
+    messages.push(String(message));
+  });
+  try {
+    const exitCode = run();
+    expect(messages).toHaveLength(1);
+    return { exitCode, receipt: JSON.parse(messages[0]!) as Record<string, unknown> };
+  } finally {
+    log.mockRestore();
+  }
+}
+
+function parsedOpts(args: string[]): NewSessionOpts {
+  const result = parseOpts(args);
+  if (!result.ok) throw result.error;
+  return result.value;
+}
+
 test("supersede-on-spawn: a new worker archives prior sessions of the same identity (ADR-0073)", () => {
   withPrRole();
   const db = openCatalogue(":memory:");
@@ -59,7 +123,7 @@ test("supersede-on-spawn: a new worker archives prior sessions of the same ident
     // attached to it via the identity FK; writeSessionMetadata for a new sid on the same
     // identity should archive the old.
     const oldId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    writeSessionMetadata(db, oldId, parseOpts([
+    writeSessionMetadata(db, oldId, parsedOpts([
       "--cluster", "pr-watch", "--role", "pr-agent",
       "--pr-number", "12080", "--pr-repo", "heroku/dashboard",
     ]), NOW);
@@ -67,7 +131,7 @@ test("supersede-on-spawn: a new worker archives prior sessions of the same ident
 
     // Spawn a FRESH worker for the same PR.
     const newId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-    writeSessionMetadata(db, newId, parseOpts([
+    writeSessionMetadata(db, newId, parsedOpts([
       "--cluster", "pr-watch", "--role", "pr-agent",
       "--pr-number", "12080", "--pr-repo", "heroku/dashboard",
     ]), NOW);
@@ -95,14 +159,14 @@ test("supersede-on-spawn keeps the fleet identity alive (acceptance #9)", () => 
 
     // 1st worker
     const oldId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    writeSessionMetadata(db, oldId, parseOpts([
+    writeSessionMetadata(db, oldId, parsedOpts([
       "--cluster", "pr-watch", "--role", "pr-agent",
       "--pr-number", "12080", "--pr-repo", "heroku/dashboard",
     ]), NOW);
 
     // 2nd worker on the same PR
     const newId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-    writeSessionMetadata(db, newId, parseOpts([
+    writeSessionMetadata(db, newId, parsedOpts([
       "--cluster", "pr-watch", "--role", "pr-agent",
       "--pr-number", "12080", "--pr-repo", "heroku/dashboard",
     ]), NOW);
@@ -126,7 +190,7 @@ test("supersede-on-spawn keeps the fleet identity alive (acceptance #9)", () => 
 });
 
 test("parseOpts: reads every flag, --role and --skill are synonyms", () => {
-  const o = parseOpts([
+  const o = parsedOpts([
     "--cluster", "pr-watch",
     "--role", "pr-agent",
     "--project", "metered-pricing",
@@ -151,11 +215,91 @@ test("parseOpts: reads every flag, --role and --skill are synonyms", () => {
 });
 
 test("parseOpts: --skill is accepted as an alias for --role", () => {
-  expect(parseOpts(["--skill", "pr-watch-eval"]).role).toBe("pr-watch-eval");
+  expect(parsedOpts(["--skill", "pr-watch-eval"]).role).toBe("pr-watch-eval");
+});
+
+test("parseOpts: reads curated location and canonical host placement", () => {
+  const opts = parsedOpts(["--location", "ccs", "--host", "Milads-Mac-mini"]);
+  expect(opts.location).toBe("ccs");
+  expect(opts.host).toBe("Milads-Mac-mini");
+});
+
+test("parseOpts: reads exact model, repeated capabilities, and JSON receipt mode", () => {
+  const opts = parsedOpts([
+    "--model=gpt-5.6-terra",
+    "--require-capability", "always-on",
+    "--require-capability=shared-vault",
+    "--json",
+  ]);
+  expect(opts.model).toBe("gpt-5.6-terra");
+  expect(opts.requiredCapabilities).toEqual(["always-on", "shared-vault"]);
+  expect(opts.json).toBe(true);
+});
+
+test("parseOpts: rejects missing values instead of dropping safety constraints", () => {
+  const beforeModel = parseOpts(["--require-capability", "--model", "gpt-5.6-sol"]);
+  expect(beforeModel.ok).toBe(false);
+  if (!beforeModel.ok) expect(beforeModel.error.message).toContain("--require-capability requires a value");
+
+  const trailing = parseOpts(["--model"]);
+  expect(trailing.ok).toBe(false);
+  if (!trailing.ok) expect(trailing.error.message).toContain("--model requires a value");
+
+  const empty = parseOpts(["--location="]);
+  expect(empty.ok).toBe(false);
+  if (!empty.ok) expect(empty.error.message).toContain("--location requires a value");
+});
+
+test("applyLocationDefaults resolves cwd, title, and route metadata before birth", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-location-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  initGitRepo(cwd);
+  const registry = join(root, "locations.toml");
+  writeFileSync(registry, `version = 1\ndefault_host = "Milads-Mac-mini"\n\n[[location]]\nkey = "ccs"\nname = "CCS"\ncwd = "${cwd}"\nkind = "repo"\neligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]\npreferred_host = "Milads-Mac-mini"\ndefault_harness = "claude-gpt"\ndefault_model = "gpt-5.6-sol"\nstatus = "active"\n`);
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "Milads-M3-2"\n[routing]\nregistry = "${registry}"\n`);
+  process.env.CCS_ROOT = root;
+
+  const opts = parsedOpts(["--location", "ccs", "--top-level"]);
+  const applied = applyLocationDefaults(opts);
+  expect(applied.ok).toBe(true);
+  expect(opts.cwd).toBe(realpathSync(cwd));
+  expect(opts.title).toBe("CCS");
+  expect(opts.via).toBeUndefined();
+  expect(opts.locationKey).toBe("ccs");
+  expect(opts.locationDefaultModel).toBe("gpt-5.6-sol");
+  if (applied.ok) expect(applied.value?.defaultHarness).toBe("claude-gpt");
+});
+
+test("applyLocationDefaults inherits the registry-wide exact route", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-root-default-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  initGitRepo(cwd);
+  const registry = join(root, "locations.toml");
+  writeFileSync(registry, `version = 1\ndefault_host = "Milads-M3-2"\ndefault_harness = "claude-gpt"\ndefault_model = "gpt-5.6-sol"\n\n[[location]]\nkey = "ccs"\nname = "CCS"\ncwd = "${cwd}"\nkind = "repo"\neligible_hosts = ["Milads-M3-2"]\npreferred_host = "Milads-M3-2"\nstatus = "active"\n`);
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "Milads-M3-2"\n[routing]\nregistry = "${registry}"\n`);
+  process.env.CCS_ROOT = root;
+
+  const opts = parsedOpts(["--location=ccs", "--top-level"]);
+  const applied = applyLocationDefaults(opts);
+  expect(applied.ok).toBe(true);
+  expect(opts.locationDefaultHarness).toBe("claude-gpt");
+  expect(opts.locationDefaultModel).toBe("gpt-5.6-sol");
+});
+
+test("applyLocationDefaults rejects explicit cwd conflicts", () => {
+  const opts = parsedOpts(["--location", "ccs", "--cwd", "/tmp"]);
+  const applied = applyLocationDefaults(opts);
+  expect(applied.ok).toBe(false);
+  if (applied.ok) return;
+  expect(applied.error.message).toContain("cannot be combined");
 });
 
 test("parseOpts: reads explicit identity-at-birth flags", () => {
-  const opts = parseOpts([
+  const opts = parsedOpts([
     "--identity=event-watch:event-worker:gio",
     "--cluster=event-watch",
     "--role=/event-worker",
@@ -170,16 +314,120 @@ test("parseOpts: reads explicit identity-at-birth flags", () => {
 });
 
 test("parseOpts: does not reinterpret an option-shaped prompt as identity", () => {
-  const opts = parseOpts(["--prompt", "--identity=not-a-flag", "--cluster=event-watch"]);
+  const opts = parsedOpts(["--prompt", "--identity=not-a-flag", "--cluster=event-watch"]);
   expect(opts.prompt).toBe("--identity=not-a-flag");
   expect(opts.identity).toBeUndefined();
   expect(opts.cluster).toBe("event-watch");
 });
 
 test("parseOpts: does not reinterpret boolean flags inside a prompt", () => {
-  expect(parseOpts(["--prompt", "--top-level"]).topLevel).toBe(false);
-  expect(parseOpts(["--prompt", "--print-id"]).printId).toBe(false);
-  expect(parseOpts(["--prompt", "--inline"]).inline).toBe(false);
+  expect(parsedOpts(["--prompt", "--top-level"]).topLevel).toBe(false);
+  expect(parsedOpts(["--prompt", "--print-id"]).printId).toBe(false);
+  expect(parsedOpts(["--prompt", "--inline"]).inline).toBe(false);
+});
+
+test("structured local receipts preserve the full recoverable session identity", () => {
+  const success = buildLocalLaunchReceipt({
+    id: "11111111-1111-4111-8111-111111111111",
+    title: "Fix checkout UI",
+    host: "Milads-M3-2",
+    location: "auf-web",
+    cwd: "/tmp/auf-web",
+    harness: "claude",
+    model: "claude-fable-5",
+    launchModel: "claude-fable-5",
+    outcome: { exitCode: 0, workspaceRef: "workspace:501", error: null },
+  });
+  expect(success).toMatchObject({
+    status: "launched",
+    session_id: "11111111-1111-4111-8111-111111111111",
+    model: "claude-fable-5",
+    workspace_ref: "workspace:501",
+    error: null,
+  });
+
+  const failed = buildLocalLaunchReceipt({
+    id: "22222222-2222-4222-8222-222222222222",
+    title: "Recoverable birth",
+    host: "Milads-M3-2",
+    location: null,
+    cwd: "/tmp/project",
+    harness: "claude-gpt",
+    model: "gpt-5.6-sol",
+    launchModel: "gpt-5.6-sol[1m]",
+    outcome: { exitCode: 1, workspaceRef: null, error: "cmux unavailable" },
+  });
+  expect(failed).toMatchObject({
+    status: "workspace_failed",
+    session_id: "22222222-2222-4222-8222-222222222222",
+    workspace_ref: null,
+    error: "cmux unavailable",
+  });
+});
+
+test("newSession: production JSON receipt reports a successful detached birth", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-json-success-"));
+  roots.push(root);
+  mkdirSync(join(root, "cache"), { recursive: true });
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "Milads-M3-2"\n`);
+  process.env.CCS_ROOT = root;
+  process.env.CMUX_BIN = configureFakeCmux(root, "success");
+
+  const result = captureJsonReceipt(() => newSession([
+    "--top-level",
+    `--cwd=${root}`,
+    "--title=Production receipt",
+    "--model=gpt-5.6-sol",
+    "--json",
+  ]));
+  expect(result.exitCode).toBe(0);
+  expect(result.receipt).toMatchObject({
+    status: "launched",
+    title: "Production receipt",
+    host: "Milads-M3-2",
+    location: null,
+    cwd: root,
+    harness: "claude-gpt",
+    model: "gpt-5.6-sol",
+    launch_model: "gpt-5.6-sol[1m]",
+    workspace_ref: "workspace:777",
+    error: null,
+  });
+  expect(result.receipt.session_id).toMatch(/^[0-9a-f-]{36}$/);
+});
+
+test("newSession: production JSON failure receipt retains the recoverable full UUID", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-json-failure-"));
+  roots.push(root);
+  mkdirSync(join(root, "cache"), { recursive: true });
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "Milads-M3-2"\n`);
+  process.env.CCS_ROOT = root;
+  process.env.CMUX_BIN = configureFakeCmux(root, "failure");
+
+  const result = captureJsonReceipt(() => newSession([
+    "--top-level",
+    `--cwd=${root}`,
+    "--title=Recoverable receipt",
+    "--model=gpt-5.6-sol",
+    "--json",
+  ]));
+  expect(result.exitCode).toBe(1);
+  expect(result.receipt).toMatchObject({
+    status: "workspace_failed",
+    title: "Recoverable receipt",
+    harness: "claude-gpt",
+    model: "gpt-5.6-sol",
+    workspace_ref: null,
+  });
+  expect(result.receipt.session_id).toMatch(/^[0-9a-f-]{36}$/);
+  expect(result.receipt.error).toContain(String(result.receipt.session_id));
+
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    expect(getRow(db, String(result.receipt.session_id))).not.toBeNull();
+  } finally {
+    db.close();
+  }
 });
 
 test("inline launch outcome distinguishes startup failures from launched failures", () => {
@@ -227,7 +475,7 @@ test("writeSessionMetadata: explicit identity attaches without minting or inferr
     const { mintIdentity } = require("../catalogue/identities.ts") as typeof import("../catalogue/identities.ts");
     mintIdentity(db, key, { cluster: "event-watch", role: "event-worker" }, NOW);
     const id = "11111111-1111-4111-8111-111111111111";
-    writeSessionMetadata(db, id, parseOpts([
+    writeSessionMetadata(db, id, parsedOpts([
       `--identity=${key}`, "--cluster=event-watch", "--role=/event-worker", "--title=Gio", "--top-level",
     ]), NOW);
     const row = getRow(db, id)!;
@@ -245,7 +493,7 @@ test("writeSessionMetadata: explicit identity failure leaves no partial session 
   const db = openCatalogue(":memory:");
   try {
     const id = "22222222-2222-4222-8222-222222222222";
-    expect(() => writeSessionMetadata(db, id, parseOpts([
+    expect(() => writeSessionMetadata(db, id, parsedOpts([
       "--identity=event-watch:event-worker:missing", "--cluster=event-watch", "--role=event-worker", "--title=must not persist",
     ]), NOW)).toThrow("does not exist");
     expect(getRow(db, id)).toBeNull();
@@ -268,7 +516,7 @@ test("writeSessionMetadata: explicit metadata rolls back if a later write fails"
       BEGIN SELECT RAISE(ABORT, 'title write failed'); END;
     `);
     const id = "33333333-3333-4333-8333-333333333333";
-    expect(() => writeSessionMetadata(db, id, parseOpts([
+    expect(() => writeSessionMetadata(db, id, parsedOpts([
       `--identity=${key}`, "--cluster=event-watch", "--role=event-worker", "--title=rollback",
     ]), NOW)).toThrow("title write failed");
     expect(getRow(db, id)).toBeNull();
@@ -286,6 +534,7 @@ test("newSession: invalid role model and policy --via conflict fail before reser
 
   writeFileSync(roleToml, 'kind = "session"\nwork_unit = "none"\nmodel = "gpt-5.6-terra"\n');
   expect(newSession(["--cluster=event-watch", "--role=event-worker", "--top-level", "--via=claude", "--print-id"])).toBe(2);
+  expect(newSession(["--cluster=event-watch", "--role=event-worker", "--top-level", "--model=gpt-5.6-sol", "--print-id"])).toBe(2);
 
   const check = openCatalogue(join(root, "cache", "catalogue.db"));
   try {
@@ -365,6 +614,536 @@ test("newSession: reserve-only automation anchor records stable provenance", () 
   }
 });
 
+test("newSession: --location resolves and records a fresh top-level birth", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-location-birth-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  initGitRepo(cwd);
+  mkdirSync(join(root, "cache"), { recursive: true });
+  const registry = join(root, "locations.toml");
+  writeFileSync(registry, `version = 1\ndefault_host = "Milads-M3-2"\n\n[[location]]\nkey = "ccs"\nname = "CCS"\ncwd = "${cwd}"\nkind = "repo"\neligible_hosts = ["Milads-M3-2"]\npreferred_host = "Milads-M3-2"\nstatus = "active"\n`);
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "Milads-M3-2"\n[routing]\nregistry = "${registry}"\n`);
+  process.env.CCS_ROOT = root;
+
+  expect(newSession(["--top-level", "--location=ccs", "--prompt=verify", "--print-id"])).toBe(0);
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const rows = db.query("SELECT session_id FROM catalogue").all() as Array<{ session_id: string }>;
+    expect(rows).toHaveLength(1);
+    const row = getRow(db, rows[0]!.session_id)!;
+    expect(row.customTitle).toBe("CCS");
+    expect(row.sessionClass).toBe("work_body");
+    expect(getMeta(row, "launch_location")).toBe("ccs");
+  } finally {
+    db.close();
+  }
+});
+
+test("newSession: location route compiles exact model and launcher provenance", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-location-route-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(join(root, "cache"), { recursive: true });
+  configureTestLocation(root, cwd, { harness: "claude-gpt", model: "gpt-5.6-sol" });
+  process.env.CCS_ROOT = root;
+
+  expect(newSession(["--top-level", "--location=ccs", "--print-id"])).toBe(0);
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const row = db.query("SELECT session_id FROM catalogue").get() as { session_id: string };
+    const stored = getRow(db, row.session_id)!;
+    expect(getMeta(stored, "launch_location_model")).toBe("gpt-5.6-sol");
+    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-sol[1m]");
+    expect(getMeta(stored, "launch_launcher")).toBe("claude-gpt");
+  } finally {
+    db.close();
+  }
+});
+
+test("newSession: registry-wide route default compiles when a location has no override", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-registry-route-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  initGitRepo(cwd);
+  mkdirSync(join(root, "cache"), { recursive: true });
+  const registry = join(root, "locations.toml");
+  writeFileSync(registry, `version = 1\ndefault_host = "Milads-M3-2"\ndefault_harness = "claude-gpt"\ndefault_model = "gpt-5.6-sol"\n\n[[location]]\nkey = "ccs"\nname = "CCS"\ncwd = "${cwd}"\nkind = "repo"\neligible_hosts = ["Milads-M3-2"]\npreferred_host = "Milads-M3-2"\nstatus = "active"\n`);
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "Milads-M3-2"\n[routing]\nregistry = "${registry}"\n`);
+  process.env.CCS_ROOT = root;
+
+  expect(newSession(["--top-level", "--location=ccs", "--print-id"])).toBe(0);
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const row = db.query("SELECT session_id FROM catalogue").get() as { session_id: string };
+    const stored = getRow(db, row.session_id)!;
+    expect(getMeta(stored, "launch_location_model")).toBe("gpt-5.6-sol");
+    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-sol[1m]");
+    expect(getMeta(stored, "launch_launcher")).toBe("claude-gpt");
+  } finally {
+    db.close();
+  }
+});
+
+test("newSession: invalid location route fails before reservation", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-location-invalid-route-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(join(root, "cache"), { recursive: true });
+  process.env.CCS_ROOT = root;
+
+  configureTestLocation(root, cwd, { harness: "claude", model: "gpt-5.6-sol" });
+  expect(newSession(["--top-level", "--location=ccs", "--print-id"])).toBe(2);
+
+  configureTestLocation(root, cwd, { harness: "claude", model: "claude-opus-4-8" });
+  expect(newSession(["--top-level", "--location=ccs", "--print-id"])).toBe(2);
+
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    expect(db.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 0 });
+  } finally {
+    db.close();
+  }
+});
+
+test("newSession: explicit --via outranks an invalid location default route", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-location-explicit-via-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(join(root, "cache"), { recursive: true });
+  configureTestLocation(root, cwd, { harness: "claude", model: "gpt-5.6-sol" });
+  process.env.CCS_ROOT = root;
+
+  expect(newSession(["--top-level", "--location=ccs", "--via=claude", "--print-id"])).toBe(0);
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const row = db.query("SELECT session_id FROM catalogue").get() as { session_id: string };
+    const stored = getRow(db, row.session_id)!;
+    expect(getMeta(stored, "launch_location_model")).toBe("gpt-5.6-sol");
+    expect(getMeta(stored, "launch_model")).toBeUndefined();
+    expect(getMeta(stored, "launch_launcher")).toBeUndefined();
+  } finally {
+    db.close();
+  }
+});
+
+test("newSession: explicit canonical model outranks an invalid location default", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-location-explicit-model-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(join(root, "cache"), { recursive: true });
+  configureTestLocation(root, cwd, { harness: "claude", model: "claude-opus-4-8" });
+  process.env.CCS_ROOT = root;
+
+  expect(newSession(["--top-level", "--location=ccs", "--model=gpt-5.6-terra", "--print-id"])).toBe(0);
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const row = db.query("SELECT session_id FROM catalogue").get() as { session_id: string };
+    const stored = getRow(db, row.session_id)!;
+    expect(getMeta(stored, "launch_location_model")).toBe("claude-opus-4-8");
+    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-terra[1m]");
+    expect(getMeta(stored, "launch_launcher")).toBe("claude-gpt");
+  } finally {
+    db.close();
+  }
+});
+
+test("newSession: invalid or contradictory explicit model flags fail before reservation", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-explicit-model-invalid-"));
+  roots.push(root);
+  mkdirSync(join(root, "cache"), { recursive: true });
+  process.env.CCS_ROOT = root;
+  expect(newSession(["--top-level", `--cwd=${root}`, "--model=opus", "--print-id"])).toBe(2);
+  expect(newSession(["--top-level", `--cwd=${root}`, "--model=gpt-5.6-terra", "--via=claude-gpt", "--print-id"])).toBe(2);
+  expect(newSession(["--top-level", `--cwd=${root}`, "--require-capability", "--model", "gpt-5.6-sol", "--print-id"])).toBe(2);
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    expect(db.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 0 });
+  } finally {
+    db.close();
+  }
+});
+
+test("newSession: required local host capabilities are checked before reservation", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-local-capabilities-"));
+  roots.push(root);
+  mkdirSync(join(root, "cache"), { recursive: true });
+  configureLocalTestHost(root);
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "milads-m3-2"\n[routing]\nhosts = "${join(root, "hosts.toml")}"\n`);
+  process.env.CCS_ROOT = root;
+
+  expect(newSession([
+    "--top-level",
+    `--cwd=${root}`,
+    "--model=gpt-5.6-sol",
+    "--require-capability=always-on",
+    "--print-id",
+  ])).toBe(2);
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    expect(db.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 0 });
+  } finally {
+    db.close();
+  }
+});
+
+test("newSession: required local host capabilities match case-insensitively", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-local-capability-match-"));
+  roots.push(root);
+  mkdirSync(join(root, "cache"), { recursive: true });
+  configureLocalTestHost(root);
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "milads-m3-2"\n[routing]\nhosts = "${join(root, "hosts.toml")}"\n`);
+  process.env.CCS_ROOT = root;
+
+  expect(newSession([
+    "--top-level",
+    `--cwd=${root}`,
+    "--model=gpt-5.6-sol",
+    "--require-capability=SHARED-VAULT",
+    "--print-id",
+  ])).toBe(0);
+});
+
+test("newSession: role model policy outranks location defaults while preserving location cwd", () => {
+  const root = withEventRole();
+  const roleToml = join(process.env.CCS_CONFIG_ROOT!, "clusters", "event-watch", "roles", "event-worker", "role.toml");
+  writeFileSync(roleToml, 'kind = "session"\nwork_unit = "none"\nmodel = "gpt-5.6-terra"\n');
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  configureTestLocation(root, cwd, { harness: "claude-gpt", model: "gpt-5.6-sol" });
+
+  expect(newSession(["--cluster=event-watch", "--role=event-worker", "--top-level", "--location=ccs", "--print-id"])).toBe(0);
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const row = db.query("SELECT session_id FROM catalogue").get() as { session_id: string };
+    const stored = getRow(db, row.session_id)!;
+    expect(stored.customTitle).toBe("CCS");
+    expect(getMeta(stored, "launch_location_model")).toBe("gpt-5.6-sol");
+    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-terra[1m]");
+    expect(getMeta(stored, "launch_launcher")).toBe("claude-gpt");
+  } finally {
+    db.close();
+  }
+});
+
+test("newSession: remote host uses preflight and one cmux transport without local reservation", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-remote-host-"));
+  roots.push(root);
+  const cwd = join(root, "remote-project");
+  mkdirSync(cwd, { recursive: true });
+  configureTestLocation(root, cwd, { harness: "claude-gpt", model: "gpt-5.6-sol" }, "Milads-Mac-mini");
+  configureTestHosts(root);
+  process.env.CCS_ROOT = root;
+  process.env.CCS_CREATOR_KIND = "agent";
+  process.env.CCS_CREATOR_REF = "11111111-1111-4111-8111-111111111111";
+
+  const preflightRequests: Array<Parameters<RemoteSessionDependencies["preflight"]>[0]> = [];
+  const launchRequests: Array<Parameters<RemoteSessionDependencies["launch"]>[0]> = [];
+  const dependencies: RemoteSessionDependencies = {
+    preflight(request) {
+      preflightRequests.push(request);
+      return { ok: true, value: {
+        targetHost: request.targetHost,
+        locationKey: request.locationKey,
+        locationName: "CCS",
+        cwd: "/remote/ccs",
+      } };
+    },
+    launch(request) {
+      launchRequests.push(request);
+      return { ok: true, receipt: {
+        status: "workspace_created",
+        session_id: "pending",
+        host: request.targetHost,
+        location: request.locationKey,
+        cwd: request.remoteCwd,
+        workspace_ref: "workspace:501",
+        uncertainty: "receipt pending",
+      } };
+    },
+  };
+
+  expect(newSession([
+    "--top-level",
+    "--host=Milads-Mac-mini",
+    "--location=ccs",
+    "--require-capability=always-on",
+    "--require-capability=shared-vault",
+    "--prompt=--inspect remote routing",
+  ], dependencies)).toBe(0);
+  expect(preflightRequests).toEqual([{
+    targetHost: "Milads-Mac-mini",
+    sshAlias: "macmini",
+    locationKey: "ccs",
+    route: {
+      launcher: "claude-gpt",
+      model: "gpt-5.6-sol",
+      launchModel: "gpt-5.6-sol[1m]",
+    },
+    via: undefined,
+    model: "gpt-5.6-sol",
+    requiredCapabilities: ["always-on", "shared-vault"],
+  }]);
+  expect(launchRequests[0]).toMatchObject({
+    targetHost: "Milads-Mac-mini",
+    sshAlias: "macmini",
+    locationKey: "ccs",
+    prompt: "--inspect remote routing",
+    model: "gpt-5.6-sol",
+    requiredCapabilities: ["always-on", "shared-vault"],
+    creatorKind: "agent",
+    creatorRef: "11111111-1111-4111-8111-111111111111",
+    remoteCwd: "/remote/ccs",
+  });
+  expect(existsSync(join(root, "cache", "catalogue.db"))).toBe(false);
+});
+
+test("newSession: remote explicit routes outrank an invalid location default", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-remote-explicit-route-"));
+  roots.push(root);
+  const cwd = join(root, "remote-project");
+  mkdirSync(cwd, { recursive: true });
+  configureTestLocation(root, cwd, { harness: "claude", model: "gpt-5.6-sol" }, "Milads-Mac-mini");
+  configureTestHosts(root);
+  process.env.CCS_ROOT = root;
+
+  const preflights: Array<Parameters<RemoteSessionDependencies["preflight"]>[0]> = [];
+  const launches: Array<Parameters<RemoteSessionDependencies["launch"]>[0]> = [];
+  const dependencies: RemoteSessionDependencies = {
+    preflight(request) {
+      preflights.push(request);
+      return { ok: true, value: {
+        targetHost: request.targetHost,
+        locationKey: request.locationKey,
+        locationName: "CCS",
+        cwd: "/remote/ccs",
+      } };
+    },
+    launch(request) {
+      launches.push(request);
+      return { ok: true, receipt: {
+        status: "workspace_created",
+        session_id: "pending",
+        host: request.targetHost,
+        location: request.locationKey,
+        cwd: request.remoteCwd,
+        workspace_ref: `workspace:${launches.length}`,
+        uncertainty: "receipt pending",
+      } };
+    },
+  };
+
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--model=claude-fable-5",
+  ], dependencies)).toBe(0);
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--via=claude",
+  ], dependencies)).toBe(0);
+  expect(preflights).toHaveLength(2);
+  expect(preflights[0]).toMatchObject({
+    route: { launcher: "claude", model: "claude-fable-5", launchModel: "claude-fable-5" },
+    model: "claude-fable-5",
+    via: undefined,
+  });
+  expect(preflights[1]).toMatchObject({
+    route: { launcher: "claude", model: null, launchModel: null },
+    model: null,
+    via: "claude",
+  });
+  expect(launches).toHaveLength(2);
+  expect(launches[0]).toMatchObject({ model: "claude-fable-5", via: undefined });
+  expect(launches[1]).toMatchObject({ model: undefined, via: "claude" });
+  expect(existsSync(join(root, "cache", "catalogue.db"))).toBe(false);
+});
+
+test("newSession: remote route and capability failures stop before preflight or workspace creation", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-remote-source-validation-"));
+  roots.push(root);
+  const cwd = join(root, "remote-project");
+  mkdirSync(cwd, { recursive: true });
+  configureTestLocation(root, cwd, { harness: "claude-gpt", model: "gpt-5.6-sol" }, "Milads-Mac-mini");
+  configureTestHosts(root);
+  process.env.CCS_ROOT = root;
+  const unused: RemoteSessionDependencies = {
+    preflight() { throw new Error("source validation must run before SSH preflight"); },
+    launch() { throw new Error("source validation must run before cmux workspace creation"); },
+  };
+
+  expect(newSession([
+    "--top-level",
+    "--host=Milads-Mac-mini",
+    "--location=ccs",
+    "--require-capability=interactive-gui",
+  ], unused)).toBe(2);
+  expect(newSession([
+    "--top-level",
+    "--host=Milads-Mac-mini",
+    "--location=ccs",
+    "--model=not-a-model",
+  ], unused)).toBe(2);
+  expect(existsSync(join(root, "cache", "catalogue.db"))).toBe(false);
+});
+
+test("session preflight resolves launchers, models, and capabilities with target-side authorities only", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-target-preflight-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  configureTestLocation(root, cwd, null, "Milads-Mac-mini");
+  configureTestHosts(root);
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "Milads-Mac-mini"\n[routing]\nregistry = "${join(root, "locations.toml")}"\nhosts = "${join(root, "hosts.toml")}"\n\n[[launcher]]\nname = "target-gpt"\nbinary = "claude-gpt"\nserves = ["*"]\n`);
+  process.env.CCS_ROOT = root;
+
+  const success = captureJsonReceipt(() => preflightNewSession([
+    "--top-level",
+    "--host=Milads-Mac-mini",
+    "--location=ccs",
+    "--via=target-gpt",
+    "--require-capability=always-on",
+  ]));
+  expect(success.exitCode).toBe(0);
+  expect(success.receipt).toMatchObject({
+    status: "ready",
+    host: "Milads-Mac-mini",
+    route: { launcher: "target-gpt", model: null, launchModel: null },
+    required_capabilities: ["always-on"],
+  });
+
+  expect(preflightNewSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--via=old-gateway",
+  ])).toBe(2);
+  expect(preflightNewSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--model=gpt-5.7-sol",
+  ])).toBe(2);
+  expect(preflightNewSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--require-capability=browser-auth",
+  ])).toBe(2);
+  expect(existsSync(join(root, "cache", "catalogue.db"))).toBe(false);
+});
+
+test("newSession: target route preflight failures create no remote workspace", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-remote-preflight-failure-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  configureTestLocation(root, cwd, null, "Milads-Mac-mini");
+  configureTestHosts(root);
+  process.env.CCS_ROOT = root;
+
+  let preflightCalls = 0;
+  let workspaceCreations = 0;
+  const blockers = [
+    new Error('unknown launcher "old-gateway"'),
+    new Error('unsupported --model "gpt-5.6-sol" on target'),
+    new Error('host "Milads-Mac-mini" lacks required capability "shared-vault"'),
+  ];
+  const dependencies: RemoteSessionDependencies = {
+    preflight() {
+      const error = blockers[preflightCalls++];
+      if (!error) throw new Error("unexpected preflight call");
+      return { ok: false, error };
+    },
+    launch() {
+      workspaceCreations++;
+      throw new Error("workspace creation must not run after failed preflight");
+    },
+  };
+
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--via=old-gateway",
+  ], dependencies)).toBe(2);
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--model=gpt-5.6-sol",
+  ], dependencies)).toBe(2);
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--require-capability=shared-vault",
+  ], dependencies)).toBe(2);
+  expect(preflightCalls).toBe(3);
+  expect(workspaceCreations).toBe(0);
+  expect(existsSync(join(root, "cache", "catalogue.db"))).toBe(false);
+});
+
+test("newSession: current --host preserves the established local path", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-current-host-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(join(root, "cache"), { recursive: true });
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "Milads-M3-2"\n`);
+  process.env.CCS_ROOT = root;
+  const unused: RemoteSessionDependencies = {
+    preflight() { throw new Error("current host must not preflight SSH"); },
+    launch() { throw new Error("current host must not launch cmux SSH"); },
+  };
+
+  expect(newSession([
+    "--top-level",
+    "--host=Milads-M3-2",
+    `--cwd=${cwd}`,
+    "--print-id",
+  ], unused)).toBe(0);
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    expect(db.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 1 });
+  } finally {
+    db.close();
+  }
+});
+
+test("newSession: remote host must be known, active, and location-eligible", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-invalid-remote-host-"));
+  roots.push(root);
+  const cwd = join(root, "project");
+  mkdirSync(cwd, { recursive: true });
+  configureTestLocation(root, cwd, null, "Milads-Mac-mini");
+  configureTestHosts(root, "retired");
+  process.env.CCS_ROOT = root;
+  const unused: RemoteSessionDependencies = {
+    preflight() { throw new Error("invalid host must not preflight SSH"); },
+    launch() { throw new Error("invalid host must not launch cmux SSH"); },
+  };
+
+  expect(newSession([
+    "--top-level", "--host=Unknown", "--location=ccs",
+  ], unused)).toBe(2);
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs",
+  ], unused)).toBe(2);
+
+  configureTestHosts(root, "active");
+  configureTestLocation(root, cwd, null, "Milads-M3-2");
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs",
+  ], unused)).toBe(2);
+  expect(existsSync(join(root, "cache", "catalogue.db"))).toBe(false);
+});
+
+test("newSession: remote placement rejects unsupported receipt and surface modes", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ns-remote-options-"));
+  roots.push(root);
+  writeFileSync(join(root, "config.toml"), `[host]\nlabel = "Milads-M3-2"\n`);
+  process.env.CCS_ROOT = root;
+  const unused: RemoteSessionDependencies = {
+    preflight() { throw new Error("invalid remote options must not preflight SSH"); },
+    launch() { throw new Error("invalid remote options must not launch cmux SSH"); },
+  };
+
+  expect(newSession([
+    "--top-level", "--host=", "--location=ccs",
+  ], unused)).toBe(2);
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--print-id",
+  ], unused)).toBe(2);
+  expect(newSession([
+    "--top-level", "--host=Milads-Mac-mini", "--location=ccs", "--inline",
+  ], unused)).toBe(2);
+});
+
 test("newSession: automation declaration without a stable ref fails before registration", () => {
   const root = withEventRole();
   process.env.CCS_CREATOR_KIND = "automation";
@@ -425,7 +1204,7 @@ test("writeSessionMetadata: binds identity to a not-yet-indexed id (forward refe
   const db = openCatalogue(":memory:");
   try {
     const id = "11111111-2222-3333-4444-555555555555";
-    writeSessionMetadata(db, id, parseOpts([
+    writeSessionMetadata(db, id, parsedOpts([
       "--cluster", "pr-watch",
       "--role", "pr-agent",
       "--pr-number", "12080", "--pr-repo", "heroku/dashboard",
@@ -450,7 +1229,7 @@ test("writeSessionMetadata: a leading slash on the role is normalised away", () 
   const db = openCatalogue(":memory:");
   try {
     const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-    writeSessionMetadata(db, id, parseOpts(["--cluster", "pr-watch", "--role", "/pr-watch-control"]), NOW);
+    writeSessionMetadata(db, id, parsedOpts(["--cluster", "pr-watch", "--role", "/pr-watch-control"]), NOW);
     expect(getRow(db, id)!.role).toBe("pr-watch-control");
   } finally {
     db.close();
@@ -461,7 +1240,7 @@ test("writeSessionMetadata: stamps gus-work + PR facts at birth (statusline link
   const db = openCatalogue(":memory:");
   try {
     const id = "cccccccc-dddd-eeee-ffff-000000000000";
-    writeSessionMetadata(db, id, parseOpts([
+    writeSessionMetadata(db, id, parsedOpts([
       "--cluster", "pr-watch", "--role", "pr-agent",
       "--gus-work", "W-23034218",
       "--pr-number", "12080", "--pr-repo", "heroku/dashboard",
@@ -477,7 +1256,7 @@ test("writeSessionMetadata: stamps gus-work + PR facts at birth (statusline link
 });
 
 test("parseOpts: --pr-number 0 (no PR yet) is treated as absent, not stamped", () => {
-  const o = parseOpts(["--pr-number", "0", "--pr-repo", "heroku/dashboard"]);
+  const o = parsedOpts(["--pr-number", "0", "--pr-repo", "heroku/dashboard"]);
   expect(o.prNumber).toBeUndefined();
 });
 
@@ -486,7 +1265,7 @@ test("writeSessionMetadata: --resume-command is not persisted outside the role d
   const db = openCatalogue(":memory:");
   try {
     const id = "ffffffff-0000-1111-2222-333333333333";
-    const opts = parseOpts([
+    const opts = parsedOpts([
       "--cluster", "pr-watch",
       "--role", "pr-agent",
       "--pr-number", "12080",
@@ -506,7 +1285,7 @@ test("writeSessionMetadata: only the provided fields are written (no clobber to 
   try {
     const id = "99999999-8888-7777-6666-555555555555";
     // ADR-0089 v33: cluster only surfaces through the identity join, so pass role too.
-    writeSessionMetadata(db, id, parseOpts(["--cluster", "pr-watch", "--role", "concierge"]), NOW);
+    writeSessionMetadata(db, id, parsedOpts(["--cluster", "pr-watch", "--role", "concierge"]), NOW);
     const row = getRow(db, id)!;
     expect(row.cluster).toBe("pr-watch");
     expect(row.role).toBe("concierge");
@@ -545,7 +1324,7 @@ test("writeSessionMetadata: --role without --cluster inherits cluster from role 
     // and callers upstream default opts.cluster from roleDef.cluster before
     // reaching writeSessionMetadata. Simulate that fill-in here (since this
     // test drives writeSessionMetadata directly).
-    const opts = parseOpts(["--role", "concierge"]);
+    const opts = parsedOpts(["--role", "concierge"]);
     opts.cluster = "pr-watch"; // <-- what newSession() does before writeSessionMetadata
     writeSessionMetadata(db, sid, opts, NOW);
     const row = getRow(db, sid)!;
@@ -562,7 +1341,7 @@ test("buildLaunchArgv: model option precedes session ID and policy-less argv is 
 });
 
 test("validateSpawn: unknown role errors", () => {
-  expect(validateSpawn(parseOpts(["--role", "ghost"]), null)).toContain("not in the registry");
+  expect(validateSpawn(parsedOpts(["--role", "ghost"]), null)).toContain("not in the registry");
 });
 
 test("validateSpawn: loop role without resume_command errors (would launch dormant)", () => {

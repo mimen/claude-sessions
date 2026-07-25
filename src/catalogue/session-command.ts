@@ -26,7 +26,7 @@ import { sessionById } from "../index/index.ts";
 import type { Database } from "bun:sqlite";
 import { getIdentity } from "./identities.ts";
 import { registerShimBirth, rename, mark } from "./commands.ts";
-import { newSession } from "../resume/new-session.ts";
+import { newSession, preflightNewSession } from "../resume/new-session.ts";
 import { pushCmuxRename } from "../cmux/liveness.ts";
 
 function now(): string {
@@ -71,6 +71,7 @@ export async function sessionCommand(args: string[]): Promise<number> {
     case "uncomplete": return doLifecycle(args.slice(1), ["--completed", "--off"]);
     case "unarchive":  return doLifecycle(args.slice(1), ["--archived", "--off"]);
     case "new":      return newSession(args.slice(1));
+    case "preflight": return preflightNewSession(args.slice(1));
     case "shim-register": return doShimRegister(args.slice(1));
     case "bump":     return await doBump(args.slice(1));
     case "--help":
@@ -91,6 +92,10 @@ function usage(rc = 1): number {
   console.error("  ccs session title <id> \"text\"                   set title + sync cmux tab");
   console.error("  ccs session complete|archive|uncomplete|unarchive <id>");
   console.error("  ccs session new <--top-level|--child-of <uuid|.>> [flags]  mint id + launch claude");
+  console.error("    --location=<key> resolves a curated cwd/title/harness before birth; cannot combine with --cwd");
+  console.error("    --host=<canonical-host> places a top-level location birth through registered SSH + local cmux");
+  console.error("    --model=<canonical-id> derives the launcher; --require-capability=<name> is repeatable");
+  console.error("    --json returns a detached launch receipt with full session id, route, and workspace ref");
   console.error("    --identity=<key> requires matching --cluster=<c> and --role=<r>; legacy PR/GUS birth remains available");
   console.error("  ccs session bump <id> [--note=\"…\"]              wake this session's cmux tab");
   return rc;
