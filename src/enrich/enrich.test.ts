@@ -17,6 +17,7 @@ const LOCATIONS: readonly EnrichmentLocation[] = [
 ];
 
 const ANSWER = {
+  title: "Enrichment sweep",
   summary: "A session about enrichment.",
   outstanding: "",
   recommendation: "continue",
@@ -72,6 +73,15 @@ function teardown(f: Fixture): void {
 const okFetch = async () =>
   new Response(JSON.stringify({ content: [{ type: "tool_use", name: "answer", input: ANSWER }] }), { status: 200 });
 const failFetch = async () => new Response("nope", { status: 500 });
+/** A 200 carrying an answer we reject — the session's own problem, so it costs an attempt. */
+const malformedFetch = async () =>
+  new Response(JSON.stringify({ content: [{ type: "tool_use", name: "answer", input: { summary: "only this" } }] }), { status: 200 });
+/** The real-world shape: HTTP 200 with an error envelope when a provider is cooling down. */
+const rateLimitedFetch = async () =>
+  new Response(JSON.stringify({
+    type: "error",
+    error: { type: "rate_limit_error", message: "All credentials for model gpt-5.6-sol(medium) are cooling down via provider codex" },
+  }), { status: 200 });
 
 describe("enrichCandidates", () => {
   test("a cold store makes every top-level session a candidate", async () => {
@@ -163,15 +173,67 @@ describe("sweep", () => {
     }
   });
 
-  test("counts failures and stores nothing for them", async () => {
+  test("counts a content failure and spends the session's budget", async () => {
     const f = await fixture([{ id: "a", messages: 4 }]);
     try {
       const stats = await sweep(f.index, f.catalogue, {
-        locations: LOCATIONS, keyPath: f.keyPath, fetchImpl: failFetch,
+        locations: LOCATIONS, keyPath: f.keyPath, fetchImpl: malformedFetch,
       });
-      expect(stats).toEqual({ enriched: 0, failed: 1, remaining: 0 });
+      expect(stats.enriched).toBe(0);
+      expect(stats.failed).toBe(1);
       expect(getRow(f.catalogue, "a")?.enrichment).toBeNull();
+      // The model answered and we rejected the answer — that is this session's problem, so it
+      // costs it an attempt.
       expect(getRow(f.catalogue, "a")?.enrichmentAttempts).toBe(1);
+    } finally {
+      teardown(f);
+    }
+  });
+
+  test("a rate limit never spends a session's attempt budget", async () => {
+    // The regression this exists for: one provider cooldown burnt an attempt on forty perfectly
+    // enrichable sessions in a single sweep. Three such storms would have excluded them from
+    // enrichment permanently, for a reason that had nothing to do with them.
+    const f = await fixture([{ id: "a", messages: 4 }]);
+    try {
+      await sweep(f.index, f.catalogue, {
+        locations: LOCATIONS, keyPath: f.keyPath, fetchImpl: rateLimitedFetch,
+      });
+      expect(getRow(f.catalogue, "a")?.enrichmentAttempts ?? 0).toBe(0);
+    } finally {
+      teardown(f);
+    }
+  });
+
+  test("stops early instead of grinding through a dead gateway", async () => {
+    const f = await fixture(Array.from({ length: 20 }, (_, i) => ({ id: `s${i}`, messages: 4 })));
+    try {
+      let calls = 0;
+      const counting = async () => { calls++; return rateLimitedFetch(); };
+      const stats = await sweep(f.index, f.catalogue, {
+        concurrency: 1, locations: LOCATIONS, keyPath: f.keyPath, fetchImpl: counting,
+      });
+      expect(calls).toBeLessThanOrEqual(4);
+      expect(stats.abortedReason).toMatch(/cooling down|rate/i);
+      // Everything unattempted is still pending, not silently dropped.
+      expect(stats.remaining).toBe(20 - stats.enriched - stats.failed);
+    } finally {
+      teardown(f);
+    }
+  });
+
+  test("an intermittent rate limit does not trip the breaker", async () => {
+    const f = await fixture(Array.from({ length: 6 }, (_, i) => ({ id: `s${i}`, messages: 4 })));
+    try {
+      let call = 0;
+      // Alternating success and rate limit: the breaker counts CONSECUTIVE failures, so a busy
+      // gateway that still answers must not look like a dead one.
+      const flaky = async () => (++call % 2 === 0 ? rateLimitedFetch() : okFetch());
+      const stats = await sweep(f.index, f.catalogue, {
+        concurrency: 1, locations: LOCATIONS, keyPath: f.keyPath, fetchImpl: flaky,
+      });
+      expect(stats.abortedReason).toBeUndefined();
+      expect(stats.enriched).toBe(3);
     } finally {
       teardown(f);
     }

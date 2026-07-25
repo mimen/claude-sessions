@@ -11,6 +11,7 @@ const KNOWN = new Set(["repos-ccs", "vault", "home"]);
 
 function payload(overrides: Partial<EnrichmentPayload> = {}): EnrichmentPayload {
   return {
+    title: "Session enrichment",
     summary: "Built the enrichment sweep and wired it to the catalogue.",
     outstanding: "",
     recommendation: "continue",

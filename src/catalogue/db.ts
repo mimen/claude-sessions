@@ -107,6 +107,8 @@ export interface CatalogueRow {
 
 /** An enrichment as hydrated off a catalogue row. Mirrors `Enrichment` with nullable suggestions. */
 export interface StoredEnrichment {
+  /** Enrichment's own name for the session. Never overwrites a human-set `customTitle`. */
+  readonly title: string;
   readonly summary: string;
   readonly outstanding: string;
   readonly recommendation: Recommendation;
@@ -133,7 +135,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 38;
+const CATALOGUE_VERSION = 39;
 const LEGACY_IDENTITY_COLUMNS = [
   "role", "system", "cluster", "project", "event",
   "pr_number", "pr_repo", "pr_branch", "pr_state", "pr_head_sha",
@@ -952,6 +954,17 @@ function applyMigrations(db: Database): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_enrichment_recommendation ON catalogue(enrichment_recommendation);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_enrichment_at ON catalogue(enrichment_at);");
   }
+  if (v < 39) {
+    // A title derived from the whole session rather than its opening.
+    //
+    // Deliberately NOT written to `custom_title`: that column holds a name a human chose, and a
+    // model must never quietly overwrite one. Keeping them separate lets the display layer prefer
+    // human > enrichment > the pre-session guesses, and makes the enriched title revisable on
+    // every pass without ever destroying an authored one.
+    if (!hasColumn(db, "catalogue", "enrichment_title")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN enrichment_title TEXT;");
+    }
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -1216,6 +1229,7 @@ function enrichmentFrom(r: Record<string, unknown>): StoredEnrichment | null {
   const at = (r.enrichment_at as string) ?? null;
   if (!at) return null;
   return {
+    title: (r.enrichment_title as string) ?? "",
     summary: (r.enrichment_summary as string) ?? "",
     outstanding: (r.enrichment_outstanding as string) ?? "",
     recommendation: (r.enrichment_recommendation as Recommendation) ?? "continue",
@@ -1227,6 +1241,22 @@ function enrichmentFrom(r: Record<string, unknown>): StoredEnrichment | null {
     atMessages: (r.enrichment_at_messages as number) ?? 0,
     at,
   };
+}
+
+/**
+ * The name to show for a session, in precedence order.
+ *
+ * A human-authored title always wins — that is the point of `ccs session title`. Enrichment comes
+ * next because it is the only title generated with knowledge of how the session actually turned
+ * out; everything below it (Claude Code's early `ai-title`, the codex titler, the first-message
+ * fallback) is a guess made from the opening turns. `indexTitle` carries that resolved fallback.
+ */
+export function displayTitle(row: CatalogueRow | null, indexTitle: string): string {
+  const custom = row?.customTitle?.trim();
+  if (custom) return custom;
+  const enriched = row?.enrichment?.title?.trim();
+  if (enriched) return enriched;
+  return indexTitle;
 }
 
 /** Ensure a row exists for sessionId (no-op if present), so updates can UPDATE in place. */
@@ -1477,6 +1507,7 @@ export function setEnrichment(
   ensureRow(db, sessionId, now);
   db.query(
     `UPDATE catalogue SET
+       enrichment_title = $title,
        enrichment_summary = $summary,
        enrichment_outstanding = $outstanding,
        enrichment_recommendation = $recommendation,
@@ -1491,6 +1522,7 @@ export function setEnrichment(
        updated_at = $now
      WHERE session_id = $id`,
   ).run({
+    $title: enrichment.title,
     $summary: enrichment.summary,
     $outstanding: enrichment.outstanding,
     $recommendation: enrichment.recommendation,

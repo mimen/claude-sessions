@@ -8,6 +8,9 @@ import { loadEnrichmentLocations, LOCATION_REGISTRY_PATH } from "./locations.ts"
 import { enrichCandidates, enrichOne, sweep } from "./enrich.ts";
 import { stalenessLabel } from "./staleness.ts";
 
+/** Terminal dim, kept local — this file is the only place ccs enrich styles anything. */
+const fgDim = (text: string): string => `\x1b[2m${text}\x1b[0m`;
+
 /**
  * `ccs enrich` — generate the cached per-session summaries that make a large store legible.
  *
@@ -138,6 +141,9 @@ async function runSweep(
   } else {
     process.stdout.write("\r");
     console.log(`Enriched ${stats.enriched}, failed ${stats.failed}${stats.remaining > 0 ? `, ${stats.remaining} left for the next run` : ""}.`);
+    if (stats.abortedReason) {
+      console.log(`Stopped early — the gateway is unavailable: ${stats.abortedReason.slice(0, 160)}`);
+    }
   }
   // A sweep in which everything failed is a broken gateway or a bad key, not a quiet no-op —
   // exit non-zero so a scheduled run surfaces in launchd's logs instead of looking healthy.
@@ -175,7 +181,9 @@ async function runOne(
     return 0;
   }
   const e = result.value;
-  console.log(`${row.title}  [${row.sessionId.slice(0, 8)}…]`);
+  // Show the enriched title, not the indexed one — it is usually the visible improvement.
+  console.log(`${e.title}  [${row.sessionId.slice(0, 8)}…]`);
+  if (e.title !== row.title) console.log(fgDim(`was: ${row.title}`));
   console.log(e.summary);
   if (e.outstanding) console.log(`open: ${e.outstanding}`);
   console.log(`recommend: ${e.recommendation} — ${e.reason}`);

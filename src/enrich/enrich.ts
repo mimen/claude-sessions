@@ -5,7 +5,7 @@ import { err, ok, type Result } from "../result.ts";
 import type { Enrichment } from "../catalogue/enrichment-schema.ts";
 import { loadEnrichmentLocations, type EnrichmentLocation } from "./locations.ts";
 import { readTranscriptTail } from "./transcript-tail.ts";
-import { requestEnrichment, type EnrichOptions } from "./gateway.ts";
+import { requestEnrichment, TransientGatewayError, type EnrichOptions } from "./gateway.ts";
 import { enrichmentStaleness, type StaleReason } from "./staleness.ts";
 
 /**
@@ -46,9 +46,20 @@ export interface SweepStats {
   failed: number;
   /** Sessions that were stale but not reached because `limit` cut the run short. */
   remaining: number;
+  /** Set when the sweep gave up early because the gateway was clearly unavailable. */
+  abortedReason?: string;
 }
 
 const DEFAULT_CONCURRENCY = 3;
+
+/**
+ * Consecutive transport failures before a sweep concludes the gateway is down and stops.
+ *
+ * Without this, a provider cooldown produces a sweep that dutifully fails every single candidate
+ * — the first real run hit 40 for 40 — which wastes minutes, floods the log, and tells you
+ * nothing you didn't know after the third one. The next scheduled run picks the work back up.
+ */
+const TRANSIENT_FAILURE_LIMIT = 3;
 
 /**
  * Sessions worth enriching, most recently active first.
@@ -114,7 +125,11 @@ export async function enrichOne(
 
   const nowIso = new Date().toISOString();
   if (!response.ok) {
-    recordEnrichmentFailure(catalogue, row.sessionId, nowIso);
+    // Transient transport failures say nothing about this session, so they must not spend its
+    // permanent attempt budget — see TransientGatewayError.
+    if (!(response.error instanceof TransientGatewayError)) {
+      recordEnrichmentFailure(catalogue, row.sessionId, nowIso);
+    }
     return response;
   }
 
@@ -151,11 +166,13 @@ export async function sweep(
 
   let cursor = 0;
   let done = 0;
+  let consecutiveTransient = 0;
+  let aborted = false;
   const workerCount = Math.min(options.concurrency ?? DEFAULT_CONCURRENCY, candidates.length);
 
   const worker = async (): Promise<void> => {
     while (true) {
-      if (options.isCancelled?.()) return;
+      if (aborted || options.isCancelled?.()) return;
       const next = cursor++;
       if (next >= candidates.length) return;
       const candidate = candidates[next]!;
@@ -165,9 +182,20 @@ export async function sweep(
       if (options.isCancelled?.()) return;
       if (result.ok) {
         stats.enriched++;
+        // Any success proves the gateway is alive, so an intermittent limit never trips the breaker.
+        consecutiveTransient = 0;
       } else {
         stats.failed++;
         options.onFailure?.(candidate.row.sessionId, result.error);
+        if (result.error instanceof TransientGatewayError) {
+          consecutiveTransient++;
+          if (consecutiveTransient >= TRANSIENT_FAILURE_LIMIT) {
+            aborted = true;
+            stats.abortedReason = result.error.message;
+          }
+        } else {
+          consecutiveTransient = 0;
+        }
       }
       done++;
       options.onProgress?.(done, candidates.length, candidate.row.sessionId);
@@ -175,6 +203,8 @@ export async function sweep(
   };
 
   await Promise.all(Array.from({ length: workerCount }, worker));
+  // Everything not reached is still pending, whether the limit or the breaker stopped us.
+  stats.remaining = all.length - stats.enriched - stats.failed;
   return stats;
 }
 

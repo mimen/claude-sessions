@@ -8,7 +8,7 @@ import type { Database } from "bun:sqlite";
 import { listByRecency, sessionById, titleOf } from "./index/index.ts";
 import { buildCostRollup } from "./index/cost-rollup.ts";
 import { formatCost } from "./cost.ts";
-import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster } from "./catalogue/db.ts";
+import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster, displayTitle } from "./catalogue/db.ts";
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson, isCoreRole } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
@@ -526,7 +526,7 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number 
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
       // A child in the constellation gets a ↳ marker inside the (padded) title cell, keeping columns aligned.
       const childMark = c?.parentSessionId ? "↳ " : "";
-      const title = pad(childMark + (c?.customTitle ?? r.title), 42);
+      const title = pad(childMark + displayTitle(c ?? null, r.title), 42);
       const isRecentUnclassified = c?.sessionClass == null && r.firstTs != null
         && Date.parse(r.firstTs) >= Date.parse(SESSION_CLASS_ROLLOUT_AT);
       const classification = c?.sessionClass === "auxiliary" ? "AUX " : isRecentUnclassified ? "UNCLASSIFIED " : "";
