@@ -20,7 +20,7 @@ export interface ResumeCommand {
   readonly cwd: string;
   /** Extra env for the spawned process (from the launcher; empty for plain `claude`). */
   readonly env: Readonly<Record<string, string>>;
-  /** Single-string form, for cmux --command and for display (env-prefixed when env is set). */
+  /** Single-string form for display/diagnostics (env-prefixed when env is set). */
   readonly shell: string;
 }
 
