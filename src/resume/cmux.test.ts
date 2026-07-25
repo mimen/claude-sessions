@@ -4,20 +4,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ResumeCommand } from "./command.ts";
 import { openInCmux } from "./cmux.ts";
-import { buildCmuxNewWorkspaceArgv } from "./spawn-cmux.ts";
 
-function withFakeCmux<T>(fn: (cmuxPath: string, callsFile: string) => T): T {
-  const tmpDir = mkdtempSync(join(tmpdir(), "ccs-open-cmux-"));
-  const cmuxPath = join(tmpDir, "fake-cmux");
-  const callsFile = join(tmpDir, "calls.log");
-  writeFileSync(cmuxPath, `#!/bin/bash
+function withFakeCmux<T>(fn: (cmuxPath: string, callsFile: string, root: string) => T): T {
+  const root = mkdtempSync(join(tmpdir(), "ccs-open-cmux-"));
+  const cmuxPath = join(root, "fake-cmux");
+  const callsFile = join(root, "calls.log");
+  writeFileSync(
+    cmuxPath,
+    `#!/bin/bash
 printf '%s\\0' "$@" > "${callsFile}"
-`, { mode: 0o755 });
+`,
+    { mode: 0o755 },
+  );
 
   try {
-    return fn(cmuxPath, callsFile);
+    return fn(cmuxPath, callsFile, root);
   } finally {
-    rmSync(tmpDir, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
   }
 }
 
@@ -27,29 +30,85 @@ function readCmuxArgv(callsFile: string): string[] {
   return argv;
 }
 
+function valueAfter(argv: readonly string[], flag: string): string {
+  const index = argv.indexOf(flag);
+  const value = argv[index + 1];
+  if (index < 0 || value === undefined) throw new Error(`missing ${flag} value`);
+  return value;
+}
+
+function environmentFileFromCommand(command: string): string {
+  const sourcePrefix = "; builtin . ";
+  const sourceStart = command.indexOf(sourcePrefix);
+  const sourceEnd = command.indexOf(" && /bin/rm -f -- ", sourceStart + sourcePrefix.length);
+  if (sourceStart < 0 || sourceEnd < 0) throw new Error("missing environment source step");
+
+  const sourceToken = command.slice(sourceStart + sourcePrefix.length, sourceEnd);
+  const parsed = Bun.spawnSync(
+    ["/bin/bash", "-c", `set -- ${sourceToken}; printf '%s' "$1"`],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  if (!parsed.success) throw new Error("failed to parse environment file path");
+  return parsed.stdout.toString();
+}
+
 describe("openInCmux", () => {
-  test("uses the shared new-workspace argv builder instead of ResumeCommand.shell", () => {
-    withFakeCmux((cmuxPath, callsFile) => {
+  test("uses the shared single-use transport instead of ResumeCommand.shell", () => {
+    withFakeCmux((cmuxPath, callsFile, root) => {
+      const launcherPath = join(root, "capture-launch-env");
+      const capturedValuePath = join(root, "captured-value.txt");
+      const childEnvironmentPath = join(root, "child.env");
+      writeFileSync(
+        launcherPath,
+        `#!/bin/bash
+printf '%s' "$CCS_OPEN_VALUE" > "$1"
+/usr/bin/env > "$2"
+`,
+        { mode: 0o755 },
+      );
+      writeFileSync(
+        cmuxPath,
+        `#!/bin/bash
+printf '%s\\0' "$@" > "${callsFile}"
+command=''
+while (($#)); do
+  if [[ "$1" == "--command" ]]; then
+    shift
+    command="$1"
+  fi
+  shift
+done
+/bin/bash -c "$command"
+`,
+        { mode: 0o755 },
+      );
+
+      const explicitValue = "parent=value with spaces and 'quotes'";
       const command: ResumeCommand = {
-        argv: ["claude-gpt", "--resume", "session id"],
-        cwd: "/tmp/resume cwd",
-        env: { CCS_LAUNCH_CREATOR_REF: "parent=value with spaces" },
+        argv: [launcherPath, capturedValuePath, childEnvironmentPath],
+        cwd: root,
+        env: { CCS_OPEN_VALUE: explicitValue },
         shell: "legacy shell text that must not be passed",
       };
-      const expected = buildCmuxNewWorkspaceArgv({
-        argv: command.argv,
-        cwd: command.cwd,
-        env: command.env,
-        name: "resume title",
-        focus: true,
-      });
-      expect(expected.ok).toBe(true);
-      if (!expected.ok) return;
 
       expect(openInCmux(command, "resume title", cmuxPath)).toBe(true);
-      expect(readCmuxArgv(callsFile)).toEqual(expected.value);
-      expect(expected.value.slice(-2)).toEqual(["--focus", "true"]);
-      expect(expected.value).not.toContain(command.shell);
+
+      const calls = readCmuxArgv(callsFile);
+      const integratedCommand = valueAfter(calls, "--command");
+      const environmentFile = environmentFileFromCommand(integratedCommand);
+      expect(calls.slice(-2)).toEqual(["--focus", "true"]);
+      expect(calls).not.toContain("--env");
+      expect(calls).not.toContain("--env-file");
+      expect(calls).not.toContain(command.shell);
+      expect(calls.join("\0")).not.toContain(explicitValue);
+      expect(readFileSync(capturedValuePath, "utf8")).toBe(explicitValue);
+      expect(readFileSync(childEnvironmentPath, "utf8")).toContain(
+        `CCS_OPEN_VALUE=${explicitValue}\n`,
+      );
+      expect(readFileSync(childEnvironmentPath, "utf8")).not.toContain(
+        "CCS_CMUX_STAGED_ENV_",
+      );
+      expect(existsSync(environmentFile)).toBe(false);
     });
   });
 

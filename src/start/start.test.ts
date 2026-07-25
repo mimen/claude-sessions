@@ -143,6 +143,18 @@ test("managed launcher birth uses session-new once, never reuses an idle session
   const fakeCmux = join(root, "fake-cmux");
   writeFileSync(fakeCmux, `#!/bin/bash
 printf '%s\\n' "$@" > "${callsPath}"
+command=''
+while (($#)); do
+  if [[ "$1" == "--command" ]]; then
+    shift
+    command="$1"
+  fi
+  shift
+done
+if [[ "$command" == *" && /usr/bin/env "* ]]; then
+  setup="\${command%% && /usr/bin/env *}"
+  /bin/bash -c "\${setup} && true)" || exit 1
+fi
 printf '%s\\n' 'workspace:901'
 `);
   chmodSync(fakeCmux, 0o755);

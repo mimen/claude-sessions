@@ -88,7 +88,21 @@ function configureLocalTestHost(runtimeRoot: string): void {
 function configureFakeCmux(runtimeRoot: string, outcome: "success" | "failure"): string {
   const executable = join(runtimeRoot, `fake-cmux-${outcome}`);
   const body = outcome === "success"
-    ? "#!/usr/bin/env bash\nprintf '%s\\n' 'OK workspace:777'\n"
+    ? `#!/usr/bin/env bash
+command=''
+while (($#)); do
+  if [[ "$1" == "--command" ]]; then
+    shift
+    command="$1"
+  fi
+  shift
+done
+if [[ "$command" == *" && /usr/bin/env "* ]]; then
+  setup="\${command%% && /usr/bin/env *}"
+  /bin/bash -c "\${setup} && true)" || exit 1
+fi
+printf '%s\\n' 'OK workspace:777'
+`
     : "#!/usr/bin/env bash\nprintf '%s\\n' 'cmux unavailable' >&2\nexit 1\n";
   writeFileSync(executable, body);
   chmodSync(executable, 0o755);
