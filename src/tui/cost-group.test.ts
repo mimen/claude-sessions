@@ -29,6 +29,7 @@ function row(id: string, costUSD: number): SessionRow {
     tokCacheWrite: 0,
     costByModel: {},
     models: [],
+    lastModel: "",
     userTurns: 0,
     tickIntervalSec: 0,
   };

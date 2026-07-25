@@ -100,12 +100,13 @@ export type ResumeSessionResult =
 export function chooseLauncher(
   launchers: readonly Launcher[],
   models: readonly string[],
-  opts: { via?: string; force?: boolean },
+  opts: { via?: string; force?: boolean; lastModel?: string },
 ):
   | { ok: true; launcher: Launcher }
   | { ok: false; status: "unknown-launcher"; name: string }
   | { ok: false; status: "route-ineligible"; reason: string } {
-  const routes = resolveRoutes(launchers, models);
+  const lastModel = opts.lastModel ?? "";
+  const routes = resolveRoutes(launchers, models, lastModel);
   if (opts.via) {
     const launcher = launcherByName(launchers, opts.via);
     if (!launcher) return { ok: false, status: "unknown-launcher", name: opts.via };
@@ -115,12 +116,13 @@ export function chooseLauncher(
     }
     return { ok: true, launcher };
   }
-  const def = defaultRoute(routes, models);
+  const def = defaultRoute(routes, models, lastModel);
   if (!def) {
+    const subject = lastModel === "" ? models.join(", ") : lastModel;
     return {
       ok: false,
       status: "route-ineligible",
-      reason: `no configured launcher serves [${models.join(", ")}]`,
+      reason: `no configured launcher serves [${subject}]`,
     };
   }
   return { ok: true, launcher: def.launcher };
@@ -162,7 +164,11 @@ export function resumeSessionEntry(
   // still reports already-open first — route choice is irrelevant for a live tab).
   if (sessionIsOpen(bridge, row)) return { status: "already-open" };
   const launchers = opts.launchers ?? DEFAULT_LAUNCHERS;
-  const chosen = chooseLauncher(launchers, row.models, { via: opts.via, force: opts.force });
+  const chosen = chooseLauncher(launchers, row.models, {
+    via: opts.via,
+    force: opts.force,
+    lastModel: row.lastModel,
+  });
   if (!chosen.ok) {
     return chosen.status === "unknown-launcher"
       ? { status: "unknown-launcher", name: chosen.name }

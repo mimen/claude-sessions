@@ -38,6 +38,7 @@ function session(sessionId: string, firstTs: string, isSubagent = false): Sessio
     tokCacheWrite: 0,
     costByModel: {},
     models: [],
+    lastModel: "",
     userTurns: 1,
     tickIntervalSec: 0,
   };
