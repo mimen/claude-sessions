@@ -84,8 +84,8 @@
     <h1><code>/ccs:new</code> session router</h1>
     <p class="lede">One command turns an initial prompt into a correctly placed, correctly routed, CCS-managed top-level session. Local births return a concrete session and workspace; remote births report exactly what is known and leave the session ID pending when target-side delivery cannot yet be confirmed.</p>
     <div class="banner">
-      <p class="status">Status: implementation and release-blocker fixes are committed and locally validated. Router integration and installation remain pending.</p>
-      <p class="muted" style="margin:0;">The swap-harness dependency is merged. The router branch is not yet pushed or merged, and no runtime link, installed plugin, live session, remote workspace, or Dock control has been changed.</p>
+      <p class="status">Status: shipped on 2026-07-25 across the laptop and Mac Mini.</p>
+      <p class="muted" style="margin:0;">The conversational router, deterministic <code>ccs start</code>, shared registries, exact model compiler, remote preflight, and warm Terra Dock launcher are installed. The rollout exposed and fixed several live-only launch defects before activation; the remaining remote receipt limitation is recorded below.</p>
     </div>
     <p class="path muted">Artifact: /Users/mimen/Programming/Repos/claude-sessions/docs/plans/ccs-new-session-router.html</p>
   </header>
@@ -271,8 +271,8 @@ ccs location register my-project --cwd /absolute/path --alias "my project"</code
   </section>
 
   <section>
-    <p class="eyebrow">10 &middot; Evidence</p>
-    <h2>What the implementation demonstrated</h2>
+    <p class="eyebrow">10 &middot; Pre-release evidence</p>
+    <h2>What the approved implementation had demonstrated before rollout</h2>
     <div class="stats">
       <div class="stat"><b>30</b><span>curated locations</span><div class="sub">30 laptop-eligible, 23 Mini-eligible, all declared paths verified</div></div>
       <div class="stat"><b>1,068</b><span>tests passing with serial file scheduling</span><div class="sub"><code>--max-concurrency=1</code>; 133 files, 3,442 expectations</div></div>
@@ -286,8 +286,8 @@ ccs location register my-project --cwd /absolute/path --alias "my project"</code
       <h3>What the numbers do not claim</h3>
       <ul>
         <li>The parallel Ink TUI tests remain timing-sensitive. These are the repository's pre-existing flakes: the affected files pass in isolation, and the full suite passes with <code>--max-concurrency=1</code>, which schedules test files serially rather than changing router behavior.</li>
-        <li>Iteration 2's 36 of 36 is conversation-layer evidence, not a live birth. No router session has been spawned. The <a href="file:///Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/iteration-2/review.html" target="_blank" rel="noopener">static evaluation viewer</a> shows the run.</li>
-        <li>Nothing is installed: no commit or push, no install, no runtime-link change, no live smoke launch, no Dock activation.</li>
+        <li>At approval time, iteration 2's 36 of 36 was conversation-layer evidence rather than a live birth. The <a href="file:///Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/iteration-2/review.html" target="_blank" rel="noopener">static evaluation viewer</a> preserves that pre-release run.</li>
+        <li>This section records the approval gate before installation. The shipped revisions, live launches, divergences, and final counts are in the closing section below.</li>
         <li>The three-tier review resolved a disputed status-wording claim at the third tier. Verified fixes covered model vocabulary, route precedence, registration, malformed-flag, and schema findings.</li>
       </ul>
     </div>
@@ -320,6 +320,34 @@ ccs location register my-project --cwd /absolute/path --alias "my project"</code
   </section>
 
   <section>
+    <p class="eyebrow">13 &middot; What actually shipped</p>
+    <h2>The smoke gate changed the implementation before activation</h2>
+    <p>The shipped CCS revision is <code>c1148a10bc8dcfea2341becc0b5fff09b06ac629</code>, merged in <a href="https://github.com/mimen/claude-sessions/pull/6" target="_blank" rel="noopener">claude-sessions PR 6</a>. The shared machine manifests pin that revision in vault revision <code>72b0555c1e807390bb73b79b30f61bdd4a2368e3</code>, merged in <a href="https://github.com/mimen/milad-vault/pull/2" target="_blank" rel="noopener">milad-vault PR 2</a>. The personal Dock seed is revision <code>3046121eb9a451f382b5e813837b2e701e3f06dd</code>, merged in <a href="https://github.com/mimen/ccs-config-personal/pull/2" target="_blank" rel="noopener">ccs-config-personal PR 2</a>. Both hosts report the pinned CCS capability healthy.</p>
+    <div class="stats">
+      <div class="stat"><b>1,270</b><span>final Bun tests passing</span><div class="sub">152 files, 3,985 expectations, zero failures</div></div>
+      <div class="stat"><b>86</b><span>focused launch contracts passing</span><div class="sub">cmux transport, new-session, resume, and <code>ccs start</code></div></div>
+      <div class="stat"><b>313</b><span>machine-adapter tests passing</span></div>
+      <div class="stat"><b>2 / 2</b><span>host capability checks healthy</span></div>
+    </div>
+    <p>TypeScript compilation and <code>git diff --check</code> also passed at the merged CCS revision.</p>
+    <div class="callout warn">
+      <h3>The planned risk was real</h3>
+      <ul>
+        <li>The first installed <code>ccs start</code> smoke created <code>workspace:87</code>, but cmux 0.64.20 truncated the environment-prefixed <code>--command</code> before the Claude launcher. The workspace evidence prevented an automatic retry and remains untouched.</li>
+        <li>The first hotfix moved values into cmux <code>--env</code>. Primary review then proved that cmux persists workspace environment into later surfaces and restored sessions, which could retain credentials. That patch was not merged.</li>
+        <li>The final transport uses an absolute mode-0700 temporary directory and mode-0600 one-shot assignment file. Values never enter cmux workspace state or command text. The integrated shell deletes the file before launch, an independent no-secret janitor removes unconsumed files after 30 seconds, and later launches prune stale task-owned artifacts.</li>
+      </ul>
+    </div>
+    <p>The corrected <code>ccs start</code> smoke created <code>workspace:89</code> and left one unsubmitted <code>/ccs:new </code> prefill. A local router smoke created managed session <code>a5cf9a73-281f-4220-b967-3943ae972171</code> in <code>workspace:90</code>; the child read <code>README.md</code> and returned its first heading without editing files.</p>
+    <p>The single Mini smoke behaved exactly as the remote contract predicted: it returned <code>workspace:92</code> with <code>session_id: pending</code>, so the workspace was inspected and no retry occurred. The target reserved session <code>0dcd8f0a-1539-4bdb-8db9-d1308c7b44aa</code> but the gateway wrapper stopped because a fresh SSH login shell lacked <code>CLAUDE_GPT_GATEWAY_API_KEY</code>. Both machines now load that variable from the existing local <code>~/.cli-proxy-api-key</code> file in <code>~/.zshenv</code>; a fresh Mini login shell and <code>claude-gpt --version</code> both pass. The rollout deliberately did not create a second Mini session merely to improve the receipt.</p>
+    <p>Dock activation exposed another live-only defect: the Dock shell did not have <code>ccs</code> on PATH. The seed now uses <code>/Users/mimen/.bun/bin/ccs</code>. The live right-sidebar body is CCS-managed session <code>44bc56f6-d199-4510-bd22-872c6afc72a6</code>, attached to <code>session-launcher@control-plane</code> and running <code>gpt-5.6-terra[1m]</code>. The manually recovered live tab still displays <code>Terminal</code>; the committed seed is titled <code>New Session</code> and will apply on the next clean Dock creation. No detached raw Claude process was used.</p>
+    <div class="callout">
+      <h3>Legacy launch aliases remain by design</h3>
+      <p style="margin:0;">The feature-by-feature <code>ClaudeConfig/claudes</code> audit is complete, and its archival gate failed safely. <code>bootstrap.py roles</code>, <code>role_env.py</code>, generated workspace aliases, the bare <code>claude</code> shell function, and active shell initialization still consume the legacy registry. Because role generation has not yet been split from workspace aliases, <code>ClaudeConfig/claudes</code> was not archived. The router ships as the sole conversational router without pretending those direct shell capabilities already have full parity.</p>
+    </div>
+  </section>
+
+  <section>
     <p class="eyebrow">References</p>
     <h2>Authorities and artifacts</h2>
     <ul class="refs">
@@ -328,9 +356,9 @@ ccs location register my-project --cwd /absolute/path --alias "my project"</code
       <li><a href="file:///Users/mimen/.claude/CLAUDE.md" target="_blank" rel="noopener">Canonical model table</a> and <a href="file:///Users/mimen/Documents/milad-vault/ClaudeConfig/seats/README.md" target="_blank" rel="noopener">seat registry contract</a>: supported harnesses and routes.</li>
       <li><a href="file:///Users/mimen/Documents/milad-vault/Workspaces/Assistant/projects/agentic-os/issues/34-remote-launch.md" target="_blank" rel="noopener">Agentic OS issue 34</a>: first-class remote launch.</li>
       <li><a href="https://cmux.com/docs/ssh" target="_blank" rel="noopener"><code>cmux ssh</code> docs</a> and <a href="https://cmux.com/docs/remote-tmux" target="_blank" rel="noopener">remote tmux docs</a>: the interim remote transport.</li>
-      <li>Staged shared registries: <span class="path">/Users/mimen/Documents/.milad-vault-worktrees/ccs-new-router-config/ClaudeConfig/session-routing/locations.toml</span> and <span class="path">/Users/mimen/Documents/.milad-vault-worktrees/ccs-new-router-config/ClaudeConfig/session-routing/hosts.toml</span>.</li>
-      <li>Staged plugin skill: <span class="path">/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/plugins/ccs/skills/new/SKILL.md</span>.</li>
-      <li>Staged Dock seed: <span class="path">/Users/mimen/.ccs-config/.claude/worktrees/ccs-new-launcher/dock/ccs-new.dock.json</span>.</li>
+      <li>Installed shared registries: <a href="file:///Users/mimen/Documents/milad-vault/ClaudeConfig/session-routing/locations.toml" target="_blank" rel="noopener">locations.toml</a> and <a href="file:///Users/mimen/Documents/milad-vault/ClaudeConfig/session-routing/hosts.toml" target="_blank" rel="noopener">hosts.toml</a>.</li>
+      <li>Installed plugin skill: <a href="file:///Users/mimen/Programming/Deployments/claude-sessions/plugins/ccs/skills/new/SKILL.md" target="_blank" rel="noopener">/Users/mimen/Programming/Deployments/claude-sessions/plugins/ccs/skills/new/SKILL.md</a>.</li>
+      <li>Installed Dock seed: <a href="file:///Users/mimen/.ccs-config/dock/ccs-new.dock.json" target="_blank" rel="noopener">/Users/mimen/.ccs-config/dock/ccs-new.dock.json</a>; live cmux copy: <a href="file:///Users/mimen/.config/cmux/dock.json" target="_blank" rel="noopener">/Users/mimen/.config/cmux/dock.json</a>.</li>
     </ul>
   </section>
 
