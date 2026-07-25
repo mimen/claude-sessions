@@ -6,7 +6,7 @@ import type { Database } from "bun:sqlite";
 import { openIndex } from "../index/schema.ts";
 import { reindexStore } from "../index/index.ts";
 import { openCatalogue, getRow, setEnrichment, recordEnrichmentFailure } from "../catalogue/db.ts";
-import { enrichCandidates, sweep } from "./enrich.ts";
+import { enrichCandidates, enrichSurvey, sweep } from "./enrich.ts";
 import { MAX_ENRICHMENT_ATTEMPTS } from "./staleness.ts";
 import type { EnrichmentLocation } from "./locations.ts";
 import type { Enrichment } from "../catalogue/enrichment-schema.ts";
@@ -297,6 +297,32 @@ describe("sweep", () => {
       });
       expect(stats.enriched).toBe(2);
       expect(stats.failed).toBe(1);
+    } finally {
+      teardown(f);
+    }
+  });
+});
+
+describe("enrichSurvey", () => {
+  test("reports sessions that have fallen out of the sweep, instead of hiding them", async () => {
+    // A session at the cap is skipped forever and looks identical to one that is up to date.
+    // That is how a transient outage quietly costs you coverage.
+    const f = await fixture([{ id: "a", messages: 4 }, { id: "burnt", messages: 4 }]);
+    try {
+      for (let i = 0; i < MAX_ENRICHMENT_ATTEMPTS; i++) recordEnrichmentFailure(f.catalogue, "burnt", NOW);
+      const survey = enrichSurvey(f.index, f.catalogue);
+      expect(survey.candidates.map((c) => c.row.sessionId)).toEqual(["a"]);
+      expect(survey.exhausted.map((e) => e.row.sessionId)).toEqual(["burnt"]);
+      expect(survey.exhausted[0]?.attempts).toBe(MAX_ENRICHMENT_ATTEMPTS);
+    } finally {
+      teardown(f);
+    }
+  });
+
+  test("a healthy store reports nothing excluded", async () => {
+    const f = await fixture([{ id: "a", messages: 4 }]);
+    try {
+      expect(enrichSurvey(f.index, f.catalogue).exhausted).toEqual([]);
     } finally {
       teardown(f);
     }

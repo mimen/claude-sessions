@@ -18,6 +18,12 @@ import { enrichmentStaleness, type StaleReason } from "./staleness.ts";
  * down its database doesn't get writes after close.
  */
 
+/** A session the sweep will never reach again until something changes. */
+export interface ExcludedSession {
+  readonly row: SessionRow;
+  readonly attempts: number;
+}
+
 export interface EnrichCandidate {
   readonly row: SessionRow;
   readonly reason: StaleReason;
@@ -74,8 +80,33 @@ export function enrichCandidates(
   catalogue: Database,
   now: Date = new Date(),
 ): EnrichCandidate[] {
+  return enrichSurvey(index, catalogue, now).candidates;
+}
+
+/**
+ * Sessions permanently skipped because they burnt their attempt budget.
+ *
+ * These are invisible by design in the sweep, which is exactly the problem: a session that falls
+ * out of the loop looks identical to one that is up to date. Surfacing them is how you notice
+ * that a transient outage cost you coverage.
+ */
+export function exhaustedSessions(
+  index: Database,
+  catalogue: Database,
+  now: Date = new Date(),
+): ExcludedSession[] {
+  return enrichSurvey(index, catalogue, now).exhausted;
+}
+
+/** One pass over the store, classifying every top-level session. */
+export function enrichSurvey(
+  index: Database,
+  catalogue: Database,
+  now: Date = new Date(),
+): { candidates: EnrichCandidate[]; exhausted: ExcludedSession[] } {
   const catalogueRows = getAll(catalogue);
   const candidates: EnrichCandidate[] = [];
+  const exhausted: ExcludedSession[] = [];
   for (const row of listByRecency(index, false)) {
     if (row.isSubagent) continue;
     const catalogueRow = catalogueRows.get(row.sessionId);
@@ -86,10 +117,15 @@ export function enrichCandidates(
       attempts: catalogueRow?.enrichmentAttempts ?? 0,
       now,
     });
-    if (!verdict.stale) continue;
+    if (!verdict.stale) {
+      if (verdict.reason === "attempts-exhausted") {
+        exhausted.push({ row, attempts: catalogueRow?.enrichmentAttempts ?? 0 });
+      }
+      continue;
+    }
     candidates.push({ row, reason: verdict.reason, messagesSince: verdict.messagesSince });
   }
-  return candidates;
+  return { candidates, exhausted };
 }
 
 /** Enrich one session and persist it. Failures bump the attempt counter and never throw. */

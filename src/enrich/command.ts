@@ -5,7 +5,7 @@ import { err, ok, type Result } from "../result.ts";
 import { openCatalogue } from "../catalogue/db.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { loadEnrichmentLocations, LOCATION_REGISTRY_PATH } from "./locations.ts";
-import { enrichCandidates, enrichOne, sweep } from "./enrich.ts";
+import { enrichOne, enrichSurvey, sweep } from "./enrich.ts";
 import { stalenessLabel } from "./staleness.ts";
 
 /** Terminal dim, kept local — this file is the only place ccs enrich styles anything. */
@@ -78,16 +78,19 @@ function listStale(
   limit: number | undefined,
   asJson: boolean,
 ): number {
-  const all = enrichCandidates(index, catalogue);
+  const { candidates: all, exhausted } = enrichSurvey(index, catalogue);
   const shown = limit ? all.slice(0, limit) : all;
   if (asJson) {
     console.log(JSON.stringify(
-      shown.map((c) => ({
-        sessionId: c.row.sessionId,
-        title: c.row.title,
-        reason: c.reason,
-        messagesSince: c.messagesSince,
-      })),
+      {
+        stale: shown.map((c) => ({
+          sessionId: c.row.sessionId,
+          title: c.row.title,
+          reason: c.reason,
+          messagesSince: c.messagesSince,
+        })),
+        exhausted: exhausted.map((e) => ({ sessionId: e.row.sessionId, title: e.row.title, attempts: e.attempts })),
+      },
       null,
       2,
     ));
@@ -95,6 +98,7 @@ function listStale(
   }
   if (shown.length === 0) {
     console.log("Nothing stale — every top-level session has a current enrichment.");
+    reportExhausted(exhausted);
     return 0;
   }
   console.log(`${all.length} stale session${all.length === 1 ? "" : "s"}${limit && all.length > shown.length ? ` (showing ${shown.length})` : ""}:`);
@@ -104,7 +108,24 @@ function listStale(
       : stalenessLabel(candidate.messagesSince) ?? candidate.reason;
     console.log(`  ${candidate.row.sessionId.slice(0, 8)}…  ${since.padEnd(24)}  ${candidate.row.title}`);
   }
+  reportExhausted(exhausted);
   return 0;
+}
+
+/**
+ * Name the sessions that have fallen out of the sweep entirely.
+ *
+ * A session at the attempt cap is skipped forever and looks exactly like one that is up to date,
+ * so a transient outage can quietly cost you coverage with nothing to show for it. `ccs enrich
+ * <id>` ignores the cap and resets it on success, which is why the hint is worth printing.
+ */
+function reportExhausted(exhausted: readonly { row: { sessionId: string; title: string }; attempts: number }[]): void {
+  if (exhausted.length === 0) return;
+  console.log(`\n${exhausted.length} session${exhausted.length === 1 ? "" : "s"} excluded — attempt budget spent:`);
+  for (const item of exhausted.slice(0, 10)) {
+    console.log(`  ${item.row.sessionId.slice(0, 8)}…  ${String(item.attempts).padEnd(24)}  ${item.row.title}`);
+  }
+  console.log("  retry one with: ccs enrich <id>   (ignores the cap, resets it on success)");
 }
 
 async function runSweep(
@@ -115,7 +136,7 @@ async function runSweep(
   asJson: boolean,
 ): Promise<number> {
   warnIfNoRegistry();
-  const total = enrichCandidates(index, catalogue).length;
+  const total = enrichSurvey(index, catalogue).candidates.length;
   if (total === 0) {
     if (asJson) console.log(JSON.stringify({ enriched: 0, failed: 0, remaining: 0 }));
     else console.log("Nothing stale.");
