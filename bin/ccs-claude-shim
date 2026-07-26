@@ -53,9 +53,29 @@ if [[ -n "${CMUX_SURFACE_ID:-}" && -z "${CCS_CLAUDE_SHIM_AFTER_CMUX:-}" ]]; then
   cmux_wrapper="$(find_cmux_wrapper || true)"
   if [[ -n "$cmux_wrapper" ]]; then
     export CCS_LAUNCH_PARENT_SESSION_ID="${CCS_LAUNCH_PARENT_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
+    # cmux clears the inherited Anthropic credential along with that identity, which
+    # silently strips the gateway route a launcher wrapper (claude-gpt) installed one
+    # exec earlier — the session then reaches the gateway with no key, or with cmux's
+    # own OAuth token, and the gateway rejects it. Carry the route across in CCS-only
+    # variables, exactly as the causal parent survives.
+    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+      export CCS_CARRIED_ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
+    fi
+    if [[ -n "${ANTHROPIC_BASE_URL:-}" ]]; then
+      export CCS_CARRIED_ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL"
+    fi
     export CCS_CLAUDE_SHIM_AFTER_CMUX=1
     exec "$cmux_wrapper" "$@"
   fi
+fi
+
+# Second pass: restore only what cmux actually cleared. A value cmux left in place is
+# the live one and is never overwritten.
+if [[ -n "${CCS_CARRIED_ANTHROPIC_API_KEY:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  export ANTHROPIC_API_KEY="$CCS_CARRIED_ANTHROPIC_API_KEY"
+fi
+if [[ -n "${CCS_CARRIED_ANTHROPIC_BASE_URL:-}" && -z "${ANTHROPIC_BASE_URL:-}" ]]; then
+  export ANTHROPIC_BASE_URL="$CCS_CARRIED_ANTHROPIC_BASE_URL"
 fi
 
 raw_link="${CCS_RAW_CLAUDE_PATH:-${HOME:-}/.local/bin/claude}"
@@ -78,6 +98,9 @@ exec_raw() {
   unset CCS_CLAUDE_SHIM_AFTER_CMUX CCS_LAUNCH_PARENT_SESSION_ID
   unset CCS_LAUNCH_CREATOR_KIND CCS_LAUNCH_CREATOR_REF
   unset CCS_CREATOR_KIND CCS_CREATOR_REF
+  # The carriers have already been restored to their real names. Drop them so the
+  # credential is not handed to Claude under a second name it does not know to redact.
+  unset CCS_CARRIED_ANTHROPIC_API_KEY CCS_CARRIED_ANTHROPIC_BASE_URL
   exec "$raw_claude" "$@"
 }
 
