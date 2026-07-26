@@ -32,6 +32,7 @@ function fixture(): Fixture {
 printf '%s\n' "$@" > "$CCS_TEST_RAW_OBSERVATION"
 printf 'base=%s\nmodel=%s\n' "\${ANTHROPIC_BASE_URL:-}" "\${ANTHROPIC_MODEL:-}" >> "$CCS_TEST_RAW_OBSERVATION"
 printf 'launch_parent=%s\nlaunch_creator_kind=%s\nlaunch_creator_ref=%s\ncreator_kind=%s\ncreator_ref=%s\n' "\${CCS_LAUNCH_PARENT_SESSION_ID:-}" "\${CCS_LAUNCH_CREATOR_KIND:-}" "\${CCS_LAUNCH_CREATOR_REF:-}" "\${CCS_CREATOR_KIND:-}" "\${CCS_CREATOR_REF:-}" >> "$CCS_TEST_RAW_OBSERVATION"
+printf 'api_key=%s\ncarried_key=%s\ncarried_base=%s\n' "\${ANTHROPIC_API_KEY:-}" "\${CCS_CARRIED_ANTHROPIC_API_KEY:-}" "\${CCS_CARRIED_ANTHROPIC_BASE_URL:-}" >> "$CCS_TEST_RAW_OBSERVATION"
 exit "\${CCS_TEST_RAW_EXIT:-0}"
 `);
   writeFileSync(ccs, `#!/bin/sh
@@ -66,6 +67,9 @@ function run(
       CCS_LAUNCH_CREATOR_KIND: "",
       CCS_LAUNCH_CREATOR_REF: "",
       CCS_CMUX_CLAUDE_WRAPPER_PATH: "",
+      ANTHROPIC_API_KEY: "",
+      CCS_CARRIED_ANTHROPIC_API_KEY: "",
+      CCS_CARRIED_ANTHROPIC_BASE_URL: "",
       ...extraEnvironment,
     },
     stdout: "pipe",
@@ -236,6 +240,56 @@ exec "$CMUX_CUSTOM_CLAUDE_PATH" --session-id "$CCS_TEST_CMUX_SESSION_ID" --setti
     expect(lines(f.ccsObservation)).toContain("--require-existing");
     expect(lines(f.ccsObservation)).toContain("--parent-session-id=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
     expect(() => readFileSync(f.rawObservation)).toThrow();
+  });
+
+  test("carries the gateway credential across cmux identity clearing", () => {
+    const f = fixture();
+    const wrapper = join(f.root, "cmux-wrapper");
+    // The real cmux wrapper clears the inherited Anthropic credential along with the
+    // session identity. Without the carrier the session reaches the gateway keyless.
+    writeFileSync(wrapper, `#!/bin/sh
+unset ANTHROPIC_API_KEY
+unset CLAUDE_CODE_SESSION_ID
+exec "$CMUX_CUSTOM_CLAUDE_PATH" "$@"
+`);
+    chmodSync(wrapper, 0o755);
+
+    const result = run(f, ["prompt"], {
+      ANTHROPIC_BASE_URL: "http://127.0.0.1:8317",
+      ANTHROPIC_API_KEY: "gateway-key",
+      CMUX_SURFACE_ID: "surface:1",
+      CMUX_CUSTOM_CLAUDE_PATH: SHIM,
+      CCS_CMUX_CLAUDE_WRAPPER_PATH: wrapper,
+    });
+    expect(result.exitCode).toBe(0);
+
+    const raw = lines(f.rawObservation);
+    expect(raw).toContain("api_key=gateway-key");
+    expect(raw).toContain("base=http://127.0.0.1:8317");
+    // The carriers are internal: Claude never sees the credential under a name it
+    // does not know to redact.
+    expect(raw).toContain("carried_key=");
+    expect(raw).toContain("carried_base=");
+  });
+
+  test("never overwrites a credential cmux deliberately replaced", () => {
+    const f = fixture();
+    const wrapper = join(f.root, "cmux-wrapper");
+    writeFileSync(wrapper, `#!/bin/sh
+ANTHROPIC_API_KEY=cmux-key
+export ANTHROPIC_API_KEY
+exec "$CMUX_CUSTOM_CLAUDE_PATH" "$@"
+`);
+    chmodSync(wrapper, 0o755);
+
+    const result = run(f, ["prompt"], {
+      ANTHROPIC_API_KEY: "gateway-key",
+      CMUX_SURFACE_ID: "surface:1",
+      CMUX_CUSTOM_CLAUDE_PATH: SHIM,
+      CCS_CMUX_CLAUDE_WRAPPER_PATH: wrapper,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(lines(f.rawObservation)).toContain("api_key=cmux-key");
   });
 
   test("preserves provider-selection environment", () => {
