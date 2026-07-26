@@ -93,18 +93,36 @@ type Session struct {
 type Enrichment struct {
 	// Enrichment's own name for the session, derived from how it actually ended rather than from
 	// its opening turns. Never overwrites a human-set custom title — see resolveDisplayTitle.
-	Title       string
-	Summary     string
-	Outstanding string
+	Title string
+	// State is where the session stands NOW, present tense, addressed to the reader. Catalogue v40
+	// split the old single `Summary` into this plus History, because that field had to be both
+	// "where this stands" and "how it got here" and was always written in the second order — so
+	// the state ended up in the final clause of a paragraph you had to read to the end of.
+	State string
+	// History is how it got there, past tense. Rendered on demand, never by default: nothing
+	// required in order to act belongs here.
+	History string
+	// Next is the single thing to do first on resuming. Exactly one action.
+	Next string
+	// Remaining is everything still open after Next, so scope is judgeable before committing.
+	Remaining string
 	// One of: continue, complete, archive, handoff. Empty when the session has never been enriched.
 	Recommendation string
-	Reason         string
-	Junk           bool
-	CWDCorrect     bool
-	SuggestedLoc   string
-	SuggestedCWD   string
-	AtMessages     int
-	At             time.Time
+	// Reason is CONDITIONAL under v40: non-empty only for archive, handoff, or junk. On continue
+	// and complete it restated the verdict in hedged prose, so it is now required to be empty and
+	// its presence means the verdict is one a reader would otherwise distrust.
+	Reason string
+	Junk   bool
+	// CWDJudged is false when no location registry existed when this was written, i.e. the cwd
+	// question was never put to the model. Distinct from CWDCorrect=false, which is a judgement
+	// that the directory is wrong — rendering a warning for "never judged" would put a defect
+	// marker on a third of the store for a question nobody asked.
+	CWDJudged    bool
+	CWDCorrect   bool
+	SuggestedLoc string
+	SuggestedCWD string
+	AtMessages   int
+	At           time.Time
 }
 
 // Present reports whether this session has ever been enriched. Recommendation is the key because

@@ -29,16 +29,17 @@ afterEach(() => {
 
 const VALID = {
   title: "Enrichment sweep",
-  summary: "Shipped the enrichment sweep.",
-  outstanding: "",
+  state: "Shipped the enrichment sweep.",
+  history: "",
+  next: "",
+  remaining: "",
   recommendation: "complete",
-  reason: "The feature landed and tests pass.",
+  // v40: reason is empty for complete — it is required only for archive, handoff, and junk.
+  reason: "",
   junk: false,
-  cwdCorrect: true,
-  suggestedLocation: "",
-  suggestedCwd: "",
   atMessages: 42,
 };
+
 
 function run(payload: unknown, extra: string[] = []): number {
   return sessionFieldsCommand(["s1", "--json", JSON.stringify({ enrichment: payload }), ...extra]);
@@ -98,14 +99,21 @@ describe("session-fields enrichment", () => {
     expect(stored()).toBeNull();
   });
 
-  test("accepts a free-text cwd when no registry is present", () => {
-    // CCS_ROOT points at an empty temp dir, so there is no locations.toml — the escape hatch has
-    // to keep working on a machine the router has not reached.
+  test("refuses a cwd judgement when no registry is present", () => {
+    // v40 reverses v39 here. CCS_ROOT points at an empty temp dir, so there is no locations.toml,
+    // which means the cwd question was never put to the sensor — any answer is invented rather
+    // than judged. Under v39 this path was open, and on this machine it produced 155 unverifiable
+    // verdicts including `/Users/mimen/claude-sessions`, a directory that does not exist.
     expect(run(
       { ...VALID, cwdCorrect: false, suggestedCwd: "/Users/mimen/Programming/Repos/new-thing" },
       ["--sensor", "x"],
-    )).toBe(0);
-    expect(stored()?.suggestedCwd).toBe("/Users/mimen/Programming/Repos/new-thing");
+    )).toBe(1);
+    expect(stored()).toBeNull();
+  });
+
+  test("a payload with no cwd fields at all is what a registry-less sensor sends", () => {
+    expect(run(VALID, ["--sensor", "x"])).toBe(0);
+    expect(stored()?.cwdCorrect).toBeNull();
   });
 
   test("writes alongside other fields in one atomic call", () => {
@@ -119,7 +127,7 @@ describe("session-fields enrichment", () => {
     try {
       const row = getRow(db, "s1");
       expect(row?.completed).toBe(true);
-      expect(row?.enrichment?.summary).toBe("Shipped the enrichment sweep.");
+      expect(row?.enrichment?.state).toBe("Shipped the enrichment sweep.");
     } finally {
       db.close();
     }

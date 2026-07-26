@@ -55,13 +55,16 @@ func renderEnrichment(session data.Session, contentWidth int) []string {
 		header += fg(theme.FgMostSubtle).Render("  junk")
 	}
 
-	lines := []string{"", sect("Summary"), fit(header, contentWidth)}
-	for _, wrapped := range wrapWords(enrichment.Summary, contentWidth) {
+	// "Summary" was the v39 field name. The section answers "where does this stand", so it says so.
+	lines := []string{"", sect("State"), fit(header, contentWidth)}
+	for _, wrapped := range wrapWords(enrichment.State, contentWidth) {
 		lines = append(lines, fg(theme.FgSubtle).Render(wrapped))
 	}
 
-	// The reason justifies the pill, not the summary, so it needs air above it — run together they
-	// read as one paragraph and the eye loses which sentence is the verdict.
+	// The reason justifies the pill, not the state, so it needs air above it — run together they
+	// read as one paragraph and the eye loses which sentence is the verdict. Under v40 this is
+	// empty on every continue and complete, so the block below simply does not appear for the
+	// ~70% of sessions where the verdict speaks for itself.
 	if enrichment.Reason != "" {
 		lines = append(lines, "")
 		for _, wrapped := range wrapWords(enrichment.Reason, contentWidth) {
@@ -72,9 +75,15 @@ func renderEnrichment(session data.Session, contentWidth int) []string {
 	// Wrapped, not truncated: this is the most actionable line in the panel, and "Milad must
 	// decide whether nine worker tab…" is exactly the half-sentence that makes you open the
 	// transcript anyway — which is the trip this panel exists to save.
-	if enrichment.Outstanding != "" {
+	if enrichment.Next != "" {
 		lines = append(lines, "")
-		lines = append(lines, hangingIndent("open", enrichment.Outstanding, contentWidth, theme.Warning)...)
+		lines = append(lines, hangingIndent("next", enrichment.Next, contentWidth, theme.Warning)...)
+	}
+
+	// Scope, not instruction: what is left after the next action, so the reader can judge whether
+	// resuming is twenty minutes or two days. Quieter than `next` on purpose.
+	if enrichment.Remaining != "" {
+		lines = append(lines, hangingIndent("also", enrichment.Remaining, contentWidth, theme.FgMoreSubtle)...)
 	}
 
 	// A wrong working directory is the one enrichment field that is a defect rather than a
@@ -82,7 +91,10 @@ func renderEnrichment(session data.Session, contentWidth int) []string {
 	// The arrow belongs to the label, not the value: a long path is one unbreakable token, so
 	// prefixing the value with "→ " strands the arrow alone on the first line and the path starts
 	// on the second, which reads as a rendering bug.
-	if !enrichment.CWDCorrect {
+	//
+	// CWDJudged gates the whole thing: a row written with no location registry never had the
+	// question put to it, and NULL scanning to false would otherwise mark it as misplaced.
+	if enrichment.CWDJudged && !enrichment.CWDCorrect {
 		if target := enrichment.SuggestedLoc; target != "" {
 			lines = append(lines, hangingIndent("cwd →", target, contentWidth, theme.Warning)...)
 		} else if target := enrichment.SuggestedCWD; target != "" {

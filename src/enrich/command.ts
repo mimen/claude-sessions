@@ -247,11 +247,17 @@ async function runOne(
   // Show the enriched title, not the indexed one — it is usually the visible improvement.
   console.log(`${e.title}  [${row.sessionId.slice(0, 8)}…]`);
   if (e.title !== row.title) console.log(fgDim(`was: ${row.title}`));
-  console.log(e.summary);
-  if (e.outstanding) console.log(`open: ${e.outstanding}`);
-  console.log(`recommend: ${e.recommendation} — ${e.reason}`);
+  console.log(e.state);
+  if (e.history) console.log(fgDim(e.history));
+  if (e.next) console.log(`next: ${e.next}`);
+  if (e.remaining) console.log(fgDim(`also: ${e.remaining}`));
+  // `reason` is empty for continue/complete by construction, so append it only when the verdict
+  // is one that had to justify itself.
+  console.log(`recommend: ${e.recommendation}${e.reason ? ` — ${e.reason}` : ""}`);
   if (e.junk) console.log("junk: this session was never worth starting");
-  if (!e.cwdCorrect) {
+  // Explicitly false, not merely falsy: undefined means no location registry existed, so the
+  // question was never asked and there is nothing to report.
+  if (e.cwdCorrect === false) {
     const where = e.suggestedLocation || e.suggestedCwd || "(unspecified)";
     console.log(`cwd: ${row.cwd ?? "(unknown)"} → should be ${where}`);
   }

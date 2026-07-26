@@ -8,6 +8,40 @@ import { formatCost } from "../cost.ts";
 import { theme, costColor } from "./theme.ts";
 import { formatTokens, modelBreakdown, formatDuration, burnPerDay } from "./format.ts";
 import type { TaskSummary } from "../tasks/reader.ts";
+import type { StoredEnrichment } from "../catalogue/db.ts";
+import { stalenessLabel } from "../enrich/staleness.ts";
+
+/** Verdict colours. `continue` is deliberately quiet: it is the "nothing to decide" case. */
+const RECOMMENDATION_COLOR: Readonly<Record<string, string>> = {
+  complete: theme.sourceNative,
+  archive: theme.muted,
+  handoff: theme.sourceCodex,
+  continue: theme.accent,
+};
+
+/**
+ * Word-wrap prose to a width, returning one string per visual row.
+ *
+ * The header is assembled row-by-row so the peek budget stays exact, which means a wrapped
+ * paragraph has to be counted, not handed to ink as one element and hoped for. `Transcript.tsx`
+ * hard-wraps mid-word, which is right for code and wrong for a sentence.
+ */
+function wrapProse(text: string, width: number): string[] {
+  const rows: string[] = [];
+  let line = "";
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (!line) {
+      line = word;
+    } else if (line.length + 1 + word.length <= width) {
+      line += ` ${word}`;
+    } else {
+      rows.push(line);
+      line = word;
+    }
+  }
+  if (line) rows.push(line);
+  return rows;
+}
 
 interface PreviewProps {
   row: SessionRow;
@@ -39,6 +73,15 @@ interface PreviewProps {
   reviewAppUrl?: string | null;
   /** Claude Code task list for this session (~/.claude/tasks/<id>/), if any. */
   tasks?: TaskSummary | null;
+  /**
+   * The session's stored enrichment (v40), or null when it has never been enriched.
+   *
+   * This pane previously answered "what is this session?" with a transcript peek — the last few
+   * hundred lines of tool calls — which is the thing enrichment exists to replace. The peek is
+   * still here and still useful for "what was it actually saying", but it no longer has to carry
+   * the catch-up job alone.
+   */
+  enrichment?: StoredEnrichment | null;
   /** Total height available to the pane (border included). */
   height: number;
   /** Total width of the pane (border included). Fixed so the box always spans its column, even when
@@ -207,6 +250,7 @@ export function Preview({
   epicUrl,
   reviewAppUrl,
   tasks,
+  enrichment,
   height,
   width,
   detailsOpen,
@@ -265,6 +309,57 @@ export function Preview({
         {kind === "loop" ? <Text color={theme.accent}> · loop ◆</Text> : null}
       </Text>,
     );
+    // Enrichment sits directly under the title, above the repo/spend metadata, because it answers
+    // the question the pane is opened to ask. Everything below it is context for a decision this
+    // block has already framed.
+    if (enrichment) {
+      const inner = Math.max(20, width - 4);
+      const stale = stalenessLabel(Math.max(0, row.msgCount - enrichment.atMessages));
+      H.push(
+        <Text key="verdict" wrap="truncate-end">
+          <Text bold color={RECOMMENDATION_COLOR[enrichment.recommendation] ?? theme.muted}>
+            {enrichment.recommendation.toUpperCase()}
+          </Text>
+          {enrichment.junk ? <Text color={theme.faint}>  junk</Text> : null}
+          {/* Loud and adjacent to the prose, not tucked into a metadata row: enrichment is written
+              confidently, and a confident description of a session as it was forty turns ago is
+              worse than none, because nothing cues the reader to distrust it. */}
+          {stale ? <Text color={theme.t3Unhealthy}>{`  ${stale}`}</Text> : null}
+        </Text>,
+      );
+      for (const [i, line] of wrapProse(enrichment.state, inner).entries()) {
+        H.push(<Text key={`st${i}`} color={theme.title} wrap="truncate-end">{line}</Text>);
+      }
+      // The most actionable line in the pane, so it is wrapped rather than truncated — a
+      // half-sentence is exactly what sends you to the transcript this pane exists to save.
+      if (enrichment.next) {
+        for (const [i, line] of wrapProse(enrichment.next, inner - 6).entries()) {
+          H.push(
+            <Text key={`nx${i}`} wrap="truncate-end">
+              <Text color={theme.accent}>{i === 0 ? "next  " : "      "}</Text>
+              <Text color={theme.title}>{line}</Text>
+            </Text>,
+          );
+        }
+      }
+      if (enrichment.remaining) {
+        for (const [i, line] of wrapProse(enrichment.remaining, inner - 6).entries()) {
+          H.push(
+            <Text key={`rm${i}`} color={theme.muted} wrap="truncate-end">
+              {i === 0 ? "also  " : "      "}{line}
+            </Text>,
+          );
+        }
+      }
+      // Empty on continue/complete by construction, so its presence means the verdict needed
+      // justifying — which is exactly when a reader wants it.
+      if (enrichment.reason) {
+        for (const [i, line] of wrapProse(enrichment.reason, inner).entries()) {
+          H.push(<Text key={`rs${i}`} color={theme.faint} wrap="truncate-end">{line}</Text>);
+        }
+      }
+      H.push(<Text key="esep"> </Text>);
+    }
     H.push(
       <Text key="repo" wrap="truncate-end">
         <Text color={theme.accent}>{row.projectName}</Text>

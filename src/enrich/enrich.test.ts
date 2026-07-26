@@ -18,10 +18,13 @@ const LOCATIONS: readonly EnrichmentLocation[] = [
 
 const ANSWER = {
   title: "Enrichment sweep",
-  summary: "A session about enrichment.",
-  outstanding: "",
+  state: "A session about enrichment.",
+  history: "",
+  next: "Keep going",
+  remaining: "",
   recommendation: "continue",
-  reason: "Still moving.",
+  // v40: empty for continue — reason is required only for archive, handoff, and junk.
+  reason: "",
   junk: false,
   cwdCorrect: true,
   suggestedLocation: "",
@@ -136,8 +139,8 @@ describe("sweep", () => {
       });
       expect(stats).toEqual({ enriched: 2, failed: 0, remaining: 0 });
       const stored = getRow(f.catalogue, "a")?.enrichment;
-      expect(stored?.summary).toBe("A session about enrichment.");
-      // The stamp must be the count the summary was made against, not a later one.
+      expect(stored?.state).toBe("A session about enrichment.");
+      // The stamp must be the count the state was made against, not a later one.
       expect(stored?.atMessages).toBe(4);
     } finally {
       teardown(f);

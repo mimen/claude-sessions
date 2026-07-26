@@ -6,6 +6,8 @@ import type { Enrichment } from "../catalogue/enrichment-schema.ts";
 import { loadEnrichmentLocations, type EnrichmentLocation } from "./locations.ts";
 import { readTranscriptTail } from "./transcript-tail.ts";
 import { requestEnrichment, TransientGatewayError, type EnrichOptions } from "./gateway.ts";
+import { readWorldState, renderWorldBlock } from "./world.ts";
+import { recordSweepFailure, recordSweepSuccess } from "./health.ts";
 import { enrichmentStaleness, type StaleReason } from "./staleness.ts";
 
 /**
@@ -39,6 +41,8 @@ export interface SweepOptions extends EnrichOptions {
   readonly now?: () => Date;
   /** Injected in tests; production reads the machine's registry. */
   readonly locations?: readonly EnrichmentLocation[];
+  /** Injected in tests so a sweep never writes to the real machine's health file. */
+  readonly healthPath?: string;
 }
 
 export interface SweepStats {
@@ -109,6 +113,16 @@ export async function enrichOne(
     return err(new Error(`transcript unreadable: ${detail}`));
   }
 
+  // Measured before the call, so the verdict is formed against the repository as it stands rather
+  // than against the transcript alone. The dossier recomputes this at render time for the same
+  // reason it is worth having: world state moves while a session sits still.
+  const world = readWorldState(index, {
+    sessionId: row.sessionId,
+    cwd: row.cwd,
+    branch: row.branch,
+    lastTs: row.lastTs,
+  });
+
   const response = await requestEnrichment(
     {
       title: row.title,
@@ -118,6 +132,7 @@ export async function enrichOne(
       skeleton: getSkeleton(index, row.sessionId),
       tail: tail.text,
       tailTruncated: tail.truncated,
+      world: renderWorldBlock(world),
     },
     locations,
     options,
@@ -205,6 +220,20 @@ export async function sweep(
   await Promise.all(Array.from({ length: workerCount }, worker));
   // Everything not reached is still pending, whether the limit or the breaker stopped us.
   stats.remaining = all.length - stats.enriched - stats.failed;
+
+  // Liveness, recorded so a dead runner is visible to readers rather than only to a log nobody
+  // opens. A run that aborted on the transient breaker is a failure even though it enriched
+  // nothing wrong — the store still stops advancing, which is the thing worth surfacing.
+  if (!options.isCancelled?.()) {
+    const nowIso = now().toISOString();
+    if (stats.abortedReason) {
+      recordSweepFailure(stats.abortedReason, nowIso, options.healthPath);
+    } else if (stats.failed > 0 && stats.enriched === 0) {
+      recordSweepFailure(`${stats.failed} sessions failed, none enriched`, nowIso, options.healthPath);
+    } else {
+      recordSweepSuccess(stats.enriched, nowIso, options.healthPath);
+    }
+  }
   return stats;
 }
 

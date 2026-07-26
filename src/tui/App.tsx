@@ -1267,6 +1267,7 @@ export function App({
         return typeof url === "string" && url.startsWith("http") ? url : null;
       })()}
       tasks={taskIds.has(selectedRow.sessionId) ? tasksFor(selectedRow.sessionId) : null}
+      enrichment={selectedCatalogue?.enrichment ?? catMap.get(selectedRow.sessionId)?.enrichment ?? null}
       height={previewHeight}
       width={sideBySide ? previewWidth : contentWidth}
       detailsOpen={detailsOpen}

@@ -357,6 +357,13 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		prefixedColumn(catalogueColumns, "c", "enrichment_title", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "enrichment_summary", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "enrichment_outstanding", "NULL"),
+		// v40. Presence-guarded like everything else here, so this binary still reads a v39
+		// catalogue (falling back to summary/outstanding below) and a v39 binary still reads a
+		// v40 one — which matters while several CCS versions share the live store.
+		prefixedColumn(catalogueColumns, "c", "enrichment_state", "NULL"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_history", "NULL"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_next", "NULL"),
+		prefixedColumn(catalogueColumns, "c", "enrichment_remaining", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "enrichment_recommendation", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "enrichment_reason", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "enrichment_junk", "0"),
@@ -391,6 +398,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		var identityArchived int
 		var identityParked sql.NullString
 		var enrichTitle, enrichSummary, enrichOutstanding, enrichRecommendation sql.NullString
+		var enrichState, enrichHistory, enrichNext, enrichRemaining sql.NullString
 		var enrichReason, enrichSuggestedLoc, enrichSuggestedCWD, enrichAt sql.NullString
 		var enrichJunk, enrichCWDCorrect, enrichAtMessages sql.NullInt64
 		if err := rows.Scan(
@@ -414,6 +422,12 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 			&enrichTitle,
 			&enrichSummary,
 			&enrichOutstanding,
+			// Order must match the SELECT above exactly — the v40 columns are appended there
+			// immediately after outstanding, so they are scanned here in the same position.
+			&enrichState,
+			&enrichHistory,
+			&enrichNext,
+			&enrichRemaining,
 			&enrichRecommendation,
 			&enrichReason,
 			&enrichJunk,
@@ -450,16 +464,30 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		// Recommendation gates the whole struct: a row without one was never enriched, and a
 		// half-populated Enrichment would render as a confident empty summary.
 		if rec := normalizeInline(enrichRecommendation.String); rec != "" {
+			// v39 rows have prose in summary/outstanding and nothing in state/next. Falling back
+			// keeps every panel readable while a cutover drains, and costs nothing once it has.
+			state := strings.TrimSpace(enrichState.String)
+			if state == "" {
+				state = strings.TrimSpace(enrichSummary.String)
+			}
+			next := normalizeInline(enrichNext.String)
+			if next == "" {
+				next = normalizeInline(enrichOutstanding.String)
+			}
 			row.Enrichment = Enrichment{
 				Title: normalizeInline(enrichTitle.String),
-				// Summary is the one field kept multi-line — normalizeInline would collapse the
+				// State is the one field kept multi-line — normalizeInline would collapse the
 				// paragraph the dossier wraps itself.
-				Summary:        strings.TrimSpace(enrichSummary.String),
-				Outstanding:    normalizeInline(enrichOutstanding.String),
+				State:          state,
+				History:        strings.TrimSpace(enrichHistory.String),
+				Next:           next,
+				Remaining:      normalizeInline(enrichRemaining.String),
 				Recommendation: rec,
 				Reason:         normalizeInline(enrichReason.String),
 				Junk:           enrichJunk.Int64 != 0,
-				CWDCorrect:     enrichCWDCorrect.Int64 != 0,
+				// Valid means the column was non-NULL, i.e. the question was actually asked.
+				CWDJudged:  enrichCWDCorrect.Valid,
+				CWDCorrect: enrichCWDCorrect.Int64 != 0,
 				SuggestedLoc:   normalizeInline(enrichSuggestedLoc.String),
 				SuggestedCWD:   normalizeInline(enrichSuggestedCWD.String),
 				AtMessages:     int(enrichAtMessages.Int64),

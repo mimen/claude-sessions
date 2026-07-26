@@ -9,12 +9,17 @@ import (
 
 func enriched() data.Enrichment {
 	return data.Enrichment{
-		Summary:        "Designed and built the enrichment subsystem end to end.",
-		Outstanding:    "The launchd agent is not installed yet.",
+		State:          "The subsystem is built and running. The launchd agent is not installed.",
+		History:        "Designed and built the enrichment subsystem end to end.",
+		Next:           "Install the launchd agent",
+		Remaining:      "then write the sweep tests",
 		Recommendation: "continue",
-		Reason:         "Work is mid-flight with tests still to write.",
-		CWDCorrect:     true,
-		AtMessages:     100,
+		// v40: empty on continue/complete by construction. Only archive, handoff, and junk carry
+		// a justification, so the dossier's reason block must not appear here.
+		Reason:     "",
+		CWDJudged:  true,
+		CWDCorrect: true,
+		AtMessages: 100,
 	}
 }
 
@@ -36,14 +41,48 @@ func plain(lines []string) string {
 	return out.String()
 }
 
-func TestRenderEnrichmentLeadsWithRecommendationAndSummary(t *testing.T) {
+func TestRenderEnrichmentLeadsWithRecommendationAndState(t *testing.T) {
 	session := data.Session{ID: "abcd1234-rest", Messages: 100, Enrichment: enriched()}
 	got := plain(renderEnrichment(session, 60))
 
-	for _, want := range []string{"continue", "Designed and built", "open", "launchd agent"} {
+	for _, want := range []string{"continue", "The subsystem is built", "next", "Install the launchd agent", "also"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("dossier missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestRenderEnrichmentKeepsHistoryOffTheDefaultPanel(t *testing.T) {
+	// History is what a reader skips unless they want it, and the whole point of splitting the
+	// old single summary was that narration was crowding out the state. If it renders by default
+	// the split bought nothing.
+	session := data.Session{ID: "abcd1234", Messages: 100, Enrichment: enriched()}
+	if got := plain(renderEnrichment(session, 60)); strings.Contains(got, "Designed and built") {
+		t.Fatalf("history should not render by default:\n%s", got)
+	}
+}
+
+func TestRenderEnrichmentOmitsReasonWhenTheVerdictSpeaksForItself(t *testing.T) {
+	// v40 makes reason conditional. On continue/complete it is empty, and an empty reason must not
+	// leave a blank paragraph where a justification used to sit.
+	session := data.Session{ID: "abcd1234", Messages: 100, Enrichment: enriched()}
+	got := plain(renderEnrichment(session, 60))
+	if strings.Contains(got, "mid-flight with tests") {
+		t.Fatalf("reason rendered on a continue verdict:\n%s", got)
+	}
+}
+
+func TestRenderEnrichmentSaysNothingAboutAnUnjudgedCWD(t *testing.T) {
+	// A row written with no location registry never had the cwd question asked. NULL scans to
+	// false, so without the CWDJudged gate every such session would be marked misplaced.
+	enrichment := enriched()
+	enrichment.CWDJudged = false
+	enrichment.CWDCorrect = false
+	enrichment.SuggestedCWD = ""
+	enrichment.SuggestedLoc = ""
+	session := data.Session{ID: "abcd1234", Messages: 100, Enrichment: enrichment}
+	if got := plain(renderEnrichment(session, 60)); strings.Contains(got, "cwd") {
+		t.Fatalf("unjudged cwd should say nothing:\n%s", got)
 	}
 }
 
@@ -102,11 +141,12 @@ func TestRenderEnrichmentStaysQuietWhenNothingIsWrong(t *testing.T) {
 	// Say less when the answer is boring: a correctly placed session with nothing outstanding
 	// should not print empty cwd or open rows.
 	enrichment := enriched()
-	enrichment.Outstanding = ""
+	enrichment.Next = ""
+	enrichment.Remaining = ""
 	session := data.Session{ID: "abcd1234", Messages: 100, Enrichment: enrichment}
 
 	got := plain(renderEnrichment(session, 60))
-	if strings.Contains(got, "cwd") || strings.Contains(got, "open ") {
+	if strings.Contains(got, "cwd") || strings.Contains(got, "next ") || strings.Contains(got, "also ") {
 		t.Fatalf("dossier printed empty rows:\n%s", got)
 	}
 }

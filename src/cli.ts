@@ -65,6 +65,8 @@ Usage:
   ccs enrich [<id>|.] [--json]                    Summarise one session (what it was, what's open, what to do)
   ccs enrich --sweep [--limit N] [--concurrency N]  Enrich every stale session
   ccs enrich --list [--limit N] [--json]          Show what the sweep would do, without calling the model
+  ccs triage [--list] [--json]                    Close out sessions whose verdict contradicts their lifecycle
+  ccs next [--json]                               What you're mid-flight on, and the next action for each
   ccs ls [--auxiliary]    Print indexed sessions (with catalogue badges)
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
   ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
@@ -205,6 +207,14 @@ export async function main(argv: string[]): Promise<number> {
     case "enrich": {
       const { enrichCommand } = await import("./enrich/command.ts");
       return await enrichCommand(args.slice(1));
+    }
+    case "triage": {
+      const { triageCommand } = await import("./enrich/triage-command.ts");
+      return await triageCommand(args.slice(1));
+    }
+    case "next": {
+      const { nextCommand } = await import("./enrich/triage-command.ts");
+      return nextCommand(args.slice(1));
     }
     case "ls":
       return ls({ all: args.includes("--all"), loops: args.includes("--loops"), auxiliary: args.includes("--auxiliary") });

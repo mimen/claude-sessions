@@ -81,6 +81,17 @@ export function enrichmentStaleness(input: StalenessInput): StalenessVerdict {
   if (!enrichment.title) {
     return { stale: true, reason: "incomplete", messagesSince };
   }
+  // v40's cutover rides the same mechanism. A row enriched under v39 has prose in
+  // `enrichment_summary` and nothing in `enrichment_state`, so it is incomplete by exactly the
+  // definition above — no `--force` flag, no one-off migration script, and no risk of a stray
+  // `--force` re-enriching the whole store by accident later. `enrichmentFrom` falls back to the
+  // v39 text while this drains, so every panel stays readable in the meantime.
+  //
+  // `legacyShape`, not `!state`: the fallback fills `state` from the old column, so the obvious
+  // check would report the entire v39 store as fresh and the cutover would silently never run.
+  if (enrichment.legacyShape) {
+    return { stale: true, reason: "incomplete", messagesSince };
+  }
   if (messagesSince >= STALE_AFTER_MESSAGES) {
     return { stale: true, reason: "advanced", messagesSince };
   }

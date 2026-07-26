@@ -154,10 +154,12 @@ test("App shows enrichment titles when no live, custom, or role title overrides 
   const now = "2026-07-24T12:00:00.000Z";
   setEnrichment(catalogue, "real1", {
     title: "Enriched outcome title",
-    summary: "The session completed its intended work.",
-    outstanding: "",
+    state: "The session completed its intended work.",
+    history: "",
+    next: "",
+    remaining: "",
     recommendation: "complete",
-    reason: "The implementation and verification are finished.",
+    reason: "",
     junk: false,
     cwdCorrect: true,
     suggestedLocation: "",

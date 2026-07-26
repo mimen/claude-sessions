@@ -72,6 +72,14 @@ export interface EnrichmentRequest {
   /** How the session ended. */
   readonly tail: string;
   readonly tailTruncated: boolean;
+  /**
+   * Ground truth about the world the transcript describes, rendered by `world.ts`.
+   *
+   * The one input here that is NOT untrusted data: it is measured by us, not asserted by anyone
+   * in the conversation, which is exactly why it can be allowed to move a verdict. Null when the
+   * caller could not determine anything (no cwd on the session).
+   */
+  readonly world: string | null;
 }
 
 export interface EnrichOptions {
@@ -103,18 +111,46 @@ const SYSTEM_PROMPT = [
 ].join(" ");
 
 function buildPrompt(request: EnrichmentRequest, locations: readonly EnrichmentLocation[]): string {
-  return [
-    "Describe this Claude Code session so someone catching up on it weeks later knows what it was",
-    "and what to do with it. Be concrete and specific to THIS session — never generic.",
+  const lines: string[] = [
+    "Describe this Claude Code session so someone picking it up cold weeks later knows where it",
+    "stands and what to do next. Be concrete and specific to THIS session — never generic.",
     "",
-    "Judge the working directory too: does the cwd fit the work the session actually did?",
-    "If it does not, name the location key it belongs in from the registry below.",
-    "Only set suggestedCwd when no registered location fits the work at all.",
-    "",
-    "<locations>",
-    renderLocationCatalogue(locations),
-    "</locations>",
-    "",
+  ];
+
+  // The cwd question is asked ONLY when there is a registry to answer it from. Under v39 it was
+  // asked unconditionally on a machine with no registry installed, and all 155 "wrong directory"
+  // verdicts took the free-text escape hatch — one of them a path that does not exist. A model
+  // asked a question it cannot answer well will answer it anyway.
+  if (locations.length > 0) {
+    lines.push(
+      "Judge the working directory too: does the cwd fit the work the session actually did?",
+      "If it does not, name the location key it belongs in from the registry below.",
+      "Only set suggestedCwd when no registered location fits the work at all.",
+      "",
+      "<locations>",
+      renderLocationCatalogue(locations),
+      "</locations>",
+      "",
+    );
+  }
+
+  // Measured ground truth, and the only input here that is not untrusted: it comes from the
+  // filesystem and the index, not from anyone in the conversation. That is what makes it safe to
+  // let it move a verdict.
+  if (request.world) {
+    lines.push(
+      "The <world> block below is measured ground truth about the repository as it is RIGHT NOW.",
+      "Trust it over the transcript: a session can end mid-sentence and still describe work that",
+      "has since landed.",
+      "",
+      "<world>",
+      request.world,
+      "</world>",
+      "",
+    );
+  }
+
+  lines.push(
     "<session>",
     `title: ${request.title}`,
     `cwd: ${request.cwd ?? "(unknown)"}`,
@@ -127,7 +163,8 @@ function buildPrompt(request: EnrichmentRequest, locations: readonly EnrichmentL
     `--- how the session ended${request.tailTruncated ? " (earlier turns omitted)" : ""} ---`,
     request.tail || "(empty transcript)",
     "</session>",
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 /** Make one enrichment call. Returns the validated payload or an error explaining the refusal. */
@@ -153,7 +190,7 @@ export async function requestEnrichment(
     tools: [{
       name: "answer",
       description: "Return the structured description of this session.",
-      input_schema: enrichmentJsonSchema(),
+      input_schema: enrichmentJsonSchema(locations.length > 0),
     }],
     tool_choice: { type: "tool", name: "answer" },
     messages: [{ role: "user", content: buildPrompt(request, locations) }],

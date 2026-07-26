@@ -12,16 +12,19 @@ const NOW = new Date("2026-07-24T12:00:00.000Z");
 function enrichedAt(at: string, atMessages: number): StoredEnrichment {
   return {
     title: "t",
-    summary: "s",
-    outstanding: "",
+    state: "s",
+    history: "",
+    next: "n",
+    remaining: "",
     recommendation: "continue",
-    reason: "r",
+    reason: "",
     junk: false,
     cwdCorrect: true,
     suggestedLocation: null,
     suggestedCwd: null,
     atMessages,
     at,
+    legacyShape: false,
   };
 }
 
@@ -100,6 +103,38 @@ describe("enrichmentStaleness", () => {
     });
     expect(verdict.messagesSince).toBe(0);
     expect(verdict.stale).toBe(false);
+  });
+});
+
+describe("the v40 cutover rides staleness, not a --force flag", () => {
+  test("a row still in the v39 shape is stale however recent it is", () => {
+    // The mechanism the whole cutover depends on. These rows are fresh by every other measure —
+    // same message count, enriched a minute ago — so without this branch the sweep would report
+    // the entire store current and v40 would never actually reach any session.
+    const legacy = { ...enrichedAt("2026-07-24T11:59:00.000Z", 100), legacyShape: true };
+    const verdict = enrichmentStaleness({
+      messageCount: 100, enrichment: legacy, attempts: 0, now: NOW,
+    });
+    expect(verdict.stale).toBe(true);
+    expect(verdict.reason).toBe("incomplete");
+  });
+
+  test("a legacy row still respects the attempt cap", () => {
+    // A shape upgrade is not a reason to re-spend a budget the model already exhausted on a
+    // transcript it genuinely cannot handle.
+    const legacy = { ...enrichedAt("2026-07-24T11:59:00.000Z", 100), legacyShape: true };
+    const verdict = enrichmentStaleness({
+      messageCount: 100, enrichment: legacy, attempts: 3, now: NOW,
+    });
+    expect(verdict.stale).toBe(false);
+    expect(verdict.reason).toBe("attempts-exhausted");
+  });
+
+  test("once re-enriched under v40 the same row goes quiet", () => {
+    const migrated = { ...enrichedAt("2026-07-24T11:59:00.000Z", 100), legacyShape: false };
+    expect(enrichmentStaleness({
+      messageCount: 100, enrichment: migrated, attempts: 0, now: NOW,
+    }).stale).toBe(false);
   });
 });
 

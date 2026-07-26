@@ -67,8 +67,13 @@ func TestLoadCatalogueReadsEnrichment(t *testing.T) {
 	if enrichment.Title != "Enrichment sweep" {
 		t.Fatalf("title = %q", enrichment.Title)
 	}
-	if enrichment.Summary != "Built the sweep." || enrichment.Recommendation != "continue" {
+	if enrichment.State != "Built the sweep." || enrichment.Recommendation != "continue" {
 		t.Fatalf("enrichment = %+v", enrichment)
+	}
+	// The fixture row is v39-shaped (summary, no state), so a passing assertion above also proves
+	// the v39 fallback: a catalogue mid-cutover still renders rather than going blank.
+	if !enrichment.CWDJudged {
+		t.Fatal("a non-NULL enrichment_cwd_correct means the question was asked")
 	}
 	if enrichment.CWDCorrect || enrichment.SuggestedLoc != "repos-ccs" {
 		t.Fatalf("cwd judgement = %+v", enrichment)

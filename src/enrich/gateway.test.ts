@@ -16,16 +16,19 @@ const REQUEST: EnrichmentRequest = {
   messageCount: 120,
   lastActivity: "2026-07-24T11:00:00.000Z",
   skeleton: "user: build enrichment\nassistant: done",
+  world: "working directory: exists\nlater sessions in this directory: 0",
   tail: "assistant: shipped the migration",
   tailTruncated: false,
 };
 
 const ANSWER = {
   title: "Session enrichment",
-  summary: "Designed and built the enrichment subsystem.",
-  outstanding: "Launchd agent still to install.",
+  state: "The subsystem is built and running. The launchd agent is not installed.",
+  history: "Designed and built the enrichment subsystem.",
+  next: "Install the launchd agent",
+  remaining: "",
   recommendation: "continue",
-  reason: "Work is mid-flight.",
+  reason: "",
   junk: false,
   cwdCorrect: false,
   suggestedLocation: "repos-ccs",
