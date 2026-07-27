@@ -3,9 +3,9 @@ import { Database } from "bun:sqlite";
 /** Bump when the schema changes. Index rows are rebuildable, but preserve them across additive upgrades. */
 // v7 recomputed cached physical cost rows after GPT gateway model pricing was introduced; v8 adds
 // shadow paths; v9 persists transcript model ids; v10 adds catalogue authority freshness state;
-// v11 adds the last model id, so a session that changed harness mid-flight still has an eligible
-// route.
-export const SCHEMA_VERSION = 11;
+// v11 adds the last model id; v12 invalidates unchanged rows so v11's additive column is actually
+// backfilled on the next incremental reindex.
+export const SCHEMA_VERSION = 12;
 
 /**
  * Open (creating if needed) the Index and ensure its schema is current. Additive migrations
@@ -51,6 +51,12 @@ export function openIndex(dbPath: string): Database {
       // rather than silently becoming eligible everywhere.
       if (!hasColumn(db, "sessions", "last_model")) {
         db.exec("ALTER TABLE sessions ADD COLUMN last_model TEXT NOT NULL DEFAULT '';");
+      }
+      // v12: v11 preserved each row's file_mtime/file_size while adding last_model='', so the
+      // incremental reindex skipped every unchanged transcript and never populated the new field.
+      // Mark rows stale once; reindex reparses them while preserving titler-owned columns.
+      if (current < 12) {
+        db.exec("UPDATE sessions SET file_mtime = -1;");
       }
     } else {
       // v6 cost accounting changed in v7, so its cache is stale even when its columns happen

@@ -1,0 +1,1048 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>Session Enrichment v40 — CCS</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ink: #14161a;
+    --ink-soft: #5b6270;
+    --ink-faint: #8b909b;
+    --paper: #fbfaf8;
+    --panel: #f4f1ec;
+    --rule: #d9d5cd;
+    --accent: #b0451f;
+    --accent-soft: #f0e2da;
+    --good: #2f6b45;
+    --warn: #8a6d17;
+    --bad: #a3301f;
+    /* Sequential ramp, ordered low→high signal. Monotonic lightness, each step ≥3:1
+       against --paper (validated); every segment is direct-labeled so identity never
+       rests on color alone. */
+    --seq-1: #cf7c33;
+    --seq-2: #a8451e;
+    --seq-3: #6f2a12;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e9e6e0; --ink-soft: #9aa0ab; --ink-faint: #767c88;
+      --paper: #14161a; --panel: #1c1f25; --rule: #2f333b;
+      --accent: #e8794d; --accent-soft: #34211a;
+      --good: #6bbb8a; --warn: #d3ae4b; --bad: #e8735c;
+      /* Re-stepped for the dark surface, not flipped. Same validation. */
+      --seq-1: #f0a878; --seq-2: #e8794d; --seq-3: #c05a2c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 17px; line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 50rem; margin: 0 auto; padding: 3.5rem 1.5rem 6rem; }
+  .kicker {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 0.9rem;
+  }
+  h1 {
+    font-size: clamp(2.1rem, 5.5vw, 3rem); line-height: 1.08; margin: 0 0 1rem;
+    letter-spacing: -0.02em; font-weight: 600; text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 1.19rem; line-height: 1.5; color: var(--ink-soft);
+    margin: 0 0 2rem; max-width: 40rem; text-wrap: balance;
+  }
+  .meta {
+    font-family: var(--mono); font-size: 0.73rem; line-height: 1.9; color: var(--ink-soft);
+    border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+    padding: 0.9rem 0; margin: 0 0 3rem; word-break: break-word;
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+  .status-pill {
+    display: inline-block; font-family: var(--mono); font-size: 0.68rem; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase; padding: 0.32rem 0.7rem;
+    background: var(--warn); color: var(--paper); border-radius: 2px;
+  }
+  h2 {
+    font-size: 1.05rem; letter-spacing: 0.09em; text-transform: uppercase;
+    font-family: var(--mono); font-weight: 700; color: var(--accent);
+    margin: 3.6rem 0 1.1rem; padding-bottom: 0.45rem; border-bottom: 2px solid var(--rule);
+    text-wrap: balance;
+  }
+  h3 { font-size: 1.16rem; margin: 2.1rem 0 0.6rem; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+  p { margin: 0 0 1.05rem; text-wrap: pretty; }
+  ul, ol { margin: 0 0 1.05rem; padding-left: 1.3rem; }
+  li { margin: 0.4rem 0; }
+  code {
+    font-family: var(--mono); font-size: 0.85em;
+    background: var(--accent-soft); padding: 0.1em 0.34em; border-radius: 3px;
+  }
+  pre {
+    font-family: var(--mono); font-size: 0.76rem; line-height: 1.7;
+    background: var(--panel); border-left: 3px solid var(--rule);
+    padding: 1rem 1.1rem; overflow-x: auto; margin: 0 0 1.3rem; border-radius: 0 3px 3px 0;
+    color: var(--ink);
+  }
+  pre code { background: none; padding: 0; }
+  .scroll { overflow-x: auto; margin: 0 0 1.4rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.87rem; min-width: 28rem; }
+  th, td { text-align: left; padding: 0.55rem 0.7rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th {
+    font-family: var(--mono); font-size: 0.67rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-soft); font-weight: 700;
+    border-bottom: 2px solid var(--rule);
+  }
+  td code { font-size: 0.8em; }
+  td.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+  .decision {
+    border-left: 3px solid var(--rule); padding: 0.15rem 0 0.15rem 1.15rem; margin: 0 0 1.9rem;
+  }
+  .decision h3 { margin-top: 0; }
+  .decision .rejected { font-size: 0.93rem; color: var(--ink-soft); margin-bottom: 0; }
+  .rejected b { color: var(--ink); font-weight: 600; }
+  .callout {
+    background: var(--accent-soft); border-radius: 3px;
+    padding: 1.1rem 1.25rem; margin: 0 0 1.5rem; font-size: 0.95rem;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .h {
+    font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.1em;
+    text-transform: uppercase; font-weight: 700; color: var(--accent);
+    display: block; margin-bottom: 0.5rem;
+  }
+
+  /* ── figures ─────────────────────────────────────────────── */
+  figure { margin: 1.8rem 0 2rem; }
+  figcaption {
+    font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.06em;
+    color: var(--ink-soft); margin-top: 0.7rem; line-height: 1.6; text-wrap: pretty;
+  }
+  .figtitle {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--ink); font-weight: 700;
+    margin-bottom: 0.75rem;
+  }
+  /* Stacked proportion bar. 2px surface gap between segments; 4px rounded outer ends. */
+  .stack { display: flex; width: 100%; height: 2.1rem; gap: 2px; }
+  .stack .seg {
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 0.68rem; font-weight: 700;
+    color: var(--paper); overflow: hidden; white-space: nowrap;
+  }
+  .stack .seg:first-child { border-radius: 4px 0 0 4px; }
+  .stack .seg:last-child { border-radius: 0 4px 4px 0; }
+  .s1 { background: var(--seq-1); } .s2 { background: var(--seq-2); } .s3 { background: var(--seq-3); }
+  .stackkey {
+    display: flex; flex-wrap: wrap; gap: 0.35rem 1.4rem; margin-top: 0.6rem;
+    font-family: var(--mono); font-size: 0.7rem; color: var(--ink-soft);
+  }
+  .stackkey span { display: flex; align-items: center; gap: 0.45rem; }
+  .swatch { width: 0.75rem; height: 0.75rem; border-radius: 2px; flex: none; display: inline-block; }
+
+  /* Paired comparison bars. Emphasis contrast, not a categorical series: the
+     measured "after" carries the accent, the rest stay neutral ink. */
+  .cmp { display: grid; grid-template-columns: 9.5rem 1fr; gap: 0.45rem 0.8rem; align-items: center; }
+  .cmp .lab { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-soft); text-align: right; }
+  .cmp .track { display: flex; align-items: center; gap: 0.55rem; }
+  .cmp .fill { height: 1.1rem; border-radius: 0 4px 4px 0; min-width: 2px; }
+  .cmp .fill.before { background: var(--ink-faint); }
+  .cmp .fill.after { background: var(--accent); }
+  .cmp .val { font-family: var(--mono); font-size: 0.7rem; color: var(--ink); font-weight: 700; }
+
+  /* Before/after copy panels */
+  .ba { display: grid; grid-template-columns: 1fr; gap: 1rem; margin: 0 0 1.4rem; }
+  @media (min-width: 46rem) { .ba { grid-template-columns: 1fr 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 4px;
+    padding: 1rem 1.1rem; font-size: 0.88rem; line-height: 1.55;
+  }
+  .card .cardhead {
+    font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em;
+    text-transform: uppercase; font-weight: 700; margin-bottom: 0.75rem;
+    padding-bottom: 0.4rem; border-bottom: 1px solid var(--rule);
+  }
+  .card.now .cardhead { color: var(--ink-soft); }
+  .card.next .cardhead { color: var(--accent); }
+  .fieldrow { margin: 0 0 0.65rem; }
+  .fieldrow:last-child { margin-bottom: 0; }
+  .fname {
+    font-family: var(--mono); font-size: 0.63rem; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--ink-faint); display: block;
+  }
+  .fval { display: block; }
+  .fval.empty { color: var(--ink-faint); font-style: italic; }
+  .chars {
+    font-family: var(--mono); font-size: 0.68rem; color: var(--ink-soft);
+    margin-top: 0.8rem; padding-top: 0.55rem; border-top: 1px solid var(--rule);
+  }
+
+  .good { color: var(--good); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  .bad  { color: var(--bad);  font-weight: 600; }
+  a { color: var(--accent); }
+  footer {
+    margin-top: 4rem; padding-top: 1.2rem; border-top: 1px solid var(--rule);
+    font-family: var(--mono); font-size: 0.7rem; color: var(--ink-soft); line-height: 1.9;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="kicker">CCS · Implementation plan</p>
+<h1>Summaries you can act on</h1>
+<p class="standfirst">
+  Enrichment works — 468 of 469 top-level sessions carry a generated description. But each one is
+  a chronicle rather than a status: it narrates the session in the order things happened, in the
+  passive, hedged register a model reaches for by default; it states the same fact three times
+  across three fields; and it asserts that work is live without ever checking whether it landed.
+  v40 changes what the model is asked for, gives it evidence about the world, and adds the two
+  surfaces that turn 468 descriptions into a queue.
+</p>
+
+<p><span class="status-pill" style="background: var(--good)">Implemented · 476/476 migrated · 1325 tests green</span></p>
+
+<div class="meta">
+  <b>Artifact</b> <code>/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/session-enrichment-v40/docs/plans/session-enrichment-v40.html</code><br>
+  <b>Branch</b> <code>worktree-session-enrichment-v40</code> off <code>origin/master</code> — the git delivery policy
+  forbids writes to the primary checkout, so the plan lands at <code>docs/plans/</code> on merge<br>
+  <b>Revises</b> <a href="file:///Users/mimen/Programming/Repos/claude-sessions/docs/plans/session-enrichment.html" target="_blank" rel="noopener"><code>docs/plans/session-enrichment.html</code></a> — the deployed v38/v39 feature<br>
+  <b>Measured against</b> the live store at <code>~/.ccs/cache/catalogue.db</code> · 469 top-level candidates, 468 enriched<br>
+  <b>Decided</b> 2026-07-26 · twelve decisions over one grilling thread<br>
+  <b>Touches</b> <code>src/catalogue/enrichment-schema.ts</code> · <code>src/catalogue/db.ts</code> · <code>src/enrich/*</code> ·
+  <code>src/title.ts</code> · new <code>ccs triage</code> / <code>ccs next</code> · <code>ccs-go/ui/enrichment_view.go</code>
+</div>
+
+<h2>1 · What actually changes</h2>
+
+<p>
+  One real row from the store, as it reads today and as it would read after v40. This is the whole
+  proposal in one picture: the same facts, reorganised so the first thing you read is the thing you
+  opened the panel to learn.
+</p>
+
+<div class="ba">
+  <div class="card now">
+    <div class="cardhead">Today · v39</div>
+    <div class="fieldrow">
+      <span class="fname">summary</span>
+      <span class="fval">Installed and validated Fork Alpha 0.0.29, then completed an upstream-friendly static-seam refactor that cut conflict-marker lines by 51% and passed broad build, test, lint, guard, review, and browser checks. The refactor remains unstaged, uncommitted, unpushed, and unreleased in <code>worktree-phase0-seam-baseline</code>; an attempt to launch it for the user to try ended on an API error.</span>
+    </div>
+    <div class="fieldrow">
+      <span class="fname">outstanding</span>
+      <span class="fval">Resume the interrupted local build/launch so the user can test the refactor, then decide whether to commit, push, build artifacts, and release it.</span>
+    </div>
+    <div class="fieldrow">
+      <span class="fname">reason</span>
+      <span class="fval">The implementation and verification are substantially complete, but the user's requested hands-on trial was interrupted before the refactored app could be launched.</span>
+    </div>
+    <div class="chars">669 characters · the state is the last clause of the first field</div>
+  </div>
+
+  <div class="card next">
+    <div class="cardhead">After · v40</div>
+    <div class="fieldrow">
+      <span class="fname">state</span>
+      <span class="fval">Refactor is done and green, sitting uncommitted in <code>worktree-phase0-seam-baseline</code>. The launch you asked for died on an API error before you could try it.</span>
+    </div>
+    <div class="fieldrow">
+      <span class="fname">next</span>
+      <span class="fval">Launch the build and try the refactor</span>
+    </div>
+    <div class="fieldrow">
+      <span class="fname">remaining</span>
+      <span class="fval">then decide whether to commit, push, release</span>
+    </div>
+    <div class="fieldrow">
+      <span class="fname">history</span>
+      <span class="fval">Installed Fork Alpha 0.0.29, refactored the static seam — conflict markers down 51% — and passed build, test, lint, guard, review, browser checks.</span>
+    </div>
+    <div class="fieldrow">
+      <span class="fname">reason</span>
+      <span class="fval empty">empty — only archive / handoff / junk carry one</span>
+    </div>
+    <div class="chars">331 characters above the fold · <code>history</code> renders on demand</div>
+  </div>
+</div>
+
+<p>
+  Nothing was invented and nothing load-bearing was dropped. The 51% figure survives, demoted to
+  <code>history</code> where it belongs — it is a fact about how the work went, not an input to
+  what you do next. What changed is that the first sentence now answers the question, the same
+  fact is no longer stated three times in three registers, and the immediate action stands alone
+  instead of leading a comma-chain.
+</p>
+
+<h2>2 · What the store says about itself</h2>
+
+<p>
+  Every claim below is a query against the live catalogue, not an impression. They are the reason
+  the changes in section 3 are the changes and not some other set.
+</p>
+
+<h3>The recommendation doesn't discriminate</h3>
+
+<p>
+  <code>continue</code> is 219 of 468 verdicts. A field that says yes to half the store sorts
+  nothing. The cause is structural: enrichment reads only the transcript, and a transcript that
+  stops mid-sentence is what every abandoned session looks like. So <code>continue</code> does not
+  mean "live work worth resuming" — it means "this didn't end tidily."
+</p>
+
+<p>
+  Checking those 219 against the world they describe: 79 ran on a feature branch, the population
+  where the question has a checkable answer. The other 140 were on <code>master</code> or
+  <code>main</code>, where "is the branch merged" is trivially true and says nothing.
+</p>
+
+<figure>
+  <div class="figtitle">Feature-branch <code>continue</code> verdicts vs. reality · n = 79</div>
+  <div class="cmp">
+    <div class="lab">branch deleted</div>
+    <div class="track"><div class="fill before" style="width: 68.4%"></div><span class="val">54</span></div>
+    <div class="lab">branch merged</div>
+    <div class="track"><div class="fill before" style="width: 6.3%"></div><span class="val">5</span></div>
+    <div class="lab">cwd gone</div>
+    <div class="track"><div class="fill before" style="width: 2.5%"></div><span class="val">2</span></div>
+    <div class="lab">genuinely live</div>
+    <div class="track"><div class="fill after" style="width: 22.8%"></div><span class="val">18</span></div>
+  </div>
+  <figcaption>
+    61 of 79 point at work that already landed or vanished. Mean age of a <code>continue</code>
+    session is 26 days; 75 of the full 219 have not moved in over a month.
+  </figcaption>
+</figure>
+
+<p>
+  The clearest single case: the constellation-edges session recommends <code>continue</code> with
+  <em>"Finish CLI implementation, run tests/typechecks, verify the brief, commit to a branch, write
+  the child report, and notify the loop-manager parent."</em> That work is
+  <code>5eb1d5b feat(catalogue): constellation edges — parent + skill per session</code>, merged
+  into <code>master</code>. The panel is telling you to go finish something that shipped.
+</p>
+
+<h3>Three fields carry one fact</h3>
+
+<p>
+  In the row in section 1, the summary's closing clause, the whole of <code>outstanding</code>,
+  and the whole of <code>reason</code> assert the same thing: the trial launch was interrupted.
+  That is the parsing tax — three paragraphs read, one state extracted. <code>reason</code>
+  averages 132 characters and appears on all 468 rows, but on the 401 where the verdict is
+  <code>continue</code> or <code>complete</code> it only restates the verdict in hedged prose.
+</p>
+
+<h3><code>outstanding</code> is a list pretending to be a sentence</h3>
+
+<p>
+  199 of the 371 non-empty values chain multiple actions with commas. The longest:
+</p>
+
+<pre><code>User must review/approve the proposed drive access model; then apply
+permissions, finish UI-only drive renames/deletion of six empty drives,
+and resolve Charles Louis's profile location and Johann Sevilla's
+current reduced-status conflict.</code></pre>
+
+<p>Four actions and two people, 232 characters, one sentence.</p>
+
+<h3>The cwd verdict is unverifiable noise</h3>
+
+<p>
+  Enrichment judges whether a session's working directory suits the work it did, and is meant to
+  answer with a key from a curated registry of launch locations so the answer can be checked. It
+  may fall back to a free-text absolute path only when no registered location fits — the escape
+  hatch, which exists because that case is itself a signal that a location should be registered.
+  155 of 468 sessions (33%) are flagged as running in the wrong directory, and
+  <em>every one</em> of those took the escape hatch, because
+  <code>~/.ccs/locations.toml</code> was never installed on this machine — it ships with the
+  unmerged <code>/ccs:new</code> router. The suggestions include
+  <code>/Users/mimen/claude-sessions</code>, which does not exist, and a bare
+  <code>/Users/mimen</code>. Each prints a warning-coloured line in the dossier.
+</p>
+
+<h3>The gap nothing surfaces</h3>
+
+<p>
+  <code>enrichment-schema.ts</code> states the design intent plainly: enrichment is
+  <em>observed</em> state, lifecycle is <em>stored intent</em>, and the gap between them is the
+  signal. The gap is currently 162 sessions wide — recommended <code>complete</code>, never
+  marked — and no command presents it.
+</p>
+
+<div class="scroll">
+<table>
+  <tr><th>Verdict</th><th class="num">Sessions</th><th class="num">Lifecycle already agrees</th><th class="num">Gap</th></tr>
+  <tr><td><code>complete</code></td><td class="num">182</td><td class="num">20</td><td class="num bad">162</td></tr>
+  <tr><td><code>handoff</code></td><td class="num">27</td><td class="num">4</td><td class="num warn">23</td></tr>
+  <tr><td><code>archive</code></td><td class="num">40</td><td class="num">23</td><td class="num warn">17</td></tr>
+  <tr><td><code>continue</code></td><td class="num">219</td><td class="num">—</td><td class="num">— (no disagreement by definition)</td></tr>
+</table>
+</div>
+
+<h2>3 · The twelve decisions</h2>
+
+<div class="decision">
+  <h3>Split <code>summary</code> into <code>state</code> and <code>history</code></h3>
+  <p>
+    The defect is ordering, not length: every summary opens with what the session set out to do
+    and buries where it landed. Two columns make the separation structural, so a reader cannot be
+    forced to parse a chronicle to find a state. The dossier leads with <code>state</code> alone
+    and reveals <code>history</code> on demand.
+  </p>
+  <p class="rejected">
+    <b>Rejected: rewriting the schema descriptions only.</b> Cheaper and reversible, and the
+    precedent was good — v39's 33%→93% first-pass jump came from exactly that kind of edit. But an
+    instruction to "lead with the state" is a request the model can drift from, whereas two columns
+    cannot be run together. Since the cutover requires a full re-enrich either way, the migration
+    was nearly free.
+  </p>
+</div>
+
+<div class="decision">
+  <h3>Split <code>outstanding</code> into <code>next</code> and <code>remaining</code></h3>
+  <p>
+    <code>next</code> is the single immediate action, imperative, ≤120 characters.
+    <code>remaining</code> is everything else, optional, ≤250, rendered dimmer. Keeping both as
+    scalar TEXT rather than a list has a second payoff: <code>SELECT next FROM catalogue WHERE
+    recommendation='continue'</code> is a to-do list across the whole store, which is what makes
+    <code>ccs next</code> a one-line query instead of a parse.
+  </p>
+  <p class="rejected">
+    <b>Rejected: a JSON array of 1–3 bullets.</b> More faithful to data that is genuinely a list,
+    and the forced tool call would return a native <code>string[]</code>. But the original design
+    explicitly refused JSON blobs for enrichment on the grounds that this is state which wants to
+    be queried and sorted, and that reasoning still holds.
+  </p>
+</div>
+
+<div class="decision">
+  <h3><code>reason</code> becomes conditional, enforced at parse time</h3>
+  <p>
+    Required when the recommendation is <code>archive</code> or <code>handoff</code>, or when
+    <code>junk</code> is true; required to be <em>empty</em> otherwise. The rule is deterministic
+    and checked in <code>validateEnrichment</code>, rather than an instruction to "mention it when
+    interesting" that a model interprets loosely. This removes roughly 401 dead lines and keeps
+    the ~67 that justify a call you would otherwise distrust.
+  </p>
+  <pre><code>const needsReason = rec === "archive" || rec === "handoff" || junk;
+if (needsReason && !reason) return "archive/handoff/junk requires a reason";
+if (!needsReason && reason) return "reason is only for archive/handoff/junk";</code></pre>
+  <p class="rejected">
+    <b>Rejected: dropping the column.</b> The world block will make <code>archive</code> verdicts
+    both more common and more surprising, and an unexplained "archive this 200-message session" is
+    exactly the prompt to open the transcript — the trip the panel exists to save.
+  </p>
+</div>
+
+<div class="decision">
+  <h3><code>junk</code> gains a coherence rule and a bulk lane</h3>
+  <p>
+    <code>junk=true</code> now forces <code>recommendation='archive'</code>. Today 17 junk rows
+    recommend <code>complete</code> — a PONG probe technically succeeded, but "complete" is the
+    wrong shelf for it, and left alone it files <em>"Unavailable fake todo tool probe"</em> into
+    your success history. The 28 still-idle junk sessions then appear in <code>ccs triage</code>
+    as one collapsed group with a single archive-all key. The population is safe to treat in bulk:
+    the largest is 16 messages and none contain work.
+  </p>
+  <p class="rejected">
+    <b>Rejected: auto-archiving junk in the sweep.</b> Defensible on the evidence and it would
+    clear all 28 with no keypresses, but it makes a model verdict write a lifecycle change, which
+    the original design refused on principle and which contradicts the read-only stance taken for
+    triage below.
+    <b>Also rejected: deleting the boolean</b> and letting <code>archive</code> carry it — that
+    collapses "never worth starting" and "a real attempt that failed" into one undifferentiated
+    pile.
+  </p>
+</div>
+
+<div class="decision">
+  <h3>The cwd question is registry-gated</h3>
+  <p>
+    When <code>~/.ccs/locations.toml</code> is absent, the <code>&lt;locations&gt;</code> block
+    <em>and</em> the three cwd properties are dropped from the JSON Schema for that call entirely.
+    A model that is never asked a question it cannot answer well cannot invent an answer. The
+    columns stay in v40, dormant, and the feature switches itself back on the day the registry
+    lands — no code change needed.
+  </p>
+  <p class="rejected">
+    <b>Rejected: blocking on the registry.</b> Extracting <code>locations.toml</code> from
+    <code>feat/ccs-new-router</code> fixes the root cause, but that branch belongs to another
+    session, so it would make v40 wait on a merge this thread does not control.
+    <b>Also rejected: deleting the cwd fields.</b> They catch a real habit; the problem is the
+    missing registry, not the question.
+  </p>
+  <div class="callout">
+    <span class="h">The premise was already stale · 2026-07-26</span>
+    <p>
+      The registry <b>is installed</b>. <code>~/.ccs/locations.toml</code> is a symlink to
+      <code>ClaudeConfig/session-routing/locations.toml</code> carrying <b>31 curated locations</b>,
+      and the router work it ships with merged (<code>docs/ccs-new-router-shipped</code>). The 155
+      free-text verdicts were all generated <em>before</em> it landed.
+    </p>
+    <p>
+      So the gate is inert on this machine, which is exactly the designed outcome — "it switches
+      itself on the day the registry lands" — and it stays as the guard for any machine the
+      registry has not reached. The cwd question is live again, and the first swept sessions
+      returned real keys (<code>repos</code>, <code>assistant</code>) with free text used only
+      where it is genuine signal: <code>/Users/mimen/Programming/Repos/imsg</code> is a real
+      directory that is not yet registered, which is the escape hatch doing its job rather than
+      inventing a path.
+    </p>
+  </div>
+</div>
+
+<div class="decision">
+  <h3>The copy register is dry operator, second person</h3>
+  <p>
+    Present tense, direct address, plain verbs, no hedges, and metrics only when the number changes
+    what you would do. "The user" is absurd in your own catalogue. In the section 1 example this
+    halves the character count, and the cut falls entirely on decoration — test counts,
+    percentages, and adjectives like "upstream-friendly" — rather than on substance.
+  </p>
+  <p class="rejected">
+    <b>Rejected: keeping the impersonal analyst voice.</b> It never misattributes to you an action
+    a delegated subagent took, which is a real edge. But it is also the register producing
+    "substantially complete" and "the session was tasked with", which is the complaint that started
+    this thread.
+  </p>
+</div>
+
+<div class="decision">
+  <h3>A <code>&lt;world&gt;</code> block goes into the prompt</h3>
+  <p>
+    Enrichment currently receives seven things — title, cwd as a string, message count, last
+    activity, the <em>skeleton</em> (the session's opening turns, as stored by the indexer), the
+    transcript tail, and the locations registry — and never touches the world any of them
+    describe. It gains a block of deterministic facts: whether the cwd still exists, the branch's
+    existence and merge state, whether the worktree is present and dirty, and how many later
+    sessions have run in the same directory.
+  </p>
+  <p>
+    All of it is readable from <code>.git/HEAD</code>, <code>.git/refs/</code>, and
+    <code>packed-refs</code> as plain files, plus one index query — no process spawn, so
+    <code>src/enrich/provenance.test.ts</code>, which fails if any module under
+    <code>src/enrich</code> gains a spawn or harness invocation, keeps passing unchanged.
+  </p>
+
+  <div class="callout">
+    <span class="h">Corrected during implementation · 2026-07-26</span>
+    <p>
+      Two of the four git facts above are <b>not</b> obtainable without running git, and the
+      paragraph claiming otherwise was wrong. <b>Merge state</b> is a commit-graph ancestry
+      question: answering it means decompressing commit objects and walking parents, and those
+      objects may sit inside packfiles. <b>Worktree dirtiness</b> is an index-versus-worktree diff,
+      including blob hashing for anything whose stat data moved. Neither is a file read. The
+      measured evidence in section 2 came from running <code>git merge-base --is-ancestor</code> in
+      a shell, which <code>src/enrich</code> is forbidden to do.
+    </p>
+    <p>
+      Shipped: the readable subset — cwd existence, whether the session's branch still exists
+      (checking <em>both</em> loose refs and <code>packed-refs</code>, since a gc'd branch has no
+      loose file and would otherwise read as deleted), the currently checked-out branch, and the
+      successor-session count. The cost is small and measured: of the 61 stale
+      <code>continue</code> verdicts on feature branches, <b>54 were "branch deleted"</b> — which
+      is readable — and only 5 were "merged". The block retains roughly 89% of the signal that
+      motivated it.
+    </p>
+    <p>
+      <b>Open:</b> recovering merge state and dirtiness means allowlisting a <code>git</code> read
+      inside <code>provenance.test.ts</code>. That guard's stated purpose is preventing
+      session-minting harness calls, which <code>git</code> cannot do — but amending a structural
+      safety property is a decision, not an implementation detail, and it is not taken here.
+    </p>
+  </div>
+
+  <p>What the model actually receives:</p>
+  <pre><code>&lt;world&gt;
+  working directory: exists
+  the branch this session ran on: DELETED since
+  branch checked out there now: master
+  later sessions in this directory: 14
+  most recent of those: 2026-07-24T09:12:00.000Z
+&lt;/world&gt;</code></pre>
+</div>
+
+<div class="decision">
+  <h3>Liveness is also recomputed at render time</h3>
+  <p>
+    This is the decision a stored-only design would have got wrong. Enrichment's freshness rule is
+    driven by progress rather than a clock: a session is re-enriched once it has gained 10
+    messages, or if it has moved at all and its stored description is more than six hours old. An
+    idle session is therefore enriched once and never again, which is exactly what makes the steady
+    state cost nothing.
+  </p>
+  <p>
+    But world state changes while a session sits <em>still</em> — you merge the branch, the session
+    gains no messages, and no rule fires. Any world verdict written into a column is therefore
+    guaranteed to rot, silently and confidently. The prompt block keeps the model's verdict honest
+    at write time; the dossier recomputes the banner on open, so the panel is never wrong even on a
+    two-month-old enrichment.
+  </p>
+</div>
+
+<div class="decision">
+  <h3>Coverage comes from successor sessions, not git alone</h3>
+  <p>
+    The branch check sounds decisive and covers less than it appears to. Across all 466 enriched
+    sessions with a recorded cwd:
+  </p>
+  <figure>
+    <div class="figtitle">Where the git branch check can speak · n = 466</div>
+    <div class="stack">
+      <div class="seg s1" style="flex: 156">156</div>
+      <div class="seg s2" style="flex: 247">247</div>
+      <div class="seg s3" style="flex: 63">63</div>
+    </div>
+    <div class="stackkey">
+      <span><i class="swatch" style="background: var(--seq-1)"></i> not a git repo — 156 (33%)</span>
+      <span><i class="swatch" style="background: var(--seq-2)"></i> on master/main, trivially "merged" — 247 (53%)</span>
+      <span><i class="swatch" style="background: var(--seq-3)"></i> feature branch, check is meaningful — 63 (14%)</span>
+    </div>
+    <figcaption>
+      Ordered low→high by how much signal the branch check carries. A third of the store is vault
+      work, the home directory, or ad-hoc directories where there is no branch to ask about.
+    </figcaption>
+  </figure>
+  <p>
+    So the world block also carries a count of how many later sessions have run in the same cwd.
+    It is a pure index query — no filesystem, no git, no model — and it works identically for a
+    repo and for the vault. 412 of 466 enriched sessions have at least one successor. It does not
+    prove work landed, but "14 sessions have worked in this directory since" is decisive staleness
+    information.
+  </p>
+  <p class="rejected">
+    <b>Rejected: successors only, dropping git.</b> One uniform signal with far better coverage and
+    the simplest implementation, but it gives up the sharpest verdict available — "branch merged,
+    this landed" is qualitatively better than "someone worked here since."
+  </p>
+</div>
+
+<div class="decision">
+  <h3><code>ccs triage</code> — the disagreement queue</h3>
+  <p>
+    A dedicated command listing only sessions where the verdict contradicts the lifecycle, most
+    recent first, one keypress to apply, skip, or open. Batch flow for a batch problem: ~180 items
+    is fifteen minutes of keypresses versus 180 dossier visits that will not happen. Read-only
+    until a key is pressed, so no model verdict mutates anything unattended. A
+    <code>--list --json</code> form feeds a scheduled digest.
+  </p>
+  <pre><code>$ ccs triage
+  ⚠ enrichment sweep last succeeded 5h ago · 42 failed runs
+
+  ▸ junk · 28 probes and throwaways        [A] archive all  [e] expand
+
+  1/135   a3f12c9d · idle → complete
+  T3 static-seam refactor and local trial
+  Refactor is green and merged; the branch was deleted 3 weeks ago.
+  ⚠ world: branch gone, cwd clean
+
+  [c] complete  [a] archive  [s] skip  [o] open dossier  [q] quit</code></pre>
+  <p class="rejected">
+    <b>Rejected: a TUI-only filter.</b> Zero new surface area and it reuses navigation that already
+    exists, but it cannot feed a scheduled digest or a morning brief.
+    <b>Note:</b> <code>ccs inbox</code> was unavailable as a name — it is agent-to-agent identity
+    messaging in <code>src/inbox/</code>, unrelated.
+  </p>
+</div>
+
+<div class="decision">
+  <h3><code>ccs next</code> — the "where was I" list</h3>
+  <p>
+    A read-only projection over sessions whose verdict is <code>continue</code>: id, title, and the
+    <code>next</code> line. Nothing is stored and nothing can be added, so it is recomputed on every
+    run and a row disappears the moment its session is closed out. It answers a question Todoist
+    structurally cannot — Todoist only knows about work you deliberately filed, whereas this is the
+    work you were interrupted in the middle of.
+  </p>
+  <pre><code>$ ccs next
+  a3f12c9d  T3 static-seam refactor
+            Launch the build and try the refactor       · 2d · t3code
+  9c02b41f  CCS harness swap and restart
+            Run `ccs restart --do` on a throwaway       · 5d · claude-sessions
+  4d81aa07  Cmux session sidebar
+            Wire the close button to a CCS primitive    · 9d · t3code</code></pre>
+  <p>
+    Expect it to be short. After the re-enrich, most of today's 219 <code>continue</code> verdicts
+    should collapse to <code>complete</code> or <code>archive</code> once the model can see the
+    branch is gone; the measured floor of genuinely live feature-branch work is 18.
+  </p>
+</div>
+
+<div class="decision">
+  <h3><code>enrichment_title</code> joins the canonical resolver</h3>
+  <p>
+    <a href="file:///Users/mimen/Programming/Repos/claude-sessions/docs/adr/0093-one-session-title-resolver-machine-index-human-catalogue.md" target="_blank" rel="noopener">ADR-0093</a>
+    made <code>resolveSessionTitle()</code> the single place a session's display title is decided,
+    specifically so seven surfaces could not drift again. <code>enrichment_title</code> shipped days
+    later and is not in that chain — it is read ad-hoc at <code>render-tab.ts:204</code> and
+    <code>App.tsx:438</code>, and is invisible to <code>ccs ls</code>, <code>ccs session</code>,
+    <code>ccs meta</code>, and the preview. That is the drift the ADR exists to prevent,
+    reintroduced.
+  </p>
+  <pre><code>live → custom → role → enrichment → native → codex → fallback</code></pre>
+  <p>
+    Slotting it above <code>native</code> keeps a human choice winning while letting a title written
+    from how the session <em>ended</em> beat one guessed from how it opened, which is the field's
+    entire argument. Both ad-hoc reads get deleted. <code>state</code> and <code>next</code> stay
+    out of list views — that is what <code>ccs next</code> and the dossier are for.
+  </p>
+  <div class="callout">
+    <span class="h">Already true on master — the hazard runs the other way · 2026-07-26</span>
+    <p>
+      <code>src/title.ts</code> does not exist on <code>master</code>; it is uncommitted work in the
+      primary checkout. What master has is <code>displayTitle()</code> at
+      <code>src/catalogue/db.ts:1311</code>, which already resolves
+      <code>custom → enrichment → indexTitle</code>, and both <code>ccs ls</code>
+      (<code>cli.ts:586</code>) and the TUI (<code>App.tsx:437</code>) route through it. There is
+      exactly one enrichment-title read in the tree and no drift.
+    </p>
+    <p>
+      So this decision needs no code here — but it inverts into a <b>merge hazard</b>. The
+      unlanded <code>resolveSessionTitle()</code> omits enrichment from its chain, so merging it as
+      written would <em>regress</em> what master already does: v40 titles would silently stop
+      appearing in <code>ccs ls</code>, <code>ccs session</code>, and the preview. Whoever lands
+      ADR-0093 must add <code>enrichment</code> between <code>role</code> and <code>native</code>.
+    </p>
+  </div>
+</div>
+
+<h2>4 · The v40 shape</h2>
+
+<div class="scroll">
+<table>
+  <tr><th>Column</th><th>Change</th><th class="num">Cap</th></tr>
+  <tr><td><code>enrichment_title</code></td><td>unchanged — the field that already works (40-char average, concrete noun phrase)</td><td class="num">120</td></tr>
+  <tr><td><code>enrichment_state</code></td><td class="good">new · where it stands, now</td><td class="num">700 <span style="color:var(--ink-faint)">/ 250</span></td></tr>
+  <tr><td><code>enrichment_history</code></td><td class="good">new · how it got there, on demand</td><td class="num">700 <span style="color:var(--ink-faint)">/ 250</span></td></tr>
+  <tr><td><code>enrichment_next</code></td><td class="good">new · one imperative action</td><td class="num">250 <span style="color:var(--ink-faint)">/ 100</span></td></tr>
+  <tr><td><code>enrichment_remaining</code></td><td class="good">new · optional</td><td class="num">400 <span style="color:var(--ink-faint)">/ 200</span></td></tr>
+  <tr><td><code>enrichment_summary</code></td><td class="bad">dropped after the sweep</td><td class="num">—</td></tr>
+  <tr><td><code>enrichment_outstanding</code></td><td class="bad">dropped after the sweep</td><td class="num">—</td></tr>
+  <tr><td><code>enrichment_recommendation</code></td><td>unchanged enum</td><td class="num">—</td></tr>
+  <tr><td><code>enrichment_reason</code></td><td class="warn">conditional — archive / handoff / junk only</td><td class="num">250</td></tr>
+  <tr><td><code>enrichment_junk</code></td><td class="warn">gains <code>junk ⇒ archive</code></td><td class="num">—</td></tr>
+  <tr><td>cwd trio</td><td class="warn">registry-gated; omitted from the schema when no registry exists</td><td class="num">—</td></tr>
+  <tr><td><code>_at</code> · <code>_at_messages</code> · <code>_attempts</code></td><td>unchanged provenance</td><td class="num">—</td></tr>
+</table>
+</div>
+
+<p>
+  Two numbers per field: the <b>cap</b> the parser enforces, and in grey the <b>length the schema
+  description actually asks for</b>. The gap between them is the whole point. Caps are a backstop
+  against a runaway generation filling a column; they are not a style guide, and one set at the
+  requested length is not a backstop but a rejection rule for anything that overshoots by a word.
+  That is not hypothetical — v39 capped summaries at 600 characters while telling the model
+  nothing, and rejected two thirds of real sessions for writing three ordinary sentences. Moving
+  the asked-for lengths into the descriptions and the caps out of the way took first-pass success
+  from 33% to 93%.
+</p>
+<p>
+  An earlier draft of this table listed <code>next</code> at a cap of 120 while the decision above
+  asks the model for ≤120 — the identical mistake, one revision later. The caps shipped above the
+  targets, and <code>enrichment-schema.test.ts</code> now asserts that a response written to the
+  asked-for length parses, and so does one 80% longer.
+</p>
+
+<h3>Cutover</h3>
+
+<p>
+  Hard: add the new columns, re-enrich all 469 in one sweep, then drop the old ones. Roughly 13k
+  input and 150 output tokens per session — free on the Sol gateway, single-digit dollars metered,
+  about an hour at concurrency 3. The backfill is already complete (469 candidates, 468 enriched,
+  zero at the attempt cap), so this is a known, bounded quantity rather than an open-ended drain.
+</p>
+
+<p>
+  The alternatives are traps the freshness rule sets. A dual-read transition means two shapes and
+  two render paths forever, because idle sessions never re-enrich on their own and would sit on the
+  fallback path permanently. A mechanical column copy (<code>summary → history</code>,
+  <code>outstanding → next</code>) is instant and free, but leaves chronicle-shaped prose in a state
+  field, comma-chains in <code>next</code>, and no world block anywhere — and the same freshness
+  rule guarantees those rows are never revisited. Either one migrates the problem instead of fixing
+  it.
+</p>
+
+<div class="callout">
+  <span class="h">How the cutover is actually triggered · 2026-07-26</span>
+  <p>
+    No <code>--force</code> flag was added. v39 already had the mechanism: a row missing a field
+    that did not exist when it was written is <em>incomplete</em>, not fresh, so the sweep is its
+    own backfill. v40 rides the same branch, which means the cutover needs no one-off script and
+    leaves behind no blunt flag that could re-enrich the entire store by accident later.
+  </p>
+  <p>
+    One subtlety made it work. <code>enrichmentFrom</code> falls back to the v39 text so no panel
+    goes blank mid-cutover — which means <code>state</code> is non-empty for a legacy row, and the
+    obvious <code>!state</code> check would have reported the whole store fresh and quietly done
+    nothing. The row carries an explicit <code>legacyShape</code> flag for the staleness check to
+    read instead; <code>staleness.test.ts</code> pins it.
+  </p>
+</div>
+
+<h3>Why v41 cannot follow immediately</h3>
+<p>
+  The plan sequenced this add → sweep → drop. The drop has to wait. Readers that predate v40 select
+  <code>enrichment_summary</code> and <code>enrichment_outstanding</code> straight out of SQL — the
+  ccs-go dossier is one — so <code>setEnrichment</code> now <b>dual-writes</b>, copying
+  <code>state</code> and <code>next</code> into the old columns as well. Those readers stay correct
+  and current throughout, at the cost of the old columns living until every one of them has moved
+  across. Dropping them the moment the sweep finished would have broken the panel this work exists
+  to improve.
+</p>
+
+<h2>5 · The outage this measurement found</h2>
+
+<div class="callout">
+  <span class="h">Fixed 2026-07-26, before this plan was written</span>
+  <p>
+    The sweep had been dead for about five hours, crash-looping every fifteen minutes with 42 logged
+    failures: <code>index schema version 12 is newer than supported version 11</code>. The launchd
+    plist pointed at the <code>.claude/worktrees/session-enrichment</code> worktree — its own comment
+    flagged that as a stopgap on the grounds that "the deployment has no <code>ccs enrich</code> at
+    all." That premise had expired, and meanwhile the live index cache moved to v12 while the pinned
+    worktree stayed on v11.
+  </p>
+  <p>
+    Repointed to <code>~/Programming/Deployments/claude-sessions/bin/ccs</code>, preflighted with
+    <code>enrich --list</code> before reloading, and confirmed live: a 19/19 sweep ran, the stale
+    queue fell to 8, and the only failures were two transient gateway 500s — which the
+    transient-vs-permanent split correctly declines to count against any session's attempt budget.
+  </p>
+</div>
+
+<p>
+  This is the second time this feature has failed by writing into a log nobody reads; the first was
+  the original plist pointing at a deployment that predated the <code>enrich</code> command. So v40
+  persists the sweep's last success and surfaces it: <code>ccs enrich --list</code> and the top of
+  <code>ccs triage</code> print how long ago the sweep last succeeded and how many runs have failed
+  since. A pipeline whose entire job is keeping the store legible should not be able to die quietly,
+  and it has now demonstrated twice that it can.
+</p>
+
+<p>
+  The freshness rule itself is not changing. 457 of 468 rows are current, which is the rule working;
+  the eleven that were not are the outage, not the policy. Tightening to "any movement past an hour"
+  would spend calls summarising sessions you are actively sitting in — the ones you least need a
+  summary of.
+</p>
+
+<h2>6 · Also agreed: retiring <code>session-park</code></h2>
+
+<p>
+  Parking a session into a Todoist task is retired. Independent of v40 — nothing here depends on it —
+  but it removes the only competing claim on "where does unfinished session work live," which is now
+  <code>ccs next</code> and <code>ccs triage</code>.
+</p>
+
+<div class="scroll">
+<table>
+  <tr><th>File</th><th>Action</th></tr>
+  <tr><td><code>ClaudeConfig/skills/session-park/SKILL.md</code></td><td>delete, with the <code>~/.claude/skills/</code> symlink</td></tr>
+  <tr><td><code>ClaudeConfig/skills/session-closer/SKILL.md</code></td><td>rewrite the blocked/stale branch so it no longer parks to Todoist (3 references)</td></tr>
+  <tr><td><code>ClaudeConfig/memory/project_session_closer_loop.md</code></td><td>drop the pointer reference</td></tr>
+  <tr><td><code>docs/adr/0091-session-hygiene-commands-ship-as-a-user-scope-plugin.md</code></td><td>text left intact; a superseding note records the retirement</td></tr>
+</table>
+</div>
+
+<p>
+  The ADR is deliberately not edited. Its job is to record what was true when the decision was made,
+  so removing the reference would leave a record that cannot be trusted and a reader who cannot tell
+  what was taken out or why. Superseding says the same thing honestly.
+</p>
+
+<h2>7 · Risks and open items</h2>
+
+<ul>
+  <li>
+    <b>The re-enrich is a one-way door on 468 rows of existing copy.</b> Dropping
+    <code>summary</code> and <code>outstanding</code> after the sweep means the old text is gone.
+    Mitigation: back up <code>catalogue.db</code> before the migration, as was done at
+    <code>user_version 37</code> for v38 — the store's existing habit, and cheap.
+  </li>
+  <li>
+    <b>The register change could overcorrect.</b> "Dry, no hedges, metrics only when they matter" is
+    exactly the instruction a model can take too far, dropping a branch name or a blocking condition
+    as decoration. The section 1 example is the calibration target; the first 20 rows of the sweep
+    should be read before letting the remaining 449 run.
+  </li>
+  <li>
+    <b>The world block adds a filesystem read to a path that previously had none.</b> Reading git
+    plumbing files avoids the process-spawn prohibition, but <code>packed-refs</code> parsing is
+    fiddly, and a repo in an odd state — bare, submodule, Gitfile worktree — must degrade to
+    "unknown" rather than throw. The successor-session count has no such failure mode, which is part
+    of why it carries the coverage.
+  </li>
+  <li>
+    <b class="good">Retired:</b> <s>the cwd trio stays dormant indefinitely</s>. The registry is
+    installed with 31 locations, so the cwd path is live and exercised from the first swept session
+    — the opposite of dormant. What remains dormant is the <em>gate</em>, which only fires on a
+    machine with no registry.
+  </li>
+  <li>
+    <b>Nothing structurally prevents the plist divergence recurring.</b> The deployment now carries
+    <code>enrich</code> and index v12, but the next time the deployed line moves for an unrelated
+    reason, the same drift is available. The preflight in the plist comment is a procedure, not an
+    enforcement; the sweep-health surface in section 5 is what actually catches it.
+  </li>
+  <li>
+    <b>The launchd agent is stopped, and restarting it early would silently undo the cutover.</b>
+    It points at the deployment, which is still v39 code: its <code>setEnrichment</code> does not
+    write <code>enrichment_state</code>, so every session it touched would be re-marked as
+    legacy-shaped and re-queued forever. It must stay down until this branch deploys. The catalogue
+    itself is forward-compatible — v40 is additive and the older binary reads it without
+    complaint — so nothing else breaks in the meantime.
+  </li>
+  <li>
+    <b>Two files claim ADR-0091.</b> This branch has
+    <code>0091-role-model-policy-is-a-birth-only-compiler-contract.md</code>; the primary checkout
+    has an uncommitted <code>0091-session-hygiene-commands-ship-as-a-user-scope-plugin.md</code>.
+    The superseding note recording the <code>session-park</code> retirement belongs on the second,
+    and was not written here because the file is not on this branch and creating it would cement
+    the collision.
+  </li>
+</ul>
+
+<h2>8 · What shipped</h2>
+
+<p>
+  Implemented and migrated on 2026-07-26, on branch <code>worktree-session-enrichment-v40</code>.
+  <b>1325 tests passing, 0 failing</b> (+38), typecheck clean, no new circular dependencies. The
+  live catalogue is at <code>user_version 40</code> with <b>476 of 476 sessions re-enriched</b>,
+  none left in the v39 shape and none at the attempt cap. Backed up first at
+  <code>~/.ccs/backups/catalogue-pre-v40-20260726-004541.db</code>.
+</p>
+
+<h3>The result the whole design was for</h3>
+
+<figure>
+  <div class="figtitle">Verdict distribution before and after the world block · n = 476</div>
+  <div class="cmp">
+    <div class="lab">continue · v39</div>
+    <div class="track"><div class="fill before" style="width: 47.5%"></div><span class="val">47.5%</span></div>
+    <div class="lab">continue · v40</div>
+    <div class="track"><div class="fill after" style="width: 19.3%"></div><span class="val">19.3%</span></div>
+  </div>
+  <figcaption>
+    The field that could not discriminate now does. <code>complete</code> is 47.9%,
+    <code>archive</code> 28.8%, <code>handoff</code> 4.0%. Archive justifications cite the
+    successor-session signal directly — "later sessions in the same directory supersede its stale
+    status note" — so the measurement is driving the verdict rather than decorating it.
+  </figcaption>
+</figure>
+
+<div class="scroll">
+<table>
+  <tr><th>Copy measure</th><th class="num">v39</th><th class="num">v40</th></tr>
+  <tr><td>Lead field length</td><td class="num">404</td><td class="num good">211</td></tr>
+  <tr><td>Above-the-fold text, paired sample of 216 identical sessions</td><td class="num">386</td><td class="num good">265</td></tr>
+  <tr><td>Records saying "the user"</td><td class="num">24 / 279</td><td class="num good">0 / 476</td></tr>
+  <tr><td>Spurious reasons on continue/complete</td><td class="num">401</td><td class="num good">0</td></tr>
+  <tr><td>Carries a concrete path/branch/commit (paired sample)</td><td class="num">83%</td><td class="num warn">77%</td></tr>
+</table>
+</div>
+
+<p>
+  That last row is the one honest negative, and it is the risk this plan named. On 216 identical
+  sessions the register change drops a concrete reference in roughly <b>one session in sixteen</b>.
+  It buys 31% less text and three labelled fields in place of one paragraph, which is a trade worth
+  making — but it is a real loss, not a rounding artefact, and the fix is one sentence in the
+  <code>state</code> description if a second pass is ever worth its cost.
+</p>
+
+<h3>Two defects the live run found, both mine</h3>
+
+<div class="callout">
+  <span class="h">A validator that rejected correct answers</span>
+  <p>
+    The first full sweep failed 33 of 471 sessions, and <b>18 of the 19 logged failures were a
+    single rule I had invented</b>: <code>remaining</code> must not appear without
+    <code>next</code>, on the reasoning that the first action belongs in <code>next</code>. The
+    rule was simply wrong. A finished session can carry optional leftovers with no obligation
+    attached — "optionally delete the private key now that it is in the Keychain" is a real
+    example from the store — and forcing that into <code>next</code> invents work the session does
+    not have.
+  </p>
+  <p>
+    This is the v39 length-cap defect wearing new clothes, one revision after that plan recorded
+    it: <em>a constraint the model keeps violating because the constraint, not the answer, is
+    mistaken.</em> Removing the rule and re-running recovered 32 of the 33. The general lesson is
+    worth more than the fix — when a coherence rule fires often, suspect the rule first.
+  </p>
+</div>
+
+<div class="callout">
+  <span class="h">The migration nearly staled the surface it exists to improve</span>
+  <p>
+    <code>setEnrichment</code> stopped writing <code>enrichment_summary</code>, and readers that
+    predate v40 select that column straight out of SQL. Rows kept their old text rather than going
+    blank — an <code>UPDATE</code> leaves unlisted columns alone — so the ccs-go dossier would have
+    shown a <em>stale</em> description beside a fresh one, indefinitely and silently. The
+    transitional dual-write fixes it forward; 443 already-swept rows were backfilled to match.
+  </p>
+</div>
+
+<h3>Diverged from the plan</h3>
+
+<ul>
+  <li><b>Merge state and worktree dirtiness were not achievable</b> as specified — see the
+    correction in section 3. Shipped the readable ~89%.</li>
+  <li><b>The locations registry was already installed</b>, so the cwd gate is inert here and the
+    feature is live rather than dormant.</li>
+  <li><b>The title-resolver decision needed no code</b> — master already does it. It inverted into
+    a merge hazard against unlanded work.</li>
+  <li><b>No <code>--force</code> flag.</b> The cutover rides the existing incomplete-row staleness
+    branch, which required an explicit <code>legacyShape</code> flag to work through the
+    compatibility fallback.</li>
+  <li><b>Caps shipped above targets, not at them</b>, contradicting this plan's own shape table and
+    following its own reasoning.</li>
+  <li><b>v41 cannot follow the sweep</b> — the dual-write keeps old readers correct, and dropping
+    the columns has to wait for them.</li>
+</ul>
+
+<h3>Left open</h3>
+
+<ul>
+  <li>
+    <b class="bad">The launchd agent is stopped and must stay down until this branch deploys.</b>
+    It points at the deployment, which is v39 code: it does not write <code>enrichment_state</code>,
+    so every session it touched would be re-marked legacy-shaped and re-queued forever. This is the
+    one action that would quietly undo the migration.
+  </li>
+  <li><b>The <code>git</code> allowlist decision</b> for merge state and dirtiness.</li>
+  <li><b>The ccs-go dossier</b>, on another session's branch; correct but not enhanced.</li>
+  <li><b>v41</b>, dropping <code>enrichment_summary</code> and <code>enrichment_outstanding</code>
+    once the last pre-v40 reader has moved.</li>
+  <li><b>The superseding note for <code>session-park</code></b>, blocked on the ADR-0091 collision.</li>
+</ul>
+
+<p>
+  The queues the feature exists to produce, as of the migration: <b>243 sessions to review</b> in
+  <code>ccs triage</code> plus a 35-session junk lane, and <b>88 mid-flight</b> in
+  <code>ccs next</code>.
+</p>
+
+<footer>
+  Living document · implemented 2026-07-26 · <span class="good">migration complete, 476/476</span><br>
+  <a href="file:///Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/session-enrichment-v40/docs/plans/session-enrichment-v40.html" target="_blank" rel="noopener">open standalone</a> ·
+  <a href="file:///Users/mimen/Programming/Repos/claude-sessions/docs/plans/session-enrichment.html" target="_blank" rel="noopener">the v38/v39 plan this revises</a>
+</footer>
+
+</div>
+<script>
+  (function () {
+    try {
+      var k = "planscroll:" + location.pathname;
+      var y = sessionStorage.getItem(k);
+      if (y !== null) window.scrollTo(0, parseInt(y, 10));
+      window.addEventListener("scroll", function () {
+        sessionStorage.setItem(k, String(window.scrollY));
+      }, { passive: true });
+    } catch (e) {}
+  })();
+</script>
+</body>
+</html>

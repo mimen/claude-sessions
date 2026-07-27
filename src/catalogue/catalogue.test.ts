@@ -212,7 +212,7 @@ test("concurrent opens wait for an active writer before confirming WAL", async (
 
     const concurrent = openCatalogue(path);
     expect(concurrent.query("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
-    expect(concurrent.query("PRAGMA user_version").get()).toEqual({ user_version: 37 });
+    expect(concurrent.query("PRAGMA user_version").get()).toEqual({ user_version: 40 });
     concurrent.close();
     expect(await writer.exited).toBe(0);
   } finally {
@@ -270,7 +270,7 @@ test("v33 schema postcondition passes on a fresh migrated DB", () => {
 test("repairs a current catalogue down-stamped to every historical version", () => {
   const root = mkdtempSync(join(tmpdir(), "ccs-downstamped-current-"));
   try {
-    for (let version = 0; version < 37; version += 1) {
+    for (let version = 0; version < 39; version += 1) {
       const path = join(root, `catalogue-v${version}.db`);
       const current = openCatalogue(path);
       setCustomTitle(current, "current-session", "Current row", NOW);
@@ -281,7 +281,7 @@ test("repairs a current catalogue down-stamped to every historical version", () 
       downstamped.close();
 
       const repaired = openCatalogue(path);
-      expect(repaired.query("PRAGMA user_version").get()).toEqual({ user_version: 37 });
+      expect(repaired.query("PRAGMA user_version").get()).toEqual({ user_version: 40 });
       expect(getRow(repaired, "current-session")?.customTitle).toBe("Current row");
       expect(repaired.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
       repaired.close();
@@ -361,7 +361,7 @@ test("repairs partially migrated catalogues missing cluster and skill", () => {
       legacy.close();
 
       const migrated = openCatalogue(path);
-      expect(migrated.query("PRAGMA user_version").get()).toEqual({ user_version: 37 });
+      expect(migrated.query("PRAGMA user_version").get()).toEqual({ user_version: 40 });
       const row = getRow(migrated, "partial-session");
       expect(row?.customTitle).toBe("Retry title");
       expect(row?.meta).toEqual({
@@ -413,7 +413,7 @@ test("migrates a legacy v5 catalogue that never received the system column", () 
     legacy.close();
 
     const migrated = openCatalogue(path);
-    expect(migrated.query("PRAGMA user_version").get()).toEqual({ user_version: 37 });
+    expect(migrated.query("PRAGMA user_version").get()).toEqual({ user_version: 40 });
     expect(getRow(migrated, "legacy-session")?.customTitle).toBe("Preserved title");
     expect(migrated.query("PRAGMA quick_check").get()).toEqual({ quick_check: "ok" });
     migrated.close();

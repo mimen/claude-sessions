@@ -8,7 +8,7 @@ import type { Database } from "bun:sqlite";
 import { listByRecency, sessionById, titleOf } from "./index/index.ts";
 import { buildCostRollup } from "./index/cost-rollup.ts";
 import { formatCost } from "./cost.ts";
-import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster } from "./catalogue/db.ts";
+import { openCatalogue, getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForCluster, displayTitle } from "./catalogue/db.ts";
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson, isCoreRole } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
@@ -16,6 +16,7 @@ import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, pro
 import { newSession } from "./resume/new-session.ts";
 import { delegateCommand } from "./delegate/command.ts";
 import { startCommand } from "./start/command.ts";
+import { locationCommand } from "./locations/command.ts";
 import { doctorCommand } from "./doctor/command.ts";
 import { launcherCommand } from "./launcher/command.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
@@ -47,6 +48,7 @@ import { sessionFieldsCommand } from "./catalogue/session-fields-command.ts";
 import { historicalDetachedChildBackfillCommand } from "./catalogue/historical-detached-child-backfill.ts";
 import { getCrashReporter, installCrashLog, summarizeArgv } from "./crashlog.ts";
 import { SESSION_CLASS_ROLLOUT_AT } from "./session-class.ts";
+import { launchGoTui } from "./tui-go/launch.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -56,10 +58,15 @@ use \`ccs identity …\`; for per-run session state (title, parent, lifecycle) u
 
 Usage:
   ccs                 Launch the session browser (TUI)
-  ccs start [--dry-run|--explain] [description...]  Route work to an active session or managed new session
+  ccs start [--] [text...]  Open a fresh managed launcher with /ccs:new prefilled, not submitted
+  ccs location list|show|match|register|retire      Manage curated session launch locations
   ccs reindex [--titles]   Refresh through the host-local catalogue authority
   ccs catalogue-service start|status|stop|refresh   Manage the on-demand local authority
-  ccs sidebar serve|url   Productivity sidebar web host for the cmux Dock
+  ccs enrich [<id>|.] [--json]                    Summarise one session (what it was, what's open, what to do)
+  ccs enrich --sweep [--limit N] [--concurrency N]  Enrich every stale session
+  ccs enrich --list [--limit N] [--json]          Show what the sweep would do, without calling the model
+  ccs triage [--list] [--json]                    Close out sessions whose verdict contradicts their lifecycle
+  ccs next [--json]                               What you're mid-flight on, and the next action for each
   ccs ls [--auxiliary]    Print indexed sessions (with catalogue badges)
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
   ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
@@ -87,9 +94,13 @@ Sessions (ephemeral, per-run):
   ccs session complete|archive|uncomplete|unarchive <id>   Per-session lifecycle
   ccs session new <--top-level|--child-of <uuid|.>> [flags]  Mint id, classify at birth, launch \`claude --session-id\`
     explicit identity: --identity=<key> --cluster=<c> --role=<r> (must match stored identity; cannot combine with --key)
-    flags: --cluster --role --title --cwd <dir> --prompt "..." --permission-mode <mode>
+    flags: --cluster --role --title --cwd <dir> --location <key> --host <canonical-host>
+           --prompt "..." --permission-mode <mode> --require-capability <name> (repeatable)
+           --model <canonical-model-id> (derives launcher; cannot combine with --via)
            --pr-repo owner/repo --pr-number 123 --gus-work W-... · --print-id (reserve only)
-           --via <launcher> (birth the session on a configured launcher, e.g. claude-gpt)
+           --json (structured detached-launch receipt with full session id and workspace ref)
+           --via <launcher> (legacy policy-less launcher selection, e.g. claude-gpt)
+           role.toml model policy: canonical IDs compile launcher + --model; it rejects --via/--model
   ccs session bump <id> [--note "..."]            Wake the session's cmux tab
   ccs session-fields <sid> --json '{...}' [--sensor <name>]  Atomic multi-field write (ADR-0078)
   ccs historical-backfill detached-children --expect-sha256 <digest> [--apply]
@@ -130,9 +141,20 @@ Resume & tabs:
                                                   All resume verbs take --via <launcher> [--force] (cross-backend
                                                   routes; launchers = [[launcher]] in ~/.ccs/config.toml)
   ccs routes <selector>                           Which launchers can resume each matched session, and why
+  ccs swap-harness [--to <launcher>] [--model <canonical-id>] [--do]
+                                                  Move THIS session to the other harness in place
+                                                  (cmux respawn-pane; same tab, nothing closed).
+                                                  Bare form is a preflight. Defaults: claude-native
+                                                  → opus, claude-gpt → gpt-5.6-sol
+  ccs restart [--on <launcher>] [--model <canonical-id>] [--do]
+                                                  Relaunch THIS session on the SAME harness, in
+                                                  place — picks up a newly released model, a newer
+                                                  Claude Code, and a fresh process. Bare form is a
+                                                  preflight; passes no --model so aliases re-resolve
   ccs sync-tabs [<selector>|.|--all]              Paint cmux tabs from catalogue metadata
-  ccs finish <sessionId> <complete|archive> [--do]  Preflight, or record lifecycle + enrich + safely close any session
-  ccs finish-current <complete|archive> [--do]    Current-session compatibility wrapper used by the CCS skills
+  ccs finish <id> <complete|archive> [--do]       Same as finish-current, for a named session
+  ccs finish-current <complete|archive> [--do]    Preflight, or record lifecycle + enrich + close this workspace
+  ccs sidebar serve [--port N]                    Serve the productivity sidebar on loopback
   ccs close-current-workspace [--do]              Prove or close only this session's cmux workspace
   ccs reap-duplicates [--do]                      Close cmux dupes for sessions with >1 live \`claude --resume\`
 
@@ -165,16 +187,20 @@ export async function main(argv: string[]): Promise<number> {
   reporter.invocation(invocation);
   reporter.breadcrumb("cli.start", invocation);
 
+  const command = args[0];
+  // `ccs start` treats trailing dash-leading argv as composer text. Dispatch it before global
+  // help/version scanning so only its own explicit parser decides what those tokens mean.
+  if (command === "start") return startCommand(args.slice(1));
+
   if (args.includes("--version") || args.includes("-v")) {
     console.log(pkg.version);
     return 0;
   }
-  if (args.includes("--help") || args.includes("-h") || args[0] === "help") {
+  if (args.includes("--help") || args.includes("-h") || command === "help") {
     console.log(HELP);
     return 0;
   }
 
-  const command = args[0];
   switch (command) {
     case "reindex":
       return await reindex({ titles: args.includes("--titles") });
@@ -182,12 +208,24 @@ export async function main(argv: string[]): Promise<number> {
       return await catalogueServiceCommand(args.slice(1));
     case "sidebar":
       return await sidebarCommand(args.slice(1));
+    case "enrich": {
+      const { enrichCommand } = await import("./enrich/command.ts");
+      return await enrichCommand(args.slice(1));
+    }
+    case "triage": {
+      const { triageCommand } = await import("./enrich/triage-command.ts");
+      return await triageCommand(args.slice(1));
+    }
+    case "next": {
+      const { nextCommand } = await import("./enrich/triage-command.ts");
+      return nextCommand(args.slice(1));
+    }
     case "ls":
       return ls({ all: args.includes("--all"), loops: args.includes("--loops"), auxiliary: args.includes("--auxiliary") });
     case "tree":
       return tree({ all: args.includes("--all"), auxiliary: args.includes("--auxiliary") });
-    case "start":
-      return startCommand(args.slice(1));
+    case "location":
+      return locationCommand(args.slice(1));
     case "delegate":
       return delegateCommand(args.slice(1));
     case "doctor":
@@ -278,12 +316,15 @@ export async function main(argv: string[]): Promise<number> {
       return bumpSessionCommand(args.slice(1));
     }
     case "finish": {
+      // The same lifecycle-then-close path as `finish-current`, but for an explicitly named session
+      // rather than the caller's own, which is what lets the sidebar finish a row it is not running
+      // inside.
       const { finishSessionCommand } = await import("./cmux/finish-current.ts");
       return await finishSessionCommand(args.slice(1));
     }
     case "finish-current": {
       const { finishCurrentCommand } = await import("./cmux/finish-current.ts");
-      return await finishCurrentCommand(args.slice(1));
+      return finishCurrentCommand(args.slice(1));
     }
     case "close-current-workspace": {
       const { closeCurrentWorkspaceCommand } = await import("./cmux/close-current.ts");
@@ -372,6 +413,21 @@ export async function main(argv: string[]): Promise<number> {
       return resumeSelector(args.slice(1));
     case "routes":
       return routesCommand(args.slice(1));
+    case "swap-harness": {
+      // In-place harness change for the CURRENT session (cmux respawn-pane). Deliberately not a
+      // resume verb: nothing is closed, so already-open/not-indexed/route-eligibility don't apply.
+      const { swapHarnessCommand } = await import("./resume/respawn-command.ts");
+      ensureDataDir();
+      return await swapHarnessCommand(args.slice(1), DB_PATH());
+    }
+    case "restart": {
+      // The same in-place respawn, onto the SAME harness. Picks up a newly released model (Claude
+      // Code resolves aliases at startup, so a long-lived session never sees one), a newer binary,
+      // and a fresh process — without losing the conversation.
+      const { restartCommand } = await import("./resume/respawn-command.ts");
+      ensureDataDir();
+      return await restartCommand(args.slice(1), DB_PATH());
+    }
     case "self-check": {
       // `ccs self-check <session-id>` — the turn-end sidecar (ADR-0063 v2). Runs a cheap
       // claude -p against the session's recent transcript + rubric, executes any `ccs` state
@@ -388,12 +444,20 @@ export async function main(argv: string[]): Promise<number> {
     case "skills": {
       // Bare `ccs skills` on a terminal opens the TUI in skills mode; flags/subcommands
       // (or piped output) use the plain-table command path.
-      if (args.length === 1 && process.stdout.isTTY) return await launchTui("skills");
+      if (args.length === 1 && process.stdout.isTTY) {
+        const code = launchGoTui(["skills"]);
+        if (code !== null) return code;
+      }
       const { skillsCommand } = await import("./skills/command.ts");
       return await skillsCommand(args.slice(1));
     }
-    case undefined:
-      return await launchTui();
+    case undefined: {
+      // The Go TUI is the session browser; there is no other one to fall back to.
+      const code = launchGoTui();
+      if (code !== null) return code;
+      console.error("ccs: the Go TUI could not be started.");
+      return 1;
+    }
     default:
       console.error(`Unknown command: ${command}\n`);
       console.error(HELP);
@@ -445,66 +509,6 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
   return 0;
 }
 
-/** Launch the interactive browser: refresh the Index, then render the Ink app. */
-async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promise<number> {
-  const reporter = getCrashReporter();
-  reporter?.breadcrumb("cli.tui.launch.start", { mode: initialMode });
-  const config = getConfig();
-  if (!config) {
-    reporter?.breadcrumb("cli.tui.launch.failure", { stage: "config" });
-    return 1;
-  }
-  ensureDataDir();
-
-  const firstRun = !existsSync(DB_PATH());
-  if (firstRun) console.log("First run — indexing your sessions…");
-
-  let stage: "catalogue-service" | "import" | "render" | "runtime" = "catalogue-service";
-  reporter?.breadcrumb("cli.tui.catalogue-refresh.start");
-  const refreshed = await refreshCatalogueAuthority({ force: false, titles: false });
-  if (refreshed.ok) {
-    reporter?.breadcrumb("cli.tui.catalogue-refresh.success", {
-      sessions: refreshed.value.sourceStatus.rowCount,
-      generation: refreshed.value.sourceStatus.generation,
-    });
-  } else {
-    // Preserve the TUI's existing fail-open behavior: an unavailable source refresh still permits
-    // browsing the last indexed snapshot.
-    reporter?.breadcrumb("cli.tui.catalogue-refresh.failure");
-  }
-
-  const db = openIndex(DB_PATH());
-  const catalogue = openCatalogue(CATALOGUE_PATH());
-  const { openSkillsDb } = await import("./skills/db.ts");
-  const { SKILLS_DB_PATH } = await import("./paths.ts");
-  const skillsDb = openSkillsDb(SKILLS_DB_PATH());
-  const resumeRequest: { current: ResumeCommand | null } = { current: null };
-  try {
-    stage = "import";
-    const { render } = await import("ink");
-    const { createElement } = await import("react");
-    const { Root } = await import("./tui/Root.tsx");
-    stage = "render";
-    reporter?.breadcrumb("cli.tui.render.mount");
-    const app = render(createElement(Root, { db, catalogue, skillsDb, config, resumeRequest, initialMode }));
-    stage = "runtime";
-    await app.waitUntilExit();
-    reporter?.breadcrumb("cli.tui.clean-exit");
-  } catch (error) {
-    reporter?.breadcrumb("cli.tui.launch.failure", { stage });
-    throw error;
-  } finally {
-    db.close();
-    catalogue.close();
-    skillsDb.close();
-  }
-
-  // The TUI has fully unmounted (terminal restored) — now hand off to claude inline.
-  if (resumeRequest.current) {
-    return handoffInline(resumeRequest.current);
-  }
-  return 0;
-}
 
 /** Table of indexed sessions, joined with catalogue metadata + live open-state. */
 function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number {
@@ -533,7 +537,7 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number 
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
       // A child in the constellation gets a ↳ marker inside the (padded) title cell, keeping columns aligned.
       const childMark = c?.parentSessionId ? "↳ " : "";
-      const title = pad(childMark + (c?.customTitle ?? r.title), 42);
+      const title = pad(childMark + displayTitle(c ?? null, r.title), 42);
       const isRecentUnclassified = c?.sessionClass == null && r.firstTs != null
         && Date.parse(r.firstTs) >= Date.parse(SESSION_CLASS_ROLLOUT_AT);
       const classification = c?.sessionClass === "auxiliary" ? "AUX " : isRecentUnclassified ? "UNCLASSIFIED " : "";
@@ -956,11 +960,14 @@ function routesCommand(args: string[]): number {
         console.log(`${sid.slice(0, 8)} — not indexed (run \`ccs reindex\`)`);
         continue;
       }
-      const routes = resolveRoutes(launchers, row.models);
-      const def = defaultRoute(routes, row.models);
+      const routes = resolveRoutes(launchers, row.models, row.lastModel);
+      const def = defaultRoute(routes, row.models, row.lastModel);
       const models = row.models.length > 0 ? row.models.join(", ") : "(no assistant turns)";
+      // Show the replay target when it narrows the history, so an eligible verdict against a
+      // mixed session reads as deliberate rather than as the globs having gone slack.
+      const last = row.lastModel !== "" && row.models.length > 1 ? `  (last: ${row.lastModel})` : "";
       console.log(`${sid.slice(0, 8)} · ${row.title}`);
-      console.log(`  models: ${models}`);
+      console.log(`  models: ${models}${last}`);
       for (const r of routes) {
         const mark = r.eligible ? "✓" : "✗";
         const star = def?.launcher.name === r.launcher.name ? " (default)" : "";

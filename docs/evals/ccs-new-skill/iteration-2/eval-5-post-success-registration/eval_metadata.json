@@ -1,0 +1,13 @@
+{
+  "eval_id": 5,
+  "eval_name": "post-success-registration",
+  "prompt": "/ccs:new In /tmp/ccs-new-eval-project, add a small README note",
+  "assertions": [
+    "Does not invent a different CWD or perform the README work in the launcher.",
+    "Launches the exact explicit path locally with the registry-wide gpt-5.6-sol model.",
+    "Calls launch exactly once before any registration call.",
+    "Registers the exact launched CWD only after status launched is returned.",
+    "Uses a stable kebab-case key and the current host eligibility in registration.",
+    "Reports the full local receipt and the new registry entry."
+  ]
+}

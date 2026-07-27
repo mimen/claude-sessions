@@ -1,361 +1,340 @@
-import { expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, expect, spyOn, test } from "bun:test";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getRow, openCatalogue, setSessionClass } from "../catalogue/db.ts";
+import type { SurfaceLocation } from "../cmux/bridge.ts";
+import { err, ok } from "../result.ts";
 import {
-  openCatalogue,
-  setArchived,
-  setCompleted,
-  setParked,
-  setSessionClass,
-} from "../catalogue/db.ts";
-import { openIndex } from "../index/schema.ts";
-import { buildStartCandidates, type StartCandidates } from "./candidates.ts";
-import { buildStartChoices } from "./choices.ts";
-import {
-  autoResumeStillEligible,
-  cmuxSendArgs,
-  cmuxSubmissionText,
-  readAutoResumeEligibility,
-  safeTrailingPrompt,
+  birthManagedLauncher,
+  composerIsReady,
+  composerPrefillArgs,
+  discoverLauncherWorkspace,
+  prefillComposer,
   startCommand,
+  waitForComposerReady,
+  type LauncherBirthRequest,
+  type PollClock,
+  type StartCommandDependencies,
 } from "./command.ts";
-import { ok } from "../result.ts";
-import { routeStart } from "./gateway.ts";
 
-const NOW = "2026-07-22T10:00:00.000Z";
+const NOW = "2026-07-24T12:00:00.000Z";
+const roots: string[] = [];
 
-function insertSession(
-  db: ReturnType<typeof openIndex>,
-  input: { id: string; projectRoot: string; title: string; skeleton?: string; lastTs?: string },
-): void {
-  db.query(
-    `INSERT INTO sessions (
-      session_id, host, path, cwd, project_root, project_name, fallback_label, skeleton,
-      first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id
-    ) VALUES (
-      $id, 'host', $path, $root, $root, $name, $title, $skeleton,
-      $last, $last, 1, 1, 1, 0, $id
-    )`,
-  ).run({
-    $id: input.id,
-    $path: join(input.projectRoot, `${input.id}.jsonl`),
-    $root: input.projectRoot,
-    $name: input.projectRoot.split("/").pop() ?? input.projectRoot,
-    $title: input.title,
-    $skeleton: input.skeleton ?? input.title,
-    $last: input.lastTs ?? NOW,
-  });
-  db.query("INSERT INTO sessions_fts (session_id, title, skeleton) VALUES ($id, $title, $skeleton)").run({
-    $id: input.id,
-    $title: input.title,
-    $skeleton: input.skeleton ?? input.title,
-  });
+const LOCATION: SurfaceLocation = {
+  surfaceId: "surface-uuid",
+  surfaceRef: "surface:9",
+  surfaceType: "terminal",
+  title: "Claude",
+  paneId: "pane-uuid",
+  paneIndex: 0,
+  indexInPane: 0,
+  workspaceId: "workspace-uuid",
+  workspaceRef: "workspace:41",
+  workspaceTitle: "/ccs:new launcher",
+  windowId: "window-uuid",
+  windowRef: "window:3",
+};
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  delete process.env.CCS_ROOT;
+  delete process.env.CMUX_BIN;
+});
+
+function quietConsole(): () => void {
+  const error = spyOn(console, "error").mockImplementation((): void => {});
+  const log = spyOn(console, "log").mockImplementation((): void => {});
+  return () => {
+    error.mockRestore();
+    log.mockRestore();
+  };
 }
 
-function sampleCandidates(): StartCandidates {
+function successfulDependencies(
+  prefills: string[],
+  requests: LauncherBirthRequest[],
+): StartCommandDependencies {
   return {
-    autoResumeSessions: [{
-      id: "active",
-      title: "Continue CCS starter",
-      projectName: "ccs",
-      cwd: "/repo/ccs",
-      lastActiveAt: NOW,
-      lifecycle: "idle",
-    }],
-    manualOnlySessions: [{
-      id: "done",
-      title: "Old CCS routing design",
-      projectName: "ccs",
-      cwd: "/repo/ccs",
-      lastActiveAt: NOW,
-      lifecycle: "completed",
-    }],
-    projects: [{
-      id: "project-1",
-      name: "ccs",
-      path: "/repo/ccs",
-      source: "current",
-      lastActiveAt: NOW,
-    }],
+    cwd: () => "/repo/current",
+    birth: (request) => {
+      requests.push(request);
+      return ok({
+        sessionId: "11111111-1111-4111-8111-111111111111",
+        workspaceRef: "workspace:41",
+      });
+    },
+    discover: async () => ok(LOCATION),
+    waitUntilReady: async () => ok(undefined),
+    prefill: (_location, text) => {
+      prefills.push(text);
+      return ok(undefined);
+    },
   };
 }
 
-test("candidate selection admits only idle work bodies to automatic resume", () => {
-  const root = mkdtempSync(join(tmpdir(), "ccs-start-"));
-  const current = join(root, "current");
-  const project = join(root, "project");
-  mkdirSync(current);
-  mkdirSync(project);
-  const index = openIndex(":memory:");
-  const catalogue = openCatalogue(":memory:");
+test("start creates one fresh top-level launcher request and one exact unsubmitted prefill", async () => {
+  const prefills: string[] = [];
+  const requests: LauncherBirthRequest[] = [];
+  const restore = quietConsole();
   try {
-    for (const id of ["active", "parked", "done", "aux", "unknown", "archived"]) {
-      insertSession(index, {
-        id,
-        projectRoot: project,
-        title: id === "active" ? "Continue session starter" : `${id} session`,
-        skeleton: id === "active" ? "Implement ccs start routing" : id,
-      });
-    }
-    for (const id of ["active", "parked", "done", "archived"]) setSessionClass(catalogue, id, "work_body", NOW);
-    setSessionClass(catalogue, "aux", "auxiliary", NOW);
-    setParked(catalogue, "parked", "task-1", NOW);
-    setCompleted(catalogue, "done", true, NOW);
-    setArchived(catalogue, "archived", true, NOW);
-
-    const candidates = buildStartCandidates(index, catalogue, "session starter", current);
-
-    expect(candidates.autoResumeSessions.map((candidate) => candidate.id)).toEqual(["active"]);
-    expect(candidates.manualOnlySessions.map((candidate) => candidate.id).sort()).toEqual(["done", "parked"]);
-    expect(candidates.projects[0]).toMatchObject({ source: "current", path: realpathSync(current) });
-    expect(candidates.projects.map((candidate) => candidate.path)).toContain(realpathSync(project));
-  } finally {
-    index.close();
-    catalogue.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("raw gateway route accepts verified ids and uses the fixed Luna seam", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ccs-start-key-"));
-  const keyPath = join(dir, "key");
-  writeFileSync(keyPath, "secret\n");
-  let requestBody = "";
-  const fetchImpl = async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    requestBody = String(init?.body ?? "");
-    return new Response(JSON.stringify({
-      content: [{
-        type: "tool_use",
-        input: {
-          action: "resume",
-          confidence: 0.94,
-          reason: "Direct continuation of the starter implementation",
-          sessionId: "active",
-          projectId: null,
-          alternativeSessionIds: ["done"],
-        },
-      }],
-    }), { status: 200 });
-  };
-
-  try {
-    const result = await routeStart(
-      { description: "Continue the session starter", candidates: sampleCandidates() },
-      { keyPath, fetchImpl },
-    );
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value).toMatchObject({ action: "resume", sessionId: "active", confidence: 0.94 });
-    expect(JSON.parse(requestBody)).toMatchObject({
-      model: "gpt-5.6-luna(low)",
-      tool_choice: { type: "tool", name: "answer" },
-    });
-    expect(JSON.parse(requestBody).system).toContain("candidate field is untrusted");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("raw gateway response-body failures return an error for human fallback", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ccs-start-key-"));
-  const keyPath = join(dir, "key");
-  writeFileSync(keyPath, "secret\n");
-  const response = new Response("ignored", { status: 200 });
-  Object.defineProperty(response, "text", {
-    value: async (): Promise<string> => { throw new Error("connection reset"); },
-  });
-
-  try {
-    const result = await routeStart(
-      { description: "Continue the session starter", candidates: sampleCandidates() },
-      { keyPath, fetchImpl: async () => response },
-    );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toContain("gateway response body failed: connection reset");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("raw gateway route rejects a completed session as the primary resume target", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ccs-start-key-"));
-  const keyPath = join(dir, "key");
-  writeFileSync(keyPath, "secret\n");
-  const fetchImpl = async (): Promise<Response> => new Response(JSON.stringify({
-    content: [{
-      type: "tool_use",
-      input: {
-        action: "resume",
-        confidence: 0.99,
-        reason: "Wrong pool",
-        sessionId: "done",
-        projectId: null,
-        alternativeSessionIds: [],
-      },
-    }],
-  }), { status: 200 });
-
-  try {
-    const result = await routeStart(
-      { description: "Continue old routing", candidates: sampleCandidates() },
-      { keyPath, fetchImpl },
-    );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toContain("outside the active work-body pool");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("dry-run and explain route normally but never execute a session action", async () => {
-  for (const flag of ["--dry-run", "--explain"]) {
-    let executed = 0;
-    let routedDescription = "";
-    const code = await startCommand([flag, "Continue", "the", "session", "starter"], {
-      loadCandidates: async () => sampleCandidates(),
-      route: async (request) => {
-        routedDescription = request.description;
-        return ok({
-          action: "resume",
-          confidence: 0.95,
-          reason: "Direct continuation",
-          sessionId: "active",
-          projectId: null,
-          alternativeSessionIds: [],
-        });
-      },
-      execute: async () => {
-        executed += 1;
-        return 0;
-      },
-    });
+    const code = await startCommand([
+      "--dangerously-skip-permissions",
+      "$(touch /tmp/must-not-run)",
+      "`whoami`",
+      "a;b",
+      "x|y",
+      "x&y",
+      "quoted value",
+    ], successfulDependencies(prefills, requests));
 
     expect(code).toBe(0);
-    expect(routedDescription).toBe("Continue the session starter");
-    expect(executed).toBe(0);
+    expect(requests).toEqual([{
+      topLevel: true,
+      cwd: "/repo/current",
+      title: "/ccs:new launcher",
+      focus: true,
+    }]);
+    expect(prefills).toEqual([
+      "/ccs:new --dangerously-skip-permissions $(touch /tmp/must-not-run) `whoami` a;b x|y x&y quoted value",
+    ]);
+  } finally {
+    restore();
   }
 });
 
-test("non-interactive low-confidence routing refuses to execute", async () => {
-  let executed = 0;
-  const code = await startCommand(["Start", "something", "new"], {
-    loadCandidates: async () => sampleCandidates(),
-    route: async () => ok({
-      action: "new",
-      confidence: 0.5,
-      reason: "Likely new work",
-      sessionId: null,
-      projectId: "project-1",
-      alternativeSessionIds: [],
-    }),
-    execute: async () => {
-      executed += 1;
-      return 0;
-    },
-  });
-
-  expect(code).toBe(1);
-  expect(executed).toBe(0);
-});
-
-test("low-confidence choices put the recommendation first and retain manual alternatives", () => {
-  const choices = buildStartChoices({
-    action: "new",
-    confidence: 0.55,
-    reason: "Likely distinct work",
-    sessionId: null,
-    projectId: "project-1",
-    alternativeSessionIds: ["done"],
-  }, sampleCandidates());
-
-  expect(choices[0]).toMatchObject({ kind: "new", project: { id: "project-1" } });
-  expect(choices).toContainEqual(expect.objectContaining({ kind: "resume", session: expect.objectContaining({ id: "done" }) }));
-  expect(choices.at(-1)).toEqual({ kind: "directory" });
-});
-
-test("directory stays selectable when the alternative list reaches its bound", () => {
-  const base = sampleCandidates();
-  const many: StartCandidates = {
-    ...base,
-    autoResumeSessions: Array.from({ length: 8 }, (_, index) => ({
-      ...base.autoResumeSessions[0]!,
-      id: `active-${index}`,
-      title: `Active ${index}`,
-    })),
-    manualOnlySessions: Array.from({ length: 4 }, (_, index) => ({
-      ...base.manualOnlySessions[0]!,
-      id: `done-${index}`,
-      title: `Done ${index}`,
-    })),
-    projects: Array.from({ length: 4 }, (_, index) => ({
-      ...base.projects[0]!,
-      id: `project-${index + 1}`,
-      name: `Project ${index + 1}`,
-      path: `/repo/project-${index + 1}`,
-    })),
-  };
-  const choices = buildStartChoices({
-    action: "ask_directory",
-    confidence: 0.2,
-    reason: "No project fits",
-    sessionId: null,
-    projectId: null,
-    alternativeSessionIds: ["active-0", "done-0"],
-  }, many);
-
-  expect(choices).toHaveLength(9);
-  expect(choices[0]).toEqual({ kind: "directory" });
-  expect(choices.filter((choice) => choice.kind === "directory")).toHaveLength(1);
-});
-
-test("cmux submission sanitizes every embedded Enter form and appends exactly one submit", () => {
-  expect(cmuxSubmissionText("first\\nsecond\\rthird\\tfourth\nfifth\rsixth")).toBe(
-    "first second third fourth fifth sixth\n",
-  );
-  expect(cmuxSubmissionText("trailing\\")).toBe("trailing\\\n");
-  expect(cmuxSubmissionText("  \\n \\r \n ")).toBeNull();
-});
-
-test("already-open delivery targets the exact Claude surface", () => {
-  expect(cmuxSendArgs(
-    { surfaceRef: "surface:7", windowRef: "window:2" },
-    "continue\n",
-  )).toEqual([
-    "send",
-    "--surface",
-    "surface:7",
-    "--window",
-    "window:2",
-    "--",
-    "continue\n",
-  ]);
-});
-
-test("dash-leading descriptions remain positional trailing prompts", () => {
-  expect(safeTrailingPrompt("--dangerously-skip-permissions")).toBe(
-    " --dangerously-skip-permissions",
-  );
-  expect(safeTrailingPrompt("normal description")).toBe("normal description");
-});
-
-test("automatic resume eligibility fails closed when the catalogue cannot be read", () => {
-  expect(readAutoResumeEligibility("session", () => { throw new Error("database locked"); })).toBe(false);
-});
-
-test("automatic resume eligibility is revalidated from current catalogue state", () => {
-  const catalogue = openCatalogue(":memory:");
+test("bare start pre-fills exactly /ccs:new plus one trailing space", async () => {
+  const prefills: string[] = [];
+  const requests: LauncherBirthRequest[] = [];
+  const restore = quietConsole();
   try {
-    setSessionClass(catalogue, "session", "work_body", NOW);
-    expect(autoResumeStillEligible(catalogue, "session")).toBe(true);
-
-    setParked(catalogue, "session", "task", NOW);
-    expect(autoResumeStillEligible(catalogue, "session")).toBe(false);
-
-    setParked(catalogue, "session", null, NOW);
-    setSessionClass(catalogue, "session", "auxiliary", NOW);
-    expect(autoResumeStillEligible(catalogue, "session")).toBe(false);
+    expect(await startCommand([], successfulDependencies(prefills, requests))).toBe(0);
+    expect(prefills).toEqual(["/ccs:new "]);
+    expect(requests).toHaveLength(1);
   } finally {
-    catalogue.close();
+    restore();
+  }
+});
+
+test("managed launcher birth uses session-new once, never reuses an idle session, and focuses cmux", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-start-birth-"));
+  roots.push(root);
+  mkdirSync(join(root, "cache"), { recursive: true });
+  writeFileSync(join(root, "config.toml"), "[host]\nlabel = \"test-host\"\n");
+  process.env.CCS_ROOT = root;
+
+  const oldId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const seeded = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    setSessionClass(seeded, oldId, "work_body", NOW);
+  } finally {
+    seeded.close();
+  }
+
+  const callsPath = join(root, "cmux-calls");
+  const fakeCmux = join(root, "fake-cmux");
+  writeFileSync(fakeCmux, `#!/bin/bash
+printf '%s\\n' "$@" > "${callsPath}"
+command=''
+while (($#)); do
+  if [[ "$1" == "--command" ]]; then
+    shift
+    command="$1"
+  fi
+  shift
+done
+if [[ "$command" == *" && /usr/bin/env "* ]]; then
+  setup="\${command%% && /usr/bin/env *}"
+  /bin/bash -c "\${setup} && true)" || exit 1
+fi
+printf '%s\\n' 'workspace:901'
+`);
+  chmodSync(fakeCmux, 0o755);
+  process.env.CMUX_BIN = fakeCmux;
+
+  const result = birthManagedLauncher({
+    topLevel: true,
+    cwd: root,
+    title: "/ccs:new launcher",
+    focus: true,
+  });
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.value.sessionId).not.toBe(oldId);
+  expect(result.value.workspaceRef).toBe("workspace:901");
+
+  const db = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    const rows = db.query("SELECT session_id FROM catalogue ORDER BY session_id").all() as Array<{ session_id: string }>;
+    expect(rows).toHaveLength(2);
+    expect(getRow(db, result.value.sessionId)?.sessionClass).toBe("work_body");
+    expect(getRow(db, result.value.sessionId)?.parentSessionId).toBeNull();
+  } finally {
+    db.close();
+  }
+
+  const calls = readFileSync(callsPath, "utf8").trim().split("\n");
+  expect(calls.filter((arg) => arg === "new-workspace")).toHaveLength(1);
+  const focusIndex = calls.indexOf("--focus");
+  expect(calls[focusIndex + 1]).toBe("true");
+  const commandIndex = calls.indexOf("--command");
+  const launchCommand = calls[commandIndex + 1] ?? "";
+  expect(launchCommand).toContain("claude");
+  expect(launchCommand).toContain("--session-id");
+  expect(launchCommand).not.toContain("--resume");
+  expect(launchCommand).not.toContain("/ccs:new");
+});
+
+test("composer prefill passes metacharacters literally in one send call with no Enter", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-start-prefill-"));
+  roots.push(root);
+  const callsPath = join(root, "cmux-calls");
+  const countPath = join(root, "cmux-count");
+  const markerPath = join(root, "executed");
+  const fakeCmux = join(root, "fake-cmux");
+  writeFileSync(fakeCmux, `#!/bin/bash
+printf '%s\\n' call >> "${countPath}"
+printf '%s\\n' "$@" > "${callsPath}"
+`);
+  chmodSync(fakeCmux, 0o755);
+  process.env.CMUX_BIN = fakeCmux;
+
+  const text = `/ccs:new --leading $(touch ${markerPath}) \`whoami\` 'single' "double" ; | &`;
+  const result = prefillComposer(LOCATION, text);
+  expect(result.ok).toBe(true);
+  expect(existsSync(markerPath)).toBe(false);
+  expect(readFileSync(countPath, "utf8").trim().split("\n")).toEqual(["call"]);
+
+  const calls = readFileSync(callsPath, "utf8").trim().split("\n");
+  expect(calls).toEqual(composerPrefillArgs(LOCATION, text));
+  expect(calls[0]).toBe("send");
+  expect(calls).not.toContain("send-key");
+  expect(calls.map((arg) => arg.toLowerCase())).not.toContain("enter");
+  expect(calls.at(-1)).toBe(text);
+});
+
+test("workspace discovery and readiness poll until exact evidence appears", async () => {
+  let now = 0;
+  const clock: PollClock = {
+    now: () => now,
+    sleep: async (milliseconds) => { now += milliseconds; },
+  };
+  let locationProbes = 0;
+  const discovered = await discoverLauncherWorkspace(
+    { sessionId: "fresh", workspaceRef: "workspace:41" },
+    () => {
+      locationProbes += 1;
+      return ok(locationProbes === 1 ? null : LOCATION);
+    },
+    clock,
+    1_000,
+  );
+  expect(discovered).toEqual(ok(LOCATION));
+  expect(locationProbes).toBe(2);
+
+  let screenReads = 0;
+  const ready = await waitForComposerReady(
+    LOCATION,
+    () => {
+      screenReads += 1;
+      return ok(screenReads === 1 ? "Starting Claude Code…" : "Claude Code\n\n❯   \n");
+    },
+    clock,
+    1_000,
+  );
+  expect(ready).toEqual(ok(undefined));
+  expect(screenReads).toBe(2);
+  expect(composerIsReady("❯ task already present")).toBe(false);
+  expect(composerIsReady("[32m❯[0m  \n")).toBe(true);
+});
+
+test("help and obsolete inference flags never create a birth", async () => {
+  let births = 0;
+  const dependencies: StartCommandDependencies = {
+    birth: () => {
+      births += 1;
+      return err(new Error("must not launch"));
+    },
+  };
+  const restore = quietConsole();
+  try {
+    expect(await startCommand(["--help"], dependencies)).toBe(0);
+    expect(await startCommand(["--explain", "old route"], dependencies)).toBe(2);
+    expect(await startCommand(["--dry-run"], dependencies)).toBe(2);
+    expect(await startCommand(["literal\\nenter"], dependencies)).toBe(2);
+    expect(await startCommand(["literal\nenter"], dependencies)).toBe(2);
+    expect(births).toBe(0);
+  } finally {
+    restore();
+  }
+});
+
+test("a separator permits obsolete-looking text as literal composer content", async () => {
+  const prefills: string[] = [];
+  const requests: LauncherBirthRequest[] = [];
+  const restore = quietConsole();
+  try {
+    expect(await startCommand(["--", "--explain", "this", "request"], successfulDependencies(prefills, requests))).toBe(0);
+    expect(prefills).toEqual(["/ccs:new --explain this request"]);
+    expect(requests).toHaveLength(1);
+  } finally {
+    restore();
+  }
+});
+
+test("birth, discovery, readiness, and prefill failures stop at their exact stage", async () => {
+  const messages: string[] = [];
+  const errorSpy = spyOn(console, "error").mockImplementation((message?: string): void => {
+    messages.push(message ?? "");
+  });
+  try {
+    let downstream = 0;
+    const birthCode = await startCommand([], {
+      birth: () => err(new Error("birth unavailable")),
+      discover: async () => { downstream += 1; return ok(LOCATION); },
+    });
+    expect(birthCode).toBe(1);
+    expect(downstream).toBe(0);
+    expect(messages.at(-1)).toContain("managed birth failed");
+
+    let prefills = 0;
+    const discoveryCode = await startCommand([], {
+      birth: () => ok({ sessionId: "fresh", workspaceRef: "workspace:1" }),
+      discover: async () => err(new Error("surface missing")),
+      waitUntilReady: async () => { downstream += 1; return ok(undefined); },
+      prefill: () => { prefills += 1; return ok(undefined); },
+    });
+    expect(discoveryCode).toBe(1);
+    expect(prefills).toBe(0);
+    expect(messages.at(-1)).toContain("workspace discovery failed");
+
+    const readinessCode = await startCommand([], {
+      birth: () => ok({ sessionId: "fresh", workspaceRef: "workspace:1" }),
+      discover: async () => ok(LOCATION),
+      waitUntilReady: async () => err(new Error("composer unavailable")),
+      prefill: () => { prefills += 1; return ok(undefined); },
+    });
+    expect(readinessCode).toBe(1);
+    expect(prefills).toBe(0);
+    expect(messages.at(-1)).toContain("composer readiness failed");
+
+    const prefillCode = await startCommand([], {
+      birth: () => ok({ sessionId: "fresh", workspaceRef: "workspace:1" }),
+      discover: async () => ok(LOCATION),
+      waitUntilReady: async () => ok(undefined),
+      prefill: () => err(new Error("send rejected")),
+    });
+    expect(prefillCode).toBe(1);
+    expect(messages.at(-1)).toContain("composer prefill failed");
+  } finally {
+    errorSpy.mockRestore();
   }
 });

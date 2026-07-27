@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROMPT_ROOT="/tmp/ccs-new-prompts"
+
+usage() {
+  printf '%s\n' \
+    'usage:' \
+    '  ccs-new prepare --session-id <claude-session-id>' \
+    '  ccs-new route --session-id <claude-session-id> [--host <host>]' \
+    '  ccs-new list' \
+    '  ccs-new launch --session-id <claude-session-id> <ccs session new flags...>' \
+    '  ccs-new register <key> --cwd <absolute-path> [location flags...]' \
+    '  ccs-new cleanup --session-id <claude-session-id>' >&2
+  exit 64
+}
+
+validated_session_id() {
+  local value="${1:-}"
+  [[ "$value" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]] || usage
+  printf '%s' "$value"
+}
+
+prompt_path() {
+  local session_id
+  session_id="$(validated_session_id "${1:-}")"
+  printf '%s/%s/prompt.txt' "$PROMPT_ROOT" "$session_id"
+}
+
+prepare_prompt() {
+  local session_id path directory
+  session_id="$(validated_session_id "${1:-}")"
+  path="$(prompt_path "$session_id")"
+  directory="${path%/*}"
+  umask 077
+  [[ ! -e "$PROMPT_ROOT" || ( -d "$PROMPT_ROOT" && ! -L "$PROMPT_ROOT" ) ]] || {
+    printf 'ccs-new: unsafe prompt root: %s\n' "$PROMPT_ROOT" >&2
+    exit 73
+  }
+  mkdir -p "$PROMPT_ROOT"
+  [[ ! -e "$directory" || ( -d "$directory" && ! -L "$directory" ) ]] || {
+    printf 'ccs-new: unsafe session prompt directory: %s\n' "$directory" >&2
+    exit 73
+  }
+  mkdir -p "$directory"
+  chmod 700 "$PROMPT_ROOT" "$directory"
+  rm -f "$path"
+  printf '%s\n' "$path"
+}
+
+read_prompt() {
+  local path size
+  path="$(prompt_path "${1:-}")"
+  [[ -f "$path" && ! -L "$path" ]] || {
+    printf 'ccs-new: prompt file is missing: %s\n' "$path" >&2
+    exit 66
+  }
+  size="$(wc -c < "$path")"
+  [[ "$size" -le 1048576 ]] || {
+    printf 'ccs-new: prompt exceeds 1 MiB\n' >&2
+    exit 65
+  }
+  printf '%s' "$(<"$path")"
+}
+
+cleanup_prompt() {
+  local path directory
+  path="$(prompt_path "${1:-}")"
+  directory="${path%/*}"
+  rm -f "$path"
+  rmdir "$directory" 2>/dev/null || true
+}
+
+operation="${1:-}"
+[[ -n "$operation" ]] || usage
+shift
+
+case "$operation" in
+  prepare)
+    [[ "${1:-}" == "--session-id" && $# -eq 2 ]] || usage
+    prepare_prompt "$2"
+    ;;
+  route)
+    [[ "${1:-}" == "--session-id" && $# -ge 2 ]] || usage
+    session_id="$2"
+    shift 2
+    query="$(read_prompt "$session_id")"
+    exec ccs location match "--query=$query" "$@" --json
+    ;;
+  list)
+    [[ $# -eq 0 ]] || usage
+    exec ccs location list --json
+    ;;
+  launch)
+    [[ "${1:-}" == "--session-id" && $# -ge 2 ]] || usage
+    session_id="$2"
+    shift 2
+    prompt="$(read_prompt "$session_id")"
+    # CCS owns reservation, local/remote placement, receipt generation, and no-retry semantics.
+    exec ccs session new --top-level --permission-mode acceptEdits "$@" --prompt "$prompt" --json
+    ;;
+  register)
+    exec ccs location register "$@"
+    ;;
+  cleanup)
+    [[ "${1:-}" == "--session-id" && $# -eq 2 ]] || usage
+    cleanup_prompt "$2"
+    ;;
+  *)
+    usage
+    ;;
+esac

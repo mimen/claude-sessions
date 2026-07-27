@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import type { Enrichment, Recommendation } from "./enrichment-schema.ts";
 
 /**
  * The Catalogue: durable, user-authored session metadata that the Index cache cannot hold
@@ -97,6 +98,48 @@ export interface CatalogueRow {
    *  started this body. Distinct from `identityKey` (our durable work-unit key); this is a
    *  provenance breadcrumb from the invocation environment. Optional for pre-v34 fixtures. */
   launcherIdentity?: string | null;
+  /** OBSERVED state from one inference pass over the transcript (v38). Null until first enriched.
+   *  Distinct from lifecycle, which is stored INTENT — the gap between them is the signal. */
+  enrichment?: StoredEnrichment | null;
+  /** Failed enrichment attempts. Capped so one unparseable session never retries forever. */
+  enrichmentAttempts?: number;
+}
+
+/** An enrichment as hydrated off a catalogue row. Mirrors `Enrichment` with nullable suggestions. */
+export interface StoredEnrichment {
+  /** Enrichment's own name for the session. Never overwrites a human-set `customTitle`. */
+  readonly title: string;
+  /** v40: where the session stands now. The field a reader is guaranteed to see. */
+  readonly state: string;
+  /** v40: how it got there. Rendered on demand. */
+  readonly history: string;
+  /** v40: the one thing to do first on resuming. */
+  readonly next: string;
+  /** v40: everything still open after `next`. */
+  readonly remaining: string;
+  readonly recommendation: Recommendation;
+  readonly reason: string;
+  readonly junk: boolean;
+  /**
+   * Null when the cwd question was never asked — i.e. no location registry was installed at
+   * generation time. Distinct from `false`, which is a judgement that the directory is wrong;
+   * readers must not render a warning for "not judged".
+   */
+  readonly cwdCorrect: boolean | null;
+  readonly suggestedLocation: string | null;
+  readonly suggestedCwd: string | null;
+  readonly atMessages: number;
+  readonly at: string;
+  /**
+   * True when this row was written under the v39 shape and `state`/`next` above are the old
+   * `summary`/`outstanding` text showing through the compatibility fallback.
+   *
+   * Display can ignore this — falling back is the point, so no panel goes blank mid-cutover. The
+   * STALENESS check cannot: `!state` is false for a legacy row precisely because the fallback
+   * filled it, so without this flag the sweep would consider the whole v39 store fresh and the
+   * cutover would never happen.
+   */
+  readonly legacyShape: boolean;
 }
 
 /** Effective substrate for a row (defaults unset rows to claude-code). */
@@ -113,7 +156,7 @@ export interface PrFacts {
   prHeadSha: string;
 }
 
-const CATALOGUE_VERSION = 37;
+const CATALOGUE_VERSION = 40;
 const LEGACY_IDENTITY_COLUMNS = [
   "role", "system", "cluster", "project", "event",
   "pr_number", "pr_repo", "pr_branch", "pr_state", "pr_head_sha",
@@ -224,6 +267,16 @@ function validateSchemaPostcondition(db: Database): { ok: true } | { ok: false; 
     "creator_ref",
     "launch_channel",
     "forked_from_session_id",
+    // v38 enrichment. Only the two provenance columns are asserted: they are what the sweep's
+    // staleness check reads, so a partially-applied v38 that kept them would still be safe to
+    // run against, while one that lost them would silently re-enrich the whole store.
+    "enrichment_at",
+    "enrichment_at_messages",
+    // v40. `enrichment_state` is asserted for the same reason the provenance pair is: it is the
+    // field every reader leads with, so a half-applied v40 that lost it would render blank panels
+    // for an entire store while reporting itself current.
+    "enrichment_state",
+    "enrichment_next",
   ];
   const cols = (db.query("PRAGMA table_info(catalogue)").all() as { name: string }[]).map((c) => c.name);
   const present = new Set(cols);
@@ -884,6 +937,87 @@ function applyMigrations(db: Database): void {
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_launch_channel ON catalogue(launch_channel);");
     db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_forked_from ON catalogue(forked_from_session_id);");
   }
+  if (v < 38) {
+    // Session enrichment: one structured inference pass per session, stored as first-class
+    // columns rather than a `meta` blob. Columns (not meta) because enrichment is real state that
+    // the statusline, `ccs ls`, and external readers all query — meta is explicitly scratch state
+    // that ccs stores without interpreting, and this is the opposite of that.
+    //
+    // No backfill: null enrichment_at means "never enriched", which is exactly what the sweep's
+    // staleness check needs to find its first-run candidates.
+    for (const [column, type] of [
+      ["enrichment_summary", "TEXT"],
+      ["enrichment_outstanding", "TEXT"],
+      ["enrichment_reason", "TEXT"],
+      // Junk = "was never worth starting", kept separate from `archive` so a failed real attempt
+      // and an accidental one-line probe stay distinguishable after both are archived.
+      ["enrichment_junk", "INTEGER"],
+      ["enrichment_cwd_correct", "INTEGER"],
+      // A key from the shared location registry. Free-text cwd is the escape hatch for work with
+      // no registered home — which is itself the signal that one should be registered.
+      ["enrichment_suggested_location", "TEXT"],
+      ["enrichment_suggested_cwd", "TEXT"],
+      // Message count at generation. Staleness is `current - this`, so the sweep re-runs only
+      // sessions that actually advanced rather than everything on a timer.
+      ["enrichment_at_messages", "INTEGER"],
+      ["enrichment_at", "TEXT"],
+      ["enrichment_attempts", "INTEGER"],
+    ] as const) {
+      if (!hasColumn(db, "catalogue", column)) {
+        db.exec(`ALTER TABLE catalogue ADD COLUMN ${column} ${type};`);
+      }
+    }
+    // Constrained separately from the loop above: the CHECK keeps a malformed write out of the
+    // column even when it arrives through `ccs session-fields` rather than the enrich command.
+    if (!hasColumn(db, "catalogue", "enrichment_recommendation")) {
+      db.exec(
+        "ALTER TABLE catalogue ADD COLUMN enrichment_recommendation TEXT " +
+        "CHECK (enrichment_recommendation IN ('continue', 'complete', 'archive', 'handoff') " +
+        "OR enrichment_recommendation IS NULL);",
+      );
+    }
+    // The two queries this feature runs constantly: "what needs my attention" and "what is stale".
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_enrichment_recommendation ON catalogue(enrichment_recommendation);");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_enrichment_at ON catalogue(enrichment_at);");
+  }
+  if (v < 39) {
+    // A title derived from the whole session rather than its opening.
+    //
+    // Deliberately NOT written to `custom_title`: that column holds a name a human chose, and a
+    // model must never quietly overwrite one. Keeping them separate lets the display layer prefer
+    // human > enrichment > the pre-session guesses, and makes the enriched title revisable on
+    // every pass without ever destroying an authored one.
+    if (!hasColumn(db, "catalogue", "enrichment_title")) {
+      db.exec("ALTER TABLE catalogue ADD COLUMN enrichment_title TEXT;");
+    }
+  }
+  if (v < 40) {
+    // v40 splits both prose fields.
+    //
+    // `summary` had to be both "where this stands" and "how it got here", and was always written
+    // in that order, so the state ended up in the final clause of a paragraph. `outstanding` held
+    // a comma-run of several actions in 199 of 371 real rows. Two columns each, because an
+    // instruction to lead with the state is one a model can drift from and a column boundary is
+    // not.
+    //
+    // ADDITIVE ONLY. `enrichment_summary` and `enrichment_outstanding` survive this migration and
+    // are dropped in v41, after the re-enrich sweep has populated the new columns — the old text
+    // is the only copy of these descriptions, so it outlives the schema that replaces it until
+    // there is something to replace it WITH.
+    for (const [column, type] of [
+      ["enrichment_state", "TEXT"],
+      ["enrichment_history", "TEXT"],
+      ["enrichment_next", "TEXT"],
+      ["enrichment_remaining", "TEXT"],
+    ] as const) {
+      if (!hasColumn(db, "catalogue", column)) {
+        db.exec(`ALTER TABLE catalogue ADD COLUMN ${column} ${type};`);
+      }
+    }
+    // No new index. `ccs next` filters on `enrichment_recommendation`, which v38 already indexed,
+    // and the store is ~2.4k rows — a partial index over it buys nothing measurable while adding
+    // a column that DROP COLUMN then has to route around during a downgrade.
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 
@@ -1132,7 +1266,64 @@ function rowFrom(r: Record<string, unknown> | null, db?: Database): CatalogueRow
     identityKey,
     substrate: (r.substrate as string) ?? null,
     launcherIdentity: (r.launcher_identity as string) ?? null,
+    enrichment: enrichmentFrom(r),
+    enrichmentAttempts: (r.enrichment_attempts as number) ?? 0,
   };
+}
+
+/**
+ * Hydrate the v38 enrichment columns, or null when the session has never been enriched.
+ *
+ * `enrichment_at` is the presence key rather than, say, the summary: it is written in the same
+ * statement as everything else, so a row that has it has all of it, and a pre-v38 row (or a row
+ * whose columns exist but were never written) reads as null instead of a half-built object.
+ */
+function enrichmentFrom(r: Record<string, unknown>): StoredEnrichment | null {
+  const at = (r.enrichment_at as string) ?? null;
+  if (!at) return null;
+  // Between v40 and the cutover sweep, a row can be enriched under the v39 shape: `state` is null
+  // and the prose lives in `enrichment_summary`. Falling back keeps every panel readable during
+  // that window rather than showing a blank where a description used to be. The v41 migration
+  // drops the old columns once the sweep has run, and this coalesce becomes inert.
+  const nativeState = (r.enrichment_state as string) || "";
+  const state = nativeState || (r.enrichment_summary as string) || "";
+  const next = (r.enrichment_next as string) || (r.enrichment_outstanding as string) || "";
+  const cwdRaw = r.enrichment_cwd_correct;
+  return {
+    title: (r.enrichment_title as string) ?? "",
+    state,
+    history: (r.enrichment_history as string) ?? "",
+    next,
+    remaining: (r.enrichment_remaining as string) ?? "",
+    recommendation: (r.enrichment_recommendation as Recommendation) ?? "continue",
+    reason: (r.enrichment_reason as string) ?? "",
+    junk: !!r.enrichment_junk,
+    // Null means "never judged" (no location registry at generation time) and must stay
+    // distinguishable from a judgement of "wrong directory", or every unjudged session renders a
+    // warning it never earned.
+    cwdCorrect: cwdRaw === null || cwdRaw === undefined ? null : !!cwdRaw,
+    suggestedLocation: (r.enrichment_suggested_location as string) || null,
+    suggestedCwd: (r.enrichment_suggested_cwd as string) || null,
+    atMessages: (r.enrichment_at_messages as number) ?? 0,
+    at,
+    legacyShape: nativeState === "",
+  };
+}
+
+/**
+ * The name to show for a session, in precedence order.
+ *
+ * A human-authored title always wins — that is the point of `ccs session title`. Enrichment comes
+ * next because it is the only title generated with knowledge of how the session actually turned
+ * out; everything below it (Claude Code's early `ai-title`, the codex titler, the first-message
+ * fallback) is a guess made from the opening turns. `indexTitle` carries that resolved fallback.
+ */
+export function displayTitle(row: CatalogueRow | null, indexTitle: string): string {
+  const custom = row?.customTitle?.trim();
+  if (custom) return custom;
+  const enriched = row?.enrichment?.title?.trim();
+  if (enriched) return enriched;
+  return indexTitle;
 }
 
 /** Ensure a row exists for sessionId (no-op if present), so updates can UPDATE in place. */
@@ -1366,6 +1557,81 @@ export function setStatusLine(db: Database, sessionId: string, statusLine: strin
 }
 
 /**
+ * Write a complete enrichment in ONE statement (v38).
+ *
+ * Deliberately not eleven `set()` calls: enrichment is a single observation, and a half-written
+ * one is worse than none — `enrichment_at` is the presence key `enrichmentFrom` reads, so a crash
+ * between column writes could otherwise leave a row claiming to be enriched with an empty summary.
+ * A successful write also zeroes the attempt counter, so a session that recovers after transient
+ * failures gets its full retry budget back.
+ */
+export function setEnrichment(
+  db: Database,
+  sessionId: string,
+  enrichment: Enrichment,
+  now: string,
+): void {
+  ensureRow(db, sessionId, now);
+  db.query(
+    `UPDATE catalogue SET
+       enrichment_title = $title,
+       enrichment_state = $state,
+       enrichment_history = $history,
+       enrichment_next = $next,
+       enrichment_remaining = $remaining,
+       -- Transitional dual-write, removed by v41 along with the columns themselves.
+       -- Readers that predate v40 select these columns directly out of SQL (the ccs-go dossier
+       -- does), so writing only the new ones would blank their panels for every session the
+       -- cutover sweep touches — a migration that breaks the surface it exists to improve.
+       enrichment_summary = $state,
+       enrichment_outstanding = $next,
+       enrichment_recommendation = $recommendation,
+       enrichment_reason = $reason,
+       enrichment_junk = $junk,
+       enrichment_cwd_correct = $cwdCorrect,
+       enrichment_suggested_location = $suggestedLocation,
+       enrichment_suggested_cwd = $suggestedCwd,
+       enrichment_at_messages = $atMessages,
+       enrichment_at = $at,
+       enrichment_attempts = 0,
+       updated_at = $now
+     WHERE session_id = $id`,
+  ).run({
+    $title: enrichment.title,
+    $state: enrichment.state,
+    $history: enrichment.history,
+    $next: enrichment.next,
+    $remaining: enrichment.remaining,
+    $recommendation: enrichment.recommendation,
+    $reason: enrichment.reason,
+    $junk: enrichment.junk ? 1 : 0,
+    // undefined means the cwd question was never asked; NULL preserves that as distinct from a
+    // judgement of "wrong directory".
+    $cwdCorrect: enrichment.cwdCorrect === undefined ? null : enrichment.cwdCorrect ? 1 : 0,
+    $suggestedLocation: enrichment.suggestedLocation || null,
+    $suggestedCwd: enrichment.suggestedCwd || null,
+    $atMessages: enrichment.atMessages,
+    $at: enrichment.at,
+    $now: now,
+    $id: sessionId,
+  });
+}
+
+/**
+ * Count one failed enrichment attempt. Mirrors `recordTitleFailure` in the index: a session the
+ * model can't parse (or that keeps timing out) burns its budget and is then skipped forever,
+ * rather than consuming a slot in every sweep for the rest of time.
+ */
+export function recordEnrichmentFailure(db: Database, sessionId: string, now: string): void {
+  ensureRow(db, sessionId, now);
+  db.query(
+    `UPDATE catalogue
+       SET enrichment_attempts = COALESCE(enrichment_attempts, 0) + 1, updated_at = $now
+     WHERE session_id = $id`,
+  ).run({ $now: now, $id: sessionId });
+}
+
+/**
  * Set a key in the session's meta map (ADR-0060). Reads the current meta JSON, merges the key/value,
  * writes back. If value is null, the key is deleted from the map. Meta is cluster/role-specific scratch
  * state (latches, flags, counters); ccs stores it but does NOT interpret it.
@@ -1522,6 +1788,10 @@ export interface RoleDef {
    * (`color = "#7d7dff"`); null when no color is set (TUI falls back to faint, cmux-paint to
    * whatever it declares). Kept as hex so ccs and cmux render literally identical bytes. */
   color: string | null;
+  /** Optional canonical model policy authored in role.toml; launch routing is derived from it. */
+  model: import("../resume/role-model-launch.ts").RoleModelId | null;
+  /** A malformed manifest/model is observable to readers and blocks a fresh birth. */
+  manifestError: string | null;
   /** Skills / commands / hooks to materialize into ~/.claude for this role (ADR-0034). */
   skills: string[];
   commands: string[];

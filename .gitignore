@@ -5,3 +5,6 @@ dist/
 
 # Local Claude Code worktree checkouts
 /.claude/worktrees/
+
+# Go TUI build output (built on demand by src/tui-go/launch.ts)
+tui-go/.bin/

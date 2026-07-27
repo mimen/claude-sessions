@@ -1,0 +1,232 @@
+# tui-go
+
+The Go + Bubble Tea session manager that ships as `ccs`. It is navigate-led: launch answers “what needs me,” resume and organization are one key away, and cost remains visible without becoming the primary axis.
+
+The UI reads the real CCS stores directly in SQLite read-only mode. Every metadata mutation is delegated to the installed `ccs` CLI so the TypeScript implementation remains the owner of migrations and invariants.
+
+## Run
+
+```bash
+# it ships as the `ccs` command:
+ccs
+
+# or run it directly from this repo:
+cd tui-go
+go run .
+```
+
+The default launch reads the real store under `~/.ccs/cache/`. Static renders use the same real data:
+
+```bash
+SHOT=browser go run .
+SHOT=transcript go run .
+SHOT=route go run .
+SHOT=options go run .
+SHOT=stage go run .
+SHOT=cost go run .
+SHOT=organize go run .
+SHOT=ai go run .
+SHOT=skills go run .
+SHOT=skill-reader go run .
+```
+
+## Session keys
+
+| Key | Action |
+| --- | --- |
+| `↑` / `↓`, `j` / `k` | Move the selected session |
+| `enter` | Focus an already-live cmux session, otherwise exit the TUI and resume inline on its origin backend |
+| `r` | Choose the harness and target for this resume: every configured launcher (`claude-native`, `claude-gpt`, …) × inline or a focused cmux workspace |
+| `g` | Cycle `default` → `tree` → `flat` |
+| `/` | Fuzzy filter title, project, and Claude task subjects |
+| `p` | Show or hide the dossier |
+| `o` | Open View Options: sort, visibility, task filter, and autorefresh settings |
+| `R` | Manually reload the read-only store snapshot while preserving selection |
+| `J` / `K` | Scroll the selected session’s normalized transcript peek |
+| `v` | Open the full transcript pager |
+| `t` | Retitle through `ccs session title` |
+| `C` | Confirm and mark done through `ccs mark --completed` |
+| `e` | Fast archive, or unarchive an archived row, through `ccs mark --archived [--off]` |
+| `X` | Confirm archive/unarchive through the same `ccs mark` path |
+| `E` | Describe a single-session metadata edit in natural language; review validated mutations before applying them through `ccs` |
+| `S` | Generate a 2–3 line transcript summary in the dossier |
+| `A` | Ask the fleet a semantic question across bounded transcript excerpts; `enter` jumps to a result |
+| `D` | Generate a conservative cleanup proposal; `space` toggles entries and `y` archives the approved set through `ccs` |
+| `Tab` | Toggle Skills mode |
+| `?` | Help |
+| `q` | Quit |
+
+Transcript pager keys: `j` / `k`, `PgUp` / `PgDn`, `g` / `G`, and `v` / `esc` to close.
+
+## View Options and autorefresh
+
+`o` opens the single settings pane for list presentation. Move with `j` / `k`, change the focused value with `space`, `enter`, or `←` / `→`, and close with `esc`. Changes apply without leaving the pane.
+
+- Sort: recency (default), recursive total cost, or indexed message count.
+- Show archived: off by default; archived rows use a dim `·` state and can be restored with `e` or confirmed `X`.
+- Show native subagents: off by default.
+- Show auxiliary managed sessions: off by default.
+- Task filter: all, unfinished, or interrupted-mid-task. Interrupted means an `in_progress` Claude task exists while the session is not live.
+- Autorefresh: on by default at 8 seconds; selectable intervals are 5s, 8s, 10s, and 30s.
+
+The Bubble Tea ticker reloads through the same read-only snapshot path as manual `R` and post-write reloads. It preserves the selected session and virtualized cursor position; disabling autorefresh does not disable manual refresh.
+
+## Landing views
+
+### Default: cluster + lifecycle
+
+Named systems lead the page. Each cluster is split by role (coordinator/control, scout/support, workers, and any other configured roles). The large `(no-system)` remainder is split into fixed navigation queues:
+
+1. `active`
+2. `idle`
+3. `parked`
+4. `done`
+
+Archived, auxiliary, and native subagent runs are hidden initially and can be included independently from View Options.
+
+### Tree
+
+The causal parent→child tree retains recursive self/total cost and Claude/GPT/other provider rollups. Rendering is cursor-centered and viewport-bounded.
+
+### Flat
+
+An ungrouped list ordered by the selected recency, cost, or message-count sort. Fuzzy filtering works in default and flat views; search relevance remains primary while a query is active. The causal tree keeps its purpose-built subtree-cost ordering.
+
+## Dossier and transcripts
+
+The right-hand dossier includes:
+
+- lifecycle, class, role, cluster, pipeline stage, optional PR number/state, cwd, duration, age, and subagent count;
+- self/recursive total cost and provider split;
+- dominant model;
+- Claude task subjects and completion count;
+- on-demand AI summary;
+- lazily loaded recent transcript peek.
+
+The shared `transcript/` reader streams or tail-reads JSONL, skips corrupt records, strips terminal controls, omits hidden reasoning, summarizes tool calls/results, and applies bounded-memory retention. It normalizes:
+
+- native Claude Code `user` / `assistant` records with string or Anthropic content blocks;
+- `claude-gpt` gateway transcripts, including split assistant/tool records in the Anthropic-compatible envelope;
+- direct gateway `role` / `content` records;
+- OpenAI Responses-style `response.output_text` and output-item records.
+
+The dossier peek byte-tail-reads at most 512 KiB and caches a bounded set of sessions with in-flight load deduplication; live-session peeks refresh after a short interval. Opening `v` separately streams and retains the entire normalized transcript, including histories longer than 2,000 records. Visual wrapping is precomputed for responsive paging; only genuinely byte-tailed documents are labeled as a recent tail. Fleet-wide AI calls use byte-bounded transcript tails plus CCS’s indexed opening/closing skeleton, avoiding full rescans of hundreds of large files.
+
+## Resume contract
+
+Closed sessions resume with:
+
+```text
+<launcher binary> --resume <indexed resume_id>
+```
+
+Claude’s transcript storage folder is authoritative: its name must equal Claude’s encoding of `realpath(cwd)`. Resume first verifies the recorded cwd against that folder, then performs the same bounded filesystem decode as CCS (24 levels, 5,000 nodes, two matches), reports lossy-encoding ambiguity or budget exhaustion, and fails closed if the walk root cannot be read. If the exact recorded anchor was deleted, it is recreated only when doing so restores the verified mapping. Only when no mapped directory exists does resume fall back to the existing recorded cwd, project root, then home.
+
+Inline resume is stored in the final Bubble Tea model, the alternate screen exits, and only then does the launcher inherit stdin/stdout/stderr. This prevents the TUI and interactive Claude process from owning the terminal simultaneously.
+
+The harness is the operator's choice, not the transcript's. `serves` globs from `~/.ccs/config.toml` only pick the *preselected* route — a pure GPT history preselects the most specific `gpt-*` launcher, a pure Claude history its `claude-*` one — and never block a route. Resuming a Claude session on `claude-gpt` (or the reverse) is one `j`/`k` away in the `r` picker, with no force flag: transcripts are stored in Anthropic format whatever produced them, and both wrappers are the same Claude Code harness. A history with no origin signal — no models yet, or one already spanning harnesses — preselects the harness chosen last, persisted in `prefs.json`. If `claude-gpt` is installed and no launcher config exists, it is exposed automatically alongside `claude`. Every launcher is also offered against `cmux`, which creates a new focused workspace with safe shell quoting and launcher environment variables. A session already live in cmux is focused by its exact surface-derived workspace/window refs instead of duplicated.
+
+## Write ownership
+
+SQLite is never opened for writing by this program. There is no Go mutation schema or migration path.
+
+| UI operation | Existing owner command |
+| --- | --- |
+| Retitle | `ccs session title <id> <title>` |
+| Done / undoable AI lifecycle change | `ccs mark <id> --completed [--off]` |
+| Archive / unarchive / cleanup | `ccs mark <id> --archived [--off]` |
+| Parent, parked task, identity attachment | `ccs session set` / `ccs session unset` |
+| Durable identity field | `ccs identity set <key> --field=value` or `--unset=field` |
+
+Before a session mutation, Go asks `ccs session <id> --json` for its ownership state. An indexed-but-uncatalogued session is materialized through `ccs session-fields <id> --json '{"customTitle":null}'`; Go still never writes SQLite. This makes organize actions work for every indexed session visible on the landing page.
+
+The AI editor returns schema-forced mutations against a numbered session list. Go validates the focus session, operation, duplicate/conflicting changes, parent references, identity keys, booleans, title bounds, and identity-field allowlist. Each approved mutation is then executed as a separate `ccs` subprocess. Cleanup similarly applies one `ccs mark --archived` call per approved session. A snapshot reload runs after both success and failure so a partially completed batch is never left invisible in the TUI.
+
+## Inference seam
+
+`inference/engine.go` mirrors `claude-sessions/src/inference/engine.ts`:
+
+1. `CCS_INFERENCE_ENGINE` / CCS config preference, otherwise Codex first and Claude fallback.
+2. Codex: `codex exec --ephemeral --sandbox read-only --ignore-rules --ignore-user-config`, JSON Schema file, and `--output-last-message`.
+3. Claude: `claude -p --no-session-persistence --strict-mcp-config --output-format json --json-schema ...`.
+4. Bounded stdin payload, timeout, schema-forced result, and no agentic tool access.
+
+The same seam powers `e`, `S`, ask-the-fleet, and cleanup. Ask-the-fleet ranks every visible session—not a fixed lexical shortlist—inside a shared 700,000-character evidence budget, with stronger lexical candidates ordered first. There are no background model calls.
+
+## Skills mode
+
+`Tab` opens a separate machine-wide Skills registry. It reads `~/.ccs/cache/skills.db` in SQLite `mode=ro` when populated. If the rebuildable cache is empty or on an older schema, it performs a parallel, pruned full-home scan without writing a cache; `R` always forces that fresh filesystem scan instead of reloading a populated cache. System/package caches, marketplace catalogue listings, linked-worktree copies, and exact-content shadow duplicates are hidden; Claude, Codex, Grok, Hermes, Cursor, IDE, agents, archive, download, project, and other discovered ecosystems remain visible. If the 30-second scan budget or one root fails, the partial registry remains usable and the footer surfaces a warning instead of presenting it as complete.
+
+Skills keys:
+
+| Key | Action |
+| --- | --- |
+| `Tab` | Return to sessions |
+| `↑` / `↓`, `j` / `k` | Move |
+| `g` | Cycle category → home → name → activity → flat |
+| `/` | Fuzzy filter name, description, path, category, and tags |
+| `p` | Toggle metadata/file preview |
+| `v` / `enter` | Open the selected skill’s file reader |
+| `R` | Rescan the read-only registry |
+| `q` | Quit |
+
+The skill reader opens `SKILL.md` first, lists bounded text/Markdown/JSON/TOML/YAML files, uses `Tab` / arrows to cycle files, and supports the same pager keys as transcripts.
+
+## Read-only data sources
+
+- `~/.ccs/cache/index.db`: paths, cwd/project, titles, timestamps, models, costs, transcript skeleton, subagent edges, and resume IDs.
+- `~/.ccs/cache/catalogue.db`: session lifecycle/classification/parentage plus identity cluster/role joins. Pipeline stage comes from canonical `identities.stage` (with a legacy `catalogue.stage` read fallback); optional PR facts come from `identity_pr_agent` when that role schema is materialized, with legacy catalogue-column fallback.
+- `~/.cmuxterm/claude-hook-sessions.json` and `cmux tree --all --json --id-format both`: exact live state and workspace/window location.
+- `~/.claude/tasks/<session-id>/*.json`: task subjects and completion counts.
+- Session JSONL paths indexed in `index.db`: dossier peek, pager, summaries, fleet search, and cleanup evidence.
+- `~/.ccs/cache/skills.db` and installed/project skill directories: Skills mode.
+
+Path overrides for isolated runs/tests:
+
+- `CCS_ROOT`
+- `CCS_INDEX_PATH`
+- `CCS_CATALOGUE_PATH`
+- `CCS_CONFIG_ROOT`
+- `CCS_TASKS_PATH`
+- `CCS_SKILLS_DB_PATH`
+- `CCS_BINARY`
+- `CMUX_BIN`
+- `CCS_INFERENCE_ENGINE`
+
+## Deliberately deferred or cut
+
+The locked v1 excludes:
+
+- fork resume and inline↔cmux swap;
+- literal full-text grep;
+- background needs-input triage or push notifications;
+- auto-title/classify;
+- bulk natural-language reorganization;
+- inference-engine switching inside the TUI;
+- epic view.
+
+Skills organization writes (tags, categories, archive/move, opening an editor) are not ported; Skills mode is read-only in this Go v1.
+
+## Verification
+
+```bash
+go test ./...
+go test -race ./...
+go vet ./...
+go build ./...
+go run .
+```
+
+Real-data proof captures:
+
+- `shots/default-real.png`
+- `shots/transcript-peek-real.png`
+- `shots/transcript-reader-real.png`
+- `shots/resume-picker-real.png`
+- `shots/view-options-real.png`
+- `shots/stage-column-real.png`
+- `shots/cost-sort-real.png`
+- `shots/organize-real.png`
+- `shots/ai-summary-real.png`
+- `shots/skills-real.png`
+- `shots/skill-reader-real.png`

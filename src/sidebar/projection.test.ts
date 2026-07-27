@@ -14,7 +14,7 @@ import {
   type SidebarRow,
   type SidebarSessionRow,
 } from "./projection.ts";
-import { familyOf } from "../tui/format.ts";
+import { familyOf } from "../display/format.ts";
 
 /** Narrow to the session rows an assertion is about; sessionless workspaces carry no model. */
 function sessionRows(rows: readonly SidebarRow[]): SidebarSessionRow[] {

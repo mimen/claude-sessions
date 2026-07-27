@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import type { ResumeCommand } from "./command.ts";
+import { invokeCmuxNewWorkspace } from "./spawn-cmux.ts";
 
 /**
  * Open the resume in a new, focused cmux workspace named after the Session. Fire-and-forget:
@@ -8,14 +8,15 @@ import type { ResumeCommand } from "./command.ts";
  * socket must never block the render thread indefinitely.
  */
 export function openInCmux(cmd: ResumeCommand, name: string, binary = "cmux"): boolean {
-  try {
-    execFileSync(
-      binary,
-      ["new-workspace", "--name", name, "--cwd", cmd.cwd, "--command", cmd.shell, "--focus", "true"],
-      { timeout: 5000, stdio: "ignore" },
-    );
-    return true;
-  } catch {
-    return false;
-  }
+  return invokeCmuxNewWorkspace(
+    {
+      argv: cmd.argv,
+      cwd: cmd.cwd,
+      env: cmd.env,
+      name,
+      focus: true,
+      cmuxBin: binary,
+    },
+    5000,
+  ) !== null;
 }

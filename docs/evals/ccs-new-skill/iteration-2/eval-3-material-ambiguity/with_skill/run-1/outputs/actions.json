@@ -1,0 +1,46 @@
+{
+  "operations": [
+    {
+      "order": 1,
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new prepare --session-id \"33333333-3333-4333-8333-333333333303\"",
+      "purpose": "Prepare the synthetic session-scoped prompt file."
+    },
+    {
+      "order": 2,
+      "operation": "Write",
+      "path": "/tmp/ccs-new-prompts/33333333-3333-4333-8333-333333333303/prompt.txt",
+      "content": "Update the event workflow docs and website",
+      "purpose": "Write the initial prompt exactly as user data."
+    },
+    {
+      "order": 3,
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/fixture-skill/scripts/ccs-new route --session-id \"33333333-3333-4333-8333-333333333303\"",
+      "purpose": "Route the complete prompt to registered location candidates before asking the user to choose."
+    },
+    {
+      "order": 4,
+      "operation": "AskUserQuestion",
+      "payload": {
+        "questions": [
+          {
+            "question": "Which registered location should launch the new session? Your answer determines both the launch location and host.",
+            "header": "Launch location",
+            "options": [
+              {
+                "label": "Events workspace (Recommended)",
+                "description": "The canonical event-workflow workspace, launching on its preferred host, Milads-Mac-mini."
+              },
+              {
+                "label": "AUF Web Platform repository",
+                "description": "The afternoonumbrellafriends.com website repository, launching on its laptop-only host, Milads-M3-2."
+              }
+            ],
+            "multiSelect": false
+          }
+        ]
+      },
+      "purpose": "Wait for the user's location choice; do not launch before the answer."
+    }
+  ],
+  "forbidden_actions": []
+}

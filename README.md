@@ -1,6 +1,6 @@
 # claude-sessions (`ccs`)
 
-A single-machine TUI to find and resume **any** Claude Code session — regardless of which
+A single-machine Go TUI to find and resume **any** Claude Code session — regardless of which
 directory it started in. Claude Code's own `--resume` picker only shows sessions for the
 current directory; `ccs` shows them all, titled, searchable, and one keypress from resuming.
 
@@ -55,12 +55,20 @@ ccs                    # launch the browser
 ccs reindex            # refresh the index from the store (incremental)
 ccs reindex --titles   # also generate missing titles (cron/launchd-friendly)
 ccs ls                 # debug: print the indexed sessions
-ccs start "continue the CCS session starter"  # route to an active session or project and launch it
-ccs start --dry-run "continue the CCS session starter"  # preview the recommendation; launch nothing
-ccs start --explain "continue the CCS session starter"  # preview candidates and routing rationale
-ccs start              # prompt for the work description interactively
+ccs start              # fresh managed launcher; prefill /ccs:new without submitting
+ccs start "fix checkout routing"  # append initial text, still leave it unsubmitted
+ccs start -- --leading-dash-text   # preserve dash-leading initial text safely
+ccs location list      # list curated session starting locations
+ccs location match "work on the session catalogue" --json
+ccs location show ccs
+ccs finish-current complete          # dry-run the exact current workspace close only
+ccs finish-current complete --do     # catalogue, complete, enrich detached, then safely close
+ccs finish-current archive --do      # catalogue, archive, enrich detached, then safely close
 
 # CCS-managed launches declare their intent before a UUID is reserved:
+ccs session new --top-level --location ccs --model gpt-5.6-sol --json --prompt "Implement the router"
+ccs session new --top-level --host Milads-Mac-mini --location ccs \
+  --require-capability always-on --require-capability shared-vault --prompt "Implement remotely"
 ccs session new --top-level --cwd /path/to/repo
 ccs session new --child-of . --cwd /path/to/repo
 
@@ -77,6 +85,14 @@ CCS_CREATOR_KIND=automation CCS_CREATOR_REF=imsg-server ccs delegate utility \
   --child-of "$ANCHOR_ID" --cwd /path/to/repo --prompt "Classify this request."
 ```
 
+`/ccs:new <initial prompt>` is the only conversational router. `ccs start` is a deterministic
+interactive shortcut: it creates one fresh CCS-managed top-level launcher in the current directory,
+focuses the new cmux workspace, waits for Claude's empty composer, and types `/ccs:new ` plus any
+trailing argv text. It never presses Enter, reuses an idle session, runs inference, routes the task,
+or executes the prompt. `--dry-run` and `--explain` are obsolete and rejected; use `--` before text
+that must literally begin with one of those tokens. Input that cmux would reinterpret as Enter or Tab
+is rejected before birth rather than partially submitted.
+
 `--top-level` creates a visible work body. `--child-of` creates an auxiliary session whose
 cost belongs to its causal parent. A delegate call selects the seat's fixed primary route by
 default; `--fallback` explicitly selects its declared backup before reservation. CCS never
@@ -86,6 +102,20 @@ normal list, search, and tree views; use `u` in the TUI or `--auxiliary` in CLI 
 them for one invocation. Canonical delegated seats live outside Claude Code's auto-discovered
 agent directories and are compiled into process-local `--agents` JSON only for the selected
 delegation.
+
+`--model` accepts a canonical birth-model ID and derives the matching launcher; it cannot be combined
+with legacy `--via`. Registered location overrides inherit the registry-wide exact route when omitted.
+`--require-capability` is repeatable and rejects a host before reservation or workspace creation when
+its authored capability list does not satisfy the request. `--json` returns the detached local birth's
+full session ID, canonical route, and workspace reference, retaining the recoverable ID on failure.
+
+`--host` accepts a canonical name from `hosts.toml`. The current host keeps the established local
+launch path. A remote top-level location birth first checks the registered SSH alias, remote login-shell
+`ccs`, readable remote location registry, and location eligibility, then creates exactly one local
+`cmux ssh` workspace whose initial command is remote `ccs session new --top-level --inline`. It never
+launches a raw Claude process or retries automatically. The first transport release returns the cmux
+workspace reference with `session_id: pending`; remote reservation and prompt delivery remain explicitly
+uncertain until the stronger session-ID receipt seam lands.
 
 ### Keys
 
@@ -117,8 +147,10 @@ conversation, where filing the work is one command away.
 
 | command | what it does |
 |---------|--------------|
-| `/ccs:archive` | keep the title useful, mark archived, and offer a safe tab-close link |
-| `/ccs:complete` | mark the work finished while keeping the session visible in history |
+| `/ccs:new <initial prompt>` | choose a registered launch location conversationally and create one fresh CCS-managed session |
+| `/ccs:archive` | synchronously archive, launch detached enrichment, then safely close its workspace |
+| `/ccs:complete` | synchronously complete, launch detached enrichment, then safely close its workspace |
+| `/ccs:close-workspace` | close only the current session's sole-surface workspace after exact identity checks |
 | `/ccs:unarchive` | clear archive or completion flags and return to active views |
 | `/ccs:title <words>` | set an explicit title verbatim and sync the cmux tab |
 | `/ccs:suggest-title` | generate a title from what the session actually became |
@@ -129,6 +161,13 @@ conversation, where filing the work is one command away.
 history but completed cluster members are not resumed. Archived work leaves active
 browse/search views and cluster resumes. Both states are reversible; neither touches
 the transcript.
+
+`ccs finish-current <complete|archive>` is a close preflight only: it performs no catalogue,
+lifecycle, or enrichment mutation. With `--do`, it validates the explicit current session UUID,
+ensures the catalogue row, records the per-session lifecycle, launches `ccs enrich <uuid>` through
+`/usr/bin/nohup` with per-session runtime logging, then hands closure to the existing two-snapshot
+stable-UUID guard. A lifecycle failure stops before enrichment or close; an enrichment launch
+failure warns and still closes because the stale row remains eligible for `ccs enrich --sweep`.
 
 ## Configuration
 
@@ -143,6 +182,10 @@ label = "<hostname>"             # tags indexed sessions with their origin host
 
 [resume]
 target = "auto"                  # auto | cmux | inline
+
+[routing]
+registry = "~/Documents/milad-vault/ClaudeConfig/session-routing/locations.toml"
+hosts = "~/Documents/milad-vault/ClaudeConfig/session-routing/hosts.toml"
 
 [inference]
 engine = "auto"                  # auto | codex | claude (env CCS_INFERENCE_ENGINE overrides)
@@ -160,6 +203,19 @@ model = "haiku"                  # cheap model for background titling; "" = CLI 
 concurrency = 3
 maxAttempts = 3
 ```
+
+The shared host registry defaults to `~/.ccs/hosts.toml`:
+
+```toml
+version = 1
+
+[[host]]
+name = "Milads-Mac-mini"       # canonical host identity from [host].label / LocalHostName
+ssh_alias = "macmini"          # one SSH config destination, never command-line options
+status = "active"              # active | retired
+```
+
+Canonical names and SSH aliases are unique after trimming and case normalization. Retired hosts cannot receive new placements.
 
 ## How it works
 

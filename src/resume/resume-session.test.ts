@@ -12,7 +12,7 @@ function row(over: Partial<SessionRow> = {}): SessionRow {
     msgCount: 0, fileSize: 0, title: "t", titleSource: "fallback",
     isSubagent: false, parentSessionId: null, resumeId: "resume-1", costUSD: 0,
     tokInput: 0, tokOutput: 0, tokCacheRead: 0, tokCacheWrite: 0, costByModel: {},
-    userTurns: 0, tickIntervalSec: 0, models: [], ...over,
+    userTurns: 0, tickIntervalSec: 0, models: [], lastModel: "", ...over,
   };
 }
 
@@ -90,6 +90,18 @@ test("liveness keys on resumeId (the id claude --resume uses), not the filename 
     null,
   );
   expect(plan.action).toBe("skip");
+});
+
+test("resume plan never injects a role birth model", () => {
+  // A role policy may later change, but replay is history-routed and has no --model override.
+  const plan = planResumeSession(stubBridge([]), row({ models: ["gpt-5.6-sol[1m]"] }), {
+    binary: "claude-gpt",
+    resumeCommand: null,
+  });
+  expect(plan.action).toBe("resume");
+  if (plan.action !== "resume") throw new Error("unreachable");
+  expect(plan.command.argv).toEqual(["claude-gpt", "--resume", "resume-1"]);
+  expect(plan.command.argv).not.toContain("--model");
 });
 
 test("launcher selection reports unknown and ineligible routes without falling back", () => {

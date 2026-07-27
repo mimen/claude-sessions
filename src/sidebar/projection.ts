@@ -9,7 +9,7 @@
  */
 import type { Lifecycle } from "../catalogue/db.ts";
 import { messagesSince, type SessionEnrichment } from "../catalogue/enrichment.ts";
-import { familyOf } from "../tui/format.ts";
+import { familyOf } from "../display/format.ts";
 
 export type { SessionEnrichment };
 

@@ -1,5 +1,6 @@
 import type { CatalogueRow, Kind } from "./db.ts";
 import { lifecycleOf, identityKeyOf } from "./db.ts";
+import { humanizeSlug, workRefOfIdentityKey } from "./identity-key.ts";
 import { boardIndex } from "../board/indexer.ts";
 import type { BoardRow } from "../board/types.ts";
 
@@ -103,6 +104,7 @@ function descriptionFromBoard(row: CatalogueRow): string | null {
  */
 export interface CmuxPaintOverride {
   title?: string;
+  title_template?: string;
   description?: string | null;
   color?: string | null;
   statusPill?: StatusPill | null;
@@ -110,11 +112,29 @@ export interface CmuxPaintOverride {
   alertPill?: StatusPill | null;
 }
 
+const WORK_REF_HUMANIZED_TOKEN = "{work_ref_humanized}";
+
+/** Render the deliberately small title-template vocabulary. Unknown/unresolvable templates fall back. */
+function renderTitleTemplate(template: unknown, row: CatalogueRow | null): string | null {
+  if (typeof template !== "string" || !template.includes(WORK_REF_HUMANIZED_TOKEN) || !row) return null;
+  const unknownTemplate = template.split(WORK_REF_HUMANIZED_TOKEN).join("");
+  if (/\{[^{}]+\}/.test(unknownTemplate)) return null;
+  const workRef = workRefOfIdentityKey(identityKeyOf(row));
+  if (!workRef) return null;
+  const humanized = humanizeSlug(workRef);
+  if (!humanized) return null;
+  return template.split(WORK_REF_HUMANIZED_TOKEN).join(humanized);
+}
+
 /** Overlay a resolved cmux-paint config onto the computed base ops. Pure. */
-export function applyPaintOverride(base: TabRenderOps, over: CmuxPaintOverride | null): TabRenderOps {
+export function applyPaintOverride(
+  base: TabRenderOps,
+  over: CmuxPaintOverride | null,
+  row: CatalogueRow | null = null,
+): TabRenderOps {
   if (!over) return base;
   const out: TabRenderOps = {
-    title: over.title ?? base.title, // title never nulls (a tab must have a name)
+    title: over.title ?? renderTitleTemplate(over.title_template, row) ?? base.title,
     description: "description" in over ? over.description ?? null : base.description,
     color: "color" in over ? over.color ?? null : base.color,
     statusPill: "statusPill" in over ? over.statusPill ?? null : base.statusPill,

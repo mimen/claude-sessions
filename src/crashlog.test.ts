@@ -52,6 +52,18 @@ describe("summarizeArgv", () => {
   test("does not mistake arbitrary positional values for structural subcommands", () => {
     expect(summarizeArgv(["rename", "top-secret-title"])).toMatchObject({ command: "rename", subcommand: null });
     expect(summarizeArgv(["status", "private status"])).toMatchObject({ command: "status", subcommand: null });
+    expect(summarizeArgv(["close-current-workspace", "--do"])).toEqual({
+      command: "close-current-workspace",
+      subcommand: null,
+      flags: "--do",
+      argumentCount: 2,
+    });
+    expect(summarizeArgv(["finish-current", "complete", "--do"])).toEqual({
+      command: "finish-current",
+      subcommand: "complete",
+      flags: "--do",
+      argumentCount: 3,
+    });
     expect(summarizeArgv(["custom-secret-command", "also-secret"])).toMatchObject({ command: null, subcommand: null });
   });
 });

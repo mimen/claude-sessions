@@ -19,6 +19,13 @@ export interface UsageTotals {
   readonly costByModel: Readonly<Record<string, number>>;
   /** Sorted, deduped model ids seen in assistant turns. */
   readonly models: readonly string[];
+  /**
+   * Model id of the LAST assistant turn, or null when there were none. `models` is sorted for
+   * display and so loses arrival order, but resume routing needs the most recent backend: a
+   * transcript that changed harness mid-session only has to be replayable by the harness it
+   * ended on, not by every one it ever used.
+   */
+  readonly lastModel: string | null;
 }
 
 /** The shape of a transcript line the accumulator cares about (assistant lines). */
@@ -61,6 +68,7 @@ const PRICES: ReadonlyArray<readonly [prefix: string, input: number, output: num
   ["gpt-5.5", 5, 30],
   ["claude-fable-5", 10, 50],
   ["claude-mythos", 10, 50],
+  ["claude-opus-5", 5, 25],
   ["claude-opus-4-8", 5, 25],
   ["claude-opus-4-7", 5, 25],
   ["claude-opus-4-6", 5, 25],
@@ -117,11 +125,15 @@ export function createUsageAccumulator(): UsageAccumulator {
   let webSearches = 0;
   const costByModel: Record<string, number> = {};
   const models = new Set<string>();
+  let lastModel: string | null = null;
 
   return {
     add(line: CostLine): void {
       const model = line.message?.model ?? "";
-      if (model && model !== "<synthetic>") models.add(model);
+      if (model && model !== "<synthetic>") {
+        models.add(model);
+        lastModel = model;
+      }
 
       const usage = line.message?.usage;
       if (!usage) return;
@@ -178,6 +190,7 @@ export function createUsageAccumulator(): UsageAccumulator {
         webSearches,
         costByModel,
         models: [...models].sort(),
+        lastModel,
       };
     },
   };

@@ -47,6 +47,7 @@ roles/<role>/
 **Authored in `role.toml`:**
 - **kind** — `"loop"` (re-arms on resume) or `"session"` (bare). Currently required.
 - **resume_command** — the command a loop re-fires on resume (e.g. `"/loop 15m /pr-watch-control"`). Present iff `kind = "loop"`.
+- **model** — optional exact launch policy: `claude-opus-5`, `gpt-5.6-terra`, or `gpt-5.6-sol`. The role never names a provider or launcher; ccs compiles native Claude to `claude --model …` and GPT models to `claude-gpt --model …[1m]`. A model-policy role rejects `ccs new-session --via …` and `--model …`; malformed or alias values fail the new-session preflight.
 - **Future properties (per ADR-0062/0069, as they land):**
   - `topology` or `work_unit` — declares core vs fleet (e.g. `work_unit = "none"` for core, `work_unit = "pr"` for fleet).
   - Other role-specific properties as the platform evolves.
@@ -155,11 +156,18 @@ EOF
 # cmux tab appearance override
 cat > .ccs-hooks/cmux-paint.json <<'EOF'
 {
-  "color": "#00ff00",
-  "icon": "📊"
+  "title_template": "Metrics · {work_ref_humanized}",
+  "color": "#00ff00"
 }
 EOF
 ```
+
+`cmux-paint.json` can set a static `title`, or a `title_template` containing
+`{work_ref_humanized}`. The placeholder reads the work reference from a structured
+`<cluster>:<role>:<work_ref>` identity key and humanizes hyphen/underscore-delimited words.
+A static `title` wins when both are present; an unknown placeholder or missing work reference
+keeps the normal computed title. Role `color` from `role.toml` remains the default unless this
+paint file overrides it.
 
 Common hook types:
 - **claude-md** (`.md`) — injected into the session's CLAUDE.md context at SessionStart (merge strategy: `sections`)

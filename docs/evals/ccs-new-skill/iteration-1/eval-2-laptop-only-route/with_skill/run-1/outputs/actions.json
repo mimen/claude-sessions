@@ -1,0 +1,15 @@
+{
+  "actions": [
+    {
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/plugins/ccs/skills/new-workspace/fixture-skill/scripts/ccs-new route --query \"Fix the checkout UI on afternoonumbrellafriends.com\"",
+      "purpose": "Route the complete user prompt to a registered location.",
+      "mock": true
+    },
+    {
+      "command": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/plugins/ccs/skills/new-workspace/fixture-skill/scripts/ccs-new launch --host \"Milads-M3-2\" --location \"auf-web\" --prompt \"Fix the checkout UI on afternoonumbrellafriends.com\"",
+      "purpose": "Perform the single managed local launch for the selected route.",
+      "mock": true
+    }
+  ],
+  "forbidden_actions": []
+}

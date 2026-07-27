@@ -1,0 +1,298 @@
+version = 1
+default_host = "Milads-Mac-mini"
+default_harness = "claude-gpt"
+default_model = "gpt-5.6-sol"
+
+[[location]]
+key = "home"
+name = "Home"
+aliases = ["knowledge home", "personal root"]
+cwd = "~"
+kind = "root"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "repos"
+name = "Programming repositories"
+aliases = ["repos", "repositories", "programming"]
+cwd = "~/Programming/Repos"
+kind = "root"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "vault"
+name = "Milad vault"
+aliases = ["obsidian", "brain", "milad vault"]
+cwd = "~/Documents/milad-vault"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "claude-config"
+name = "ClaudeConfig"
+aliases = ["agent config", "claude configuration", "fleet config"]
+cwd = "~/Documents/milad-vault/ClaudeConfig"
+kind = "config"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "assistant"
+name = "Assistant workspace"
+aliases = ["assistant", "agentic os", "personal assistant"]
+cwd = "~/Documents/milad-vault/Workspaces/Assistant"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "events"
+name = "Events workspace"
+aliases = ["events", "events friend", "event operations"]
+cwd = "~/Documents/milad-vault/Workspaces/Events"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "auf"
+name = "AUF workspace"
+aliases = ["afternoon umbrella friends", "auf business", "auf operations"]
+cwd = "~/Documents/milad-vault/Workspaces/AUF"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "auf-web-workspace"
+name = "AUF Web Platform workspace"
+aliases = ["awp workspace", "auf web workspace", "web platform workspace"]
+cwd = "~/Documents/milad-vault/Workspaces/AUF Web Platform"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "bookings"
+name = "Bookings workspace"
+aliases = ["bookings", "talent bookings"]
+cwd = "~/Documents/milad-vault/Workspaces/Bookings"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "finance"
+name = "Finance workspace"
+aliases = ["finances", "numbers friend", "bookkeeping"]
+cwd = "~/Documents/milad-vault/Workspaces/Finance"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "graphic-design"
+name = "Graphic Design workspace"
+aliases = ["design", "graphics", "graphic design"]
+cwd = "~/Documents/milad-vault/Workspaces/Graphic Design"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "health"
+name = "Health workspace"
+aliases = ["fitness", "health", "supplements"]
+cwd = "~/Documents/milad-vault/Workspaces/Health"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "life"
+name = "Life workspace"
+aliases = ["personal life", "life"]
+cwd = "~/Documents/milad-vault/Workspaces/Life"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "marketing"
+name = "Marketing workspace"
+aliases = ["marketing", "promotion"]
+cwd = "~/Documents/milad-vault/Workspaces/Marketing"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "music"
+name = "Music workspace"
+aliases = ["dj music", "music", "music library"]
+cwd = "~/Documents/milad-vault/Workspaces/Music"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "pluto"
+name = "Pluto Sound workspace"
+aliases = ["pluto", "pluto sound"]
+cwd = "~/Documents/milad-vault/Workspaces/Pluto Sound"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "productivity"
+name = "Productivity workspace"
+aliases = ["productivity", "tasks and time"]
+cwd = "~/Documents/milad-vault/Workspaces/Productivity"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "social"
+name = "Social workspace"
+aliases = ["social", "social media"]
+cwd = "~/Documents/milad-vault/Workspaces/Social"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "sprout"
+name = "Sprout workspace"
+aliases = ["sprout", "sprout beats"]
+cwd = "~/Documents/milad-vault/Workspaces/Sprout"
+kind = "workspace"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "ccs"
+name = "CCS"
+aliases = ["claude sessions", "session catalogue", "session router", "ccs tui", "ccs go", "charmtone"]
+cwd = "~/Programming/Repos/claude-sessions"
+kind = "repo"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+default_harness = "claude-gpt"
+default_model = "gpt-5.6-sol"
+status = "active"
+
+[[location]]
+key = "mindmap-visualizer"
+name = "Mindmap visualizer"
+aliases = ["mind map visualizer", "strategic graph"]
+cwd = "~/Programming/Repos/mindmap-visualizer"
+kind = "repo"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "granola-sync"
+name = "Granola sync"
+aliases = ["granola obsidian sync", "meeting sync"]
+cwd = "~/Programming/Repos/granola-obsidian-sync"
+kind = "repo"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "beeper-tools"
+name = "Beeper messaging tools"
+aliases = ["beeper messaging", "beeper tools"]
+cwd = "~/Programming/Repos/beeper-messaging-tools"
+kind = "repo"
+eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
+preferred_host = "Milads-Mac-mini"
+status = "active"
+
+[[location]]
+key = "t3code"
+name = "T3 Code"
+aliases = ["t3", "t3 code", "claude swap"]
+cwd = "~/Programming/Repos/t3code"
+kind = "repo"
+eligible_hosts = ["Milads-M3-2"]
+preferred_host = "Milads-M3-2"
+status = "active"
+
+[[location]]
+key = "claude-actions"
+name = "Claude actions"
+aliases = ["action links", "clickable actions"]
+cwd = "~/Programming/Repos/claude-actions"
+kind = "repo"
+eligible_hosts = ["Milads-M3-2"]
+preferred_host = "Milads-M3-2"
+status = "active"
+
+[[location]]
+key = "auf-web"
+name = "AUF Web Platform repository"
+aliases = ["afternoonumbrellafriends.com", "auf website", "auf web"]
+cwd = "~/Programming/Repos/afternoonumbrellafriends.com"
+kind = "repo"
+eligible_hosts = ["Milads-M3-2"]
+preferred_host = "Milads-M3-2"
+default_harness = "claude"
+default_model = "claude-fable-5"
+status = "active"
+
+[[location]]
+key = "booking-intel"
+name = "AUF Booking Intel"
+aliases = ["booking intel", "artist intelligence"]
+cwd = "~/Programming/Repos/auf-booking-intel"
+kind = "repo"
+eligible_hosts = ["Milads-M3-2"]
+preferred_host = "Milads-M3-2"
+status = "active"
+
+[[location]]
+key = "convex-db"
+name = "Convex DB monorepo"
+aliases = ["convex db", "imsg app", "master db"]
+cwd = "~/Programming/Repos/convex-db"
+kind = "repo"
+eligible_hosts = ["Milads-M3-2"]
+preferred_host = "Milads-M3-2"
+status = "active"
+
+[[location]]
+key = "dj-manager"
+name = "DJ artist manager"
+aliases = ["crate", "dj manager", "spotify library"]
+cwd = "~/Programming/Repos/dj-artist-manager"
+kind = "repo"
+eligible_hosts = ["Milads-M3-2"]
+preferred_host = "Milads-M3-2"
+status = "active"

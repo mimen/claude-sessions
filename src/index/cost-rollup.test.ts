@@ -32,6 +32,7 @@ function row(
     tokCacheWrite: 0,
     costByModel: options.costByModel ?? {},
     models: [],
+    lastModel: "",
     userTurns: 0,
     tickIntervalSec: 0,
   };

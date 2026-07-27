@@ -247,6 +247,39 @@ test("applyPaintOverride: title never nulls (a tab must have a name)", () => {
   expect(out.title).toBe("control");
 });
 
+test("applyPaintOverride: humanizes a structured identity work reference", () => {
+  const r = row({ identityKey: "event-watch:event-worker:gio-lucca-3oz-august" });
+  const out = applyPaintOverride(baseOps, { title_template: "{work_ref_humanized}" }, r);
+  expect(out.title).toBe("Gio Lucca 3oz August");
+});
+
+test("applyPaintOverride: title templates can compose around the work reference", () => {
+  const r = row({ identityKey: "event-watch:event-worker:gio-lucca-3oz-august" });
+  const out = applyPaintOverride(baseOps, { title_template: "Events · {work_ref_humanized}" }, r);
+  expect(out.title).toBe("Events · Gio Lucca 3oz August");
+});
+
+test("applyPaintOverride: a static title takes precedence over its template", () => {
+  const r = row({ identityKey: "event-watch:event-worker:gio-lucca-3oz-august" });
+  const out = applyPaintOverride(baseOps, {
+    title: "Static worker title",
+    title_template: "{work_ref_humanized}",
+  }, r);
+  expect(out.title).toBe("Static worker title");
+});
+
+test("applyPaintOverride: unresolved or unknown title templates keep the base title", () => {
+  const core = row({ identityKey: "event-watch:coordinator" });
+  const worker = row({ identityKey: "event-watch:event-worker:gio-lucca" });
+  expect(applyPaintOverride(baseOps, { title_template: "{work_ref_humanized}" }, core).title)
+    .toBe(baseOps.title);
+  expect(applyPaintOverride(baseOps, { title_template: "{unknown}" }, core).title)
+    .toBe(baseOps.title);
+  expect(applyPaintOverride(baseOps, {
+    title_template: "Events · {work_ref_humanized} {unknown}",
+  }, worker).title).toBe(baseOps.title);
+});
+
 test("applyPaintOverride: can set a custom status pill", () => {
   const out = applyPaintOverride(baseOps, { statusPill: { key: "k", label: "building" } });
   expect(out.statusPill?.label).toBe("building");

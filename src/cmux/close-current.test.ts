@@ -59,6 +59,8 @@ function binding(overrides: Partial<SurfaceSession> = {}): SurfaceSession {
     agentLifecycle: "running",
     isRestorable: true,
     pid: 123,
+    transcriptPath: null,
+    lastPermissionMode: null,
     ...overrides,
   };
 }

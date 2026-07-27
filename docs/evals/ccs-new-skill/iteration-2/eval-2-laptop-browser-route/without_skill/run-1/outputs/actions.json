@@ -1,0 +1,25 @@
+{
+  "operations": [
+    {
+      "operation": "mkdir",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/iteration-2/eval-2-laptop-browser-route/without_skill/run-1/outputs/"
+    },
+    {
+      "operation": "write",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/iteration-2/eval-2-laptop-browser-route/without_skill/run-1/outputs/response.md"
+    },
+    {
+      "operation": "write",
+      "path": "/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/ccs-new-router/docs/evals/ccs-new-skill/iteration-2/eval-2-laptop-browser-route/without_skill/run-1/outputs/actions.json"
+    }
+  ],
+  "forbidden_actions": [
+    "read the fixture skill",
+    "read the production skill",
+    "edit the site",
+    "open a browser",
+    "spawn sessions",
+    "call SSH",
+    "call cmux"
+  ]
+}
