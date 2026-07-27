@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="30">
+<title>Sidebar triage IA</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa; --fg: #1a1a18; --muted: #6b6b66; --faint: #9a9a94;
+    --rule: #e4e4e0; --card: #ffffff; --accent: #b4531f;
+    --ok: #2f6f4f; --warn: #8a6d1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16161a; --fg: #e8e8e4; --muted: #9d9d96; --faint: #6e6e68;
+            --rule: #2c2c30; --card: #1d1d22; --accent: #e08a4c;
+            --ok: #7cc39b; --warn: #d7b45c; }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16161a; --fg: #e8e8e4; --muted: #9d9d96; --faint: #6e6e68;
+    --rule: #2c2c30; --card: #1d1d22; --accent: #e08a4c;
+    --ok: #7cc39b; --warn: #d7b45c;
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfbfa; --fg: #1a1a18; --muted: #6b6b66; --faint: #9a9a94;
+    --rule: #e4e4e0; --card: #ffffff; --accent: #b4531f;
+    --ok: #2f6f4f; --warn: #8a6d1f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 3rem 1.5rem 6rem; background: var(--bg); color: var(--fg);
+    font: 15px/1.62 ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+  }
+  main { max-width: 60rem; margin: 0 auto; }
+  h1 { font-size: 1.9rem; line-height: 1.15; margin: 0 0 .3rem; letter-spacing: -.02em; }
+  h2 { font-size: 1.15rem; margin: 2.6rem 0 .8rem; letter-spacing: -.01em;
+       border-bottom: 1px solid var(--rule); padding-bottom: .35rem; }
+  h3 { font-size: .95rem; margin: 1.6rem 0 .5rem; }
+  .sub { color: var(--muted); margin: 0 0 1.6rem; }
+  .status { display: inline-block; font-size: .74rem; letter-spacing: .07em;
+            text-transform: uppercase; font-weight: 700; padding: .2rem .5rem;
+            border: 1px solid var(--accent); color: var(--accent); border-radius: 2px; }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  code { font-size: .87em; background: color-mix(in oklab, var(--fg) 7%, transparent);
+         padding: .1em .35em; border-radius: 2px; }
+  pre { background: var(--card); border: 1px solid var(--rule); border-radius: 3px;
+        padding: 1rem; overflow-x: auto; font-size: .8rem; line-height: 1.5; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: .88rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--rule);
+           vertical-align: top; }
+  th { font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  ul { padding-left: 1.15rem; } li { margin: .3rem 0; }
+  .decided { border-left: 3px solid var(--ok); padding-left: .8rem; margin: .8rem 0; }
+  .open { border-left: 3px solid var(--warn); padding-left: .8rem; margin: .8rem 0; }
+  .note { color: var(--muted); font-size: .9rem; }
+  .scroll { overflow-x: auto; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Sidebar triage IA</h1>
+<p class="sub">
+  <span class="status">Design settled &mdash; awaiting implementation authorization</span><br>
+  <code>/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/cmux-t3-sidebar-v1/docs/plans/sidebar-triage-ia.html</code>
+</p>
+
+<h2>Goal</h2>
+<p>
+  Turn the CCS productivity sidebar from a <strong>session list</strong> into a <strong>triage
+  queue</strong>. Scan overall state at a glance (open / closed / complete / archived, plus what is
+  <em>suggested</em> to become complete or archived) and blow through sessions: mark done, close to
+  reclaim RAM, reopen, archive, hand off.
+</p>
+<p>
+  The organising principle: <strong>closing is a RAM decision, not a work decision.</strong> It should
+  feel like closing a browser tab and must never imply losing the session. Complete and archive are
+  work decisions and belong on a separate axis.
+</p>
+
+<h2>What we found</h2>
+
+<h3>Enrichment v40 already computes the triage verdict</h3>
+<p>
+  Catalogue v40 shipped 2026-07-26 (<code>229d2e2</code>) explicitly to make dispositions sortable.
+  Its commit message states the problem it solved: <em>"47.5% of 468 sessions said
+  <code>continue</code>, which sorts nothing."</em>
+</p>
+<ul>
+  <li><code>summary</code> split into <code>state</code> (where it stands now) + <code>history</code></li>
+  <li><code>outstanding</code> split into <code>next</code> (one imperative action) + <code>remaining</code></li>
+  <li><code>reason</code> is conditional: required for archive/handoff/junk, required <em>empty</em> otherwise</li>
+  <li><code>junk</code> implies archive; <code>cwd_correct</code> nullable (NULL = never asked)</li>
+  <li>Enrichment reads measured evidence (cwd exists, branch exists, successor count), not just the transcript</li>
+</ul>
+<p class="note">
+  The sidebar currently reads the <strong>pre-v40</strong> fields (<code>summary</code>,
+  <code>outstanding</code>) and ignores the recommendation entirely.
+</p>
+
+<h3>There is a 280-item backlog nobody can see</h3>
+<div class="scroll">
+<table>
+  <tr><th>Recommends</th><th class="num">Still active</th><th class="num">Already applied</th></tr>
+  <tr><td><code>complete</code></td><td class="num"><strong>189</strong></td><td class="num">21</td></tr>
+  <tr><td><code>archive</code></td><td class="num"><strong>74</strong></td><td class="num">65</td></tr>
+  <tr><td><code>handoff</code></td><td class="num"><strong>17</strong></td><td class="num">5</td></tr>
+  <tr><td><code>continue</code></td><td class="num">91 (correct)</td><td class="num">4</td></tr>
+</table>
+</div>
+<p>Plus 71 rows flagged <code>enrichment_junk = 1</code>, which v40 says implies archive.</p>
+
+<h3>The list is silently truncated</h3>
+<p>
+  <strong>5,487 sessions exist. The sidebar renders 21.</strong> <code>RECENT_LIMIT = 8</code> caps
+  closed sessions with no indication anything was cut, which is why it is not obvious why a given
+  session is absent.
+</p>
+
+<h2>Diagnosis</h2>
+<p>Three independent axes are collapsed into one <code>section</code> field:</p>
+<div class="scroll">
+<table>
+  <tr><th>Axis</th><th>Values</th><th>Meaning</th></tr>
+  <tr><td>Liveness</td><td>open / closed</td><td>RAM. Reversible, cheap, not a judgment</td></tr>
+  <tr><td>Disposition</td><td>active / complete / archived</td><td>Work state. A real decision</td></tr>
+  <tr><td>Suggestion</td><td>complete / archive / continue / handoff</td><td>What enrichment thinks should happen</td></tr>
+</table>
+</div>
+<p>
+  Today <code>recent</code> (liveness) sits alongside <code>needs-you</code> (status) as if they were
+  the same kind of thing. That conflation is why closing feels like losing: a closed session drops to
+  the bottom of one flat ordering and is then truncated.
+</p>
+
+<h2>Confirmed decisions</h2>
+
+<div class="decided">
+  <strong>1. Triage lives as inline chips plus a Triage scope.</strong>
+  Every row carries its suggestion as a chip (<code>&#10003;complete</code> /
+  <code>&#9642;archive</code> / <code>&#8674;handoff</code>) accepted or dismissed in one click. The
+  existing scope selector gains a <em>Triage</em> option filtering to un-acted suggestions. Normal
+  browsing is unchanged; no session ever appears in two groups.
+</div>
+
+<div class="decided">
+  <strong>2. Infinite scroll, no caps.</strong>
+  Closed and archived groups page in as you scroll (~50 at a time). Requires paging the snapshot API
+  and virtualised rows so a thousand one-liners stay smooth.
+</div>
+
+<div class="decided">
+  <strong>3. Row density is a first-class concept, not a per-section hack.</strong>
+  Three tiers, driven by a <code>density</code> field on the projected row:
+  <ul>
+    <li><strong>full box</strong> &mdash; live sessions (open, costs RAM)</li>
+    <li><strong>one-line</strong> &mdash; closed sessions whose work is still active</li>
+    <li><strong>one-line in a collapsed dropdown</strong> &mdash; complete and archived</li>
+  </ul>
+</div>
+
+<div class="decided">
+  <strong>4. The muted/non-bold treatment moves to idle-but-open.</strong>
+  It is a good "does this need me" signal and is currently spent on closed sessions, where structural
+  lightness does the job better.
+</div>
+
+<div class="decided">
+  <strong>5. COMPLETE and ARCHIVED are sticky bars pinned to the bottom edge, not sections below the
+  scroll.</strong>
+  An infinite list has no bottom, so anything placed after it in document order is unreachable. Their
+  collapsed bars stay fixed at the bottom of the sidebar and are one click away from any scroll
+  position. Expanding one turns it into the scrolling list (accordion), so exactly one unbounded list
+  is ever live and "scroll to the end" always terminates. Side effect: the two counts are permanently
+  visible, which is itself the overall-state readout.
+</div>
+
+<h2>Target layout</h2>
+<pre>
++------------------------------------------+
+| Filter              Active v      sort   |  &lt;- sticky top
++------------------------------------------+
+| OPEN 9                        [close idle]
+|   NEEDS YOU 3   full box, bold title
+|   WORKING 2     full box
+|   IDLE 4        full box, muted title    |  scrolls
+|                                          |
+| CLOSED  ·  work still active             |
+|   - Reply with PONG        archive?  21h |  infinite
+|   - say ok x               complete? 17h |
+|   - One browser, delete Ink TUI      3d  |
+|   ... keeps loading as you scroll        |
++------------------------------------------+
+| COMPLETE 21                           &gt;  |  &lt;- sticky bottom,
+| ARCHIVED 65                           &gt;  |     always reachable
++------------------------------------------+
+</pre>
+<p class="note">
+  Expanding a bottom bar makes it the scrolling list and collapses CLOSED to its own bar, so exactly
+  one unbounded list is live at a time.
+</p>
+
+<h2>Implementation approach</h2>
+<ol>
+  <li>
+    <strong>Projection</strong> (<code>src/sidebar/projection.ts</code>): read v40 fields
+    (<code>state</code>, <code>next</code>, <code>remaining</code>, <code>history</code>) with fallback
+    to legacy <code>summary</code>/<code>outstanding</code>; add <code>suggestion</code> and
+    <code>density</code> to the row union. Rows stay a discriminated union per house style.
+  </li>
+  <li>
+    <strong>Shared reader</strong> (<code>src/catalogue/enrichment.ts</code>): extend to the v40
+    columns so the sidebar and TUI keep reading one source.
+  </li>
+  <li>
+    <strong>Snapshot + server</strong>: drop <code>RECENT_LIMIT</code>, add cursor paging to
+    <code>GET /api/snapshot</code>.
+  </li>
+  <li>
+    <strong>Web</strong>: three row components by density; collapsible COMPLETE/ARCHIVED sections;
+    suggestion chips; Triage scope; scroll paging.
+  </li>
+  <li>
+    <strong>Actions</strong>: chips call the existing
+    <code>POST /api/session/lifecycle</code> (<code>complete</code> / <code>archive</code> /
+    <code>uncomplete</code> / <code>unarchive</code>). No new mutation path, so ADR-0068's catalogue
+    boundary is respected.
+  </li>
+</ol>
+
+<h2>Open questions</h2>
+<p class="note">All resolved 2026-07-27. Kept here as the record of what was asked and decided.</p>
+
+<div class="decided">
+  <strong>6. <code>handoff</code> is display-only.</strong>
+  The chip shows the verdict but is not actionable from the sidebar: performing a handoff is work that
+  happens <em>inside</em> the session, not a lifecycle flag flipped from a list. Only
+  <code>complete</code> and <code>archive</code> get accept buttons, and both map to lifecycle verbs
+  that already exist.
+</div>
+
+<div class="decided">
+  <strong>7. Dismissal gets a catalogue column.</strong>
+  Without one a dismissed chip returns on the next enrichment sweep. The column records
+  <em>which verb</em> was dismissed, not merely that something was: dismissing <code>archive</code>
+  must not suppress a later <code>complete</code>, because enrichment changing its mind is new
+  information rather than the same suggestion repeating.
+</div>
+
+<div class="decided">
+  <strong>8. Junk stays individual clicks.</strong>
+  The 71 junk rows surface their <code>archive</code> suggestion like any other row. No bulk action:
+  junk is enrichment's inference, and 71 sessions disappearing on one click is a lot of trust to place
+  in it.
+</div>
+
+<div class="decided">
+  <strong>9. Last-known cmux status is not persisted.</strong>
+  It dies with the workspace and stays dead. Enrichment's <code>state</code> and <code>next</code>
+  already answer the same question durably and more usefully, so recording the pill would add a write
+  per poll for a strictly weaker signal.
+</div>
+
+<h2>Non-goals</h2>
+<ul>
+  <li>No deletion. Closed, complete, and archived sessions all stay searchable and reopenable.</li>
+  <li>No change to how enrichment computes anything. This consumes v40; it does not modify it.</li>
+  <li>No new global cmux setting. The sidebar is a web page and owns its own view state.</li>
+</ul>
+
+<h2>What changed</h2>
+<ul>
+  <li><strong>2026-07-27</strong> &mdash; plan created. Decisions 1&ndash;4 confirmed.</li>
+  <li><strong>2026-07-27</strong> &mdash; decision 5 added: COMPLETE/ARCHIVED become sticky bottom
+      bars after Milad noted that sections placed below an infinite list are unreachable.</li>
+  <li><strong>2026-07-27</strong> &mdash; decisions 6&ndash;9 settle the four open questions;
+      handoff is display-only, dismissal gets a verb-aware column, junk stays per-row, and the cmux
+      pill is not persisted. No open questions remain.</li>
+</ul>
+
+</main>
+<script>
+  // Keep scroll position across the timed refresh so the plan can be read while it updates.
+  const KEY = "sidebar-triage-ia:scroll";
+  const saved = sessionStorage.getItem(KEY);
+  if (saved) window.scrollTo(0, parseInt(saved, 10) || 0);
+  addEventListener("scroll", () => sessionStorage.setItem(KEY, String(window.scrollY)), { passive: true });
+</script>
+</body>
+</html>
