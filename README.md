@@ -1,21 +1,10 @@
 # claude-sessions (`ccs`)
 
-A single-machine TUI to find and resume **any** Claude Code session — regardless of which
+A single-machine Go TUI to find and resume **any** Claude Code session — regardless of which
 directory it started in. Claude Code's own `--resume` picker only shows sessions for the
 current directory; `ccs` shows them all, titled, searchable, and one keypress from resuming.
 
 It's also the read-only foundation for a future session-cataloguing layer.
-
-## Two interfaces (the Ink TUI is deprecated)
-
-`ccs` now launches the **Go TUI** in [`tui-go/`](tui-go/) — the default and the one that gets new
-work. It is built on demand (a rebuild happens only when a Go source file changed) and reads the
-CCS store read-only, routing every mutation back through the `ccs` CLI.
-
-The original Ink/React TUI is still reachable as **`ccs classic`**, prints a deprecation notice,
-and **will be removed** once the Go TUI closes its remaining parity gaps — fork-resume, full-text
-search, and narrow-terminal layout. A verified feature-by-feature comparison of the two lives in
-[`docs/ccs-vs-ccs-go.md`](docs/ccs-vs-ccs-go.md).
 
 ## What it does
 

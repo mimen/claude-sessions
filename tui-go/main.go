@@ -21,7 +21,12 @@ func main() {
 		fmt.Print(ui.Shot(shot, snapshot))
 		return
 	}
-	program := tea.NewProgram(ui.New(snapshot), tea.WithAltScreen())
+	model := ui.New(snapshot)
+	// `ccs skills` opens straight into the skills browser.
+	if len(os.Args) > 1 && os.Args[1] == "skills" {
+		model = model.StartInSkills()
+	}
+	program := tea.NewProgram(model, tea.WithAltScreen())
 	final, err := program.Run()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ccs-go:", err)
