@@ -23,6 +23,7 @@ import {
   type GroupingMode,
 } from "./format.ts";
 import { SessionRow } from "./components/session-row.tsx";
+import { CompactRow } from "./components/compact-row.tsx";
 import { Input } from "@/components/ui/input";
 import { SearchIcon } from "./components/icons.tsx";
 import { GroupingSelect } from "./components/grouping-select.tsx";
@@ -491,21 +492,38 @@ export function App(): React.ReactElement {
               </div>
             ) : null}
             {group.rows.map((row) => (
-              <SessionRow
-                key={row.id}
-                row={row}
-                now={now}
-                selected={flatRows[selected]?.id === row.id}
-                showShortcut={metaHeld}
-                opening={openingIds.has(row.id)}
-                onClose={closeWorkspace}
-                onLifecycle={setLifecycle}
-                onPin={setPinned}
-                onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
-                registerRef={(element) => {
-                  rowRefs.current[flatRows.indexOf(row)] = element;
-                }}
-              />
+              // Density is decided in the projection, so the view only has to honour it. A closed
+              // or settled session collapses to a line; anything live keeps the full card.
+              row.kind === "session" && row.density !== "full" ? (
+                <CompactRow
+                  key={row.id}
+                  now={now}
+                  onAccept={setLifecycle}
+                  onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
+                  opening={openingIds.has(row.id)}
+                  registerRef={(_id, element) => {
+                    rowRefs.current[flatRows.indexOf(row)] = element;
+                  }}
+                  row={row}
+                  selected={flatRows[selected]?.id === row.id}
+                />
+              ) : (
+                <SessionRow
+                  key={row.id}
+                  row={row}
+                  now={now}
+                  selected={flatRows[selected]?.id === row.id}
+                  showShortcut={metaHeld}
+                  opening={openingIds.has(row.id)}
+                  onClose={closeWorkspace}
+                  onLifecycle={setLifecycle}
+                  onPin={setPinned}
+                  onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
+                  registerRef={(element) => {
+                    rowRefs.current[flatRows.indexOf(row)] = element;
+                  }}
+                />
+              )
             ))}
           </div>
         ))}
