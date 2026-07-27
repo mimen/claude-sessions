@@ -196,7 +196,7 @@ status = "active"
 [[location]]
 key = "ccs"
 name = "CCS"
-aliases = ["claude sessions", "session catalogue", "session router"]
+aliases = ["claude sessions", "session catalogue", "session router", "ccs tui", "ccs go", "charmtone"]
 cwd = "~/Programming/Repos/claude-sessions"
 kind = "repo"
 eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
@@ -240,16 +240,6 @@ key = "t3code"
 name = "T3 Code"
 aliases = ["t3", "t3 code", "claude swap"]
 cwd = "~/Programming/Repos/t3code"
-kind = "repo"
-eligible_hosts = ["Milads-M3-2"]
-preferred_host = "Milads-M3-2"
-status = "active"
-
-[[location]]
-key = "ccs-go"
-name = "CCS Go"
-aliases = ["ccs tui", "charmtone"]
-cwd = "~/Programming/Repos/ccs-go"
 kind = "repo"
 eligible_hosts = ["Milads-M3-2"]
 preferred_host = "Milads-M3-2"

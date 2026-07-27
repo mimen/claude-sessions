@@ -1,13 +1,17 @@
-# ccs-go
+# tui-go
 
-A standalone Go + Bubble Tea session manager for CCS. It is navigate-led: launch answers “what needs me,” resume and organization are one key away, and cost remains visible without becoming the primary axis.
+The Go + Bubble Tea session manager that ships as `ccs`. It is navigate-led: launch answers “what needs me,” resume and organization are one key away, and cost remains visible without becoming the primary axis.
 
 The UI reads the real CCS stores directly in SQLite read-only mode. Every metadata mutation is delegated to the installed `ccs` CLI so the TypeScript implementation remains the owner of migrations and invariants.
 
 ## Run
 
 ```bash
-cd /Users/mimen/Programming/Repos/ccs-go
+# it ships as the `ccs` command:
+ccs
+
+# or run it directly from this repo:
+cd tui-go
 go run .
 ```
 

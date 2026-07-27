@@ -57,7 +57,7 @@ fires. Failure is invisible. Fix the gate before v41, not after.
 
 ## 2. The ccs-go dossier
 
-**Where:** `~/Programming/Repos/ccs-go` on `feat/navigate-led-redesign` (another session's branch).
+**Where:** `tui-go/` in this repo (was `~/Programming/Repos/ccs-go`, now removed).
 
 **What to change:**
 

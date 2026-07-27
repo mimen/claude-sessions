@@ -63,7 +63,7 @@ test("loads the vault registry shape and canonical host defaults", () => {
   expect(loaded.value.defaultHost).toBe(MINI_HOST);
   expect(loaded.value.defaultHarness).toBe("claude-gpt");
   expect(loaded.value.defaultModel).toBe("gpt-5.6-sol");
-  expect(loaded.value.locations).toHaveLength(30);
+  expect(loaded.value.locations).toHaveLength(29);
   expect(new Set(loaded.value.locations.map((location) => location.kind))).toEqual(
     new Set(["root", "workspace", "repo", "config"]),
   );

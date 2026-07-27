@@ -2,7 +2,8 @@
 
 Verified against real code on 2026-07-24.
 Ink side: `/Users/mimen/Programming/Repos/claude-sessions` @ branch `fix/transactional-catalogue-migrations`.
-Go side: `/Users/mimen/Programming/Repos/ccs-go` @ `feat/navigate-led-redesign`.
+Go side: then a standalone repo at `~/Programming/Repos/ccs-go`; since moved into this repo at
+`tui-go/` and now shipping as `ccs` (the Ink TUI described here has been removed).
 
 Both are installed and run side by side: `ccs` (Ink) · `ccs-go` (Go).
 
