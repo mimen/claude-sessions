@@ -108,6 +108,15 @@ export function App(): React.ReactElement {
   const [now, setNow] = useState(() => Date.now());
   /** True while Command is held. Only observable when this page holds keyboard focus. */
   const [metaHeld, setMetaHeld] = useState(false);
+  /**
+   * Whether the pointer is inside the sidebar right now.
+   *
+   * A hover card asserts where the mouse is, so it has to be retractable by the same fact. Row-level
+   * `mouseleave` is not enough on its own: moving the pointer out of the window in one motion, or
+   * another app taking focus, can leave a row believing it is still hovered and strand a card on
+   * screen with the mouse nowhere near it.
+   */
+  const [pointerInside, setPointerInside] = useState(false);
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const openingIdsRef = useRef(new Set<string>());
   const selectedScopeRef = useRef(scope);
@@ -197,6 +206,25 @@ export function App(): React.ReactElement {
       window.removeEventListener("keydown", sync);
       window.removeEventListener("keyup", sync);
       window.removeEventListener("blur", clear);
+    };
+  }, []);
+
+  // The same failure the Command badges have, for the same reason: an exit the container never
+  // sees. `mouseout` to a null relatedTarget is the pointer leaving the document entirely, and
+  // blur/visibilitychange cover another window or app taking over. Any of them means the mouse is
+  // no longer here, so no hover card may claim otherwise.
+  useEffect(() => {
+    const leave = (): void => setPointerInside(false);
+    const onMouseOut = (event: MouseEvent): void => {
+      if (event.relatedTarget === null) leave();
+    };
+    document.addEventListener("mouseout", onMouseOut);
+    document.addEventListener("visibilitychange", leave);
+    window.addEventListener("blur", leave);
+    return () => {
+      document.removeEventListener("mouseout", onMouseOut);
+      document.removeEventListener("visibilitychange", leave);
+      window.removeEventListener("blur", leave);
     };
   }, []);
 
@@ -434,6 +462,10 @@ export function App(): React.ReactElement {
   return (
     <div
       className="relative flex h-full flex-col bg-background text-foreground"
+      // `mouseleave` on the container catches the ordinary exit; the window listeners below catch
+      // the ones it misses, which are the cases that actually strand a card.
+      onMouseEnter={() => setPointerInside(true)}
+      onMouseLeave={() => setPointerInside(false)}
       onKeyDown={onKeyDown}
     >
       {/*
@@ -502,8 +534,9 @@ export function App(): React.ReactElement {
                   onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
                   opening={openingIds.has(row.id)}
                   registerRef={(_id, element) => {
-                    rowRefs.current[flatRows.indexOf(row)] = element;
+                    rowRefs.current[flatRows.indexOf(row)] = element as HTMLButtonElement | null;
                   }}
+                  pointerInside={pointerInside}
                   row={row}
                   selected={flatRows[selected]?.id === row.id}
                 />
@@ -519,6 +552,7 @@ export function App(): React.ReactElement {
                   onLifecycle={setLifecycle}
                   onPin={setPinned}
                   onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
+                  pointerInside={pointerInside}
                   registerRef={(element) => {
                     rowRefs.current[flatRows.indexOf(row)] = element;
                   }}

@@ -1,5 +1,5 @@
 /** Display helpers for the sidebar rows. Pure, so they are tested without a DOM. */
-import type { SidebarScope, SidebarSection } from "../projection.ts";
+import type { SidebarDensity, SidebarScope, SidebarSection } from "../projection.ts";
 
 /**
  * Time since the last activity, at the coarsest unit that still distinguishes rows.
@@ -124,6 +124,27 @@ interface GroupableRow {
   readonly directory: string | null;
   readonly lastActivityAt: number | null;
   readonly pinned: boolean;
+  /** Full for a live session; the collapsed densities are closed or settled work. */
+  readonly density: SidebarDensity;
+}
+
+/**
+ * Open work sits above closed work inside every group.
+ *
+ * A group is a queue of things that might need you, and a closed session cannot need you: it has
+ * no live process to be waiting on anything. Interleaving the two by recency alone put one-line
+ * closed rows between full cards, which broke the run of cards visually and buried live work
+ * behind sessions that had merely been touched more recently.
+ */
+function openFirst<Row extends GroupableRow>(
+  compare: (left: Row, right: Row) => number,
+): (left: Row, right: Row) => number {
+  return (left, right) => {
+    const leftClosed = left.density !== "full";
+    const rightClosed = right.density !== "full";
+    if (leftClosed !== rightClosed) return leftClosed ? 1 : -1;
+    return compare(left, right);
+  };
 }
 
 /** A pin is an explicit instruction to keep something in view, so it outranks every other order. */
@@ -168,7 +189,7 @@ export function groupSessions<Row extends GroupableRow>(
   const pinned = rows.filter((row) => row.pinned);
   const rest = rows.filter((row) => !row.pinned);
   const pinnedGroup: Array<SessionGroup<Row>> = pinned.length > 0
-    ? [{ key: "pinned", label: "Pinned", rows: [...pinned].sort(byWaitingLongest) }]
+    ? [{ key: "pinned", label: "Pinned", rows: [...pinned].sort(openFirst(byWaitingLongest)) }]
     : [];
   return [...pinnedGroup, ...groupUnpinned(rest, mode, now)];
 }
@@ -182,7 +203,7 @@ function groupUnpinned<Row extends GroupableRow>(
     // Ordering alone makes "how stale is this?" a matter of counting rows. Age bands answer it
     // directly, and the boundaries are the ones people actually reason in.
     const buckets = new Map<string, Row[]>();
-    for (const row of [...rows].sort(pinnedFirst(byRecency))) {
+    for (const row of [...rows].sort(pinnedFirst(openFirst(byRecency)))) {
       const band = recencyBand(row.lastActivityAt, now);
       const bucket = buckets.get(band);
       if (bucket) bucket.push(row);
@@ -205,7 +226,7 @@ function groupUnpinned<Row extends GroupableRow>(
     // under the cursor every few seconds; a stable order is worth more here than freshness,
     // which the rows themselves already carry.
     return [...byProject.entries()]
-      .map(([key, projectRows]) => ({ key, label: key, rows: [...projectRows].sort(pinnedFirst(byRecency)) }))
+      .map(([key, projectRows]) => ({ key, label: key, rows: [...projectRows].sort(pinnedFirst(openFirst(byRecency))) }))
       .sort((left, right) => left.key.localeCompare(right.key, undefined, { sensitivity: "base" }));
   }
 
@@ -216,7 +237,7 @@ function groupUnpinned<Row extends GroupableRow>(
       // A status section is a queue: whatever has been waiting longest is at the top, so the
       // thing most overdue for attention is the first thing read. Pins still lead.
       rows: rows.filter((row) => row.section === section)
-        .sort(pinnedFirst(byWaitingLongest)),
+        .sort(pinnedFirst(openFirst(byWaitingLongest))),
     }))
     .filter((group) => group.rows.length > 0);
 }

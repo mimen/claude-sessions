@@ -35,6 +35,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { StatusIcon } from "./status-icon.tsx";
+import { EmptySummaryCard, SummaryCard, summaryAsText } from "./summary-card.tsx";
 
 /**
  * cmux's status words mapped onto the vendored component's four states. cmux owns the label;
@@ -73,72 +74,6 @@ function ModelMark({ provider }: { provider: string }): React.ReactElement | nul
 function surfaceSummary(kinds: readonly string[]): string {
   const distinct = [...new Set(kinds)];
   return distinct.length > 0 ? distinct.join(" · ") : "empty";
-}
-
-const RECOMMENDATION_TONES: Readonly<Record<string, string>> = {
-  complete: "var(--action-confirm)",
-  archive: "var(--action-shelve)",
-  handoff: "var(--action-destroy)",
-  continue: "#4C8DFF",
-};
-
-/** The whole enrichment record as plain text, for the clipboard. */
-function summaryAsText(summary: SidebarSummary, name: string): string {
-  const parts = [name, ""];
-  if (summary.recommendation) parts.push(`Recommendation: ${summary.recommendation}`, "");
-  parts.push(summary.summary);
-  if (summary.reason) parts.push("", `Reason: ${summary.reason}`);
-  if (summary.outstanding) parts.push("", `Outstanding: ${summary.outstanding}`);
-  return parts.join("\n");
-}
-
-/** How far the transcript has moved since the summary was written. */
-function summaryAge(messagesSince: number | null): string | null {
-  if (messagesSince === null) return null;
-  if (messagesSince === 0) return "up to date";
-  return `${messagesSince} message${messagesSince === 1 ? "" : "s"} since`;
-}
-
-function SummaryCard({ summary }: { summary: SidebarSummary }): React.ReactElement {
-  const age = summaryAge(summary.messagesSince);
-  return (
-    <>
-      {summary.recommendation || age ? (
-        <span className="flex items-center gap-1.5">
-          {summary.recommendation ? (
-            <>
-              <span
-                aria-hidden="true"
-                className="size-1.5 shrink-0 rounded-full"
-                style={{ background: RECOMMENDATION_TONES[summary.recommendation] ?? "var(--muted-foreground)" }}
-              />
-              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground">
-                {summary.recommendation}
-              </span>
-            </>
-          ) : null}
-          {age ? <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">{age}</span> : null}
-        </span>
-      ) : null}
-      {/*
-        * The whole summary, scrolled rather than clamped. A truncated paragraph with no way to
-        * reach the rest is the worst of both: it costs the space and still withholds the answer.
-        */}
-      {/*
-        * The card ignores the pointer so it never blocks the row beneath, which also means it can
-        * never be scrolled. The body is therefore capped by clamping rather than overflow, and
-        * "Copy summary" in the context menu is the way to read anything past the cut.
-        */}
-      <span className="line-clamp-[14] text-[12px] leading-[1.45] text-foreground">
-        {summary.summary}
-      </span>
-      {summary.reason ? (
-        <span className="border-t border-border pt-2 text-[11px] leading-[1.4] text-muted-foreground">
-          {summary.reason}
-        </span>
-      ) : null}
-    </>
-  );
 }
 
 /** One hover-revealed control. The tone states the consequence, not the kind of thing acted on. */
@@ -254,6 +189,13 @@ export interface SessionRowProps {
   readonly opening: boolean;
   readonly onOpen: (row: SidebarRow) => void;
   readonly registerRef: (element: HTMLButtonElement | null) => void;
+  /**
+   * False whenever the pointer is not inside the sidebar. A hover card is a claim about where
+   * the mouse is right now, and `mouseleave` is not guaranteed to fire when the pointer leaves
+   * the window or another app takes focus -- without this the card can hang on screen with the
+   * mouse nowhere near it.
+   */
+  readonly pointerInside: boolean;
 }
 
 export function SessionRow({
@@ -267,6 +209,7 @@ export function SessionRow({
   onClose,
   onPin,
   registerRef,
+  pointerInside,
 }: SessionRowProps): React.ReactElement {
   // Only a session has a lifecycle to act on. A browser split or plain shell is navigation
   // only: there is nothing to complete, archive, or enrich, so it gets no lifecycle controls.
@@ -313,7 +256,9 @@ export function SessionRow({
         */}
       <span className="flex items-stretch gap-2">
         <span className="flex min-w-0 flex-1 flex-col justify-between">
-          <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          {/* The project line needs air under it: at 10px directly above a 13px title the two read
+            * as one wrapped string rather than as label-then-thing. */}
+          <span className="mb-[2px] flex items-center gap-1.5 text-[10px] text-muted-foreground">
             <ProjectIcon source={row.faviconUrl} />
             <span className="truncate">{row.directory ?? shortenPath(row.directoryPath)}</span>
             {/*
@@ -469,8 +414,10 @@ export function SessionRow({
         // The delay is the whole design: summaries sit on nearly every row, so an instant card
         // would fire a paragraph under the cursor on every row you scan past. At ~600ms it only
         // appears when you deliberately rest on one.
+        // Every session gets a card, enriched or not: four fifths are unenriched, and showing
+        // nothing made "no summary" indistinguishable from "the card failed to open".
         render={
-          summary
+          session
             ? <PreviewCardTrigger delay={600} render={rowButton} />
             : rowButton
         }
@@ -531,17 +478,22 @@ export function SessionRow({
     // The card is suppressed outright while the menu is open, so a right-click never leaves two
     // overlays stacked on the same row.
     <div>
-      <PreviewCard onOpenChange={setCardOpen} open={cardOpen && !menuOpen}>
+      <PreviewCard onOpenChange={setCardOpen} open={cardOpen && !menuOpen && pointerInside}>
         {menu}
       {/*
         * Centred on the row, which spans the sidebar, so the card is centred in the sidebar with
         * a small margin either side rather than anchored to wherever the pointer entered.
         */}
+        {/* The card must not be hoverable itself. It covers the rows below the one you are on, so
+          * if it held the hover it would stay up while you moved toward the next session and block
+          * the very row you were reaching for -- the pointer has to fall through to whatever is
+          * underneath. The cost is that the card can never be scrolled or selected, which is why
+          * the body clamps and "Copy summary" exists in the context menu. */}
         <PreviewCardPopup
           align="center"
-          className="w-[calc(100vw-1rem)] max-w-none flex-col gap-2 p-3"
+          className="pointer-events-none w-[calc(100vw-1rem)] max-w-none flex-col gap-2 p-3"
         >
-          <SummaryCard summary={summary} />
+          {summary ? <SummaryCard summary={summary} /> : <EmptySummaryCard />}
         </PreviewCardPopup>
       </PreviewCard>
     </div>

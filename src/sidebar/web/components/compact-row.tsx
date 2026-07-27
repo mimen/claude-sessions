@@ -18,6 +18,12 @@ import { relativeTime } from "../format.ts";
 import { cn } from "@/lib/utils";
 import { SuggestionChip } from "./suggestion-chip.tsx";
 import { ProjectMark } from "./project-mark.tsx";
+import { EmptySummaryCard, SummaryCard } from "./summary-card.tsx";
+import {
+  PreviewCard,
+  PreviewCardPopup,
+  PreviewCardTrigger,
+} from "@/components/ui/preview-card";
 
 export interface CompactRowProps {
   readonly row: SidebarSessionRow;
@@ -29,6 +35,8 @@ export interface CompactRowProps {
   readonly onAccept?: (row: SidebarSessionRow, verb: "complete" | "archive") => void;
   readonly onDismiss?: (row: SidebarSessionRow) => void;
   readonly registerRef?: (id: string, element: HTMLElement | null) => void;
+  /** False whenever the pointer is not inside the sidebar; see SessionRowProps.pointerInside. */
+  readonly pointerInside: boolean;
 }
 
 export function CompactRow({
@@ -40,19 +48,25 @@ export function CompactRow({
   onAccept,
   onDismiss,
   registerRef,
+  pointerInside,
 }: CompactRowProps): React.ReactElement {
   const [hovered, setHovered] = useState(false);
+  const [cardOpen, setCardOpen] = useState(false);
   const age = relativeTime(row.lastActivityAt, now);
   const suggestion = row.suggestion;
 
   const open = useCallback((): void => onOpen(row), [onOpen, row]);
+  const summary = row.summary;
 
-  return (
+  const rowButton = (
     <button
       aria-busy={opening}
       aria-selected={selected}
       className={cn(
-        "group flex w-full cursor-pointer items-center gap-1.5 rounded-(--radius) px-2 py-[3px]",
+        // Same horizontal padding, corner radius and bottom margin as the full card, so the hover
+        // surface lines up with the cards above instead of reading as a differently-shaped list.
+        // Only the vertical padding shrinks -- that is where the height saving comes from.
+        "group mb-1.5 flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-[3px]",
         "text-left transition-colors duration-75",
         "hover:bg-secondary focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
         selected && "bg-secondary ring-1 ring-ring/60 ring-inset",
@@ -89,5 +103,24 @@ export function CompactRow({
         <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">{age}</span>
       ) : null}
     </button>
+  );
+
+  // A closed session is exactly the case where you no longer remember what it was, so the summary
+  // is worth more here than on a live row, not less. Same 600ms delay: summaries sit on most rows,
+  // and an instant card would fire a paragraph under the cursor on everything you scroll past.
+  return (
+    <PreviewCard onOpenChange={setCardOpen} open={cardOpen && pointerInside}>
+      <PreviewCardTrigger delay={600} render={rowButton} />
+      {/* Same geometry as the full row's card, so a summary does not jump around as you move
+        * between an open session and a closed one -- and pointer-events-none for the same reason
+        * it carries there: the card overlaps the rows below, so holding the hover itself would
+        * keep it up while you reach for the next session. */}
+      <PreviewCardPopup
+        align="center"
+        className="pointer-events-none w-[calc(100vw-1rem)] max-w-none flex-col gap-2 p-3"
+      >
+        {summary ? <SummaryCard summary={summary} /> : <EmptySummaryCard />}
+      </PreviewCardPopup>
+    </PreviewCard>
   );
 }
