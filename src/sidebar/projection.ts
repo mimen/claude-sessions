@@ -8,7 +8,10 @@
  * Every input is supplied by the caller so this module stays free of cmux, SQLite, and git I/O.
  */
 import type { Lifecycle } from "../catalogue/db.ts";
+import { messagesSince, type SessionEnrichment } from "../catalogue/enrichment.ts";
 import { familyOf } from "../tui/format.ts";
+
+export type { SessionEnrichment };
 
 /** cmux's own `claude_code` status entry, exactly as cmux renders it. */
 export interface CmuxClaudeStatus {
@@ -91,20 +94,6 @@ export interface CheckoutInput {
   /** The linked worktree's name, or null when this is the repository's main checkout. */
   readonly worktree: string | null;
   readonly branch: string | null;
-}
-
-/** What enrichment concluded about a session, as the catalogue recorded it. */
-export interface SessionEnrichment {
-  /** What happened in the session. */
-  readonly summary: string;
-  /** Why the recommendation follows, in enrichment's own words. */
-  readonly reason: string | null;
-  /** What enrichment thinks should happen next. */
-  readonly recommendation: string | null;
-  /** Work explicitly left open. */
-  readonly outstanding: string | null;
-  /** Transcript message count when the summary was written. */
-  readonly atMessages: number | null;
 }
 
 /** An enrichment record plus how far the transcript has moved since it was written. */
@@ -410,11 +399,7 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     const found = summaries.get(sessionId)
       ?? (indexed ? summaries.get(indexed.sessionId) ?? summaries.get(indexed.resumeId) : undefined);
     if (!found) return null;
-    const now = indexed?.messageCount ?? null;
-    const messagesSince = now !== null && found.atMessages !== null
-      ? Math.max(0, now - found.atMessages)
-      : null;
-    return { ...found, messagesSince };
+    return { ...found, messagesSince: messagesSince(found, indexed?.messageCount ?? null) };
   };
   const faviconUrlFor = (cwd: string | null): string | null =>
     cwd && faviconDirectories.has(cwd) ? `/api/favicon?dir=${encodeURIComponent(cwd)}` : null;

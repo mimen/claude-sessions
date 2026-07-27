@@ -8,6 +8,7 @@ import { formatCost } from "../cost.ts";
 import { theme, costColor } from "./theme.ts";
 import { formatTokens, modelBreakdown, formatDuration, burnPerDay } from "./format.ts";
 import type { TaskSummary } from "../tasks/reader.ts";
+import type { SessionEnrichment } from "../catalogue/enrichment.ts";
 
 interface PreviewProps {
   row: SessionRow;
@@ -39,6 +40,8 @@ interface PreviewProps {
   reviewAppUrl?: string | null;
   /** Claude Code task list for this session (~/.claude/tasks/<id>/), if any. */
   tasks?: TaskSummary | null;
+  /** What enrichment concluded, plus how far the transcript has moved since. */
+  summary?: PreviewSummary | null;
   /** Total height available to the pane (border included). */
   height: number;
   /** Total width of the pane (border included). Fixed so the box always spans its column, even when
@@ -51,6 +54,31 @@ interface PreviewProps {
   peekLines: TranscriptLine[] | null;
   /** Peek scroll offset in rows (only meaningful once `peekLines` is loaded); clamped here. */
   peekScroll: number;
+}
+
+/** An enrichment record plus how far the transcript has moved since it was written. */
+export interface PreviewSummary extends SessionEnrichment {
+  readonly messagesSince: number | null;
+}
+
+/**
+ * How stale the summary is, in the same units the catalogue stamped it with.
+ *
+ * A summary with no message count behind it says so rather than claiming to be current: "unknown"
+ * is a weaker claim than "0 new", and reporting the stronger one would make every un-stamped
+ * summary look freshly written.
+ */
+function stalenessLabel(messagesSince: number | null): string {
+  if (messagesSince === null) return "age unknown";
+  if (messagesSince === 0) return "current";
+  return `${messagesSince} msg${messagesSince === 1 ? "" : "s"} behind`;
+}
+
+/** Green while the summary still describes the session; amber once the transcript has outrun it. */
+function stalenessColor(messagesSince: number | null): string {
+  if (messagesSince === null) return theme.faint;
+  if (messagesSince === 0) return theme.sourceNative;
+  return messagesSince >= 50 ? "yellow" : theme.muted;
 }
 
 const SOURCE_COLOR = {
@@ -207,6 +235,7 @@ export function Preview({
   epicUrl,
   reviewAppUrl,
   tasks,
+  summary,
   height,
   width,
   detailsOpen,
@@ -293,6 +322,16 @@ export function Preview({
         <Text key="task" color={theme.accent} wrap="truncate-end">
           ▸ {inProgress.subject}
           {openTasks.length > 1 ? <Text color={theme.muted}>{`  +${openTasks.length - 1} open`}</Text> : null}
+        </Text>,
+      );
+    }
+    // The staleness marker leads: a summary the transcript has outrun describes a session that no
+    // longer exists, and reading it as current is the actual failure mode. `d` shows the full text.
+    if (summary) {
+      H.push(
+        <Text key="summary" wrap="truncate-end">
+          <Text color={stalenessColor(summary.messagesSince)}>◈ {stalenessLabel(summary.messagesSince)}</Text>
+          <Text color={theme.muted}>  ·  {summary.summary}</Text>
         </Text>,
       );
     }
@@ -426,6 +465,24 @@ export function Preview({
         {event ? <Field label="event" value={`⊞ ${event}`} color={theme.project} /> : null}
         {parentTitle ? <Field label="parent" value={parentTitle} color="yellow" /> : null}
       </Box>
+
+      {summary ? (
+        <Box marginTop={1} flexDirection="column" flexShrink={0}>
+          <Field
+            label="summary"
+            value={stalenessLabel(summary.messagesSince)}
+            color={stalenessColor(summary.messagesSince)}
+          />
+          <Field label="" value={summary.summary} />
+          {summary.recommendation ? (
+            <Field label="" value={`→ ${summary.recommendation}`} color={theme.accent} />
+          ) : null}
+          {summary.outstanding ? (
+            <Field label="" value={`⊙ ${summary.outstanding}`} color="yellow" />
+          ) : null}
+          {summary.reason ? <Field label="" value={`· ${summary.reason}`} color={theme.faint} /> : null}
+        </Box>
+      ) : null}
 
       <Box marginTop={1} flexDirection="column" flexShrink={0}>
         <Box>

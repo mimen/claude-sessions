@@ -68,11 +68,14 @@ import {
   type IndexedSessionInput,
   type LiveSessionInput,
   type LiveWorkspaceInput,
-  type SessionEnrichment,
   type SidebarLifecycle,
   type SidebarScope,
   type SidebarSnapshot,
 } from "./projection.ts";
+import {
+  readEnrichmentSummaries,
+  type SessionEnrichment,
+} from "../catalogue/enrichment.ts";
 
 /** How many indexed sessions are considered before the resume shelf is filled. */
 const INDEX_SCAN_LIMIT = 200;
@@ -447,62 +450,6 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       });
       return { sessions: [], readable: false };
     }
-  }
-
-  /**
-   * Enrichment summaries, read straight off the column because the catalogue row type does not
-   * carry it. Only ~a fifth of sessions have ever been enriched, so a missing summary is the
-   * normal case and yields no entry rather than an empty string the UI would have to special-case.
-   * A catalogue predating the column simply returns nothing.
-   */
-  function readEnrichmentSummaries(db: Database): Map<string, SessionEnrichment> {
-    const summaries = new Map<string, SessionEnrichment>();
-    try {
-      const columns = new Set(
-        (db.query("PRAGMA table_info(catalogue)").all() as Array<{ name: string }>)
-          .map((column) => column.name),
-      );
-      if (!columns.has("enrichment_summary")) return summaries;
-      // Each companion column is selected only when it exists, so a catalogue written before any
-      // one of them was added still yields the fields it does have.
-      const optional = (name: string): string =>
-        columns.has(name) ? name : `NULL AS ${name}`;
-      const rows = db.query(
-        `SELECT session_id, resume_id, enrichment_summary,
-                ${optional("enrichment_reason")},
-                ${optional("enrichment_recommendation")},
-                ${optional("enrichment_outstanding")},
-                ${optional("enrichment_at_messages")}
-           FROM catalogue
-          WHERE enrichment_summary IS NOT NULL AND TRIM(enrichment_summary) != ''`,
-      ).all() as Array<{
-        session_id: string;
-        resume_id: string | null;
-        enrichment_summary: string;
-        enrichment_reason: string | null;
-        enrichment_recommendation: string | null;
-        enrichment_outstanding: string | null;
-        enrichment_at_messages: number | null;
-      }>;
-      const text = (value: string | null): string | null => {
-        const trimmed = value?.trim() ?? "";
-        return trimmed.length > 0 ? trimmed : null;
-      };
-      for (const row of rows) {
-        const record: SessionEnrichment = {
-          summary: row.enrichment_summary.trim(),
-          reason: text(row.enrichment_reason),
-          recommendation: text(row.enrichment_recommendation),
-          outstanding: text(row.enrichment_outstanding),
-          atMessages: row.enrichment_at_messages ?? null,
-        };
-        summaries.set(row.session_id, record);
-        if (row.resume_id) summaries.set(row.resume_id, record);
-      }
-    } catch {
-      // A summary is a nicety; failing to read one must never cost the caller its lifecycle data.
-    }
-    return summaries;
   }
 
   function readCatalogueLifecycles(): Result<CatalogueLifecycleState> {

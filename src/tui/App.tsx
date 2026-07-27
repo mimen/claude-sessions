@@ -44,6 +44,11 @@ import { buildCostRollup, type CostRollup } from "../index/cost-rollup.ts";
 import { boardIndex } from "../board/indexer.ts";
 import { allGroupingsAcrossClusters } from "../state/groupings.ts";
 import { describe as describeDisposition } from "../catalogue/disposition.ts";
+import {
+  messagesSince,
+  readEnrichmentSummaries,
+  type SessionEnrichment,
+} from "../catalogue/enrichment.ts";
 import { loadPrefs, savePrefs } from "./prefs.ts";
 import { runMetadataCommand, applyMutations, type SessionMeta } from "../catalogue/command.ts";
 import { buildStateItems, DEFAULT_COLLAPSED } from "./stateGroups.ts";
@@ -295,6 +300,13 @@ export function App({
   // catalogue is present (tests mount without one, so no cmux probe runs there).
   const catMap = useMemo(
     () => (catalogue ? getAll(catalogue) : new Map()),
+    [catalogue, refreshTick],
+  );
+  // Enrichment summaries, read off the catalogue columns the row type does not carry. Same reader
+  // the sidebar uses, so the two surfaces can never disagree about what a session's summary says
+  // or how stale it is.
+  const summaryMap = useMemo(
+    () => (catalogue ? readEnrichmentSummaries(catalogue) : new Map<string, SessionEnrichment>()),
     [catalogue, refreshTick],
   );
   // Grouping (epic) display metadata is CLUSTER RUNTIME state now (ADR-0051), not a platform
@@ -1260,6 +1272,12 @@ export function App({
         const attrs = key ? identityAttrsMap.get(key) : null;
         const url = attrs?.review_app_url;
         return typeof url === "string" && url.startsWith("http") ? url : null;
+      })()}
+      summary={(() => {
+        const found = summaryMap.get(selectedRow.sessionId)
+          ?? summaryMap.get(selectedRow.resumeId);
+        if (!found) return null;
+        return { ...found, messagesSince: messagesSince(found, selectedRow.msgCount) };
       })()}
       tasks={taskIds.has(selectedRow.sessionId) ? tasksFor(selectedRow.sessionId) : null}
       height={previewHeight}
