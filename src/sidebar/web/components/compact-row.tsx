@@ -18,12 +18,6 @@ import { relativeTime } from "../format.ts";
 import { cn } from "@/lib/utils";
 import { SuggestionChip } from "./suggestion-chip.tsx";
 import { ProjectMark } from "./project-mark.tsx";
-import { EmptySummaryCard, SummaryCard } from "./summary-card.tsx";
-import {
-  PreviewCard,
-  PreviewCardPopup,
-  PreviewCardTrigger,
-} from "@/components/ui/preview-card";
 
 export interface CompactRowProps {
   readonly row: SidebarSessionRow;
@@ -35,8 +29,8 @@ export interface CompactRowProps {
   readonly onAccept?: (row: SidebarSessionRow, verb: "complete" | "archive") => void;
   readonly onDismiss?: (row: SidebarSessionRow) => void;
   readonly registerRef?: (id: string, element: HTMLElement | null) => void;
-  /** False whenever the pointer is not inside the sidebar; see SessionRowProps.pointerInside. */
-  readonly pointerInside: boolean;
+  /** Report the pointer entering this row, or leaving it (null); the list owns the card. */
+  readonly onHover: (row: SidebarSessionRow, element: HTMLElement | null) => void;
 }
 
 export function CompactRow({
@@ -48,17 +42,15 @@ export function CompactRow({
   onAccept,
   onDismiss,
   registerRef,
-  pointerInside,
+  onHover,
 }: CompactRowProps): React.ReactElement {
   const [hovered, setHovered] = useState(false);
-  const [cardOpen, setCardOpen] = useState(false);
   const age = relativeTime(row.lastActivityAt, now);
   const suggestion = row.suggestion;
 
   const open = useCallback((): void => onOpen(row), [onOpen, row]);
-  const summary = row.summary;
 
-  const rowButton = (
+  return (
     <button
       aria-busy={opening}
       aria-selected={selected}
@@ -76,8 +68,8 @@ export function CompactRow({
         row.density === "settled" && "opacity-60",
       )}
       onClick={open}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={(event) => { setHovered(true); onHover(row, event.currentTarget); }}
+      onMouseLeave={() => { setHovered(false); onHover(row, null); }}
       ref={(element) => registerRef?.(row.id, element)}
       type="button"
     >
@@ -105,22 +97,4 @@ export function CompactRow({
     </button>
   );
 
-  // A closed session is exactly the case where you no longer remember what it was, so the summary
-  // is worth more here than on a live row, not less. Same 600ms delay: summaries sit on most rows,
-  // and an instant card would fire a paragraph under the cursor on everything you scroll past.
-  return (
-    <PreviewCard onOpenChange={setCardOpen} open={cardOpen && pointerInside}>
-      <PreviewCardTrigger delay={600} render={rowButton} />
-      {/* Same geometry as the full row's card, so a summary does not jump around as you move
-        * between an open session and a closed one -- and pointer-events-none for the same reason
-        * it carries there: the card overlaps the rows below, so holding the hover itself would
-        * keep it up while you reach for the next session. */}
-      <PreviewCardPopup
-        align="center"
-        className="pointer-events-none w-[calc(100vw-1rem)] max-w-none flex-col gap-2 p-3"
-      >
-        {summary ? <SummaryCard summary={summary} /> : <EmptySummaryCard />}
-      </PreviewCardPopup>
-    </PreviewCard>
-  );
 }

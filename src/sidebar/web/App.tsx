@@ -24,6 +24,7 @@ import {
 } from "./format.ts";
 import { SessionRow } from "./components/session-row.tsx";
 import { CompactRow } from "./components/compact-row.tsx";
+import { HoverSummary, type HoverTarget } from "./components/hover-summary.tsx";
 import { Input } from "@/components/ui/input";
 import { SearchIcon } from "./components/icons.tsx";
 import { GroupingSelect } from "./components/grouping-select.tsx";
@@ -35,6 +36,8 @@ const POLL_INTERVAL_MS = 1_000;
 const GROUPING_STORAGE_KEY = "ccs-sidebar-grouping";
 const SCOPE_STORAGE_KEY = "ccs-sidebar-scope";
 const CLOCK_INTERVAL_MS = 30_000;
+/** Long enough not to fire while scanning past rows, short enough not to feel like waiting. */
+const HOVER_DELAY_MS = 220;
 
 type OpenStatus = "focused" | "resumed" | "not-found" | "liveness-unreadable" | "failed";
 
@@ -117,6 +120,12 @@ export function App(): React.ReactElement {
    * screen with the mouse nowhere near it.
    */
   const [pointerInside, setPointerInside] = useState(false);
+  /**
+   * The one row whose summary is showing. Single-valued on purpose: two cards at once was the
+   * previous design's routine failure, and it was possible only because each row owned its own.
+   */
+  const [hoverTarget, setHoverTarget] = useState<HoverTarget | null>(null);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const openingIdsRef = useRef(new Set<string>());
   const selectedScopeRef = useRef(scope);
@@ -214,7 +223,11 @@ export function App(): React.ReactElement {
   // blur/visibilitychange cover another window or app taking over. Any of them means the mouse is
   // no longer here, so no hover card may claim otherwise.
   useEffect(() => {
-    const leave = (): void => setPointerInside(false);
+    const leave = (): void => {
+      setPointerInside(false);
+      if (hoverTimerRef.current !== null) clearTimeout(hoverTimerRef.current);
+      setHoverTarget(null);
+    };
     const onMouseOut = (event: MouseEvent): void => {
       if (event.relatedTarget === null) leave();
     };
@@ -341,6 +354,23 @@ export function App(): React.ReactElement {
     }
   }, [load]);
 
+  /**
+   * Open the card after a short rest on a row, and close it the instant the pointer leaves.
+   *
+   * Asymmetric by design: the delay exists so scanning down the list does not fire a paragraph
+   * under the cursor on every row, but once you have left there is nothing to debounce -- a card
+   * that lingers is the bug, not a feature.
+   */
+  const onHover = useCallback((row: SidebarRow, element: HTMLElement | null): void => {
+    if (hoverTimerRef.current !== null) clearTimeout(hoverTimerRef.current);
+    if (element === null || row.kind !== "session") {
+      setHoverTarget(null);
+      return;
+    }
+    const rect = element.getBoundingClientRect();
+    hoverTimerRef.current = setTimeout(() => setHoverTarget({ row, rect }), HOVER_DELAY_MS);
+  }, []);
+
   const setLifecycle = useCallback((
     row: SidebarSessionRow,
     action: "complete" | "archive" | "uncomplete" | "unarchive",
@@ -465,7 +495,7 @@ export function App(): React.ReactElement {
       // `mouseleave` on the container catches the ordinary exit; the window listeners below catch
       // the ones it misses, which are the cases that actually strand a card.
       onMouseEnter={() => setPointerInside(true)}
-      onMouseLeave={() => setPointerInside(false)}
+      onMouseLeave={() => { setPointerInside(false); onHover({ kind: 'session' } as SidebarRow, null); }}
       onKeyDown={onKeyDown}
     >
       {/*
@@ -536,7 +566,7 @@ export function App(): React.ReactElement {
                   registerRef={(_id, element) => {
                     rowRefs.current[flatRows.indexOf(row)] = element as HTMLButtonElement | null;
                   }}
-                  pointerInside={pointerInside}
+                  onHover={onHover}
                   row={row}
                   selected={flatRows[selected]?.id === row.id}
                 />
@@ -552,7 +582,7 @@ export function App(): React.ReactElement {
                   onLifecycle={setLifecycle}
                   onPin={setPinned}
                   onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
-                  pointerInside={pointerInside}
+                  onHover={onHover}
                   registerRef={(element) => {
                     rowRefs.current[flatRows.indexOf(row)] = element;
                   }}
@@ -569,6 +599,9 @@ export function App(): React.ReactElement {
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">Loading…</div>
         ) : null}
       </div>
+
+      {/* One card for the whole list, rendered outside it so scrolling the list cannot clip it. */}
+      <HoverSummary target={hoverTarget} />
 
       <Toasts onDismiss={() => setActionError(null)} toasts={toasts} />
     </div>

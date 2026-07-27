@@ -23,11 +23,6 @@ import {
   PinOffIcon,
 } from "./icons.tsx";
 import {
-  PreviewCard,
-  PreviewCardPopup,
-  PreviewCardTrigger,
-} from "@/components/ui/preview-card";
-import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -35,7 +30,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { StatusIcon } from "./status-icon.tsx";
-import { EmptySummaryCard, SummaryCard, summaryAsText } from "./summary-card.tsx";
+import { summaryAsText } from "./summary-card.tsx";
 
 /**
  * cmux's status words mapped onto the vendored component's four states. cmux owns the label;
@@ -190,12 +185,10 @@ export interface SessionRowProps {
   readonly onOpen: (row: SidebarRow) => void;
   readonly registerRef: (element: HTMLButtonElement | null) => void;
   /**
-   * False whenever the pointer is not inside the sidebar. A hover card is a claim about where
-   * the mouse is right now, and `mouseleave` is not guaranteed to fire when the pointer leaves
-   * the window or another app takes focus -- without this the card can hang on screen with the
-   * mouse nowhere near it.
+   * Report that the pointer entered this row, or left it (null). The list owns the one summary
+   * card; a row only says where the mouse is, which is the only thing it actually knows.
    */
-  readonly pointerInside: boolean;
+  readonly onHover: (row: SidebarRow, element: HTMLElement | null) => void;
 }
 
 export function SessionRow({
@@ -209,7 +202,7 @@ export function SessionRow({
   onClose,
   onPin,
   registerRef,
-  pointerInside,
+  onHover,
 }: SessionRowProps): React.ReactElement {
   // Only a session has a lifecycle to act on. A browser split or plain shell is navigation
   // only: there is nothing to complete, archive, or enrich, so it gets no lifecycle controls.
@@ -245,6 +238,8 @@ export function SessionRow({
       data-row-id={row.id}
       data-section={row.section}
       onClick={() => { if (!opening) onOpen(row); }}
+      onMouseEnter={(event) => onHover(row, event.currentTarget)}
+      onMouseLeave={() => onHover(row, null)}
       ref={registerRef}
       type="button"
     >
@@ -414,13 +409,7 @@ export function SessionRow({
         // The delay is the whole design: summaries sit on nearly every row, so an instant card
         // would fire a paragraph under the cursor on every row you scan past. At ~600ms it only
         // appears when you deliberately rest on one.
-        // Every session gets a card, enriched or not: four fifths are unenriched, and showing
-        // nothing made "no summary" indistinguishable from "the card failed to open".
-        render={
-          session
-            ? <PreviewCardTrigger delay={600} render={rowButton} />
-            : rowButton
-        }
+        render={rowButton}
       />
       <ContextMenuContent>
         <ContextMenuItem
@@ -471,31 +460,6 @@ export function SessionRow({
     </ContextMenu>
   );
 
-  // Only enriched sessions get a hover card. Wrapping every row would mean most of them opened an
-  // empty panel over the list, which is worse than no affordance at all.
-  if (!summary) return menu;
-  return (
-    // The card is suppressed outright while the menu is open, so a right-click never leaves two
-    // overlays stacked on the same row.
-    <div>
-      <PreviewCard onOpenChange={setCardOpen} open={cardOpen && !menuOpen && pointerInside}>
-        {menu}
-      {/*
-        * Centred on the row, which spans the sidebar, so the card is centred in the sidebar with
-        * a small margin either side rather than anchored to wherever the pointer entered.
-        */}
-        {/* The card must not be hoverable itself. It covers the rows below the one you are on, so
-          * if it held the hover it would stay up while you moved toward the next session and block
-          * the very row you were reaching for -- the pointer has to fall through to whatever is
-          * underneath. The cost is that the card can never be scrolled or selected, which is why
-          * the body clamps and "Copy summary" exists in the context menu. */}
-        <PreviewCardPopup
-          align="center"
-          className="pointer-events-none w-[calc(100vw-1rem)] max-w-none flex-col gap-2 p-3"
-        >
-          {summary ? <SummaryCard summary={summary} /> : <EmptySummaryCard />}
-        </PreviewCardPopup>
-      </PreviewCard>
-    </div>
-  );
+  return menu;
 }
+
