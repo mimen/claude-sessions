@@ -1,9 +1,6 @@
-# Build output for the self-rebuilding `ccs-go` launcher (see ~/.local/bin/ccs-go).
+# Build output. The binary is built on demand by src/tui-go/launch.ts when a Go
+# source file is newer than it, so it never belongs in the repo.
 .bin/
-
-# Local binaries from ad-hoc `go build -o`.
-/ccsspike
-/ccs-go
 
 # Git worktrees used by delegated sessions.
 .worktrees/
