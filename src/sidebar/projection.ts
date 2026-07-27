@@ -8,10 +8,11 @@
  * Every input is supplied by the caller so this module stays free of cmux, SQLite, and git I/O.
  */
 import type { Lifecycle } from "../catalogue/db.ts";
-import { messagesSince, type SessionEnrichment } from "../catalogue/enrichment.ts";
+import { messagesSince, type StoredEnrichment } from "../catalogue/enrichment.ts";
+import type { Recommendation } from "../catalogue/enrichment-schema.ts";
 import { familyOf } from "../display/format.ts";
 
-export type { SessionEnrichment };
+export type { StoredEnrichment, Recommendation };
 
 /** cmux's own `claude_code` status entry, exactly as cmux renders it. */
 export interface CmuxClaudeStatus {
@@ -97,13 +98,46 @@ export interface CheckoutInput {
 }
 
 /** An enrichment record plus how far the transcript has moved since it was written. */
-export interface SidebarSummary extends SessionEnrichment {
+export interface SidebarSummary extends StoredEnrichment {
   /**
-   * Messages appended since the summary was generated, or null when either count is unknown.
+   * Messages appended since the enrichment was generated, or null when either count is unknown.
    * Messages rather than turns: the catalogue records a message count at enrichment time and
    * never recorded a turn count, so turns cannot be derived without inventing one.
    */
   readonly messagesSince: number | null;
+}
+
+/**
+ * How much vertical space a row is worth.
+ *
+ * Attention is the whole ordering principle of this sidebar, and height is the honest way to spend
+ * it: a muted three-line row is quieter but still costs three lines of scroll, so a hundred settled
+ * sessions drown the nine that need you. Density is carried on the row rather than derived in the
+ * view so the rule stays one decision in one place.
+ */
+export type SidebarDensity =
+  /** Live session: the full card, because this is what you might act on now. */
+  | "full"
+  /** Closed but still active work: one line, reopenable, not a judgment about the work. */
+  | "line"
+  /** Complete or archived: one line inside a section that is collapsed by default. */
+  | "settled";
+
+/**
+ * What enrichment thinks should happen to a session, when that disagrees with where it actually is.
+ *
+ * Only surfaced while un-acted: a session already archived has nothing to suggest. `handoff` is
+ * carried but never actionable from here -- performing a handoff is work that happens inside the
+ * session, not a lifecycle flag flipped from a list.
+ */
+export interface SidebarSuggestion {
+  readonly verb: Recommendation;
+  /** True when the verb maps to a lifecycle action the sidebar can actually apply. */
+  readonly actionable: boolean;
+  /** Why, in enrichment's words. Present for archive and handoff; empty by design otherwise. */
+  readonly reason: string | null;
+  /** Enrichment judged the session never worth starting. Implies an archive verb. */
+  readonly junk: boolean;
 }
 
 export type SidebarLifecycle = "active" | "completed" | "archived";
@@ -129,7 +163,7 @@ export interface ProjectionInput {
   /** Unread notification counts keyed by stable workspace UUID, as cmux reports them. */
   readonly unreadByWorkspaceId?: ReadonlyMap<string, number>;
   /** Enrichment records keyed by canonical session id and resume alias. */
-  readonly summaries?: ReadonlyMap<string, SessionEnrichment>;
+  readonly summaries?: ReadonlyMap<string, StoredEnrichment>;
   /** False when cmux state could not be read; the UI must not claim sessions are closed. */
   readonly livenessReadable: boolean;
   /** False when the session index could not be read; models and the resume shelf go missing. */
@@ -159,6 +193,8 @@ export interface SidebarModel {
 interface SidebarRowShared {
   /** Stable identity for keys and actions: a canonical session id, or a workspace UUID. */
   readonly id: string;
+  /** How much height this row is worth. See `SidebarDensity`. */
+  readonly density: SidebarDensity;
   /** True when cmux has the workspace pinned, so the UI can lead with it. */
   readonly pinned: boolean;
   /** True when this is the workspace cmux currently has focused. */
@@ -210,6 +246,11 @@ export interface SidebarSessionRow extends SidebarRowShared {
    * been enriched — the UI shows nothing rather than inventing a description.
    */
   readonly summary: SidebarSummary | null;
+  /**
+   * Enrichment's verdict, when it contradicts where the session actually sits. Null when there is
+   * no enrichment, when it says `continue`, or when its verdict has already been applied.
+   */
+  readonly suggestion: SidebarSuggestion | null;
 }
 
 /**
@@ -391,7 +432,39 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
   const unreadByWorkspaceId = input.unreadByWorkspaceId ?? new Map<string, number>();
   const unreadFor = (workspaceId: string | null): number =>
     (workspaceId ? unreadByWorkspaceId.get(workspaceId) : 0) ?? 0;
-  const summaries = input.summaries ?? new Map<string, SessionEnrichment>();
+  /**
+   * Height a row is worth: live work gets the full card, closed work one line, settled work one
+   * line inside a collapsed section. Liveness rather than lifecycle decides the first split,
+   * because closing is a memory decision and completing is a judgment about the work.
+   */
+  const densityFor = (live: boolean, lifecycle: SidebarLifecycle): SidebarDensity =>
+    lifecycle !== "active" ? "settled" : live ? "full" : "line";
+
+  /**
+   * Enrichment's verdict, but only while it still contradicts reality.
+   *
+   * `continue` is dropped because it asks for nothing, and a verb already applied is dropped
+   * because a row cannot be archived twice. What survives is exactly the set worth a chip.
+   */
+  const suggestionFor = (
+    summary: SidebarSummary | null,
+    lifecycle: SidebarLifecycle,
+  ): SidebarSuggestion | null => {
+    const verb = summary?.recommendation;
+    if (!verb || verb === "continue") return null;
+    if (verb === "complete" && lifecycle === "completed") return null;
+    if (verb === "archive" && lifecycle === "archived") return null;
+    return {
+      verb,
+      // Handoff is deliberately inert here: passing a thread on is work done inside the session,
+      // not a flag flipped from a list.
+      actionable: verb === "complete" || verb === "archive",
+      reason: summary?.reason ?? null,
+      junk: summary?.junk ?? false,
+    };
+  };
+
+  const summaries = input.summaries ?? new Map<string, StoredEnrichment>();
   const summaryFor = (
     sessionId: string,
     indexed: IndexedSessionInput | undefined,
@@ -423,6 +496,8 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
   ): SidebarSessionRow => {
     const cwd = live.cwd ?? indexed?.cwd ?? null;
     const cmuxActivity = live.updatedAt === null ? null : live.updatedAt * 1000;
+    const liveSummary = summaryFor(live.sessionId, indexed);
+    const liveLifecycle = lifecycleFor(live.sessionId, indexed);
     return {
       kind: "session",
       id: canonicalSessionIdFor(live.sessionId, indexed),
@@ -431,9 +506,11 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
       windowRef: live.windowRef,
       unread: unreadFor(live.workspaceId),
       shortcut: live.shortcut,
-      summary: summaryFor(live.sessionId, indexed),
+      summary: liveSummary,
+      suggestion: suggestionFor(liveSummary, liveLifecycle),
+      density: densityFor(true, liveLifecycle),
       sessionId: canonicalSessionIdFor(live.sessionId, indexed),
-      lifecycle: lifecycleFor(live.sessionId, indexed),
+      lifecycle: liveLifecycle,
       name: cleanSessionName(live.workspaceTitle ?? indexed?.title ?? "Untitled session"),
       directory: projectFor(cwd),
       directoryPath: cwd,
@@ -462,6 +539,11 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     unread: 0,
     shortcut: null,
     summary: summaryFor(session.sessionId, session),
+    suggestion: suggestionFor(
+      summaryFor(session.sessionId, session),
+      lifecycleFor(session.sessionId, session),
+    ),
+    density: densityFor(knownLive, lifecycleFor(session.sessionId, session)),
     sessionId: canonicalSessionIdFor(session.sessionId, session),
     lifecycle: lifecycleFor(session.sessionId, session),
     name: cleanSessionName(session.title),
@@ -487,6 +569,9 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
   const rowForWorkspace = (workspace: LiveWorkspaceInput): SidebarWorkspaceRow => ({
     kind: "workspace",
     id: workspace.workspaceId,
+    // A workspace only appears here while it is open, so it is always live and never settled:
+    // there is no lifecycle on a browser pane to complete or archive.
+    density: "full",
     name: cleanSessionName(
       workspace.workspaceTitle ?? directoryLabel(workspace.cwd) ?? "Untitled tab",
     ),

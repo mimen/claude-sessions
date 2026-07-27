@@ -73,8 +73,8 @@ import {
   type SidebarSnapshot,
 } from "./projection.ts";
 import {
-  readEnrichmentSummaries,
-  type SessionEnrichment,
+  readEnrichments,
+  type StoredEnrichment,
 } from "../catalogue/enrichment.ts";
 
 /** How many indexed sessions are considered before the resume shelf is filled. */
@@ -315,7 +315,7 @@ interface CatalogueLifecycleState {
   /** Delegated seats, hidden the way `ccs ls` hides them. */
   readonly auxiliary: ReadonlySet<string>;
   /** Enrichment summaries keyed by canonical id and resume alias; absent for unenriched sessions. */
-  readonly summaries: ReadonlyMap<string, SessionEnrichment>;
+  readonly summaries: ReadonlyMap<string, StoredEnrichment>;
 }
 
 function lifecycleForIndexedSession(
@@ -493,7 +493,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         canonicalSessionIds,
         sessionIds,
         auxiliary,
-        summaries: readEnrichmentSummaries(catalogueDb),
+        summaries: readEnrichments(catalogueDb),
       });
     } catch (error) {
       return err(error instanceof Error ? error : new Error(String(error)));
@@ -515,7 +515,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       canonicalSessionIds: new Map(),
       // Nothing is known to be auxiliary when the catalogue is unreadable, so nothing is hidden.
       auxiliary: new Set<string>(),
-      summaries: new Map<string, SessionEnrichment>(),
+      summaries: new Map<string, StoredEnrichment>(),
       sessionIds: new Map<SidebarLifecycle, readonly string[]>([
         ["active", []],
         ["completed", []],
