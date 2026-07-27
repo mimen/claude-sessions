@@ -440,7 +440,12 @@ export function App(): React.ReactElement {
         * control sits beside it with a border, an icon and a chevron so it is obviously a button
         * and obviously cycles. Both share one height so the bar has a single baseline.
         */}
-      <div className="flex items-center gap-1.5 border-b border-border px-2 py-2">
+      {/*
+        * The top inset clears the host's floating window controls. cmux publishes it only to a page
+        * that asked for the full sidebar rect; anywhere else the property is unset and the fallback
+        * collapses it to the plain `py-2` bar, so this renders identically in a browser tab.
+        */}
+      <div className="flex items-center gap-1.5 border-b border-border px-2 pt-[calc(0.5rem+var(--cmux-sidebar-inset-top,0px))] pb-2">
         <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -472,8 +477,10 @@ export function App(): React.ReactElement {
         />
       </div>
 
+      {/* Bottom padding rather than a shorter list, so rows scroll *under* the host's footer
+        * instead of stopping short of it — the last row stays reachable either way. */}
       <div
-        className="session-list flex-1 overflow-y-auto px-1.5 pt-1.5"
+        className="session-list flex-1 overflow-y-auto px-1.5 pt-1.5 pb-[var(--cmux-sidebar-inset-bottom,0px)]"
       >
         {groups.map((group) => (
           <div key={group.key}>

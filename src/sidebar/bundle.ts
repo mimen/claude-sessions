@@ -37,7 +37,12 @@ function page(script: string, stylesheet: string): string {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover asks a cmux HTML sidebar for the full rect instead of the region left
+         free by its floating chrome, so rows scroll under the titlebar and footer the way cmux's
+         own workspace list does. The price is owning the insets, which app.css does via the
+         --cmux-sidebar-inset-* custom properties cmux publishes. Harmless in a plain browser,
+         where those properties are simply unset and fall back to zero. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>CCS sessions</title>
     <link rel="stylesheet" href="${stylesheet}" />${tweakcnTag()}
   </head>
