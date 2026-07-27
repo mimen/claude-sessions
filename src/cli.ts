@@ -56,8 +56,7 @@ For durable per-work-unit writes (stage, status_line, meta.*, grouping, PR facts
 use \`ccs identity …\`; for per-run session state (title, parent, lifecycle) use \`ccs session …\`.
 
 Usage:
-  ccs                 Launch the session browser (Go TUI — the default)
-  ccs classic         Launch the legacy Ink TUI (DEPRECATED; will be removed)
+  ccs                 Launch the session browser (TUI)
   ccs start [--] [text...]  Open a fresh managed launcher with /ccs:new prefilled, not submitted
   ccs location list|show|match|register|retire      Manage curated session launch locations
   ccs reindex [--titles]   Refresh through the host-local catalogue authority
@@ -423,26 +422,19 @@ export async function main(argv: string[]): Promise<number> {
     case "skills": {
       // Bare `ccs skills` on a terminal opens the TUI in skills mode; flags/subcommands
       // (or piped output) use the plain-table command path.
-      if (args.length === 1 && process.stdout.isTTY) return await launchTui("skills");
+      if (args.length === 1 && process.stdout.isTTY) {
+        const code = launchGoTui(["skills"]);
+        if (code !== null) return code;
+      }
       const { skillsCommand } = await import("./skills/command.ts");
       return await skillsCommand(args.slice(1));
     }
-    case "classic": {
-      // The original Ink/React TUI, kept reachable during the Go migration.
-      // DEPRECATED: it is no longer the default and will be removed once the Go
-      // TUI closes the remaining parity gaps (see docs/ccs-vs-ccs-go.md).
-      console.error(
-        "ccs classic: the Ink TUI is deprecated and will be removed — plain `ccs` now runs the Go TUI.",
-      );
-      return await launchTui(args[1] === "skills" ? "skills" : "sessions");
-    }
     case undefined: {
-      // Default interface: the Go TUI. Falls back to the classic Ink TUI only
-      // when the Go build genuinely can't run, so `ccs` always opens something.
+      // The Go TUI is the session browser; there is no other one to fall back to.
       const code = launchGoTui();
       if (code !== null) return code;
-      console.error("ccs: falling back to the classic TUI.");
-      return await launchTui();
+      console.error("ccs: the Go TUI could not be started.");
+      return 1;
     }
     default:
       console.error(`Unknown command: ${command}\n`);
@@ -495,66 +487,6 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
   return 0;
 }
 
-/** Launch the interactive browser: refresh the Index, then render the Ink app. */
-async function launchTui(initialMode: "sessions" | "skills" = "sessions"): Promise<number> {
-  const reporter = getCrashReporter();
-  reporter?.breadcrumb("cli.tui.launch.start", { mode: initialMode });
-  const config = getConfig();
-  if (!config) {
-    reporter?.breadcrumb("cli.tui.launch.failure", { stage: "config" });
-    return 1;
-  }
-  ensureDataDir();
-
-  const firstRun = !existsSync(DB_PATH());
-  if (firstRun) console.log("First run — indexing your sessions…");
-
-  let stage: "catalogue-service" | "import" | "render" | "runtime" = "catalogue-service";
-  reporter?.breadcrumb("cli.tui.catalogue-refresh.start");
-  const refreshed = await refreshCatalogueAuthority({ force: false, titles: false });
-  if (refreshed.ok) {
-    reporter?.breadcrumb("cli.tui.catalogue-refresh.success", {
-      sessions: refreshed.value.sourceStatus.rowCount,
-      generation: refreshed.value.sourceStatus.generation,
-    });
-  } else {
-    // Preserve the TUI's existing fail-open behavior: an unavailable source refresh still permits
-    // browsing the last indexed snapshot.
-    reporter?.breadcrumb("cli.tui.catalogue-refresh.failure");
-  }
-
-  const db = openIndex(DB_PATH());
-  const catalogue = openCatalogue(CATALOGUE_PATH());
-  const { openSkillsDb } = await import("./skills/db.ts");
-  const { SKILLS_DB_PATH } = await import("./paths.ts");
-  const skillsDb = openSkillsDb(SKILLS_DB_PATH());
-  const resumeRequest: { current: ResumeCommand | null } = { current: null };
-  try {
-    stage = "import";
-    const { render } = await import("ink");
-    const { createElement } = await import("react");
-    const { Root } = await import("./tui/Root.tsx");
-    stage = "render";
-    reporter?.breadcrumb("cli.tui.render.mount");
-    const app = render(createElement(Root, { db, catalogue, skillsDb, config, resumeRequest, initialMode }));
-    stage = "runtime";
-    await app.waitUntilExit();
-    reporter?.breadcrumb("cli.tui.clean-exit");
-  } catch (error) {
-    reporter?.breadcrumb("cli.tui.launch.failure", { stage });
-    throw error;
-  } finally {
-    db.close();
-    catalogue.close();
-    skillsDb.close();
-  }
-
-  // The TUI has fully unmounted (terminal restored) — now hand off to claude inline.
-  if (resumeRequest.current) {
-    return handoffInline(resumeRequest.current);
-  }
-  return 0;
-}
 
 /** Table of indexed sessions, joined with catalogue metadata + live open-state. */
 function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number {

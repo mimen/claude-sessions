@@ -1,6 +1,6 @@
 import type { CatalogueRow } from "./db.ts";
-import { familyOf } from "../tui/format.ts";
-import { theme, costColor, fullnessColor } from "../tui/theme.ts";
+import { familyOf } from "../display/format.ts";
+import { theme, costColor, fullnessColor } from "../display/theme.ts";
 import { formatCost } from "../cost.ts";
 
 /**

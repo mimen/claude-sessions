@@ -205,12 +205,24 @@ func (m Model) nextSessionID(cursor int) string {
 	return ""
 }
 
+// StartInSkills opens directly in the machine-wide skills browser, so
+// `ccs skills` lands there without a Tab press.
+func (m Model) StartInSkills() Model {
+	m.mode = ModeSkills
+	return m
+}
+
 func (m Model) Init() tea.Cmd {
 	commands := []tea.Cmd{m.loadSelectedTranscriptCmd()}
 	if m.options.autoRefresh {
 		commands = append(commands,
 			autoRefreshCmd(m.options.refreshInterval, m.tickerGeneration),
 			procSampleCmd(m.tickerGeneration))
+	}
+	// Skills are lazy-loaded on the Tab into skills mode; when we *start* there
+	// the load has to be kicked off here instead or the pane renders empty.
+	if m.mode == ModeSkills && len(m.skills.Skills) == 0 {
+		commands = append(commands, loadSkillsCmd())
 	}
 	return tea.Batch(commands...)
 }
