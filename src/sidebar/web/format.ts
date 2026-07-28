@@ -1,5 +1,5 @@
 /** Display helpers for the sidebar rows. Pure, so they are tested without a DOM. */
-import type { SidebarDensity, SidebarScope, SidebarSection } from "../projection.ts";
+import type { SidebarDensity, SidebarSection, SidebarView } from "../projection.ts";
 
 /**
  * Time since the last activity, at the coarsest unit that still distinguishes rows.
@@ -33,8 +33,8 @@ export const SECTION_ORDER: readonly SidebarSection[] =
 
 /** A response may update the view only when it belongs to the selected scope and is newest. */
 export function shouldApplySnapshotResponse(
-  responseScope: SidebarScope,
-  selectedScope: SidebarScope,
+  responseScope: SidebarView,
+  selectedScope: SidebarView,
   requestId: number,
   latestAppliedRequestId: number,
 ): boolean {
@@ -43,8 +43,8 @@ export function shouldApplySnapshotResponse(
 
 /** Reload only for an explicit freshness request or when the selected scope changed in flight. */
 export function shouldReloadSnapshot(
-  responseScope: SidebarScope,
-  selectedScope: SidebarScope,
+  responseScope: SidebarView,
+  selectedScope: SidebarView,
   freshReloadQueued: boolean,
 ): boolean {
   return freshReloadQueued || responseScope !== selectedScope;

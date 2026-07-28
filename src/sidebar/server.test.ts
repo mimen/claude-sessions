@@ -12,7 +12,7 @@ import type {
   FocusWorkspaceOutcome,
   PinWorkspaceOutcome,
 } from "./snapshot.ts";
-import type { SidebarScope, SidebarSnapshot } from "./projection.ts";
+import type { SidebarSnapshot, SidebarView } from "./projection.ts";
 
 const EMPTY_SNAPSHOT: SidebarSnapshot = {
   rows: [],
@@ -31,7 +31,7 @@ const ASSETS = new Map([
 interface Harness {
   readonly url: string;
   readonly opened: string[];
-  readonly snapshotScopes: SidebarScope[];
+  readonly snapshotScopes: SidebarView[];
   readonly lifecycleChanges: Array<{
     readonly sessionId: string;
     readonly action: SessionLifecycleAction;
@@ -44,7 +44,7 @@ const running: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
 function harness(overrides: Partial<SidebarSource> = {}): Harness {
   // Built below from the base source, so a test overriding setLifecycle still drives retire.
   const opened: string[] = [];
-  const snapshotScopes: SidebarScope[] = [];
+  const snapshotScopes: SidebarView[] = [];
   const lifecycleChanges: Array<{
     readonly sessionId: string;
     readonly action: SessionLifecycleAction;
@@ -151,17 +151,23 @@ describe("sidebar server", () => {
     expect(app.snapshotScopes).toEqual(["active"]);
   });
 
-  test("passes a valid lifecycle scope and rejects an unknown one", async () => {
+  test("passes a valid view and rejects an unknown one", async () => {
     const app = harness();
 
     const completed = await fetch(`${app.url}/api/snapshot?scope=completed`);
     expect(completed.status).toBe(200);
     expect(app.snapshotScopes).toEqual(["completed"]);
 
+    // Triage is a view rather than a lifecycle, so it has to pass validation that the catalogue's
+    // own three states would reject.
+    const triage = await fetch(`${app.url}/api/snapshot?scope=triage`);
+    expect(triage.status).toBe(200);
+    expect(app.snapshotScopes).toEqual(["completed", "triage"]);
+
     const invalid = await fetch(`${app.url}/api/snapshot?scope=parked`);
     expect(invalid.status).toBe(400);
-    expect(await invalid.json()).toEqual({ error: "invalid snapshot scope" });
-    expect(app.snapshotScopes).toEqual(["completed"]);
+    expect(await invalid.json()).toEqual({ error: "invalid snapshot view" });
+    expect(app.snapshotScopes).toEqual(["completed", "triage"]);
   });
 
   test("reports a snapshot failure instead of serving a partial page", async () => {

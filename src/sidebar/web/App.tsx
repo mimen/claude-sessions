@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   SidebarRow,
-  SidebarScope,
+  SidebarView,
   SidebarSection,
   SidebarSessionRow,
   SidebarSnapshot,
@@ -106,9 +106,11 @@ export function App(): React.ReactElement {
   );
   /** Pin changes shown before the poll confirms them, keyed by workspace UUID. */
   const [optimisticPins, setOptimisticPins] = useState<ReadonlyMap<string, boolean>>(() => new Map());
-  const [scope, setScope] = useState<SidebarScope>(() => {
+  const [scope, setScope] = useState<SidebarView>(() => {
     const stored = localStorage.getItem(SCOPE_STORAGE_KEY);
-    return stored === "completed" || stored === "archived" ? stored : "active";
+    return stored === "completed" || stored === "archived" || stored === "triage"
+      ? stored
+      : "active";
   });
   const [grouping, setGrouping] = useState<GroupingMode>(
     () => parseGroupingMode(localStorage.getItem(GROUPING_STORAGE_KEY)),
@@ -395,7 +397,7 @@ export function App(): React.ReactElement {
    * Shared by the scope dropdown and the bottom bars so the two can never disagree about what is on
    * screen; the bars are simply a more reachable affordance for the same state.
    */
-  const selectScope = useCallback((next: SidebarScope): void => {
+  const selectScope = useCallback((next: SidebarView): void => {
     if (next === selectedScopeRef.current) return;
     selectedScopeRef.current = next;
     setScope(next);
@@ -643,7 +645,7 @@ export function App(): React.ReactElement {
       <LifecycleBars
         counts={snapshot?.lifecycleCounts ?? { active: 0, completed: 0, archived: 0 }}
         onSelect={selectScope}
-        scope={scope}
+        scope={scope === "triage" ? "active" : scope}
       />
 
       {/* One card for the whole list, rendered outside it so scrolling the list cannot clip it. */}

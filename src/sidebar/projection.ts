@@ -160,6 +160,23 @@ export interface SidebarSuggestion {
 export type SidebarLifecycle = "active" | "completed" | "archived";
 export type SidebarScope = SidebarLifecycle;
 
+/**
+ * What the list is showing.
+ *
+ * `triage` is not a lifecycle -- a session is never "in triage" -- it is the active list filtered
+ * to rows whose enrichment verdict still contradicts where they sit. Keeping it out of
+ * `SidebarLifecycle` means no lifecycle-typed value can ever be handed one, and the catalogue
+ * never has to answer a question it has no column for.
+ */
+export type SidebarView = SidebarScope | "triage";
+
+export const SIDEBAR_VIEWS: readonly SidebarView[] = ["active", "triage", "completed", "archived"];
+
+/** The lifecycle a view browses. Triage reads the active list, then filters it. */
+export function lifecycleForView(view: SidebarView): SidebarScope {
+  return view === "triage" ? "active" : view;
+}
+
 export interface ProjectionInput {
   readonly live: readonly LiveSessionInput[];
   /** Live cmux workspaces no session owns; omitted entirely when the caller does not collect them. */
@@ -197,6 +214,8 @@ export interface ProjectionInput {
   /** Epoch milliseconds used for relative times. */
   readonly now: number;
   /** How many resumable sessions the active shelf may show. */
+  /** Keep only rows carrying an un-acted enrichment verdict. */
+  readonly triageOnly?: boolean;
   /** Totals per lifecycle, from the catalogue rather than from the rows in view. */
   readonly lifecycleCounts?: Readonly<Record<SidebarLifecycle, number>>;
   readonly recentLimit?: number;
@@ -746,8 +765,14 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     rows.push(...selected.map((candidate) => candidate.row));
   }
 
+  // Triage is a filter over the finished list rather than a different projection: the rows a
+  // session shows in triage must be the same rows it shows anywhere else.
+  const visible = input.triageOnly
+    ? rows.filter((row) => row.kind === "session" && row.suggestion !== null)
+    : rows;
+
   return {
-    rows,
+    rows: visible,
     livenessReadable: input.livenessReadable,
     indexReadable: input.indexReadable ?? true,
     catalogueReadable: input.catalogueReadable ?? true,

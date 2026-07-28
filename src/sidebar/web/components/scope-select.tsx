@@ -5,18 +5,24 @@
  * treatment as the arrangement control so the two read as a pair.
  */
 import type React from "react";
-import type { SidebarScope } from "../../projection.ts";
+import type { SidebarView } from "../../projection.ts";
 import { ChevronIcon } from "./icons.tsx";
 
-const SCOPES: ReadonlyArray<{ readonly value: SidebarScope; readonly label: string }> = [
+/**
+ * Triage sits next to Active because it is the same list, narrowed: the sessions whose verdict
+ * still contradicts where they sit. Completed and archived remain reachable here as well as from
+ * the bottom bars, so the control stays a complete account of what the list can show.
+ */
+const SCOPES: ReadonlyArray<{ readonly value: SidebarView; readonly label: string }> = [
   { value: "active", label: "Active" },
+  { value: "triage", label: "Triage" },
   { value: "completed", label: "Completed" },
   { value: "archived", label: "Archived" },
 ];
 
 export function ScopeSelect({ value, onChange }: {
-  readonly value: SidebarScope;
-  readonly onChange: (scope: SidebarScope) => void;
+  readonly value: SidebarView;
+  readonly onChange: (view: SidebarView) => void;
 }): React.ReactElement {
   const label = SCOPES.find((scope) => scope.value === value)?.label ?? "Active";
   return (
@@ -28,7 +34,7 @@ export function ScopeSelect({ value, onChange }: {
       <select
         aria-label="Which sessions to show"
         className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-        onChange={(event) => onChange(event.target.value as SidebarScope)}
+        onChange={(event) => onChange(event.target.value as SidebarView)}
         value={value}
       >
         {SCOPES.map((scope) => (

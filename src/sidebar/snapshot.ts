@@ -64,6 +64,7 @@ import {
   type DirectoryFactsResult,
 } from "./directory-facts.ts";
 import {
+  lifecycleForView,
   directoriesToResolve,
   projectSidebar,
   sidebarLifecycleOf,
@@ -73,6 +74,7 @@ import {
   type SidebarLifecycle,
   type SidebarScope,
   type SidebarSnapshot,
+  type SidebarView,
 } from "./projection.ts";
 import {
   readEnrichments,
@@ -136,8 +138,12 @@ export type PinWorkspaceOutcome =
   | { readonly status: "failed"; readonly reason: string };
 
 export interface SidebarSource {
-  /** `rowLimit` is how many rows the caller has room for; it grows as the client scrolls. */
-  snapshot(scope?: SidebarScope, rowLimit?: number): Promise<SidebarSnapshot>;
+  /**
+   * @param view Which list to build: a lifecycle, or `triage` for the active list filtered to
+   *   rows whose verdict still contradicts where they sit.
+   * @param rowLimit How many rows the caller has room for; it grows as the client scrolls.
+   */
+  snapshot(view?: SidebarView, rowLimit?: number): Promise<SidebarSnapshot>;
   open(sessionId: string): Promise<OpenSessionOutcome>;
   setLifecycle(
     sessionId: string,
@@ -693,14 +699,20 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
      *   the client raises it as you scroll, which is what makes the list unbounded. The index
      *   scan is widened to match, since a limit the scan cannot feed is not a limit at all.
      */
-    async snapshot(scope: SidebarScope = "active", rowLimit?: number): Promise<SidebarSnapshot> {
+    async snapshot(view: SidebarView = "active", rowLimit?: number): Promise<SidebarSnapshot> {
+      const scope = lifecycleForView(view);
+      const triageOnly = view === "triage";
       const bridge = await readBridge();
       const catalogue = readCatalogueLifecyclesSafely();
       const requestedIds = scope === "active"
         ? undefined
         : catalogue.sessionIds.get(scope) ?? [];
-      const recentLimit = rowLimit ?? RECENT_LIMIT;
-      const historyLimit = rowLimit ?? HISTORY_LIMIT;
+      // Triage discards most of what it projects, so a window sized for the visible rows would
+      // come back nearly empty. Widened here rather than by the client, which cannot know the
+      // hit rate.
+      const triageFactor = triageOnly ? 6 : 1;
+      const recentLimit = (rowLimit ?? RECENT_LIMIT) * triageFactor;
+      const historyLimit = (rowLimit ?? HISTORY_LIMIT) * triageFactor;
       const index = readIndexedSessionsSafely(
         // Live rows come from cmux, not the index, so the active scan has to cover the shelf
         // plus the live sessions it must skip over; a flat multiple is enough and stays cheap.
@@ -767,6 +779,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         unreadByWorkspaceId: notifications?.unreadCountsByWorkspaceId,
         summaries: catalogue.summaries,
         preferredTitles: catalogue.preferredTitles,
+        triageOnly,
         lifecycleCounts: {
           active: catalogue.sessionIds.get("active")?.length ?? 0,
           completed: catalogue.sessionIds.get("completed")?.length ?? 0,

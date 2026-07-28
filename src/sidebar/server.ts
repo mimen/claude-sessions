@@ -9,7 +9,7 @@
 import { isIPv4 } from "node:net";
 import { err, ok, type Result } from "../result.ts";
 import { loadFavicon } from "./favicon.ts";
-import type { SidebarScope } from "./projection.ts";
+import type { SidebarView } from "./projection.ts";
 import type { SessionLifecycleAction, SidebarSource } from "./snapshot.ts";
 
 /**
@@ -45,8 +45,9 @@ function isJsonObject(value: JsonValue): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isSidebarScope(value: string): value is SidebarScope {
-  return value === "active" || value === "completed" || value === "archived";
+/** Triage is a view, not a lifecycle; the snapshot maps it back to the active list plus a filter. */
+function isSidebarView(value: string): value is SidebarView {
+  return value === "active" || value === "completed" || value === "archived" || value === "triage";
 }
 
 function isLifecycleAction(value: JsonValue | undefined): value is SessionLifecycleAction {
@@ -146,8 +147,8 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       if (url.pathname === "/api/snapshot" && request.method === "GET") {
         const scopeValues = url.searchParams.getAll("scope");
         const scope = scopeValues.length === 0 ? "active" : scopeValues[0];
-        if (scopeValues.length > 1 || scope === undefined || !isSidebarScope(scope)) {
-          return json({ error: "invalid snapshot scope" }, 400);
+        if (scopeValues.length > 1 || scope === undefined || !isSidebarView(scope)) {
+          return json({ error: "invalid snapshot view" }, 400);
         }
         // How many rows the client currently has room for. It grows as you scroll, which is what
         // makes the list unbounded; clamped so a hand-typed URL cannot ask for the whole store.
