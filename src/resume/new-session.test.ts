@@ -236,9 +236,9 @@ test("ADR-0094: parseOpts rejects a --permission-mode Claude Code wouldn't accep
 });
 
 test("ADR-0094: birth precedence — explicit flag > role > cluster > the legacy loop default", () => {
-  const loop = { kind: "loop" as const, permissionMode: null };
-  const loopWithPolicy = { kind: "loop" as const, permissionMode: "plan" };
-  const worker = { kind: "session" as const, permissionMode: null };
+  const loop = { kind: "loop" as const, permissionMode: null, manifestError: null };
+  const loopWithPolicy = { kind: "loop" as const, permissionMode: "plan", manifestError: null };
+  const worker = { kind: "session" as const, permissionMode: null, manifestError: null };
   const bypass = { permissionMode: "bypassPermissions" };
   const noPolicy = { permissionMode: null };
 
@@ -581,6 +581,24 @@ test("newSession: invalid role model and policy --via conflict fail before reser
   const check = openCatalogue(join(root, "cache", "catalogue.db"));
   try {
     expect(check.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 0 });
+  } finally { check.close(); }
+});
+
+test("ADR-0094: a cluster manifest that exists but won't parse REFUSES the birth, before reservation", () => {
+  const root = withEventRole();
+  const clusterToml = join(process.env.CCS_CONFIG_ROOT!, "clusters", "event-watch", "cluster.toml");
+  // A declared posture ccs can't read must not degrade to "launch under the legacy default".
+  writeFileSync(clusterToml, 'name = "event-watch"\npermission_mode = "bypass"\n');
+  expect(newSession(["--cluster=event-watch", "--role=event-worker", "--top-level", "--print-id"])).toBe(2);
+
+  // A cluster with NO manifest is the different, pre-existing case: warn-and-proceed.
+  rmSync(clusterToml);
+  expect(newSession(["--cluster=event-watch", "--role=event-worker", "--top-level", "--print-id"])).toBe(0);
+
+  const check = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    // exactly one row — the refused birth reserved nothing
+    expect(check.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 1 });
   } finally { check.close(); }
 });
 

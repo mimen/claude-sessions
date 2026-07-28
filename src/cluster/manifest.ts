@@ -102,6 +102,16 @@ export interface ClusterManifest {
  * a cluster with no readable manifest is a real problem the caller should surface, not paper over
  * (unlike role.toml, which is fail-open because most fields are directory-derived).
  */
+/**
+ * Does this cluster SHIP a manifest at all? The distinction readClusterManifest's single `err()`
+ * can't make: "no config package here" (ad-hoc/legacy cluster name — callers warn and proceed)
+ * vs "a manifest that exists but won't parse" (a declared contract ccs cannot honor — callers
+ * that act on manifest policy, e.g. ADR-0094 permission mode at birth, refuse).
+ */
+export function clusterManifestExists(cluster: string, configRoot = ccsConfigRoot()): boolean {
+  return existsSync(join(configRoot, "clusters", cluster, "cluster.toml"));
+}
+
 export function readClusterManifest(cluster: string, configRoot = ccsConfigRoot()): Result<ClusterManifest> {
   const dir = join(configRoot, "clusters", cluster);
   const tomlPath = join(dir, "cluster.toml");

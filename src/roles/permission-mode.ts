@@ -26,10 +26,20 @@ export function permissionModeValidationError(): string {
   return `permission_mode must be one of: ${PERMISSION_MODES.join(", ")}`;
 }
 
-/** Role policy overrides cluster policy; birth-only legacy defaults are applied by the caller. */
+/**
+ * Role policy overrides cluster policy; birth-only legacy defaults are applied by the caller.
+ *
+ * A role whose manifest didn't parse resolves to NO policy — it does not fall through to the
+ * cluster. That role may have been trying to declare a *narrower* posture (`plan` under a
+ * `bypassPermissions` cluster) and we simply can't read it; inheriting the cluster's would grant
+ * more autonomy than its author asked for. Fail-open must mean "no enforced mode", never "a more
+ * permissive one". Birth refuses such a role outright (validateSpawn on manifestError); this is
+ * what resume — which must stay fail-open to keep transcripts reachable — does instead.
+ */
 export function resolvePermissionMode(
-  roleDef: Pick<RoleDef, "permissionMode"> | null,
+  roleDef: Pick<RoleDef, "permissionMode" | "manifestError"> | null,
   clusterManifest: Pick<ClusterManifest, "permissionMode"> | null,
 ): string | null {
+  if (roleDef?.manifestError) return null;
   return roleDef?.permissionMode ?? clusterManifest?.permissionMode ?? null;
 }

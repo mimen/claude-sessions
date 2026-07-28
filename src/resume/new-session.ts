@@ -35,7 +35,12 @@ import pkg from "../../package.json" with { type: "json" };
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import { getIdentity } from "../catalogue/identities.ts";
 import { resolveRole } from "../roles/role-files.ts";
-import { checkClusterGate, readClusterManifest, type ClusterManifest } from "../cluster/manifest.ts";
+import {
+  checkClusterGate,
+  clusterManifestExists,
+  readClusterManifest,
+  type ClusterManifest,
+} from "../cluster/manifest.ts";
 import {
   isPermissionMode,
   permissionModeValidationError,
@@ -713,7 +718,7 @@ function supersedeWorkUnitSiblings(db: Database, workUnitId: string, keepId: str
 /** Birth precedence adds the historical unattended-loop default beneath declared policy. */
 export function resolveNewSessionPermissionMode(
   explicitMode: string | null | undefined,
-  roleDef: Pick<RoleDef, "kind" | "permissionMode"> | null,
+  roleDef: Pick<RoleDef, "kind" | "permissionMode" | "manifestError"> | null,
   clusterManifest: Pick<ClusterManifest, "permissionMode"> | null,
 ): string | null {
   return explicitMode
@@ -915,12 +920,20 @@ export function newSession(
 
   // ADR-0094: permission mode is embodiment policy, not transcript history. Resolve it for every
   // birth with the authored role above cluster, then retain the historical loop default only when
-  // neither layer declares a posture. A bad/missing cluster manifest stays on the existing gate's
-  // loud warning path; role.toml policy errors are blocked by validateSpawn below.
+  // neither layer declares a posture. role.toml policy errors are blocked by validateSpawn below.
   let clusterManifest: ClusterManifest | null = null;
   if (opts.cluster) {
     const loadedManifest = readClusterManifest(opts.cluster);
     if (loadedManifest.ok) clusterManifest = loadedManifest.value;
+    // A cluster that SHIPS a manifest it can't parse has declared a posture ccs cannot honor.
+    // Proceeding would silently launch under the legacy default (or none) — the exact failure
+    // ADR-0094 exists to kill. Refuse the birth; a fresh session is cheap to retry once the
+    // manifest is fixed. A cluster with NO manifest at all is a different case (ad-hoc / legacy):
+    // it keeps the pre-existing warn-and-proceed path via checkClusterGate below.
+    else if (clusterManifestExists(opts.cluster)) {
+      console.error(`ccs new-session: ${loadedManifest.error.message}. Nothing spawned.`);
+      return 2;
+    }
   }
   opts.permissionMode = resolveNewSessionPermissionMode(opts.permissionMode, roleDef, clusterManifest) ?? undefined;
 

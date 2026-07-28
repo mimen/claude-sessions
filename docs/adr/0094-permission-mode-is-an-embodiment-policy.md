@@ -26,7 +26,13 @@ The trailing `loop ⇒ acceptEdits` is the pre-existing unattended-loop default;
 
 On resume the flag is inserted **after** `--resume <id>` and **before** the trailing resume command, because that command is a positional prompt — a flag after it would be swallowed as prompt text.
 
-Validation is asymmetric, matching how each file already behaves. `role.toml` stays fail-open on read but records an unknown value as `manifestError`, which `validateSpawn` already refuses to launch — so a typo'd role posture blocks the birth. `cluster.toml` errs at parse rather than dropping the bad key: the cluster resolves to *no* policy (never a wrong one) and the existing `checkClusterGate` surfaces the parse error loudly on both the birth and resume-cluster paths. Resume itself **fails open** on both files: an unreadable or deleted config package must never strand a reachable transcript.
+Validation is asymmetric, matching how each file already behaves.
+
+`role.toml` stays fail-open on read but records an unknown value as `manifestError`, which `validateSpawn` already refuses to launch — a typo'd role posture blocks the birth.
+
+`cluster.toml` errs at parse. A cluster that ships a manifest ccs cannot parse **refuses the birth** rather than silently falling back to the legacy default; a cluster with no manifest at all keeps the pre-existing warn-and-proceed path, since that is an ad-hoc cluster name, not a broken declaration.
+
+Resume, by contrast, **fails open**: an unreadable or deleted config package must never strand a reachable transcript. But fail-open means *no enforced mode* — never *a more permissive one*. A role whose manifest didn't parse therefore resolves to no policy at all and does **not** inherit its cluster's: that role may have been declaring a narrower posture (`plan` under a `bypassPermissions` cluster) that we simply can't read, and inheriting upward would hand it more autonomy than its author asked for.
 
 ## Consequences
 
