@@ -197,6 +197,8 @@ export interface ProjectionInput {
   /** Epoch milliseconds used for relative times. */
   readonly now: number;
   /** How many resumable sessions the active shelf may show. */
+  /** Totals per lifecycle, from the catalogue rather than from the rows in view. */
+  readonly lifecycleCounts?: Readonly<Record<SidebarLifecycle, number>>;
   readonly recentLimit?: number;
   /** How many rows a completed or archived history view may show. */
   readonly historyLimit?: number;
@@ -302,6 +304,14 @@ export interface SidebarSnapshot {
   readonly indexReadable: boolean;
   /** False when lifecycle state was unreadable and visible rows were conservatively left active. */
   readonly catalogueReadable: boolean;
+  /**
+   * How many sessions sit in each lifecycle, whatever the current scope shows.
+   *
+   * Counted across the whole catalogue rather than the rendered rows, because the point of the
+   * figure is to say what is NOT on screen. Zero when the catalogue is unreadable, which the
+   * flag above already qualifies.
+   */
+  readonly lifecycleCounts: Readonly<Record<SidebarLifecycle, number>>;
   readonly generatedAt: number;
 }
 
@@ -741,6 +751,7 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     livenessReadable: input.livenessReadable,
     indexReadable: input.indexReadable ?? true,
     catalogueReadable: input.catalogueReadable ?? true,
+    lifecycleCounts: input.lifecycleCounts ?? { active: 0, completed: 0, archived: 0 },
     generatedAt: input.now,
   };
 }

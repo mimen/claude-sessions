@@ -136,7 +136,8 @@ export type PinWorkspaceOutcome =
   | { readonly status: "failed"; readonly reason: string };
 
 export interface SidebarSource {
-  snapshot(scope?: SidebarScope): Promise<SidebarSnapshot>;
+  /** `rowLimit` is how many rows the caller has room for; it grows as the client scrolls. */
+  snapshot(scope?: SidebarScope, rowLimit?: number): Promise<SidebarSnapshot>;
   open(sessionId: string): Promise<OpenSessionOutcome>;
   setLifecycle(
     sessionId: string,
@@ -687,14 +688,23 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   }
 
   return {
-    async snapshot(scope: SidebarScope = "active"): Promise<SidebarSnapshot> {
+    /**
+     * @param rowLimit How many rows the caller has room for. Absent means the default window;
+     *   the client raises it as you scroll, which is what makes the list unbounded. The index
+     *   scan is widened to match, since a limit the scan cannot feed is not a limit at all.
+     */
+    async snapshot(scope: SidebarScope = "active", rowLimit?: number): Promise<SidebarSnapshot> {
       const bridge = await readBridge();
       const catalogue = readCatalogueLifecyclesSafely();
       const requestedIds = scope === "active"
         ? undefined
         : catalogue.sessionIds.get(scope) ?? [];
+      const recentLimit = rowLimit ?? RECENT_LIMIT;
+      const historyLimit = rowLimit ?? HISTORY_LIMIT;
       const index = readIndexedSessionsSafely(
-        scope === "active" ? INDEX_SCAN_LIMIT : HISTORY_LIMIT,
+        // Live rows come from cmux, not the index, so the active scan has to cover the shelf
+        // plus the live sessions it must skip over; a flat multiple is enough and stays cheap.
+        scope === "active" ? Math.max(INDEX_SCAN_LIMIT, recentLimit * 4) : historyLimit,
         requestedIds,
       );
       // Delegated seats never reach the shelf or the history scopes; a live one still shows,
@@ -757,12 +767,17 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         unreadByWorkspaceId: notifications?.unreadCountsByWorkspaceId,
         summaries: catalogue.summaries,
         preferredTitles: catalogue.preferredTitles,
+        lifecycleCounts: {
+          active: catalogue.sessionIds.get("active")?.length ?? 0,
+          completed: catalogue.sessionIds.get("completed")?.length ?? 0,
+          archived: catalogue.sessionIds.get("archived")?.length ?? 0,
+        },
         livenessReadable: bridge.readable,
         indexReadable: index.readable,
         catalogueReadable: catalogue.readable,
         now: now(),
-        recentLimit: RECENT_LIMIT,
-        historyLimit: HISTORY_LIMIT,
+        recentLimit,
+        historyLimit,
       });
 
       // Authorize exactly the directories this returned snapshot exposed, not the wider set scanned

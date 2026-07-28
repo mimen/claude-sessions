@@ -12,6 +12,13 @@ import { loadFavicon } from "./favicon.ts";
 import type { SidebarScope } from "./projection.ts";
 import type { SessionLifecycleAction, SidebarSource } from "./snapshot.ts";
 
+/**
+ * Row-count bounds for `?limit`. Below the minimum the list cannot fill a screen; above it a
+ * single response would carry more sessions than anyone scrolls in one sitting.
+ */
+const MIN_ROW_LIMIT = 20;
+const MAX_ROW_LIMIT = 2_000;
+
 /** cmux's Dock needs a stable origin, so the port is fixed unless deliberately overridden. */
 export const DEFAULT_SIDEBAR_PORT = 8787;
 export const DEFAULT_SIDEBAR_HOST = "127.0.0.1";
@@ -142,8 +149,14 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         if (scopeValues.length > 1 || scope === undefined || !isSidebarScope(scope)) {
           return json({ error: "invalid snapshot scope" }, 400);
         }
+        // How many rows the client currently has room for. It grows as you scroll, which is what
+        // makes the list unbounded; clamped so a hand-typed URL cannot ask for the whole store.
+        const limitRaw = Number(url.searchParams.get("limit") ?? "");
+        const limit = Number.isFinite(limitRaw)
+          ? Math.min(Math.max(Math.trunc(limitRaw), MIN_ROW_LIMIT), MAX_ROW_LIMIT)
+          : undefined;
         try {
-          return json(await source.snapshot(scope));
+          return json(await source.snapshot(scope, limit));
         } catch {
           return json({ error: "snapshot failed" }, 500);
         }

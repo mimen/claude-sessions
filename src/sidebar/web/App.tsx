@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { SearchIcon } from "./components/icons.tsx";
 import { GroupingSelect } from "./components/grouping-select.tsx";
 import { ScopeSelect } from "./components/scope-select.tsx";
+import { LifecycleBars } from "./components/lifecycle-bars.tsx";
 import { Toasts, type Toast } from "./components/toasts.tsx";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +39,10 @@ const SCOPE_STORAGE_KEY = "ccs-sidebar-scope";
 const CLOCK_INTERVAL_MS = 30_000;
 /** Long enough not to fire while scanning past rows, short enough not to feel like waiting. */
 const HOVER_DELAY_MS = 220;
+/** Rows requested initially, and the step added each time the list is scrolled near its end. */
+const ROW_PAGE = 40;
+/** How close to the bottom counts as "near the end", in px. */
+const SCROLL_THRESHOLD_PX = 240;
 
 type OpenStatus = "focused" | "resumed" | "not-found" | "liveness-unreadable" | "failed";
 
@@ -126,6 +131,17 @@ export function App(): React.ReactElement {
    */
   const [hoverTarget, setHoverTarget] = useState<HoverTarget | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * How many rows the server is currently asked for.
+   *
+   * The list used to stop at eight closed sessions with nothing to say it had, while thousands
+   * existed -- a silent truncation is worse than a visible one, because a session you cannot find
+   * looks like a session that is gone. This grows as you reach the end, so the list simply
+   * continues.
+   */
+  const [rowLimit, setRowLimit] = useState(ROW_PAGE);
+  const rowLimitRef = useRef(ROW_PAGE);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const openingIdsRef = useRef(new Set<string>());
   const selectedScopeRef = useRef(scope);
@@ -152,7 +168,9 @@ export function App(): React.ReactElement {
           requestScope = selectedScopeRef.current;
           const requestId = ++nextSnapshotRequestIdRef.current;
           try {
-            const response = await fetch(`/api/snapshot?scope=${requestScope}`);
+            const response = await fetch(
+              `/api/snapshot?scope=${requestScope}&limit=${rowLimitRef.current}`,
+            );
             if (!response.ok) throw new Error(`snapshot failed (${response.status})`);
             const nextSnapshot = (await response.json()) as SidebarSnapshot;
             // The server has spoken; stop overriding any row it now agrees about.
@@ -371,6 +389,26 @@ export function App(): React.ReactElement {
     hoverTimerRef.current = setTimeout(() => setHoverTarget({ row, rect }), HOVER_DELAY_MS);
   }, []);
 
+  /**
+   * Switch which lifecycle the list shows.
+   *
+   * Shared by the scope dropdown and the bottom bars so the two can never disagree about what is on
+   * screen; the bars are simply a more reachable affordance for the same state.
+   */
+  const selectScope = useCallback((next: SidebarScope): void => {
+    if (next === selectedScopeRef.current) return;
+    selectedScopeRef.current = next;
+    setScope(next);
+    // The rows on screen belong to the old scope, so keeping them while the new ones load would
+    // show completed sessions under an "Archived" heading for one poll.
+    setSnapshot(null);
+    setSnapshotError(null);
+    rowLimitRef.current = ROW_PAGE;
+    setRowLimit(ROW_PAGE);
+    localStorage.setItem(SCOPE_STORAGE_KEY, next);
+    load();
+  }, [load]);
+
   const setLifecycle = useCallback((
     row: SidebarSessionRow,
     action: "complete" | "archive" | "uncomplete" | "unarchive",
@@ -519,18 +557,7 @@ export function App(): React.ReactElement {
             value={query}
           />
         </div>
-        <ScopeSelect
-          onChange={(next) => {
-            if (next === selectedScopeRef.current) return;
-            selectedScopeRef.current = next;
-            setScope(next);
-            setSnapshot(null);
-            setSnapshotError(null);
-            localStorage.setItem(SCOPE_STORAGE_KEY, next);
-            load();
-          }}
-          value={scope}
-        />
+        <ScopeSelect onChange={selectScope} value={scope} />
         <GroupingSelect
           onChange={(next) => {
             setGrouping(next);
@@ -544,6 +571,19 @@ export function App(): React.ReactElement {
         * instead of stopping short of it — the last row stays reachable either way. */}
       <div
         className="session-list flex-1 overflow-y-auto px-1.5 pt-1.5 pb-[var(--cmux-sidebar-inset-bottom,0px)]"
+        // Asking for more before the end is reached, so the next rows are already there by the
+        // time you get to them. Only ever grows: shrinking the window mid-scroll would pull rows
+        // out from under the pointer.
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+          if (remaining > SCROLL_THRESHOLD_PX) return;
+          if (rowLimitRef.current > flatRows.length + ROW_PAGE) return;
+          rowLimitRef.current += ROW_PAGE;
+          setRowLimit(rowLimitRef.current);
+          load(true);
+        }}
+        ref={listRef}
       >
         {groups.map((group) => (
           <div key={group.key}>
@@ -599,6 +639,12 @@ export function App(): React.ReactElement {
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">Loading…</div>
         ) : null}
       </div>
+
+      <LifecycleBars
+        counts={snapshot?.lifecycleCounts ?? { active: 0, completed: 0, archived: 0 }}
+        onSelect={selectScope}
+        scope={scope}
+      />
 
       {/* One card for the whole list, rendered outside it so scrolling the list cannot clip it. */}
       <HoverSummary target={hoverTarget} />
