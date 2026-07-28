@@ -57,6 +57,11 @@ const SOURCE_COLOR = {
   native: theme.sourceNative,
   codex: theme.sourceCodex,
   fallback: theme.sourceFallback,
+  // Display sources layered on by resolveSessionTitle (title.ts): a human/identity name reads as
+  // "yours", not as a generated source.
+  custom: theme.accent,
+  live: theme.accent,
+  role: theme.muted,
 } as const;
 
 // ---- Content peek (compact-mode default) --------------------------------------------------

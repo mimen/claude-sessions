@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>Session Enrichment — CCS</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ink: #14161a;
+    --ink-soft: #5b6270;
+    --paper: #fbfaf8;
+    --rule: #d9d5cd;
+    --accent: #b0451f;
+    --accent-soft: #f0e2da;
+    --good: #2f6b45;
+    --warn: #8a6d17;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e9e6e0; --ink-soft: #9aa0ab; --paper: #14161a; --rule: #2f333b;
+      --accent: #e8794d; --accent-soft: #34211a; --good: #6bbb8a; --warn: #d3ae4b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 17px; line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 47rem; margin: 0 auto; padding: 3.5rem 1.5rem 6rem; }
+  .kicker {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 0.9rem;
+  }
+  h1 {
+    font-size: clamp(2.1rem, 5.5vw, 3rem); line-height: 1.08; margin: 0 0 1rem;
+    letter-spacing: -0.02em; font-weight: 600;
+  }
+  .standfirst {
+    font-size: 1.19rem; line-height: 1.5; color: var(--ink-soft);
+    margin: 0 0 2rem; max-width: 38rem;
+  }
+  .meta {
+    font-family: var(--mono); font-size: 0.73rem; line-height: 1.9; color: var(--ink-soft);
+    border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+    padding: 0.9rem 0; margin: 0 0 3rem; word-break: break-word;
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+  .status-pill {
+    display: inline-block; font-family: var(--mono); font-size: 0.68rem; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase; padding: 0.3rem 0.7rem;
+    background: var(--accent); color: var(--paper); border-radius: 2px;
+  }
+  h2 {
+    font-size: 1.05rem; letter-spacing: 0.09em; text-transform: uppercase;
+    font-family: var(--mono); font-weight: 700; color: var(--accent);
+    margin: 3.4rem 0 1.1rem; padding-bottom: 0.45rem; border-bottom: 2px solid var(--rule);
+  }
+  h3 { font-size: 1.16rem; margin: 2.1rem 0 0.6rem; font-weight: 600; letter-spacing: -0.01em; }
+  p { margin: 0 0 1.05rem; }
+  ul, ol { margin: 0 0 1.05rem; padding-left: 1.3rem; }
+  li { margin: 0.35rem 0; }
+  code {
+    font-family: var(--mono); font-size: 0.85em;
+    background: var(--accent-soft); padding: 0.1em 0.34em; border-radius: 3px;
+  }
+  pre {
+    font-family: var(--mono); font-size: 0.78rem; line-height: 1.65;
+    background: var(--accent-soft); border-left: 3px solid var(--accent);
+    padding: 1rem 1.1rem; overflow-x: auto; margin: 0 0 1.3rem; border-radius: 0 3px 3px 0;
+  }
+  pre code { background: none; padding: 0; }
+  .stats { display: flex; flex-wrap: wrap; gap: 1.6rem; margin: 2rem 0 2.4rem; }
+  .stat { flex: 1 1 7rem; }
+  .stat .n {
+    font-family: var(--mono); font-size: 2rem; font-weight: 700;
+    line-height: 1; color: var(--accent); letter-spacing: -0.03em;
+  }
+  .stat .l {
+    font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--ink-soft); margin-top: 0.42rem;
+  }
+  .scroll { overflow-x: auto; margin: 0 0 1.4rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.87rem; min-width: 30rem; }
+  th, td { text-align: left; padding: 0.52rem 0.7rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th {
+    font-family: var(--mono); font-size: 0.67rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-soft); font-weight: 700;
+    border-bottom: 2px solid var(--rule);
+  }
+  td code { font-size: 0.8em; }
+  .decision {
+    border-left: 3px solid var(--rule); padding: 0.15rem 0 0.15rem 1.15rem; margin: 0 0 1.8rem;
+  }
+  .decision h3 { margin-top: 0; }
+  .decision .rejected {
+    font-size: 0.93rem; color: var(--ink-soft); margin-bottom: 0;
+  }
+  .rejected b { color: var(--ink); font-weight: 600; }
+  .callout {
+    background: var(--accent-soft); border-radius: 3px;
+    padding: 1.1rem 1.25rem; margin: 0 0 1.5rem; font-size: 0.95rem;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .h {
+    font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.1em;
+    text-transform: uppercase; font-weight: 700; color: var(--accent);
+    display: block; margin-bottom: 0.5rem;
+  }
+  .done { color: var(--good); font-weight: 600; }
+  .open { color: var(--warn); font-weight: 600; }
+  .bar { display: flex; height: 1.6rem; border-radius: 2px; overflow: hidden; margin: 0.4rem 0 0.5rem; font-family: var(--mono); font-size: 0.66rem; }
+  .bar span { display: flex; align-items: center; justify-content: center; color: var(--paper); white-space: nowrap; }
+  .bar .a { background: var(--accent); }
+  .bar .b { background: var(--ink-soft); }
+  a { color: var(--accent); }
+  footer {
+    margin-top: 4rem; padding-top: 1.2rem; border-top: 1px solid var(--rule);
+    font-family: var(--mono); font-size: 0.7rem; color: var(--ink-soft);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="kicker">CCS · Implementation plan</p>
+<h1>A store of 458 sessions you can actually read</h1>
+<p class="standfirst">
+  One structured model pass per session turns an unreadable transcript pile into a queryable
+  answer to “what was this, what’s still open, and what should I do with it?” — stored as real
+  catalogue state, refreshed only when a session actually moves.
+</p>
+
+<p><span class="status-pill">Deployed · rendering in the TUI · backfill draining</span></p>
+
+<div class="meta">
+  <b>Artifact</b> <code>/Users/mimen/Programming/Repos/claude-sessions/docs/plans/session-enrichment.html</code><br>
+  <b>Branch</b> <code>feat/session-enrichment</code> · worktree <code>.claude/worktrees/session-enrichment</code><br>
+  <b>Based on</b> <code>14dd6df</code> (the deployed head, 7 commits ahead of <code>master</code>)<br>
+  <b>Supersedes</b> <code>/Users/mimen/Programming/Repos/ccs-go/docs/plans/session-enrichment.html</code>, which scoped this as a Go TUI feature
+</div>
+
+<h2>1 · What this is for</h2>
+
+<p>
+  The session store has grown past the point where a transcript is a useful way to remember what a
+  session was. Opening one shows the last few hundred lines of tool calls; catching up means
+  reading. With 458 top-level sessions, catching up doesn’t happen.
+</p>
+<p>
+  Enrichment replaces that with a cached, structured description generated once per session: a
+  short summary, what’s still unfinished, a recommended next action, and a judgement about whether
+  the session is even running in the right directory. It is generated by one model call, stored on
+  the session’s catalogue row, and regenerated only when the session has actually advanced.
+</p>
+
+<div class="stats">
+  <div class="stat"><div class="n">458</div><div class="l">top-level sessions</div></div>
+  <div class="stat"><div class="n">v39</div><div class="l">catalogue schema</div></div>
+  <div class="stat"><div class="n">93%</div><div class="l">first-pass success</div></div>
+  <div class="stat"><div class="n">1093</div><div class="l">tests passing</div></div>
+</div>
+
+<h2>2 · The decisions that shaped it</h2>
+
+<p>
+  Five questions were open when this thread started. Answering them moved the feature from “a Go
+  TUI reads its own sidecar database” to “CCS owns enrichment as first-class state.” Each decision
+  below records what was chosen and what was rejected, because the rejected option is usually the
+  one a future reader would otherwise re-propose.
+</p>
+
+<div class="decision">
+  <h3>Enrichment lives in catalogue columns, not a sidecar or a JSON blob</h3>
+  <p>
+    The original design gave the Go TUI its own SQLite file to avoid touching the CCS schema, with
+    a migration to “canonical storage” deferred. But the catalogue is at <code>user_version 37</code>
+    with roughly twenty additive <code>ALTER TABLE catalogue ADD COLUMN</code> precedents, each
+    presence-guarded, and since <code>b9760e7</code> every migration runs in one transaction with a
+    post-migration schema check. Adding columns here is routine.
+  </p>
+  <p class="rejected">
+    <b>Rejected: a ccs-go sidecar.</b> It makes enrichment invisible to the statusline, <code>ccs ls</code>,
+    and every other consumer, and turns “promote it later” into a scheduled migration.
+    <b>Also rejected: the generic <code>meta</code> JSON blob.</b> <code>meta</code> is explicitly
+    scratch state that ccs stores without interpreting; enrichment is the opposite — state that
+    wants to be queried, sorted, and indexed.
+  </p>
+</div>
+
+<div class="decision">
+  <h3>CCS owns the producer; the TUI is only a reader</h3>
+  <p>
+    Once enrichment became catalogue state written through a sensor path, the model call belonged
+    in CCS too — mirroring <code>ccs reindex --titles</code>. This turned out to shrink the build
+    rather than grow it: <code>src/start/gateway.ts</code> was already a working, zod-validated
+    gateway client, so there was no new inference engine to write in either language.
+  </p>
+  <p class="rejected">
+    <b>Rejected: the Go TUI owning the model call.</b> It strands inference logic in a language no
+    other consumer speaks, so the next reader — statusline, cron, the board — reimplements it.
+  </p>
+</div>
+
+<div class="decision">
+  <h3>Working-directory suggestions are registry keys, not free text</h3>
+  <p>
+    Sessions are often started in the wrong place, so enrichment judges whether the cwd fits the
+    work. Asked openly, a model answers with a plausible invented path — the first real run on this
+    machine, with no registry installed, proposed <code>~/.claude/skills/ccs-new</code> for work
+    that belongs in the CCS repo. Constrained to the shared launch-location registry (30 curated
+    locations with verified paths), the model picks a key that can be checked, and the same run
+    correctly proposed <code>~/Programming/Repos/claude-sessions</code>.
+  </p>
+  <p class="rejected">
+    <b>Rejected: free-text paths everywhere.</b> Kept only as the escape hatch for work with no
+    registered home — which is itself the signal that a location should be registered.
+  </p>
+</div>
+
+<div class="decision">
+  <h3>No <code>delete</code>, and no fourth status enum</h3>
+  <p>
+    CCS has no delete: lifecycle is a fixed enum over an append-only forensic record. Rather than
+    build destructive deletion so a model could recommend it, the enum stops at four values and a
+    separate <code>junk</code> boolean preserves the “never worth starting” distinction. A
+    <code>status</code> field was dropped entirely — the catalogue already carries lifecycle,
+    <code>stage</code>, and <code>activity</code>, and a fourth status-shaped axis is one more
+    thing to keep coherent for no new information.
+  </p>
+  <p class="rejected">
+    <b>Rejected: archive + a <code>junk</code> entity tag.</b> <code>ccs tag</code> links sessions
+    to vault entities; <code>junk</code> isn’t one, and putting it there is a permanent semantic leak.
+  </p>
+</div>
+
+<div class="decision">
+  <h3>Freshness is driven by progress, not by a clock</h3>
+  <p>
+    A session is re-enriched when it has gained 10 messages, or when it has moved at all and the
+    stored summary is more than six hours old. An idle session is enriched once and then never
+    again, which is what makes the steady-state cost approximately nothing.
+  </p>
+  <p class="rejected">
+    <b>Rejected: “re-enrich when last activity moved,”</b> which appeared in the original design
+    alongside the message threshold. Any session that gains one message has moved, so that rule
+    would have fired on every advance and made the threshold decorative. The case it was reaching
+    for — a dormant session picked back up — is caught by the age backstop instead.
+  </p>
+</div>
+
+<h2>3 · How it works</h2>
+
+<h3>The stored shape</h3>
+<p>
+  Eleven columns on <code>catalogue</code>, all prefixed <code>enrichment_</code>. Two of them —
+  <code>enrichment_at</code> and <code>enrichment_at_messages</code> — are the provenance that makes
+  staleness computable, and are asserted by the post-migration schema check.
+</p>
+
+<div class="scroll">
+<table>
+  <tr><th>Column</th><th>Meaning</th></tr>
+  <tr><td><code>enrichment_title</code></td><td>A name derived from how the session ended, not how it opened (v39)</td></tr>
+  <tr><td><code>enrichment_summary</code></td><td>Two or three sentences: what the session was, where it ended up</td></tr>
+  <tr><td><code>enrichment_outstanding</code></td><td>One line on what is still unfinished; empty when nothing is open</td></tr>
+  <tr><td><code>enrichment_recommendation</code></td><td><code>continue</code> · <code>complete</code> · <code>archive</code> · <code>handoff</code> (CHECK-constrained)</td></tr>
+  <tr><td><code>enrichment_reason</code></td><td>One line justifying the recommendation</td></tr>
+  <tr><td><code>enrichment_junk</code></td><td>Never worth starting — distinct from a real attempt that failed</td></tr>
+  <tr><td><code>enrichment_cwd_correct</code></td><td>Whether the cwd suits the work the session actually did</td></tr>
+  <tr><td><code>enrichment_suggested_location</code></td><td>A registry key, when the cwd is wrong</td></tr>
+  <tr><td><code>enrichment_suggested_cwd</code></td><td>Free-text path, only when no registered location fits</td></tr>
+  <tr><td><code>enrichment_at_messages</code></td><td>Message count at generation — staleness is <code>current − this</code></td></tr>
+  <tr><td><code>enrichment_at</code></td><td>Generation timestamp, for the age backstop</td></tr>
+  <tr><td><code>enrichment_attempts</code></td><td>Failed attempts; capped at 3, reset by any success</td></tr>
+</table>
+</div>
+
+<h3>Recommendation → action</h3>
+<div class="scroll">
+<table>
+  <tr><th>Value</th><th>Means</th><th>Action</th></tr>
+  <tr><td><code>continue</code></td><td>Live work worth resuming</td><td>none — stays active</td></tr>
+  <tr><td><code>complete</code></td><td>It succeeded and is done</td><td><code>ccs mark --completed</code> (stays visible)</td></tr>
+  <tr><td><code>archive</code></td><td>Abandoned or a dead end</td><td><code>ccs mark --archived</code> (hidden)</td></tr>
+  <tr><td><code>handoff</code></td><td>Belongs with another session or person</td><td>the <code>handoff</code> skill</td></tr>
+</table>
+</div>
+
+<h3>The command</h3>
+<pre><code>ccs enrich [&lt;id|prefix&gt;|.] [--json]        one session, now
+ccs enrich --sweep [--limit N] [--concurrency N]
+ccs enrich --list  [--limit N] [--json]    what the sweep would do, no model calls</code></pre>
+<p>
+  <code>--list</code> exists because the sweep is what a scheduled job runs unattended: being able
+  to ask “what do you currently think is stale” without spending calls is how a cadence gone wrong
+  gets diagnosed. Session ids accept unique short prefixes, so <code>--list</code> output pastes
+  straight back into the command.
+</p>
+
+<h3>Why enrichment mints no sessions</h3>
+<div class="callout">
+  <span class="h">The failure this design avoids</span>
+  <p>
+    Headless model calls made through a harness binary (<code>claude -p</code>, <code>codex</code>)
+    register as Claude Code sessions. The real store already contains junk one-line entries from
+    exactly this — “Reply With OK”, “Identify the Running Model ID”. Enrichment runs over
+    <em>every</em> top-level session, so a harness-based implementation would have added hundreds
+    of such entries to the catalogue it exists to make legible, and each new entry would itself
+    become enrichable. That is a loop.
+  </p>
+  <p>
+    Enrichment therefore reaches the model by raw HTTP POST only, which cannot create a session.
+    <code>src/enrich/provenance.test.ts</code> pins this at the source level — it fails if any
+    module under <code>src/enrich</code> gains a process spawn or a harness invocation.
+  </p>
+</div>
+
+<h3>Prompt injection</h3>
+<p>
+  Enrichment reads conversations containing arbitrary text, including text shaped exactly like a
+  directive to a model. The transcript is fenced in a <code>&lt;session&gt;</code> block and the
+  system prompt states that everything inside it is untrusted data that must never be followed as
+  an instruction — the same stance <code>src/start/gateway.ts</code> takes toward catalogue titles,
+  and more load-bearing here because the payload is a whole conversation. Beyond that, output is
+  structurally constrained: a location key the model was not given is rejected outright.
+</p>
+
+<h2>4 · What it costs</h2>
+
+<p>
+  The cost argument is entirely in the cadence. A timer-based sweep would re-read 458 finished
+  sessions every night to discover that none of them changed. Progress-based staleness means the
+  backfill is a one-time expense and the steady state is a trickle.
+</p>
+
+<div class="bar">
+  <span class="a" style="flex: 458">458 sessions · one-time backfill</span>
+  <span class="b" style="flex: 40">steady state</span>
+</div>
+<p style="font-size: 0.87rem; color: var(--ink-soft);">
+  Input is bounded per session — a 24k-character transcript tail plus the indexed skeleton, roughly
+  13k tokens at worst; output is about 150 tokens. On Sol via the ChatGPT subscription the marginal
+  cost is approximately zero; the metered equivalent for the whole store is single-digit dollars.
+  The scheduled job takes 40 sessions per run so a cold store drains in about two hours without
+  ever presenting the gateway with a burst.
+</p>
+
+<h2>5 · Execution status</h2>
+
+<p>
+  Implemented on <code>feat/session-enrichment</code>, rebased onto the deployed head. Full suite:
+  <b>1093 passing, 0 failing.</b> The v38 migration has been applied to the live catalogue (backed
+  up beforehand at <code>user_version 37</code>), and a real backfill is running.
+</p>
+
+<div class="scroll">
+<table>
+  <tr><th>Piece</th><th>Where</th><th>State</th></tr>
+  <tr><td>Catalogue v38/v39 + setters</td><td><code>src/catalogue/db.ts</code></td><td class="done">done</td></tr>
+  <tr><td>Schema + coherence rules</td><td><code>src/catalogue/enrichment-schema.ts</code></td><td class="done">done</td></tr>
+  <tr><td>Location registry reader</td><td><code>src/enrich/locations.ts</code></td><td class="done">done</td></tr>
+  <tr><td>Bounded transcript tail</td><td><code>src/enrich/transcript-tail.ts</code></td><td class="done">done</td></tr>
+  <tr><td>Gateway call (Sol, medium)</td><td><code>src/enrich/gateway.ts</code></td><td class="done">done</td></tr>
+  <tr><td>Staleness rules</td><td><code>src/enrich/staleness.ts</code></td><td class="done">done</td></tr>
+  <tr><td>Sweep + orchestration</td><td><code>src/enrich/enrich.ts</code></td><td class="done">done</td></tr>
+  <tr><td>CLI</td><td><code>src/enrich/command.ts</code></td><td class="done">done</td></tr>
+  <tr><td>External writer seam</td><td><code>src/catalogue/session-fields-command.ts</code></td><td class="done">done</td></tr>
+  <tr><td>Tests (57 new)</td><td><code>src/enrich/*.test.ts</code>, <code>src/catalogue/enrichment-*.test.ts</code></td><td class="done">done</td></tr>
+  <tr><td>launchd agent</td><td><code>scripts/launchd/</code></td><td class="done">installed, pointed at the deployment</td></tr>
+  <tr><td>Deploy</td><td><code>~/Programming/Deployments/claude-sessions</code></td><td class="done">done, <code>master</code> fast-forwarded</td></tr>
+  <tr><td>ccs-go dossier</td><td><code>feat/dossier-enrichment</code></td><td class="done">done, 11 new tests</td></tr>
+  <tr><td>Store backfill</td><td>live catalogue</td><td class="open">draining, 281/458</td></tr>
+</table>
+</div>
+
+<h3>What real runs changed</h3>
+<p>
+  Two defects only appeared against the live store, and both are worth recording because the unit
+  tests could not have found them.
+</p>
+<ul>
+  <li>
+    <b>Field budgets the model was never told about.</b> Summaries were capped at 600 characters
+    with nothing in the schema mentioning a limit, and two thirds of real sessions were rejected
+    for writing three ordinary sentences. The caps are now backstops (1200/500) and the requested
+    lengths appear in the schema descriptions the model actually reads. First-pass success went
+    from 33% to 93%.
+  </li>
+  <li>
+    <b>Unattended failures were invisible.</b> The sweep reported “failed 8” with no reasons, which
+    in a launchd log makes a dead gateway, an expired key, and one bad transcript indistinguishable.
+    Each failure now logs a truncated reason to stderr.
+  </li>
+  <li>
+    <b>A rate limit was quietly disqualifying sessions forever.</b> The attempt cap exists so a
+    transcript the model genuinely cannot handle stops costing calls — but it was counting
+    <em>transport</em> failures too. One provider cooldown burnt an attempt on forty perfectly
+    enrichable sessions in a single sweep, and twenty-seven had already reached the cap of three,
+    between that and the summary-length bug above. Both causes were mine, not theirs. Transport
+    failures are now a distinct error type that is retried freely and never counted; only an
+    answer the model produced and we rejected spends budget. The counters were reset.
+  </li>
+</ul>
+
+<div class="callout">
+  <span class="h">A note on the attempt cap</span>
+  <p>
+    The general shape of the bug is worth remembering: a budget meant to bound the cost of
+    <em>bad input</em> was being spent on <em>bad infrastructure</em>. Those fail identically at
+    the call site and mean opposite things — one is permanent and about this session, the other is
+    temporary and about none of them. Any retry budget needs that distinction at the point where
+    it decides to count.
+  </p>
+</div>
+
+<h2>6 · Open items and known limits</h2>
+
+<ul>
+  <li>
+    <b>The location registry isn’t on this machine yet.</b> <code>~/.ccs/locations.toml</code>
+    ships with the <code>/ccs:new</code> session router, still unmerged in
+    <code>feat/ccs-new-router</code>. Until it lands, cwd suggestions fall back to free text and
+    are noticeably weaker; the command warns when it finds no registry. No code change is needed
+    when it arrives.
+  </li>
+  <li>
+    <b><code>master</code> is 7 commits behind the deployed <code>ccs</code></b> (<code>14dd6df</code>,
+    carrying index schema v10). This branch is based on the deployed head, not on
+    <code>master</code>. Merging it to <code>master</code> alone would ship a binary that cannot
+    read the live index.
+  </li>
+  <li>
+    <b>The ccs-go work is on its own branch, unmerged.</b> <code>feat/dossier-enrichment</code>
+    branches from <code>feat/navigate-led-redesign</code>, which another session owns. Merging it
+    is that session's call, not this one's.
+  </li>
+  <li>
+    <b>The deployed <code>ccs</code> briefly predated <code>enrich</code>.</b> The first plist
+    pointed at the deployment and would have failed every fifteen minutes with
+    <code>Unknown command</code>. The branch is now deployed and the agent points there, but the
+    installer keeps the preflight that proves the command exists in whatever checkout it is asked
+    to schedule — the failure mode was silent, into a log nobody reads.
+  </li>
+  <li>
+    <b>Two sweeps have no mutual lock.</b> launchd will not start a second copy of its own job, but
+    a manual <code>ccs enrich --sweep</code> run alongside it can enrich the same session twice.
+    Harmless — the write is idempotent and last-write-wins — but wasteful.
+  </li>
+</ul>
+
+<footer>
+  Living document · updated as the work moves ·
+  <a href="file:///Users/mimen/Programming/Repos/claude-sessions/docs/plans/session-enrichment.html" target="_blank" rel="noopener">open standalone</a>
+</footer>
+
+</div>
+<script>
+  (function () {
+    try {
+      var k = "planscroll:" + location.pathname;
+      var y = sessionStorage.getItem(k);
+      if (y !== null) window.scrollTo(0, parseInt(y, 10));
+      window.addEventListener("scroll", function () {
+        sessionStorage.setItem(k, String(window.scrollY));
+      }, { passive: true });
+    } catch (e) {}
+  })();
+</script>
+</body>
+</html>

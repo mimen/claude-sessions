@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>CCS productivity sidebar</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --bg: #f3f5f7; --paper: #fff; --ink: #17212b; --muted: #66727d;
+      --rule: #d8dee3; --accent: #4667a5; --good: #277a5a; --wait: #9a6423;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #11171c; --paper: #182027; --ink: #e8edf1; --muted: #9ba8b2; --rule: #34414b; --accent: #91afe8; --good: #75caa7; --wait: #e1b46f; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.5; }
+    main { width: min(760px, calc(100% - 2rem)); margin: 2rem auto; padding: 2rem; background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; }
+    h1 { margin: 0 0 .4rem; font-size: clamp(2rem, 5vw, 3.3rem); letter-spacing: -.05em; line-height: 1; }
+    h2 { margin: 2rem 0 .7rem; padding-top: 1.4rem; border-top: 1px solid var(--rule); font-size: 1.15rem; }
+    p, li { max-width: 68ch; }
+    .muted { color: var(--muted); }
+    .status { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.1rem 0; }
+    .chip { padding: .25rem .6rem; border: 1px solid var(--rule); border-radius: 999px; font-size: .76rem; font-weight: 700; }
+    .done { color: var(--good); } .waiting { color: var(--wait); }
+    .decision { margin: .65rem 0; padding: .85rem 1rem; border-left: 4px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+    .row { margin: .7rem 0; padding: .85rem; border: 1px solid var(--rule); border-radius: 9px; }
+    .row-line { display: flex; gap: .6rem; justify-content: space-between; align-items: baseline; }
+    .row-title { margin: .25rem 0; font-weight: 700; }
+    .small { color: var(--muted); font-size: .82rem; }
+    .model { color: var(--accent); font-weight: 700; }
+    .path { margin-top: 2rem; color: var(--muted); font: .73rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="muted">CCS × cmux</p>
+    <h1>Productivity sidebar</h1>
+    <p>A fast work queue answering: what is running, what needs me, and what should I resume?</p>
+
+    <div class="status">
+      <span class="chip done">V1 complete</span>
+      <span class="chip done">V2 built and running</span>
+      <span class="chip waiting">Dock placement is a manual step</span>
+    </div>
+
+    <h2>Product decisions</h2>
+    <div class="decision"><strong>T3 is visual reference only.</strong> Use its dense rows, model/provider icon treatment, hover surface, selected surface, and status hierarchy.</div>
+    <div class="decision"><strong>cmux supplies active work.</strong> Presence already means live. Surface cmux’s actual <code>claude_code</code> status, such as <code>Running</code>, rather than adding a redundant liveness badge.</div>
+    <div class="decision"><strong>CCS supplies resume.</strong> Its useful job here is showing a short shelf of recent resumable sessions and performing managed resume. Cost, lineage, fleet structure, and catalogue metadata stay out.</div>
+
+    <h2>Sections</h2>
+    <ol>
+      <li><strong>Needs you</strong>: Claude is waiting for input, permission, review, or another user action.</li>
+      <li><strong>Working</strong>: active Claude sessions whose cmux Claude status says they are running.</li>
+      <li><strong>Ready</strong>: live Claude workspaces sitting at the prompt, available to continue.</li>
+      <li><strong>Recent sessions</strong>: a collapsed, capped CCS shelf for sessions not currently in cmux. Click resumes through CCS.</li>
+      <li><strong>Other workspaces</strong>: compact non-Claude cmux tools such as the CCS TUI.</li>
+    </ol>
+
+    <h2>Active row</h2>
+    <div class="row">
+      <div class="row-line small"><span>◉ claude-sessions</span><span>⚡ Running</span></div>
+      <div class="row-title">Design cmux productivity sidebar</div>
+      <div class="row-line small"><span>cmux-t3-sidebar-v1</span><span><span class="model">Sol ⬡</span>&nbsp;&nbsp;2m</span></div>
+    </div>
+    <ul>
+      <li><strong>Top left:</strong> favicon when the project publishes one, then the <em>project</em> — the repository’s name, resolved through git’s common directory so every worktree of one repository reads as the same project.</li>
+      <li><strong>Top right:</strong> cmux’s exact Claude status icon and label, preserving the status color.</li>
+      <li><strong>Middle:</strong> session name as the primary line, with cmux’s activity glyph stripped since the pill already says that.</li>
+      <li><strong>Bottom left:</strong> which checkout, shown only when the session is in a linked worktree.</li>
+      <li><strong>Bottom right:</strong> short model name plus the provider’s own logo, then time since the last message. Examples: <code>Sol</code>, <code>Fable</code>, <code>Opus</code>, and <code>Sonnet</code>.</li>
+      <li>Click focuses the live workspace. Hover changes the surface and may reveal one contextual action.</li>
+    </ul>
+    <p><strong>Logos are the vendors’ own, unaltered — only sized.</strong> The OpenAI mark follows the theme because that is how it is published; the Claude mark keeps <code>#D97757</code> in both. The model label sits in muted ink so one chip carries one color.</p>
+
+    <h2>Controls</h2>
+    <ul>
+      <li>Up/down and Enter for fast keyboard navigation.</li>
+      <li>One-click focus for live rows.</li>
+      <li>One-click managed resume for Recent sessions.</li>
+      <li>Optional Clear action for a dismissed attention item.</li>
+      <li>No inline administration menu. Rename, archive, lineage, and full catalogue browsing remain in the CCS TUI.</li>
+    </ul>
+
+    <h2>Remove</h2>
+    <ul>
+      <li>Cost and token usage.</li>
+      <li>Lineage, parent/child structure, seats, and fleet metadata.</li>
+      <li>Redundant cmux liveness indicators.</li>
+      <li>Progress percentages.</li>
+      <li>Port count, tab count, remote-server icons, PR chips, and dirty-branch clutter.</li>
+      <li>A full detached-session catalogue.</li>
+    </ul>
+
+    <h2>Implementation shape</h2>
+    <p>cmux Dock browser → CCS-owned React host → cmux workspace/status data plus a small CCS Recent-session query. No T3 runtime dependency and no browser access to CCS databases.</p>
+
+    <h2>Built</h2>
+    <ol>
+      <li>Pure projection in <code>src/sidebar/projection.ts</code>: sections, row anatomy, model identity, cmux glyph stripping.</li>
+      <li>Adapters for cmux’s <code>claude_code</code> status pill, git worktrees, and project favicons.</li>
+      <li>One interface in <code>snapshot.ts</code>: <code>snapshot()</code>, <code>open()</code>, <code>faviconFor()</code>.</li>
+      <li>Loopback host on <code>127.0.0.1:8787</code>, wired as <code>ccs sidebar serve|url</code>.</li>
+      <li>React app with sections, hover, selected surface, filter, and session-stable keyboard navigation.</li>
+      <li>Click routing: focus when live, CCS-managed resume when not, fail closed when cmux is unreadable.</li>
+      <li>Docs at <a href="file:///Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/cmux-t3-sidebar-v1/src/sidebar/README.md" target="_blank" rel="noopener"><code>src/sidebar/README.md</code></a>.</li>
+    </ol>
+
+    <h2>Verification</h2>
+    <ul>
+      <li>Full suite: 1029 passed, 0 failed. Both typecheck projects clean.</li>
+      <li>Live snapshot against the real fleet: 26 rows across all four sections, with real statuses, worktrees, models, and one project favicon.</li>
+      <li>Rendered in Chrome at 400px in light and dark; keyboard navigation and the filter verified in the page.</li>
+      <li>Evidence: <code>docs/evidence/ccs-sidebar-v2-dock.png</code>.</li>
+    </ul>
+
+    <h2>Review fixes landed</h2>
+    <p>A primary review found six defects; three implementer agents fixed them in parallel, partitioned by file.</p>
+    <ul>
+      <li><strong>Duplicate spawn</strong> — a second click during the window before cmux binds a resumed surface could spawn the session twice. Now guarded by a per-session single flight plus a recently-resumed window.</li>
+      <li><strong>Launcher fail-open</strong> — an unreadable launcher config silently resumed a GPT-origin session on plain <code>claude</code>. Now fails closed.</li>
+      <li><strong>Favicon</strong> — symlink escape, a replace-after-check window, and same-origin SVG execution. Symlinks refused, the file re-opened with <code>O_NOFOLLOW</code> and identity-matched, SVG excluded, <code>nosniff</code> and a locked-down CSP added.</li>
+      <li><strong>Trust boundary</strong> — <code>--host</code> silently exposed the LAN and no endpoint validated <code>Host</code>. Non-loopback binds are now refused outright and every request checks <code>Host</code>.</li>
+      <li><strong>Status truthfulness</strong> — statuses were targeted by mutable numeric refs, and an unreadable status demoted a running session to Ready. Now keyed on the stable workspace UUID, with an unread status distinguished from an absent one.</li>
+      <li><strong>Polling</strong> — neither single-flight nor ordered. Now one flight, with late responses unable to overwrite newer state.</li>
+    </ul>
+
+    <h2>Degraded-index finding</h2>
+    <p>Found while verifying: the sidebar returned HTTP 500 and rendered nothing, because the shared session index had been migrated to schema 11 while this branch supports 10. The index only supplies model identity and the resume shelf — cmux alone already knows what is running — so failing the whole snapshot was wrong. It now degrades to live rows and says which half is missing.</p>
+    <p><strong>Separate, wider issue:</strong> <code>feat/swap-harness</code> declares schema 11 and migrated the shared database; <code>master</code> and every other branch declare 10 and can no longer read it. That affects <code>ccs ls</code> and the TUI too, not just the sidebar. Milad's call to resolve.</p>
+
+    <h2>Design pass in flight</h2>
+    <div class="decision"><strong>Standard shadcn theme, zinc base, in oklch.</strong> Pulled from shadcn's own registry rather than approximated, and stored at <code>docs/shadcn-zinc-reference.css</code>.</div>
+    <div class="decision"><strong>Theme follows the system automatically.</strong> cmux's own themes are set to <code>inherit</code>, so it already tracks macOS; the Dock browser gets the same signal through <code>prefers-color-scheme</code>. Auto therefore matches cmux with no cmux-specific integration.</div>
+    <div class="decision"><strong>Worktree name is hidden in the row.</strong> Only the project shows. The worktree stays in the projection so the hover preview card can use it.</div>
+    <div class="decision"><strong>Model colours come from CCS.</strong> <code>modelOf</code> now takes its colour from <code>familyOf</code> in <code>src/tui/format.ts</code> instead of keeping a copy, so the sidebar and the TUI cannot drift. A test locks them together.</div>
+    <ul>
+      <li>Tailwind v4 with a CSS-first <code>@theme</code>, compiled into the Bun bundle so <code>ccs sidebar serve</code> stays one self-contained command.</li>
+      <li><a href="https://www.kibo-ui.com/components/status" target="_blank" rel="noopener">kibo-ui Status</a> for the cmux status pill.</li>
+      <li><a href="https://coss.com/ui/docs/components/preview-card" target="_blank" rel="noopener">coss preview-card</a> for row hover detail — it is a hover card, so the row stays dense and path, branch, and worktree live in the popup.</li>
+      <li><a href="https://lobehub.com/icons" target="_blank" rel="noopener">@lobehub/icons-static-svg</a> (MIT, 903 official brand SVGs) for model marks, inlined into the bundle.</li>
+    </ul>
+
+    <h2>Remaining</h2>
+    <ul>
+      <li>The host runs detached but is not installed to start on login; that needs a LaunchAgent.</li>
+      <li>Live focus and resume were not exercised end to end, to avoid moving the active workspace unasked.</li>
+      <li>V1 remains installed and unchanged. No Dock configuration file was written; the Dock surface was added with a single command.</li>
+    </ul>
+
+    <p class="path">/Users/mimen/Programming/Repos/claude-sessions/docs/plans/cmux-session-sidebar.html</p>
+  </main>
+  <script>
+    const key = `scroll:${location.pathname}`;
+    const saved = sessionStorage.getItem(key);
+    if (saved !== null) requestAnimationFrame(() => window.scrollTo(0, Number(saved)));
+    addEventListener("beforeunload", () => sessionStorage.setItem(key, String(window.scrollY)));
+  </script>
+</body>
+</html>

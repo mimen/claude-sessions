@@ -9,8 +9,10 @@ It's also the read-only foundation for a future session-cataloguing layer.
 ## What it does
 
 - **Browse** every session on this machine, newest-activity first, across all directories.
-- **Titles** for each session: Claude Code's native `ai-title` when present, otherwise one
-  generated with Codex, otherwise a cleaned first message.
+- **Titles** for each session, from one resolver (`src/title.ts`): a title you set yourself wins,
+  else the identity role name, else Claude Code's native `ai-title`, else one generated with Codex,
+  else a cleaned first message. A title you set (`t` in the TUI, or `ccs rename`) is durable and
+  always outranks a generated one.
 - **Search** (`/`) — fuzzy over title/project, full-text over a content skeleton.
 - **Group** (`g`) by project (git-repo root; a repo's root and subdirs collapse together).
 - **Preview** (`p`) — full metadata + a content peek, including subagent relationships.
@@ -103,29 +105,32 @@ delegation.
 
 ## Slash commands (the `ccs` plugin)
 
-The TUI catalogues sessions from the outside. The plugin does it from inside the
-conversation, where filing the work is one command away.
+The TUI catalogues sessions from the outside. The plugin does it from the inside — so you
+can file a session without leaving it, which is the only way it actually happens.
 
 ```sh
 /plugin marketplace add mimen/claude-sessions
 /plugin install ccs@claude-sessions
-/reload-plugins        # only needed in an already-running session
+/reload-plugins        # only needed to pick them up in an already-running session
 ```
 
 | command | what it does |
 |---------|--------------|
-| `/ccs:archive` | keep the title useful, mark archived, and offer a safe tab-close link |
-| `/ccs:complete` | mark the work finished while keeping the session visible in history |
-| `/ccs:unarchive` | clear archive or completion flags and return to active views |
-| `/ccs:title <words>` | set an explicit title verbatim and sync the cmux tab |
+| `/ccs:archive` | retitle if the title is stale → mark archived → offer a one-click tab close |
+| `/ccs:complete` | mark the work finished; the session stays visible |
+| `/ccs:unarchive` | undo either flag, back to the active list |
+| `/ccs:title <words>` | set an explicit title, your wording verbatim (syncs the cmux tab) |
 | `/ccs:suggest-title` | generate a title from what the session actually became |
-| `/ccs:tag <entity>` | tag the session so related work is easy to find |
-| `/ccs:info` | show this session's lifecycle, cost, identity, and tags |
+| `/ccs:tag <entity>` | tag it so you can find every session about a thing |
+| `/ccs:info` | this session's catalogue row — lifecycle, cost, identity, tags |
 
-`completed` and `archived` are different claims. Completed work stays visible in CCS
-history but completed cluster members are not resumed. Archived work leaves active
-browse/search views and cluster resumes. Both states are reversible; neither touches
-the transcript.
+`archive` and `complete` are different claims: **completed** means the work landed and the
+session stays in view; **archived** means get it out of the way. Both are reversible, and
+neither touches the transcript — `ccs` only ever writes to its own catalogue.
+
+They call the per-session verbs (`ccs session archive .`), never the identity ones, so
+archiving a conversation never retires a standing cluster role. Design rationale:
+`docs/adr/0091-session-hygiene-commands-ship-as-a-user-scope-plugin.md`.
 
 ## Configuration
 

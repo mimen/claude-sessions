@@ -1,0 +1,423 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>CCS Titling Audit — every way a session gets a name</title>
+<style>
+  :root {
+    --fg: #1a1a1a; --bg: #ffffff; --muted: #666; --line: #ddd;
+    --code-bg: #f4f4f4; --accent: #2a52be; --warn-bg: #fff8e6; --warn-line: #e0c060;
+    --owner-harness: #7a3ea8; --owner-ccs: #1f6f43; --owner-cmux: #b3541e; --owner-user: #205081;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #e4e4e4; --bg: #16181c; --muted: #9aa0a8; --line: #333;
+      --code-bg: #22252b; --accent: #7aa2f7; --warn-bg: #2a2410; --warn-line: #6a5a20;
+      --owner-harness: #c08ae0; --owner-ccs: #63c896; --owner-cmux: #e0925e; --owner-user: #6fa8dc;
+    }
+  }
+  :root[data-theme="dark"] {
+    --fg: #e4e4e4; --bg: #16181c; --muted: #9aa0a8; --line: #333;
+    --code-bg: #22252b; --accent: #7aa2f7; --warn-bg: #2a2410; --warn-line: #6a5a20;
+    --owner-harness: #c08ae0; --owner-ccs: #63c896; --owner-cmux: #e0925e; --owner-user: #6fa8dc;
+  }
+  :root[data-theme="light"] {
+    --fg: #1a1a1a; --bg: #ffffff; --muted: #666; --line: #ddd;
+    --code-bg: #f4f4f4; --accent: #2a52be; --warn-bg: #fff8e6; --warn-line: #e0c060;
+    --owner-harness: #7a3ea8; --owner-ccs: #1f6f43; --owner-cmux: #b3541e; --owner-user: #205081;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--fg); background: var(--bg);
+    max-width: 60rem; margin: 0 auto; padding: 2rem 1.25rem 6rem;
+  }
+  h1 { font-size: 1.6rem; margin: 0 0 .3rem; }
+  h2 { font-size: 1.25rem; margin: 2.4rem 0 .6rem; padding-bottom: .3rem; border-bottom: 2px solid var(--line); }
+  h3 { font-size: 1.05rem; margin: 1.5rem 0 .3rem; }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 3px; font-size: .88em; }
+  pre { background: var(--code-bg); padding: .8rem 1rem; border-radius: 6px; overflow-x: auto; font-size: .82rem; line-height: 1.45; }
+  pre code { background: none; padding: 0; }
+  a { color: var(--accent); }
+  .path { font-family: ui-monospace, monospace; font-size: .8rem; color: var(--muted); word-break: break-all; }
+  .status { display: inline-block; font-size: .8rem; font-weight: 600; padding: .2rem .6rem; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); }
+  .lede { color: var(--muted); margin: .5rem 0 0; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: .86rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; }
+  .wrap { overflow-x: auto; }
+  .owner { font-weight: 700; font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; }
+  .o-harness { color: var(--owner-harness); }
+  .o-ccs { color: var(--owner-ccs); }
+  .o-cmux { color: var(--owner-cmux); }
+  .o-user { color: var(--owner-user); }
+  .cite { font-family: ui-monospace, monospace; font-size: .78rem; color: var(--muted); }
+  .note { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 6px; padding: .7rem 1rem; margin: 1rem 0; }
+  .note h4 { margin: 0 0 .3rem; font-size: .95rem; }
+  ol.stack { counter-reset: s; list-style: none; padding-left: 0; }
+  ol.stack li { counter-increment: s; padding: .5rem .7rem .5rem 2.6rem; position: relative; border: 1px solid var(--line); border-radius: 6px; margin-bottom: .4rem; }
+  ol.stack li::before { content: counter(s); position: absolute; left: .7rem; top: .5rem; font-weight: 700; color: var(--accent); font-family: ui-monospace, monospace; }
+  ol.stack strong { font-family: ui-monospace, monospace; }
+  .muted { color: var(--muted); }
+  .tag { font-size: .72rem; border: 1px solid var(--line); border-radius: 4px; padding: .05rem .35rem; color: var(--muted); white-space: nowrap; }
+  .legend span { margin-right: 1.2rem; white-space: nowrap; }
+</style>
+
+<h1>CCS Titling Audit</h1>
+<p class="lede">Every way a Claude&nbsp;Code session acquires a display name — who owns each source, how it's generated, where it's stored, and the order they resolve in. <strong>Part&nbsp;I</strong> is the audit (how it works today). <strong>Part&nbsp;II</strong> (§10–12) diagnoses the inconsistencies and proposes a simpler, single-source model.</p>
+<p style="margin:.8rem 0 0"><span class="status">✔ Implemented 2026-07-22 · in-scope steps shipped · P3 deferred (identity domain)</span></p>
+
+<div class="note" style="border-width:2px;margin-top:1.2rem">
+  <h4>✔ Execution status — shipped 2026-07-22</h4>
+  <ul style="margin:.3rem 0 .5rem 1.2rem">
+    <li><strong>Step 1 (P2) — self-naming is durable + tab-synced.</strong> The TUI <code>t</code> key now writes <code>custom_title</code> and renames the cmux tab (like <code>ccs rename</code>), not the rebuildable <code>codex_title</code>. Fixes F2, F3. <span class="cite">App.tsx retitle</span></li>
+    <li><strong>Step 2 (P1) — one resolver, every surface.</strong> New leaf module <code>src/title.ts</code> (<code>resolveSessionTitle</code>); called by <code>ccs ls</code>, the TUI list, the preview, <code>ccs meta</code>, <code>ccs session</code>. Fixes F1, the ls-vs-TUI drift, and G1 (the <code>★/✎/~</code> glyph now reflects the source that actually won). Identity rows defer to identity naming, untouched.</li>
+    <li><strong>Step 3 (P4) — <code>native_title</code> documented</strong> at the parse site + column as "last-emitted title," not "the AI title." Fixes N1. (Renaming the column judged not worth the churn.)</li>
+    <li><strong>Verification:</strong> <code>tsc</code> clean; all 41 titling-related tests pass; full suite's only failures are a pre-existing filesystem-walk flake that also fails on the clean tree. No schema change, no data migration.</li>
+    <li><strong>Deferred as planned:</strong> P3 (single-writer <code>custom_title</code>) — identity/cluster domain, cross-system. Recorded in <code>docs/adr/0093-*.md</code>. Also noted: search doesn't yet match custom titles (cross-DB FTS, separate enhancement).</li>
+  </ul>
+</div>
+<p class="path">/Users/mimen/Programming/Repos/claude-sessions/docs/plans/titling-audit.html</p>
+<p class="legend" style="margin-top:1rem;font-size:.82rem">
+  Owner key:
+  <span class="owner o-harness">■ harness</span>
+  <span class="owner o-cmux">■ cmux</span>
+  <span class="owner o-ccs">■ ccs</span>
+  <span class="owner o-user">■ you</span>
+</p>
+
+<div class="note" style="border-width:2px;margin-top:1.4rem">
+  <h4>TL;DR — the end state we're proposing (read this, skip the rest if you like)</h4>
+  <p style="margin:.2rem 0 .6rem">Every ordinary session shows <strong>one</strong> title, picked from the best source that exists, in this order:</p>
+  <ol style="margin:.2rem 0 .7rem 1.2rem">
+    <li><strong>the name you gave it</strong> — typed, or via <code>/ccs:suggest-title</code>. If it exists, it wins. Always.</li>
+    <li><strong>Claude Code's auto-name</strong> (the ai-title the harness writes)</li>
+    <li><strong>ccs's generated name</strong> (the titler's guess from the transcript)</li>
+    <li><strong>the first message, cleaned up</strong> — or "untitled" if there's nothing usable</li>
+  </ol>
+  <p style="margin:.2rem 0 .6rem">Plus two guarantees that <em>don't</em> hold today:</p>
+  <ul style="margin:.2rem 0 .7rem 1.2rem">
+    <li><strong>Same name everywhere</strong> — list, TUI, <code>ccs meta</code>, the tab all agree. (Today they can disagree, or show blank.)</li>
+    <li><strong>Your name is permanent and always wins</strong> — no machine guess overrides it, no cache-clear loses it. (Today the TUI <code>t</code> key can silently no-op and can be wiped by an index rebuild.)</li>
+  </ul>
+  <p style="margin:0"><strong>Why it's the floor:</strong> a title must be <em>findable</em> (your name is permanent + top priority), <em>honest</em> (same everywhere), and <em>never worse than now</em> (intentional beats generated beats nothing). You can't satisfy fewer than these three. &nbsp;<strong>Scope:</strong> ordinary sessions only — role/cluster worker tabs keep their own naming, untouched.</p>
+</div>
+
+<div class="note" style="margin-top:1rem">
+  <h4>How we get there — three steps, smallest and safest first</h4>
+  <ol style="margin:.3rem 0 .6rem 1.2rem">
+    <li><strong>Make "name it yourself" always stick.</strong> <span class="muted">(small, do first)</span> The TUI <code>t</code> key writes to the throwaway cache today and can silently no-op; point it at the permanent store, like <code>/ccs:suggest-title</code> already does. &nbsp;<em>→ naming a session is permanent and always wins.</em></li>
+    <li><strong>Make every screen read the title the same way.</strong> <span class="muted">(the keystone)</span> Replace ~7 drifting title-picking sites with <strong>one</strong> function that applies the 4-step order above; every screen calls it. &nbsp;<em>→ list, TUI, <code>ccs meta</code>, tab all agree; the ★/✎ marker stops lying. This is where the ordinary-vs-identity boundary is drawn in code.</em></li>
+    <li><strong>Fix the misleading name.</strong> <span class="muted">(free, anytime)</span> Rename/document <code>native_title</code> (it means "last-shown title," not "the AI title"). &nbsp;<em>→ no one is misled later.</em> Doc-only.</li>
+  </ol>
+  <p style="margin:.2rem 0 0"><strong>Why this order:</strong> each step ships alone and is useful alone (never half-migrated); smallest/safest first, so you get value before the bigger change; step 2 is a pure reorganization (no schema/data change) over tested code; and none of it touches the cluster/worker naming. &nbsp;<span class="muted">The pr-watch PR-title cleanup is a separate, later track — it reaches into another system.</span></p>
+</div>
+
+<h2>1 · The one thing to understand first</h2>
+<p>A session does not have <em>a</em> title. It has up to <strong>six candidate strings from four owners</strong>, and two <em>different</em> display surfaces (the <code>ccs</code> list/TUI, and the cmux tab) resolve them in <em>different</em> priority orders. "What's this session called?" has two correct answers depending on where you look.</p>
+
+<p>Three of the candidates live in the rebuildable <strong>index</strong> (<code>~/.ccs/cache/index.db</code>, reconstructable from transcripts), one lives in the durable <strong>catalogue</strong> (<code>~/.ccs/cache/catalogue.db</code>, never dropped), one is an identity attribute, and one is only ever live in cmux. That split is why clearing a custom title "loses" nothing — the index still holds the fallback chain.</p>
+
+<h2>2 · The six candidate sources</h2>
+<div class="wrap">
+<table>
+  <tr>
+    <th>Source</th><th>Owner</th><th>Where stored</th><th>How the value is produced</th>
+  </tr>
+  <tr>
+    <td><code>native_title</code><br><span class="muted">(ai-title)</span></td>
+    <td><span class="owner o-harness">harness</span> <span class="muted">+ cmux</span></td>
+    <td>index — parsed from transcript</td>
+    <td>Claude&nbsp;Code writes <code>{"type":"ai-title","aiTitle":"…"}</code> records into the JSONL. The value is the session's <em>current display title</em>: AI-generated prose at first, then <strong>overwritten</strong> whenever an external tool renames the workspace (observed: cmux worktree slugs like <code>priority-shelf-plan</code>). ccs keeps the <em>last</em> record.</td>
+  </tr>
+  <tr>
+    <td><code>codex_title</code></td>
+    <td><span class="owner o-ccs">ccs</span></td>
+    <td>index</td>
+    <td>ccs's own titler: an LLM (Codex or Claude) is handed the <em>skeleton</em> and asked for one ≤60-char imperative title. Only generated when there's no native title.</td>
+  </tr>
+  <tr>
+    <td><code>fallback_label</code></td>
+    <td><span class="owner o-ccs">ccs</span></td>
+    <td>index (<code>NOT NULL</code>)</td>
+    <td>Deterministic clean-up of the first human message — strip harness tags, drop pasted paths, surface a bare <code>/slash-command</code>, truncate to 80 chars. <code>"(untitled)"</code> if nothing usable. No LLM.</td>
+  </tr>
+  <tr>
+    <td><code>custom_title</code></td>
+    <td><span class="owner o-user">you</span> <span class="muted">via ccs</span></td>
+    <td>catalogue (durable)</td>
+    <td>Set explicitly — <code>ccs rename</code> / <code>ccs session title</code> / <code>/ccs:title</code> / <code>/ccs:suggest-title</code> / TUI. Verbatim; nothing rewrites it.</td>
+  </tr>
+  <tr>
+    <td><code>role</code></td>
+    <td><span class="owner o-ccs">ccs</span></td>
+    <td>catalogue (identity)</td>
+    <td>A cluster role name (<code>control</code>, <code>scout</code>, <code>pr-agent</code>). Used as a title only for loop/role sessions that have no custom title.</td>
+  </tr>
+  <tr>
+    <td><code>meta.shortname</code></td>
+    <td><span class="owner o-ccs">ccs</span> <span class="muted">(worker)</span></td>
+    <td>catalogue (<code>meta</code> JSON)</td>
+    <td>A worker's own stable ≤35-char label, used on the cmux tab so a PR session reads <code>#12137 addons plan list</code>. Lives in <code>meta</code> (not <code>custom_title</code>) so cluster sync can't overwrite it.</td>
+  </tr>
+</table>
+</div>
+
+<h2>3 · Resolution order — the two surfaces disagree</h2>
+
+<h3>Surface A — the <code>ccs</code> TUI (fullest chain)</h3>
+<p class="cite">src/index/index.ts:70 · src/tui/App.tsx:328</p>
+<p>The index resolves a base title by SQL <code>COALESCE</code>; the TUI then layers the catalogue's durable strings on top:</p>
+<ol class="stack">
+  <li><strong>live cmux tab title</strong> <span class="tag">if the session is open</span> <span class="muted">— what cmux currently shows</span></li>
+  <li><strong>custom_title</strong> <span class="muted">— your explicit title</span></li>
+  <li><strong>role</strong> <span class="muted">— identity role name</span></li>
+  <li><strong>native_title</strong> <span class="muted">— Claude Code's ai-title</span></li>
+  <li><strong>codex_title</strong> <span class="muted">— ccs-generated</span></li>
+  <li><strong>fallback_label</strong> <span class="muted">— cleaned first message → "(untitled)"</span></li>
+</ol>
+<p class="muted" style="font-size:.86rem">Items 4–6 are the <code>COALESCE(native_title, codex_title, fallback_label)</code> the index returns as <code>title</code>; items 1–3 are layered in front of it by <code>App.tsx</code> (<code>openTitles ?? customTitle ?? role ?? r.title</code>).</p>
+<p><code>ccs ls</code> is a <strong>subset</strong> of this — <span class="cite">cli.ts:506</span> — it does only <code>custom_title ?? resolved</code>, with <em>no</em> live-cmux layer and <em>no</em> role layer. So a role loop with no custom title shows its role name in the TUI but its native/codex/fallback title in <code>ls</code>.</p>
+
+<div class="note">
+  <h4>The write-through loop: cmux → custom_title</h4>
+  <p><span class="cite">App.tsx:335</span> — while a session is open, the TUI persists its <em>live cmux tab title</em> back into <code>custom_title</code> (guarded so a slug-shaped id can't poison it). So a cmux rename doesn't just paint the tab — it durably becomes the session's title. This is the reverse direction of surface B (where ccs paints the tab <em>from</em> <code>custom_title</code>), and the two together are why titles converge across list, TUI, and tab once a session has been open in cmux.</p>
+</div>
+
+<h3>Surface B — the cmux tab, painted by ccs</h3>
+<p class="cite">src/catalogue/render-tab.ts:201 (loops) · :220 (work sessions)</p>
+<p>When ccs paints a tab (turn hook or <code>ccs sync-tabs</code>) it uses a <strong>different, shorter</strong> chain — the index fallback chain isn't consulted at all:</p>
+<ul>
+  <li><strong>Loop/role session:</strong> <code>custom_title || role || identity-key || id[:8]</code></li>
+  <li><strong>Work session:</strong> <code>meta.shortname || custom_title</code> (with <code>#PR</code> prefix composed on) <code>|| identity-key || role || id[:8]</code></li>
+</ul>
+<div class="note">
+  <h4>Consequence: a tab and the list can show different names for the same session</h4>
+  <p>If a session has only a <code>native_title</code> (no custom title), the <code>ccs</code> list shows that native prose, but a ccs-painted tab falls through to the identity key or <code>id[:8]</code> — because <code>render-tab</code> never reads <code>native_title</code>. In practice the tab usually still shows the native prose anyway, because <strong>cmux itself</strong> set the tab from Claude Code's ai-title and ccs only <em>repaints</em> on sync. The <span class="owner o-cmux">✳</span> you saw prefixed to your tab is cmux's own activity glyph, not a ccs title source.</p>
+</div>
+
+<h3>Surface C — the Claude Code statusline</h3>
+<p class="cite">src/catalogue/render-statusline.ts:56</p>
+<p>A third surface, the bottom-of-window status line, composes its own label: a work tag (<code>#PR</code> / <code>W-…</code>) + <code>custom_title</code> (PR-prefix stripped) + a state pill. Same <code>custom_title</code>-first bias as the tab; the index fallback chain doesn't reach it either.</p>
+
+<h2>4 · How <code>native_title</code> is captured</h2>
+<p class="cite">src/parse.ts:147</p>
+<pre><code>if (obj.type === "ai-title" &amp;&amp; typeof obj.aiTitle === "string") {
+  nativeTitle = obj.aiTitle;   // reassigned every occurrence → LAST one wins
+  continue;
+}</code></pre>
+<p>The record repeats on essentially every turn (Claude Code re-emits the current title each line). ccs takes the last, so if the title changed mid-session the newest value is kept. This is the field that carried kebab-case slugs in 4 of your transcripts — those sessions were renamed to a cmux worktree slug partway through, and that slug flowed back into the ai-title channel. <strong>ccs never writes ai-title records</strong>; it only reads them.</p>
+
+<h2>5 · How <code>codex_title</code> is generated — the ccs titler</h2>
+
+<h3>5a · The input: the "skeleton"</h3>
+<p class="cite">src/parse.ts:37 · :172 · :221</p>
+<p>The titler never sees the full transcript. It sees a <strong>skeleton</strong>: the first 8 and last 4 <em>prose</em> turns (tool calls stubbed out, pure tool turns skipped), capped at 14,000 chars (~3.5k tokens).</p>
+<div class="wrap"><table>
+  <tr><th>Constant</th><th>Value</th><th>Meaning</th></tr>
+  <tr><td><code>FIRST_TURNS</code></td><td>8</td><td>opening prose turns kept</td></tr>
+  <tr><td><code>LAST_TURNS</code></td><td>4</td><td>closing prose turns kept (rolling buffer)</td></tr>
+  <tr><td><code>USER_TEXTS</code></td><td>4</td><td>first human messages kept for the fallback label</td></tr>
+  <tr><td><code>SKELETON_MAX_CHARS</code></td><td>14,000</td><td>hard cap; head+tail joined with <code>…</code></td></tr>
+</table></div>
+
+<h3>5b · The prompt</h3>
+<p class="cite">src/titler/codex.ts:14</p>
+<pre><code>"You title Claude Code coding/assistant sessions. Given the transcript excerpt in the
+&lt;stdin&gt; block, produce ONE concise title: max 60 characters, imperative mood, no
+surrounding quotes, no trailing period. Respond using the provided JSON schema."</code></pre>
+<p>Fed the skeleton on stdin, forced through a JSON schema (<code>src/titler/schema.json</code>). This is the contract <code>/ccs:suggest-title</code> now mirrors so a hand-invoked title is indistinguishable from a backfilled one.</p>
+
+<h3>5c · Which engine actually runs</h3>
+<p class="cite">src/inference/engine.ts:14 · :168 · src/config.ts:36</p>
+<div class="wrap"><table>
+  <tr><th>Engine</th><th>Invocation</th><th>Default model</th><th>When used</th></tr>
+  <tr><td><code>codex</code></td><td><code>codex exec</code> (hermetic, read-only sandbox)</td><td>your Codex default (<code>reasoningEffort: low</code>)</td><td>first choice under <code>auto</code> — rides free ChatGPT auth (ADR-0001)</td></tr>
+  <tr><td><code>claude</code></td><td><code>claude -p --json-schema … --output-format json</code></td><td><code>haiku</code></td><td>fallback under <code>auto</code>, or forced</td></tr>
+</table></div>
+<p>Selection: config <code>inference.engine</code> (<code>auto</code>|<code>codex</code>|<code>claude</code>), the <code>CCS_INFERENCE_ENGINE</code> env var, or the in-TUI <code>i</code> toggle. Under <code>auto</code> the order is <strong>codex then claude</strong> — whichever is installed.</p>
+
+<h3>5d · When titling runs, and who is eligible</h3>
+<p class="cite">src/index/index.ts:260 (gating) · src/titler/queue.ts:32 (drain) · src/tui/App.tsx:564 · src/cli.ts:400</p>
+<p>Three triggers drain the queue: the TUI in the background on launch, <code>ccs reindex --titles</code> (the cron/launchd path), and the TUI <code>t</code> key on one row. A session is a <strong>candidate</strong> only when:</p>
+<pre><code>native_title IS NULL          -- never override the harness title
+AND is_subagent = 0           -- subagents aren't titled
+AND title_attempts &lt; maxAttempts   -- default cap 3; failures don't retry forever
+AND skeleton &lt;&gt; ''            -- needs content
+AND ( codex_title IS NULL     -- never titled, OR…
+      OR msg_count &gt; title_msg_count * 1.5 )   -- grew >1.5× since last titling → regenerate</code></pre>
+<p>That last clause is the one place a ccs-generated title <strong>regenerates</strong> as a session grows — unlike the harness ai-title, which is written once and (absent a rename) never revisited. Concurrency defaults to 3; a successful generate stamps <code>title_msg_count</code> and resets attempts.</p>
+
+<h2>6 · How <code>fallback_label</code> is cleaned</h2>
+<p class="cite">src/label.ts · src/index/index.ts:194</p>
+<p>Pure string surgery over the first human messages, no model. In order: return a bare <code>/slash-command</code> as its own name; else strip harness <code>&lt;command-*&gt;</code> / <code>&lt;local-command-*&gt;</code> wrappers and any stray tags; drop leading pasted file-path lines; collapse whitespace; truncate at 80 chars with <code>…</code>. If every candidate cleans to empty → <code>"(untitled)"</code>. This is what shows for the ~92% of sessions with neither a native nor a generated title.</p>
+
+<h2>7 · The glyphs you see</h2>
+<div class="wrap"><table>
+  <tr><th>Glyph</th><th>Where</th><th>Owner</th><th>Means</th></tr>
+  <tr><td><code>★</code></td><td><code>ccs ls</code> col 1</td><td><span class="owner o-ccs">ccs</span></td><td>title source = <code>native</code> <span class="cite">cli.ts:501</span></td></tr>
+  <tr><td><code>✎</code></td><td><code>ccs ls</code> col 1</td><td><span class="owner o-ccs">ccs</span></td><td>title source = <code>codex</code> (ccs-generated)</td></tr>
+  <tr><td><span class="muted">(space)</span></td><td><code>ccs ls</code> col 1</td><td><span class="owner o-ccs">ccs</span></td><td>title source = <code>fallback</code></td></tr>
+  <tr><td><code>↳</code></td><td><code>ccs ls</code> title cell</td><td><span class="owner o-ccs">ccs</span></td><td>child in the causal tree</td></tr>
+  <tr><td><code>✳</code></td><td>cmux tab</td><td><span class="owner o-cmux">cmux</span></td><td>cmux activity indicator — <em>not</em> a ccs title source</td></tr>
+</table></div>
+
+<h2>8 · Findings surfaced during the audit</h2>
+<p class="muted" style="font-size:.86rem">Observations, not proposed changes. Each is a real behavior worth knowing; whether any is worth fixing is a separate call.</p>
+
+<div class="note">
+  <h4>F1 · <code>ccs meta</code> / <code>ccs session</code> show only <code>custom_title</code>, not the resolved title</h4>
+  <p><span class="cite">commands.ts:600 · session-command.ts:119</span> — both print the catalogue's <code>custom_title</code> and nothing else, so a session whose real name is a native/codex/fallback title shows a blank <code>title:</code> line (or <code>-</code>). This is why clearing this session's custom title made <code>ccs meta</code> go blank even though <code>ccs ls</code> still showed the native title. It matters because <code>/ccs:archive</code> and <code>/ccs:info</code> read the title from <code>ccs meta</code> — on the ~2/3 of sessions with no catalogue row, they'd see no title and retitle unnecessarily. The fix would be one <code>titleOf()</code> fallback at each site.</p>
+</div>
+
+<div class="note">
+  <h4>F2 · TUI <code>t</code> and <code>/ccs:suggest-title</code> write different fields</h4>
+  <p><span class="cite">App.tsx:734 vs the slash command → ccs rename</span> — the TUI <code>t</code> key stores a <strong><code>codex_title</code></strong> (index); the slash command stores a <strong><code>custom_title</code></strong> (catalogue). Same generation, different storage and different precedence. The slash-command form is durable and overrides native; the <code>t</code> form is a rebuildable-cache write.</p>
+</div>
+
+<div class="note">
+  <h4>F3 · On a native-titled session, TUI <code>t</code> is a display no-op</h4>
+  <p>Because display resolves <code>native</code> before <code>codex</code>, pressing <code>t</code> on one of the ~7.7% of sessions that have a native title generates and stores a <code>codex_title</code> that is then permanently shadowed and never shown. The background/reindex path avoids this (it gates on <code>native_title IS NULL</code>); only the manual key bypasses the gate. <code>/ccs:suggest-title</code> does not have this problem — <code>custom_title</code> outranks native.</p>
+</div>
+
+<div class="note">
+  <h4>F4 · Native titles are rare and effectively immutable</h4>
+  <p>Measured on this host: <strong>363 of 4,711 transcripts (7.7%)</strong> carry any ai-title; of those, <strong>359 never change it</strong>. The 4 that "changed" were renamed to cmux worktree slugs, not re-generated. So the harness titles the <em>opening ask</em>, once — which is exactly why ccs needs its own titler for the other 92%, and why a native title is usually the earliest, most stable name a session has.</p>
+</div>
+
+<h2>9 · Data snapshot</h2>
+<p class="muted" style="font-size:.82rem">Measured 2026-07-21 on this host.</p>
+<div class="wrap"><table>
+  <tr><th>Metric</th><th>Value</th></tr>
+  <tr><td>Transcripts total</td><td>4,711</td></tr>
+  <tr><td>With any <code>native_title</code></td><td>363 (7.7%)</td></tr>
+  <tr><td>Native title that ever changed</td><td>4 of 363 (all → worktree slugs)</td></tr>
+  <tr><td>Catalogue rows (any metadata)</td><td>~1,559</td></tr>
+  <tr><td>Titler default: engine / concurrency / maxAttempts</td><td>auto (codex→claude) / 3 / 3</td></tr>
+  <tr><td>Skeleton budget</td><td>first 8 + last 4 turns, ≤14k chars</td></tr>
+</table></div>
+
+<hr style="margin:3rem 0 0;border:none;border-top:3px double var(--line)">
+<h1 style="margin-top:1.5rem">Part II — Analysis &amp; a simpler model</h1>
+<p class="lede">The audit above shows a system that <em>works</em> but has accreted. The problems aren't the number of title <em>sources</em> — the provenances are all genuinely distinct and worth keeping. The problems are in the <em>plumbing</em>. And the first, biggest simplification is to recognize that <strong>two different naming systems have been tangled into one</strong>.</p>
+
+<div class="note" style="border-width:2px">
+  <h4>Scope decision — two naming domains, split apart</h4>
+  <p>There are really <strong>two</strong> kinds of "title," and this refactor only touches the first:</p>
+  <table style="margin-top:.5rem">
+    <tr><th></th><th>Session title <span class="tag">IN SCOPE</span></th><th>Identity name <span class="tag">OUT OF SCOPE</span></th></tr>
+    <tr><td><strong>Answers</strong></td><td>"what was this conversation about?"</td><td>"which durable responsibility is this?"</td></tr>
+    <tr><td><strong>Applies to</strong></td><td>ordinary one-off / ad-hoc sessions</td><td>role loops &amp; cluster work-units (pr-watch, event-watch)</td></tr>
+    <tr><td><strong>Produced by</strong></td><td><em>generated</em> (native / codex / fallback) + optional human override</td><td><em>customized / authored</em> — never generated</td></tr>
+    <tr><td><strong>Inputs</strong></td><td><code>native_title</code>, <code>codex_title</code>, <code>fallback_label</code>, human <code>custom_title</code></td><td><code>role</code>, <code>meta.shortname</code>, <code>#PR</code>, cluster-synced <code>custom_title</code>, board pills</td></tr>
+    <tr><td><strong>Owned by</strong></td><td>the index resolver + list/TUI/<code>meta</code> display</td><td><code>render-tab.ts</code> (renderLoop / renderSession) + statusline + <code>catalogue_sync</code></td></tr>
+  </table>
+  <p style="margin-bottom:0">The identity domain is <em>authoritative and customizable by design</em> — those names are deliberately set by an operator or a cluster, so "unify the resolver" and "single-writer" don't apply to them the way they apply to generated titles. It's a separate subsystem (ADR-0089 identities) with its own contract. <strong>We split it off and refactor only the one-off session title.</strong> Conveniently, the code already half-embodies this: <code>render-tab.ts</code> is the identity renderer; a plain session never routes through it.</p>
+</div>
+
+<h2>10 · Root causes (session-title domain)</h2>
+<p>Within the in-scope domain, the inconsistencies trace to two structural choices. (A third, <strong>RC2</strong>, turns out to live entirely in the out-of-scope identity domain — noted below and then set aside.)</p>
+
+<h3>RC1 · There is no single "what is this session called?" function</h3>
+<p>At least <strong>seven</strong> sites independently decide the display title, and they have already drifted:</p>
+<div class="wrap"><table>
+  <tr><th>Site</th><th>Precedence it implements</th><th class="cite">where</th></tr>
+  <tr><td>index base</td><td><code>native ?? codex ?? fallback</code></td><td class="cite">index.ts:70, :449</td></tr>
+  <tr><td>TUI list</td><td><code>liveCmux ?? custom ?? role ?? base</code></td><td class="cite">App.tsx:328</td></tr>
+  <tr><td><code>ccs ls</code></td><td><code>custom ?? base</code> <span class="tag">no role, no liveCmux</span></td><td class="cite">cli.ts:506</td></tr>
+  <tr><td>tab · work</td><td><code>shortname ?? custom(-PR) ?? key ?? role ?? sid</code> (+<code>#PR</code>)</td><td class="cite">render-tab.ts:220</td></tr>
+  <tr><td>tab · loop</td><td><code>custom ?? role ?? key ?? sid</code></td><td class="cite">render-tab.ts:201</td></tr>
+  <tr><td>statusline</td><td>work-tag + <code>custom</code></td><td class="cite">render-statusline.ts:56</td></tr>
+  <tr><td><code>ccs meta</code> / <code>session</code></td><td><code>custom</code> only</td><td class="cite">commands.ts:600</td></tr>
+</table></div>
+<p>To change precedence you must edit up to seven places and keep them in agreement — which hasn't happened (F1 and the <code>ls</code>-vs-TUI gap are live drift). This is the single biggest maintainability cost.</p>
+
+<h3>RC2 · <code>custom_title</code> has more than one writer <span class="tag">OUT OF SCOPE — identity domain</span></h3>
+<p>Recorded for completeness, then set aside. It is written by the human (<code>ccs rename</code>, <code>/ccs:title</code>, the NL command, <code>session set --title</code>) <em>and</em> by the pr-watch cluster's <code>catalogue_sync</code>, which overwrites it with the full PR title every tick <span class="cite">(render-tab.ts:223, new-session.ts:46)</span>. Because a user title can be clobbered by sync, two workarounds had to be invented:</p>
+<ul>
+  <li><code>meta.shortname</code> — a <em>second</em> title field that sync won't touch, so a worker's label survives <span class="cite">render-tab.ts:242</span>.</li>
+  <li><code>stripPrPrefix()</code> — because sync bakes <code>#12133</code> into the stored title, every reader must strip it back off <span class="cite">render-tab.ts:216</span>.</li>
+  <li>the write-through's <em>slug guard</em> — because the field can hold sync-shaped junk, the cmux→custom write-through must sniff and reject id-shaped values <span class="cite">App.tsx:343</span>.</li>
+</ul>
+<p>One overloaded field spawned three defensive mechanisms. The clean fix — give the cluster's synced PR title its own field so <code>custom_title</code> means only "the human's title" — belongs to the identity/cluster subsystem and crosses into <code>~/.ccs-config</code>. <strong>Out of scope for this refactor</strong>; tracked as a separate identity-domain cleanup. Note that within the in-scope one-off domain, <code>custom_title</code> already <em>has</em> a single writer (the human) — this problem simply doesn't arise there.</p>
+
+<h3>RC3 · A human retitle writes rebuildable storage</h3>
+<p>The TUI <code>t</code> key stores its result in <code>codex_title</code>, which lives only in the index <span class="cite">(App.tsx:734 → saveCodexTitle, index.ts:278)</span>. Verified: <code>codex_title</code> is absent from the index <code>INSERT</code> column list and is never re-written on re-parse — so it survives incremental reindex, but a full <code>index.db</code> delete (which <code>README</code> explicitly says is safe) <strong>loses it</strong>. A title a human deliberately chose should not live on a cache the tool promises is disposable. This one choice causes F2 (two fields for one gesture) and F3 (native shadows codex, so <code>t</code> silently no-ops on the 7.7% with a native title).</p>
+
+<h2>11 · Full inconsistency catalogue</h2>
+<div class="wrap"><table>
+  <tr><th>#</th><th>Inconsistency</th><th>Root</th><th class="cite">site</th></tr>
+  <tr><td>F1</td><td><code>ccs meta</code>/<code>session</code> show only <code>custom_title</code> → blank for native/codex/fallback-named sessions</td><td>RC1</td><td class="cite">commands.ts:600, session-command.ts:119</td></tr>
+  <tr><td>—</td><td><code>ccs ls</code> lacks the <code>role</code> and live-cmux layers the TUI has → same session, two names</td><td>RC1</td><td class="cite">cli.ts:506 vs App.tsx:328</td></tr>
+  <tr><td>F2</td><td><code>t</code> writes <code>codex_title</code>; <code>/ccs:suggest-title</code> writes <code>custom_title</code> — same gesture, different field &amp; precedence</td><td>RC3</td><td class="cite">App.tsx:734</td></tr>
+  <tr><td>F3</td><td>native shadows codex, so <code>t</code> is a display no-op on native-titled sessions</td><td>RC3</td><td class="cite">index.ts:70 order</td></tr>
+  <tr><td>G1</td><td>the <code>★ native / ✎ codex</code> source glyph reflects only the <em>index</em> COALESCE — it still shows <code>★</code> while a <code>custom_title</code> is what's actually displayed. The glyph can lie.</td><td>RC1</td><td class="cite">cli.ts:501, :506</td></tr>
+  <tr><td>N1</td><td><code>native_title</code> is misnamed: it holds the session's <em>last-emitted</em> title, including external worktree slugs — not "the AI title"</td><td>—</td><td class="cite">parse.ts:147</td></tr>
+  <tr><td style="opacity:.55">W1</td><td style="opacity:.55"><code>meta.shortname</code>, <code>stripPrPrefix</code>, and the slug-guard are three defenses against one overloaded field <span class="tag">OUT OF SCOPE — identity domain</span></td><td style="opacity:.55">RC2</td><td class="cite" style="opacity:.55">render-tab.ts:216,242</td></tr>
+</table></div>
+<p class="muted" style="font-size:.86rem">F1, F2, F3, G1, N1 are all in the session-title domain — every one is fixable inside this repo without touching the cluster contract. Only W1 lives in the out-of-scope identity domain.</p>
+
+<h2>12 · Proposed model — one <em>session-title</em> resolver, one invariant</h2>
+<p class="muted" style="font-size:.86rem">Proposals for the in-scope (session-title) domain only. None is authorized; each ships independently, smallest-blast-radius first. All are entirely inside this repo — none touches the cluster contract.</p>
+
+<h3>P1 · One canonical <code>resolveSessionTitle(row)</code> <span class="tag">fixes RC1, F1, ls-drift, G1</span></h3>
+<p>A single pure function returns the display title for a <em>one-off session</em> — just the four generated/human inputs, no identity fields:</p>
+<pre><code>custom_title → native_title → codex_title → fallback_label</code></pre>
+<p>Every session-domain surface calls it — <code>titleOf</code>, <code>ccs ls</code>, the TUI list base, <code>ccs meta</code>, <code>ccs session</code>, the preview. F1 and the <code>ls</code>-vs-TUI drift vanish by construction, and the <code>★/✎</code> source glyph is computed from what actually won so it stops lying (G1).</p>
+<p><strong>The domain boundary is explicit, not merged.</strong> For a row that <em>has</em> an identity (role / cluster / work-unit), display defers to the identity naming layer (<code>render-tab</code>, unchanged): the shared list merge drops its inline <code>?? role</code> and instead branches "identity row → identity name; plain row → <code>resolveSessionTitle</code>." The live-cmux write-through stays as-is; it just feeds <code>custom_title</code>.</p>
+<p><strong>Effort:</strong> medium · <strong>Risk:</strong> low — pure-function extraction over a well-tested surface, no schema change. Keystone: do it and F1/G1/ls-drift close together.</p>
+
+<h3>P2 · Provenance invariant: machine→index, human→catalogue <span class="tag">fixes RC3, F2, F3</span></h3>
+<p>Enforce one rule: <em>machine guesses live in the rebuildable index; authoritative human choices live in the durable catalogue.</em> Concretely, point the TUI <code>t</code> key at <code>custom_title</code> (like the slash command already does). Then:</p>
+<ul>
+  <li><code>codex_title</code> becomes purely the automated-backfill field — never written by a human action, safe to lose on an index rebuild;</li>
+  <li>a human retitle is durable and outranks native, so <code>t</code> works on <em>every</em> session (F3 gone) and matches <code>/ccs:suggest-title</code> exactly (F2 gone).</li>
+</ul>
+<p><strong>Effort:</strong> low · <strong>Risk:</strong> low — one call-site change plus a row reload. Best impact-per-line, and a clean first step.</p>
+
+<h3>P4 · Document (or rename) <code>native_title</code> <span class="tag">fixes N1</span></h3>
+<p>Rename to <code>harness_title</code> / <code>emitted_title</code>, or at minimum document that it is "the session's last-emitted display title, harness- or externally-set" — so the next reader doesn't assume it's always AI prose. Doc-only; near-zero risk.</p>
+
+<div class="note" style="border-style:dashed">
+  <h4>Deferred, separately: P3 · single-writer <code>custom_title</code> <span class="tag">identity domain — not this refactor</span></h4>
+  <p>The cluster-sync-clobbers-<code>custom_title</code> problem (RC2 / W1) and its fix — give the synced PR title its own field, retiring <code>meta.shortname</code>, <code>stripPrPrefix</code>, and the slug-guard — live in the identity/cluster subsystem and cross into <code>~/.ccs-config</code>. Real cleanup, arguably higher value, but a <em>different</em> effort with a cross-system contract. Tracked here so it isn't lost; excluded from the session-title refactor by the scope decision above.</p>
+</div>
+
+<h3>What this collapses to (in scope)</h3>
+<p>After P1, P2, P4 the one-off session title reduces to: <strong>four stored provenances</strong> (harness / codex / fallback / human), <strong>one</strong> resolver, <strong>one</strong> clean rule for which store a title lands in. The session-title chains collapse to one; F1, F2, F3, G1, N1 all close. No source is removed, and the identity naming system is left untouched behind a clear boundary.</p>
+
+<div class="note">
+  <h4>Recommended sequence — all in-repo, low-risk</h4>
+  <p><strong>P2</strong> first (tiny, self-contained, fixes F2+F3) → <strong>P1</strong> (the keystone; makes every session surface consistent, absorbs F1 + the <code>ls</code> drift + G1) → <strong>P4</strong> (doc, free). None touches <code>~/.ccs-config</code>. The identity-domain P3 is a separate, later track if you want it.</p>
+</div>
+
+<h2>What changed in this doc</h2>
+<ul style="font-size:.9rem">
+  <li><strong>Scope decision (§Part II preamble):</strong> split the two naming domains. <em>Session title</em> (generated + human override, for one-off sessions) is in scope; <em>identity name</em> (role / cluster / PR-worker, authored not generated) is out of scope and left untouched. Verified the boundary is clean — <code>render-tab.ts</code> is the identity renderer; a plain session never routes through it.</li>
+  <li><strong>Rescoped §12:</strong> P1 is now the <em>session-title</em> resolver only (defers to identity naming for identity rows, rather than swallowing it). P3 (single-writer <code>custom_title</code>) moved out of scope into the identity domain, since its dual-writer only exists for cluster sessions. Result: the whole in-scope plan (P2 → P1 → P4) is in-repo and low-risk.</li>
+  <li>Earlier: added the Part&nbsp;II diagnosis, inconsistency catalogue, and verified claims (<code>codex_title</code> lost on index rebuild; <code>catalogue_sync</code> a second writer of <code>custom_title</code>).</li>
+  <li>Status: audit + analysis; §12 proposals await your authorization — no code has changed.</li>
+</ul>
+
+<h2>Source map</h2>
+<div class="wrap"><table>
+  <tr><th>Concern</th><th>File</th></tr>
+  <tr><td>ai-title capture, skeleton, fallback inputs</td><td class="cite">src/parse.ts</td></tr>
+  <tr><td>fallback cleaning</td><td class="cite">src/label.ts</td></tr>
+  <tr><td>resolution <code>COALESCE</code>, <code>titleOf</code>, titler gating/save</td><td class="cite">src/index/index.ts</td></tr>
+  <tr><td>titler prompt + engine call</td><td class="cite">src/titler/codex.ts, src/titler/queue.ts, src/titler/schema.json</td></tr>
+  <tr><td>engine selection</td><td class="cite">src/inference/engine.ts, src/config.ts</td></tr>
+  <tr><td>TUI display precedence + <code>t</code> key</td><td class="cite">src/tui/App.tsx, src/tui/Preview.tsx</td></tr>
+  <tr><td>cmux tab paint precedence + glyphs</td><td class="cite">src/catalogue/render-tab.ts, src/cli.ts</td></tr>
+  <tr><td>custom-title readers (the F1 sites)</td><td class="cite">src/catalogue/commands.ts, src/catalogue/session-command.ts</td></tr>
+</table></div>
+
+<script>
+  // Preserve scroll across the 30s meta-refresh.
+  try {
+    const k = "titling-audit-scroll";
+    const y = sessionStorage.getItem(k);
+    if (y) window.scrollTo(0, parseInt(y, 10));
+    window.addEventListener("scroll", () => sessionStorage.setItem(k, String(window.scrollY)), { passive: true });
+  } catch (e) {}
+</script>

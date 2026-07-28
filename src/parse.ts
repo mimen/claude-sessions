@@ -11,7 +11,13 @@ export interface ParsedSession {
   readonly firstTs: string | null;
   readonly lastTs: string | null;
   readonly msgCount: number;
-  /** Native Claude Code `ai-title`, if the transcript has one (last one wins). */
+  /**
+   * The session's last-emitted display title, from the transcript's `ai-title` records (last one
+   * wins). Despite the name it is NOT always AI-generated: it starts as the harness's ai-title but
+   * is overwritten whenever an external tool renames the session (e.g. a cmux worktree slug), so
+   * treat it as "the harness/last-emitted title," not "the model's title." Stored as `native_title`
+   * and used as one input to the display resolver (`src/title.ts`), below any custom/role title.
+   */
   readonly nativeTitle: string | null;
   /** First few raw human user texts, in order — input to label cleaning. */
   readonly userTexts: readonly string[];
@@ -145,6 +151,8 @@ export async function parseSessionFile(
       lastTs = obj.timestamp;
     }
     if (obj.type === "ai-title" && typeof obj.aiTitle === "string") {
+      // Last record wins: the harness re-emits the current title each turn, and an external rename
+      // (cmux worktree slug, etc.) lands here too — so this is the last-emitted title, not the AI's.
       nativeTitle = obj.aiTitle;
       continue;
     }

@@ -2,6 +2,9 @@ import { test, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import { createElement } from "react";
 import { Database } from "bun:sqlite";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openIndex } from "../index/schema.ts";
 import { loadConfig } from "../config.ts";
 import { App } from "./App.tsx";
@@ -64,10 +67,9 @@ test("App mounts, lists real sessions, hides subagents by default", async () => 
 
   const frame = lastFrame() ?? "";
   expect(frame).toContain("ccs");
-  // The real (non-subagent) session is listed — assert its truncation-safe title prefix
-  // ("Rea" survives the narrow test width; the cluster view's PHASE/ROLE columns eat into
-  // the title, so the full word "Real" no longer fits at this width).
-  expect(frame).toContain("Rea"); // visible real session (title truncates to "Rea…")
+  // The real (non-subagent) session is listed. At the narrow test width the cluster
+  // columns leave room for only the first title character plus an ellipsis.
+  expect(frame).toContain("R…");
   expect(frame).not.toContain("SUBAGENTONLY"); // subagent hidden by default
   expect(frame).toContain("sessions"); // dashboard header stat
   // Footer highlights keys with ANSI escapes (the key and its label are separated by color
@@ -125,5 +127,85 @@ test("auxiliary sessions stay hidden until the session-local u toggle reveals th
 
   unmount();
   catalogue.close();
+  index.close();
+});
+
+// `R` re-scans the store and re-indexes, so a session that appeared on disk after the TUI opened
+// shows up without quitting and relaunching (the whole point of the refresh key).
+test("R refreshes the store and surfaces a session created after mount", async () => {
+  const index = openIndex(":memory:"); // empty index — nothing listed at mount
+  const store = mkdtempSync(join(tmpdir(), "ccs-refresh-"));
+
+  const configPath = join(store, "config.toml");
+  writeFileSync(configPath, `[store]\npath = "${store}"\n[host]\nlabel = "reftest"\n`);
+  const cfg = loadConfig(configPath);
+  if (!cfg.ok) throw cfg.error;
+
+  const { lastFrame, stdin, unmount } = render(
+    createElement(App, {
+      db: index,
+      config: cfg.value,
+      engineState: noopEngineState,
+      resumeRequest: { current: null },
+      cmuxProbes: noopCmuxProbes,
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  expect(lastFrame() ?? "").toContain("0 sessions"); // empty index at mount
+  expect(lastFrame() ?? "").toContain("No sessions indexed yet.");
+
+  // Now the session lands on disk (as if a fresh Claude Code run just started).
+  const now = new Date().toISOString();
+  const id = "refresh-sess-1";
+  const lines = [
+    JSON.stringify({ type: "ai-title", aiTitle: "REFRESHMARK", sessionId: id, cwd: "/tmp/proj", timestamp: now }),
+    JSON.stringify({ type: "user", message: { role: "user", content: "hi" }, sessionId: id, cwd: "/tmp/proj", timestamp: now }),
+  ].join("\n");
+  writeFileSync(join(store, `${id}.jsonl`), lines);
+
+  stdin.write("R");
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const frame = lastFrame() ?? "";
+  expect(frame).toContain("1 sessions"); // re-index picked the new file up
+  expect(frame).toContain("refreshed — 1 new/updated"); // and reported it
+
+  unmount();
+  index.close();
+});
+
+// Auto-refresh (config.tui.autoRefreshSec) picks up a new on-disk session with NO keypress — the
+// background poll runs the same re-index on its interval.
+test("auto-refresh surfaces a new session on its interval without a keypress", async () => {
+  const index = openIndex(":memory:");
+  const store = mkdtempSync(join(tmpdir(), "ccs-autorefresh-"));
+
+  const configPath = join(store, "config.toml");
+  writeFileSync(configPath, `[store]\npath = "${store}"\n[host]\nlabel = "reftest"\n[tui]\nautoRefreshSec = 1\n`);
+  const cfg = loadConfig(configPath);
+  if (!cfg.ok) throw cfg.error;
+
+  const { lastFrame, unmount } = render(
+    createElement(App, {
+      db: index,
+      config: cfg.value,
+      engineState: noopEngineState,
+      resumeRequest: { current: null },
+      cmuxProbes: noopCmuxProbes,
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  expect(lastFrame() ?? "").toContain("0 sessions");
+
+  const now = new Date().toISOString();
+  const id = "auto-sess-1";
+  writeFileSync(
+    join(store, `${id}.jsonl`),
+    JSON.stringify({ type: "user", message: { role: "user", content: "hi" }, sessionId: id, cwd: "/tmp/proj", timestamp: now }),
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 1400)); // let one ~1s poll tick fire
+  expect(lastFrame() ?? "").toContain("1 sessions"); // indexed with no input
+
+  unmount();
   index.close();
 });

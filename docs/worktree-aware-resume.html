@@ -1,0 +1,368 @@
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="30">
+<title>ccs: worktree resume — resolved</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { max-width: 62rem; margin: 2rem auto; padding: 0 1.25rem;
+         font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  h1 { font-size: 1.7rem; margin-bottom: .2rem; }
+  h2 { margin-top: 2.6rem; border-bottom: 1px solid currentColor; padding-bottom: .3rem; font-size: 1.25rem; }
+  h3 { margin-top: 1.7rem; font-size: 1.05rem; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .87em; }
+  pre { padding: .8rem 1rem; overflow-x: auto; border: 1px solid; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .88rem; }
+  th, td { border: 1px solid; padding: .45rem .55rem; text-align: left; vertical-align: top; }
+  .meta { font-size: .85rem; opacity: .8; margin-bottom: 2rem; }
+  .status { display: inline-block; border: 1px solid; border-radius: 3px; padding: .1rem .45rem; font-size: .8rem; }
+  .verdict { border: 2px solid; padding: 1rem 1.2rem; margin: 1.5rem 0; }
+  .note { border-left: 3px solid; padding: .5rem 0 .5rem .9rem; margin: 1rem 0; }
+  ul, ol { padding-left: 1.3rem; } li { margin: .35rem 0; }
+  dt { font-weight: 600; margin-top: .7rem; } dd { margin-left: 0; padding-left: 1rem; }
+  .small { font-size: .85rem; opacity: .85; }
+</style>
+
+<h1>ccs: worktree resume — resolved</h1>
+<p class="meta">
+  <span class="status">STATUS: RESOLVED &middot; ADR-0092 accepted &middot; cmux exonerated (9/9 spawns clean) &middot; real bug = stranded storage folders</span><br>
+  <a href="/Users/mimen/Programming/Repos/claude-sessions/docs/adr/0092-resume-lookup-is-cwd-and-sibling-worktree-scoped.md">ADR-0092</a>
+  is the durable record. Battle-test verdict in §0.4.<br>
+  Artifact: <code>/Users/mimen/Programming/Repos/claude-sessions/docs/worktree-aware-resume.html</code><br>
+  Project: <code>/Users/mimen/Programming/Repos/claude-sessions</code> &middot;
+  Evidence: Claude Code <code>2.1.217</code> binary at
+  <code>/Users/mimen/.local/share/claude/versions/2.1.217</code>
+</p>
+
+<div class="verdict">
+  <p><strong>Verdict: ccs has no resume defect here, and <code>--worktree</code> should not be implemented.</strong></p>
+  <p>
+    <code>claude --resume &lt;id&gt;</code> finds a session by looking in the project folder for the
+    current directory, and — on a miss — searching the project folders of every <strong>git worktree of
+    the repo the current directory belongs to</strong>. Nothing consults a session→worktree binding.
+    <code>--worktree</code> plays no part in <em>finding</em> a session.
+  </p>
+  <p>
+    The transcript lives under <code>-Users-mimen-Programming-Repos</code>. From
+    <code>/Users/mimen/Programming/Repos</code> it is found on the first lookup — which is exactly the
+    command ccs already builds. From inside the worktree it is unreachable, because the parent directory
+    of a repo is not one of that repo's worktrees. <strong>The variable was cwd, and ccs had the cwd right.</strong>
+  </p>
+  <p class="small">
+    Everything below is read out of the shipped binary, not inferred. Earlier revisions of this document
+    argued the opposite on weaker evidence; §7 records what was wrong and why.
+  </p>
+</div>
+
+<h2>0.4 Battle-test verdict (final)</h2>
+<div class="verdict">
+<p><strong>cmux is faithful; ccs computes the right dir; the real bug is stranded storage folders.</strong></p>
+<ul>
+  <li><strong>9 live instrumented spawns, 0 cwd mismatches</strong> — including spawns that
+    correctly landed inside a live git worktree. The "cmux ignores <code>--cwd</code>" theory
+    (§0.2) is dead. cmux launches exactly where ccs asks.</li>
+  <li><strong>Sweep of all 1,954 non-subagent sessions:</strong> 1,266 resume fine; <strong>688
+    do not</strong>, and they collapse to <strong>10 directories / 2 causes</strong> —
+    <strong>593</strong> whose cwd became a <em>symlink</em> (the <code>imsg</code> convex-db
+    migration: <code>imsg</code>, <code>imsg/client</code>, <code>t3code-spike-sessions</code>) and
+    <strong>95</strong> whose dir was <em>deleted</em> (dead worktrees, temp scratch).</li>
+  <li><strong>Live-confirmed</strong> the symlink strand: <code>claude --resume &lt;imsg-id&gt;</code>
+    from the symlinked <code>~/Programming/Repos/imsg</code> → "No conversation found," because the
+    harness encodes <code>realpath(cwd)</code> and the physical folder ≠ the transcript's logical
+    folder.</li>
+  <li>ccs already <em>detects</em> both (the "could not confirm storage dir" / "original cwd is
+    gone" notes) but then spawns a doomed workspace instead of failing clearly. That — detection
+    quality — is the one real improvement the whole investigation surfaced. Recovery recipes for
+    both classes are verified and in ADR-0092.</li>
+</ul>
+<p class="small">
+  Cleanup done: instrumenting cmux shim deleted; <code>~/.ccs/spawn-cwd-probe.log</code> kept as
+  evidence (9 spawns, 0 mismatches). The empty <code>convex-db/.claude/worktrees/imsg-priority-shelf</code>
+  dir was recreated to recover <code>bd0948c0</code> and left in place for that resume.
+</p>
+</div>
+
+<h2>0.2 SECOND reopening — the actual incident was never diagnosed</h2>
+<div class="verdict">
+<p>
+  Milad's account: he resumed via the <strong>ccs TUI (Enter)</strong>; ccs <strong>opened a fresh
+  workspace, a new shell, and typed the resume command itself</strong>; that shell was in the
+  <strong>worktree</strong>, the typed resume failed, and a manual <code>cd</code> to the repo fixed it.
+</p>
+<p>This is the <em>spawn</em> path, and it defeats every "ccs is fine" conclusion below:</p>
+<ul>
+  <li><code>focusSession</code> (<code>src/cmux/liveness.ts:77</code>) only runs
+    <code>select-workspace</code> + <code>focus-window</code> — it never types a command. So this was
+    <strong>not</strong> the already-open focus path.</li>
+  <li>The spawn path calls <code>resolveResumeCwd</code>, which for this session <strong>provably
+    returns <code>/Users/mimen/Programming/Repos</code></strong> — one index row, one transcript; both
+    the early-return and the fallback walk resolve to the repo, and the worktree encodes to a different
+    folder name so the walk cannot return it.</li>
+  <li><code>spawnCmux</code> (<code>src/resume/spawn-cmux.ts:38</code>) passes that cwd explicitly:
+    <code>cmux new-workspace --cwd /Users/mimen/Programming/Repos …</code>.</li>
+  <li><strong>Yet the shell was in the worktree.</strong></li>
+</ul>
+<p>
+  All four facts hold at once, so the wrong cwd did <strong>not</strong> come from ccs's computation.
+  The remaining explanation — consistent with the worktree having a live, persisted cmux workspace at
+  14:44 — is that <strong>cmux <code>new-workspace</code> did not honour <code>--cwd</code>, reusing the
+  session's persisted worktree-cwd workspace instead.</strong> ccs handed cmux the right directory; cmux
+  launched elsewhere. A distinct defect at the ccs→cmux boundary, adjacent to <strong>ADR-0021 Issue
+  2</strong> (cmux faithfully restores a drifted cwd), and NOT what ADR-0092 documents.
+</p>
+<p class="small">
+  Confidence: the only explanation consistent with all four verified facts, but it rests on an
+  <em>unconfirmed</em> cmux behaviour and the 14:44 state is gone (the successful manual resume, pid
+  71735, is now live at the repo). Hence: instrument before any fix or ADR rewrite.
+</p>
+</div>
+
+<h3>0.3 Instrumentation — an out-of-repo cmux shim</h3>
+<p class="note">
+  An in-repo probe (edit to <code>spawn-cmux.ts</code>) was landed and then <strong>wiped within minutes
+  by concurrent development on the <code>claude-sessions</code> checkout</strong> — the same reset also
+  reverted the <code>locate.ts</code> comment from ADR-0092. Uncommitted source edits are not durable in
+  this tree right now, so the probe was moved <em>outside</em> the repo entirely.
+</p>
+<p>
+  <code>~/.ccs/cmux-probe-shim.sh</code> wraps cmux. Because <code>spawnCmux</code> resolves
+  <code>opts.cmuxBin ?? process.env.CMUX_BIN ?? "cmux"</code> (<code>spawn-cmux.ts:35</code>), launching
+  the TUI as <code>CMUX_BIN=~/.ccs/cmux-probe-shim.sh ccs</code> routes every
+  <code>cmux new-workspace</code> ccs issues through the shim. For <code>new-workspace</code> it records
+  the <code>--cwd</code> ccs <em>requested</em> vs the workspace's actual
+  <code>current_directory</code> (from <code>cmux list-workspaces --json</code>), appending a JSON line
+  with a <code>mismatch</code> flag to <code>~/.ccs/spawn-cwd-probe.log</code>; every other subcommand
+  passes through untouched. Verified: transparent passthrough, correct mismatch detection, valid JSON.
+  Nothing in the repo is modified, so a reset cannot clobber it.
+</p>
+<p><strong>Repro:</strong> launch <code>CMUX_BIN=~/.ccs/cmux-probe-shim.sh ccs</code>, Enter-resume a
+  worktree-drifted session that is currently <em>closed</em> (so it takes the spawn path, not focus),
+  then read <code>~/.ccs/spawn-cwd-probe.log</code>. A <code>mismatch:true</code> where
+  <code>requestedCwd</code> is the repo and <code>actualCwd</code> is the worktree <strong>confirms the
+  cmux-override</strong>; equality falsifies it and sends the hunt back to ccs.</p>
+<p class="small">
+  Cleanest target is <code>3b292f6d</code> itself, but it is currently live (pid 71735) so it would take
+  the focus path — reproducing with it means closing it first. Otherwise leave the shim active and it
+  logs the next natural worktree-session spawn.
+</p>
+
+<h2>1. How <code>--resume &lt;id&gt;</code> actually resolves a session</h2>
+<p>The lookup chain, from the resume entry point:</p>
+<pre>else if (typeof e === "string") n = await C8e(e) ?? await Ng_(e), s = e;</pre>
+<dl>
+  <dt><code>C8e(id)</code> — the direct hit</dt>
+  <dd>Loads <code>&lt;projectDirFor(cwd)&gt;/&lt;id&gt;.jsonl</code>, where the project dir is
+    <code>hz(p) = join(projectsRoot, encode(p))</code> — the same non-alphanumeric → <code>-</code>
+    encoding <code>ccs/src/resume/locate.ts:25</code> already mirrors.</dd>
+
+  <dt><code>Ng_(id)</code> — the fallback, and the whole story</dt>
+  <dd>
+<pre>async function Ng_(e) {
+  for (let t of await lRe(sn()))                        // lRe(cwd) = `git worktree list --porcelain`
+    for (let r of await qL(t)) {                        // qL(path) = project dir(s) for that path
+      let n = await C8e(e, join(r, `${e}.jsonl`));
+      if (n) return M("tengu_resume_worktree_fallback", {}), n
+    }
+  return null
+}</pre>
+    <ul>
+      <li><code>sn()</code> → the process's <strong>original cwd</strong>.</li>
+      <li><code>lRe(dir)</code> → shells out to <code>git worktree list --porcelain</code> in
+        <code>dir</code>, returning that repo's worktree paths (current one first). Not a repo ⇒ empty list.</li>
+      <li><code>qL(path)</code> → the <code>~/.claude/projects/</code> folder(s) for a path, including
+        long-path truncation siblings.</li>
+    </ul>
+    <p>Its own telemetry name says what it is: <strong><code>tengu_resume_worktree_fallback</code></strong>.
+      The search is scoped to <em>sibling worktrees of the current repo</em> — it is not global, and it
+      never walks upward to a parent directory.</p>
+  </dd>
+</dl>
+
+<h3>1.1 Applied to the trigger session</h3>
+<p>Transcript: <code>~/.claude/projects/-Users-mimen-Programming-Repos/3b292f6d….jsonl</code></p>
+<table>
+  <tr><th>Run from</th><th><code>C8e</code> direct</th><th><code>Ng_</code> fallback searches</th><th>Result</th></tr>
+  <tr>
+    <td><code>/Users/mimen/Programming/Repos</code></td>
+    <td><strong>HIT</strong> — <code>-Users-mimen-Programming-Repos</code></td>
+    <td>never reached</td>
+    <td><strong>resumes</strong> ✓ observed</td>
+  </tr>
+  <tr>
+    <td><code>/…/claude-sessions/.claude/worktrees/ccs-delegated-sessions</code></td>
+    <td>miss — worktree's own project dir</td>
+    <td>the 10 worktrees of the <code>claude-sessions</code> repo. <code>/Users/mimen/Programming/Repos</code>
+      is the repo's <em>parent</em>, not a worktree of it ⇒ absent.</td>
+    <td><strong>"No conversation found"</strong> ✓ observed</td>
+  </tr>
+</table>
+<p>
+  Both observed outcomes fall out of the code with no residue. Note the first row is a
+  <em>non-git</em> directory — irrelevant, because <code>C8e</code> hits before git is ever consulted.
+</p>
+
+<h2>2. What the "Resume this session with: <code>--worktree</code>" line actually is</h2>
+<p>It is an <strong>exit-time hint</strong>, emitted from the graceful-shutdown path:</p>
+<pre>function r$s() {
+  if (JOo) return;                                   // print at most once per process
+  if (process.stdout.isTTY &amp;&amp; q1() &amp;&amp; !ere()) try {
+    let e = wt();                                    // THIS process's session id
+    if (!Isn(e)) return;
+    let n = Gbc(), o = n ? `--worktree ${n} ` : "";  // THIS process's worktree
+    writeSync(1, dim(`\nResume this session with:\nclaude ${o}--resume ${r}\n`)), JOo = true
+  } catch {}
+}
+function Gbc() { if (dUr) return dUr.enteredExisting ? null : dUr.worktreeName; return z1i }</pre>
+<p>Three consequences, each of which contradicts how I read that line originally:</p>
+<ol>
+  <li><strong>It is not a refusal.</strong> It is printed on the way <em>out</em>, telling you how to come
+    back. It also fires on the failure path, because that path exits via the same graceful shutdown
+    (<code>mu(1)</code>) — which is why a <em>failed</em> resume can print it.</li>
+  <li><strong>The worktree name describes the process, not the session.</strong> <code>Gbc()</code> reads
+    process-local state about a worktree this process created. It performs no session→worktree lookup.
+    Running from inside a worktree is sufficient to make that flag appear.</li>
+  <li><strong><code>~/.claude.json</code> is not involved.</strong> No <code>activeWorktreeSession</code>
+    read anywhere in this path.</li>
+</ol>
+<p class="note">
+  So <code>--worktree</code> is a flag for <em>where you want to work</em>, not for <em>which session to
+  find</em>. Implementing it in ccs would add a token that cannot affect whether a session is located.
+</p>
+
+<h2>3. Does ccs have a defect?</h2>
+
+<h3>3.1 The resume path — no</h3>
+<p>
+  <code>resolveResumeCwd</code> returns a directory <code>D</code> only when
+  <code>encode(realpath(D)) === storageFolder</code> (<code>src/resume/command.ts:65</code>, and the
+  <code>locate.ts</code> walk enforces the same predicate). That is precisely <code>C8e</code>'s
+  requirement, so <strong>any directory ccs returns produces a first-lookup hit</strong> — it never even
+  needs the worktree fallback. Measured on the trigger session:
+</p>
+<pre>parsed cwd      : /Users/mimen/Programming/Repos
+resolveResumeCwd: { cwd: "/Users/mimen/Programming/Repos", note: null }
+argv            : claude --resume 3b292f6d-6756-4bbc-bba7-e12e09a1f53f</pre>
+<p>
+  That is the command that worked. <code>note: null</code> was correct; there was nothing to warn about.
+</p>
+<p>
+  ccs's storage-folder-first design is in fact <strong>stronger than the harness's own fallback</strong>:
+  <code>Ng_</code> can only find sessions inside sibling worktrees of the current repo, whereas
+  <code>locate.ts</code> decodes the storage folder to its real directory from anywhere. The README's
+  premise — that the harness's own resume UX is directory-scoped — survives this investigation intact.
+</p>
+
+<h3>3.2 <code>parse.ts:137</code> / <code>:138</code> — a metadata defect, unrelated to resume</h3>
+<p>
+  <code>cwd</code> and <code>gitBranch</code> are first-wins and ignore all 429 <code>relocated</code>
+  records, so a session that moved shows its birth values. For the trigger session <code>branch</code>
+  is <code>"HEAD"</code> rather than <code>worktree-ccs-delegated-sessions</code>. This cannot corrupt a
+  launch dir (§3.1) but it does affect display and the git/PR sensing in <code>catalogue/db.ts</code>.
+  <strong>Fixing it requires schema v9 + a forced reparse of 4,702 transcripts</strong> (see §5) — a poor
+  trade for cosmetics. Recommend leaving it, with a comment recording why.
+</p>
+
+<h3>3.3 The one genuinely broken session</h3>
+<p>
+  <code>754b9a1a</code> (imsg): its transcript sits in a worktree project folder whose directory has been
+  <strong>deleted</strong>. The <code>locate.ts</code> walk finds nothing, so ccs falls back to the
+  recorded birth cwd — which does <em>not</em> encode to the storage folder, so the emitted command will
+  fail. ccs does emit a note. This is a dead-worktree problem, not a <code>--worktree</code> problem, and
+  it is unfixable from ccs's side: the directory that would satisfy <code>C8e</code> no longer exists.
+</p>
+
+<h2>4. Corrected picture of the six worktree-touched sessions</h2>
+<p>Out of 4,702 transcripts: 5 carry <code>worktree-state</code> records, 4 carry <code>relocated</code>.</p>
+<table>
+  <tr><th>Session</th><th>Storage folder</th><th>Last <code>worktree-state</code></th><th>Resumable by ccs?</th></tr>
+  <tr><td><code>3b292f6d</code> <em>trigger</em></td><td>original project</td><td>null (released)</td><td><strong>yes — proven</strong></td></tr>
+  <tr><td><code>d5f974e4</code></td><td>original project</td><td>null (released)</td><td>yes</td></tr>
+  <tr><td><code>fecf6cab</code></td><td><code>/Users/mimen</code></td><td>null (released)</td><td>yes</td></tr>
+  <tr><td><code>1f1ecde9</code></td><td>the worktree (exists)</td><td>bound — session-import</td><td>yes — walk resolves it</td></tr>
+  <tr><td><code>754b9a1a</code></td><td>the worktree (<strong>deleted</strong>)</td><td>bound — imsg-priority-shelf</td><td><strong>no</strong> — §3.3</td></tr>
+  <tr><td><code>d39e8f65</code></td><td colspan="3">no transcript on disk; only a stale <code>claude.json</code> binding names it</td></tr>
+</table>
+<p>
+  <strong>No session on this machine requires <code>--worktree</code> to be resumed.</strong> The two
+  still-bound sessions are reachable by directory alone, because the binding was never a lookup key.
+</p>
+
+<h2>5. Why a "small" metadata fix is not small</h2>
+<p>Preserved from the pipeline survey, since it governs any future transcript-derived column:</p>
+<p>
+  <code>reindexStore</code> skips re-parsing when a transcript's <strong>mtime + size + path</strong> are
+  unchanged (<code>src/index/index.ts:177-184</code>). Every session of interest here is closed, so a new
+  content-derived column stays NULL forever on exactly the rows it was added for. Populating it means
+  deliberately taking the <strong>drop-and-rebuild</strong> branch of the v8→v9 migration
+  (<code>src/index/schema.ts:32-44</code>) rather than the additive <code>ALTER</code> — a full reparse of
+  4,702 transcripts including a 46 MB file. Rows are declared rebuildable cache
+  (<code>schema.ts:3</code>), so this is legitimate; it is simply not worth spending on §3.2.
+</p>
+
+<h2>6. Recommendation</h2>
+<ol>
+  <li><strong>Write no worktree code.</strong> §1 and §2 remove the motivation entirely.</li>
+  <li><strong>Record the finding.</strong> An ADR (next free number <strong>0091</strong> —
+    <code>0090</code> is taken twice) documenting: the harness's resume lookup is
+    <code>cwd project dir → sibling-worktree project dirs</code>; the <code>--worktree</code> exit hint is
+    cosmetic and describes the process, not the session; ccs deliberately ignores it. Direct precedent:
+    <strong>ADR-0021</strong>, already about Claude Code resume-cwd drift. This is the durable value of
+    the whole investigation — it stops the next person re-deriving it from a misleading hint.</li>
+  <li><strong>Optionally</strong>, extend <code>locate.ts</code>'s header comment with the
+    <code>Ng_</code> fallback, so the storage-folder rule is documented as necessary <em>and</em>
+    sufficient.</li>
+  <li><strong>Leave §3.3 alone</strong> — unfixable — and <strong>§3.2 alone</strong> unless a schema bump
+    is happening for another reason.</li>
+</ol>
+
+<h2>7. Open question</h2>
+<dl>
+  <dt>What did ccs actually show you?</dt>
+  <dd>The claim that started this — "the cwd was wrong in CCS, it was trying to resume from a different
+    location" — is <strong>not reproducible</strong>. Running ccs's real functions against this session
+    yields <code>/Users/mimen/Programming/Repos</code>, the directory that works.
+    <code>ccs resume-session &lt;id&gt; --dry-run</code> currently answers
+    <em>"already open — nothing to do"</em>, so it may never have computed a directory at all. Candidates:
+    a cmux workspace opened earlier in the worktree and reused; the TUI's displayed cwd (which
+    <em>is</em> stale, per §3.2) mistaken for the launch dir; or a different session id.
+    Until this is pinned down, there is no evidence of a ccs bug — and if the answer is "the TUI cwd
+    column", then §3.2 is the whole complaint and the fix is cosmetic.</dd>
+</dl>
+
+<h2>8. Investigation history</h2>
+<p class="small">Kept deliberately: the failure mode is more instructive than the finding.</p>
+<table>
+  <tr><th>Rev</th><th>Claimed</th><th>Why it was wrong</th></tr>
+  <tr>
+    <td>1</td>
+    <td>ccs silently returns a wrong resume command; needs <code>--worktree</code>.</td>
+    <td>Read the harness's exit hint as a refusal, and treated <code>~/.claude.json</code> as a resume
+      gate. Never verified either. Also mislabelled the trigger session as worktree-<em>bound</em> when my
+      own earlier read of the same file said <em>released</em>.</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>Retracted the above; blamed a stale <code>activeWorktreeSession</code> for the hint.</td>
+    <td>Right conclusion (ccs is fine), wrong reason. The hint never reads that file — it reports the
+      current process's own worktree (§2).</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>This document.</td>
+    <td>Read the shipped binary. Both observed outcomes now derive from source with nothing left over.</td>
+  </tr>
+</table>
+<p class="small">
+  The through-line: two revisions of confident reasoning from an error message, when the authoritative
+  answer was sitting in a 250 MB file on disk the whole time. The message was cosmetic; I treated it as a
+  specification.
+</p>
+
+<script>
+  (function () {
+    var k = "scroll:" + location.pathname;
+    var y = sessionStorage.getItem(k);
+    if (y) window.scrollTo(0, parseInt(y, 10));
+    window.addEventListener("beforeunload", function () {
+      sessionStorage.setItem(k, String(window.scrollY));
+    });
+  })();
+</script>

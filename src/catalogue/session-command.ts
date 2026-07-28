@@ -22,7 +22,7 @@ import { openCatalogue, getRow } from "./db.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { existsSync } from "node:fs";
 import { openIndex } from "../index/schema.ts";
-import { sessionById } from "../index/index.ts";
+import { sessionById, resolvedTitleOf } from "../index/index.ts";
 import type { Database } from "bun:sqlite";
 import { getIdentity } from "./identities.ts";
 import { registerShimBirth, rename, mark } from "./commands.ts";
@@ -118,7 +118,7 @@ function doRead(idArg: string, rest: string[]): number {
       }
       console.log(`session ${sid}`);
       console.log(`  state:        catalogued`);
-      console.log(`  title:        ${row.customTitle ?? "-"}`);
+      console.log(`  title:        ${displayTitle(sid, { customTitle: row.customTitle, role: row.role })}`);
       console.log(`  parent:       ${row.parentSessionId ?? "-"}`);
       console.log(`  parked:       ${row.parkedTaskId ?? "-"}`);
       console.log(`  identity_key: ${identityKey ?? "(loose)"}`);
@@ -163,6 +163,17 @@ function indexedSession(sessionId: string) {
   const index = openIndex(DB_PATH());
   try {
     return sessionById(index, sessionId);
+  } finally {
+    index.close();
+  }
+}
+
+/** Full display title (custom/role over the generated index title, per title.ts). */
+function displayTitle(id: string, over: { customTitle?: string | null; role?: string | null }): string {
+  if (!existsSync(DB_PATH())) return over.customTitle?.trim() || over.role?.trim() || "(untitled)";
+  const index = openIndex(DB_PATH());
+  try {
+    return resolvedTitleOf(index, id, over);
   } finally {
     index.close();
   }

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>Event Watch session customization plan</title>
+<style>
+  :root { color-scheme: dark light; font-family: ui-sans-serif, system-ui, sans-serif; line-height: 1.5; }
+  body { margin: 0 auto; max-width: 980px; padding: 2rem; background: Canvas; color: CanvasText; }
+  h1, h2, h3 { line-height: 1.15; } h2 { border-top: 1px solid color-mix(in srgb, CanvasText 25%, transparent); padding-top: 1.3rem; margin-top: 2rem; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; } pre { padding: 1rem; overflow: auto; background: color-mix(in srgb, CanvasText 8%, transparent); }
+  table { border-collapse: collapse; width: 100%; } th, td { padding: .6rem; border-bottom: 1px solid color-mix(in srgb, CanvasText 20%, transparent); text-align: left; vertical-align: top; }
+  .status { padding: .8rem 1rem; border-left: 4px solid #d08b29; background: color-mix(in srgb, #d08b29 12%, transparent); }
+  .fact { color: #187a9b; font-weight: 650; } .open { color: #b27016; font-weight: 650; } .path { overflow-wrap: anywhere; }
+</style>
+<script>
+  addEventListener('beforeunload', () => sessionStorage.setItem('event-watch-plan-scroll', String(scrollY)));
+  addEventListener('load', () => { const y = sessionStorage.getItem('event-watch-plan-scroll'); if (y) scrollTo(0, Number(y)); });
+</script>
+</head>
+<body>
+<h1>Event Watch session customization</h1>
+<p class="status"><strong>Status:</strong> implementation authorized. V1 is in progress: role colors, CMUX title templates, static core names, humanized worker titles, and lifecycle-only pills. Event Watch behavior remains unchanged.</p>
+<p><strong>Artifact:</strong> <code class="path">/Users/mimen/Programming/Repos/claude-sessions/docs/plans/event-watch-session-customization.html</code></p>
+
+<h2>Goal</h2>
+<p>Give Event Watch sessions an immediately legible CMUX presence—role-aware tab names and colors, concise descriptions, useful lifecycle/state pills, and predictable repaint behavior—without duplicating Event-domain facts in CCS, changing worker loop policy, or introducing a scheduler.</p>
+
+<h2>Confirmed current state</h2>
+<ul>
+  <li><span class="fact">Live Event Watch package has no hooks.</span> <code>ccs hooks explain</code> reports no <code>cmux-paint</code> or <code>start</code> hook at cluster, coordinator, scout, or event-worker scope.</li>
+  <li>The current package declares two loop cores (<code>coordinator</code>, <code>scout</code>) and one manual freeform fleet role (<code>event-worker</code>).</li>
+  <li>CCS paints a tab on SessionStart, Stop, resume, and selector-based <code>ccs sync-tabs</code>. A sweep is required because another actor can mutate an idle session’s row.</li>
+  <li><code>cmux-paint</code> is <strong>most-specific wins</strong>. It can override title, description, color, lifecycle/state pill, epic pill, and alert pill. A role <code>color = &quot;#RRGGBB&quot;</code> is also the shared TUI/CMUX accent when no paint color overrides it.</li>
+  <li>PR Watch’s frozen reference uses role-local <code>cmux-paint.json</code> primarily for concise core titles such as <code>pr-watch • control</code>, plus start actions (<code>arm</code> / <code>drain-inbox</code>), spawn locations, and stop-context guidance. It does not provide Event Watch assets to copy wholesale.</li>
+  <li>Event Watch’s worker behavior authority remains vault-canonical skills and the Event Watch engine. This package remains an orchestration/display layer.</li>
+</ul>
+
+<h2>PR Watch patterns worth porting</h2>
+<table>
+<thead><tr><th>Pattern</th><th>Why it works</th><th>Event Watch adaptation</th></tr></thead>
+<tbody>
+<tr><td>Role-local paint ownership</td><td>One explicit config controls a role’s CMUX presentation; generic renderer remains the fallback.</td><td>One paint file per Event Watch role; no per-event copied config.</td></tr>
+<tr><td>Role title for cores</td><td>Core tabs are stable infrastructure, so the title is concise and predictable.</td><td><code>Events · Coordinator</code> and <code>Events · Scout</code>.</td></tr>
+<tr><td>Worker state lives in pills</td><td>Tab title remains scan-friendly while current state changes independently.</td><td>Worker title identifies the event; lifecycle and later Event Watch state become separate pills.</td></tr>
+<tr><td>Stop-context avoids duplicate prose</td><td>Workers write a status only when it adds novel information beyond pills.</td><td>Port only after Event Watch has a trustworthy state source; do not invent worker self-reporting now.</td></tr>
+<tr><td>Paint sweep plus per-turn repaint</td><td>Cross-actor lifecycle changes reach idle tabs eventually.</td><td>Use existing CCS repaint triggers; no new Event Watch poller/scheduler in this customization.</td></tr>
+</tbody>
+</table>
+
+<h2>Proposed customization surface</h2>
+<pre>~/.ccs-config/clusters/event-watch/
+  roles/
+    coordinator/
+      role.toml              # add shared accent color
+      .ccs-hooks/cmux-paint.json
+    scout/
+      role.toml              # add shared accent color
+      .ccs-hooks/cmux-paint.json
+    event-worker/
+      role.toml              # add shared accent color
+      .ccs-hooks/cmux-paint.json
+  docs/event-watch-cmux-contract.md
+  tests/cmux-contract.sh</pre>
+<p>No copied vault skills, no engine wrapper, no worker loop, no start hook, and no sensor are proposed in this first customization.</p>
+
+<h2>Recommended behavior</h2>
+<table>
+<thead><tr><th>Role</th><th>Tab title</th><th>Color</th><th>Persistent status</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Coordinator</td><td><code>Events · Coordinator</code></td><td><code>#7057C7</code> deep violet</td><td>Existing lifecycle pill only</td><td>Pin behavior remains role.toml’s existing <code>pin_on_resume = true</code>.</td></tr>
+<tr><td>Scout</td><td><code>Events · Scout</code></td><td><code>#20B8C8</code> electric cyan</td><td>Existing lifecycle pill only</td><td>No automatic wake or scan cadence is introduced.</td></tr>
+<tr><td>Event worker</td><td><code>Gio Lucca 3oz August</code> (existing CCS humanized work-reference fallback)</td><td><code>#D28A3A</code> warm amber</td><td>Existing lifecycle pill; future Event Watch state only when a source is defined</td><td>No static title override: a role-level static title would erase the per-event identity.</td></tr>
+</tbody>
+</table>
+
+<h2>Model routing decision</h2>
+<table>
+<thead><tr><th>Role</th><th>Historical transcript usage</th><th>Decided launch policy</th></tr></thead>
+<tbody>
+<tr><td>Coordinator</td><td><code>claude-fable-5</code></td><td>Native Claude Opus 4.8</td></tr>
+<tr><td>Scout</td><td><code>claude-fable-5</code></td><td>GPT-5.6 Sol through <code>claude-gpt</code></td></tr>
+<tr><td>Event worker</td><td>Mostly Claude Opus 4.8; some Sonnet; one historical Fable worker</td><td>GPT-5.6 Terra through <code>claude-gpt</code></td></tr>
+</tbody>
+</table>
+<p><strong>Confirmed design:</strong> model selection becomes a generic role capability. A role declares a full canonical model ID in <code>role.toml</code>; CCS resolves that model to native <code>claude</code> or <code>claude-gpt</code> at birth and resume. Role config names <em>what</em>; CCS owns <em>how</em>. Unsupported or unresolvable models fail before launch—never silently fall back. Policy takes effect on future birth/resume only; it does not switch a running embodiment or rewrite historical model records.</p>
+
+<h2>Role model launch-policy architecture</h2>
+<pre>role.toml
+  model = &quot;claude-opus-4-8&quot; | &quot;gpt-5.6-terra&quot; | &quot;gpt-5.6-sol&quot;
+        ↓ strict closed CCS compiler (before UUID/catalogue reservation)
+  native Claude: claude --model claude-opus-4-8 ...
+  GPT harness:   claude-gpt --model gpt-5.6-terra[1m] ...
+        ↓
+  provenance recorded for observability only
+
+resume
+  transcript/index model history → existing compatible launcher resolver
+  no role-model override; no implicit backend/model switch</pre>
+<ul>
+  <li>Role config authors only the canonical model. Provider, launcher binary, and compiled gateway model derive from a closed CCS registry.</li>
+  <li>Model-bearing roles reject <code>--via</code> and unsupported/malformed/alias/suffixed model strings before any reservation or launch.</li>
+  <li>Policy-less roles preserve today’s default birth and manual <code>--via</code> behavior.</li>
+  <li>The launcher used at birth is recorded as session provenance but is not resume policy; history-compatible replay remains authoritative.</li>
+</ul>
+
+<h2>State and pill contract</h2>
+<p><strong>Tab-title finding:</strong> the TUI row label and CMUX workspace title use separate render paths. The current CMUX worker fallback can expose the raw identity key when no custom title exists. Static role-level <code>cmux-paint.json</code> titles solve core names but would make every worker identical. V1 therefore needs a narrow renderer/template capability that derives a worker title from its identity work-reference.</p>
+<p><strong>V1 pills:</strong> use only CCS lifecycle pills—parked, done, archived—and clear stale entries through existing <code>pushRenderOps</code>. Do not claim “planning,” “outreach,” “ticketed,” or other Event Watch stages until the vault/engine exposes one authoritative, machine-readable source.</p>
+<p><strong>V2 (explicitly deferred):</strong> add an Event Watch board composer or a narrow adapter that reads one authoritative event-state source and emits a state pill plus an alert pill. This is display-only; it must not become a second Event Watch state store.</p>
+
+<h2>Open decisions</h2>
+<ol>
+  <li><span class="fact">Palette decided:</span> a coherent event-world family: coordinator <code>#7057C7</code> deep violet, scout <code>#20B8C8</code> electric cyan, and workers <code>#D28A3A</code> warm amber. Lifecycle/alert pills—not tab color—carry urgency.</li>
+  <li><span class="open">Worker CMUX title source:</span> V1 should render the existing humanized identity work-reference rather than the raw key. The unresolved implementation choice is a generic template mechanism versus a narrowly scoped renderer fallback. A vault-authoritative event title requires an explicit display mapping or lookup and remains deferred.</li>
+  <li><span class="open">Status scope:</span> lifecycle-only now (recommended) versus an Event Watch state adapter in the first pass.</li>
+</ol>
+
+<h2>Implementation and verification plan</h2>
+<ol>
+  <li>Design and implement a role launch-policy contract in CCS for pinned native versus <code>claude-gpt</code> models. It must apply to new sessions and resume, and must fail closed rather than silently using the default launcher.</li>
+  <li>Add valid role colors, launch policy, and <code>cmux-paint.json</code> files in the private config package; document why the worker title remains computed rather than static.</li>
+  <li>Add isolated contract tests for paint ownership, role color validity, static core titles, absence of a static worker title, and exact launch-policy resolution.</li>
+  <li>Run package tests plus <code>ccs hooks lint</code> under isolated roots. Review the resolved hook output before touching live sessions.</li>
+  <li>Commit/push the config-only package change. Do not resume or wake sessions.</li>
+  <li>Perform an explicit, bounded live <code>ccs sync-tabs --cluster=event-watch</code> after recording the pre-state. Verify only intended titles/colors/pills changed; no session launch, inbox, registry, or vault mutation.</li>
+  <li>Rollback by removing the three paint files and colors, then run the same selector-based repaint to restore renderer defaults. No session deletion or transcript manipulation.</li>
+</ol>
+
+<h2>Constraints and non-goals</h2>
+<ul>
+  <li>Do not copy PR Watch’s old engine, filesystem inbox, scheduler, lifecycle policy, or PR-specific stop context.</li>
+  <li>Do not alter Event Watch vault skills, engine scripts, registry, event folders, or Airtable data.</li>
+  <li>Do not wake, resume, loop, spawn, or bump workers as part of visual customization.</li>
+  <li>Do not store event names, stages, dates, or Airtable IDs in the Event Worker identity schema.</li>
+  <li>Keep raw identity keys available in CCS detail, copy, CLI, and JSON surfaces; they are not tab labels.</li>
+</ul>
+</body>
+</html>
