@@ -12,9 +12,11 @@ import type { Database } from "bun:sqlite";
 import { sessionById, type SessionRow } from "../index/index.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import { liveBridge } from "../cmux/live.ts";
-import { getRow, getAll, lifecycleOf } from "../catalogue/db.ts";
+import { getRow, getAll, lifecycleOf, type RoleDef } from "../catalogue/db.ts";
 import { identityKey } from "../catalogue/lineage.ts";
 import { resolveRole } from "../roles/role-files.ts";
+import { readClusterManifest, type ClusterManifest } from "../cluster/manifest.ts";
+import { resolvePermissionMode } from "../roles/permission-mode.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
 import { pushRenderOps } from "../catalogue/sync-tabs.ts";
@@ -29,6 +31,8 @@ import {
 /** Just the catalogue bits resume needs (kept narrow so the planner is easy to test). */
 export interface ResumeMeta {
   resumeCommand: string | null;
+  /** Operating posture re-asserted because restored session state/settings cannot enforce it. */
+  permissionMode?: string | null;
   /** One-shot trailing prompt supplied by the caller; overrides the role's recurring command. */
   prompt?: string;
   /** Launcher executable for argv[0]; null → plain `claude`. */
@@ -67,6 +71,7 @@ export function planResumeSession(
     fork: false,
     cwd,
     resumeCommand: meta?.prompt ?? meta?.resumeCommand ?? null,
+    permissionMode: meta?.permissionMode ?? null,
     binary: meta?.binary ?? undefined,
     env: meta?.env,
   });
@@ -128,6 +133,25 @@ export function chooseLauncher(
   return { ok: true, launcher: def.launcher };
 }
 
+/** Resume policy is deliberately fail-open: an unreadable definition must not strand history. */
+function resolveRoleForResume(role: string, cluster: string | null): RoleDef | null {
+  try {
+    return resolveRole(role, cluster);
+  } catch {
+    return null;
+  }
+}
+
+/** Cluster permission policy is advisory on resume when its manifest cannot be read or parsed. */
+function readClusterManifestForResume(cluster: string): ClusterManifest | null {
+  try {
+    const manifest = readClusterManifest(cluster);
+    return manifest.ok ? manifest.value : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The full `ccs resume-session <id>` entry: resolve the row + its resume_command, plan, and
  * (unless dry-run) execute. `bridge` defaults to the live cmux state; injectable for tests.
@@ -149,6 +173,10 @@ export function resumeSessionEntry(
     force?: boolean;
     /** Configured launcher fleet; default = plain `claude` (byte-identical to pre-routes ccs). */
     launchers?: readonly Launcher[];
+    /** Internal shared lookup from resumeMany; defaults to a fail-open file read for one resume. */
+    roleLookup?: (role: string, cluster: string | null) => RoleDef | null;
+    /** Internal shared lookup from resumeMany; defaults to a fail-open manifest read for one resume. */
+    clusterManifestLookup?: (cluster: string) => ClusterManifest | null;
   } = {},
 ): ResumeSessionResult {
   const row = sessionById(indexDb, sessionId);
@@ -176,10 +204,16 @@ export function resumeSessionEntry(
   }
   // ADR-0062: re-arm from the ROLE's authored resume_command (files-are-truth), not the session
   // column copy that can drift from a config edit. Fall back to the session column for a row whose
-  // role isn't resolvable (unregistered/standalone) so nothing regresses.
-  const roleResume = cat?.role ? resolveRole(cat.role, cat.cluster)?.resumeCommand ?? null : null;
+  // role isn't resolvable (unregistered/standalone) so nothing regresses. ADR-0094 resolves the
+  // embodiment posture from the same already-loaded role plus its cluster manifest. Both lookups
+  // fail open on resume: history remains reachable even when config was removed or malformed.
+  const roleLookup = opts.roleLookup ?? resolveRoleForResume;
+  const manifestLookup = opts.clusterManifestLookup ?? readClusterManifestForResume;
+  const roleDef = cat?.role ? roleLookup(cat.role, cat.cluster) : null;
+  const clusterManifest = cat?.cluster ? manifestLookup(cat.cluster) : null;
   const plan = planResumeSession(bridge, row, {
-    resumeCommand: roleResume ?? cat?.resumeCommand ?? null,
+    resumeCommand: roleDef?.resumeCommand ?? cat?.resumeCommand ?? null,
+    permissionMode: resolvePermissionMode(roleDef, clusterManifest),
     prompt: opts.prompt,
     binary: chosen.launcher.binary,
     env: chosen.launcher.env,

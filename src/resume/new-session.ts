@@ -35,7 +35,17 @@ import pkg from "../../package.json" with { type: "json" };
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import { getIdentity } from "../catalogue/identities.ts";
 import { resolveRole } from "../roles/role-files.ts";
-import { checkClusterGate } from "../cluster/manifest.ts";
+import {
+  checkClusterGate,
+  clusterManifestExists,
+  readClusterManifest,
+  type ClusterManifest,
+} from "../cluster/manifest.ts";
+import {
+  isPermissionMode,
+  permissionModeValidationError,
+  resolvePermissionMode,
+} from "../roles/permission-mode.ts";
 import { shellQuote } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
 import type { Launcher } from "./launchers.ts";
@@ -103,8 +113,8 @@ export interface NewSessionOpts {
   /** The session's role — the canonical identity axis (ADR-0015). */
   role?: string;
   /** How a loop is re-armed on resume — DERIVED from the role's role.toml at launch (ADR-0062),
-   * not a per-session flag. Populated internally from roleDef; used only for launch (prompt +
-   * permission mode), never stored (kind/resume_command columns dropped v29). */
+   * not a per-session flag. Populated internally from roleDef; used only for the launch prompt,
+   * never stored (kind/resume_command columns dropped v29). */
   resumeCommand?: string;
   project?: string;
   key?: string;
@@ -222,6 +232,10 @@ export function parseOpts(args: string[]): Result<NewSessionOpts> {
   const parsed = parseOptions(args);
   if (!parsed.ok) return parsed;
   const { values, allValues, booleans } = parsed.value;
+  const permissionMode = values.get("--permission-mode");
+  if (permissionMode !== undefined && !isPermissionMode(permissionMode)) {
+    return resultErr(new Error(`--permission-mode: ${permissionModeValidationError()}`));
+  }
   return resultOk({
     cluster: values.get("--cluster"),
     identity: values.get("--identity"),
@@ -241,7 +255,7 @@ export function parseOpts(args: string[]): Result<NewSessionOpts> {
     location: values.get("--location"),
     host: values.get("--host"),
     prompt: values.get("--prompt"),
-    permissionMode: values.get("--permission-mode"),
+    permissionMode,
     printId: booleans.has("--print-id"),
     topLevel: booleans.has("--top-level"),
     inline: booleans.has("--inline"),
@@ -701,6 +715,17 @@ function supersedeWorkUnitSiblings(db: Database, workUnitId: string, keepId: str
   }
 }
 
+/** Birth precedence adds the historical unattended-loop default beneath declared policy. */
+export function resolveNewSessionPermissionMode(
+  explicitMode: string | null | undefined,
+  roleDef: Pick<RoleDef, "kind" | "permissionMode" | "manifestError"> | null,
+  clusterManifest: Pick<ClusterManifest, "permissionMode"> | null,
+): string | null {
+  return explicitMode
+    ?? resolvePermissionMode(roleDef, clusterManifest)
+    ?? (roleDef?.kind === "loop" ? "acceptEdits" : null);
+}
+
 /** Build the launch invocation. Prompt (if any) is a trailing positional arg. `binary` comes
  * from the `--via` launcher; default is plain `claude`. */
 export function buildLaunchArgv(id: string, opts: NewSessionOpts, binary = "claude"): string[] {
@@ -891,10 +916,26 @@ export function newSession(
     // A loop role born fresh should START RUNNING: default the launch prompt to its
     // resume_command (the /loop …) unless an explicit --prompt was given.
     if (!opts.prompt && opts.resumeCommand) opts.prompt = opts.resumeCommand;
-    // Loops run unattended → default to acceptEdits so they don't stall on edit prompts
-    // (the folder-trust gate is handled separately via ~/.claude.json pre-trust).
-    if (!opts.permissionMode && roleDef.kind === "loop") opts.permissionMode = "acceptEdits";
   }
+
+  // ADR-0094: permission mode is embodiment policy, not transcript history. Resolve it for every
+  // birth with the authored role above cluster, then retain the historical loop default only when
+  // neither layer declares a posture. role.toml policy errors are blocked by validateSpawn below.
+  let clusterManifest: ClusterManifest | null = null;
+  if (opts.cluster) {
+    const loadedManifest = readClusterManifest(opts.cluster);
+    if (loadedManifest.ok) clusterManifest = loadedManifest.value;
+    // A cluster that SHIPS a manifest it can't parse has declared a posture ccs cannot honor.
+    // Proceeding would silently launch under the legacy default (or none) — the exact failure
+    // ADR-0094 exists to kill. Refuse the birth; a fresh session is cheap to retry once the
+    // manifest is fixed. A cluster with NO manifest at all is a different case (ad-hoc / legacy):
+    // it keeps the pre-existing warn-and-proceed path via checkClusterGate below.
+    else if (clusterManifestExists(opts.cluster)) {
+      console.error(`ccs new-session: ${loadedManifest.error.message}. Nothing spawned.`);
+      return 2;
+    }
+  }
+  opts.permissionMode = resolveNewSessionPermissionMode(opts.permissionMode, roleDef, clusterManifest) ?? undefined;
 
   // A spawn-location config that named a mode whose input is missing (e.g. "worktree" with no
   // --cwd) is a determinism failure — fail LOUD, don't silently fall back to the wrong dir.

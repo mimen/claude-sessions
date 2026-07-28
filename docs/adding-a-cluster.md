@@ -54,6 +54,7 @@ A minimal cluster needs:
 - **name** (canonical cluster name, should match directory)
 - **engine** (path to engine dir, package-relative)
 - **sense** (path to sense entry point, package-relative)
+- **permission_mode** (optional, ADR-0094) — the operating posture every session in the cluster launches with, re-asserted as `--permission-mode` on birth AND resume. An unattended cluster wants `bypassPermissions`; without it, resumed sessions come back in whatever mode they drifted into, because Claude Code never restores `bypassPermissions` and the restored mode outranks `settings.json`. A role's `permission_mode` overrides the cluster's.
 
 ---
 

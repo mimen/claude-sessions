@@ -13,7 +13,7 @@
  */
 import type { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
-import { sessionsForCluster, getRow, lifecycleOf, type CatalogueRow } from "../catalogue/db.ts";
+import { sessionsForCluster, getRow, lifecycleOf, type CatalogueRow, type RoleDef } from "../catalogue/db.ts";
 import { liveBridge } from "../cmux/live.ts";
 import { openSessionIdsFrom, workspaceForSessionFrom } from "../cmux/liveness.ts";
 import type { Bridge } from "../cmux/bridge.ts";
@@ -21,6 +21,7 @@ import { resumeSessionEntry, type ResumeSessionResult } from "./resume-session.t
 import type { Launcher } from "./launchers.ts";
 import { workUnitKey } from "../catalogue/spawn-contract.ts";
 import { resolveRole } from "../roles/role-files.ts";
+import { readClusterManifest, type ClusterManifest } from "../cluster/manifest.ts";
 
 export type MemberDisposition = ResumeSessionResult["status"] | "retired" | "superseded";
 
@@ -196,20 +197,34 @@ export function resumeMany(
     title: row?.customTitle ?? null,
     shortname: typeof row?.meta?.shortname === "string" ? row.meta.shortname : null,
   });
-  // Role-level opt-in `pin_on_resume` (role.toml). Memoized on the (cluster, role)
-  // pair — post-ADR-0080 role identity is (cluster, role), not global-by-name.
-  // resolveRole is I/O so we compute lazily on first sight of a pair.
-  const pinCache = new Map<string, boolean>();
-  const shouldPin = (cluster: string | null, role: string | null): boolean => {
-    if (!role) return false;
+  // Role definitions and cluster manifests are files-as-truth I/O. A cluster resume can fan out
+  // over hundreds of sessions, so memoize each (cluster, role) and each cluster for the whole pass.
+  // The role object serves both pin_on_resume and ADR-0094 permission resolution; failures cache as
+  // null and remain fail-open so one missing config package cannot strand resumable history.
+  const roleCache = new Map<string, RoleDef | null>();
+  const roleFor = (role: string, cluster: string | null): RoleDef | null => {
     const key = `${cluster ?? ""}:${role}`;
-    const hit = pinCache.get(key);
-    if (hit !== undefined) return hit;
-    let flag = false;
-    try { flag = resolveRole(role, cluster)?.pinOnResume === true; } catch { flag = false; }
-    pinCache.set(key, flag);
-    return flag;
+    if (roleCache.has(key)) return roleCache.get(key) ?? null;
+    let roleDef: RoleDef | null = null;
+    try { roleDef = resolveRole(role, cluster); } catch { roleDef = null; }
+    roleCache.set(key, roleDef);
+    return roleDef;
   };
+  const clusterManifestCache = new Map<string, ClusterManifest | null>();
+  const manifestFor = (cluster: string): ClusterManifest | null => {
+    if (clusterManifestCache.has(cluster)) return clusterManifestCache.get(cluster) ?? null;
+    let manifest: ClusterManifest | null = null;
+    try {
+      const loaded = readClusterManifest(cluster);
+      manifest = loaded.ok ? loaded.value : null;
+    } catch {
+      manifest = null;
+    }
+    clusterManifestCache.set(cluster, manifest);
+    return manifest;
+  };
+  const shouldPin = (cluster: string | null, role: string | null): boolean =>
+    role ? roleFor(role, cluster)?.pinOnResume === true : false;
   const cmuxBin = opts.cmuxBin ?? process.env.CMUX_BIN ?? "cmux";
   /** Pin a workspace when its role asks for it. For a JUST-spawned session, cmux hasn't yet bound
    * surface→sessionId (that happens when the child claude fires its SessionStart hook), so a
@@ -253,6 +268,8 @@ export function resumeMany(
       via: opts.via,
       force: opts.force,
       launchers: opts.launchers,
+      roleLookup: roleFor,
+      clusterManifestLookup: manifestFor,
     });
     summary.perSession.push({ sessionId: p.sessionId, result: res.status, ...rowFields(p.row) });
     switch (res.status) {

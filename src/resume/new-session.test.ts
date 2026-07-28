@@ -16,6 +16,7 @@ import {
   newSession,
   parseOpts,
   preflightNewSession,
+  resolveNewSessionPermissionMode,
   writeSessionMetadata,
   type NewSessionOpts,
   type RemoteSessionDependencies,
@@ -226,6 +227,33 @@ test("parseOpts: reads every flag, --role and --skill are synonyms", () => {
   expect(o.prompt).toBe("go build it");
   expect(o.permissionMode).toBe("acceptEdits");
   expect(o.printId).toBe(true);
+});
+
+test("ADR-0094: parseOpts rejects a --permission-mode Claude Code wouldn't accept", () => {
+  const bad = parseOpts(["--permission-mode", "bypass"]);
+  expect(bad.ok).toBe(false);
+  if (!bad.ok) expect(bad.error.message).toContain("permission_mode must be one of");
+});
+
+test("ADR-0094: birth precedence — explicit flag > role > cluster > the legacy loop default", () => {
+  const loop = { kind: "loop" as const, permissionMode: null, manifestError: null };
+  const loopWithPolicy = { kind: "loop" as const, permissionMode: "plan", manifestError: null };
+  const worker = { kind: "session" as const, permissionMode: null, manifestError: null };
+  const bypass = { permissionMode: "bypassPermissions" };
+  const noPolicy = { permissionMode: null };
+
+  // An operator typing the flag always wins — policy is a default, not a cage.
+  expect(resolveNewSessionPermissionMode("manual", loopWithPolicy, bypass)).toBe("manual");
+  // Role above cluster.
+  expect(resolveNewSessionPermissionMode(undefined, loopWithPolicy, bypass)).toBe("plan");
+  // Cluster policy applies when the role is silent — and BEATS the historical loop default,
+  // which existed only because nothing could declare a posture.
+  expect(resolveNewSessionPermissionMode(undefined, loop, bypass)).toBe("bypassPermissions");
+  // With no declared policy anywhere, an unattended loop keeps its acceptEdits default…
+  expect(resolveNewSessionPermissionMode(undefined, loop, noPolicy)).toBe("acceptEdits");
+  // …and a plain worker keeps launching with no flag at all.
+  expect(resolveNewSessionPermissionMode(undefined, worker, noPolicy)).toBeNull();
+  expect(resolveNewSessionPermissionMode(undefined, null, null)).toBeNull();
 });
 
 test("parseOpts: --skill is accepted as an alias for --role", () => {
@@ -553,6 +581,24 @@ test("newSession: invalid role model and policy --via conflict fail before reser
   const check = openCatalogue(join(root, "cache", "catalogue.db"));
   try {
     expect(check.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 0 });
+  } finally { check.close(); }
+});
+
+test("ADR-0094: a cluster manifest that exists but won't parse REFUSES the birth, before reservation", () => {
+  const root = withEventRole();
+  const clusterToml = join(process.env.CCS_CONFIG_ROOT!, "clusters", "event-watch", "cluster.toml");
+  // A declared posture ccs can't read must not degrade to "launch under the legacy default".
+  writeFileSync(clusterToml, 'name = "event-watch"\npermission_mode = "bypass"\n');
+  expect(newSession(["--cluster=event-watch", "--role=event-worker", "--top-level", "--print-id"])).toBe(2);
+
+  // A cluster with NO manifest is the different, pre-existing case: warn-and-proceed.
+  rmSync(clusterToml);
+  expect(newSession(["--cluster=event-watch", "--role=event-worker", "--top-level", "--print-id"])).toBe(0);
+
+  const check = openCatalogue(join(root, "cache", "catalogue.db"));
+  try {
+    // exactly one row — the refused birth reserved nothing
+    expect(check.query("SELECT COUNT(*) AS count FROM catalogue").get()).toEqual({ count: 1 });
   } finally { check.close(); }
 });
 
@@ -1315,7 +1361,7 @@ import type { RoleDef } from "../catalogue/db.ts";
 
 const loopDef: RoleDef = {
   role: "control", cluster: "pr-watch", kind: "loop", workUnit: "none", homeDir: "/tmp",
-  resumeCommand: "/loop 15m /pr-watch-control", stageSchema: null, pinOnResume: false, color: null, model: null, manifestError: null, skills: [], commands: [], hooks: [], updatedAt: null,
+  resumeCommand: "/loop 15m /pr-watch-control", stageSchema: null, pinOnResume: false, color: null, model: null, permissionMode: null, manifestError: null, skills: [], commands: [], hooks: [], updatedAt: null,
 };
 
 test("writeSessionMetadata: --role without --cluster inherits cluster from role registry + mints identity", () => {
@@ -1376,7 +1422,7 @@ test("validateSpawn: standalone role (no cluster in role def, no --cluster arg) 
   // Rejection prevents latent data-integrity issues.
   const standaloneRoleDef: RoleDef = {
     role: "debug", kind: "session", cluster: null, workUnit: null, homeDir: "/tmp",
-    resumeCommand: null, stageSchema: null, pinOnResume: false, color: null, model: null, manifestError: null, skills: [], commands: [], hooks: [], updatedAt: null,
+    resumeCommand: null, stageSchema: null, pinOnResume: false, color: null, model: null, permissionMode: null, manifestError: null, skills: [], commands: [], hooks: [], updatedAt: null,
   };
   const err = validateSpawn({ printId: false, inline: false, role: "debug" }, standaloneRoleDef);
   expect(err).toContain("standalone role");

@@ -163,6 +163,23 @@ test("readRoleDir parses canonical model policy and rejects aliases", () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("ADR-0094: readRoleDir parses permission_mode and blocks births on an unknown one", () => {
+  const root = pkg((r) => {
+    writeRole(r, "c", "unattended", 'kind = "loop"\nresume_command = "/loop /x"\npermission_mode = "bypassPermissions"');
+    writeRole(r, "c", "typo", 'kind = "session"\npermission_mode = "bypass"');
+    writeRole(r, "c", "silent", 'kind = "session"');
+  });
+  try {
+    expect(resolveRole("unattended", root)!.permissionMode).toBe("bypassPermissions");
+    expect(resolveRole("unattended", root)!.manifestError).toBeNull();
+    // A near-miss must not silently degrade to "no policy" — that would launch the wrong posture.
+    expect(resolveRole("typo", root)!.permissionMode).toBeNull();
+    expect(resolveRole("typo", root)!.manifestError).toContain("permission_mode must be one of");
+    expect(resolveRole("silent", root)!.permissionMode).toBeNull();
+    expect(resolveRole("silent", root)!.manifestError).toBeNull();
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("ADR-0074: skills/commands read from .claude/ (project-local), with legacy fallback", () => {
   const root = pkg((r) => {
     const d = roleDir(r, "c", "modern");

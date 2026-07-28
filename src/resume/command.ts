@@ -36,12 +36,17 @@ export function buildResumeCommand(
     fork: boolean;
     cwd: string;
     resumeCommand?: string | null;
+    permissionMode?: string | null;
     binary?: string;
     env?: Readonly<Record<string, string>>;
   },
 ): ResumeCommand {
   const argv = [opts.binary ?? "claude", "--resume", row.resumeId];
   if (opts.fork) argv.push("--fork-session");
+  // Claude Code parses the resumed prompt positionally, so embodiment policy MUST precede it.
+  // ADR-0094: restored mode outranks settings, while bypassPermissions is not restored at all;
+  // the explicit argv flag is therefore the only deterministic enforcement point.
+  if (opts.permissionMode) argv.push("--permission-mode", opts.permissionMode);
   // ADR-0015: a loop's resume_command is replayed as the trailing prompt so it comes back
   // RUNNING (`claude --resume <id> '<resume_command>'`). Workers have none → bare resume.
   if (opts.resumeCommand) argv.push(opts.resumeCommand);

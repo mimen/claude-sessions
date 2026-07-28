@@ -4,6 +4,7 @@ import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
 import { type Result, ok, err } from "../result.ts";
 import { ccsConfigRoot } from "../roles/role-files.ts";
+import { PERMISSION_MODES } from "../roles/permission-mode.ts";
 
 /**
  * The cluster manifest (`cluster.toml`) — the tool's typed view of a cluster package (ADR-0048/0058).
@@ -70,6 +71,8 @@ const ManifestSchema = z.object({
   /** ADR-0070: the cluster's mid-level GROUPING TYPE (pr-watch = "epic"). A display label + a
    * sensing/render hint, NOT storage — the grouping entity stays generic (ADR-0051/0059). */
   grouping_type: z.string().optional(),
+  /** Operating posture re-asserted on every birth and resume embodiment (ADR-0094). */
+  permission_mode: z.enum(PERMISSION_MODES).optional(),
 });
 
 /** The typed cluster manifest, as the tool sees it. Absolute `engineDir`/`sensePath`/`boardPath` are resolved. */
@@ -90,6 +93,8 @@ export interface ClusterManifest {
    * defaults to "epic" when undeclared (the historical assumption), never null so callers can
    * always show a word. The generic grouping entity is unchanged — this only types the label. */
   groupingType: string;
+  /** Claude Code operating posture to re-assert on every embodiment; null when undeclared. */
+  permissionMode: string | null;
 }
 
 /**
@@ -97,6 +102,16 @@ export interface ClusterManifest {
  * a cluster with no readable manifest is a real problem the caller should surface, not paper over
  * (unlike role.toml, which is fail-open because most fields are directory-derived).
  */
+/**
+ * Does this cluster SHIP a manifest at all? The distinction readClusterManifest's single `err()`
+ * can't make: "no config package here" (ad-hoc/legacy cluster name — callers warn and proceed)
+ * vs "a manifest that exists but won't parse" (a declared contract ccs cannot honor — callers
+ * that act on manifest policy, e.g. ADR-0094 permission mode at birth, refuse).
+ */
+export function clusterManifestExists(cluster: string, configRoot = ccsConfigRoot()): boolean {
+  return existsSync(join(configRoot, "clusters", cluster, "cluster.toml"));
+}
+
 export function readClusterManifest(cluster: string, configRoot = ccsConfigRoot()): Result<ClusterManifest> {
   const dir = join(configRoot, "clusters", cluster);
   const tomlPath = join(dir, "cluster.toml");
@@ -122,6 +137,7 @@ export function readClusterManifest(cluster: string, configRoot = ccsConfigRoot(
     version: m.version === undefined ? null : String(m.version),
     requiresCcs: m.requires_ccs ?? null,
     groupingType: m.grouping_type ?? "epic",
+    permissionMode: m.permission_mode ?? null,
   });
 }
 
