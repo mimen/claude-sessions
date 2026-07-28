@@ -7,6 +7,7 @@
  * approximations they replace were built on a 16-unit grid and read heavy and uneven at this size.
  */
 import type React from "react";
+import { cn } from "@/lib/utils";
 
 type IconProps = { readonly className?: string };
 
@@ -14,7 +15,11 @@ function Glyph({ className, children }: IconProps & { children: React.ReactNode 
   return (
     <svg
       aria-hidden="true"
-      className={className}
+      // An SVG with no width or height falls back to the replaced-element default (300x150), which
+      // inside a 16px control renders as a huge dark block rather than an icon. Every call site
+      // passing a size is not something the type system can require, so the default lives here;
+      // `cn` lets a call site's own size win.
+      className={cn("size-4", className)}
       fill="none"
       stroke="currentColor"
       strokeLinecap="round"

@@ -629,6 +629,7 @@ export function App(): React.ReactElement {
                   now={now}
                   onAccept={setLifecycle}
                   onDismiss={declineSuggestion}
+                  onLifecycle={setLifecycle}
                   onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
                   opening={openingIds.has(row.id)}
                   registerRef={(_id, element) => {

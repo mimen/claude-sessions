@@ -31,6 +31,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { StatusIcon } from "./status-icon.tsx";
+import { RowAction } from "./row-action.tsx";
 import { summaryAsText } from "./summary-card.tsx";
 
 /**
@@ -70,48 +71,6 @@ function ModelMark({ provider }: { provider: string }): React.ReactElement | nul
 function surfaceSummary(kinds: readonly string[]): string {
   const distinct = [...new Set(kinds)];
   return distinct.length > 0 ? distinct.join(" · ") : "empty";
-}
-
-/** One hover-revealed control. The tone states the consequence, not the kind of thing acted on. */
-type ActionTone = "confirm" | "shelve" | "dismiss" | "destroy";
-
-const ACTION_TONES: Readonly<Record<ActionTone, string>> = {
-  confirm: "text-[color:var(--action-confirm)]",
-  shelve: "text-[color:var(--action-shelve)]",
-  /** Closing a session's workspace is housekeeping — the session and its transcript survive. */
-  dismiss: "text-muted-foreground",
-  /** Closing a sessionless tab really is the end of it, so it reads as destructive. */
-  destroy: "text-[color:var(--action-destroy)]",
-};
-
-function RowAction({ label, onClick, tone, disabled = false, children }: {
-  readonly label: string;
-  readonly onClick: () => void;
-  readonly tone: ActionTone;
-  readonly disabled?: boolean;
-  readonly children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <span
-      aria-disabled={disabled}
-      aria-label={label}
-      className={cn(
-        "flex size-5 shrink-0 items-center justify-center rounded-sm border border-border",
-        "bg-muted/40 transition-colors hover:bg-muted",
-        disabled
-          ? "cursor-default text-muted-foreground opacity-30"
-          : `cursor-pointer ${ACTION_TONES[tone]}`,
-      )}
-      onClick={(event) => {
-        event.stopPropagation();
-        if (!disabled) onClick();
-      }}
-      role="button"
-      title={label}
-    >
-      {children}
-    </span>
-  );
 }
 
 /**

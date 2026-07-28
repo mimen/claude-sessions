@@ -18,7 +18,8 @@ import { relativeTime } from "../format.ts";
 import { cn } from "@/lib/utils";
 import { SuggestionChip } from "./suggestion-chip.tsx";
 import { ProjectMark } from "./project-mark.tsx";
-import { SummaryIcon } from "./icons.tsx";
+import { ArchiveIcon, CheckIcon, SummaryIcon } from "./icons.tsx";
+import { RowAction } from "./row-action.tsx";
 
 export interface CompactRowProps {
   readonly row: SidebarSessionRow;
@@ -28,6 +29,17 @@ export interface CompactRowProps {
   readonly onOpen: (row: SidebarSessionRow) => void;
   /** Apply enrichment's verdict. Absent for a row whose verdict is not actionable. */
   readonly onAccept?: (row: SidebarSessionRow, verb: "complete" | "archive") => void;
+  /**
+   * Lifecycle actions, the same ones the full rows offer.
+   *
+   * A closed session is the one most likely to want completing or archiving -- it is finished work
+   * you are looking back at -- so leaving these off the collapsed rows put the actions furthest
+   * from where they were most wanted.
+   */
+  readonly onLifecycle: (
+    row: SidebarSessionRow,
+    action: "complete" | "archive" | "uncomplete" | "unarchive",
+  ) => void;
   readonly onDismiss?: (row: SidebarSessionRow) => void;
   readonly registerRef?: (id: string, element: HTMLElement | null) => void;
   /** Report the pointer entering this row, or leaving it (null); the list owns the card. */
@@ -42,6 +54,7 @@ export function CompactRow({
   onOpen,
   onAccept,
   onDismiss,
+  onLifecycle,
   registerRef,
   onHover,
 }: CompactRowProps): React.ReactElement {
@@ -92,6 +105,29 @@ export function CompactRow({
           suggestion={suggestion}
         />
       ) : null}
+      {/* Lifecycle controls, revealed like the full rows'. A completed row offers only the way
+        * back, and an archived one likewise: showing "Archive" beside a completed row invites a
+        * second terminal state that says nothing new. */}
+      <span className="hidden shrink-0 items-center gap-1 group-hover:flex">
+        {row.lifecycle !== "archived" ? (
+          <RowAction
+            label={row.lifecycle === "completed" ? "Mark not complete" : "Complete"}
+            onClick={() => onLifecycle(row, row.lifecycle === "completed" ? "uncomplete" : "complete")}
+            tone="confirm"
+          >
+            <CheckIcon className="size-3" />
+          </RowAction>
+        ) : null}
+        {row.lifecycle !== "completed" ? (
+          <RowAction
+            label={row.lifecycle === "archived" ? "Unarchive" : "Archive"}
+            onClick={() => onLifecycle(row, row.lifecycle === "archived" ? "unarchive" : "archive")}
+            tone="shelve"
+          >
+            <ArchiveIcon className="size-2.5" />
+          </RowAction>
+        ) : null}
+      </span>
       {/* The same trigger the full rows use, so the gesture is one thing to learn. Only on hover:
         * a column of icons down a list of closed sessions would out-shout the sessions. */}
       <span
