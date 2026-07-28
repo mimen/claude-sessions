@@ -1,63 +1,85 @@
+/**
+ * A SEAT's definition is one native Claude Code agent definition: `<agents-root>/<seat>.md`,
+ * YAML frontmatter plus the role prompt below it. There is no second representation.
+ *
+ * Claude Code ignores frontmatter keys it does not recognise, so the delegate-only keys
+ * (`fallback_model`, `fallback_effort`) ride along in the very file the native Agent tool
+ * auto-discovers. One file is therefore both the native agent and the ccs seat, which is what
+ * retired the parallel `seat.toml` + `prompt.md` registry.
+ */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
 import { err, ok, type Result } from "../result.ts";
-import { launcherServesFamily } from "../resume/role-model-launch.ts";
+import type { LauncherName, ModelFamily } from "../resume/role-model-launch.ts";
 
 const SeatNameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]*$/);
 const EffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
-const ProviderSchema = z.enum(["claude", "gpt"]);
-const SeatLauncherSchema = z.enum(["claudex", "claude-native", "claude-gpt"]);
 
-const FixedRouteSchema = z.object({
-  provider: ProviderSchema,
-  launcher: SeatLauncherSchema,
-  requested_model: z.string().min(1),
-  effort: EffortSchema,
-}).strict();
-
-const RoutingSchema = z.object({
-  primary: FixedRouteSchema,
-  fallback: FixedRouteSchema.optional(),
-}).strict();
-
-const SeatFileSchema = z.object({
-  name: SeatNameSchema,
-  description: z.string().min(1),
-  tools: z.array(z.string().min(1)).default([]),
-  permission_mode: z.string().min(1).optional(),
-  skills: z.array(z.string().min(1)).default([]),
-  routing: RoutingSchema,
-}).strict();
-
-export type ProviderFamily = z.infer<typeof ProviderSchema>;
-export type SeatLauncher = z.infer<typeof SeatLauncherSchema>;
-export type SeatEffort = z.infer<typeof EffortSchema>;
-export type SeatRouteKind = "primary" | "fallback";
-export type SeatRoute = z.infer<typeof FixedRouteSchema>;
-export type SeatFile = z.infer<typeof SeatFileSchema>;
+/** `tools:`/`skills:` are authorable as a YAML list or as Claude Code's comma-separated string. */
+const NameListSchema = z.preprocess(
+  (value) => (typeof value === "string"
+    ? value.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0)
+    : value),
+  z.array(z.string().min(1)),
+);
 
 /**
- * A seat's launcher vocabulary is a SUBSET of the fleet's: a seat must name a deterministic route,
- * so the bare updater-managed `claude` — whose backend depends on inherited env — is not authorable
- * here. Which vendors each launcher reaches is deliberately NOT restated: `LAUNCHER_FAMILIES` in
- * role-model-launch.ts is the single authority, and passing a `SeatLauncher` to it type-checks the
- * subset relation at every call.
+ * The keys `ccs delegate` reads. Deliberately NOT `.strict()`: an agent definition carries whatever
+ * else its author or a future Claude Code version wants, and an unknown key must be ignored rather
+ * than refuse the launch — tolerating them in both directions is the premise of the single file.
  */
-function seatLaunchersServing(provider: ProviderFamily): SeatLauncher[] {
-  return SeatLauncherSchema.options.filter((launcher) => launcherServesFamily(launcher, provider));
+const AgentDefinitionSchema = z.object({
+  name: SeatNameSchema,
+  description: z.string().min(1),
+  // Present but empty keeps the retired manifest's meaning: declare no restriction, inherit every
+  // tool. `tools` is omitted from the compiled agent in that case, which is how Claude Code spells it.
+  tools: NameListSchema,
+  model: z.string().min(1),
+  effort: EffortSchema,
+  fallback_model: z.string().min(1).optional(),
+  fallback_effort: EffortSchema.optional(),
+  skills: NameListSchema.optional(),
+  permission_mode: z.string().min(1).optional(),
+});
+
+export type SeatEffort = z.infer<typeof EffortSchema>;
+export type SeatRouteKind = "primary" | "fallback";
+
+/**
+ * The launcher every delegated child is born on.
+ *
+ * An agent definition declares a MODEL and never a launcher, so the launcher stopped being a
+ * per-seat authoring decision — and with it the provider/launcher pairing invariant the old
+ * manifest had to validate. `claudex` is the birth route default and the one launcher in the fleet
+ * that reaches Anthropic and OpenAI alike (`LAUNCHER_FAMILIES`), which is precisely what lets one
+ * definition name either vendor's model.
+ */
+export const DELEGATE_LAUNCHER: LauncherName = "claudex";
+
+export interface SeatFallbackRoute {
+  readonly model: string;
+  readonly effort: SeatEffort;
 }
 
-export interface SeatDefinition extends SeatFile {
+export interface SeatDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly tools: readonly string[];
+  readonly model: string;
+  readonly effort: SeatEffort;
+  /** null when the definition declares no manual backup; `--fallback` then fails before reservation. */
+  readonly fallback: SeatFallbackRoute | null;
+  readonly skills: readonly string[];
+  readonly permissionMode: string | null;
   readonly prompt: string;
-  readonly directory: string;
+  readonly path: string;
 }
 
 export interface ResolvedSeatRoute {
   readonly route: SeatRouteKind;
-  readonly provider: ProviderFamily;
-  readonly launcher: SeatLauncher;
+  readonly provider: ModelFamily;
+  readonly launcher: LauncherName;
   readonly requestedModel: string;
   readonly compiledModel: string;
   readonly effort: SeatEffort;
@@ -75,38 +97,85 @@ export interface CompiledAgentDefinition {
 
 export type CompiledAgents = Readonly<Record<string, CompiledAgentDefinition>>;
 
+interface AgentDocument {
+  readonly frontmatter: string;
+  readonly body: string;
+}
+
+const FRONTMATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n([\s\S]*))?$/;
+
+function splitAgentDocument(text: string): AgentDocument | null {
+  const match = FRONTMATTER.exec(text);
+  return match ? { frontmatter: match[1] ?? "", body: match[2] ?? "" } : null;
+}
+
 function errorMessage(error: object): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * The vendor a seat's model belongs to, read off its canonical prefix. Recorded for provenance
+ * only — nothing routes on it now that one launcher serves both vendors. Deliberately not
+ * `modelFamily`, which classifies the closed birth-model vocabulary: a seat's model is a free-form
+ * authored string so the registry can name a model this binary has never heard of.
+ */
+function providerFor(model: string): ModelFamily {
+  return model.startsWith("gpt-") ? "gpt" : "claude";
+}
+
+/**
+ * The `[1m]` context declaration belongs to `gpt-*` IDs only. Claude IDs are accepted verbatim by
+ * every launcher, gateway included, and adding the suffix there buys nothing.
+ */
 export function normalizeGptModel(model: string): string {
   return model.startsWith("gpt-") && !model.endsWith("[1m]") ? `${model}[1m]` : model;
 }
 
-export function loadSeat(seatsRoot: string, seatName: string): Result<SeatDefinition> {
+export function loadSeat(agentsRoot: string, seatName: string): Result<SeatDefinition> {
   const parsedName = SeatNameSchema.safeParse(seatName);
   if (!parsedName.success) return err(new Error(`Invalid seat name: ${seatName}`));
 
-  const directory = join(seatsRoot, parsedName.data);
-  const manifestPath = join(directory, "seat.toml");
-  const promptPath = join(directory, "prompt.md");
-
+  const path = join(agentsRoot, `${parsedName.data}.md`);
   try {
-    const manifestObject = parseToml(readFileSync(manifestPath, "utf8")) as object;
-    const manifest = SeatFileSchema.safeParse(manifestObject);
-    if (!manifest.success) {
-      return err(new Error(`Invalid seat manifest at ${manifestPath}:\n${z.prettifyError(manifest.error)}`));
+    const document = splitAgentDocument(readFileSync(path, "utf8"));
+    if (!document) return err(new Error(`Agent definition has no YAML frontmatter: ${path}`));
+
+    const parsed = AgentDefinitionSchema.safeParse(Bun.YAML.parse(document.frontmatter) as object);
+    if (!parsed.success) {
+      return err(new Error(`Invalid agent definition at ${path}:\n${z.prettifyError(parsed.error)}`));
     }
-    if (manifest.data.name !== parsedName.data) {
+    const definition = parsed.data;
+    if (definition.name !== parsedName.data) {
       return err(
         new Error(
-          `Seat manifest name ${JSON.stringify(manifest.data.name)} does not match directory ${JSON.stringify(parsedName.data)}`,
+          `Agent definition name ${JSON.stringify(definition.name)} does not match file ${JSON.stringify(`${parsedName.data}.md`)}`,
         ),
       );
     }
-    const prompt = readFileSync(promptPath, "utf8").trim();
-    if (prompt.length === 0) return err(new Error(`Seat prompt is empty: ${promptPath}`));
-    return ok({ ...manifest.data, prompt, directory });
+    // Half a fallback is an authoring mistake, not a route: refuse it here rather than launch the
+    // primary model at the backup's effort the first time somebody passes --fallback.
+    if (Boolean(definition.fallback_model) !== Boolean(definition.fallback_effort)) {
+      return err(
+        new Error(`Agent definition ${path} must declare fallback_model and fallback_effort together, or neither`),
+      );
+    }
+    const prompt = document.body.trim();
+    if (prompt.length === 0) return err(new Error(`Agent definition has an empty role prompt: ${path}`));
+
+    return ok({
+      name: definition.name,
+      description: definition.description,
+      tools: definition.tools,
+      model: definition.model,
+      effort: definition.effort,
+      fallback: definition.fallback_model && definition.fallback_effort
+        ? { model: definition.fallback_model, effort: definition.fallback_effort }
+        : null,
+      skills: definition.skills ?? [],
+      permissionMode: definition.permission_mode ?? null,
+      prompt,
+      path,
+    });
   } catch (error) {
     return err(new Error(`Failed to load seat ${seatName}: ${errorMessage(error as object)}`));
   }
@@ -116,23 +185,15 @@ export function resolveSeatRoute(
   seat: SeatDefinition,
   routeKind: SeatRouteKind = "primary",
 ): Result<ResolvedSeatRoute> {
-  const route = routeKind === "primary" ? seat.routing.primary : seat.routing.fallback;
+  const route = routeKind === "primary" ? { model: seat.model, effort: seat.effort } : seat.fallback;
   if (!route) return err(new Error(`Seat ${seat.name} does not declare a fallback route`));
-
-  if (!launcherServesFamily(route.launcher, route.provider)) {
-    return err(
-      new Error(
-        `Seat ${seat.name} routes ${route.provider} through ${route.launcher}, which does not serve ${route.provider}; launchers that do: ${seatLaunchersServing(route.provider).join(", ")}`,
-      ),
-    );
-  }
 
   return ok({
     route: routeKind,
-    provider: route.provider,
-    launcher: route.launcher,
-    requestedModel: route.requested_model,
-    compiledModel: route.provider === "gpt" ? normalizeGptModel(route.requested_model) : route.requested_model,
+    provider: providerFor(route.model),
+    launcher: DELEGATE_LAUNCHER,
+    requestedModel: route.model,
+    compiledModel: normalizeGptModel(route.model),
     effort: route.effort,
   });
 }
@@ -143,7 +204,7 @@ export function compileAgent(seat: SeatDefinition, route: ResolvedSeatRoute): Co
     prompt: seat.prompt,
     model: route.compiledModel,
     ...(seat.tools.length > 0 ? { tools: seat.tools } : {}),
-    ...(seat.permission_mode ? { permissionMode: seat.permission_mode } : {}),
+    ...(seat.permissionMode ? { permissionMode: seat.permissionMode } : {}),
     ...(seat.skills.length > 0 ? { skills: seat.skills } : {}),
     effort: route.effort,
   };

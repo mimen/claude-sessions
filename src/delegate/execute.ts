@@ -4,11 +4,10 @@ import {
   compileAgent,
   loadSeat,
   resolveSeatRoute,
-  type ProviderFamily,
   type SeatEffort,
-  type SeatLauncher,
   type SeatRouteKind,
 } from "./seat.ts";
+import type { LauncherName, ModelFamily } from "../resume/role-model-launch.ts";
 import { err, ok, type Result } from "../result.ts";
 
 export interface DelegateRequest {
@@ -16,7 +15,8 @@ export interface DelegateRequest {
   readonly parentSessionId: string;
   readonly cwd: string;
   readonly prompt: string;
-  readonly seatsRoot: string;
+  /** Directory of native agent definitions — one `<seat>.md` per seat. */
+  readonly agentsRoot: string;
   readonly route?: SeatRouteKind;
 }
 
@@ -26,8 +26,8 @@ export interface DelegateReservation {
   readonly parentSessionId: string;
   readonly cwd: string;
   readonly route: SeatRouteKind;
-  readonly provider: ProviderFamily;
-  readonly launcher: SeatLauncher;
+  readonly provider: ModelFamily;
+  readonly launcher: LauncherName;
   readonly requestedModel: string;
   readonly compiledModel: string;
   readonly effort: SeatEffort;
@@ -99,7 +99,7 @@ export function executeDelegate(
     return err(new Error(`Delegation cwd does not exist or is not a directory: ${request.cwd}`));
   }
 
-  const loaded = loadSeat(request.seatsRoot, request.seat);
+  const loaded = loadSeat(request.agentsRoot, request.seat);
   if (!loaded.ok) return loaded;
   const route = request.route ?? "primary";
   const routed = resolveSeatRoute(loaded.value, route);

@@ -6,11 +6,11 @@ export interface DelegateCliArgs {
   readonly parentIsCurrent: boolean;
   readonly cwd: string;
   readonly prompt: string;
-  readonly seatsRoot: string | null;
+  readonly agentsRoot: string | null;
   readonly useFallback: boolean;
 }
 
-const VALUE_FLAGS = new Set(["--child-of", "--cwd", "--prompt", "--seats-root"]);
+const VALUE_FLAGS = new Set(["--child-of", "--cwd", "--prompt", "--agents-root"]);
 const NO_VALUE_FLAGS = new Set(["--fallback"]);
 
 function flagValue(args: readonly string[], flag: string): string | null {
@@ -61,7 +61,7 @@ export function parseDelegateArgs(
     parentIsCurrent: childOf === ".",
     cwd,
     prompt,
-    seatsRoot: flagValue(args, "--seats-root"),
+    agentsRoot: flagValue(args, "--agents-root"),
     useFallback: fallback.value,
   });
 }

@@ -1,7 +1,13 @@
 # ADR-0090: Delegated sessions are causal auxiliary children
 
-**Status:** accepted (2026-07-20)
+**Status:** accepted (2026-07-20); the seat-definition format below is superseded by ADR-0095 (2026-07-28)
 **Scope:** ccs session catalogue, delegation, visibility, and cost accounting
+
+> **Superseded in part.** Everything about session class, creation intent, parent semantics,
+> visibility, and cost stands. What changed: a seat is now ONE native agent definition
+> (`~/.claude/agents/<seat>.md`), not a `seat.toml` + `prompt.md` pair; it declares a model and an
+> effort but no provider and no launcher, and every delegated child is born on the both-vendor
+> `claudex` gateway. See ADR-0095.
 
 ## Context
 

@@ -17,10 +17,20 @@ describe("parseDelegateArgs", () => {
         parentIsCurrent: true,
         cwd: "/repo",
         prompt: "Review this.",
-        seatsRoot: null,
+        agentsRoot: null,
         useFallback: false,
       },
     });
+  });
+
+  test("accepts an explicit agent-definition directory", () => {
+    const result = parseDelegateArgs(
+      ["primary-review", "--child-of", PARENT, "--cwd", "/repo", "--prompt", "Review.", "--agents-root", "/tmp/agents"],
+      {},
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.agentsRoot).toBe("/tmp/agents");
   });
 
   test("selects a declared fallback explicitly", () => {

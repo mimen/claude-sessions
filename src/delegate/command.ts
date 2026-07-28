@@ -30,9 +30,15 @@ import {
   type DelegateReservation,
 } from "./execute.ts";
 
-function defaultSeatsRoot(environment: Readonly<Record<string, string | undefined>>): string {
-  return environment.CCS_SEATS_ROOT
-    ?? join(environment.HOME ?? homedir(), "Documents", "milad-vault", "ClaudeConfig", "seats");
+/**
+ * Seats are read from Claude Code's own agent directory, not a ccs-private registry: the same
+ * `<seat>.md` the native Agent tool auto-discovers is the file `ccs delegate` compiles, so the two
+ * can never disagree about what a seat is. `~/.claude/agents` is a per-machine symlink to whatever
+ * canonical source that host syncs, which is why the fallback resolves the harness path rather than
+ * a checkout path.
+ */
+function defaultAgentsRoot(environment: Readonly<Record<string, string | undefined>>): string {
+  return environment.CCS_AGENTS_ROOT ?? join(environment.HOME ?? homedir(), ".claude", "agents");
 }
 
 function errorText(error: object): string {
@@ -189,7 +195,7 @@ export function delegateCommand(
         route: parsed.value.useFallback ? "fallback" : "primary",
         cwd: parsed.value.cwd,
         prompt: parsed.value.prompt,
-        seatsRoot: parsed.value.seatsRoot ?? defaultSeatsRoot(environment),
+        agentsRoot: parsed.value.agentsRoot ?? defaultAgentsRoot(environment),
       },
       createDependencies(db, {
         ...environment,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, type Result } from "../result.ts";
@@ -18,31 +18,24 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function seatsRoot(withFallback = true): string {
+function agentsRoot(withFallback = true): string {
   const root = mkdtempSync(join(tmpdir(), "ccs-delegate-"));
   roots.push(root);
-  const directory = join(root, "primary-review");
-  mkdirSync(directory);
   writeFileSync(
-    join(directory, "seat.toml"),
-    `name = "primary-review"
-description = "Independent primary review"
-tools = ["Bash", "Read"]
+    join(root, "primary-review.md"),
+    `---
+name: primary-review
+description: Independent primary review
+tools: ["Bash", "Read"]
+model: gpt-5.6-sol
+effort: high
+${withFallback ? `fallback_model: gpt-5.6-terra
+fallback_effort: xhigh
+` : ""}---
 
-[routing.primary]
-provider = "gpt"
-launcher = "claude-gpt"
-requested_model = "gpt-5.6-sol"
-effort = "high"
-${withFallback ? `
-[routing.fallback]
-provider = "gpt"
-launcher = "claude-gpt"
-requested_model = "gpt-5.6-terra"
-effort = "xhigh"
-` : ""}`,
+Review the specified implementation.
+`,
   );
-  writeFileSync(join(directory, "prompt.md"), "Review the specified implementation.");
   return root;
 }
 
@@ -100,7 +93,7 @@ describe("executeDelegate", () => {
         parentSessionId: PARENT,
         cwd: "/tmp",
         prompt: "Review this diff.\nKeep quotes like 'this' literal.",
-        seatsRoot: seatsRoot(),
+        agentsRoot: agentsRoot(),
       },
       h.dependencies,
     );
@@ -115,14 +108,14 @@ describe("executeDelegate", () => {
         cwd: "/tmp",
         route: "primary",
         provider: "gpt",
-        launcher: "claude-gpt",
+        launcher: "claudex",
         requestedModel: "gpt-5.6-sol",
         compiledModel: "gpt-5.6-sol[1m]",
         effort: "high",
       },
     ]);
     const argv = h.launches[0]!.argv;
-    expect(argv[0]).toBe("claude-gpt");
+    expect(argv[0]).toBe("claudex");
     expect(argv.slice(-2)).toEqual(["-p", "Review this diff.\nKeep quotes like 'this' literal."]);
     expect(argv).toContain("--agents");
     expect(argv).toContain("--agent");
@@ -143,7 +136,7 @@ describe("executeDelegate", () => {
         route: "fallback",
         cwd: "/tmp",
         prompt: "Review.",
-        seatsRoot: seatsRoot(),
+        agentsRoot: agentsRoot(),
       },
       h.dependencies,
     );
@@ -169,7 +162,7 @@ describe("executeDelegate", () => {
         route: "fallback",
         cwd: "/tmp",
         prompt: "Review.",
-        seatsRoot: seatsRoot(false),
+        agentsRoot: agentsRoot(false),
       },
       h.dependencies,
     );
@@ -180,7 +173,7 @@ describe("executeDelegate", () => {
   test("keeps the reservation and records a process startup failure", () => {
     const h = harness(err(new Error("launcher missing")));
     const result = executeDelegate(
-      { seat: "primary-review", parentSessionId: PARENT, cwd: "/tmp", prompt: "Review.", seatsRoot: seatsRoot() },
+      { seat: "primary-review", parentSessionId: PARENT, cwd: "/tmp", prompt: "Review.", agentsRoot: agentsRoot() },
       h.dependencies,
     );
     expect(result.ok).toBe(false);
@@ -191,7 +184,7 @@ describe("executeDelegate", () => {
   test("propagates a nonzero child exit without a hidden fallback retry", () => {
     const h = harness(ok({ exitCode: 17 }));
     const result = executeDelegate(
-      { seat: "primary-review", parentSessionId: PARENT, cwd: "/tmp", prompt: "Review.", seatsRoot: seatsRoot() },
+      { seat: "primary-review", parentSessionId: PARENT, cwd: "/tmp", prompt: "Review.", agentsRoot: agentsRoot() },
       h.dependencies,
     );
     expect(result.ok).toBe(true);
@@ -202,28 +195,26 @@ describe("executeDelegate", () => {
     expect(h.launches).toHaveLength(1);
   });
 
-  test("reserves and launches a claudex seat, recording it as the launcher", () => {
+  test("launches a Claude-model seat on the same both-vendor launcher, unsuffixed", () => {
     const root = mkdtempSync(join(tmpdir(), "ccs-delegate-"));
     roots.push(root);
-    const directory = join(root, "generalist");
-    mkdirSync(directory);
     writeFileSync(
-      join(directory, "seat.toml"),
-      `name = "generalist"
-description = "Broad default seat"
+      join(root, "generalist.md"),
+      `---
+name: generalist
+description: Broad default seat
+tools: ["Bash", "Read"]
+model: claude-opus-5
+effort: high
+---
 
-[routing.primary]
-provider = "claude"
-launcher = "claudex"
-requested_model = "claude-opus-5"
-effort = "high"
+Do the specified work.
 `,
     );
-    writeFileSync(join(directory, "prompt.md"), "Do the specified work.");
 
     const h = harness();
     const result = executeDelegate(
-      { seat: "generalist", parentSessionId: PARENT, cwd: "/tmp", prompt: "Go.", seatsRoot: root },
+      { seat: "generalist", parentSessionId: PARENT, cwd: "/tmp", prompt: "Go.", agentsRoot: root },
       h.dependencies,
     );
     expect(result.ok).toBe(true);
@@ -233,19 +224,20 @@ effort = "high"
       compiledModel: "claude-opus-5",
     });
     expect(h.launches[0]!.argv[0]).toBe("claudex");
+    expect(h.launches[0]!.argv.join(" ")).toContain('"model":"claude-opus-5"');
   });
 
   test("rejects missing cwd and invalid input before minting or reserving", () => {
     const h = harness();
     const missingCwd = executeDelegate(
-      { seat: "primary-review", parentSessionId: PARENT, cwd: "/missing", prompt: "Review.", seatsRoot: seatsRoot() },
+      { seat: "primary-review", parentSessionId: PARENT, cwd: "/missing", prompt: "Review.", agentsRoot: agentsRoot() },
       { ...h.dependencies, cwdExists: () => false },
     );
     expect(missingCwd.ok).toBe(false);
     expect(h.events).toEqual([]);
 
     const invalid = executeDelegate(
-      { seat: "primary-review", parentSessionId: "not-a-uuid", cwd: "/tmp", prompt: "Review.", seatsRoot: seatsRoot() },
+      { seat: "primary-review", parentSessionId: "not-a-uuid", cwd: "/tmp", prompt: "Review.", agentsRoot: agentsRoot() },
       h.dependencies,
     );
     expect(invalid.ok).toBe(false);

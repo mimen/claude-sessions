@@ -20,39 +20,33 @@ afterEach(() => {
 
 function fixture(exitCode = 0, withFallback = true): {
   readonly root: string;
-  readonly seatsRoot: string;
+  readonly agentsRoot: string;
   readonly bin: string;
   readonly observation: string;
 } {
   const root = mkdtempSync(join(tmpdir(), "ccs-delegate-command-"));
   roots.push(root);
-  const seatsRoot = join(root, "seats");
-  const seatDirectory = join(seatsRoot, "primary-review");
+  const agentsRoot = join(root, "agents");
   const bin = join(root, "bin");
   const observation = join(root, "observation.json");
-  mkdirSync(seatDirectory, { recursive: true });
+  mkdirSync(agentsRoot, { recursive: true });
   mkdirSync(bin);
   writeFileSync(
-    join(seatDirectory, "seat.toml"),
-    `name = "primary-review"
-description = "Primary review"
-tools = ["Bash", "Read"]
+    join(agentsRoot, "primary-review.md"),
+    `---
+name: primary-review
+description: Primary review
+tools: ["Bash", "Read"]
+model: gpt-5.6-sol
+effort: high
+${withFallback ? `fallback_model: gpt-5.6-terra
+fallback_effort: xhigh
+` : ""}---
 
-[routing.primary]
-provider = "gpt"
-launcher = "claude-gpt"
-requested_model = "gpt-5.6-sol"
-effort = "high"
-${withFallback ? `
-[routing.fallback]
-provider = "gpt"
-launcher = "claude-gpt"
-requested_model = "gpt-5.6-terra"
-effort = "xhigh"
-` : ""}`,
+Review the implementation.
+`,
   );
-  writeFileSync(join(seatDirectory, "prompt.md"), "Review the implementation.");
-  const executable = join(bin, "claude-gpt");
+  const executable = join(bin, "claudex");
   writeFileSync(
     executable,
     `#!/usr/bin/env bun
@@ -69,7 +63,7 @@ process.exit(${exitCode});
 `,
   );
   chmodSync(executable, 0o755);
-  return { root, seatsRoot, bin, observation };
+  return { root, agentsRoot, bin, observation };
 }
 
 function seedParent(root: string): void {
@@ -100,7 +94,7 @@ describe("delegateCommand", () => {
     seedParent(f.root);
     const prompt = "Review this diff.\nKeep 'quotes' literal.";
     const code = delegateCommand(
-      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", prompt, "--seats-root", f.seatsRoot],
+      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", prompt, "--agents-root", f.agentsRoot],
       {
         ...process.env,
         PATH: `${f.bin}:${process.env.PATH ?? ""}`,
@@ -163,7 +157,7 @@ describe("delegateCommand", () => {
     process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
     const code = delegateCommand(
-      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
       {
         ...process.env,
         PATH: `${f.bin}:${process.env.PATH ?? ""}`,
@@ -210,7 +204,7 @@ describe("delegateCommand", () => {
     mkdirSync(shimDirectory, { recursive: true });
     symlinkSync(SHIM, join(shimDirectory, "claude"));
 
-    const launcher = join(f.bin, "claude-gpt");
+    const launcher = join(f.bin, "claudex");
     writeFileSync(launcher, "#!/bin/sh\nexec claude \"$@\"\n");
     chmodSync(launcher, 0o755);
 
@@ -229,7 +223,7 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
     chmodSync(raw, 0o755);
 
     const code = delegateCommand(
-      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
       {
         ...process.env,
         HOME: home,
@@ -273,7 +267,7 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
     process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
     const code = delegateCommand(
-      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
       {
         ...process.env,
         PATH: `${f.bin}:${process.env.PATH ?? ""}`,
@@ -290,7 +284,7 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
     process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
     const code = delegateCommand(
-      ["primary-review", "--fallback", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      ["primary-review", "--fallback", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
       { ...process.env, PATH: `${f.bin}:${process.env.PATH ?? ""}`, OBSERVATION_PATH: f.observation },
     );
     expect(code).toBe(0);
@@ -311,7 +305,7 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
     process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
     const code = delegateCommand(
-      ["primary-review", "--fallback", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      ["primary-review", "--fallback", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
       { ...process.env, PATH: `${f.bin}:${process.env.PATH ?? ""}` },
     );
     expect(code).toBe(1);
@@ -323,7 +317,7 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
     process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
     const code = delegateCommand(
-      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
       { ...process.env, PATH: "/definitely/missing" },
     );
 
@@ -341,7 +335,7 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
     const f = fixture();
     process.env.CCS_ROOT = join(f.root, "runtime");
     const code = delegateCommand(
-      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
       { ...process.env, PATH: `${f.bin}:${process.env.PATH ?? ""}` },
     );
     expect(code).toBe(2);
@@ -352,7 +346,7 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
     const f = fixture();
     process.env.CCS_ROOT = join(f.root, "runtime");
     const code = delegateCommand(
-      ["primary-review", "--child-of", ".", "--cwd", f.root, "--prompt", "Review.", "--seats-root", f.seatsRoot],
+      ["primary-review", "--child-of", ".", "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
       { ...process.env, CLAUDE_CODE_SESSION_ID: PARENT, PATH: `${f.bin}:${process.env.PATH ?? ""}`, OBSERVATION_PATH: f.observation },
     );
     expect(code).toBe(0);

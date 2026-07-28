@@ -69,6 +69,8 @@ ccs delegate <seat> --fallback \
 
 CCS never automatically retries a launched child. A retry or fallback is a separate auxiliary session because the first process may already have changed state.
 
+`<seat>` names a native agent definition at `~/.claude/agents/<seat>.md` — the same file the native Agent tool auto-discovers. Its frontmatter declares `name`, `description`, `tools`, `model`, `effort`, and optionally `fallback_model` + `fallback_effort` (both or neither), `skills`, and `permission_mode`; everything below the frontmatter is the role prompt. `--fallback` fails before reservation when the definition declares no backup. See ADR-0095.
+
 ### Supporting child without a seat
 
 ```bash

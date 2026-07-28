@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -15,79 +15,205 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function fixture(name: string, manifest: string, prompt = "Review the implementation."): string {
-  const root = mkdtempSync(join(tmpdir(), "ccs-seat-"));
+/** Write one native agent definition — frontmatter plus role prompt — into a fresh agents root. */
+function fixture(name: string, definition: string): string {
+  const root = mkdtempSync(join(tmpdir(), "ccs-agents-"));
   roots.push(root);
-  const directory = join(root, name);
-  mkdirSync(directory);
-  writeFileSync(join(directory, "seat.toml"), manifest);
-  writeFileSync(join(directory, "prompt.md"), prompt);
+  writeFileSync(join(root, `${name}.md`), definition);
   return root;
 }
 
-const PRIMARY_REVIEW = `name = "primary-review"
-description = "Primary implementation review"
-tools = ["Bash", "Read"]
-skills = ["review"]
+const PRIMARY_REVIEW = `---
+name: primary-review
+description: Primary implementation review
+tools: ["Bash", "Read"]
+model: gpt-5.6-sol
+effort: high
+fallback_model: gpt-5.6-terra
+fallback_effort: xhigh
+skills: ["review"]
+---
 
-[routing.primary]
-provider = "gpt"
-launcher = "claude-gpt"
-requested_model = "gpt-5.6-sol"
-effort = "high"
-
-[routing.fallback]
-provider = "gpt"
-launcher = "claude-gpt"
-requested_model = "gpt-5.6-terra"
-effort = "xhigh"
+Review the implementation.
 `;
 
 describe("loadSeat", () => {
-  test("loads fixed primary and fallback routes from TOML plus prompt", () => {
-    const root = fixture("primary-review", PRIMARY_REVIEW);
-
-    const result = loadSeat(root, "primary-review");
+  test("loads the route, the optional fallback, and the body as the role prompt", () => {
+    const result = loadSeat(fixture("primary-review", PRIMARY_REVIEW), "primary-review");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.prompt).toBe("Review the implementation.");
-    expect(result.value.routing.primary.provider).toBe("gpt");
-    expect(result.value.routing.fallback?.requested_model).toBe("gpt-5.6-terra");
+    expect(result.value).toMatchObject({
+      name: "primary-review",
+      description: "Primary implementation review",
+      tools: ["Bash", "Read"],
+      model: "gpt-5.6-sol",
+      effort: "high",
+      fallback: { model: "gpt-5.6-terra", effort: "xhigh" },
+      skills: ["review"],
+      permissionMode: null,
+      prompt: "Review the implementation.",
+    });
   });
 
-  test("rejects legacy inherited routes and top-level effort", () => {
-    const root = fixture(
-      "implementer",
-      `name = "implementer"
-description = "Implement a specified change"
-effort = "medium"
+  test("a definition without fallback keys loads with no fallback route", () => {
+    const root = fixture("implementer", `---
+name: implementer
+description: Implement a specified change
+tools: ["Bash", "Read", "Edit"]
+model: gpt-5.6-sol
+effort: medium
+---
 
-[routing]
-provider = "inherit_parent"
-launcher = "inherit_parent"
-requested_model = "opus"
-`,
-    );
-    expect(loadSeat(root, "implementer").ok).toBe(false);
+Implement exactly what the task specifies.
+`);
+    const result = loadSeat(root, "implementer");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.fallback).toBeNull();
   });
 
-  test("rejects a manifest whose name differs from its directory", () => {
-    const root = fixture(
-      "architect",
-      `name = "other"
-description = "Architecture"
+  test("keys ccs does not know are ignored, not errors", () => {
+    // The whole premise of one file for both readers: Claude Code tolerates ccs-only keys, and ccs
+    // must tolerate everything else a definition carries — including nested maps.
+    const root = fixture("designer", `---
+name: designer
+description: Product and visual taste
+tools: ["Read", "Write"]
+model: claude-fable-5
+effort: high
+color: purple
+proactive: true
+metadata:
+  owner: milad
+  tiers:
+    - one
+    - two
+---
 
-[routing.primary]
-provider = "claude"
-launcher = "claude-native"
-requested_model = "claude-fable-5"
-effort = "high"
-`,
-    );
+Design the surface.
+`);
+    const result = loadSeat(root, "designer");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.model).toBe("claude-fable-5");
+    expect(result.value.prompt).toBe("Design the surface.");
+  });
+
+  test("accepts Claude Code's comma-separated tools and skills spelling", () => {
+    const root = fixture("fact-shaped", `---
+name: fact-shaped
+description: Comma-separated lists
+tools: Bash, Read, Skill
+model: claude-sonnet-5
+effort: low
+skills: antigravity, browser-use
+---
+
+Check the fact.
+`);
+    const result = loadSeat(root, "fact-shaped");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.tools).toEqual(["Bash", "Read", "Skill"]);
+    expect(result.value.skills).toEqual(["antigravity", "browser-use"]);
+  });
+
+  test("carries permission_mode through as an embodiment posture", () => {
+    const root = fixture("bulk-grinder", `---
+name: bulk-grinder
+description: Mechanical grinding
+tools: ["Bash"]
+model: gpt-5.6-terra
+effort: medium
+permission_mode: bypassPermissions
+---
+
+Grind the list.
+`);
+    const result = loadSeat(root, "bulk-grinder");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.permissionMode).toBe("bypassPermissions");
+  });
+
+  test("rejects a missing required key, half a fallback, and an unknown effort", () => {
+    const missingModel = fixture("broken", `---
+name: broken
+description: No model
+tools: ["Bash"]
+effort: high
+---
+
+Body.
+`);
+    expect(loadSeat(missingModel, "broken").ok).toBe(false);
+
+    const halfFallback = fixture("broken", `---
+name: broken
+description: Half a fallback
+tools: ["Bash"]
+model: gpt-5.6-sol
+effort: high
+fallback_model: gpt-5.6-terra
+---
+
+Body.
+`);
+    const half = loadSeat(halfFallback, "broken");
+    expect(half.ok).toBe(false);
+    if (half.ok) return;
+    expect(half.error.message).toContain("fallback_model and fallback_effort together");
+
+    const badEffort = fixture("broken", `---
+name: broken
+description: Unknown effort
+tools: ["Bash"]
+model: gpt-5.6-sol
+effort: ultra
+---
+
+Body.
+`);
+    expect(loadSeat(badEffort, "broken").ok).toBe(false);
+  });
+
+  test("rejects a definition whose name differs from its filename", () => {
+    const root = fixture("architect", `---
+name: other
+description: Architecture
+tools: ["Read"]
+model: claude-fable-5
+effort: high
+---
+
+Design it.
+`);
     const result = loadSeat(root, "architect");
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.message).toContain("does not match directory");
+    expect(result.error.message).toContain("does not match file");
+  });
+
+  test("rejects a file with no frontmatter and one with an empty role prompt", () => {
+    const noFrontmatter = fixture("plain", "Just a markdown file.\n");
+    const plain = loadSeat(noFrontmatter, "plain");
+    expect(plain.ok).toBe(false);
+    if (plain.ok) return;
+    expect(plain.error.message).toContain("no YAML frontmatter");
+
+    const emptyBody = fixture("hollow", `---
+name: hollow
+description: No prompt
+tools: ["Bash"]
+model: gpt-5.6-sol
+effort: high
+---
+
+`);
+    const hollow = loadSeat(emptyBody, "hollow");
+    expect(hollow.ok).toBe(false);
+    if (hollow.ok) return;
+    expect(hollow.error.message).toContain("empty role prompt");
   });
 
   test("rejects path traversal before reading", () => {
@@ -96,26 +222,29 @@ effort = "high"
 });
 
 describe("routing and compilation", () => {
-  test("normalizes GPT model context marker exactly once", () => {
+  test("normalizes the GPT context marker exactly once and only for gpt-*", () => {
     expect(normalizeGptModel("gpt-5.6-sol")).toBe("gpt-5.6-sol[1m]");
     expect(normalizeGptModel("gpt-5.6-sol[1m]")).toBe("gpt-5.6-sol[1m]");
     expect(normalizeGptModel("claude-fable-5")).toBe("claude-fable-5");
+    expect(normalizeGptModel("claude-opus-5")).toBe("claude-opus-5");
   });
 
   test("compiles primary and fallback with their route-local models and efforts", () => {
-    const root = fixture("primary-review", PRIMARY_REVIEW, "Review focused code.");
-    const loaded = loadSeat(root, "primary-review");
+    const loaded = loadSeat(fixture("primary-review", PRIMARY_REVIEW), "primary-review");
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
 
     const primary = resolveSeatRoute(loaded.value);
-    expect(primary.ok).toBe(true);
-    if (!primary.ok) return;
-    expect(primary.value).toMatchObject({
-      route: "primary",
-      launcher: "claude-gpt",
-      compiledModel: "gpt-5.6-sol[1m]",
-      effort: "high",
+    expect(primary).toEqual({
+      ok: true,
+      value: {
+        route: "primary",
+        provider: "gpt",
+        launcher: "claudex",
+        requestedModel: "gpt-5.6-sol",
+        compiledModel: "gpt-5.6-sol[1m]",
+        effort: "high",
+      },
     });
 
     const fallback = resolveSeatRoute(loaded.value, "fallback");
@@ -123,14 +252,13 @@ describe("routing and compilation", () => {
     if (!fallback.ok) return;
     expect(fallback.value).toMatchObject({
       route: "fallback",
-      launcher: "claude-gpt",
       compiledModel: "gpt-5.6-terra[1m]",
       effort: "xhigh",
     });
     expect(compileAgent(loaded.value, fallback.value)).toEqual({
       "primary-review": {
         description: "Primary implementation review",
-        prompt: "Review focused code.",
+        prompt: "Review the implementation.",
         tools: ["Bash", "Read"],
         model: "gpt-5.6-terra[1m]",
         skills: ["review"],
@@ -139,126 +267,87 @@ describe("routing and compilation", () => {
     });
   });
 
-  test("compiles a native Fable-to-Opus fallback", () => {
-    const root = fixture(
-      "architect",
-      `name = "architect"
-description = "Design an architecture"
+  test("routes a Claude model through the same both-vendor launcher, unsuffixed", () => {
+    const root = fixture("generalist", `---
+name: generalist
+description: Broad default seat
+tools: ["Bash", "Read"]
+model: claude-opus-5
+effort: high
+fallback_model: claude-fable-5
+fallback_effort: high
+permission_mode: bypassPermissions
+---
 
-[routing.primary]
-provider = "claude"
-launcher = "claude-native"
-requested_model = "claude-fable-5"
-effort = "high"
-
-[routing.fallback]
-provider = "claude"
-launcher = "claude-native"
-requested_model = "claude-opus-4-8"
-effort = "high"
-`,
-    );
-    const loaded = loadSeat(root, "architect");
+Do the specified work.
+`);
+    const loaded = loadSeat(root, "generalist");
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
+
     const fallback = resolveSeatRoute(loaded.value, "fallback");
     expect(fallback).toEqual({
       ok: true,
       value: {
         route: "fallback",
         provider: "claude",
-        launcher: "claude-native",
-        requestedModel: "claude-opus-4-8",
-        compiledModel: "claude-opus-4-8",
-        effort: "high",
-      },
-    });
-  });
-
-  test("rejects a provider-launcher mismatch and missing fallback route", () => {
-    const root = fixture(
-      "broken",
-      `name = "broken"
-description = "Broken route"
-
-[routing.primary]
-provider = "claude"
-launcher = "claude-gpt"
-requested_model = "claude-fable-5"
-effort = "high"
-`,
-    );
-    const loaded = loadSeat(root, "broken");
-    expect(loaded.ok).toBe(true);
-    if (!loaded.ok) return;
-    const primary = resolveSeatRoute(loaded.value);
-    expect(primary.ok).toBe(false);
-    if (!primary.ok) {
-      // Still catches the unreachable route, but names what WOULD work rather than one blessed pair.
-      expect(primary.error.message).toContain("does not serve claude");
-      expect(primary.error.message).toContain("claudex, claude-native");
-    }
-    expect(resolveSeatRoute(loaded.value, "fallback").ok).toBe(false);
-  });
-});
-
-// --- claudex: one seat launcher serving both vendors ------------------------------
-
-describe("a both-vendor launcher", () => {
-  const CLAUDEX_SEAT = (provider: string, model: string): string => `name = "generalist"
-description = "Broad default seat"
-
-[routing.primary]
-provider = "${provider}"
-launcher = "claudex"
-requested_model = "${model}"
-effort = "high"
-`;
-
-  test("claudex is authorable for a Claude route", () => {
-    const root = fixture("generalist", CLAUDEX_SEAT("claude", "claude-opus-5"));
-    const loaded = loadSeat(root, "generalist");
-    expect(loaded.ok).toBe(true);
-    if (!loaded.ok) return;
-    expect(resolveSeatRoute(loaded.value)).toEqual({
-      ok: true,
-      value: {
-        route: "primary",
-        provider: "claude",
         launcher: "claudex",
-        requestedModel: "claude-opus-5",
-        compiledModel: "claude-opus-5",
+        requestedModel: "claude-fable-5",
+        compiledModel: "claude-fable-5",
+        effort: "high",
+      },
+    });
+    if (!fallback.ok) return;
+    expect(compileAgent(loaded.value, fallback.value)).toEqual({
+      generalist: {
+        description: "Broad default seat",
+        prompt: "Do the specified work.",
+        tools: ["Bash", "Read"],
+        model: "claude-fable-5",
+        permissionMode: "bypassPermissions",
         effort: "high",
       },
     });
   });
 
-  test("...and for a GPT route through the SAME launcher, with the [1m] marker applied", () => {
-    const root = fixture("generalist", CLAUDEX_SEAT("gpt", "gpt-5.6-sol"));
-    const loaded = loadSeat(root, "generalist");
+  test("refuses a fallback the definition never declared", () => {
+    const root = fixture("utility", `---
+name: utility
+description: Mechanical glue
+tools: ["Bash"]
+model: gpt-5.6-luna
+effort: low
+---
+
+Do the mechanical step.
+`);
+    const loaded = loadSeat(root, "utility");
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(resolveSeatRoute(loaded.value).ok).toBe(true);
+    const fallback = resolveSeatRoute(loaded.value, "fallback");
+    expect(fallback.ok).toBe(false);
+    if (fallback.ok) return;
+    expect(fallback.error.message).toContain("does not declare a fallback route");
+  });
+
+  test("an empty tools list compiles to no tools key, inheriting every tool", () => {
+    const root = fixture("wide-open", `---
+name: wide-open
+description: Every tool
+tools: []
+model: gpt-5.6-sol
+effort: high
+---
+
+Use anything.
+`);
+    const loaded = loadSeat(root, "wide-open");
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
     const route = resolveSeatRoute(loaded.value);
     expect(route.ok).toBe(true);
     if (!route.ok) return;
-    expect(route.value).toMatchObject({ launcher: "claudex", compiledModel: "gpt-5.6-sol[1m]" });
-    expect(compileAgent(loaded.value, route.value)).toMatchObject({
-      generalist: { model: "gpt-5.6-sol[1m]" },
-    });
-  });
-
-  test("an unknown launcher is still refused at parse time, not silently launched", () => {
-    const root = fixture("generalist", `name = "generalist"
-description = "Broad default seat"
-
-[routing.primary]
-provider = "claude"
-launcher = "claude"
-requested_model = "claude-opus-5"
-effort = "high"
-`);
-    // The bare updater-managed `claude` resolves its backend from inherited env; a seat must name a
-    // deterministic route, so it is not part of the seat vocabulary.
-    expect(loadSeat(root, "generalist").ok).toBe(false);
+    expect(compileAgent(loaded.value, route.value)["wide-open"]).not.toHaveProperty("tools");
   });
 });

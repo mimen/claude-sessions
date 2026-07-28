@@ -96,9 +96,17 @@ default; `--fallback` explicitly selects its declared backup before reservation.
 automatically retries a child after launch, because the child may already have changed state;
 a manual fallback invocation creates a separate auxiliary child. Auxiliary sessions are hidden in
 normal list, search, and tree views; use `u` in the TUI or `--auxiliary` in CLI views to reveal
-them for one invocation. Canonical delegated seats live outside Claude Code's auto-discovered
-agent directories and are compiled into process-local `--agents` JSON only for the selected
-delegation.
+them for one invocation.
+
+A seat IS a native Claude Code agent definition: `~/.claude/agents/<seat>.md`, frontmatter plus the
+role prompt, the same file the native Agent tool auto-discovers (`--agents-root` or `CCS_AGENTS_ROOT`
+override the directory). Claude Code ignores frontmatter keys it does not know, so the delegate-only
+`fallback_model` / `fallback_effort` pair rides in that one file instead of a parallel registry.
+`ccs delegate` reads `name`, `description`, `tools`, `model`, `effort`, and the optional
+`fallback_model`, `fallback_effort`, `skills`, and `permission_mode`, ignores every other key, and
+compiles them into process-local `--agents` JSON for that one delegation. A definition declares no
+launcher: children are born on the both-vendor `claudex` gateway, and the `[1m]` context marker is
+appended to `gpt-*` models only.
 
 `--model` accepts a canonical birth-model ID and derives the matching launcher; it cannot be combined
 with legacy `--via`. Registered location overrides inherit the registry-wide exact route when omitted.
