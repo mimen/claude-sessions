@@ -112,6 +112,42 @@ function readOwner(lockPath: string): LockOwner | null {
   }
 }
 
+export interface CatalogueServiceProcessState {
+  readonly running: boolean;
+  readonly pid: number | null;
+}
+
+/** Inspect daemon ownership without making a request that would postpone its idle shutdown. */
+export function inspectCatalogueServiceProcess(
+  lockPath: string = CATALOGUE_SERVICE_LOCK_PATH(),
+): CatalogueServiceProcessState {
+  const owner = readOwner(lockPath);
+  if (owner === null || !processOwnsCatalogueDaemon(owner.pid)) return { running: false, pid: null };
+  return { running: true, pid: owner.pid };
+}
+
+/** Hard-stop only a positively identified daemon after a bounded maintenance request times out. */
+export function terminateWedgedCatalogueService(
+  lockPath: string = CATALOGUE_SERVICE_LOCK_PATH(),
+): boolean {
+  const owner = readOwner(lockPath);
+  if (owner === null) return false;
+  try {
+    process.kill(owner.pid, 0);
+    const result = Bun.spawnSync(["ps", "-p", String(owner.pid), "-o", "command="], {
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    if (result.exitCode !== 0) return false;
+    const command = result.stdout.toString();
+    if (!command.includes("catalogue-service") || !command.includes("serve")) return false;
+    process.kill(owner.pid, "SIGKILL");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function claimInstance(lockPath: string, socketPath: string):
   | { readonly status: "claimed"; readonly claim: ClaimedInstance }
   | { readonly status: "busy"; readonly pid: number | null }

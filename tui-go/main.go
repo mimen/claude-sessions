@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/mimen/claude-sessions/tui-go/ccscli"
 	"github.com/mimen/claude-sessions/tui-go/data"
 	"github.com/mimen/claude-sessions/tui-go/resume"
 	"github.com/mimen/claude-sessions/tui-go/ui"
@@ -12,7 +15,9 @@ import (
 )
 
 func main() {
-	snapshot, err := data.Load(data.DefaultLoadOptions())
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	snapshot, err := ccscli.LoadSnapshot(ctx, data.DefaultLoadOptions())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ccs-go:", err)
 		os.Exit(1)

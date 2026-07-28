@@ -103,11 +103,12 @@ var refreshIntervals = []time.Duration{
 
 type autoRefreshMsg struct {
 	generation uint64
+	at         time.Time
 }
 
 func autoRefreshCmd(interval time.Duration, generation uint64) tea.Cmd {
-	return tea.Tick(interval, func(time.Time) tea.Msg {
-		return autoRefreshMsg{generation: generation}
+	return tea.Tick(interval, func(at time.Time) tea.Msg {
+		return autoRefreshMsg{generation: generation, at: at}
 	})
 }
 
@@ -197,7 +198,7 @@ func (m Model) adjustViewOption(direction int) (tea.Model, tea.Cmd) {
 
 	if visibilityChanged {
 		m.refreshInFlight = true
-		command = refreshCmd(m.options.loadOptions(), preferredID, true)
+		command = refreshCmd(m.options.loadOptions(), preferredID, true, false)
 	}
 	m.savePrefs()
 	return m, command

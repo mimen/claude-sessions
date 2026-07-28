@@ -60,7 +60,7 @@ Usage:
   ccs start [--] [text...]  Open a fresh managed launcher with /ccs:new prefilled, not submitted
   ccs location list|show|match|register|retire      Manage curated session launch locations
   ccs reindex [--titles]   Refresh through the host-local catalogue authority
-  ccs catalogue-service start|status|stop|refresh   Manage the on-demand local authority
+  ccs catalogue-service start|status|check|stop|refresh   Manage and verify the on-demand local authority
   ccs enrich [<id>|.] [--json]                    Summarise one session (what it was, what's open, what to do)
   ccs enrich --sweep [--limit N] [--concurrency N]  Enrich every stale session
   ccs enrich --list [--limit N] [--json]          Show what the sweep would do, without calling the model

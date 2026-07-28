@@ -1,4 +1,4 @@
-// Package ccscli is the only metadata write path: every mutation shells out to ccs.
+// Package ccscli owns TUI shell-outs to ccs; every metadata mutation crosses this boundary.
 package ccscli
 
 import (
@@ -33,7 +33,7 @@ func Run(ctx context.Context, args ...string) (string, error) {
 		if message == "" {
 			message = err.Error()
 		}
-		return "", fmt.Errorf("ccs %s: %s", strings.Join(args, " "), message)
+		return strings.TrimSpace(stdout.String()), fmt.Errorf("ccs %s: %s", strings.Join(args, " "), message)
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }

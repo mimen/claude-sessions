@@ -2,7 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import type { CatalogueHealthResult } from "./protocol.ts";
+import { refreshCatalogueAuthority } from "./client.ts";
+import { CATALOGUE_PROTOCOL_VERSION, type CatalogueHealthResult } from "./protocol.ts";
+import { terminateWedgedCatalogueService } from "./server.ts";
 import { requestUnixHttp } from "./transport.ts";
 
 const roots: string[] = [];
@@ -78,6 +80,101 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+test("maintenance watchdog kills only the daemon identified by the ownership lock", async () => {
+  const f = setup();
+  mkdirSync(f.lockPath, { recursive: true });
+  const daemon = Bun.spawn(
+    [process.execPath, "-e", "setInterval(() => {}, 1000)", "catalogue-service", "serve"],
+    { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+  );
+  writeFileSync(
+    join(f.lockPath, "owner.json"),
+    `${JSON.stringify({
+      pid: daemon.pid,
+      instanceId: crypto.randomUUID(),
+      startedAt: new Date().toISOString(),
+    })}\n`,
+  );
+  try {
+    expect(terminateWedgedCatalogueService(f.lockPath)).toBe(true);
+    expect(await waitForExit(daemon)).not.toBe(0);
+  } finally {
+    if (daemon.exitCode === null) daemon.kill(9);
+  }
+});
+
+test("bounded refresh timeout kills the wedged daemon without retrying the request", async () => {
+  const f = setup();
+  const previousEnv = {
+    CCS_ROOT: process.env.CCS_ROOT,
+    CCS_CATALOGUE_SOCKET: process.env.CCS_CATALOGUE_SOCKET,
+    CCS_CATALOGUE_REFRESH_TIMEOUT_MS: process.env.CCS_CATALOGUE_REFRESH_TIMEOUT_MS,
+  };
+  mkdirSync(f.lockPath, { recursive: true });
+  const daemon = Bun.spawn(
+    [process.execPath, "-e", "setInterval(() => {}, 1000)", "catalogue-service", "serve"],
+    { stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+  );
+  writeFileSync(
+    join(f.lockPath, "owner.json"),
+    `${JSON.stringify({
+      pid: daemon.pid,
+      instanceId: crypto.randomUUID(),
+      startedAt: new Date().toISOString(),
+    })}\n`,
+  );
+  let refreshRequests = 0;
+  const server = Bun.serve({
+    unix: f.socketPath,
+    async fetch(request): Promise<Response> {
+      const path = new URL(request.url).pathname;
+      if (path === "/v1/health") {
+        return Response.json({
+          protocolVersion: CATALOGUE_PROTOCOL_VERSION,
+          service: {
+            pid: daemon.pid,
+            instanceId: crypto.randomUUID(),
+            startedAt: new Date().toISOString(),
+            idleTimeoutMs: 30_000,
+          },
+          sourceStatus: {
+            generation: 0,
+            phase: "refreshing",
+            freshness: "stale",
+            indexedAt: null,
+            refreshedAt: null,
+            ageMs: null,
+            staleAfterMs: 5_000,
+            rowCount: 0,
+            lastError: null,
+            lastRefresh: { scanned: 0, parsed: 0, skipped: 0, removed: 0 },
+          },
+        });
+      }
+      refreshRequests++;
+      await Bun.sleep(200);
+      return Response.json({ protocolVersion: CATALOGUE_PROTOCOL_VERSION });
+    },
+  });
+  try {
+    process.env.CCS_ROOT = f.root;
+    process.env.CCS_CATALOGUE_SOCKET = f.socketPath;
+    process.env.CCS_CATALOGUE_REFRESH_TIMEOUT_MS = "20";
+    const result = await refreshCatalogueAuthority({ force: true, titles: false });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain("stopped the wedged service");
+    expect(refreshRequests).toBe(1);
+    expect(await waitForExit(daemon)).not.toBe(0);
+  } finally {
+    for (const [name, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await server.stop(true);
+    if (daemon.exitCode === null) daemon.kill(9);
+  }
+});
+
 test("daemon enforces one instance and cleans ownership files on explicit shutdown", async () => {
   const f = setup();
   const first = Bun.spawn([bin, "catalogue-service", "serve", "--idle-timeout-ms", "5000"], {
@@ -135,10 +232,10 @@ test("a stale lock owned by a non-daemon PID is reclaimed", async () => {
   expect(await waitForExit(daemon)).toBe(0);
 }, 15_000);
 
-test("refresh command starts the authority on demand", async () => {
+test("refresh command starts the authority on demand with launchd's minimal PATH", async () => {
   const f = setup();
-  const refresh = Bun.spawn([bin, "catalogue-service", "refresh", "--json"], {
-    env: { ...f.env, CCS_CATALOGUE_IDLE_MS: "5000" },
+  const refresh = Bun.spawn([process.execPath, bin, "catalogue-service", "refresh", "--json"], {
+    env: { ...f.env, PATH: "/usr/bin:/bin", CCS_CATALOGUE_IDLE_MS: "5000" },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",

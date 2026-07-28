@@ -189,6 +189,53 @@ type Launcher struct {
 	Reason   string
 }
 
+// CatalogueServiceStatus is the process state reported by ccs catalogue-service check.
+type CatalogueServiceStatus struct {
+	Running bool `json:"running"`
+	PID     int  `json:"pid"`
+}
+
+// CatalogueSourceIndexStatus is the source/index freshness reported by the catalogue service.
+type CatalogueSourceIndexStatus struct {
+	State                string `json:"state"`
+	SourceLatestMtimeMs  int64  `json:"sourceLatestMtimeMs"`
+	IndexedLatestMtimeMs int64  `json:"indexedLatestMtimeMs"`
+	LagMs                int64  `json:"lagMs"`
+	StaleAfterMs         int64  `json:"staleAfterMs"`
+	SourceFiles          int    `json:"sourceFiles"`
+	IndexedSessions      int    `json:"indexedSessions"`
+	OutOfSyncSessions    int    `json:"outOfSyncSessions"`
+	Generation           int64  `json:"generation"`
+	IndexedAt            string `json:"indexedAt"`
+	RefreshedAt          string `json:"refreshedAt"`
+	LastErrorAt          string `json:"lastErrorAt"`
+	LastError            string `json:"lastError"`
+}
+
+// CatalogueRefreshStats is the existing index refresh count returned by ccs.
+type CatalogueRefreshStats struct {
+	Scanned int `json:"scanned"`
+	Parsed  int `json:"parsed"`
+	Skipped int `json:"skipped"`
+	Removed int `json:"removed"`
+}
+
+// CatalogueStatus records the fail-open preflight result attached to a TUI snapshot.
+type CatalogueStatus struct {
+	Checked      bool
+	Healthy      bool `json:"healthy"`
+	ServiceKnown bool
+	Service      CatalogueServiceStatus     `json:"service"`
+	SourceIndex  CatalogueSourceIndexStatus `json:"sourceIndex"`
+	Recovery     CatalogueRefreshStats
+	Failure      string
+}
+
+// RecoveredRows returns the number of rows indexed or removed during recovery.
+func (s CatalogueStatus) RecoveredRows() int {
+	return s.Recovery.Parsed + s.Recovery.Removed
+}
+
 // Snapshot is the immutable real-data view used by one TUI run.
 type Snapshot struct {
 	Sessions      []Session
@@ -198,6 +245,7 @@ type Snapshot struct {
 	LoadedAt      time.Time
 	IndexPath     string
 	CataloguePath string
+	Catalogue     CatalogueStatus
 	Warnings      []string
 }
 

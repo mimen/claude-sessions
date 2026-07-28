@@ -123,6 +123,22 @@ func TestArchiveBatchUsesIndividualMarkCommands(t *testing.T) {
 	}
 }
 
+func TestRunPreservesStdoutOnNonzeroExit(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "ccs")
+	script := "#!/bin/sh\nprintf '{\"healthy\":false}'\nprintf 'stale\\n' >&2\nexit 1\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCS_BINARY", binary)
+	output, err := Run(context.Background(), "catalogue-service", "check", "--json")
+	if err == nil {
+		t.Fatal("Run unexpectedly succeeded")
+	}
+	if output != `{"healthy":false}` {
+		t.Fatalf("output = %q", output)
+	}
+}
+
 func shellPath(path string) string {
 	return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
 }

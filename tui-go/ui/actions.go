@@ -215,6 +215,18 @@ func (m *Model) jumpToSession(sessionID string) {
 func (m *Model) replaceSnapshot(snapshot data.Snapshot, preferredID string) {
 	previousCursor := m.cursor
 	previousTreeCursor := m.treeCursor
+	if snapshot.Catalogue.Checked {
+		if snapshot.Catalogue.Healthy && snapshot.Catalogue.RecoveredRows() > 0 {
+			m.catalogue.noticeGeneration++
+			m.catalogue.recoveryVisible = true
+		} else {
+			m.catalogue.recoveryVisible = false
+		}
+	} else {
+		// Metadata writes reload the caches immediately without waiting on a service
+		// preflight, so they preserve the last checked catalogue state.
+		snapshot.Catalogue = m.snapshot.Catalogue
+	}
 	m.snapshot = snapshot
 	m.rebuildRows()
 	if m.view == ViewTree {

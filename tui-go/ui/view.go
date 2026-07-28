@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/mimen/claude-sessions/tui-go/data"
@@ -106,15 +107,93 @@ func (m Model) renderHeader(width int) string {
 	right := fg(theme.FgMoreSubtle).Render(viewName)
 	line1 := joinSides(left, right, width)
 
-	line2 := stat(fmt.Sprintf("%d", stats.Loops), "loops", theme.Accent) +
+	secondary := stat(fmt.Sprintf("%d", stats.Loops), "loops", theme.Accent) +
 		fg(theme.FgMoreSubtle).Render(" ("+data.FormatCompactUSD(stats.LoopSpend)+")") + separator +
 		stat(data.FormatCompactUSD(stats.AgentSpend), "in subagents", theme.FgBase)
 	if stats.TopTitle != "" {
-		line2 += separator + fg(theme.FgMoreSubtle).Render("top ") +
+		secondary += separator + fg(theme.FgMoreSubtle).Render("top ") +
 			fg(theme.CostColor(stats.TopCost)).Bold(true).Render(data.FormatCompactUSD(stats.TopCost)) +
 			fg(theme.FgMoreSubtle).Render(" "+truncate(stats.TopTitle, 34))
 	}
+	line2 := secondary
+	if notice := m.renderCatalogueNotice(); notice != "" {
+		// The notice owns the left side. joinSides drops the secondary stats before
+		// truncating it, so narrow terminals retain the actionable warning.
+		line2 = joinSides(notice, secondary, width)
+	}
 	return theme.Main.Width(width).Render(fit(line1, width) + "\n" + fit(line2, width))
+}
+
+func (m Model) renderCatalogueNotice() string {
+	status := m.snapshot.Catalogue
+	if !status.Checked || (status.Healthy && !m.catalogue.recoveryVisible) {
+		return ""
+	}
+	if status.Healthy {
+		parts := make([]string, 0, 2)
+		if status.Recovery.Parsed > 0 {
+			parts = append(parts, fmt.Sprintf("%d indexed", status.Recovery.Parsed))
+		}
+		if status.Recovery.Removed > 0 {
+			parts = append(parts, fmt.Sprintf("%d removed", status.Recovery.Removed))
+		}
+		if len(parts) == 0 {
+			return ""
+		}
+		return fg(theme.Success).Bold(true).Render("catalogue caught up") +
+			fg(theme.FgMoreSubtle).Render(" · "+strings.Join(parts, " · "))
+	}
+
+	details := make([]string, 0, 4)
+	headline := "catalogue stale"
+	switch status.SourceIndex.State {
+	case "stale":
+		if status.SourceIndex.LagMs > 0 {
+			details = append(details, formatCatalogueLag(status.SourceIndex.LagMs)+" lag")
+		}
+	case "unavailable", "":
+		headline = "catalogue unavailable"
+		details = append(details, "source/index unreadable")
+	}
+	if status.SourceIndex.OutOfSyncSessions > 0 {
+		label := "sessions"
+		if status.SourceIndex.OutOfSyncSessions == 1 {
+			label = "session"
+		}
+		details = append(details, fmt.Sprintf("%d %s out of sync", status.SourceIndex.OutOfSyncSessions, label))
+	}
+	if status.Failure != "" {
+		details = append(details, status.Failure)
+	}
+	if !status.ServiceKnown {
+		details = append(details, "service unknown")
+	} else if status.Service.Running {
+		if status.Service.PID > 0 {
+			details = append(details, fmt.Sprintf("service pid %d", status.Service.PID))
+		} else {
+			details = append(details, "service running")
+		}
+	} else {
+		details = append(details, "service stopped")
+	}
+	return fg(theme.Warning).Bold(true).Render(headline) +
+		fg(theme.WarnDim).Render(" · "+strings.Join(details, " · "))
+}
+
+func formatCatalogueLag(milliseconds int64) string {
+	duration := time.Duration(milliseconds) * time.Millisecond
+	switch {
+	case duration >= 24*time.Hour:
+		return fmt.Sprintf("%dd", duration/(24*time.Hour))
+	case duration >= time.Hour:
+		return fmt.Sprintf("%dh", duration/time.Hour)
+	case duration >= time.Minute:
+		return fmt.Sprintf("%dm", duration/time.Minute)
+	case duration >= time.Second:
+		return fmt.Sprintf("%ds", duration/time.Second)
+	default:
+		return "<1s"
+	}
 }
 
 func joinSides(left string, right string, width int) string {

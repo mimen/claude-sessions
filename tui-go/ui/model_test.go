@@ -202,6 +202,20 @@ func TestAutoRefreshTickSchedulesReloadAndNextTick(t *testing.T) {
 	}
 }
 
+func TestCatalogueCheckThrottleAllowsOneStoreScanPerFiveMinutes(t *testing.T) {
+	checkedAt := time.Date(2026, time.July, 28, 12, 0, 0, 0, time.UTC)
+	state := catalogueViewState{checkedAt: checkedAt}
+	if state.shouldCheck(checkedAt.Add(catalogueCheckInterval - time.Second)) {
+		t.Fatal("catalogue check was due before the five-minute interval")
+	}
+	if !state.shouldCheck(checkedAt.Add(catalogueCheckInterval)) {
+		t.Fatal("catalogue check was not due at the five-minute interval")
+	}
+	if !(catalogueViewState{}).shouldCheck(checkedAt) {
+		t.Fatal("never-checked catalogue did not request a check")
+	}
+}
+
 func TestListWindowStaysViewportBound(t *testing.T) {
 	model := New(testSnapshot(200))
 	model.cursor = len(model.rows) - 1

@@ -3,13 +3,15 @@ import {
   refreshCatalogueAuthority,
   shutdownCatalogueService,
 } from "./client.ts";
+import { checkCatalogueService } from "./check.ts";
 import { catalogueServicePaths, runCatalogueDaemon } from "./server.ts";
 
 const USAGE = `usage:
   ccs catalogue-service start
   ccs catalogue-service status [--json]
+  ccs catalogue-service check [--json]
   ccs catalogue-service stop
-  ccs catalogue-service refresh [--titles] [--json]
+  ccs catalogue-service refresh [--if-stale] [--titles] [--json]
   ccs catalogue-service serve [--idle-timeout-ms <ms>] [--fresh-ms <ms>]`;
 
 function positiveFlag(args: readonly string[], name: string): number | undefined {
@@ -18,6 +20,18 @@ function positiveFlag(args: readonly string[], name: string): number | undefined
   if (!raw) return undefined;
   const value = Number(raw);
   return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+export interface CatalogueRefreshCommandOptions {
+  readonly force: boolean;
+  readonly titles: boolean;
+}
+
+export function catalogueRefreshCommandOptions(args: readonly string[]): CatalogueRefreshCommandOptions {
+  return {
+    force: !args.includes("--if-stale"),
+    titles: args.includes("--titles"),
+  };
 }
 
 export async function catalogueServiceCommand(args: string[]): Promise<number> {
@@ -67,8 +81,24 @@ export async function catalogueServiceCommand(args: string[]): Promise<number> {
       }
       return 0;
     }
+    case "check": {
+      const report = await checkCatalogueService();
+      if (args.includes("--json")) {
+        console.log(JSON.stringify(report));
+      } else {
+        const source = report.sourceIndex;
+        const service = report.service.running ? `running (pid ${report.service.pid})` : "idle (stopped normally)";
+        const lag = source.lagMs === null ? "unknown lag" : `${Math.round(source.lagMs / 1_000)}s lag`;
+        console.log(
+          `ccs: catalogue source index ${source.state} · ${lag} · ` +
+          `${source.sourceFiles} source files / ${source.indexedSessions} indexed sessions · service ${service}`,
+        );
+        if (source.state === "unavailable" && source.lastError) console.error(`ccs: ${source.lastError}`);
+      }
+      return report.healthy ? 0 : 1;
+    }
     case "refresh": {
-      const result = await refreshCatalogueAuthority({ force: true, titles: args.includes("--titles") });
+      const result = await refreshCatalogueAuthority(catalogueRefreshCommandOptions(args));
       if (!result.ok) {
         console.error(`ccs: ${result.error.message}`);
         return 1;

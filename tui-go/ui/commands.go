@@ -16,14 +16,16 @@ import (
 )
 
 type writeFinishedMsg struct {
-	preferredID string
-	status      string
-	snapshot    data.Snapshot
-	loadOptions data.LoadOptions
-	reloaded    bool
-	refresh     bool
-	silent      bool
-	err         error
+	preferredID      string
+	status           string
+	snapshot         data.Snapshot
+	loadOptions      data.LoadOptions
+	reloaded         bool
+	refresh          bool
+	silent           bool
+	catalogueChecked bool
+	completedAt      time.Time
+	err              error
 }
 
 type metadataProposedMsg struct {
@@ -123,14 +125,32 @@ func reloadAfterFailure(options data.LoadOptions, preferredID string, writeErr e
 	return writeFinishedMsg{preferredID: preferredID, snapshot: snapshot, loadOptions: options, reloaded: true, err: writeErr}
 }
 
-// refreshCmd re-scans the store (no write) and reloads the snapshot, keeping the
-// current selection. Manual refresh is bound to `R` (shift+r).
-func refreshCmd(options data.LoadOptions, preferredID string, silent bool) tea.Cmd {
+// refreshCmd reloads the read-only caches while keeping the current selection.
+// Startup, manual refresh, and a throttled automatic pass also check and heal the
+// catalogue; ordinary automatic reloads avoid rescanning the transcript store.
+func refreshCmd(options data.LoadOptions, preferredID string, silent bool, checkCatalogue bool) tea.Cmd {
 	return func() tea.Msg {
-		message := reloadAfterWrite(options, preferredID, "refreshed")
-		message.refresh = true
-		message.silent = silent
-		return message
+		var snapshot data.Snapshot
+		var err error
+		if checkCatalogue {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			snapshot, err = ccscli.LoadSnapshot(ctx, options)
+		} else {
+			snapshot, err = data.Load(options)
+		}
+		return writeFinishedMsg{
+			preferredID:      preferredID,
+			status:           "refreshed",
+			snapshot:         snapshot,
+			loadOptions:      options,
+			reloaded:         err == nil,
+			refresh:          true,
+			silent:           silent,
+			catalogueChecked: checkCatalogue,
+			completedAt:      time.Now(),
+			err:              err,
+		}
 	}
 }
 

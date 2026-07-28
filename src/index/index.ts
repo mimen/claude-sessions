@@ -65,6 +65,28 @@ interface ExistingMeta {
   codex_title: string | null;
 }
 
+export interface CanonicalStoredSessionFile {
+  readonly sessionId: string;
+  readonly file: StoredSessionFile;
+  readonly shadowPaths: readonly string[];
+}
+
+/** Apply the Index's duplicate-session winner rule without reading transcript contents. */
+export function canonicalStoreFiles(
+  files: readonly StoredSessionFile[],
+): CanonicalStoredSessionFile[] {
+  const grouped = new Map<string, StoredSessionFile[]>();
+  for (const file of files) {
+    const group = grouped.get(file.sessionId);
+    if (group) group.push(file);
+    else grouped.set(file.sessionId, [file]);
+  }
+  return [...grouped.entries()].map(([sessionId, candidates]) => {
+    const ranked = [...candidates].sort(compareTranscriptFiles);
+    return { sessionId, file: ranked[0]!, shadowPaths: ranked.slice(1).map((candidate) => candidate.path) };
+  });
+}
+
 // COALESCE order encodes Title priority; titleSource reports which one won.
 const SELECT_COLS = `
   session_id AS sessionId, host, path, cwd,
@@ -125,16 +147,7 @@ export async function reindexStore(
     });
   }
 
-  const grouped = new Map<string, StoredSessionFile[]>();
-  for (const file of files) {
-    const group = grouped.get(file.sessionId);
-    if (group) group.push(file);
-    else grouped.set(file.sessionId, [file]);
-  }
-  const canonical = [...grouped.entries()].map(([sessionId, candidates]) => {
-    const ranked = [...candidates].sort(compareTranscriptFiles);
-    return { sessionId, file: ranked[0]!, shadowPaths: ranked.slice(1).map((candidate) => candidate.path) };
-  });
+  const canonical = canonicalStoreFiles(files);
   const stats: ReindexStats = {
     scanned: files.length,
     parsed: 0,

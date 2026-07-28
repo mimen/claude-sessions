@@ -70,6 +70,28 @@ type transcriptLoadedMsg struct {
 	err       error
 }
 
+type catalogueNoticeExpiredMsg struct {
+	generation uint64
+}
+
+const catalogueCheckInterval = 5 * time.Minute
+
+type catalogueViewState struct {
+	noticeGeneration uint64
+	recoveryVisible  bool
+	checkedAt        time.Time
+}
+
+func (state catalogueViewState) shouldCheck(at time.Time) bool {
+	if state.checkedAt.IsZero() {
+		return true
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	return !at.Before(state.checkedAt.Add(catalogueCheckInterval))
+}
+
 type transcriptReader struct {
 	sessionID   string
 	title       string
@@ -89,6 +111,7 @@ type Model struct {
 	viewOptionCursor   int
 	tickerGeneration   uint64
 	refreshInFlight    bool
+	catalogue          catalogueViewState
 	snapshot           data.Snapshot
 	rows               []row
 	collapsed          map[string]bool
@@ -142,12 +165,24 @@ type Model struct {
 func New(snapshot data.Snapshot) Model {
 	options := defaultViewOptions()
 	rows := buildRows(snapshot.Sessions)
+	catalogueCheckedAt := time.Time{}
+	if snapshot.Catalogue.Checked {
+		catalogueCheckedAt = snapshot.LoadedAt
+		if catalogueCheckedAt.IsZero() {
+			catalogueCheckedAt = time.Now()
+		}
+	}
 	model := Model{
-		w:                  120,
-		h:                  40,
-		view:               ViewGroups,
-		options:            options,
-		tickerGeneration:   1,
+		w:                120,
+		h:                40,
+		view:             ViewGroups,
+		options:          options,
+		tickerGeneration: 1,
+		catalogue: catalogueViewState{
+			noticeGeneration: 1,
+			recoveryVisible:  snapshot.Catalogue.Healthy && snapshot.Catalogue.RecoveredRows() > 0,
+			checkedAt:        catalogueCheckedAt,
+		},
 		preview:            true,
 		skillView:          skillViewCategory,
 		skillPreview:       true,
@@ -214,6 +249,9 @@ func (m Model) StartInSkills() Model {
 
 func (m Model) Init() tea.Cmd {
 	commands := []tea.Cmd{m.loadSelectedTranscriptCmd()}
+	if m.catalogue.recoveryVisible {
+		commands = append(commands, catalogueNoticeCmd(m.catalogue.noticeGeneration))
+	}
 	if m.options.autoRefresh {
 		commands = append(commands,
 			autoRefreshCmd(m.options.refreshInterval, m.tickerGeneration),
@@ -225,6 +263,12 @@ func (m Model) Init() tea.Cmd {
 		commands = append(commands, loadSkillsCmd())
 	}
 	return tea.Batch(commands...)
+}
+
+func catalogueNoticeCmd(generation uint64) tea.Cmd {
+	return tea.Tick(6*time.Second, func(time.Time) tea.Msg {
+		return catalogueNoticeExpiredMsg{generation: generation}
+	})
 }
 
 func (m Model) selectedSession() (data.Session, bool) {
@@ -340,6 +384,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.peekScroll = max(0, len(msg.document.Lines)-6)
 		}
 		return m, nil
+	case catalogueNoticeExpiredMsg:
+		if msg.generation == m.catalogue.noticeGeneration {
+			m.catalogue.recoveryVisible = false
+		}
+		return m, nil
 	case procSampledMsg:
 		if msg.generation != m.tickerGeneration || !m.options.autoRefresh {
 			return m, nil
@@ -373,22 +422,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			preferredID = session.ID
 		}
 		m.refreshInFlight = true
-		return m, tea.Batch(nextTick, refreshCmd(m.options.loadOptions(), preferredID, true))
+		checkCatalogue := m.catalogue.shouldCheck(msg.at)
+		return m, tea.Batch(nextTick, refreshCmd(m.options.loadOptions(), preferredID, true, checkCatalogue))
 	case writeFinishedMsg:
 		if msg.refresh {
 			m.refreshInFlight = false
 		}
+		if msg.catalogueChecked {
+			m.catalogue.checkedAt = msg.completedAt
+		}
+		var noticeCmd tea.Cmd
 		if msg.reloaded && msg.loadOptions == m.options.loadOptions() {
 			m.replaceSnapshot(msg.snapshot, msg.preferredID)
+			if msg.snapshot.Catalogue.Checked && msg.snapshot.Catalogue.Healthy && msg.snapshot.Catalogue.RecoveredRows() > 0 {
+				noticeCmd = catalogueNoticeCmd(m.catalogue.noticeGeneration)
+			}
 		}
 		if msg.err != nil {
 			m.status = msg.err.Error()
-			return m, m.loadSelectedTranscriptCmd()
+			return m, tea.Batch(noticeCmd, m.loadSelectedTranscriptCmd())
 		}
 		if !msg.silent {
 			m.status = msg.status
 		}
-		return m, m.loadSelectedTranscriptCmd()
+		return m, tea.Batch(noticeCmd, m.loadSelectedTranscriptCmd())
 	case metadataProposedMsg:
 		if msg.err != nil {
 			m.status = "AI edit failed: " + msg.err.Error()
@@ -609,15 +666,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input = &textInput{kind: inputEdit, sessionID: session.ID, label: "AI metadata edit"}
 		}
 	case "R":
-		// Refresh: re-scan the store for new sessions and fresh activity, keeping
-		// the current selection.
+		// Refresh: heal a stale catalogue if needed, then reload cached sessions
+		// while keeping the current selection.
 		preferredID := ""
 		if session, ok := m.selectedSession(); ok {
 			preferredID = session.ID
 		}
 		m.status = "refreshing…"
 		m.refreshInFlight = true
-		return m, refreshCmd(m.options.loadOptions(), preferredID, false)
+		return m, refreshCmd(m.options.loadOptions(), preferredID, false, true)
 	case "S":
 		if session, ok := m.selectedSession(); ok {
 			m.status = "summarizing with the inference engine…"

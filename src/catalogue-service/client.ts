@@ -1,5 +1,5 @@
 import { closeSync, openSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   CATALOGUE_SERVICE_LOG_PATH,
   CATALOGUE_SERVICE_SOCKET_PATH,
@@ -20,10 +20,21 @@ import type {
   SourceStatusResult,
 } from "./protocol.ts";
 import { CATALOGUE_PROTOCOL_VERSION } from "./protocol.ts";
-import { probeCatalogueHealth } from "./server.ts";
-import { requestUnixHttp, type UnixHttpResponse } from "./transport.ts";
+import { probeCatalogueHealth, terminateWedgedCatalogueService } from "./server.ts";
+import {
+  requestUnixHttp,
+  UnixHttpTimeoutError,
+  type UnixHttpResponse,
+} from "./transport.ts";
 
 const START_TIMEOUT_MS = 5_000;
+
+function catalogueRefreshTimeoutMs(): number {
+  const raw = process.env.CCS_CATALOGUE_REFRESH_TIMEOUT_MS;
+  if (!raw) return 0;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+}
 
 export interface CatalogueClientError {
   readonly code: CatalogueErrorCode | "unavailable" | "protocol_error";
@@ -36,6 +47,8 @@ interface RequestOptions {
   readonly autoStart: boolean;
   /** Zero disables the transport timeout for explicit maintenance work such as title backfill. */
   readonly timeoutMs?: number;
+  readonly retryOnTransportError?: boolean;
+  readonly terminateServiceOnTimeout?: boolean;
 }
 
 function ccsBinary(): string {
@@ -47,11 +60,17 @@ function spawnCatalogueService(): Result<void, CatalogueClientError> {
   let logFd: number | null = null;
   try {
     logFd = openSync(CATALOGUE_SERVICE_LOG_PATH(), "a", 0o600);
+    // Keep CCS_BIN's executable contract (absolute path or PATH lookup), including native test
+    // doubles. Prefix the current Bun directory so bin/ccs's `env bun` shebang also works under
+    // launchd's intentionally minimal environment.
+    const path = [dirname(process.execPath), process.env.PATH]
+      .filter((entry): entry is string => Boolean(entry))
+      .join(":");
     const child = Bun.spawn([ccsBinary(), "catalogue-service", "serve"], {
       stdin: "ignore",
       stdout: logFd,
       stderr: logFd,
-      env: process.env,
+      env: { ...process.env, PATH: path },
     });
     child.unref();
     return ok(undefined);
@@ -111,16 +130,31 @@ async function requestJson<T>(
   let response: UnixHttpResponse;
   try {
     response = await execute();
-  } catch {
+  } catch (cause) {
+    if (cause instanceof UnixHttpTimeoutError && options.terminateServiceOnTimeout) {
+      const terminated = terminateWedgedCatalogueService();
+      return err({
+        code: "unavailable",
+        message: terminated
+          ? "Catalogue refresh timed out; stopped the wedged service."
+          : "Catalogue refresh timed out; the service could not be safely identified for termination.",
+      });
+    }
     if (!options.autoStart) {
       return err({ code: "unavailable", message: "Catalogue service is not running." });
+    }
+    if (options.retryOnTransportError === false) {
+      return err({ code: "unavailable", message: "Catalogue service is unavailable." });
     }
     // The daemon can idle out between readiness and the actual request. Restart/retry once.
     const ready = await ensureCatalogueService(socketPath);
     if (!ready.ok) return ready;
     try {
       response = await execute();
-    } catch {
+    } catch (retryCause) {
+      if (retryCause instanceof UnixHttpTimeoutError && options.terminateServiceOnTimeout) {
+        terminateWedgedCatalogueService();
+      }
       return err({ code: "unavailable", message: "Catalogue service is unavailable." });
     }
   }
@@ -184,11 +218,18 @@ export function refreshCatalogueAuthority(options: {
   readonly force: boolean;
   readonly titles: boolean;
 }): Promise<Result<CatalogueRefreshResult, CatalogueClientError>> {
+  const timeoutMs = options.titles ? 0 : catalogueRefreshTimeoutMs();
+  const bounded = timeoutMs > 0;
   return requestJson<CatalogueRefreshResult>("/_control/refresh", {
     method: "POST",
     body: options,
     autoStart: true,
-    timeoutMs: 0,
+    // Manual maintenance stays unbounded by default. The launchd job opts into a
+    // generous watchdog; on timeout the client hard-stops only a positively identified
+    // daemon so a later interval can start a clean authority.
+    timeoutMs,
+    retryOnTransportError: !bounded,
+    terminateServiceOnTimeout: bounded,
   });
 }
 

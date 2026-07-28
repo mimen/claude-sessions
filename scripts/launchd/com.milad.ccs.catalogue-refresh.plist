@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Catalogue source-index refresh.
+
+     Reindexes the configured Claude transcript store every five minutes so the rebuildable
+     catalogue source index self-heals even when no interactive client happens to wake its
+     on-demand authority.
+
+     This deliberately uses RunAtLoad + StartInterval rather than KeepAlive. The catalogue daemon
+     intentionally idles out after 30 seconds; KeepAlive would fight that lifecycle and keep the
+     daemon permanently resident. A periodic `ccs reindex` starts it on demand, completes one
+     refresh, and lets it return to its normal idle state.
+
+     Absolute paths throughout because launchd does NOT source a shell profile and its default
+     PATH contains neither Homebrew bun nor ccs. Bun is invoked directly, and an explicit PATH is
+     also supplied for descendant processes and `#!/usr/bin/env bun` compatibility.
+
+     CHECKOUT: the deployment, never a worktree — a scheduled job aimed at a worktree dies the
+     moment that worktree is removed. The installer proves the deployed ccs advertises `reindex`
+     before scheduling it.
+
+     Install:   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.milad.ccs.catalogue-refresh.plist
+     Remove:    launchctl bootout gui/$(id -u)/com.milad.ccs.catalogue-refresh
+     Run now:   launchctl kickstart -k gui/$(id -u)/com.milad.ccs.catalogue-refresh
+     Logs:      ~/Library/Logs/com.milad.ccs.catalogue-refresh.log
+-->
+<dict>
+    <key>Label</key>
+    <string>com.milad.ccs.catalogue-refresh</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/bun</string>
+        <string>/Users/mimen/Programming/Deployments/claude-sessions/bin/ccs</string>
+        <string>reindex</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <!-- Scheduled runs get a generous watchdog; interactive/manual reindex remains unbounded. -->
+        <key>CCS_CATALOGUE_REFRESH_TIMEOUT_MS</key>
+        <string>1800000</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <!-- launchd runs one wrapper instance per label, so a refresh that outlives the interval cannot
+         overlap. The 30-minute watchdog leaves cold rebuilds room to finish but eventually kills a
+         positively identified wedged daemon. Abandon its process group so a successful daemon can
+         perform its intentional 30-second idle shutdown and clean up its own socket and lock. -->
+    <key>AbandonProcessGroup</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/mimen/Library/Logs/com.milad.ccs.catalogue-refresh.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mimen/Library/Logs/com.milad.ccs.catalogue-refresh.log</string>
+</dict>
+</plist>

@@ -2,6 +2,13 @@ import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
+export class UnixHttpTimeoutError extends Error {
+  constructor() {
+    super("Catalogue service request timed out.");
+    this.name = "UnixHttpTimeoutError";
+  }
+}
+
 export interface UnixHttpResponse {
   readonly status: number;
   readonly headers: IncomingHttpHeaders;
@@ -59,7 +66,9 @@ export function requestUnixHttp(
     const timeoutMs = options.timeoutMs ?? 5_000;
     if (timeoutMs > 0) {
       timeout = setTimeout(() => {
-        request.destroy(new Error("Catalogue service request timed out."));
+        timeout = null;
+        request.destroy();
+        reject(new UnixHttpTimeoutError());
       }, timeoutMs);
     }
     request.on("error", (cause) => {
