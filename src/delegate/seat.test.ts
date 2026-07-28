@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import {
   compileAgent,
   loadSeat,
-  normalizeGptModel,
+  compileLaunchModel,
   resolveSeatRoute,
 } from "./seat.ts";
 
@@ -222,11 +222,20 @@ effort: high
 });
 
 describe("routing and compilation", () => {
-  test("normalizes the GPT context marker exactly once and only for gpt-*", () => {
-    expect(normalizeGptModel("gpt-5.6-sol")).toBe("gpt-5.6-sol[1m]");
-    expect(normalizeGptModel("gpt-5.6-sol[1m]")).toBe("gpt-5.6-sol[1m]");
-    expect(normalizeGptModel("claude-fable-5")).toBe("claude-fable-5");
-    expect(normalizeGptModel("claude-opus-5")).toBe("claude-opus-5");
+  test("applies the context marker per LAUNCHER, not per model family, exactly once", () => {
+    // Gateway launchers declare the window for BOTH vendors. Applying this to gpt-* only
+    // silently gave delegated Claude seats a narrower context than an identical location
+    // birth on the same launcher (review finding, 2026-07-28).
+    expect(compileLaunchModel("gpt-5.6-sol", "claudex")).toBe("gpt-5.6-sol[1m]");
+    expect(compileLaunchModel("claude-opus-5", "claudex")).toBe("claude-opus-5[1m]");
+    expect(compileLaunchModel("claude-fable-5", "claude-gpt")).toBe("claude-fable-5[1m]");
+
+    // idempotent
+    expect(compileLaunchModel("gpt-5.6-sol[1m]", "claudex")).toBe("gpt-5.6-sol[1m]");
+    expect(compileLaunchModel("claude-opus-5[1m]", "claudex")).toBe("claude-opus-5[1m]");
+
+    // direct-to-Anthropic launchers take the canonical ID verbatim
+    expect(compileLaunchModel("claude-opus-5", "claude-native")).toBe("claude-opus-5");
   });
 
   test("compiles primary and fallback with their route-local models and efforts", () => {
@@ -267,7 +276,7 @@ describe("routing and compilation", () => {
     });
   });
 
-  test("routes a Claude model through the same both-vendor launcher, unsuffixed", () => {
+  test("routes a Claude model through the same both-vendor launcher, window declared", () => {
     const root = fixture("generalist", `---
 name: generalist
 description: Broad default seat
@@ -293,7 +302,8 @@ Do the specified work.
         provider: "claude",
         launcher: "claudex",
         requestedModel: "claude-fable-5",
-        compiledModel: "claude-fable-5",
+        // claudex is a gateway launcher, so the window is declared for Claude too.
+        compiledModel: "claude-fable-5[1m]",
         effort: "high",
       },
     });
@@ -303,7 +313,8 @@ Do the specified work.
         description: "Broad default seat",
         prompt: "Do the specified work.",
         tools: ["Bash", "Read"],
-        model: "claude-fable-5",
+        // What reaches Claude Code is the compiled spelling, window declaration included.
+        model: "claude-fable-5[1m]",
         permissionMode: "bypassPermissions",
         effort: "high",
       },

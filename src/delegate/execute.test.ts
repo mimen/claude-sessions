@@ -195,7 +195,7 @@ describe("executeDelegate", () => {
     expect(h.launches).toHaveLength(1);
   });
 
-  test("launches a Claude-model seat on the same both-vendor launcher, unsuffixed", () => {
+  test("launches a Claude-model seat on the same both-vendor launcher, window declared", () => {
     const root = mkdtempSync(join(tmpdir(), "ccs-delegate-"));
     roots.push(root);
     writeFileSync(
@@ -221,10 +221,10 @@ Do the specified work.
     expect(h.reservations[0]).toMatchObject({
       provider: "claude",
       launcher: "claudex",
-      compiledModel: "claude-opus-5",
+      compiledModel: "claude-opus-5[1m]",
     });
     expect(h.launches[0]!.argv[0]).toBe("claudex");
-    expect(h.launches[0]!.argv.join(" ")).toContain('"model":"claude-opus-5"');
+    expect(h.launches[0]!.argv.join(" ")).toContain('"model":"claude-opus-5[1m]"');
   });
 
   test("rejects missing cwd and invalid input before minting or reserving", () => {

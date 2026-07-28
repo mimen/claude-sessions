@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { err, ok, type Result } from "../result.ts";
+import { GATEWAY_LAUNCHERS } from "../resume/role-model-launch.ts";
 import type { LauncherName, ModelFamily } from "../resume/role-model-launch.ts";
 
 const SeatNameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]*$/);
@@ -124,11 +125,20 @@ function providerFor(model: string): ModelFamily {
 }
 
 /**
- * The `[1m]` context declaration belongs to `gpt-*` IDs only. Claude IDs are accepted verbatim by
- * every launcher, gateway included, and adding the suffix there buys nothing.
+ * `[1m]` is a property of the LAUNCHER, not of the model family. Claude Code strips it client-side
+ * and uses it as the context-window declaration, so on a gateway launcher `claude-opus-5[1m]` and
+ * `claude-opus-5` are the same upstream request with DIFFERENT declared windows. Omitting it on a
+ * Claude model does not fail — it silently declares the smaller window.
+ *
+ * An earlier revision applied the suffix to `gpt-*` only, on the theory that Claude IDs are
+ * accepted verbatim everywhere. They are, which is why the bug was quiet: delegated Claude seats
+ * ran on a narrower context than an otherwise identical location birth through the same launcher.
+ * Caught in review 2026-07-28 as a disagreement between this compiler and `launchModelFor` in
+ * `resume/role-model-launch.ts`. The launcher rule there is authoritative; this mirrors it.
  */
-export function normalizeGptModel(model: string): string {
-  return model.startsWith("gpt-") && !model.endsWith("[1m]") ? `${model}[1m]` : model;
+export function compileLaunchModel(model: string, launcher: LauncherName): string {
+  if (!GATEWAY_LAUNCHERS.has(launcher)) return model;
+  return model.endsWith("[1m]") ? model : `${model}[1m]`;
 }
 
 export function loadSeat(agentsRoot: string, seatName: string): Result<SeatDefinition> {
@@ -193,7 +203,7 @@ export function resolveSeatRoute(
     provider: providerFor(route.model),
     launcher: DELEGATE_LAUNCHER,
     requestedModel: route.model,
-    compiledModel: normalizeGptModel(route.model),
+    compiledModel: compileLaunchModel(route.model, DELEGATE_LAUNCHER),
     effort: route.effort,
   });
 }

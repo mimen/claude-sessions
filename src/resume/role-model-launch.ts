@@ -52,7 +52,7 @@ export const LAUNCHER_NAMES = Object.keys(LAUNCHER_FAMILIES) as readonly Launche
  * Anthropic launchers take the canonical ID verbatim. This is a property of the LAUNCHER, not of
  * the model — the same `claude-opus-5` is spelled differently on `claudex` and on `claude-native`.
  */
-const GATEWAY_LAUNCHERS: ReadonlySet<LauncherName> = new Set<LauncherName>(["claudex", "claude-gpt"]);
+export const GATEWAY_LAUNCHERS: ReadonlySet<LauncherName> = new Set<LauncherName>(["claudex", "claude-gpt"]);
 
 export function parseLauncherName(value: string): LauncherName | null {
   return (LAUNCHER_NAMES as readonly string[]).includes(value) ? value as LauncherName : null;
