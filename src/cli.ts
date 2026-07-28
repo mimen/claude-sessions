@@ -141,10 +141,14 @@ Resume & tabs:
                                                   routes; launchers = [[launcher]] in ~/.ccs/config.toml)
   ccs routes <selector>                           Which launchers can resume each matched session, and why
   ccs swap-harness [--to <launcher>] [--model <canonical-id>] [--do]
-                                                  Move THIS session to the other harness in place
-                                                  (cmux respawn-pane; same tab, nothing closed).
-                                                  Bare form is a preflight. Defaults: claude-native
-                                                  → opus, claude-gpt → gpt-5.6-sol
+                                                  Move THIS session to another harness in place
+                                                  (cmux respawn-pane; same tab, nothing closed) to
+                                                  change its CAPABILITY envelope — changing model
+                                                  alone is now /model, in session. Bare form is a
+                                                  preflight; --to is required once more than two
+                                                  launchers are configured. Model defaults: claudex
+                                                  → opus, claude-native → opus, claude-gpt →
+                                                  gpt-5.6-sol
   ccs restart [--on <launcher>] [--model <canonical-id>] [--do]
                                                   Relaunch THIS session on the SAME harness, in
                                                   place — picks up a newly released model, a newer

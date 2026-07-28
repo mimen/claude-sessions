@@ -191,7 +191,74 @@ effort = "high"
     const loaded = loadSeat(root, "broken");
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
-    expect(resolveSeatRoute(loaded.value).ok).toBe(false);
+    const primary = resolveSeatRoute(loaded.value);
+    expect(primary.ok).toBe(false);
+    if (!primary.ok) {
+      // Still catches the unreachable route, but names what WOULD work rather than one blessed pair.
+      expect(primary.error.message).toContain("does not serve claude");
+      expect(primary.error.message).toContain("claudex, claude-native");
+    }
     expect(resolveSeatRoute(loaded.value, "fallback").ok).toBe(false);
+  });
+});
+
+// --- claudex: one seat launcher serving both vendors ------------------------------
+
+describe("a both-vendor launcher", () => {
+  const CLAUDEX_SEAT = (provider: string, model: string): string => `name = "generalist"
+description = "Broad default seat"
+
+[routing.primary]
+provider = "${provider}"
+launcher = "claudex"
+requested_model = "${model}"
+effort = "high"
+`;
+
+  test("claudex is authorable for a Claude route", () => {
+    const root = fixture("generalist", CLAUDEX_SEAT("claude", "claude-opus-5"));
+    const loaded = loadSeat(root, "generalist");
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(resolveSeatRoute(loaded.value)).toEqual({
+      ok: true,
+      value: {
+        route: "primary",
+        provider: "claude",
+        launcher: "claudex",
+        requestedModel: "claude-opus-5",
+        compiledModel: "claude-opus-5",
+        effort: "high",
+      },
+    });
+  });
+
+  test("...and for a GPT route through the SAME launcher, with the [1m] marker applied", () => {
+    const root = fixture("generalist", CLAUDEX_SEAT("gpt", "gpt-5.6-sol"));
+    const loaded = loadSeat(root, "generalist");
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    const route = resolveSeatRoute(loaded.value);
+    expect(route.ok).toBe(true);
+    if (!route.ok) return;
+    expect(route.value).toMatchObject({ launcher: "claudex", compiledModel: "gpt-5.6-sol[1m]" });
+    expect(compileAgent(loaded.value, route.value)).toMatchObject({
+      generalist: { model: "gpt-5.6-sol[1m]" },
+    });
+  });
+
+  test("an unknown launcher is still refused at parse time, not silently launched", () => {
+    const root = fixture("generalist", `name = "generalist"
+description = "Broad default seat"
+
+[routing.primary]
+provider = "claude"
+launcher = "claude"
+requested_model = "claude-opus-5"
+effort = "high"
+`);
+    // The bare updater-managed `claude` resolves its backend from inherited env; a seat must name a
+    // deterministic route, so it is not part of the seat vocabulary.
+    expect(loadSeat(root, "generalist").ok).toBe(false);
   });
 });

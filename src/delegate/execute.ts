@@ -1,6 +1,14 @@
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
-import { compileAgent, loadSeat, resolveSeatRoute, type ProviderFamily, type SeatEffort, type SeatRouteKind } from "./seat.ts";
+import {
+  compileAgent,
+  loadSeat,
+  resolveSeatRoute,
+  type ProviderFamily,
+  type SeatEffort,
+  type SeatLauncher,
+  type SeatRouteKind,
+} from "./seat.ts";
 import { err, ok, type Result } from "../result.ts";
 
 export interface DelegateRequest {
@@ -19,7 +27,7 @@ export interface DelegateReservation {
   readonly cwd: string;
   readonly route: SeatRouteKind;
   readonly provider: ProviderFamily;
-  readonly launcher: "claude-native" | "claude-gpt";
+  readonly launcher: SeatLauncher;
   readonly requestedModel: string;
   readonly compiledModel: string;
   readonly effort: SeatEffort;

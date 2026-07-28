@@ -3,13 +3,16 @@ import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
 import { err, ok, type Result } from "../result.ts";
+import { launcherServesFamily } from "../resume/role-model-launch.ts";
 
 const SeatNameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]*$/);
 const EffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
+const ProviderSchema = z.enum(["claude", "gpt"]);
+const SeatLauncherSchema = z.enum(["claudex", "claude-native", "claude-gpt"]);
 
 const FixedRouteSchema = z.object({
-  provider: z.enum(["claude", "gpt"]),
-  launcher: z.enum(["claude-native", "claude-gpt"]),
+  provider: ProviderSchema,
+  launcher: SeatLauncherSchema,
   requested_model: z.string().min(1),
   effort: EffortSchema,
 }).strict();
@@ -28,11 +31,23 @@ const SeatFileSchema = z.object({
   routing: RoutingSchema,
 }).strict();
 
-export type ProviderFamily = "claude" | "gpt";
+export type ProviderFamily = z.infer<typeof ProviderSchema>;
+export type SeatLauncher = z.infer<typeof SeatLauncherSchema>;
 export type SeatEffort = z.infer<typeof EffortSchema>;
 export type SeatRouteKind = "primary" | "fallback";
 export type SeatRoute = z.infer<typeof FixedRouteSchema>;
 export type SeatFile = z.infer<typeof SeatFileSchema>;
+
+/**
+ * A seat's launcher vocabulary is a SUBSET of the fleet's: a seat must name a deterministic route,
+ * so the bare updater-managed `claude` — whose backend depends on inherited env — is not authorable
+ * here. Which vendors each launcher reaches is deliberately NOT restated: `LAUNCHER_FAMILIES` in
+ * role-model-launch.ts is the single authority, and passing a `SeatLauncher` to it type-checks the
+ * subset relation at every call.
+ */
+function seatLaunchersServing(provider: ProviderFamily): SeatLauncher[] {
+  return SeatLauncherSchema.options.filter((launcher) => launcherServesFamily(launcher, provider));
+}
 
 export interface SeatDefinition extends SeatFile {
   readonly prompt: string;
@@ -42,7 +57,7 @@ export interface SeatDefinition extends SeatFile {
 export interface ResolvedSeatRoute {
   readonly route: SeatRouteKind;
   readonly provider: ProviderFamily;
-  readonly launcher: "claude-native" | "claude-gpt";
+  readonly launcher: SeatLauncher;
   readonly requestedModel: string;
   readonly compiledModel: string;
   readonly effort: SeatEffort;
@@ -104,11 +119,12 @@ export function resolveSeatRoute(
   const route = routeKind === "primary" ? seat.routing.primary : seat.routing.fallback;
   if (!route) return err(new Error(`Seat ${seat.name} does not declare a fallback route`));
 
-  if (route.provider === "claude" && route.launcher !== "claude-native") {
-    return err(new Error(`Seat ${seat.name} routes Claude through ${route.launcher}; expected claude-native`));
-  }
-  if (route.provider === "gpt" && route.launcher !== "claude-gpt") {
-    return err(new Error(`Seat ${seat.name} routes GPT through ${route.launcher}; expected claude-gpt`));
+  if (!launcherServesFamily(route.launcher, route.provider)) {
+    return err(
+      new Error(
+        `Seat ${seat.name} routes ${route.provider} through ${route.launcher}, which does not serve ${route.provider}; launchers that do: ${seatLaunchersServing(route.provider).join(", ")}`,
+      ),
+    );
   }
 
   return ok({

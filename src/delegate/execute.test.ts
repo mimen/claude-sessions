@@ -202,6 +202,39 @@ describe("executeDelegate", () => {
     expect(h.launches).toHaveLength(1);
   });
 
+  test("reserves and launches a claudex seat, recording it as the launcher", () => {
+    const root = mkdtempSync(join(tmpdir(), "ccs-delegate-"));
+    roots.push(root);
+    const directory = join(root, "generalist");
+    mkdirSync(directory);
+    writeFileSync(
+      join(directory, "seat.toml"),
+      `name = "generalist"
+description = "Broad default seat"
+
+[routing.primary]
+provider = "claude"
+launcher = "claudex"
+requested_model = "claude-opus-5"
+effort = "high"
+`,
+    );
+    writeFileSync(join(directory, "prompt.md"), "Do the specified work.");
+
+    const h = harness();
+    const result = executeDelegate(
+      { seat: "generalist", parentSessionId: PARENT, cwd: "/tmp", prompt: "Go.", seatsRoot: root },
+      h.dependencies,
+    );
+    expect(result.ok).toBe(true);
+    expect(h.reservations[0]).toMatchObject({
+      provider: "claude",
+      launcher: "claudex",
+      compiledModel: "claude-opus-5",
+    });
+    expect(h.launches[0]!.argv[0]).toBe("claudex");
+  });
+
   test("rejects missing cwd and invalid input before minting or reserving", () => {
     const h = harness();
     const missingCwd = executeDelegate(

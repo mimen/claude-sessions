@@ -19,6 +19,7 @@ import { launcherByName, type Launcher } from "./launchers.ts";
 import {
   compileRespawnModel,
   describeRespawn,
+  originIsCertain,
   originLauncher,
   proveSurface,
   refuse,
@@ -72,10 +73,15 @@ export function planRestart(
     );
   }
 
-  if (!opts.model) return ok(respawnPlan(proven.value, origin, target, null));
+  // A bare restart aims at the INFERRED origin. When several launchers can replay this history the
+  // inference is a preference, not an observation, so the plan says so and the two-phase preflight
+  // gives the operator the chance to pin `--on` before anything is replaced.
+  const certain = originIsCertain(launchers, history);
+
+  if (!opts.model) return ok(respawnPlan(proven.value, origin, target, null, certain));
   const compiled = compileRespawnModel(opts.model, target);
   if (!compiled.ok) return compiled;
-  return ok(respawnPlan(proven.value, origin, target, compiled.value));
+  return ok(respawnPlan(proven.value, origin, target, compiled.value, certain));
 }
 
 export function describeRestart(plan: RespawnPlan): string {

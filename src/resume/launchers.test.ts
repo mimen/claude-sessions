@@ -156,3 +156,45 @@ describe("launcherByName", () => {
     expect(launcherByName(FLEET, "nope")).toBeNull();
   });
 });
+
+// Milad's fleet after the claudex consolidation: one launcher reaching BOTH vendors, listed first
+// as the daily driver, alongside the two single-vendor ones it supersedes.
+const claudex: Launcher = { name: "claudex", binary: "claudex", serves: ["*"], env: {} };
+const CONSOLIDATED_FLEET = [claudex, claudeNative, claudeGpt];
+
+describe("a both-vendor launcher alongside single-vendor ones", () => {
+  test("claudex is eligible for every history, including the mixed ones that stranded the pair", () => {
+    const mixed = ["claude-opus-5", "gpt-5.6-sol"];
+    // No last model recorded (pre-v10 row): the strict whole-history verdict used to disqualify
+    // BOTH launchers, which is what made a harness swap a one-way door.
+    const routes = resolveRoutes(CONSOLIDATED_FLEET, mixed, "");
+    expect(routes.map((r) => r.eligible)).toEqual([true, false, false]);
+    expect(defaultRoute(routes, mixed, "")?.launcher.name).toBe("claudex");
+  });
+
+  test("origin-backend preference still beats the catch-all for a single-vendor history", () => {
+    // This is what keeps swap-harness able to name the harness a session came from: a `*` launcher
+    // sitting first in config order must not swallow every default.
+    const claude = ["claude-opus-5"];
+    expect(defaultRoute(resolveRoutes(CONSOLIDATED_FLEET, claude, "claude-opus-5"), claude, "claude-opus-5")
+      ?.launcher.name).toBe("claude-native");
+
+    const gptOnly = ["gpt-5.6-sol"];
+    expect(defaultRoute(resolveRoutes(CONSOLIDATED_FLEET, gptOnly, "gpt-5.6-sol"), gptOnly, "gpt-5.6-sol")
+      ?.launcher.name).toBe("claude-gpt");
+  });
+
+  test("a session with no assistant turns yet defaults to the first-listed launcher", () => {
+    // Config ORDER is the only tie-break with nothing to route on, which is how `claudex` becomes
+    // the daily driver without touching the specificity rule above.
+    expect(defaultRoute(resolveRoutes(CONSOLIDATED_FLEET, [], ""), [], "")?.launcher.name).toBe("claudex");
+  });
+
+  test("three named launchers all load, and none of them shadows another", () => {
+    const loaded = launchersFrom(CONSOLIDATED_FLEET);
+    expect(loaded).toEqual(CONSOLIDATED_FLEET);
+    expect(launcherByName(CONSOLIDATED_FLEET, "claudex")).toBe(claudex);
+    expect(launcherByName(CONSOLIDATED_FLEET, "claude-native")).toBe(claudeNative);
+    expect(launcherByName(CONSOLIDATED_FLEET, "claude-gpt")).toBe(claudeGpt);
+  });
+});

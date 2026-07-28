@@ -1,10 +1,14 @@
 /**
- * `swap-harness` — relaunch a live session on the OTHER launcher, in place.
+ * `swap-harness` — relaunch a live session on a DIFFERENT launcher, in place.
  *
- * A harness is a launcher binary: `claude-native` (real Anthropic) or `claude-gpt` (the same
- * Claude Code against a local gateway, on GPT models). Transcripts are stored in Anthropic format
- * regardless of which one wrote them, so either can replay the other's history — a swap is a
- * launcher change, not a data migration.
+ * A harness is a launcher binary: `claudex` (one gateway process reaching both vendors),
+ * `claude-native` (real Anthropic, the only one with claude.ai connectors and Remote Control), or
+ * `claude-gpt` (the GPT-only gateway wrapper it replaced). Transcripts are stored in Anthropic
+ * format regardless of which one wrote them, so any of them can replay another's history — a swap
+ * is a launcher change, not a data migration.
+ *
+ * Now that one launcher reaches both vendors, changing MODEL no longer needs a swap (`/model` does
+ * it in-session); what a swap still changes is the CAPABILITY ENVELOPE of the process.
  *
  * The mechanism, identity proofs, and command construction all live in respawn.ts; this module is
  * only the target-and-model decision.
@@ -16,6 +20,7 @@ import { compileRoleModelValue } from "./role-model-launch.ts";
 import {
   compileRespawnModel,
   describeRespawn,
+  originIsCertain,
   originLauncher,
   proveSurface,
   refuse,
@@ -27,11 +32,15 @@ import {
 } from "./respawn.ts";
 
 /**
- * Where a bare swap lands, per target harness (Milad, 2026-07-24). Deliberately one model per
- * harness rather than a tier map between them: a tier map has to be re-derived every time the
- * fleet changes, and these two entries are the ones actually wanted.
+ * Where a swap lands, per target harness (Milad, 2026-07-24; `claudex` added 2026-07-28).
+ * Deliberately one model per harness rather than a tier map between them: a tier map has to be
+ * re-derived every time the fleet changes, and these entries are the ones actually wanted.
+ *
+ * `claudex` reaches both vendors, so its default is the Claude one it opens on; landing there on a
+ * GPT model is a `--model` away and no longer needs a different binary.
  */
 export const DEFAULT_SWAP_MODEL: Readonly<Record<string, string>> = {
+  claudex: "opus",
   "claude-native": "opus",
   "claude-gpt": "gpt-5.6-sol",
 };
@@ -83,7 +92,15 @@ export function planSwap(
     target = others[0]!;
   }
 
-  if (origin && target.name === origin.name) {
+  // Only refuse a no-op swap when the origin is a FACT, not a guess. `originLauncher` always names
+  // the most specific eligible launcher, but once two launchers serve the same model — `claudex`
+  // and `claude-native` both replay `claude-opus-5` — the transcript cannot say which binary is
+  // running. Refusing an explicit `--to` on the strength of that guess would block exactly the swap
+  // the consolidated fleet exists for (claudex → claude-native, to get connectors back), and a
+  // wrongly-permitted swap is only ever a restart. This can only fire for an explicit `--to`: the
+  // inferred branch above picks a target that is not the origin by construction.
+  const certain = originIsCertain(launchers, history);
+  if (origin && target.name === origin.name && certain) {
     return refuse("same-harness", `already running on ${target.name} — use \`ccs restart\` instead`);
   }
 
@@ -99,7 +116,7 @@ export function planSwap(
   const compiled = shouldCompile ? compileRespawnModel(requestedModel, target) : ok(requestedModel);
   if (!compiled.ok) return compiled;
 
-  return ok(respawnPlan(proven.value, origin, target, compiled.value));
+  return ok(respawnPlan(proven.value, origin, target, compiled.value, certain));
 }
 
 export function describeSwap(plan: RespawnPlan): string {

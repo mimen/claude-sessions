@@ -1,10 +1,12 @@
 import { type Result, err, ok } from "../result.ts";
 import { DEFAULT_LAUNCHERS, launcherByName, loadLaunchers, type Launcher } from "./launchers.ts";
 import {
+  birthLauncher,
   compileLocationModelLaunch,
   compileModelLaunch,
   compileRoleModelLaunch,
   parseBirthModel,
+  parseLauncherName,
   type BirthModelId,
   type RoleModelId,
 } from "./role-model-launch.ts";
@@ -108,7 +110,14 @@ export function resolveBirthRoute(
   }
 
   if (exact.value.model) {
-    return ok({ exact: exact.value, launcher: compileModelLaunch(exact.value.model).launcher });
+    // Resolve the launcher the route ALREADY compiled, never re-derive it from the model: a
+    // location that declares `default_harness = "claudex"` picks a launcher the model alone cannot
+    // name, and re-deriving here would silently send the birth to a different backend.
+    const named = parseLauncherName(exact.value.launcher);
+    return ok({
+      exact: exact.value,
+      launcher: named ? birthLauncher(named) : compileModelLaunch(exact.value.model).launcher,
+    });
   }
 
   return ok({ exact: exact.value, launcher: DEFAULT_LAUNCHERS[0]! });

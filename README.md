@@ -201,6 +201,53 @@ concurrency = 3
 maxAttempts = 3
 ```
 
+### Launchers
+
+A **launcher** is one Claude Code executable. `[[launcher]]` entries declare which exist on this
+host and the model-id globs each backend can replay; `ccs routes`, `ccs resume --via`,
+`ccs swap-harness` and `ccs restart` all read this fleet. With no `[[launcher]]` entries the tool
+runs on a single hardcoded `claude` and the feature is invisible — the fleet is deliberately
+**config, not code**, because launcher names are per-host facts (a binary that is not installed
+must not be offered as a route).
+
+The reference fleet:
+
+```toml
+# The daily driver: one gateway process (CLIProxyAPI) holding OAuth for BOTH vendors, so a
+# session changes model with /model instead of changing binary. No claude.ai connectors, no
+# Remote Control. Listed FIRST — config order is the only tie-break for a session with no model
+# history yet, which is how a launcher becomes the default without touching route specificity.
+[[launcher]]
+name = "claudex"
+binary = "claudex"
+serves = ["*"]
+
+# Real Anthropic. The only launcher with claude.ai connectors and Remote Control, and the
+# ToS/gateway escape hatch.
+[[launcher]]
+name = "claude-native"
+binary = "claude-native"
+serves = ["claude-*", "anthropic.*"]
+
+# The GPT-only gateway wrapper claudex supersedes. Kept so existing gpt-* transcripts stay
+# resumable on the harness that wrote them; deprecated out of the hot paths.
+[[launcher]]
+name = "claude-gpt"
+binary = "claude-gpt"
+serves = ["gpt-*"]
+```
+
+`serves` decides *eligibility and preselection*, not permission: routing keys on a session's LAST
+model, and the most specific matching glob wins, so a `claude-*` history still prefers
+`claude-native` over the catch-all. A launcher whose globs match everything is what keeps a
+mixed-history transcript resumable at all.
+
+**Which launcher a NEW session is born on** is a different question, answered by the location
+registry's `default_harness` / `default_model` pair (`[routing].registry`), not by this fleet. That
+pair is validated for reachability — `claudex` may be declared for either vendor, `claude-gpt` only
+for `gpt-*`, `claude-native` and `claude` only for Claude models — so moving the whole fleet onto a
+different daily driver, or back, is a one-line edit in that registry.
+
 The shared host registry defaults to `~/.ccs/hosts.toml`:
 
 ```toml

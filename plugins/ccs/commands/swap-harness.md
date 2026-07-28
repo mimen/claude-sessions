@@ -1,15 +1,31 @@
 ---
-description: Move this session to the other harness (claude-native <-> claude-gpt) in place, keeping its tab, title, and history
-argument-hint: "[--to <launcher>] [--model <canonical-model-id>]"
+description: Swap this session's capability envelope in place (claudex <-> claude-native), keeping its tab, title, and history
+argument-hint: "--to <claudex|claude-native> [--model <canonical-model-id>]"
 allowed-tools: Bash(ccs:*)
 ---
 
 # Swap this session's harness
 
-A harness is the launcher this session runs on: `claude-native` (real Anthropic) or `claude-gpt`
-(the same Claude Code harness pointed at the local gateway, on GPT models). Transcripts are stored
-in Anthropic format whichever one wrote them, so either can replay the other's history — the swap
-changes the launcher, not the data.
+**First check whether this command is the right tool.** It is not, if the user only wants a
+different model. `claudex` is one process reaching both vendors, so switching between Claude and
+GPT models is `/model` typed in this session — no relaunch, no lost tab, nothing to plan. Say so
+and stop.
+
+What a swap still changes, and the only reason to run it, is the **capability envelope** of the
+process:
+
+| Harness | Vendors reachable | claude.ai connectors | Remote Control |
+| --- | --- | --- | --- |
+| `claudex` | Claude + GPT | no | no |
+| `claude-native` | Claude only | yes | yes |
+
+So the two swaps that make sense are `claudex → claude-native` (to get connectors and Remote
+Control back, at the cost of GPT models) and `claude-native → claudex` (the reverse trade).
+`claude-gpt` still exists for older GPT-only transcripts but is deprecated — do not send a session
+there unless the user names it.
+
+Transcripts are stored in Anthropic format whichever harness wrote them, so any of them can replay
+another's history — the swap changes the launcher, not the data.
 
 The swap happens IN PLACE, via `cmux respawn-pane`. Nothing is closed: the workspace, tab, title,
 dock slot, CCS catalogue row, and cmux surface all survive, and the session keeps its full
@@ -20,12 +36,15 @@ The user's explicit `/ccs:swap-harness` invocation authorizes replacing this ses
 Do not call `cmux respawn-pane` yourself, and never aim a swap at a surface, workspace, or session
 id other than the one `ccs` proves is the current one.
 
-1. **Preflight.** Pass through whatever the user supplied (`--to`, `--model`); otherwise run it
-   bare.
+1. **Preflight, always with an explicit `--to`.** More than two launchers are configured, so
+   "the other one" is not defined and a bare run is refused by design. Name the target:
 
    ```
-   ccs swap-harness
+   ccs swap-harness --to claude-native
    ```
+
+   If the user did not say which harness they want, ask before running anything — the answer is a
+   capability trade, not a detail you can pick for them.
 
    The command must prove that `CLAUDE_CODE_SESSION_ID`, `CMUX_SURFACE_ID`, and
    `CMUX_WORKSPACE_ID` all agree with cmux's own surface binding before it will plan anything.
@@ -39,18 +58,24 @@ id other than the one `ccs` proves is the current one.
    - `identity-mismatch` / `surface-unbound` — cmux binds this surface to a different session.
      Something is wrong with the session's bookkeeping; investigate, don't force.
    - `liveness-unreadable` — cmux is down or its hook store is unreadable. Fail closed.
-   - `origin-unknown` — the session has no assistant turns yet, so its current harness can't be
-     inferred. Ask the user which harness they want and pass `--to`.
-   - `same-harness` — it is already running there.
+   - `ambiguous-target` — you ran it bare. Re-run with `--to`.
+   - `unknown-launcher` — the name is not in `[[launcher]]` config; the message lists what is.
+   - `same-harness` — the session is provably already there. This only fires when exactly one
+     configured launcher could have produced the transcript; with `claudex` in the fleet the model
+     history usually cannot tell `claudex` from `claude-native`, so the swap is permitted and the
+     printed `from:` may read as a guess. Trust the user's stated harness over the inferred one.
+   - `origin-unknown` — no assistant turns yet, so nothing to infer from. `--to` already covers it.
 
-3. **Show the user the plan and confirm the model.** The defaults are `opus` for `claude-native`
-   and `gpt-5.6-sol` for `claude-gpt`. If they want a different one, re-run the preflight with
-   a canonical birth-model ID in `--model`; launcher spellings such as `[1m]` are compiled by ccs.
+3. **Show the user the plan and confirm the model.** The defaults are `opus` for both `claudex` and
+   `claude-native`, and `gpt-5.6-sol` for `claude-gpt`. A swap always pins a model, because the
+   settings alias would otherwise resolve against the harness just left. If they want a different
+   one, re-run the preflight with a canonical birth-model ID in `--model`; launcher spellings such
+   as `[1m]` are compiled by ccs, and a target that cannot reach the model is refused.
 
 4. **Swap.** Once the user is happy with the printed plan:
 
    ```
-   ccs swap-harness --do
+   ccs swap-harness --to claude-native --do
    ```
 
    Repeat the same `--to` / `--model` flags used in the preflight.

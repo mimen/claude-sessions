@@ -6,7 +6,7 @@ Architecture and rollout record: [mandatory-session-admission.html](./mandatory-
 
 ## Core rule
 
-Every **persistent Claude Code process** must be born through a CCS-managed path. Do not launch a nested persistent `claude`, `claude-native`, or `claude-gpt` process directly.
+Every **persistent Claude Code process** must be born through a CCS-managed path. Do not launch a nested persistent `claude`, `claudex`, `claude-native`, or `claude-gpt` process directly.
 
 Non-persistent API/inference calls are not sessions and remain outside this contract.
 
@@ -156,6 +156,7 @@ Agents and automations must not create persistent children with:
 
 ```bash
 claude ...
+claudex ...
 claude-native ...
 claude-gpt ...
 ```

@@ -66,6 +66,13 @@ export interface RespawnPlan {
    * at would be worse than admitting we don't know.
    */
   readonly from: Launcher | null;
+  /**
+   * Whether `from` is an OBSERVATION or the best guess. False whenever more than one configured
+   * launcher could have produced this history — the normal case once a launcher serves every
+   * vendor — so a reader can tell "you are on claude-native" from "claude-native is the most
+   * specific launcher that fits".
+   */
+  readonly originCertain: boolean;
   /** The harness it will come back on. Equal to `from` for a restart. */
   readonly to: Launcher;
   /** null means "pass no --model", letting the new process re-resolve from settings. */
@@ -158,6 +165,24 @@ export function originLauncher(
 }
 
 /**
+ * Whether the model history alone identifies WHICH BINARY is running.
+ *
+ * `originLauncher` always answers with the most specific eligible launcher, but that is only the
+ * running harness when exactly one launcher could have produced the transcript. A fleet with an
+ * every-vendor launcher (`claudex`) alongside single-vendor ones has at least two eligible for any
+ * model, so the origin is a preference, not an observation. Callers that would REFUSE on the
+ * strength of the origin must consult this first.
+ */
+export function originIsCertain(
+  launchers: readonly Launcher[],
+  history: ModelHistory,
+): boolean {
+  if (history.lastModel === "" && history.models.length === 0) return false;
+  const eligible = resolveRoutes(launchers, history.models, history.lastModel).filter((r) => r.eligible);
+  return eligible.length === 1;
+}
+
+/**
  * Validate a user-authored canonical model through the birth-model compiler, then return the
  * launcher spelling. Canonical IDs remain provider-neutral at the boundary; GPT's required `[1m]`
  * suffix is compiler-owned and appears only in the executable plan.
@@ -217,11 +242,13 @@ export function respawnPlan(
   from: Launcher | null,
   to: Launcher,
   model: string | null,
+  originCertain: boolean,
 ): RespawnPlan {
   return {
     sessionId: proven.sessionId,
     surfaceId: proven.surfaceId,
     from,
+    originCertain,
     to,
     model,
     cwd: proven.cwd,
@@ -264,5 +291,12 @@ export function describeRespawn(plan: RespawnPlan, headline: string): string {
   ];
   if (plan.pid !== null) lines.push(`  replaces:   pid ${plan.pid} (SIGHUP via cmux respawn-pane)`);
   lines.push(`  command:    ${plan.command}`);
+  // Say plainly when the "from" harness was guessed. A relaunch that lands on a launcher with a
+  // different capability envelope than the one you were on is not something to discover later.
+  if (plan.from && !plan.originCertain) {
+    lines.push(
+      `  note:       current harness INFERRED as ${plan.from.name} — several configured launchers can replay this history, so name the target explicitly if that is wrong`,
+    );
+  }
   return lines.join("\n");
 }

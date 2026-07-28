@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { Bridge, SurfaceSession } from "../cmux/bridge.ts";
 import type { Launcher } from "./launchers.ts";
-import { planRestart } from "./restart.ts";
+import { describeRestart, planRestart } from "./restart.ts";
 import type { RespawnEnv } from "./respawn.ts";
 
 const native: Launcher = {
@@ -11,6 +11,7 @@ const native: Launcher = {
   env: {},
 };
 const gpt: Launcher = { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {} };
+const claudex: Launcher = { name: "claudex", binary: "claudex", serves: ["*"], env: {} };
 const FLEET = [native, gpt];
 
 const SURFACE = "surface-uuid-1";
@@ -160,4 +161,38 @@ test("restart refuses without a transcript-resolved launch dir", () => {
   const res = planRestart(env(), stubBridge(surfaceSession()), FLEET, claudeHistory);
   if (res.ok) throw new Error("unreachable");
   expect(res.error.code).toBe("cwd-unknown");
+});
+
+// --- the consolidated fleet: a bare restart must not silently change envelope -----
+
+const CONSOLIDATED = [claudex, native, gpt];
+
+test("a bare restart still aims at the most specific launcher for the history", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, claudeHistory);
+  expect(res.ok).toBe(true);
+  if (!res.ok) throw new Error("unreachable");
+  expect(res.value.to.name).toBe("claude-native");
+});
+
+test("...but flags the origin as INFERRED, because claudex could have written the same history", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, claudeHistory);
+  if (!res.ok) throw new Error("unreachable");
+  expect(res.value.originCertain).toBe(false);
+  expect(describeRestart(res.value)).toContain("current harness INFERRED as claude-native");
+});
+
+test("a disjoint two-launcher fleet still OBSERVES the origin and says nothing extra", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), FLEET, claudeHistory);
+  if (!res.ok) throw new Error("unreachable");
+  expect(res.value.originCertain).toBe(true);
+  expect(describeRestart(res.value)).not.toContain("INFERRED");
+});
+
+test("--on pins the harness in the consolidated fleet, keeping the settings alias unpinned", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, claudeHistory, { on: "claudex" });
+  expect(res.ok).toBe(true);
+  if (!res.ok) throw new Error("unreachable");
+  expect(res.value.to.name).toBe("claudex");
+  expect(res.value.model).toBeNull();
+  expect(res.value.command).not.toContain("--model");
 });

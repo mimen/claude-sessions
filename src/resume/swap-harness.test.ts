@@ -245,6 +245,65 @@ test("a target with no default model demands --model rather than inventing one",
   expect(res.error.code).toBe("model-unknown");
 });
 
+// --- the consolidated fleet: swapping CAPABILITY ENVELOPE, not vendor -------------
+
+const claudex: Launcher = { name: "claudex", binary: "claudex", serves: ["*"], env: {} };
+const CONSOLIDATED = [claudex, native, gpt];
+
+test("claudex has a default model, so a swap onto it never demands --model", () => {
+  expect(DEFAULT_SWAP_MODEL["claudex"]).toBe("opus");
+});
+
+test("a Claude session swaps onto claudex, keeping the native `opus` alias", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, claudeHistory, { to: "claudex" });
+  expect(res.ok).toBe(true);
+  if (!res.ok) throw new Error("unreachable");
+  expect(res.value.to.name).toBe("claudex");
+  expect(res.value.model).toBe("opus");
+  expect(res.value.command).toBe(
+    `cd -- ${CWD} && claudex --resume ${SESSION} --model opus --permission-mode bypassPermissions`,
+  );
+});
+
+// The whole point of the command now: get claude.ai connectors and Remote Control back. The model
+// history says "claude-opus-5", which claudex AND claude-native both serve, so the inferred origin
+// is claude-native — a guess. Refusing on it would block the only swap that still matters.
+test("claudex → claude-native is allowed even though the inferred origin IS claude-native", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, claudeHistory, {
+    to: "claude-native",
+  });
+  expect(res.ok).toBe(true);
+  if (!res.ok) throw new Error("unreachable");
+  expect(res.value.to.name).toBe("claude-native");
+  expect(res.value.model).toBe("opus");
+});
+
+test("...but a fleet where exactly one launcher can have produced the history still refuses", () => {
+  // Two disjoint launchers: only claude-gpt replays gpt-5.6-sol, so the origin is observed, not
+  // guessed, and the no-op guard keeps its teeth.
+  const res = plan(env(), stubBridge(surfaceSession()), FLEET, gptHistory, { to: "claude-gpt" });
+  if (res.ok) throw new Error("unreachable");
+  expect(res.error.code).toBe("same-harness");
+});
+
+test("a GPT session on claudex can be moved to claude-native with a Claude model", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, gptHistory, {
+    to: "claude-native",
+    model: "claude-opus-5",
+  });
+  expect(res.ok).toBe(true);
+  if (!res.ok) throw new Error("unreachable");
+  expect(res.value.to.name).toBe("claude-native");
+  expect(res.value.model).toBe("claude-opus-5");
+});
+
+test("a bare swap in a three-launcher fleet names the options instead of picking one", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, claudeHistory);
+  if (res.ok) throw new Error("unreachable");
+  expect(res.error.code).toBe("ambiguous-target");
+  expect(res.error.message).toContain("claudex, claude-native, claude-gpt");
+});
+
 // --- execution ------------------------------------------------------------------
 
 test("runRespawn hands the planned command to the planned surface", () => {
