@@ -54,6 +54,7 @@ function harness(overrides: Partial<SidebarSource> = {}): Harness {
       snapshotScopes.push(scope);
       return EMPTY_SNAPSHOT;
     },
+    declineSuggestion: async () => ({ status: "ok" as const }),
     closeWorkspace: async (): Promise<CloseWorkspaceOutcome> => ({ status: "not-live" }),
     focusWorkspace: async (): Promise<FocusWorkspaceOutcome> => ({ status: "not-live" }),
     closeLooseWorkspace: async (): Promise<CloseWorkspaceOutcome> => ({ status: "not-live" }),
@@ -304,6 +305,7 @@ describe("sidebar server", () => {
   test("accepts only literal loopback bind addresses", () => {
     const source: SidebarSource = {
       snapshot: async () => EMPTY_SNAPSHOT,
+      declineSuggestion: async () => ({ status: "ok" as const }),
       open: async () => ({ status: "not-found" }),
       setLifecycle: async () => ({ status: "not-found" }),
       closeWorkspace: async () => ({ status: "not-live" }),

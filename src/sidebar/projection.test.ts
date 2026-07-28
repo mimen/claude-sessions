@@ -530,3 +530,51 @@ describe("directoriesToResolve", () => {
     expect(directories).toEqual(["/a", "/b"]);
   });
 });
+
+describe("declined verdicts", () => {
+  /** The one enrichment field shape these tests care about; the rest is inert. */
+  function enrichment(overrides: Record<string, unknown> = {}): never {
+    return {
+      state: "where it stands",
+      history: null,
+      next: null,
+      remaining: null,
+      recommendation: "archive",
+      reason: "a dead end",
+      junk: false,
+      atMessages: null,
+      at: null,
+      declined: null,
+      ...overrides,
+    } as never;
+  }
+
+  test("a verdict that has not been declined is offered", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [indexed({ sessionId: "s1", resumeId: "s1" })],
+      summaries: new Map([["s1", enrichment()]]),
+    }));
+    const row = snapshot.rows.find((r) => r.id === "s1");
+    expect(row?.kind === "session" && row.suggestion?.verb).toBe("archive");
+  });
+
+  test("declining a verdict withdraws that verdict", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [indexed({ sessionId: "s1", resumeId: "s1" })],
+      summaries: new Map([["s1", enrichment({ declined: "archive" })]]),
+    }));
+    const row = snapshot.rows.find((r) => r.id === "s1");
+    expect(row?.kind === "session" && row.suggestion).toBeNull();
+  });
+
+  // The reason the column stores a verb rather than a flag: enrichment reaching a different
+  // conclusion later is new information, and a boolean would have buried it.
+  test("declining one verdict does not suppress a different one", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [indexed({ sessionId: "s1", resumeId: "s1" })],
+      summaries: new Map([["s1", enrichment({ recommendation: "complete", declined: "archive" })]]),
+    }));
+    const row = snapshot.rows.find((r) => r.id === "s1");
+    expect(row?.kind === "session" && row.suggestion?.verb).toBe("complete");
+  });
+});

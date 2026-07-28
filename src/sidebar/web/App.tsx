@@ -411,6 +411,31 @@ export function App(): React.ReactElement {
     load();
   }, [load]);
 
+  /**
+   * Refuse a verdict. Optimistic like the lifecycle actions: the row leaving the triage list is the
+   * confirmation, and only a failure is worth saying.
+   */
+  const declineSuggestion = useCallback((row: SidebarSessionRow): void => {
+    const verb = row.suggestion?.verb;
+    if (!verb) return;
+    void (async (): Promise<void> => {
+      try {
+        const response = await fetch("/api/session/decline", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId: row.sessionId, verb }),
+        });
+        const result = (await response.json()) as { status?: string; reason?: string; error?: string };
+        if (result.error) setActionError(result.error);
+        else if (result.status === "failed") setActionError(result.reason ?? "could not record that");
+        else if (result.status === "not-found") setActionError("that session is not in the catalogue");
+        else load(true);
+      } catch (cause) {
+        setActionError(cause instanceof Error ? cause.message : "could not record that");
+      }
+    })();
+  }, [load]);
+
   const setLifecycle = useCallback((
     row: SidebarSessionRow,
     action: "complete" | "archive" | "uncomplete" | "unarchive",
@@ -603,6 +628,7 @@ export function App(): React.ReactElement {
                   key={row.id}
                   now={now}
                   onAccept={setLifecycle}
+                  onDismiss={declineSuggestion}
                   onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
                   opening={openingIds.has(row.id)}
                   registerRef={(_id, element) => {

@@ -43,6 +43,13 @@ export interface StoredEnrichment {
   readonly atMessages: number | null;
   /** ISO timestamp of generation. */
   readonly at: string | null;
+  /**
+   * A verdict the reader declined, if any.
+   *
+   * The verb rather than a flag: enrichment reaching a DIFFERENT conclusion later is new
+   * information and should surface, while the same one staying quiet is the whole point.
+   */
+  readonly declined: Recommendation | null;
 }
 
 /** A stored enrichment plus how far the transcript has moved since it was written. */
@@ -86,6 +93,7 @@ const OPTIONAL_COLUMNS = [
   "enrichment_junk",
   "enrichment_at_messages",
   "enrichment_at",
+  "enrichment_declined",
 ] as const;
 
 /**
@@ -149,6 +157,9 @@ export function readEnrichments(db: Database): Map<string, StoredEnrichment> {
           ? row.enrichment_at_messages
           : null,
         at: text(row.enrichment_at),
+        declined: isRecommendation(text(row.enrichment_declined))
+          ? (text(row.enrichment_declined) as Recommendation)
+          : null,
       };
 
       found.set(row.session_id as string, record);

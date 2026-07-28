@@ -63,6 +63,7 @@ test("reads a v40 row whole", () => {
     junk: false,
     atMessages: 120,
     at: "2026-07-27T00:00:00.000Z",
+    declined: null,
   });
 });
 
@@ -158,6 +159,23 @@ test("a catalogue predating enrichment entirely yields nothing", () => {
 
 test("an unreadable catalogue costs the caller nothing", () => {
   expect(readEnrichments(new Database(":memory:")).size).toBe(0);
+});
+
+test("a declined verb is read back, and an unknown one is not", () => {
+  const db = catalogueWith([...V40, "enrichment_declined TEXT"], [
+    { session_id: "declined", enrichment_state: "s", enrichment_declined: "archive" },
+    { session_id: "bogus", enrichment_state: "s", enrichment_declined: "delete" },
+    { session_id: "none", enrichment_state: "s" },
+  ]);
+  const found = readEnrichments(db);
+  expect(found.get("declined")!.declined).toBe("archive");
+  expect(found.get("bogus")!.declined).toBeNull();
+  expect(found.get("none")!.declined).toBeNull();
+});
+
+test("a catalogue without the declined column reads as nothing declined", () => {
+  const db = catalogueWith(V40, [{ session_id: "s1", enrichment_state: "s" }]);
+  expect(readEnrichments(db).get("s1")!.declined).toBeNull();
 });
 
 test("staleness counts messages appended since the enrichment", () => {

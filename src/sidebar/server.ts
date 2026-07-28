@@ -9,6 +9,7 @@
 import { isIPv4 } from "node:net";
 import { err, ok, type Result } from "../result.ts";
 import { loadFavicon } from "./favicon.ts";
+import { RECOMMENDATIONS } from "../catalogue/enrichment-schema.ts";
 import type { SidebarView } from "./projection.ts";
 import type { SessionLifecycleAction, SidebarSource } from "./snapshot.ts";
 
@@ -73,6 +74,33 @@ function parseLifecycleRequest(value: JsonValue): Result<LifecycleRequestBody, s
   }
   if (!isLifecycleAction(value.action)) return err("action is invalid");
   return ok({ sessionId, action: value.action });
+}
+
+/**
+ * Declining a verdict. Same shape as the lifecycle request, but the verb is the recommendation
+ * being refused rather than a lifecycle action, so it gets its own parser rather than a widened
+ * one -- the two vocabularies overlap ("archive") and conflating them would let a lifecycle action
+ * arrive where a verdict belongs.
+ */
+function parseDeclineRequest(value: JsonValue): Result<{ sessionId: string; verb: string }, string> {
+  if (!isJsonObject(value)) return err("request body must be an object");
+  const keys = Object.keys(value);
+  if (
+    keys.length !== 2
+    || !Object.prototype.hasOwnProperty.call(value, "sessionId")
+    || !Object.prototype.hasOwnProperty.call(value, "verb")
+  ) {
+    return err("request body must contain only sessionId and verb");
+  }
+  const sessionId = value.sessionId;
+  if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+    return err("sessionId is required");
+  }
+  const verb = value.verb;
+  if (typeof verb !== "string" || !RECOMMENDATIONS.includes(verb as never)) {
+    return err("verb is invalid");
+  }
+  return ok({ sessionId, verb });
 }
 
 function json(body: object, status = 200): Response {
@@ -205,6 +233,26 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           // Source implementations should return a typed failure; this is the last boundary if one
           // violates that contract, and it still must not disclose catalogue paths or handles.
           return json({ status: "failed", reason: "session lifecycle update failed" });
+        }
+      }
+
+      // Declining a verdict. Not a lifecycle change -- nothing about the session moves -- so it is
+      // its own endpoint rather than another action on the lifecycle one.
+      if (url.pathname === "/api/session/decline" && request.method === "POST") {
+        if (!originIsBound(request, boundHostname, boundPort)) {
+          return json({ error: "forbidden origin" }, 403);
+        }
+        let parsed: Result<{ sessionId: string; verb: string }, string>;
+        try {
+          parsed = parseDeclineRequest((await request.json()) as JsonValue);
+        } catch {
+          return json({ error: "invalid request body" }, 400);
+        }
+        if (!parsed.ok) return json({ error: parsed.error }, 400);
+        try {
+          return json(await source.declineSuggestion(parsed.value.sessionId, parsed.value.verb));
+        } catch {
+          return json({ status: "failed", reason: "could not record the decision" });
         }
       }
 

@@ -505,6 +505,9 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
   ): SidebarSuggestion | null => {
     const verb = summary?.recommendation;
     if (!verb || verb === "continue") return null;
+    // Declining is a decision, so the same verdict stays gone. A different one is new
+    // information and comes back.
+    if (summary?.declined === verb) return null;
     if (verb === "complete" && lifecycle === "completed") return null;
     if (verb === "archive" && lifecycle === "archived") return null;
     return {

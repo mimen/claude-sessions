@@ -1018,6 +1018,23 @@ function applyMigrations(db: Database): void {
     // and the store is ~2.4k rows — a partial index over it buys nothing measurable while adding
     // a column that DROP COLUMN then has to route around during a downgrade.
   }
+  // Records that a verdict was declined.
+  //
+  // Without it a dismissed suggestion returns on the next sweep, so declining one is a delay
+  // rather than a decision, and a queue that re-fills itself with things you already rejected
+  // stops being worth working down.
+  //
+  // The VERB is stored, not a flag. Enrichment changing its mind is new information: declining
+  // `archive` says nothing about a later `complete`, and a boolean would suppress both.
+  //
+  // Deliberately OUTSIDE the version ladder. v41 is already claimed by the enrichment branch for
+  // dropping `enrichment_summary` / `enrichment_outstanding`, and stamping this catalogue past 41
+  // here would make that migration's `v < 41` false on Milad's live store — silently skipping a
+  // drop that branch believes it performed. Additive, presence-guarded and idempotent, so running
+  // it on every open costs one PRAGMA and cannot collide with whatever number that work lands as.
+  if (!hasColumn(db, "catalogue", "enrichment_declined")) {
+    db.exec("ALTER TABLE catalogue ADD COLUMN enrichment_declined TEXT;");
+  }
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 

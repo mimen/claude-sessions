@@ -137,6 +137,12 @@ export type PinWorkspaceOutcome =
   | { readonly status: "liveness-unreadable" }
   | { readonly status: "failed"; readonly reason: string };
 
+/** Declining touches one column and nothing else, so there is little that can go wrong loudly. */
+export type DeclineOutcome =
+  | { readonly status: "ok" }
+  | { readonly status: "not-found" }
+  | { readonly status: "failed"; readonly reason: string };
+
 export interface SidebarSource {
   /**
    * @param view Which list to build: a lifecycle, or `triage` for the active list filtered to
@@ -144,6 +150,8 @@ export interface SidebarSource {
    * @param rowLimit How many rows the caller has room for; it grows as the client scrolls.
    */
   snapshot(view?: SidebarView, rowLimit?: number): Promise<SidebarSnapshot>;
+  /** Record that the reader refused a verdict, so the same one stops being offered. */
+  declineSuggestion(sessionId: string, verb: string): Promise<DeclineOutcome>;
   open(sessionId: string): Promise<OpenSessionOutcome>;
   setLifecycle(
     sessionId: string,
@@ -937,6 +945,28 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       action: SessionLifecycleAction,
     ): Promise<SessionLifecycleOutcome> {
       return updateLifecycle(sessionId, action);
+    },
+
+    async declineSuggestion(sessionId: string, verb: string): Promise<DeclineOutcome> {
+      let db: Database | null = null;
+      try {
+        ensureDataDirectory();
+        db = openCatalogueDb(CATALOGUE_PATH());
+        // Only an existing row: declining a verdict for a session the catalogue has never heard of
+        // would create a row whose only content is a refusal, which is not a session.
+        const existing = getRow(db, sessionId);
+        if (!existing) return { status: "not-found" };
+        db.query("UPDATE catalogue SET enrichment_declined = $verb WHERE session_id = $id")
+          .run({ $verb: verb, $id: sessionId });
+        return { status: "ok" };
+      } catch (error) {
+        return {
+          status: "failed",
+          reason: error instanceof Error ? error.message : "could not record the decision",
+        };
+      } finally {
+        db?.close();
+      }
     },
 
     async open(sessionId: string): Promise<OpenSessionOutcome> {
