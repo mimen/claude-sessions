@@ -7,9 +7,11 @@
  * CCS if it is not" is decided here rather than by every caller, because getting that wrong
  * spawns a duplicate of a running session.
  */
+import { statSync } from "node:fs";
 import type { Database } from "bun:sqlite";
 import { openIndex } from "../index/schema.ts";
 import {
+  displayTitle,
   getAll,
   getRow,
   lifecycleOf,
@@ -311,11 +313,27 @@ function allLiveSessionIdsFrom(bridge: Bridge): Set<string> {
 interface CatalogueLifecycleState {
   readonly lifecycles: ReadonlyMap<string, SidebarLifecycle>;
   readonly canonicalSessionIds: ReadonlyMap<string, string>;
+  /** Titles the catalogue owns (human, then enrichment); the index title is the fallback. */
+  readonly preferredTitles: ReadonlyMap<string, string>;
   readonly sessionIds: ReadonlyMap<SidebarLifecycle, readonly string[]>;
   /** Delegated seats, hidden the way `ccs ls` hides them. */
   readonly auxiliary: ReadonlySet<string>;
   /** Enrichment summaries keyed by canonical id and resume alias; absent for unenriched sessions. */
   readonly summaries: ReadonlyMap<string, StoredEnrichment>;
+}
+
+/**
+ * When the transcript was last written, or null when it cannot be read.
+ *
+ * Null rather than a throw or a zero: a missing transcript means the drift question simply
+ * cannot be answered, and answering it wrongly is what this whole path exists to prevent.
+ */
+function transcriptMtime(path: string): number | null {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return null;
+  }
 }
 
 function lifecycleForIndexedSession(
@@ -459,6 +477,13 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       catalogueDb = openCatalogueDb(CATALOGUE_PATH());
       const rows = getAll(catalogueDb);
       const lifecycles = new Map<string, SidebarLifecycle>();
+      /**
+       * Catalogue-owned titles, resolved by `displayTitle` itself rather than by reimplementing
+       * its precedence here. Passing an empty fallback makes it return only what the catalogue
+       * owns -- a human's title, then enrichment's -- so the projection supplies the index title
+       * as the last resort and the ordering stays defined in exactly one place.
+       */
+      const preferredTitles = new Map<string, string>();
       // Delegated seats — reviewers, implementers — are real sessions but not work anyone
       // browses. `ccs ls` hides `sessionClass === "auxiliary"` unless asked, and the sidebar
       // is the same kind of surface, so it hides them too.
@@ -475,6 +500,13 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         const lifecycle = sidebarLifecycleOf(lifecycleOf(row));
         lifecycles.set(row.sessionId, lifecycle);
         canonicalSessionIds.set(row.sessionId, row.sessionId);
+        // Empty fallback: whatever comes back is catalogue-owned, so an absent one means the
+        // index title still wins.
+        const preferred = displayTitle(row, "");
+        if (preferred) {
+          preferredTitles.set(row.sessionId, preferred);
+          if (row.resumeId) preferredTitles.set(row.resumeId, preferred);
+        }
         if (row.sessionClass === "auxiliary") {
           auxiliary.add(row.sessionId);
           if (row.resumeId) auxiliary.add(row.resumeId);
@@ -490,6 +522,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
 
       return ok({
         lifecycles,
+        preferredTitles,
         canonicalSessionIds,
         sessionIds,
         auxiliary,
@@ -513,6 +546,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     return {
       lifecycles: new Map(),
       canonicalSessionIds: new Map(),
+      preferredTitles: new Map<string, string>(),
       // Nothing is known to be auxiliary when the catalogue is unreadable, so nothing is hidden.
       auxiliary: new Set<string>(),
       summaries: new Map<string, StoredEnrichment>(),
@@ -665,10 +699,21 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       );
       // Delegated seats never reach the shelf or the history scopes; a live one still shows,
       // because a running agent is something you may need to act on.
-      const indexed = index.sessions.filter(
-        (session) => !catalogue.auxiliary.has(session.sessionId)
-          && !catalogue.auxiliary.has(session.resumeId),
-      );
+      const indexed = index.sessions
+        .filter(
+          (session) => !catalogue.auxiliary.has(session.sessionId)
+            && !catalogue.auxiliary.has(session.resumeId),
+        )
+        // One stat per row, and only for rows that carry an enrichment worth aging. The index's
+        // message count cannot detect drift on a live session -- it is the thing that has not
+        // moved -- so the filesystem is asked instead.
+        .map((session) => ({
+          ...session,
+          transcriptMtimeMs: session.transcriptPath
+            && catalogue.summaries.has(session.sessionId)
+            ? transcriptMtime(session.transcriptPath)
+            : null,
+        }));
 
       const statuses = bridge.readable
         ? await statusReader.read(bridge.workspaceIds())
@@ -711,6 +756,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         faviconDirectories: new Set(facts.favicons.keys()),
         unreadByWorkspaceId: notifications?.unreadCountsByWorkspaceId,
         summaries: catalogue.summaries,
+        preferredTitles: catalogue.preferredTitles,
         livenessReadable: bridge.readable,
         indexReadable: index.readable,
         catalogueReadable: catalogue.readable,

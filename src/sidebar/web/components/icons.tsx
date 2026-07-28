@@ -122,3 +122,13 @@ export function CopyIcon({ className }: IconProps): React.ReactElement {
     </Glyph>
   );
 }
+
+/** A document with lines: the session's written summary, not a generic "info" circle. */
+export function SummaryIcon({ className }: IconProps): React.ReactElement {
+  return (
+    <svg aria-hidden="true" className={className} fill="none" stroke="currentColor"
+      strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+      <path d="M4 5h16" /><path d="M4 12h16" /><path d="M4 19h10" />
+    </svg>
+  );
+}

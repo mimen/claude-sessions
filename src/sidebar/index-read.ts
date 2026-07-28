@@ -36,6 +36,7 @@ interface IndexRow {
   models: string | null;
   cost_by_model: string | null;
   msg_count: number | null;
+  path: string | null;
 }
 
 function columnsOf(db: Database, table: string): Set<string> {
@@ -88,6 +89,9 @@ export function readIndexReadOnly(
     // Optional, not required: it only ages the enrichment summary, so an index without it should
     // cost the summary its age — never the whole session list.
     const messageCountExpression = available.has("msg_count") ? "msg_count" : "NULL AS msg_count";
+    // The transcript's own path, so a reader can ask the filesystem whether the session has moved
+    // since the index last looked. Optional for the same reason as msg_count.
+    const pathExpression = available.has("path") ? "path" : "NULL AS path";
     const titleSources = TITLE_COLUMNS.filter((column) => available.has(column));
     // COALESCE keeps the index's own title priority; with no title column at all the row still
     // has an id, and the caller falls back to cmux's workspace title.
@@ -97,7 +101,7 @@ export function readIndexReadOnly(
 
     const select =
       `SELECT session_id, resume_id, ${titleExpression} AS title, cwd, last_ts, models, cost_by_model,
-              ${messageCountExpression}
+              ${messageCountExpression}, ${pathExpression}
          FROM sessions`;
     let rows: IndexRow[];
 
@@ -143,6 +147,7 @@ export function readIndexReadOnly(
       models: parseJson<string[]>(row.models, []),
       costByModel: parseJson<Record<string, number>>(row.cost_by_model, {}),
       messageCount: row.msg_count ?? null,
+      transcriptPath: row.path ?? null,
     }));
   } finally {
     db.close();

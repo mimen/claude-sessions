@@ -11,6 +11,7 @@ import type { Lifecycle } from "../catalogue/db.ts";
 import { messagesSince, type StoredEnrichment } from "../catalogue/enrichment.ts";
 import type { Recommendation } from "../catalogue/enrichment-schema.ts";
 import { familyOf } from "../display/format.ts";
+import { enrichmentDriftLabel } from "../enrich/staleness.ts";
 
 export type { StoredEnrichment, Recommendation };
 
@@ -86,6 +87,14 @@ export interface IndexedSessionInput {
   readonly costByModel: Readonly<Record<string, number>>;
   /** Transcript message count, used to age the enrichment summary. */
   readonly messageCount?: number | null;
+  /** Where the transcript lives, so a caller can stat it. */
+  readonly transcriptPath?: string | null;
+  /**
+   * When the transcript was last written, in ms. The message count above comes from the index,
+   * and the index does not move for a live session -- so the count alone reports the sessions
+   * most likely to have drifted as perfectly current. The filesystem is the second opinion.
+   */
+  readonly transcriptMtimeMs?: number | null;
 }
 
 /** The checkout a directory belongs to, when the directory is inside a git repository. */
@@ -99,6 +108,14 @@ export interface CheckoutInput {
 
 /** An enrichment record plus how far the transcript has moved since it was written. */
 export interface SidebarSummary extends StoredEnrichment {
+  /**
+   * How out of date this enrichment is, or null when it is genuinely current.
+   *
+   * Not derivable from `messagesSince` alone: that counts index rows, and a live session's index
+   * row does not move, so zero means "the index has not caught up" rather than "nothing has
+   * happened". A transcript newer than the enrichment says so even when the count cannot.
+   */
+  readonly driftLabel: string | null;
   /**
    * Messages appended since the enrichment was generated, or null when either count is unknown.
    * Messages rather than turns: the catalogue records a message count at enrichment time and
@@ -164,6 +181,13 @@ export interface ProjectionInput {
   readonly unreadByWorkspaceId?: ReadonlyMap<string, number>;
   /** Enrichment records keyed by canonical session id and resume alias. */
   readonly summaries?: ReadonlyMap<string, StoredEnrichment>;
+  /**
+   * Titles the catalogue owns, already resolved by `displayTitle`: a human's title first, then
+   * enrichment's. Absent means nothing outranks the index title. Without this an enriched
+   * session keeps whatever cmux happened to call the tab, while `ccs ls` and the TUI show the
+   * accurate name -- the same session under two names in two places.
+   */
+  readonly preferredTitles?: ReadonlyMap<string, string>;
   /** False when cmux state could not be read; the UI must not claim sessions are closed. */
   readonly livenessReadable: boolean;
   /** False when the session index could not be read; models and the resume shelf go missing. */
@@ -464,6 +488,10 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     };
   };
 
+  const preferredTitles = input.preferredTitles ?? new Map<string, string>();
+  const preferredTitleFor = (sessionId: string, resumeId?: string): string | null =>
+    preferredTitles.get(sessionId) ?? (resumeId ? preferredTitles.get(resumeId) ?? null : null);
+
   const summaries = input.summaries ?? new Map<string, StoredEnrichment>();
   const summaryFor = (
     sessionId: string,
@@ -472,7 +500,18 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     const found = summaries.get(sessionId)
       ?? (indexed ? summaries.get(indexed.sessionId) ?? summaries.get(indexed.resumeId) : undefined);
     if (!found) return null;
-    return { ...found, messagesSince: messagesSince(found, indexed?.messageCount ?? null) };
+    const since = messagesSince(found, indexed?.messageCount ?? null);
+    return {
+      ...found,
+      messagesSince: since,
+      driftLabel: found.at === null
+        ? null
+        : enrichmentDriftLabel({
+            messagesSince: since ?? 0,
+            enrichmentAt: found.at,
+            transcriptMtimeMs: indexed?.transcriptMtimeMs ?? null,
+          }),
+    };
   };
   const faviconUrlFor = (cwd: string | null): string | null =>
     cwd && faviconDirectories.has(cwd) ? `/api/favicon?dir=${encodeURIComponent(cwd)}` : null;
@@ -511,7 +550,10 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
       density: densityFor(true, liveLifecycle),
       sessionId: canonicalSessionIdFor(live.sessionId, indexed),
       lifecycle: liveLifecycle,
-      name: cleanSessionName(live.workspaceTitle ?? indexed?.title ?? "Untitled session"),
+      name: cleanSessionName(
+        preferredTitleFor(live.sessionId, indexed?.resumeId)
+          ?? live.workspaceTitle ?? indexed?.title ?? "Untitled session",
+      ),
       directory: projectFor(cwd),
       directoryPath: cwd,
       faviconUrl: faviconUrlFor(cwd),
@@ -546,7 +588,9 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     density: densityFor(knownLive, lifecycleFor(session.sessionId, session)),
     sessionId: canonicalSessionIdFor(session.sessionId, session),
     lifecycle: lifecycleFor(session.sessionId, session),
-    name: cleanSessionName(session.title),
+    name: cleanSessionName(
+      preferredTitleFor(session.sessionId, session.resumeId) ?? session.title,
+    ),
     directory: projectFor(session.cwd),
     directoryPath: session.cwd,
     faviconUrl: faviconUrlFor(session.cwd),

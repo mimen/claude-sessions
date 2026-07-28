@@ -118,3 +118,28 @@ export function stalenessLabel(messagesSince: number): string | null {
   if (messagesSince <= 0) return null;
   return `not updated in ${messagesSince} turn${messagesSince === 1 ? "" : "s"}`;
 }
+
+/**
+ * The staleness warning a reader should see, given everything we can cheaply observe.
+ *
+ * `stalenessLabel` alone is not enough, and for the same reason the sweep was blind: it counts
+ * messages, the count comes from the index, and the index does not move for a live session. So the
+ * sessions most likely to have drifted are exactly the ones it reports as current.
+ *
+ * When the transcript has been written since the enrichment but the index has not caught up, we
+ * cannot say HOW far behind it is — only that it is. Saying so is strictly better than printing
+ * nothing, because the failure being prevented is a reader trusting confident prose that describes
+ * a session as it was hours ago.
+ */
+export function enrichmentDriftLabel(input: {
+  readonly messagesSince: number;
+  readonly enrichmentAt: string;
+  readonly transcriptMtimeMs: number | null;
+}): string | null {
+  const exact = stalenessLabel(input.messagesSince);
+  if (exact) return exact;
+  const enrichedAtMs = Date.parse(input.enrichmentAt);
+  if (Number.isNaN(enrichedAtMs) || input.transcriptMtimeMs === null) return null;
+  if (input.transcriptMtimeMs <= enrichedAtMs) return null;
+  return "session has moved since this was written";
+}

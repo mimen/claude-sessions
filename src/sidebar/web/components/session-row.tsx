@@ -21,6 +21,7 @@ import {
   FolderIcon,
   PinIcon,
   PinOffIcon,
+  SummaryIcon,
 } from "./icons.tsx";
 import {
   ContextMenu,
@@ -238,8 +239,6 @@ export function SessionRow({
       data-row-id={row.id}
       data-section={row.section}
       onClick={() => { if (!opening) onOpen(row); }}
-      onMouseEnter={(event) => onHover(row, event.currentTarget)}
-      onMouseLeave={() => onHover(row, null)}
       ref={registerRef}
       type="button"
     >
@@ -358,6 +357,22 @@ export function SessionRow({
 
           {session ? (
             <span className="mt-auto hidden h-5 items-center gap-1 group-hover:flex">
+              {/*
+                * The summary opens from its own control rather than from the row, so moving down
+                * the list never fires a card you did not ask for. Hover, not click: the card is
+                * the entire payload, so a click would have nothing left to do.
+                */}
+              <span
+                aria-label="Show summary"
+                className="flex size-5 shrink-0 cursor-help items-center justify-center rounded-sm
+                  border border-border bg-muted/40 text-muted-foreground transition-colors
+                  hover:bg-muted hover:text-foreground"
+                onMouseEnter={(event) => onHover(row, event.currentTarget.closest("button"))}
+                onMouseLeave={() => onHover(row, null)}
+                title="Show summary"
+              >
+                <SummaryIcon className="size-3" />
+              </span>
               {/*
                 * A finished session offers only the way back. Showing "Archive" next to a
                 * completed row invited a second terminal state that says nothing new, and

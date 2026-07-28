@@ -21,11 +21,19 @@ const RECOMMENDATION_TONES: Readonly<Record<string, string>> = {
   continue: "#4C8DFF",
 };
 
-/** How far the transcript has moved since the enrichment was written. */
-export function summaryAge(messagesSince: number | null): string | null {
-  if (messagesSince === null) return null;
-  if (messagesSince === 0) return "up to date";
-  return `${messagesSince} message${messagesSince === 1 ? "" : "s"} since`;
+/**
+ * How out of date the enrichment is, in the card's own words.
+ *
+ * The projection does the judging, because only it can see the filesystem. This deliberately never
+ * says "up to date": `messagesSince === 0` means the index has not moved, which is not the same as
+ * nothing having happened, and a live session's index row does not move at all. Claiming currency
+ * on exactly the sessions most likely to have drifted is the failure this replaced -- observed
+ * live, a session indexed at 154 messages whose transcript held 227 was labelled "up to date".
+ *
+ * Silence is the honest answer when there is nothing to warn about.
+ */
+export function summaryAge(driftLabel: string | null): string | null {
+  return driftLabel;
 }
 
 /** The whole enrichment record as plain text, for the clipboard. */
@@ -49,14 +57,14 @@ export function summaryAsText(summary: SidebarSummary, name: string): string {
  */
 export function EmptySummaryCard(): React.ReactElement {
   return (
-    <span className="text-[11px] leading-[1.4] text-muted-foreground">
+    <span className="text-[10px] leading-[1.35] text-muted-foreground">
       No summary yet. Enrichment has not run on this session.
     </span>
   );
 }
 
 export function SummaryCard({ summary }: { summary: SidebarSummary }): React.ReactElement {
-  const age = summaryAge(summary.messagesSince);
+  const age = summaryAge(summary.driftLabel);
   return (
     <>
       {summary.recommendation || age ? (
@@ -70,13 +78,13 @@ export function SummaryCard({ summary }: { summary: SidebarSummary }): React.Rea
                   background: RECOMMENDATION_TONES[summary.recommendation] ?? "var(--muted-foreground)",
                 }}
               />
-              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-foreground">
+              <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-foreground">
                 {summary.junk ? "junk" : summary.recommendation}
               </span>
             </>
           ) : null}
           {age ? (
-            <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">{age}</span>
+            <span className="ml-auto text-[9px] text-[color:var(--action-shelve)]">{age}</span>
           ) : null}
         </span>
       ) : null}
@@ -85,17 +93,17 @@ export function SummaryCard({ summary }: { summary: SidebarSummary }): React.Rea
         * never be scrolled. The body is therefore capped by clamping rather than overflow, and
         * "Copy summary" in the context menu is the way to read anything past the cut.
         */}
-      <span className="line-clamp-[10] text-[12px] leading-[1.45] text-foreground">
+      <span className="line-clamp-6 text-[11px] leading-[1.4] text-foreground">
         {summary.state}
       </span>
       {summary.next ? (
-        <span className="border-t border-border pt-2 text-[11px] leading-[1.4] text-foreground">
+        <span className="border-t border-border pt-1.5 text-[10px] leading-[1.35] text-foreground">
           <span className="text-muted-foreground">Next </span>
           {summary.next}
         </span>
       ) : null}
       {summary.reason ? (
-        <span className="border-t border-border pt-2 text-[11px] leading-[1.4] text-muted-foreground">
+        <span className="border-t border-border pt-1.5 text-[10px] leading-[1.35] text-muted-foreground">
           {summary.reason}
         </span>
       ) : null}

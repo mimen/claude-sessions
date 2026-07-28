@@ -24,45 +24,72 @@ export interface HoverTarget {
   readonly rect: DOMRect;
 }
 
-/** Narrow enough to read as an annotation on the row rather than a takeover of the sidebar. */
-const CARD_WIDTH = 300;
+/**
+ * Narrow enough to read as an annotation on the row rather than a takeover of the sidebar.
+ *
+ * The dock is itself only a few hundred pixels wide, so a card sized as a fraction of the
+ * viewport is indistinguishable from a full-width panel. A fixed, deliberately small width is
+ * what makes it read as a note about a row.
+ */
+const CARD_WIDTH = 240;
 const VIEWPORT_MARGIN = 8;
 /** Gap between the row and the card, so the card is clearly about the row and not part of it. */
 const ROW_GAP = 6;
 
+interface Placement {
+  readonly top: number;
+  readonly left: number;
+}
+
 export function HoverSummary({ target }: { target: HoverTarget | null }): React.ReactElement | null {
   const cardRef = useRef<HTMLDivElement | null>(null);
-  const [top, setTop] = useState(0);
+  const [placement, setPlacement] = useState<Placement | null>(null);
 
-  // Measured after paint: the height depends on how much prose this particular session has, so it
-  // cannot be known before the card exists. Until it is measured the card sits at the row's own
-  // top, which is already close, so the correction is invisible rather than a visible jump.
+  // Placement needs the card's height, which depends on how much prose this particular session has,
+  // so it cannot be known until the card exists. It is therefore rendered hidden for one frame and
+  // positioned here -- hidden rather than at a guessed position, because a card that visibly jumps
+  // is worse than one that appears a frame later.
   useLayoutEffect(() => {
-    if (!target) return;
+    if (!target) {
+      setPlacement(null);
+      return;
+    }
     const height = cardRef.current?.offsetHeight ?? 0;
-    const preferred = target.rect.top;
-    const maxTop = window.innerHeight - height - VIEWPORT_MARGIN;
-    setTop(Math.max(VIEWPORT_MARGIN, Math.min(preferred, maxTop)));
+    const below = target.rect.bottom + ROW_GAP;
+    const above = target.rect.top - height - ROW_GAP;
+
+    // Below the row by default, flipping above only when the card would run off the bottom. Never
+    // over the row: the row is what the card is describing, and covering it takes away the thing
+    // you were reading about.
+    const fitsBelow = below + height + VIEWPORT_MARGIN <= window.innerHeight;
+    const fitsAbove = above >= VIEWPORT_MARGIN;
+    const top = fitsBelow || !fitsAbove
+      ? Math.min(below, Math.max(VIEWPORT_MARGIN, window.innerHeight - height - VIEWPORT_MARGIN))
+      : above;
+
+    // Left-aligned with the row, clamped so a card near the edge stays fully on screen.
+    const left = Math.min(
+      Math.max(VIEWPORT_MARGIN, target.rect.left),
+      Math.max(VIEWPORT_MARGIN, window.innerWidth - CARD_WIDTH - VIEWPORT_MARGIN),
+    );
+    setPlacement({ top, left });
   }, [target]);
 
   if (!target) return null;
 
-  // Left of the sidebar when there is room, otherwise inside it. In cmux's left rail the sidebar is
-  // flush against the screen edge, so "inside" is the normal case; the outside placement is what
-  // keeps the card off the rows when the sidebar is docked right.
-  const spaceLeft = target.rect.left;
-  const left = spaceLeft >= CARD_WIDTH + VIEWPORT_MARGIN + ROW_GAP
-    ? target.rect.left - CARD_WIDTH - ROW_GAP
-    : Math.max(VIEWPORT_MARGIN, target.rect.right - CARD_WIDTH - VIEWPORT_MARGIN);
-
   return (
     <div
-      // Never interactive. The card overlaps the rows beneath it, so taking the pointer would keep
-      // it up while you reach for the next session and block the row you were reaching for.
-      className="pointer-events-none fixed z-50 flex flex-col gap-2 rounded-md border border-border
-        bg-popover p-2.5 text-popover-foreground shadow-lg"
+      // Never interactive. The card overlaps whatever is beneath it, so taking the pointer would
+      // keep it up while you reach for the next session and block the row you were reaching for.
+      className="pointer-events-none fixed z-50 flex flex-col gap-1.5 rounded-md border border-border
+        bg-popover px-2 py-1.5 text-popover-foreground shadow-lg"
       ref={cardRef}
-      style={{ left, top, width: CARD_WIDTH }}
+      style={{
+        left: placement?.left ?? 0,
+        top: placement?.top ?? 0,
+        width: CARD_WIDTH,
+        visibility: placement ? "visible" : "hidden",
+      }}
     >
       {target.row.summary
         ? <SummaryCard summary={target.row.summary} />

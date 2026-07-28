@@ -18,6 +18,7 @@ import { relativeTime } from "../format.ts";
 import { cn } from "@/lib/utils";
 import { SuggestionChip } from "./suggestion-chip.tsx";
 import { ProjectMark } from "./project-mark.tsx";
+import { SummaryIcon } from "./icons.tsx";
 
 export interface CompactRowProps {
   readonly row: SidebarSessionRow;
@@ -68,8 +69,8 @@ export function CompactRow({
         row.density === "settled" && "opacity-60",
       )}
       onClick={open}
-      onMouseEnter={(event) => { setHovered(true); onHover(row, event.currentTarget); }}
-      onMouseLeave={() => { setHovered(false); onHover(row, null); }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       ref={(element) => registerRef?.(row.id, element)}
       type="button"
     >
@@ -91,6 +92,18 @@ export function CompactRow({
           suggestion={suggestion}
         />
       ) : null}
+      {/* The same trigger the full rows use, so the gesture is one thing to learn. Only on hover:
+        * a column of icons down a list of closed sessions would out-shout the sessions. */}
+      <span
+        aria-label="Show summary"
+        className="hidden size-4 shrink-0 cursor-help items-center justify-center rounded-sm
+          text-muted-foreground/60 hover:text-foreground group-hover:flex"
+        onMouseEnter={(event) => onHover(row, event.currentTarget.closest("button"))}
+        onMouseLeave={() => onHover(row, null)}
+        title="Show summary"
+      >
+        <SummaryIcon className="size-3" />
+      </span>
       {age ? (
         <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">{age}</span>
       ) : null}
