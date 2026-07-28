@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import type { RoleDef, Kind, WorkUnitAnchorType, StageSchema } from "../catalogue/db.ts";
 import { ROLE_MODEL_IDS, parseRoleModel, type RoleModelId } from "../resume/role-model-launch.ts";
+import { isPermissionMode, permissionModeValidationError } from "./permission-mode.ts";
 
 /**
  * File-backed role definitions (ADR-0048/0050/0074): a role is a directory in a cluster package;
@@ -43,6 +44,8 @@ interface RoleToml {
   color?: unknown;
   /** Optional canonical model ID. Launcher/provider routing is derived by ccs. */
   model?: unknown;
+  /** Optional Claude Code operating posture, re-asserted at every embodiment. */
+  permission_mode?: string;
 }
 
 /** Read a role dir into a RoleDef. `dir` is the role's home; `cluster` is its grouping or null. */
@@ -64,6 +67,10 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
   const modelError = toml.model === undefined || model !== null
     ? null
     : `model must be one of: ${ROLE_MODEL_IDS.join(", ")}`;
+  const permissionMode = isPermissionMode(toml.permission_mode) ? toml.permission_mode : null;
+  const permissionModeError = toml.permission_mode === undefined || permissionMode !== null
+    ? null
+    : permissionModeValidationError();
   const kind: Kind | null = toml.kind === "loop" ? "loop" : toml.kind === "session" ? "session" : null;
   // ADR-0069: work_unit anchor type is authoritative; fall back to the interim ADR-0062 topology
   // (core→none, fleet→freeform) for a role.toml not yet migrated. null when neither is declared.
@@ -92,7 +99,8 @@ export function readRoleDir(dir: string, role: string, cluster: string | null): 
     pinOnResume: toml.pin_on_resume === true,
     color: typeof toml.color === "string" && /^#[0-9a-fA-F]{6}$/.test(toml.color) ? toml.color : null,
     model,
-    manifestError: tomlError ?? modelError,
+    permissionMode,
+    manifestError: tomlError ?? modelError ?? permissionModeError,
     // ADR-0074: skills + commands read from PROJECT-LOCAL .claude/ (Claude Code discovers them
     // from the role's cwd), with a fallback to the legacy top-level locations (so nothing breaks
     // before the config-side file moves). Hooks remain in .ccs-hooks (never project-local).

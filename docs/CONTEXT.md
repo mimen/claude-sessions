@@ -58,6 +58,7 @@ Post-ADR-0089, identity is a **first-class entity** with its own table — no lo
 - **role-def** — a role's DEFINITION, read from files (`role.toml` + directory structure), never a DB cache: `{role, cluster, kind, homeDir, resumeCommand, skills[], commands[], hooks[]}` (ADR-0050).
 - **role.toml** — the TOML manifest in a role directory holding the non-derivable bits (`kind`, `resume_command`; and per ADR-0062/0069 the `topology`/`work_unit` properties as they land). Everything else is derived from the directory.
 - **resume_command** — the command a **loop** re-fires on resume so it comes back running (e.g. `/loop 15m /pr-watch-control`).
+- **permission_mode** — **embodiment policy** (ADR-0094): the Claude Code operating posture (`bypassPermissions`, `plan`, …) authored in `cluster.toml` or `role.toml` and re-asserted as `--permission-mode` on EVERY birth and resume. Unlike **model** (birth-only, ADR-0091), it is not a property of the transcript — Claude Code never restores `bypassPermissions` on resume, so argv is the only enforcement point. Role overrides cluster; an explicit CLI flag overrides both.
 
 ### Stores (where state lives)
 

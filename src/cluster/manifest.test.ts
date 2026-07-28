@@ -83,6 +83,23 @@ test("readClusterManifest errs on malformed toml", () => {
   expect(res.ok).toBe(false);
 });
 
+test("ADR-0094: permission_mode parses, defaults to null, and errs LOUD on an unknown value", () => {
+  const declared = writeCluster("unattended", 'name = "unattended"\npermission_mode = "bypassPermissions"\n');
+  const ok = readClusterManifest("unattended", declared);
+  expect(ok.ok).toBe(true);
+  if (ok.ok) expect(ok.value.permissionMode).toBe("bypassPermissions");
+
+  const silent = writeCluster("silent", 'name = "silent"\n');
+  const none = readClusterManifest("silent", silent);
+  expect(none.ok).toBe(true);
+  if (none.ok) expect(none.value.permissionMode).toBeNull();
+
+  // Unlike role.toml (fail-open, most fields derived), a cluster manifest is fail-closed: a
+  // mistyped posture must surface rather than resolve to "whatever the session drifted into".
+  const typo = writeCluster("typo", 'name = "typo"\npermission_mode = "bypass"\n');
+  expect(readClusterManifest("typo", typo).ok).toBe(false);
+});
+
 test("readClusterManifest errs when required 'name' is missing", () => {
   const root = writeCluster("noname", 'engine = "engine"\n');
   const res = readClusterManifest("noname", root);
@@ -100,7 +117,7 @@ test("a manifest with no engine/version/requires_ccs parses with nulls (legacy c
 });
 
 const manifest = (over: Partial<ClusterManifest> = {}): ClusterManifest => ({
-  name: "c", engineDir: null, sensePath: null, boardPath: null, version: null, requiresCcs: null, groupingType: "epic", ...over,
+  name: "c", engineDir: null, sensePath: null, boardPath: null, version: null, requiresCcs: null, groupingType: "epic", permissionMode: null, ...over,
 });
 
 test("gate: no requirement → ok", () => {

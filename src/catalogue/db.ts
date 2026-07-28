@@ -1790,7 +1790,9 @@ export interface RoleDef {
   color: string | null;
   /** Optional canonical model policy authored in role.toml; launch routing is derived from it. */
   model: import("../resume/role-model-launch.ts").RoleModelId | null;
-  /** A malformed manifest/model is observable to readers and blocks a fresh birth. */
+  /** Claude Code operating posture to re-assert on every birth and resume; null when undeclared. */
+  permissionMode: string | null;
+  /** A malformed manifest/model/permission policy is observable and blocks a fresh birth. */
   manifestError: string | null;
   /** Skills / commands / hooks to materialize into ~/.claude for this role (ADR-0034). */
   skills: string[];

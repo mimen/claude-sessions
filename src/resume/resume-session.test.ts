@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { chooseLauncher, planResumeSession, resumeSessionEntry } from "./resume-session.ts";
 import { openIndex } from "../index/schema.ts";
-import { openCatalogue, setResumeId } from "../catalogue/db.ts";
+import { openCatalogue, setCluster, setResumeId, setRole } from "../catalogue/db.ts";
 import type { SessionRow } from "../index/index.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 
@@ -81,6 +81,46 @@ test("closed worker resumes bare (no resume_command)", () => {
   expect(plan.command.argv).toEqual(["claude", "--resume", "resume-1"]);
 });
 
+test("ADR-0094: a declared permission mode precedes the positional resume prompt", () => {
+  const plan = planResumeSession(
+    stubBridge([]),
+    row({ resumeId: "resume-1", cwd: "/tmp" }),
+    { resumeCommand: "/loop /event-watch", permissionMode: "bypassPermissions" },
+  );
+  expect(plan.action).toBe("resume");
+  if (plan.action !== "resume") throw new Error("unreachable");
+  // Order is load-bearing: the resume command is POSITIONAL, so a flag after it would be
+  // swallowed into the prompt text instead of parsed.
+  expect(plan.command.argv).toEqual([
+    "claude",
+    "--resume",
+    "resume-1",
+    "--permission-mode",
+    "bypassPermissions",
+    "/loop /event-watch",
+  ]);
+});
+
+test("ADR-0094: a worker with a declared mode and no resume command resumes with just the flag", () => {
+  const plan = planResumeSession(stubBridge([]), row({ resumeId: "resume-1", cwd: "/tmp" }), {
+    resumeCommand: null,
+    permissionMode: "bypassPermissions",
+  });
+  expect(plan.action).toBe("resume");
+  if (plan.action !== "resume") throw new Error("unreachable");
+  expect(plan.command.argv).toEqual(["claude", "--resume", "resume-1", "--permission-mode", "bypassPermissions"]);
+});
+
+test("no declared permission mode leaves argv byte-identical to pre-ADR-0094 resume", () => {
+  const plan = planResumeSession(stubBridge([]), row({ resumeId: "resume-1", cwd: "/tmp" }), {
+    resumeCommand: null,
+    permissionMode: null,
+  });
+  expect(plan.action).toBe("resume");
+  if (plan.action !== "resume") throw new Error("unreachable");
+  expect(plan.command.argv).not.toContain("--permission-mode");
+});
+
 test("liveness keys on resumeId (the id claude --resume uses), not the filename sessionId", () => {
   // open set holds the resume id; a session whose resumeId is open must be seen as open
   const plan = planResumeSession(
@@ -143,6 +183,29 @@ test("resumed status carries workspaceRef so callers can act on the workspace pr
     if (res.status !== "resumed") throw new Error("unreachable");
     // dry-run doesn't spawn → no ref, but the field is present in the union
     expect(res.workspaceRef).toBeNull();
+  } finally {
+    idx.close();
+    cat.close();
+  }
+});
+
+test("ADR-0094: resume policy FAILS OPEN — a deleted config package never strands history", () => {
+  // Deliberate asymmetry with birth: a fresh session refuses to launch under a broken policy, but
+  // an existing transcript must stay reachable even after its cluster package is gone or renamed.
+  const idx = openIndex(":memory:");
+  const cat = openCatalogue(":memory:");
+  const NOW = "2026-07-11T00:00:00Z";
+  try {
+    idx.query(
+      `INSERT INTO sessions (session_id, host, path, cwd, project_root, project_name,
+         fallback_label, first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id)
+       VALUES ('s3', 'h', '/store/s3.jsonl', '/tmp', '/tmp', 'p', 's3', $now, $now, 1, 0, 0, 0, 's3')`,
+    ).run({ $now: NOW });
+    setResumeId(cat, "s3", "s3", NOW);
+    setCluster(cat, "s3", "cluster-that-was-deleted", NOW);
+    setRole(cat, "s3", "role-that-was-deleted", NOW);
+    const res = resumeSessionEntry(idx, cat, "s3", { dryRun: true, bridge: stubBridge([]) });
+    expect(res.status).toBe("resumed");
   } finally {
     idx.close();
     cat.close();

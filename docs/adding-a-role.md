@@ -48,6 +48,7 @@ roles/<role>/
 - **kind** — `"loop"` (re-arms on resume) or `"session"` (bare). Currently required.
 - **resume_command** — the command a loop re-fires on resume (e.g. `"/loop 15m /pr-watch-control"`). Present iff `kind = "loop"`.
 - **model** — optional exact launch policy: `claude-opus-5`, `gpt-5.6-terra`, or `gpt-5.6-sol`. The role never names a provider or launcher; ccs compiles native Claude to `claude --model …` and GPT models to `claude-gpt --model …[1m]`. A model-policy role rejects `ccs new-session --via …` and `--model …`; malformed or alias values fail the new-session preflight.
+- **permission_mode** — optional operating posture (`acceptEdits`, `auto`, `bypassPermissions`, `default`, `manual`, `dontAsk`, `plan`), re-asserted as `--permission-mode` on every birth AND resume (ADR-0094). Overrides the same key in `cluster.toml`; an explicit `ccs new-session --permission-mode` still wins over both. Unlike `model`, this is NOT birth-only — Claude Code never restores `bypassPermissions` on resume, so argv is the only enforcement point.
 - **Future properties (per ADR-0062/0069, as they land):**
   - `topology` or `work_unit` — declares core vs fleet (e.g. `work_unit = "none"` for core, `work_unit = "pr"` for fleet).
   - Other role-specific properties as the platform evolves.
