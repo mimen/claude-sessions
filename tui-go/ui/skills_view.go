@@ -27,6 +27,8 @@ func (m Model) renderSkillsScreen() string {
 		viewLabel = "name"
 	case skillViewActivity:
 		viewLabel = "activity"
+	case skillViewSource:
+		viewLabel = "source"
 	case skillViewFlat:
 		viewLabel = "flat"
 	}

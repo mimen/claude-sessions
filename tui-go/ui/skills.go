@@ -17,8 +17,13 @@ const (
 	skillViewHome
 	skillViewName
 	skillViewActivity
+	skillViewSource
 	skillViewFlat
 )
+
+// firstPartyBucket collects the skills with no provenance slug in the source view.
+// Like "uncategorized" in the category view, it always sorts last.
+const firstPartyBucket = "first-party"
 
 type skillRow struct {
 	header bool
@@ -127,7 +132,7 @@ func (m Model) handleSkillKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.moveSkill(1)
 	case "g":
-		m.skillView = (m.skillView + 1) % 5
+		m.skillView = (m.skillView + 1) % 6
 		m.rebuildSkillRows()
 	case "/":
 		m.skillSearching = true
@@ -182,6 +187,12 @@ func buildSkillRows(all []skills.Skill, view skillView, query string) []skillRow
 			key = all[index].Name
 		case skillViewActivity:
 			key = skillActivity(all[index].Usage.LastUsed)
+		case skillViewSource:
+			// Group on the full <owner>/<repo> slug; an absent source is homegrown.
+			key = all[index].Source
+			if key == "" {
+				key = firstPartyBucket
+			}
 		}
 		if key == "" {
 			key = "uncategorized"
@@ -221,6 +232,9 @@ func buildSkillRows(all []skills.Skill, view skillView, query string) []skillRow
 			if view == skillViewCategory && (keys[i] == "uncategorized") != (keys[j] == "uncategorized") {
 				return keys[j] == "uncategorized"
 			}
+			if view == skillViewSource && (keys[i] == firstPartyBucket) != (keys[j] == firstPartyBucket) {
+				return keys[j] == firstPartyBucket
+			}
 			if len(buckets[keys[i]]) != len(buckets[keys[j]]) {
 				return len(buckets[keys[i]]) > len(buckets[keys[j]])
 			}
@@ -256,7 +270,7 @@ func matchesSkill(skill skills.Skill, query string) bool {
 	if query == "" {
 		return true
 	}
-	haystack := strings.ToLower(strings.Join([]string{skill.Name, skill.Description, skill.Path, skill.Category, strings.Join(skill.Tags, " ")}, " "))
+	haystack := strings.ToLower(strings.Join([]string{skill.Name, skill.Description, skill.Path, skill.Category, skill.Source, strings.Join(skill.Tags, " ")}, " "))
 	_, matched := fuzzyScore(query, haystack)
 	return matched
 }
