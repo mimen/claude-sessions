@@ -17,6 +17,13 @@ describe("rewriteFrontmatterCategory", () => {
     const noCat = "---\nname: x\n---\nBody\n";
     expect(rewriteFrontmatterCategory(noCat, null)).toBe(noCat);
   });
+  test("a source line is left untouched", () => {
+    const withSource = "---\nname: x\nsource: jakubkrehel/skills\ncategory: dev\n---\nBody\n";
+    expect(rewriteFrontmatterCategory(withSource, "infra")).toBe(
+      "---\nname: x\nsource: jakubkrehel/skills\ncategory: infra\n---\nBody\n",
+    );
+    expect(rewriteFrontmatterCategory(withSource, null)).toBe("---\nname: x\nsource: jakubkrehel/skills\n---\nBody\n");
+  });
   test("no frontmatter → null", () => {
     expect(rewriteFrontmatterCategory("# Just a doc", "dev")).toBeNull();
   });

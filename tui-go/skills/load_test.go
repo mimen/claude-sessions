@@ -1,15 +1,94 @@
 package skills
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestParseFrontmatterFoldedDescription(t *testing.T) {
-	frontmatter := parseFrontmatter("---\nname: sample\ndescription: >-\n  one line\n  two line\ncategory: dev\n---\nbody")
+	frontmatter := parseFrontmatter("---\nname: sample\ndescription: >-\n  one line\n  two line\ncategory: dev\nsource: jakubkrehel/skills\n---\nbody")
 	if frontmatter["name"] != "sample" || frontmatter["description"] != "one line two line" || frontmatter["category"] != "dev" {
 		t.Fatalf("frontmatter = %#v", frontmatter)
+	}
+	if frontmatter["source"] != "jakubkrehel/skills" {
+		t.Fatalf("source = %q", frontmatter["source"])
+	}
+}
+
+func writeSkillsCache(t *testing.T, statements []string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "skills.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestLoadCacheReadsSourceColumn(t *testing.T) {
+	path := writeSkillsCache(t, []string{
+		`CREATE TABLE skills (name TEXT, path TEXT, real_path TEXT, ecosystem TEXT, description TEXT, aliases TEXT, mtime_ms REAL, content_hash TEXT, category TEXT, source TEXT)`,
+		`INSERT INTO skills VALUES ('vendored', '/skills/vendored', '/skills/vendored', 'claude-user', '', '[]', 0, 'a', 'dev', 'jakubkrehel/skills')`,
+		`INSERT INTO skills VALUES ('homegrown', '/skills/homegrown', '/skills/homegrown', 'claude-user', '', '[]', 0, 'b', 'dev', NULL)`,
+	})
+	loaded, err := loadCache(path, "/Users/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bySource := make(map[string]string, len(loaded))
+	for _, skill := range loaded {
+		bySource[skill.Name] = skill.Source
+	}
+	if bySource["vendored"] != "jakubkrehel/skills" {
+		t.Fatalf("vendored source = %q", bySource["vendored"])
+	}
+	if bySource["homegrown"] != "" {
+		t.Fatalf("homegrown source = %q", bySource["homegrown"])
+	}
+}
+
+func TestLoadCacheToleratesMissingSourceColumn(t *testing.T) {
+	path := writeSkillsCache(t, []string{
+		`CREATE TABLE skills (name TEXT, path TEXT, real_path TEXT, ecosystem TEXT, description TEXT, aliases TEXT, mtime_ms REAL, content_hash TEXT, category TEXT)`,
+		`INSERT INTO skills VALUES ('legacy', '/skills/legacy', '/skills/legacy', 'claude-user', '', '[]', 0, 'a', 'dev')`,
+	})
+	loaded, err := loadCache(path, "/Users/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 || loaded[0].Source != "" || loaded[0].Category != "dev" {
+		t.Fatalf("loaded = %+v", loaded)
+	}
+}
+
+func TestScanMachineReadsFrontmatterSource(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "Documents", "vendor", "skills", "imported", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("---\nname: imported\nsource: mattpocock/skills\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scanned, _, err := scanMachine(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scanned) != 1 || scanned[0].Source != "mattpocock/skills" {
+		t.Fatalf("scanned = %+v", scanned)
 	}
 }
 

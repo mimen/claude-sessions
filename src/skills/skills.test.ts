@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { classifyPath, parseFrontmatter } from "./scan.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { classifyPath, parseFrontmatter, type SkillRecord } from "./scan.ts";
+import { openSkillsDb, saveSkills, loadSkills } from "./db.ts";
 import { extractEvents, makeSkillDirMatcher } from "./usage.ts";
 
 const HOME = "/Users/mimen";
@@ -63,6 +67,47 @@ describe("parseFrontmatter", () => {
   test("quoted values are unquoted", () => {
     const fm = parseFrontmatter('---\nname: "quoted"\n---\n');
     expect(fm.name).toBe("quoted");
+  });
+  test("source slug is parsed alongside category", () => {
+    const fm = parseFrontmatter("---\nname: x\ncategory: dev\nsource: jakubkrehel/skills\n---\n");
+    expect(fm.category).toBe("dev");
+    expect(fm.source).toBe("jakubkrehel/skills");
+  });
+  test("absent source is undefined (first-party)", () => {
+    expect(parseFrontmatter("---\nname: x\n---\n").source).toBeUndefined();
+  });
+});
+
+describe("skills db source column", () => {
+  function record(over: Partial<SkillRecord>): SkillRecord {
+    return {
+      name: "x",
+      path: `${HOME}/.claude/skills/x`,
+      realPath: `${HOME}/.claude/skills/x`,
+      ecosystem: "claude-user",
+      description: "",
+      aliases: [],
+      mtimeMs: 0,
+      contentHash: "h",
+      ...over,
+    };
+  }
+
+  test("source round-trips through save/load; absent stays null", () => {
+    const db = openSkillsDb(join(mkdtempSync(join(tmpdir(), "ccs-skills-db-")), "skills.db"));
+    try {
+      saveSkills(db, [
+        record({ name: "vendored", path: "/1/vendored", source: "jakubkrehel/skills" }),
+        record({ name: "homegrown", path: "/2/homegrown" }),
+      ]);
+      const loaded = loadSkills(db).sort((a, b) => a.name.localeCompare(b.name));
+      expect(loaded.map((r) => [r.name, r.source])).toEqual([
+        ["homegrown", null],
+        ["vendored", "jakubkrehel/skills"],
+      ]);
+    } finally {
+      db.close();
+    }
   });
 });
 

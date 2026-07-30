@@ -97,7 +97,7 @@ func (m Model) renderSkillRow(width int, skill skills.Skill, selected bool) stri
 		if skill.Usage.Invocations+skill.Usage.Commands+skill.Usage.Reads > 0 {
 			usage = fmt.Sprintf("%d/%d/%d", skill.Usage.Invocations, skill.Usage.Commands, skill.Usage.Reads)
 		}
-		right = style(theme.FgMoreSubtle).Render(pad(skill.Home, 13) + " " + pad(skill.Category, 12) + " " + lpad(usage, 9) + " " + lpad(skillAge(skill.Usage.LastUsed), 5))
+		right = style(theme.FgMoreSubtle).Render(pad(skill.Home, 11) + " " + pad(skill.Category, 10) + " " + pad(skillSourceOwner(skill.Source), 8) + " " + lpad(usage, 9) + " " + lpad(skillAge(skill.Usage.LastUsed), 5))
 	}
 	nameWidth := max(1, width-lipgloss.Width(right)-3)
 	name := skill.Name
@@ -129,6 +129,7 @@ func (m Model) renderSkillPreview(width int, height int) string {
 		fg(theme.FgMostSubtle).Render(pad("home", 11)) + fg(theme.Info).Render(truncate(skill.Home, max(1, width-11))),
 		fg(theme.FgMostSubtle).Render(pad("ecosystem", 11)) + fg(theme.FgSubtle).Render(truncate(skill.Ecosystem, max(1, width-11))),
 		fg(theme.FgMostSubtle).Render(pad("category", 11)) + fg(theme.Keyword).Render(truncate(nonEmpty(skill.Category, "—"), max(1, width-11))),
+		fg(theme.FgMostSubtle).Render(pad("source", 11)) + fg(theme.FgSubtle).Render(truncate(nonEmpty(skill.Source, "—"), max(1, width-11))),
 		fg(theme.FgMostSubtle).Render(pad("path", 11)) + fg(theme.FgSubtle).Render(truncate(compactHome(skill.Path), max(1, width-11))),
 	}
 	if len(skill.Tags) > 0 {
@@ -215,6 +216,19 @@ func (m Model) renderSkillFooter(width int) string {
 		return fit(fg(theme.Warning).Render(m.skillWarning)+fg(theme.FgMoreSubtle).Render(" · R rescan"), width)
 	}
 	return fit(fg(theme.Accent).Bold(true).Render("Tab")+fg(theme.FgMoreSubtle).Render(" sessions · ")+fg(theme.Accent).Bold(true).Render("↑↓")+fg(theme.FgMoreSubtle).Render(" move · ")+fg(theme.Accent).Bold(true).Render("v/enter")+fg(theme.FgMoreSubtle).Render(" read · ")+fg(theme.Accent).Bold(true).Render("/")+fg(theme.FgMoreSubtle).Render(" search · ")+fg(theme.Accent).Bold(true).Render("g")+fg(theme.FgMoreSubtle).Render(" view · ")+fg(theme.Accent).Bold(true).Render("p")+fg(theme.FgMoreSubtle).Render(" preview · ")+fg(theme.Accent).Bold(true).Render("R")+fg(theme.FgMoreSubtle).Render(" rescan · q quit"), width)
+}
+
+// skillSourceOwner renders the SOURCE cell: the owner segment of the <owner>/<repo>
+// provenance slug, or the em-dash placeholder for first-party skills.
+func skillSourceOwner(source string) string {
+	if source == "" {
+		return "—"
+	}
+	owner, _, found := strings.Cut(source, "/")
+	if !found || owner == "" {
+		return source
+	}
+	return owner
 }
 
 func skillAge(value string) string {

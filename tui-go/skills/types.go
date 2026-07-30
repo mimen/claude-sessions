@@ -18,11 +18,13 @@ type Skill struct {
 	Home        string
 	Description string
 	Category    string
-	Aliases     []string
-	Tags        []string
-	Hash        string
-	Usage       Usage
-	Drift       bool
+	// Source is the provenance slug (<owner>/<repo>) from SKILL.md frontmatter; "" is first-party.
+	Source  string
+	Aliases []string
+	Tags    []string
+	Hash    string
+	Usage   Usage
+	Drift   bool
 }
 
 // Snapshot is one immutable registry load.

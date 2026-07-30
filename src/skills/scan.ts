@@ -39,6 +39,12 @@ export interface SkillRecord {
    * is the fallback/override layer for skills whose files we don't own (plugins, other tools).
    */
   category?: string | null;
+  /**
+   * Provenance from SKILL.md frontmatter as a GitHub slug (`<owner>/<repo>`) — canonical
+   * exactly like `category` (travels with the file, survives db rebuilds). Absent means
+   * first-party/homegrown and renders as the em-dash placeholder.
+   */
+  source?: string | null;
 }
 
 const EXCLUDES = ["*/node_modules/*", "*/Library/*", "*/.Trash/*", "*/.git/*", "*/.archive/*"];
@@ -77,7 +83,7 @@ export function classifyPath(path: string, home: string = homedir()): Ecosystem 
  * Minimal YAML frontmatter reader for SKILL.md: top `---` block, `key: value` lines,
  * folded blocks (`key: >-` / `|`) joined from their indented continuation lines.
  */
-export function parseFrontmatter(text: string): { name?: string; description?: string; category?: string } {
+export function parseFrontmatter(text: string): { name?: string; description?: string; category?: string; source?: string } {
   if (!text.startsWith("---")) return {};
   const end = text.indexOf("\n---", 3);
   if (end === -1) return {};
@@ -100,7 +106,7 @@ export function parseFrontmatter(text: string): { name?: string; description?: s
     }
     out[key] = value.replace(/^["']|["']$/g, "");
   }
-  return { name: out["name"], description: out["description"], category: out["category"] };
+  return { name: out["name"], description: out["description"], category: out["category"], source: out["source"] };
 }
 
 /**
@@ -165,7 +171,7 @@ export async function discoverSkills(root: string = homedir()): Promise<Result<S
       if (dir !== existing.path && !existing.aliases.includes(dir)) existing.aliases.push(dir);
       continue;
     }
-    let fm: { name?: string; description?: string; category?: string } = {};
+    let fm: { name?: string; description?: string; category?: string; source?: string } = {};
     let contentHash = "";
     try {
       const text = readFileSync(line, "utf8");
@@ -184,6 +190,7 @@ export async function discoverSkills(root: string = homedir()): Promise<Result<S
       mtimeMs,
       contentHash,
       category: fm.category?.trim() || null,
+      source: fm.source?.trim() || null,
     });
   }
 

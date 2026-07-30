@@ -7,10 +7,10 @@ import type { UsageTotals } from "./db.ts";
  * search filtering, and the section/item builder for every view mode.
  */
 
-export type SkillsView = "home" | "name" | "category" | "activity" | "flat" | "access";
-export const SKILLS_VIEW_CYCLE: SkillsView[] = ["home", "name", "category", "activity", "flat"];
+export type SkillsView = "home" | "name" | "category" | "source" | "activity" | "flat" | "access";
+export const SKILLS_VIEW_CYCLE: SkillsView[] = ["home", "name", "category", "source", "activity", "flat"];
 /** Inside a context lens the extra "access" view (grouped by HOW a skill loads) leads the cycle. */
-export const CONTEXT_VIEW_CYCLE: SkillsView[] = ["access", "home", "name", "category", "activity", "flat"];
+export const CONTEXT_VIEW_CYCLE: SkillsView[] = ["access", "home", "name", "category", "source", "activity", "flat"];
 
 /**
  * Stable color per category so the CATEGORY column scans at a glance. Fixed map for the
@@ -25,6 +25,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   pkm: "cyan",
   loops: "magenta",
   dev: "yellow",
+  design: "#c58fd9", // orchid
   infra: "#9aa3b2", // grey — plumbing
   services: "green",
 };
@@ -48,6 +49,8 @@ export interface SkillRow {
   /** Human "where it lives": global, a repo/workspace name, plugin:<mkt>, codex, … */
   home: string;
   category: string | null;
+  /** Provenance slug (`<owner>/<repo>`) from frontmatter; null means first-party. */
+  source: string | null;
   tags: string[];
   /** Usage is name-keyed, so all copies of a name share it. */
   usage: UsageTotals | null;
@@ -186,16 +189,21 @@ export function driftedNames(records: readonly SkillRecord[]): Set<string> {
 
 /**
  * Search: plain terms fuzzy-match name/description/path (case-insensitive substring per term);
- * `#term` matches category or tags exactly.
+ * `#term` matches category, tags, or source (full `<owner>/<repo>` slug or bare owner) exactly.
  */
 export function matchesQuery(row: SkillRow, query: string): boolean {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return true;
   const haystack = `${row.rec.name} ${row.rec.description} ${row.rec.path}`.toLowerCase();
+  const source = (row.source ?? "").toLowerCase();
+  const sourceOwner = source.split("/")[0] ?? "";
   for (const term of terms) {
     if (term.startsWith("#")) {
       const want = term.slice(1);
-      const has = (row.category ?? "").toLowerCase() === want || row.tags.some((t) => t.toLowerCase() === want);
+      const has =
+        (row.category ?? "").toLowerCase() === want ||
+        row.tags.some((t) => t.toLowerCase() === want) ||
+        (source !== "" && (source === want || sourceOwner === want));
       if (!has) return false;
     } else if (!haystack.includes(term)) {
       return false;
@@ -276,7 +284,9 @@ export function buildSkillItems(rows: SkillRow[], ctx: BuildCtx): SkillItem[] {
         ? r.rec.name
         : ctx.view === "category"
           ? r.category ?? "uncategorized"
-          : activityOf(r.usage, ctx.nowMs);
+          : ctx.view === "source"
+            ? r.source ?? "first-party"
+            : activityOf(r.usage, ctx.nowMs);
 
   const buckets = new Map<string, SkillRow[]>();
   for (const r of rows) {
@@ -301,6 +311,11 @@ export function buildSkillItems(rows: SkillRow[], ctx: BuildCtx): SkillItem[] {
     if (ctx.view === "category" && keys.includes("uncategorized")) {
       keys = keys.filter((k) => k !== "uncategorized");
       keys.push("uncategorized");
+    }
+    // Same idea for provenance: homegrown skills are the baseline, so vendored sources lead.
+    if (ctx.view === "source" && keys.includes("first-party")) {
+      keys = keys.filter((k) => k !== "first-party");
+      keys.push("first-party");
     }
   }
 

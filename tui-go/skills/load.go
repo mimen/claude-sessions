@@ -104,7 +104,11 @@ func loadCache(path string, home string) ([]Skill, error) {
 	} else if columns["fm_category"] {
 		categoryColumn = "coalesce(fm_category, '')"
 	}
-	rows, err := db.Query("SELECT name, path, real_path, ecosystem, description, aliases, content_hash, " + categoryColumn + " FROM skills")
+	sourceColumn := "''"
+	if columns["source"] {
+		sourceColumn = "coalesce(source, '')"
+	}
+	rows, err := db.Query("SELECT name, path, real_path, ecosystem, description, aliases, content_hash, " + categoryColumn + ", " + sourceColumn + " FROM skills")
 	if err != nil {
 		return nil, fmt.Errorf("query skills cache: %w", err)
 	}
@@ -113,7 +117,7 @@ func loadCache(path string, home string) ([]Skill, error) {
 	for rows.Next() {
 		var skill Skill
 		var aliasesJSON string
-		if err := rows.Scan(&skill.Name, &skill.Path, &skill.RealPath, &skill.Ecosystem, &skill.Description, &aliasesJSON, &skill.Hash, &skill.Category); err != nil {
+		if err := rows.Scan(&skill.Name, &skill.Path, &skill.RealPath, &skill.Ecosystem, &skill.Description, &aliasesJSON, &skill.Hash, &skill.Category, &skill.Source); err != nil {
 			return nil, fmt.Errorf("scan skills cache: %w", err)
 		}
 		_ = json.Unmarshal([]byte(aliasesJSON), &skill.Aliases)
@@ -331,6 +335,7 @@ func scanMachine(home string) ([]Skill, []string, error) {
 		name := filepath.Base(dir)
 		description := ""
 		category := ""
+		source := ""
 		hash := ""
 		if readErr == nil {
 			frontmatter := parseFrontmatter(string(contents))
@@ -339,12 +344,13 @@ func scanMachine(home string) ([]Skill, []string, error) {
 			}
 			description = frontmatter["description"]
 			category = frontmatter["category"]
+			source = frontmatter["source"]
 			digest := sha256.Sum256(contents)
 			hash = hex.EncodeToString(digest[:8])
 		}
 		byReal[real] = &Skill{
 			Name: name, Path: dir, RealPath: real, Ecosystem: classifyPath(real, home),
-			Home: homeOf(dir, home), Description: description, Category: category, Hash: hash,
+			Home: homeOf(dir, home), Description: description, Category: category, Source: source, Hash: hash,
 		}
 	}
 	probeSymlinkFarms(byReal, home)

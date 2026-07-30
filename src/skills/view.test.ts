@@ -24,6 +24,7 @@ function row(over: Omit<Partial<SkillRow>, "rec"> & { rec?: Partial<SkillRecord>
     rec: rec(over.rec ?? {}),
     home: over.home ?? "global",
     category: over.category ?? null,
+    source: over.source ?? null,
     tags: over.tags ?? [],
     usage: over.usage ?? null,
     drift: over.drift ?? false,
@@ -95,6 +96,16 @@ describe("matchesQuery", () => {
     expect(matchesQuery(r, "#messaging")).toBe(true);
     expect(matchesQuery(r, "#comm")).toBe(false);
   });
+  test("#term matches the source owner or the full slug", () => {
+    const vendored = row({ rec: { name: "vendored" }, source: "jakubkrehel/skills" });
+    expect(matchesQuery(vendored, "#jakubkrehel")).toBe(true);
+    expect(matchesQuery(vendored, "#jakubkrehel/skills")).toBe(true);
+    expect(matchesQuery(vendored, "#skills")).toBe(false);
+    expect(matchesQuery(vendored, "#mattpocock")).toBe(false);
+  });
+  test("first-party rows match no source term", () => {
+    expect(matchesQuery(r, "#jakubkrehel")).toBe(false);
+  });
 });
 
 describe("buildSkillItems", () => {
@@ -113,6 +124,18 @@ describe("buildSkillItems", () => {
     const items = buildSkillItems(rows, { view: "category", sort: "name", collapsed: new Set(), nowMs: now });
     const sections = items.filter((i) => i.kind === "section") as Array<{ key: string }>;
     expect(sections[sections.length - 1]!.key).toBe("uncategorized");
+  });
+  test("source view groups by slug and pins first-party last", () => {
+    const sourced = [
+      ...rows,
+      row({ rec: { name: "d", path: "/3/d" }, source: "jakubkrehel/skills" }),
+      row({ rec: { name: "e", path: "/3/e" }, source: "jakubkrehel/skills" }),
+      row({ rec: { name: "f", path: "/4/f" }, source: "mattpocock/skills" }),
+    ];
+    const items = buildSkillItems(sourced, { view: "source", sort: "name", collapsed: new Set(), nowMs: now });
+    const sections = items.filter((i) => i.kind === "section") as Array<{ key: string; count: number }>;
+    expect(sections.map((s) => s.key)).toEqual(["jakubkrehel/skills", "mattpocock/skills", "first-party"]);
+    expect(sections[sections.length - 1]!.count).toBe(3);
   });
   test("activity view fixed order + collapse hides rows", () => {
     const items = buildSkillItems(rows, { view: "activity", sort: "name", collapsed: new Set(["unobserved"]), nowMs: now });

@@ -6,7 +6,7 @@ import type { SkillRecord, Ecosystem } from "./scan.ts";
  * - Cache tables (skills, usage_files, usage_counts) are rebuildable — dropped on version bump.
  * - The tags table is durable user-authored organization (like the Catalogue) and is NEVER dropped.
  */
-export const SKILLS_CACHE_VERSION = 3;
+export const SKILLS_CACHE_VERSION = 4;
 
 export function openSkillsDb(dbPath: string): Database {
   const db = new Database(dbPath, { create: true });
@@ -45,7 +45,8 @@ export function openSkillsDb(dbPath: string): Database {
       aliases     TEXT NOT NULL DEFAULT '[]',
       mtime_ms    REAL NOT NULL DEFAULT 0,
       content_hash TEXT NOT NULL DEFAULT '',
-      category    TEXT
+      category    TEXT,
+      source      TEXT
     );
   `);
   db.exec(`
@@ -85,12 +86,12 @@ export function serializeSkillsWrite<T>(fn: () => Promise<T> | T): Promise<T> {
 /** Replace the whole cached registry with a fresh scan result. */
 export function saveSkills(db: Database, records: SkillRecord[]): void {
   const insert = db.prepare(
-    "INSERT OR REPLACE INTO skills (name, path, real_path, ecosystem, description, aliases, mtime_ms, content_hash, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT OR REPLACE INTO skills (name, path, real_path, ecosystem, description, aliases, mtime_ms, content_hash, category, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const tx = db.transaction((rows: SkillRecord[]) => {
     db.exec("DELETE FROM skills;");
     for (const r of rows) {
-      insert.run(r.name, r.path, r.realPath, r.ecosystem, r.description, JSON.stringify(r.aliases), r.mtimeMs, r.contentHash, r.category ?? null);
+      insert.run(r.name, r.path, r.realPath, r.ecosystem, r.description, JSON.stringify(r.aliases), r.mtimeMs, r.contentHash, r.category ?? null, r.source ?? null);
     }
   });
   tx(records);
@@ -112,6 +113,7 @@ export function loadSkills(db: Database): SkillRecord[] {
     mtime_ms: number;
     content_hash: string;
     category: string | null;
+    source: string | null;
   }>;
   return rows.map((r) => ({
     name: r.name,
@@ -123,6 +125,7 @@ export function loadSkills(db: Database): SkillRecord[] {
     mtimeMs: r.mtime_ms,
     contentHash: r.content_hash,
     category: r.category ?? null,
+    source: r.source ?? null,
   }));
 }
 
