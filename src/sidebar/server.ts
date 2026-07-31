@@ -10,7 +10,7 @@ import { isIPv4 } from "node:net";
 import { err, ok, type Result } from "../result.ts";
 import { loadFavicon } from "./favicon.ts";
 import { RECOMMENDATIONS } from "../catalogue/enrichment-schema.ts";
-import type { SidebarView } from "./projection.ts";
+import type { SidebarLifecycle, SidebarView } from "./projection.ts";
 import type { SessionLifecycleAction, SidebarSource } from "./snapshot.ts";
 
 /**
@@ -184,8 +184,15 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         const limit = Number.isFinite(limitRaw)
           ? Math.min(Math.max(Math.trunc(limitRaw), MIN_ROW_LIMIT), MAX_ROW_LIMIT)
           : undefined;
+        // Which finished sections the client currently has expanded. Anything not named is not
+        // projected, so a shelved section costs nothing.
+        const include = (url.searchParams.get("include") ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter((value): value is SidebarLifecycle =>
+            value === "completed" || value === "archived");
         try {
-          return json(await source.snapshot(scope, limit));
+          return json(await source.snapshot(scope, limit, include));
         } catch {
           return json({ error: "snapshot failed" }, 500);
         }

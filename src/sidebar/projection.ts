@@ -214,6 +214,14 @@ export interface ProjectionInput {
   /** Epoch milliseconds used for relative times. */
   readonly now: number;
   /** How many resumable sessions the active shelf may show. */
+  /**
+   * Lifecycles this projection should emit rows for, beyond the scope's own.
+   *
+   * The finished sections are groups in the one list now, so the active view has to be able to
+   * carry completed and archived rows when those sections are expanded. Absent means the scope
+   * alone, which is the behaviour every other caller wants.
+   */
+  readonly includeLifecycles?: readonly SidebarLifecycle[];
   /** Keep only rows carrying an un-acted enrichment verdict. */
   readonly triageOnly?: boolean;
   /** Totals per lifecycle, from the catalogue rather than from the rows in view. */
@@ -223,7 +231,22 @@ export interface ProjectionInput {
   readonly historyLimit?: number;
 }
 
-export type SidebarSection = "needs-you" | "working" | "ready" | "recent" | "other";
+export type SidebarSection =
+  | "needs-you"
+  | "working"
+  | "ready"
+  | "recent"
+  | "other"
+  /**
+   * Finished work, as sections rather than a separate scope.
+   *
+   * These exist so completed and archived sessions can be headers in the one list, opened and
+   * closed like every other group. They were bottom bars while every group was permanently
+   * expanded; once a header can be shelved, a pinned affordance is a second way to do what
+   * collapsing already does.
+   */
+  | "completed"
+  | "archived";
 
 export interface SidebarModel {
   readonly id: string;
@@ -490,6 +513,16 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
    * line inside a collapsed section. Liveness rather than lifecycle decides the first split,
    * because closing is a memory decision and completing is a judgment about the work.
    */
+  /**
+   * Finished work belongs to its disposition, whatever its liveness would otherwise say. A
+   * completed session that happens to still be open is still completed, and burying it under
+   * "Ready" would put it back in the queue it just left.
+   */
+  const sectionForLifecycle = (
+    lifecycle: SidebarLifecycle,
+    whenActive: SidebarSection,
+  ): SidebarSection => (lifecycle === "active" ? whenActive : lifecycle);
+
   const densityFor = (live: boolean, lifecycle: SidebarLifecycle): SidebarDensity =>
     lifecycle !== "active" ? "settled" : live ? "full" : "line";
 
@@ -594,7 +627,10 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
       status: live.status,
       statusAvailability: live.statusAvailability,
       lastActivityAt: cmuxActivity ?? parseTimestamp(indexed?.lastTs ?? null),
-      section: sectionForStatus(live.status, live.statusAvailability),
+      section: sectionForLifecycle(
+        liveLifecycle,
+        sectionForStatus(live.status, live.statusAvailability),
+      ),
       workspaceRef: live.workspaceRef,
       pinned: live.pinned,
       focused: live.focused,
@@ -631,7 +667,10 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     status: null,
     statusAvailability: knownLive ? "absent" : "not-live",
     lastActivityAt: parseTimestamp(session.lastTs),
-    section: knownLive ? "ready" : "recent",
+    section: sectionForLifecycle(
+      lifecycleFor(session.sessionId, session),
+      knownLive ? "ready" : "recent",
+    ),
     workspaceRef: null,
     pinned: false,
     focused: false,
@@ -701,9 +740,15 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
       const limit = input.recentLimit ?? DEFAULT_RECENT_LIMIT;
       const seen = new Set<string>();
       let added = 0;
+      const shelfLifecycles = new Set<SidebarLifecycle>([
+        "active",
+        ...(input.includeLifecycles ?? []),
+      ]);
       for (const session of input.indexed) {
         if (added >= limit) break;
-        if (lifecycleFor(session.sessionId, session) !== "active") continue;
+        // A finished session reaches the shelf only while its section is expanded; the section it
+        // lands in is decided by `sectionForLifecycle`, not here.
+        if (!shelfLifecycles.has(lifecycleFor(session.sessionId, session))) continue;
         if (liveIds.has(session.sessionId) || liveIds.has(session.resumeId)) continue;
         if (seen.has(session.sessionId)) continue;
         seen.add(session.sessionId);

@@ -29,13 +29,14 @@ import { Input } from "@/components/ui/input";
 import { SearchIcon } from "./components/icons.tsx";
 import { GroupingSelect } from "./components/grouping-select.tsx";
 import { ScopeSelect } from "./components/scope-select.tsx";
-import { LifecycleBars } from "./components/lifecycle-bars.tsx";
+import { GroupHeader } from "./components/group-header.tsx";
 import { Toasts, type Toast } from "./components/toasts.tsx";
 import { cn } from "@/lib/utils";
 
 const POLL_INTERVAL_MS = 1_000;
 const GROUPING_STORAGE_KEY = "ccs-sidebar-grouping";
 const SCOPE_STORAGE_KEY = "ccs-sidebar-scope";
+const COLLAPSED_STORAGE_KEY = "ccs-sidebar-collapsed";
 const CLOCK_INTERVAL_MS = 30_000;
 /** Long enough not to fire while scanning past rows, short enough not to feel like waiting. */
 const HOVER_DELAY_MS = 220;
@@ -141,6 +142,23 @@ export function App(): React.ReactElement {
    * looks like a session that is gone. This grows as you reach the end, so the list simply
    * continues.
    */
+  /**
+   * Group keys the user has shelved. Persisted, because a shelved group is a standing decision
+   * about what you want to see, not a per-visit preference.
+   *
+   * Finished sections start collapsed: they are the least likely to need you, and expanding one is
+   * also what asks the server for its rows, so the default costs nothing.
+   */
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => {
+    const stored = localStorage.getItem(COLLAPSED_STORAGE_KEY);
+    if (stored === null) return new Set(["completed", "archived"]);
+    try {
+      return new Set(JSON.parse(stored) as string[]);
+    } catch {
+      return new Set(["completed", "archived"]);
+    }
+  });
+  const collapsedRef = useRef(collapsed);
   const [rowLimit, setRowLimit] = useState(ROW_PAGE);
   const rowLimitRef = useRef(ROW_PAGE);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -170,8 +188,12 @@ export function App(): React.ReactElement {
           requestScope = selectedScopeRef.current;
           const requestId = ++nextSnapshotRequestIdRef.current;
           try {
+            const include = (["completed", "archived"] as const)
+              .filter((section) => !collapsedRef.current.has(section))
+              .join(",");
             const response = await fetch(
-              `/api/snapshot?scope=${requestScope}&limit=${rowLimitRef.current}`,
+              `/api/snapshot?scope=${requestScope}&limit=${rowLimitRef.current}`
+              + (include ? `&include=${include}` : ""),
             );
             if (!response.ok) throw new Error(`snapshot failed (${response.status})`);
             const nextSnapshot = (await response.json()) as SidebarSnapshot;
@@ -436,6 +458,19 @@ export function App(): React.ReactElement {
     })();
   }, [load]);
 
+  const toggleGroup = useCallback((key: string): void => {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      collapsedRef.current = next;
+      localStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify([...next]));
+      return next;
+    });
+    // Expanding a finished section is also the request for its rows, so the snapshot has to be
+    // re-read rather than waiting for the next poll to notice.
+    load(true);
+  }, [load]);
+
   const setLifecycle = useCallback((
     row: SidebarSessionRow,
     action: "complete" | "archive" | "uncomplete" | "unarchive",
@@ -615,12 +650,20 @@ export function App(): React.ReactElement {
         {groups.map((group) => (
           <div key={group.key}>
             {group.label ? (
-              <div className="flex items-center gap-1.5 px-0.5 pt-2 pb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground">
-                <span className="truncate">{group.label}</span>
-                <span className="font-semibold opacity-70">{group.rows.length}</span>
-              </div>
+              <GroupHeader
+                collapsed={collapsed.has(group.key)}
+                count={
+                  // A collapsed finished section has no rows to count, so its catalogue total
+                  // stands in -- otherwise shelving one would make it read as empty.
+                  group.rows.length === 0 && (group.key === "completed" || group.key === "archived")
+                    ? snapshot?.lifecycleCounts[group.key] ?? 0
+                    : group.rows.length
+                }
+                label={group.label}
+                onToggle={() => toggleGroup(group.key)}
+              />
             ) : null}
-            {group.rows.map((row) => (
+            {(collapsed.has(group.key) ? [] : group.rows).map((row) => (
               // Density is decided in the projection, so the view only has to honour it. A closed
               // or settled session collapses to a line; anything live keeps the full card.
               row.kind === "session" && row.density !== "full" ? (
@@ -668,12 +711,6 @@ export function App(): React.ReactElement {
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">Loading…</div>
         ) : null}
       </div>
-
-      <LifecycleBars
-        counts={snapshot?.lifecycleCounts ?? { active: 0, completed: 0, archived: 0 }}
-        onSelect={selectScope}
-        scope={scope === "triage" ? "active" : scope}
-      />
 
       {/* One card for the whole list, rendered outside it so scrolling the list cannot clip it. */}
       <HoverSummary target={hoverTarget} />

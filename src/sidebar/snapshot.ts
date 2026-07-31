@@ -149,7 +149,16 @@ export interface SidebarSource {
    *   rows whose verdict still contradicts where they sit.
    * @param rowLimit How many rows the caller has room for; it grows as the client scrolls.
    */
-  snapshot(view?: SidebarView, rowLimit?: number): Promise<SidebarSnapshot>;
+  /**
+   * @param include Extra lifecycles to return rows for, beyond the view's own. Sections the
+   *   client has collapsed are simply not requested, so a shelved section costs nothing to
+   *   project and its header still shows a count from `lifecycleCounts`.
+   */
+  snapshot(
+    view?: SidebarView,
+    rowLimit?: number,
+    include?: readonly SidebarLifecycle[],
+  ): Promise<SidebarSnapshot>;
   /** Record that the reader refused a verdict, so the same one stops being offered. */
   declineSuggestion(sessionId: string, verb: string): Promise<DeclineOutcome>;
   open(sessionId: string): Promise<OpenSessionOutcome>;
@@ -707,26 +716,53 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
      *   the client raises it as you scroll, which is what makes the list unbounded. The index
      *   scan is widened to match, since a limit the scan cannot feed is not a limit at all.
      */
-    async snapshot(view: SidebarView = "active", rowLimit?: number): Promise<SidebarSnapshot> {
+    async snapshot(
+      view: SidebarView = "active",
+      rowLimit?: number,
+      include: readonly SidebarLifecycle[] = [],
+    ): Promise<SidebarSnapshot> {
       const scope = lifecycleForView(view);
       const triageOnly = view === "triage";
       const bridge = await readBridge();
       const catalogue = readCatalogueLifecyclesSafely();
-      const requestedIds = scope === "active"
-        ? undefined
-        : catalogue.sessionIds.get(scope) ?? [];
+      // Which lifecycles this response carries rows for: the view's own, plus any section the
+      // client has expanded. A collapsed section is simply not asked for, so shelving one costs
+      // nothing to project while its header keeps a count from `lifecycleCounts`.
+      const lifecycles: readonly SidebarLifecycle[] = [
+        scope,
+        ...include.filter((lifecycle) => lifecycle !== scope),
+      ];
+      const explicitIds = lifecycles
+        .filter((lifecycle) => lifecycle !== "active")
+        .flatMap((lifecycle) => catalogue.sessionIds.get(lifecycle) ?? []);
       // Triage discards most of what it projects, so a window sized for the visible rows would
       // come back nearly empty. Widened here rather than by the client, which cannot know the
       // hit rate.
       const triageFactor = triageOnly ? 6 : 1;
       const recentLimit = (rowLimit ?? RECENT_LIMIT) * triageFactor;
       const historyLimit = (rowLimit ?? HISTORY_LIMIT) * triageFactor;
-      const index = readIndexedSessionsSafely(
-        // Live rows come from cmux, not the index, so the active scan has to cover the shelf
-        // plus the live sessions it must skip over; a flat multiple is enough and stays cheap.
-        scope === "active" ? Math.max(INDEX_SCAN_LIMIT, recentLimit * 4) : historyLimit,
-        requestedIds,
-      );
+      // Two reads rather than one, because the two halves are addressed differently and a single
+      // query cannot do both: the active list is a recency-ordered scan with no id set, while
+      // finished sessions are old enough to fall outside any such scan and have to be fetched by
+      // id. Asking for one id set would have silently dropped whichever half was not named.
+      const activeIndex = lifecycles.includes("active")
+        ? readIndexedSessionsSafely(
+            // Live rows come from cmux, not the index, so the active scan has to cover the shelf
+            // plus the live sessions it must skip over; a flat multiple is enough and stays cheap.
+            Math.max(INDEX_SCAN_LIMIT, recentLimit * 4),
+          )
+        : { sessions: [], readable: true };
+      const explicitIndex = explicitIds.length > 0
+        ? readIndexedSessionsSafely(historyLimit, explicitIds)
+        : { sessions: [], readable: true };
+      const seenIndexIds = new Set(activeIndex.sessions.map((session) => session.sessionId));
+      const index = {
+        sessions: [
+          ...activeIndex.sessions,
+          ...explicitIndex.sessions.filter((session) => !seenIndexIds.has(session.sessionId)),
+        ],
+        readable: activeIndex.readable && explicitIndex.readable,
+      };
       // Delegated seats never reach the shelf or the history scopes; a live one still shows,
       // because a running agent is something you may need to act on.
       const indexed = index.sessions
@@ -762,7 +798,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         cwd: workspaceStates.get(entry.workspaceId)?.cwd ?? null,
       }));
       const indexedForScope = indexed.filter((session) =>
-        lifecycleForIndexedSession(session, catalogue.lifecycles) === scope);
+        lifecycles.includes(lifecycleForIndexedSession(session, catalogue.lifecycles)));
       const facts = await directoryFacts.lookup([
         ...directoriesToResolve(
           live,
@@ -788,6 +824,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         summaries: catalogue.summaries,
         preferredTitles: catalogue.preferredTitles,
         triageOnly,
+        includeLifecycles: lifecycles.filter((lifecycle) => lifecycle !== "active"),
         lifecycleCounts: {
           active: catalogue.sessionIds.get("active")?.length ?? 0,
           completed: catalogue.sessionIds.get("completed")?.length ?? 0,
