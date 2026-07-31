@@ -246,7 +246,7 @@ claude_option_consumes_optional_value() {
 
 is_builtin_command_invocation() {
   local pending_value=false pending_optional_value=false consuming_many=false arg option
-  for arg in "${args[@]}"; do
+  for arg in "${args[@]+"${args[@]}"}"; do
     if [[ "$pending_optional_value" == true ]]; then
       pending_optional_value=false
       if [[ "$arg" != -* ]]; then continue; fi
@@ -296,11 +296,11 @@ is_builtin_command_invocation() {
 }
 
 if is_builtin_command_invocation; then
-  exec_raw "${args[@]}"
+  exec_raw "${args[@]+"${args[@]}"}"
 fi
 
 if [[ -n "${CLAUDE_CODE_SKIP_PROMPT_HISTORY:-}" ]]; then
-  exec_raw "${args[@]}"
+  exec_raw "${args[@]+"${args[@]}"}"
 fi
 
 session_id=""
@@ -310,7 +310,7 @@ pending_option=""
 pending_optional_value=false
 consuming_many=false
 options_ended=false
-for arg in "${args[@]}"; do
+for arg in "${args[@]+"${args[@]}"}"; do
   if [[ "$options_ended" == true ]]; then continue; fi
   if [[ "$pending_optional_value" == true ]]; then
     pending_optional_value=false
@@ -363,7 +363,7 @@ for arg in "${args[@]}"; do
 done
 
 if [[ "$resume_or_nonpersistent" == true ]]; then
-  exec_raw "${args[@]}"
+  exec_raw "${args[@]+"${args[@]}"}"
 fi
 
 nested_parent="${CCS_LAUNCH_PARENT_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
@@ -408,6 +408,6 @@ if [[ -n "${CCS_SHIM_DEBUG:-}" ]]; then
 fi
 
 if [[ "$explicit_session" == true ]]; then
-  exec_raw "${args[@]}"
+  exec_raw "${args[@]+"${args[@]}"}"
 fi
-exec_raw --session-id "$session_id" "${args[@]}"
+exec_raw --session-id "$session_id" "${args[@]+"${args[@]}"}"
