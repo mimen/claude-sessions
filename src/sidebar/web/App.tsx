@@ -37,6 +37,7 @@ const POLL_INTERVAL_MS = 1_000;
 const GROUPING_STORAGE_KEY = "ccs-sidebar-grouping";
 const SCOPE_STORAGE_KEY = "ccs-sidebar-scope";
 const COLLAPSED_STORAGE_KEY = "ccs-sidebar-collapsed";
+const CLUSTERS_STORAGE_KEY = "ccs-sidebar-clusters";
 const CLOCK_INTERVAL_MS = 30_000;
 /** Long enough not to fire while scanning past rows, short enough not to feel like waiting. */
 const HOVER_DELAY_MS = 220;
@@ -159,6 +160,15 @@ export function App(): React.ReactElement {
     }
   });
   const collapsedRef = useRef(collapsed);
+  /**
+   * Whether cluster sessions are lifted into their own groups at the top.
+   *
+   * Off by default: most sessions belong to no cluster, so the flat list is the honest default and
+   * this is a lens you reach for when managing a fleet.
+   */
+  const [clusterFirst, setClusterFirst] = useState(
+    () => localStorage.getItem(CLUSTERS_STORAGE_KEY) === "1",
+  );
   const [rowLimit, setRowLimit] = useState(ROW_PAGE);
   const rowLimitRef = useRef(ROW_PAGE);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -302,14 +312,23 @@ export function App(): React.ReactElement {
       return pending && pending !== row.lifecycle ? { ...row, lifecycle: pending } : row;
       // A sessionless workspace has no lifecycle to browse by, so it belongs to the live view
       // only — it would be dishonest to list a running browser pane under Completed.
-    }).filter((row) => (row.kind === "session" ? row.lifecycle === scope : scope === "active"));
+    // The finished sections live in this list now, so a row belongs if its lifecycle is the
+    // browsed one OR a section the user has expanded. Filtering to the scope alone would drop
+    // exactly the rows the server was just asked for.
+    }).filter((row) => {
+      if (row.kind !== "session") return scope === "active";
+      if (row.lifecycle === scope) return true;
+      return scope === "active"
+        && (row.lifecycle === "completed" || row.lifecycle === "archived")
+        && !collapsed.has(row.lifecycle);
+    });
     const needle = query.trim().toLowerCase();
     const matched = needle
       ? all.filter((row) =>
           `${row.name} ${row.directory ?? ""} ${row.worktree ?? ""}`.toLowerCase().includes(needle))
       : all;
-    return groupSessions(matched, grouping, now);
-  }, [snapshot, query, grouping, now, optimistic, optimisticPins, scope]);
+    return groupSessions(matched, grouping, now, clusterFirst);
+  }, [snapshot, query, grouping, now, optimistic, optimisticPins, scope, collapsed, clusterFirst]);
 
   // One flat order underlies the groups so arrow keys cross headings without special cases.
   const flatRows = useMemo(() => groups.flatMap((group) => group.rows), [groups]);
@@ -620,6 +639,27 @@ export function App(): React.ReactElement {
           />
         </div>
         <ScopeSelect onChange={selectScope} value={scope} />
+        {/* A lens, not a mode: it re-groups what is already on screen and changes nothing about
+          * which sessions are shown. */}
+        <button
+          aria-pressed={clusterFirst}
+          className={cn(
+            "flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2 text-[11px]",
+            "transition-colors",
+            clusterFirst
+              ? "border-ring bg-secondary text-foreground"
+              : "border-input text-muted-foreground hover:text-foreground",
+          )}
+          onClick={() => {
+            const next = !clusterFirst;
+            setClusterFirst(next);
+            localStorage.setItem(CLUSTERS_STORAGE_KEY, next ? "1" : "0");
+          }}
+          title="Group cluster sessions at the top"
+          type="button"
+        >
+          Clusters
+        </button>
         <GroupingSelect
           onChange={(next) => {
             setGrouping(next);
@@ -659,6 +699,7 @@ export function App(): React.ReactElement {
                     ? snapshot?.lifecycleCounts[group.key] ?? 0
                     : group.rows.length
                 }
+                color={group.color}
                 label={group.label}
                 onToggle={() => toggleGroup(group.key)}
               />

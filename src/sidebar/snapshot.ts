@@ -75,6 +75,7 @@ import {
   type SidebarScope,
   type SidebarSnapshot,
   type SidebarView,
+  type SidebarMembership,
 } from "./projection.ts";
 import {
   readEnrichments,
@@ -339,6 +340,8 @@ interface CatalogueLifecycleState {
   readonly canonicalSessionIds: ReadonlyMap<string, string>;
   /** Titles the catalogue owns (human, then enrichment); the index title is the fallback. */
   readonly preferredTitles: ReadonlyMap<string, string>;
+  /** Cluster membership keyed by session id and resume alias. */
+  readonly memberships: ReadonlyMap<string, SidebarMembership>;
   readonly sessionIds: ReadonlyMap<SidebarLifecycle, readonly string[]>;
   /** Delegated seats, hidden the way `ccs ls` hides them. */
   readonly auxiliary: ReadonlySet<string>;
@@ -500,6 +503,28 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       ensureDataDirectory();
       catalogueDb = openCatalogueDb(CATALOGUE_PATH());
       const rows = getAll(catalogueDb);
+      // One read of the identity table, keyed for the join below. Sessions far outnumber
+      // identities, so this is cheaper than asking per row.
+      //
+      // Guarded separately from the lifecycle read around it: a catalogue predating ADR-0089 has
+      // no `identities` table at all, and letting that throw would cost the caller every lifecycle
+      // in the store to learn that nothing belongs to a cluster. Membership is a garnish; lifecycle
+      // is not.
+      const identitiesByKey = new Map<string, { cluster: string; role: string; kind: string }>();
+      try {
+        const identityRows = catalogueDb.query(
+          "SELECT identity_key, cluster, role, kind FROM identities WHERE cluster IS NOT NULL",
+        ).all() as Array<{ identity_key: string; cluster: string; role: string; kind: string }>;
+        for (const identity of identityRows) {
+          identitiesByKey.set(identity.identity_key, {
+            cluster: identity.cluster,
+            role: identity.role,
+            kind: identity.kind,
+          });
+        }
+      } catch {
+        // No identities table, or a shape that predates it: nothing belongs to a cluster.
+      }
       const lifecycles = new Map<string, SidebarLifecycle>();
       /**
        * Catalogue-owned titles, resolved by `displayTitle` itself rather than by reimplementing
@@ -508,6 +533,11 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
        * as the last resort and the ordering stays defined in exactly one place.
        */
       const preferredTitles = new Map<string, string>();
+      /**
+       * Cluster membership per session. Read here because the projection stays free of SQLite;
+       * the identity is the durable thing and the session merely points at it.
+       */
+      const memberships = new Map<string, SidebarMembership>();
       // Delegated seats — reviewers, implementers — are real sessions but not work anyone
       // browses. `ccs ls` hides `sessionClass === "auxiliary"` unless asked, and the sidebar
       // is the same kind of surface, so it hides them too.
@@ -526,6 +556,19 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         canonicalSessionIds.set(row.sessionId, row.sessionId);
         // Empty fallback: whatever comes back is catalogue-owned, so an absent one means the
         // index title still wins.
+        if (row.identityKey) {
+          const identity = identitiesByKey.get(row.identityKey);
+          if (identity) {
+            const membership: SidebarMembership = {
+              identityKey: row.identityKey,
+              cluster: identity.cluster,
+              role: identity.role,
+              kind: identity.kind === "core" ? "core" : "fleet",
+            };
+            memberships.set(row.sessionId, membership);
+            if (row.resumeId) memberships.set(row.resumeId, membership);
+          }
+        }
         const preferred = displayTitle(row, "");
         if (preferred) {
           preferredTitles.set(row.sessionId, preferred);
@@ -547,6 +590,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       return ok({
         lifecycles,
         preferredTitles,
+        memberships,
         canonicalSessionIds,
         sessionIds,
         auxiliary,
@@ -571,6 +615,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       lifecycles: new Map(),
       canonicalSessionIds: new Map(),
       preferredTitles: new Map<string, string>(),
+      memberships: new Map<string, SidebarMembership>(),
       // Nothing is known to be auxiliary when the catalogue is unreadable, so nothing is hidden.
       auxiliary: new Set<string>(),
       summaries: new Map<string, StoredEnrichment>(),
@@ -741,28 +786,34 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const triageFactor = triageOnly ? 6 : 1;
       const recentLimit = (rowLimit ?? RECENT_LIMIT) * triageFactor;
       const historyLimit = (rowLimit ?? HISTORY_LIMIT) * triageFactor;
-      // Two reads rather than one, because the two halves are addressed differently and a single
-      // query cannot do both: the active list is a recency-ordered scan with no id set, while
-      // finished sessions are old enough to fall outside any such scan and have to be fetched by
-      // id. Asking for one id set would have silently dropped whichever half was not named.
-      const activeIndex = lifecycles.includes("active")
-        ? readIndexedSessionsSafely(
-            // Live rows come from cmux, not the index, so the active scan has to cover the shelf
-            // plus the live sessions it must skip over; a flat multiple is enough and stays cheap.
-            Math.max(INDEX_SCAN_LIMIT, recentLimit * 4),
-          )
-        : { sessions: [], readable: true };
-      const explicitIndex = explicitIds.length > 0
-        ? readIndexedSessionsSafely(historyLimit, explicitIds)
-        : { sessions: [], readable: true };
-      const seenIndexIds = new Set(activeIndex.sessions.map((session) => session.sessionId));
+      // The scope's own read, unchanged: a recency-ordered scan for the active view, an id set
+      // for the finished ones. Its readability is the answer for the whole snapshot, so it always
+      // runs -- skipping it when an id set happened to be empty reported an unreadable index as
+      // readable.
+      const primaryIndex = readIndexedSessionsSafely(
+        // Live rows come from cmux, not the index, so the active scan has to cover the shelf plus
+        // the live sessions it must skip over; a flat multiple is enough and stays cheap.
+        scope === "active" ? Math.max(INDEX_SCAN_LIMIT, recentLimit * 4) : historyLimit,
+        scope === "active" ? undefined : catalogue.sessionIds.get(scope) ?? [],
+      );
+      // A second, purely additive read for sections the client has expanded. They are addressed by
+      // id because finished sessions are old enough to fall outside a recency-ordered scan, so one
+      // combined query could not serve both halves.
+      const extraIds = lifecycles
+        .filter((lifecycle) => lifecycle !== scope)
+        .flatMap((lifecycle) => catalogue.sessionIds.get(lifecycle) ?? []);
+      const extraIndex = extraIds.length > 0
+        ? readIndexedSessionsSafely(historyLimit, extraIds)
+        : { sessions: [], readable: primaryIndex.readable };
+      const seenIndexIds = new Set(primaryIndex.sessions.map((session) => session.sessionId));
       const index = {
         sessions: [
-          ...activeIndex.sessions,
-          ...explicitIndex.sessions.filter((session) => !seenIndexIds.has(session.sessionId)),
+          ...primaryIndex.sessions,
+          ...extraIndex.sessions.filter((session) => !seenIndexIds.has(session.sessionId)),
         ],
-        readable: activeIndex.readable && explicitIndex.readable,
+        readable: primaryIndex.readable && extraIndex.readable,
       };
+
       // Delegated seats never reach the shelf or the history scopes; a live one still shows,
       // because a running agent is something you may need to act on.
       const indexed = index.sessions
@@ -823,6 +874,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         unreadByWorkspaceId: notifications?.unreadCountsByWorkspaceId,
         summaries: catalogue.summaries,
         preferredTitles: catalogue.preferredTitles,
+        memberships: catalogue.memberships,
         triageOnly,
         includeLifecycles: lifecycles.filter((lifecycle) => lifecycle !== "active"),
         lifecycleCounts: {

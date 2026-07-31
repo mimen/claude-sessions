@@ -1,5 +1,10 @@
 /** Display helpers for the sidebar rows. Pure, so they are tested without a DOM. */
-import type { SidebarDensity, SidebarSection, SidebarView } from "../projection.ts";
+import type {
+  SidebarDensity,
+  SidebarMembership,
+  SidebarSection,
+  SidebarView,
+} from "../projection.ts";
 
 /**
  * Time since the last activity, at the coarsest unit that still distinguishes rows.
@@ -118,6 +123,8 @@ export function recencyBand(lastActivityAt: number | null, now: number): string 
 
 export interface SessionGroup<Row> {
   readonly key: string;
+  /** A colour the group claims, when it has one. Clusters do; time bands do not. */
+  readonly color?: string;
   /** Absent when the arrangement is one flat list that needs no heading. */
   readonly label: string | null;
   readonly rows: readonly Row[];
@@ -130,6 +137,56 @@ interface GroupableRow {
   readonly pinned: boolean;
   /** Full for a live session; the collapsed densities are closed or settled work. */
   readonly density: SidebarDensity;
+  /** Present when the session belongs to a cluster. */
+  readonly membership?: SidebarMembership | null;
+}
+
+/**
+ * A cluster's colour, derived from its name rather than read from cmux.
+ *
+ * cmux can set a workspace colour but reports it nowhere, so mirroring is not available. Deriving
+ * is better regardless: the colour holds whether or not a workspace is open, where a mirrored one
+ * would vanish the moment the session closed.
+ */
+export function clusterColor(cluster: string): string {
+  let hash = 0;
+  for (const character of cluster) hash = (hash * 31 + character.charCodeAt(0)) | 0;
+  // Fixed saturation and lightness so every cluster reads as the same kind of mark and only the
+  // hue distinguishes them.
+  return `oklch(0.65 0.14 ${Math.abs(hash) % 360})`;
+}
+
+/**
+ * Cluster sessions lifted into their own groups at the top.
+ *
+ * They MOVE rather than copy: a session has exactly one home, so the counts everywhere else stay
+ * honest. Core roles lead each cluster because a coordinator is the way in, and its fleet follows.
+ */
+function clusterGroups<Row extends GroupableRow>(
+  rows: readonly Row[],
+): { readonly groups: Array<SessionGroup<Row>>; readonly rest: Row[] } {
+  const byCluster = new Map<string, Row[]>();
+  const rest: Row[] = [];
+  for (const row of rows) {
+    const cluster = row.membership?.cluster;
+    if (!cluster) { rest.push(row); continue; }
+    const bucket = byCluster.get(cluster);
+    if (bucket) bucket.push(row); else byCluster.set(cluster, [row]);
+  }
+  const groups = [...byCluster.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([cluster, members]) => ({
+      key: `cluster:${cluster}`,
+      label: cluster,
+      color: clusterColor(cluster),
+      rows: members.sort((left, right) => {
+        const leftCore = left.membership?.kind === "core";
+        const rightCore = right.membership?.kind === "core";
+        if (leftCore !== rightCore) return leftCore ? -1 : 1;
+        return byWaitingLongest(left, right);
+      }),
+    }));
+  return { groups, rest };
 }
 
 /**
@@ -189,13 +246,17 @@ export function groupSessions<Row extends GroupableRow>(
   rows: readonly Row[],
   mode: GroupingMode,
   now: number = Date.now(),
+  clusterFirst = false,
 ): Array<SessionGroup<Row>> {
-  const pinned = rows.filter((row) => row.pinned);
-  const rest = rows.filter((row) => !row.pinned);
+  // Clusters are lifted before anything else, so their members never reach the pinned or status
+  // grouping below and cannot appear twice.
+  const lifted = clusterFirst ? clusterGroups(rows) : { groups: [], rest: [...rows] };
+  const pinned = lifted.rest.filter((row) => row.pinned);
+  const rest = lifted.rest.filter((row) => !row.pinned);
   const pinnedGroup: Array<SessionGroup<Row>> = pinned.length > 0
     ? [{ key: "pinned", label: "Pinned", rows: [...pinned].sort(openFirst(byWaitingLongest)) }]
     : [];
-  return [...pinnedGroup, ...groupUnpinned(rest, mode, now)];
+  return [...lifted.groups, ...pinnedGroup, ...groupUnpinned(rest, mode, now)];
 }
 
 function groupUnpinned<Row extends GroupableRow>(

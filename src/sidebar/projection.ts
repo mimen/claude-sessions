@@ -157,6 +157,20 @@ export interface SidebarSuggestion {
   readonly junk: boolean;
 }
 
+/**
+ * A session's place in a cluster.
+ *
+ * The identity is the durable thing and the session points at it, so this travels with the row
+ * rather than being looked up per render. `core` is the way into a cluster -- a coordinator, a
+ * scout -- and `fleet` is one unit of its work.
+ */
+export interface SidebarMembership {
+  readonly identityKey: string;
+  readonly cluster: string;
+  readonly role: string;
+  readonly kind: "core" | "fleet";
+}
+
 export type SidebarLifecycle = "active" | "completed" | "archived";
 export type SidebarScope = SidebarLifecycle;
 
@@ -196,6 +210,8 @@ export interface ProjectionInput {
   readonly faviconDirectories?: ReadonlySet<string>;
   /** Unread notification counts keyed by stable workspace UUID, as cmux reports them. */
   readonly unreadByWorkspaceId?: ReadonlyMap<string, number>;
+  /** Cluster membership keyed by canonical session id and resume alias. */
+  readonly memberships?: ReadonlyMap<string, SidebarMembership>;
   /** Enrichment records keyed by canonical session id and resume alias. */
   readonly summaries?: ReadonlyMap<string, StoredEnrichment>;
   /**
@@ -319,6 +335,8 @@ export interface SidebarSessionRow extends SidebarRowShared {
    * no enrichment, when it says `continue`, or when its verdict has already been applied.
    */
   readonly suggestion: SidebarSuggestion | null;
+  /** Which cluster and role this session belongs to, when it belongs to one. */
+  readonly membership: SidebarMembership | null;
 }
 
 /**
@@ -557,6 +575,10 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
   const preferredTitleFor = (sessionId: string, resumeId?: string): string | null =>
     preferredTitles.get(sessionId) ?? (resumeId ? preferredTitles.get(resumeId) ?? null : null);
 
+  const memberships = input.memberships ?? new Map<string, SidebarMembership>();
+  const membershipFor = (sessionId: string, resumeId?: string): SidebarMembership | null =>
+    memberships.get(sessionId) ?? (resumeId ? memberships.get(resumeId) ?? null : null);
+
   const summaries = input.summaries ?? new Map<string, StoredEnrichment>();
   const summaryFor = (
     sessionId: string,
@@ -612,6 +634,7 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
       shortcut: live.shortcut,
       summary: liveSummary,
       suggestion: suggestionFor(liveSummary, liveLifecycle),
+      membership: membershipFor(live.sessionId, indexed?.resumeId),
       density: densityFor(true, liveLifecycle),
       sessionId: canonicalSessionIdFor(live.sessionId, indexed),
       lifecycle: liveLifecycle,
@@ -653,6 +676,7 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
       summaryFor(session.sessionId, session),
       lifecycleFor(session.sessionId, session),
     ),
+    membership: membershipFor(session.sessionId, session.resumeId),
     density: densityFor(knownLive, lifecycleFor(session.sessionId, session)),
     sessionId: canonicalSessionIdFor(session.sessionId, session),
     lifecycle: lifecycleFor(session.sessionId, session),
