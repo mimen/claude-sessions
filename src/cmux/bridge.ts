@@ -1,4 +1,5 @@
 import { log } from "../logger.ts";
+import { resolveIdPrefix } from "../session-id.ts";
 
 /**
  * cmux bridge — the surface-keyed link between a Claude session and its live cmux body.
@@ -376,8 +377,19 @@ export function buildBridge(
     return null;
   };
 
+  // Resolve a full-or-prefix session id against the live-surface session ids. Returns the full
+  // id on a unique match, or null on no-match / ambiguity (a wake must never guess which of two
+  // live sessions to nudge — see session-id.ts + ADR-0054).
+  const resolveLiveId = (sessionId: string): string | null => {
+    if (sessionToSurface.has(sessionId)) return sessionId; // exact (full id) fast path
+    const r = resolveIdPrefix(sessionToSurface.keys(), sessionId);
+    return r.ok ? r.value : null;
+  };
+
   const locateSession = (sessionId: string): SurfaceLocation | null => {
-    const surfaceId = sessionToSurface.get(sessionId);
+    const resolved = resolveLiveId(sessionId);
+    if (!resolved) return null;
+    const surfaceId = sessionToSurface.get(resolved);
     return surfaceId ? (surfaceToWorkspace.get(surfaceId) ?? null) : null;
   };
 
@@ -388,7 +400,7 @@ export function buildBridge(
     surfacesInWorkspace,
     surfaceInfo,
     locateSession,
-    isOpen: (sessionId) => sessionToSurface.has(sessionId),
+    isOpen: (sessionId) => resolveLiveId(sessionId) !== null,
     primarySurface,
     readable,
   };

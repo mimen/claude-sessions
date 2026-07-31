@@ -353,6 +353,13 @@ export function sessionById(db: Database, sessionId: string): SessionRow | null 
   return rows[0] ?? null;
 }
 
+/** Every indexed session id — cheap id-only scan used to resolve a short/prefix id. */
+export function allSessionIds(db: Database): string[] {
+  return (db.query("SELECT session_id FROM sessions").all() as { session_id: string }[]).map(
+    (r) => r.session_id,
+  );
+}
+
 /** Full token/cost detail for one Session (drives `ccs meta`). */
 export interface SessionUsage {
   readonly costUSD: number;

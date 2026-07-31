@@ -17,11 +17,15 @@
  * — they're used by hooks/skills and get swept in step 10. This noun is the new PREFERRED
  * surface; the old ones become deprecation candidates once the sweep lands.
  */
-import { openCatalogue, getRow } from "./db.ts";
+import { openCatalogue, getRow, allSessionIds as catalogueSessionIds } from "./db.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { existsSync } from "node:fs";
 import { openIndex } from "../index/schema.ts";
-import { sessionById } from "../index/index.ts";
+import { sessionById, allSessionIds as indexSessionIds } from "../index/index.ts";
+import { resolveIdPrefix, ambiguousMessage } from "../session-id.ts";
+import type { Result } from "../result.ts";
+import type { ResolveIdError } from "../session-id.ts";
+import { ok } from "../result.ts";
 import type { Database } from "bun:sqlite";
 import { getIdentity } from "./identities.ts";
 import { rename, mark } from "./commands.ts";
@@ -96,11 +100,21 @@ function usage(rc = 1): number {
 
 function doRead(idArg: string, rest: string[]): number {
   const { bools } = parseFlags(rest);
-  const sid = resolveSessionId(idArg);
-  if (!sid) {
+  const raw = resolveSessionId(idArg);
+  if (!raw) {
     console.error("ccs session: no session id (bare id, '.', or $CLAUDE_CODE_SESSION_ID)");
     return 1;
   }
+  const resolved = resolveShortSessionId(raw);
+  if (!resolved.ok) {
+    if (resolved.error.kind === "ambiguous") {
+      console.error(`ccs session: ${ambiguousMessage(raw, resolved.error.matches)}`);
+      return 1;
+    }
+    // No prefix match anywhere — fall through with the raw id so the existing "no session"
+    // message (with its reindex hint) still fires.
+  }
+  const sid = resolved.ok ? resolved.value : raw;
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
@@ -164,6 +178,35 @@ function indexedSession(sessionId: string) {
   } finally {
     index.close();
   }
+}
+
+/**
+ * Resolve a full-or-short session id against every known session id (catalogue ∪ index). A full
+ * id is returned unchanged; a unique prefix resolves to its full id; an ambiguous prefix fails
+ * closed with the candidate list. `{kind:"none"}` means no id started with the input — callers
+ * fall through to the raw id so the existing "no session / run reindex" message still fires.
+ */
+function resolveShortSessionId(input: string): Result<string, ResolveIdError> {
+  const ids = new Set<string>();
+  ensureDataDir();
+  const cat = openCatalogue(CATALOGUE_PATH());
+  try {
+    for (const id of catalogueSessionIds(cat)) ids.add(id);
+  } finally {
+    cat.close();
+  }
+  if (existsSync(DB_PATH())) {
+    const index = openIndex(DB_PATH());
+    try {
+      for (const id of indexSessionIds(index)) ids.add(id);
+    } finally {
+      index.close();
+    }
+  }
+  // An exact hit is authoritative even if the id isn't in either DB yet (e.g. a live-but-
+  // uncatalogued session): let the downstream exact lookups handle it as before.
+  if (ids.size === 0) return ok(input);
+  return resolveIdPrefix(ids, input);
 }
 
 function doList(_rest: string[]): number {

@@ -937,6 +937,13 @@ export function getRow(db: Database, sessionId: string): CatalogueRow | null {
   );
 }
 
+/** Every catalogued session id — cheap id-only scan used to resolve a short/prefix id. */
+export function allSessionIds(db: Database): string[] {
+  return (db.query("SELECT session_id FROM catalogue").all() as { session_id: string }[]).map(
+    (r) => r.session_id,
+  );
+}
+
 /** All catalogue rows keyed by session_id, for joining against the Index in one pass. */
 export function getAll(db: Database): Map<string, CatalogueRow> {
   const rows = db.query("SELECT * FROM catalogue").all() as Record<string, unknown>[];

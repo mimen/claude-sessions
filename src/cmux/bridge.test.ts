@@ -230,6 +230,66 @@ describe("buildBridge", () => {
     expect(bridge.isOpen("00000000-0000-0000-0000-000000000000")).toBe(false);
   });
 
+  test("a unique short prefix resolves to the same surface + workspace as the full id", () => {
+    const full = firstAgent.sessionId;
+    const prefix = full.slice(0, 8);
+    // sanity: the prefix must actually be shorter than the full id (fixture uses UUIDs)
+    expect(prefix.length).toBeLessThan(full.length);
+
+    expect(bridge.isOpen(prefix)).toBe(true);
+    const byPrefix = bridge.locateSession(prefix);
+    const byFull = bridge.locateSession(full);
+    expect(byPrefix).toEqual(byFull);
+    expect(byPrefix?.surfaceId).toBe(firstSurfaceId);
+  });
+
+  test("a prefix matching no live session is not open and does not locate", () => {
+    // 'zz…' can't prefix a UUID, so it matches nothing in the live set
+    expect(bridge.isOpen("zzzzzzzz")).toBe(false);
+    expect(bridge.locateSession("zzzzzzzz")).toBeNull();
+  });
+
+  test("empty input never matches a live session (would otherwise prefix all)", () => {
+    // '' is a prefix of every id; the resolver fails it closed rather than picking one
+    expect(bridge.isOpen("")).toBe(false);
+    expect(bridge.locateSession("")).toBeNull();
+  });
+
+  test("a prefix shared by two live sessions is ambiguous → fails closed", () => {
+    // Two live claude surfaces whose session ids share the prefix 'dupe' — a short id of 'dupe'
+    // must NOT silently pick one (ADR-0054: fail closed on ambiguous bindings).
+    const ambigTree = {
+      windows: [{
+        id: "w", ref: "window:1", workspaces: [{
+          id: "ws", ref: "workspace:1", panes: [{
+            id: "p", ref: "pane:1", index: 0,
+            surfaces: [
+              { id: "s-a", ref: "surface:1", type: "terminal", index_in_pane: 0 },
+              { id: "s-b", ref: "surface:2", type: "terminal", index_in_pane: 1 },
+            ],
+          }],
+        }],
+      }],
+    };
+    const ambigStore = {
+      sessions: {
+        "dupe-aaaa": { sessionId: "dupe-aaaa", surfaceId: "s-a" },
+        "dupe-bbbb": { sessionId: "dupe-bbbb", surfaceId: "s-b" },
+      },
+      activeSessionsBySurface: { "s-a": { sessionId: "dupe-aaaa" }, "s-b": { sessionId: "dupe-bbbb" } },
+    };
+    const ambig = buildBridge(ambigTree, ambigStore);
+    // both full ids resolve
+    expect(ambig.isOpen("dupe-aaaa")).toBe(true);
+    expect(ambig.isOpen("dupe-bbbb")).toBe(true);
+    // the shared prefix does not
+    expect(ambig.isOpen("dupe")).toBe(false);
+    expect(ambig.locateSession("dupe")).toBeNull();
+    // a prefix unique to one of them still resolves
+    expect(ambig.isOpen("dupe-a")).toBe(true);
+    expect(ambig.locateSession("dupe-a")?.surfaceId).toBe("s-a");
+  });
+
   test("primary session of a workspace is the earliest claude-surface", () => {
     const anyLoc = bridge.locateSession(firstAgent.sessionId);
     expect(anyLoc).not.toBeNull();
