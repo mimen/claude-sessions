@@ -106,7 +106,7 @@ export function parseRoleModel(value: unknown): RoleModelId | null {
  * by the `[[launcher]]` fleet in config.toml, never by a synthesized birth launcher.
  */
 export function birthLauncher(name: LauncherName): Launcher {
-  return { name, binary: name, serves: ["*"], env: {} };
+  return { name, binary: name, serves: ["*"], env: {}, clears: [] };
 }
 
 /** The model spelling a given launcher accepts for a canonical birth-model ID. */

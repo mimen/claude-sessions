@@ -18,8 +18,8 @@ const SESSION = "e995627d-0db4-421d-8a7d-982250ef216f";
 const SURFACE = "surface-1";
 const WORKSPACE = "workspace-1";
 const FLEET: Launcher[] = [
-  { name: "claude-native", binary: "claude-native", serves: ["claude-*"], env: {} },
-  { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {} },
+  { name: "claude-native", binary: "claude-native", serves: ["claude-*"], env: {}, clears: [] },
+  { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] },
 ];
 const ENVIRONMENT: RespawnEnv = {
   sessionId: SESSION,

@@ -18,6 +18,8 @@ export interface Launcher {
   readonly serves: readonly string[];
   /** Extra env for the spawned process (lets a launcher be `claude` + env vars). */
   readonly env: Readonly<Record<string, string>>;
+  /** Inherited variables unset before `env` applies — the gateway escape hatch. */
+  readonly clears: readonly string[];
 }
 
 export interface Route {
@@ -29,7 +31,7 @@ export interface Route {
 
 /** Behavior with no `[[launcher]]` config: exactly today's hardcoded `claude`. */
 export const DEFAULT_LAUNCHERS: readonly Launcher[] = [
-  { name: "claude", binary: "claude", serves: ["*"], env: {} },
+  { name: "claude", binary: "claude", serves: ["*"], env: {}, clears: [] },
 ];
 
 /** Shape of one `[[launcher]]` config entry (validated by the config schema). */
@@ -38,6 +40,7 @@ export interface LauncherConfigEntry {
   readonly binary: string;
   readonly serves: readonly string[];
   readonly env: Readonly<Record<string, string>>;
+  readonly clears: readonly string[];
 }
 
 /**
@@ -51,7 +54,13 @@ export function launchersFrom(entries: readonly LauncherConfigEntry[]): Launcher
     if (seen.has(e.name)) return { error: `duplicate launcher name "${e.name}" in config` };
     seen.add(e.name);
   }
-  return entries.map((e) => ({ name: e.name, binary: e.binary, serves: e.serves, env: e.env }));
+  return entries.map((e) => ({
+    name: e.name,
+    binary: e.binary,
+    serves: e.serves,
+    env: e.env,
+    clears: e.clears,
+  }));
 }
 
 /**

@@ -1,0 +1,35 @@
+#!/bin/zsh
+# claude-gpt — Claude Code harness on GPT models via the local CLIProxyAPI gateway (billed to
+# the ChatGPT/Codex subscription despite the "API Usage Billing" header). Normal `claude` is
+# untouched.
+#
+# THIS WRAPPER NO LONGER DEFINES ENVIRONMENT. Base URL, auth token, and the alias→model mapping
+# live in the `claude-gpt` [[launcher]] entry's `env` in ~/.ccs/config.toml, materialized by
+# `ccs launcher install` and applied by the ~/.ccs/bin/claude shim.
+#
+# CCS_FORCE_HARNESS tells the shim which launcher's environment to apply. The `exec claude`
+# bounce back into the shim is DELIBERATE — it is what registers the session birth.
+#
+# Usage:
+#   claude-gpt                                  # default: gpt-5.6-sol, effort via arrows//effort
+#   claude-gpt 'gpt-5.5'                        # first arg = model if it looks like one
+#   claude-gpt 'gpt-5.5(minimal)'               # (effort) suffix PINS effort and beats the
+#                                               # in-session effort arrows; omit it normally
+#   claude-gpt --model 'gpt-5.6-terra(xhigh)[1m]'
+#   In-session: /model gpt-5.6-luna(low)[1m]    # keep the [1m] suffix — it declares the
+#                                               # context window to Claude Code (stripped
+#                                               # before hitting the gateway)
+#   List models: curl -s http://127.0.0.1:8317/v1/models -H "Authorization: Bearer $(cat ~/.cli-proxy-api-key)"
+# Gateway: brew services start cliproxyapi   (127.0.0.1:8317)
+export CCS_FORCE_HARNESS=claude-gpt
+
+# Launch via the fable ALIAS so the active model = the Fable-slot row (sol) — no duplicate
+# "Custom model" entry in /model. A gpt-* first arg still overrides.
+MODEL='fable'
+if [[ "$1" == gpt-* ]]; then MODEL="$1"; shift; fi
+for a in "$@"; do [[ "$a" == "--model" ]] && MODEL=""; done   # explicit --model wins
+[[ -n "$MODEL" && "$MODEL" == gpt-* && "$MODEL" != *\[1m\] ]] && MODEL="${MODEL}[1m]"
+
+margs=()
+[[ -n "$MODEL" ]] && margs=(--model "$MODEL")
+exec claude --dangerously-skip-permissions "${margs[@]}" "$@"

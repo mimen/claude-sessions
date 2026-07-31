@@ -94,10 +94,118 @@ if [[ "$raw_claude" -ef "$0" ]]; then
   exit 126
 fi
 
+# --- launcher environment ----------------------------------------------------------------
+# `claude` is an INDIRECTION: it registers the birth, applies ONE launcher's environment, then
+# execs the raw binary. Which launcher is a single config value (`default_harness` in the
+# location registry, materialized here by `ccs launcher install`), so re-pointing the fleet is
+# one edit and never a change to this file or to a wrapper.
+#
+# Specs are materialized files, not TOML and not a `ccs` subprocess: this runs in front of every
+# interactive `claude`, and neither a parser nor a Bun start-up belongs on that path. Directives
+# are dispatched over a fixed three-verb vocabulary, so a malformed spec can set a variable and
+# nothing else — a generated script that got `source`d would be arbitrary code execution.
+env_spec_dir="${CCS_LAUNCHER_ENV_DIR:-${HOME:-}/.ccs/launcher-env}"
+
+# The active launcher name. CCS_FORCE_HARNESS lets a wrapper name ITSELF, which is what keeps
+# `claudex`/`claude-gpt`/`claude-native` working while they stop defining environment: they are
+# thin shims that set this and exec back through here, and the bounce is still what registers
+# the session. Absent, the materialized default wins.
+resolve_launcher_name() {
+  if [[ -n "${CCS_FORCE_HARNESS:-}" ]]; then
+    printf '%s' "$CCS_FORCE_HARNESS"
+    return 0
+  fi
+  local default_file="$env_spec_dir/default"
+  if [[ -r "$default_file" ]]; then
+    local name=""
+    IFS= read -r name < "$default_file" || true
+    printf '%s' "$name"
+    return 0
+  fi
+  return 0
+}
+
+# Read a secret's value from the file that holds it, so it lives in exactly one place on disk and
+# rotating it needs no config edit. Only the first line is taken; a trailing newline is normal.
+read_secret_file() {
+  local path="$1" value=""
+  [[ -r "$path" ]] || return 1
+  IFS= read -r value < "$path" || true
+  printf '%s' "$value"
+}
+
+apply_launcher_env() {
+  local name
+  name="$(resolve_launcher_name)"
+  [[ -n "$name" ]] || return 0
+  # A name is a filename here; refuse anything that could escape the spec directory.
+  case "$name" in
+    *[!A-Za-z0-9._-]*|.|..) warn "ignoring invalid launcher name: $name"; return 0 ;;
+  esac
+
+  local spec="$env_spec_dir/$name.env"
+  if [[ ! -r "$spec" ]]; then
+    # An unknown launcher must not silently inherit whatever the parent had. Say so and apply
+    # nothing; the raw binary still launches on its own defaults.
+    warn "no launcher environment for \"$name\"; launching with the inherited environment"
+    return 0
+  fi
+
+  local line verb rest key value secret
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    # Every directive is "<verb> <argument>". No space means no argument.
+    if [[ "$line" != *" "* ]]; then
+      warn "ignoring malformed launcher environment directive: $line"
+      continue
+    fi
+    verb="${line%% *}"
+    rest="${line#* }"
+    case "$verb" in
+      clear) key="$rest" ;;
+      set|setfile)
+        if [[ "$rest" != *"="* ]]; then
+          warn "ignoring launcher environment directive without a value: $line"
+          continue
+        fi
+        key="${rest%%=*}"
+        value="${rest#*=}"
+        ;;
+      *)
+        warn "ignoring unknown launcher environment directive: $verb"
+        continue
+        ;;
+    esac
+    # The spec is generated, but it is also a file on disk: validate the name here too rather
+    # than hand an arbitrary string to `export`/`unset`.
+    case "$key" in
+      ""|[!A-Za-z_]*|*[!A-Za-z0-9_]*)
+        warn "ignoring invalid launcher environment key: $key"
+        continue
+        ;;
+    esac
+    case "$verb" in
+      clear) unset "$key" ;;
+      set) export "$key=$value" ;;
+      setfile)
+        if secret="$(read_secret_file "$value")"; then
+          export "$key=$secret"
+        else
+          warn "cannot read $key from $value"
+        fi
+        ;;
+    esac
+  done < "$spec"
+}
+
 exec_raw() {
+  apply_launcher_env
   unset CCS_CLAUDE_SHIM_AFTER_CMUX CCS_LAUNCH_PARENT_SESSION_ID
   unset CCS_LAUNCH_CREATOR_KIND CCS_LAUNCH_CREATOR_REF
   unset CCS_CREATOR_KIND CCS_CREATOR_REF
+  # The launcher's own environment is now installed; drop the selector so a child that reaches
+  # this shim again resolves the default afresh instead of inheriting this session's choice.
+  unset CCS_FORCE_HARNESS
   # The carriers have already been restored to their real names. Drop them so the
   # credential is not handed to Claude under a second name it does not know to redact.
   unset CCS_CARRIED_ANTHROPIC_API_KEY CCS_CARRIED_ANTHROPIC_BASE_URL

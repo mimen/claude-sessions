@@ -1,0 +1,49 @@
+#!/bin/zsh
+# claudex — ONE Claude Code harness serving both vendors through the local CLIProxyAPI gateway
+# (127.0.0.1:8317). Claude models bill the Max sub, GPT models bill the ChatGPT/Codex sub,
+# despite the "API Usage Billing" header.
+#
+# THIS WRAPPER NO LONGER DEFINES ENVIRONMENT. Base URL, auth token, the four /model picker
+# slots, and the compaction settings all live in ONE place — the `claudex` [[launcher]] entry's
+# `env` in ~/.ccs/config.toml, materialized by `ccs launcher install` and applied by the
+# ~/.ccs/bin/claude shim. Hot-swapping a picker slot is an edit there plus `ccs launcher
+# install`, not an edit here.
+#
+# What is left here is the ARGUMENT handling that is genuinely this wrapper's own: the default
+# model, the model-as-first-arg shortcut, and [1m] suffixing.
+#
+# CCS_FORCE_HARNESS is how the shim knows which launcher's environment to apply. The
+# `exec claude` bounce back into the shim is DELIBERATE and load-bearing — it is what registers
+# the session birth. Do not make this exec the raw binary directly.
+#
+# /model picker slots and hot-swap levers: see the `env` block of the claudex launcher in
+# ~/.ccs/config.toml.
+#
+# Usage:
+#   claudex                                  # default: Claude Opus 5 (see MODEL below)
+#   claudex gpt-5.6-sol                      # first arg = model if it looks like one
+#   claudex claude-opus-5
+#   claudex 'gpt-5.6-terra(xhigh)'           # (effort) suffix PINS effort and beats the
+#                                            # in-session effort arrows; omit it normally
+#   In-session: /model gpt-5.6-luna(low)[1m] # keep [1m] — it declares the context window
+#                                            # to Claude Code (stripped before the gateway)
+#   List models: curl -s http://127.0.0.1:8317/v1/models -H "Authorization: Bearer $(cat ~/.cli-proxy-api-key)"
+# Gateway: brew services start cliproxyapi
+export CCS_FORCE_HARNESS=claudex
+
+# Launch via a bare ALIAS so the active model highlights that slot row — no duplicate
+# "Custom model" entry in /model. A model-looking first arg overrides.
+# Opens on OPUS, not fable (Milad 2026-07-27): the fleet runs ~22 sessions on the house default
+# claude-fable-5, which saturates Fable's per-model window on the Max account. Opus 5 is
+# Claude-first, uncontended, and verified 200. Flip with /model claude-fable-5[1m].
+MODEL='opus'
+if [[ "$1" == gpt-* || "$1" == claude-* ]]; then MODEL="$1"; shift; fi
+for a in "$@"; do [[ "$a" == "--model" ]] && MODEL=""; done   # explicit --model wins
+# Append the context-window declaration to full model IDs only, never to aliases.
+if [[ "$MODEL" == gpt-* || "$MODEL" == claude-* ]] && [[ "$MODEL" != *\[1m\] ]]; then
+  MODEL="${MODEL}[1m]"
+fi
+
+margs=()
+[[ -n "$MODEL" ]] && margs=(--model "$MODEL")
+exec claude --dangerously-skip-permissions "${margs[@]}" "$@"

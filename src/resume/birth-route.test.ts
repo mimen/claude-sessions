@@ -4,9 +4,9 @@ import { ok } from "../result.ts";
 import type { Launcher } from "./launchers.ts";
 
 const FLEET: readonly Launcher[] = [
-  { name: "claudex", binary: "claudex", serves: ["*"], env: {} },
-  { name: "claude-native", binary: "claude-native", serves: ["claude-*", "anthropic.*"], env: {} },
-  { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {} },
+  { name: "claudex", binary: "claudex", serves: ["*"], env: {}, clears: [] },
+  { name: "claude-native", binary: "claude-native", serves: ["claude-*", "anthropic.*"], env: {}, clears: [] },
+  { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] },
 ];
 const registry = () => ok(FLEET);
 

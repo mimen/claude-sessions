@@ -145,8 +145,8 @@ test("resume plan never injects a role birth model", () => {
 
 test("launcher selection reports unknown and ineligible routes without falling back", () => {
   const launchers = [
-    { name: "claude", binary: "claude", serves: ["claude-*"] as const, env: {} },
-    { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"] as const, env: {} },
+    { name: "claude", binary: "claude", serves: ["claude-*"] as const, env: {}, clears: [] },
+    { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"] as const, env: {}, clears: [] },
   ];
 
   expect(chooseLauncher(launchers, ["gpt-5.6"], { via: "missing" })).toEqual({

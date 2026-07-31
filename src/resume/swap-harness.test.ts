@@ -14,8 +14,9 @@ const native: Launcher = {
   binary: "claude-native",
   serves: ["claude-*", "anthropic.*"],
   env: {},
+  clears: [],
 };
-const gpt: Launcher = { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {} };
+const gpt: Launcher = { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] };
 const FLEET = [native, gpt];
 
 const SURFACE = "surface-uuid-1";
@@ -232,14 +233,14 @@ test("an unknown --to lists what is configured", () => {
 });
 
 test("three launchers make 'the other one' ambiguous — say so instead of picking", () => {
-  const third: Launcher = { name: "claude", binary: "claude", serves: ["*"], env: {} };
+  const third: Launcher = { name: "claude", binary: "claude", serves: ["*"], env: {}, clears: [] };
   const res = plan(env(), stubBridge(surfaceSession()), [...FLEET, third], gptHistory);
   if (res.ok) throw new Error("unreachable");
   expect(res.error.code).toBe("ambiguous-target");
 });
 
 test("a target with no default model demands --model rather than inventing one", () => {
-  const odd: Launcher = { name: "other", binary: "other", serves: ["x-*"], env: {} };
+  const odd: Launcher = { name: "other", binary: "other", serves: ["x-*"], env: {}, clears: [] };
   const res = plan(env(), stubBridge(surfaceSession()), [native, odd], claudeHistory, { to: "other" });
   if (res.ok) throw new Error("unreachable");
   expect(res.error.code).toBe("model-unknown");
@@ -247,7 +248,7 @@ test("a target with no default model demands --model rather than inventing one",
 
 // --- the consolidated fleet: swapping CAPABILITY ENVELOPE, not vendor -------------
 
-const claudex: Launcher = { name: "claudex", binary: "claudex", serves: ["*"], env: {} };
+const claudex: Launcher = { name: "claudex", binary: "claudex", serves: ["*"], env: {}, clears: [] };
 const CONSOLIDATED = [claudex, native, gpt];
 
 test("claudex has a default model, so a swap onto it never demands --model", () => {

@@ -9,9 +9,9 @@ import {
   type Launcher,
 } from "./launchers.ts";
 
-const claude: Launcher = { name: "claude", binary: "claude", serves: ["*"], env: {} };
-const gpt: Launcher = { name: "gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {} };
-const native: Launcher = { name: "native", binary: "claude-native", serves: ["*"], env: {} };
+const claude: Launcher = { name: "claude", binary: "claude", serves: ["*"], env: {}, clears: [] };
+const gpt: Launcher = { name: "gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] };
+const native: Launcher = { name: "native", binary: "claude-native", serves: ["*"], env: {}, clears: [] };
 const FLEET = [claude, gpt, native];
 
 describe("matchesModel", () => {
@@ -102,8 +102,9 @@ const claudeNative: Launcher = {
   binary: "claude-native",
   serves: ["claude-*", "anthropic.*"],
   env: {},
+  clears: [],
 };
-const claudeGpt: Launcher = { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {} };
+const claudeGpt: Launcher = { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] };
 const SPLIT_FLEET = [claudeNative, claudeGpt];
 
 describe("routing keys on the last model", () => {
@@ -159,7 +160,7 @@ describe("launcherByName", () => {
 
 // Milad's fleet after the claudex consolidation: one launcher reaching BOTH vendors, listed first
 // as the daily driver, alongside the two single-vendor ones it supersedes.
-const claudex: Launcher = { name: "claudex", binary: "claudex", serves: ["*"], env: {} };
+const claudex: Launcher = { name: "claudex", binary: "claudex", serves: ["*"], env: {}, clears: [] };
 const CONSOLIDATED_FLEET = [claudex, claudeNative, claudeGpt];
 
 describe("a both-vendor launcher alongside single-vendor ones", () => {

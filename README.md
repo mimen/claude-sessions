@@ -256,6 +256,42 @@ pair is validated for reachability — `claudex` may be declared for either vend
 for `gpt-*`, `claude-native` and `claude` only for Claude models — so moving the whole fleet onto a
 different daily driver, or back, is a one-line edit in that registry.
 
+#### Launcher environment
+
+`env` is the **single source** of a launcher's environment, and `clears` is the list of inherited
+variables unset before it applies. A `@file:<path>` value names a file whose first line IS the
+value, so a secret is referenced from config instead of copied into it — rotating the credential
+is a write to that one file, and config.toml never holds it:
+
+```toml
+[[launcher]]
+name = "claudex"
+binary = "claudex"
+serves = ["*"]
+[launcher.env]
+ANTHROPIC_BASE_URL = "http://127.0.0.1:8317"
+ANTHROPIC_AUTH_TOKEN = "@file:~/.cli-proxy-api-key"
+ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-5[1m]"
+
+# The gateway escape hatch: applies no gateway env and actively strips any it inherited, so it
+# still reaches real Anthropic when launched from inside a gateway session.
+[[launcher]]
+name = "claude-native"
+binary = "claude-native"
+serves = ["claude-*", "anthropic.*"]
+clears = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
+```
+
+`ccs launcher install` materializes each launcher's `env`/`clears` into `~/.ccs/launcher-env/`,
+and the `~/.ccs/bin/claude` shim applies exactly one of them immediately before exec'ing the raw
+binary. **`claude` is therefore an indirection**: which launcher it resolves to is the location
+registry's `default_harness`, the same value that decides where a managed birth lands, so the
+fleet moves — or falls back to `claude-native` — in one edit. A wrapper names itself by exporting
+`CCS_FORCE_HARNESS=<name>` and then `exec claude`; that bounce back through the shim is what
+registers the session birth, and is why a wrapper must never exec the raw binary directly.
+
+Re-run `ccs launcher install` after editing `env`, `clears`, or `default_harness`.
+
 The shared host registry defaults to `~/.ccs/hosts.toml`:
 
 ```toml

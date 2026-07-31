@@ -78,6 +78,12 @@ const ConfigSchema = z.object({
    * Claude Code launcher executables for cross-backend resume (`[[launcher]]` array tables).
    * Each entry names an executable and the model-id globs its backend can replay; sessions
    * route to launchers via src/resume/launchers.ts. Empty (the default) → plain `claude`.
+   *
+   * `env` is the SINGLE SOURCE of a launcher's environment: `ccs launcher install` materializes
+   * it for the `~/.ccs/bin/claude` shim, and the resume/birth paths hand the same map to the
+   * spawned process. A value of `@file:<path>` names a file whose first line is the value, so a
+   * secret is referenced from config rather than copied into it. `clears` unsets inherited
+   * variables before `env` is applied — how `claude-native` stays a true gateway escape hatch.
    */
   launcher: z
     .array(
@@ -86,6 +92,7 @@ const ConfigSchema = z.object({
         binary: z.string().min(1),
         serves: z.array(z.string().min(1)).default(["*"]),
         env: z.record(z.string(), z.string()).default({}),
+        clears: z.array(z.string().min(1)).default([]),
       }),
     )
     .default([]),

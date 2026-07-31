@@ -1,0 +1,16 @@
+#!/bin/zsh
+# claude-native — force a real Anthropic-backed claude, stripping any gateway env. Needed when
+# delegating to Claude models from inside a gateway session, where plain `claude` would inherit
+# ANTHROPIC_BASE_URL and route to the gateway. The only launcher with claude.ai connectors and
+# Remote Control, and the ToS/gateway escape hatch.
+#
+# THE `env -u` LIST MOVED INTO CONFIG. It is now the `clears` array on the `claude-native`
+# [[launcher]] entry in ~/.ccs/config.toml, applied by the ~/.ccs/bin/claude shim immediately
+# before it execs the raw binary. That placement is what makes the clearing actually hold: an
+# `env -u` here would be undone by anything the shim applied afterwards, whereas `clears` runs
+# inside the same step that installs a launcher's environment.
+#
+# CCS_FORCE_HARNESS tells the shim which launcher to apply. The `exec claude` bounce back into
+# the shim is DELIBERATE — it is what registers the session birth.
+export CCS_FORCE_HARNESS=claude-native
+exec claude "$@"

@@ -9,9 +9,10 @@ const native: Launcher = {
   binary: "claude-native",
   serves: ["claude-*", "anthropic.*"],
   env: {},
+  clears: [],
 };
-const gpt: Launcher = { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {} };
-const claudex: Launcher = { name: "claudex", binary: "claudex", serves: ["*"], env: {} };
+const gpt: Launcher = { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] };
+const claudex: Launcher = { name: "claudex", binary: "claudex", serves: ["*"], env: {}, clears: [] };
 const FLEET = [native, gpt];
 
 const SURFACE = "surface-uuid-1";
