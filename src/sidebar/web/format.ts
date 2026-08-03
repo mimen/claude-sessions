@@ -306,3 +306,98 @@ function groupUnpinned<Row extends GroupableRow>(
     }))
     .filter((group) => group.rows.length > 0);
 }
+
+/**
+ * How much of a group is showing.
+ *
+ * Three states rather than two because "collapsed" and "everything" are not the only useful
+ * answers: a project with two running sessions and seven finished ones is mostly history, and the
+ * history is worth keeping one click away rather than one scroll away.
+ *
+ * `live` is only offered where it can do something -- see `canFilterLive`.
+ */
+export type ShelfState = "all" | "live" | "collapsed";
+
+/** A row backed by something currently running: an open session, or any cmux tab. */
+export function isLiveRow(row: { readonly kind: string; readonly density?: SidebarDensity }): boolean {
+  // A sessionless tab is live by definition: it is a workspace that is open right now. For a
+  // session, `full` density is exactly "live and not finished", which the projection already
+  // decided -- re-deriving it here would be a second opinion that could disagree.
+  return row.kind === "workspace" || row.density === "full";
+}
+
+/**
+ * Would a live-only state show something different from both other states?
+ *
+ * Only a group holding BOTH kinds qualifies. Measured against the live sidebar, no group under
+ * "by status" ever does -- the sections are already split by liveness, so offering the state there
+ * would put a stop in the cycle that either changes nothing or empties the group. A control that
+ * is present but inert is worse than one that is absent.
+ */
+export function canFilterLive(rows: readonly { readonly kind: string; readonly density?: SidebarDensity }[]): boolean {
+  let live = false;
+  let other = false;
+  for (const row of rows) {
+    if (isLiveRow(row)) live = true;
+    else other = true;
+    if (live && other) return true;
+  }
+  return false;
+}
+
+/**
+ * The next state one click along: a narrowing progression, wrapping back to everything.
+ *
+ * Groups that cannot filter skip the middle stop entirely, so their header stays the plain
+ * open/closed control it has always been.
+ */
+export function nextShelfState(state: ShelfState, filterable: boolean): ShelfState {
+  if (state === "collapsed") return "all";
+  if (state === "all") return filterable ? "live" : "collapsed";
+  return "collapsed";
+}
+
+/** The rows a state actually shows. */
+export function shelfRows<Row extends { readonly kind: string; readonly density?: SidebarDensity }>(
+  rows: readonly Row[],
+  state: ShelfState,
+): readonly Row[] {
+  if (state === "collapsed") return [];
+  if (state === "live") return rows.filter(isLiveRow);
+  return rows;
+}
+
+/**
+ * Shelf states read back from storage.
+ *
+ * Accepts the older format -- a bare array of collapsed keys -- because it is what every existing
+ * install has, and dropping it would silently reopen every section someone had shelved.
+ */
+export function parseShelfStates(raw: string | null): Map<string, ShelfState> {
+  // Finished sections start shelved: they are the least likely to need you, and expanding one is
+  // also what asks the server for its rows, so the default costs nothing.
+  const fallback = (): Map<string, ShelfState> =>
+    new Map([["completed", "collapsed"], ["archived", "collapsed"]]);
+  if (raw === null) return fallback();
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      return new Map(parsed.filter((key): key is string => typeof key === "string")
+        .map((key) => [key, "collapsed" as ShelfState]));
+    }
+    if (parsed !== null && typeof parsed === "object") {
+      const states = new Map<string, ShelfState>();
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (value === "all" || value === "live" || value === "collapsed") states.set(key, value);
+      }
+      return states;
+    }
+    return fallback();
+  } catch {
+    return fallback();
+  }
+}
+
+export function serializeShelfStates(states: ReadonlyMap<string, ShelfState>): string {
+  return JSON.stringify(Object.fromEntries(states));
+}

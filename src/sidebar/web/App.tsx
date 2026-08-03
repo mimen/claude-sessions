@@ -14,13 +14,19 @@ import type {
   SidebarSnapshot,
 } from "../projection.ts";
 import {
+  canFilterLive,
   emptyStateMessage,
   GROUPING_LABELS,
   groupSessions,
+  nextShelfState,
   parseGroupingMode,
+  parseShelfStates,
+  serializeShelfStates,
+  shelfRows,
   shouldApplySnapshotResponse,
   shouldReloadSnapshot,
   type GroupingMode,
+  type ShelfState,
 } from "./format.ts";
 import { SessionRow } from "./components/session-row.tsx";
 import { CompactRow } from "./components/compact-row.tsx";
@@ -36,7 +42,7 @@ import { cn } from "@/lib/utils";
 const POLL_INTERVAL_MS = 1_000;
 const GROUPING_STORAGE_KEY = "ccs-sidebar-grouping";
 const SCOPE_STORAGE_KEY = "ccs-sidebar-scope";
-const COLLAPSED_STORAGE_KEY = "ccs-sidebar-collapsed";
+const SHELVES_STORAGE_KEY = "ccs-sidebar-collapsed";
 const CLUSTERS_STORAGE_KEY = "ccs-sidebar-clusters";
 const CLOCK_INTERVAL_MS = 30_000;
 /**
@@ -151,22 +157,22 @@ export function App(): React.ReactElement {
    * continues.
    */
   /**
-   * Group keys the user has shelved. Persisted, because a shelved group is a standing decision
-   * about what you want to see, not a per-visit preference.
+   * How much of each group is showing. Persisted, because how much of a group you want to see is a
+   * standing decision, not a per-visit preference.
    *
-   * Finished sections start collapsed: they are the least likely to need you, and expanding one is
-   * also what asks the server for its rows, so the default costs nothing.
+   * The storage key is unchanged from when this held only collapsed keys, and `parseShelfStates`
+   * still reads that shape -- a new key would have silently reopened every section anyone had
+   * already shelved.
    */
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => {
-    const stored = localStorage.getItem(COLLAPSED_STORAGE_KEY);
-    if (stored === null) return new Set(["completed", "archived"]);
-    try {
-      return new Set(JSON.parse(stored) as string[]);
-    } catch {
-      return new Set(["completed", "archived"]);
-    }
-  });
-  const collapsedRef = useRef(collapsed);
+  const [shelves, setShelves] = useState<ReadonlyMap<string, ShelfState>>(
+    () => parseShelfStates(localStorage.getItem(SHELVES_STORAGE_KEY)),
+  );
+  const shelvesRef = useRef(shelves);
+  /** Everything a group does not say explicitly: show it all. */
+  const shelfOf = useCallback(
+    (key: string): ShelfState => shelves.get(key) ?? "all",
+    [shelves],
+  );
   /**
    * Whether cluster sessions are lifted into their own groups at the top.
    *
@@ -205,8 +211,10 @@ export function App(): React.ReactElement {
           requestScope = selectedScopeRef.current;
           const requestId = ++nextSnapshotRequestIdRef.current;
           try {
+            // A shelved finished section costs nothing: not asking for its rows is the point of
+            // the default. Any other state needs them.
             const include = (["completed", "archived"] as const)
-              .filter((section) => !collapsedRef.current.has(section))
+              .filter((section) => (shelvesRef.current.get(section) ?? "all") !== "collapsed")
               .join(",");
             const response = await fetch(
               `/api/snapshot?scope=${requestScope}&limit=${rowLimitRef.current}`
@@ -327,7 +335,7 @@ export function App(): React.ReactElement {
       if (row.lifecycle === scope) return true;
       return scope === "active"
         && (row.lifecycle === "completed" || row.lifecycle === "archived")
-        && !collapsed.has(row.lifecycle);
+        && shelfOf(row.lifecycle) !== "collapsed";
     });
     const needle = query.trim().toLowerCase();
     const matched = needle
@@ -335,7 +343,7 @@ export function App(): React.ReactElement {
           `${row.name} ${row.directory ?? ""} ${row.worktree ?? ""}`.toLowerCase().includes(needle))
       : all;
     return groupSessions(matched, grouping, now, clusterFirst);
-  }, [snapshot, query, grouping, now, optimistic, optimisticPins, scope, collapsed, clusterFirst]);
+  }, [snapshot, query, grouping, now, optimistic, optimisticPins, scope, shelfOf, clusterFirst]);
 
   // One flat order underlies the groups so arrow keys cross headings without special cases.
   const flatRows = useMemo(() => groups.flatMap((group) => group.rows), [groups]);
@@ -484,15 +492,21 @@ export function App(): React.ReactElement {
     })();
   }, [load]);
 
-  const toggleGroup = useCallback((key: string): void => {
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      collapsedRef.current = next;
-      localStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify([...next]));
+  /**
+   * Advance one group to its next state.
+   *
+   * Filterability is decided at the call site from the group's own rows, because only the caller
+   * can see them -- a group of nothing but live sessions has no middle stop to offer.
+   */
+  const cycleShelf = useCallback((key: string, filterable: boolean): void => {
+    setShelves((current) => {
+      const next = new Map(current);
+      next.set(key, nextShelfState(current.get(key) ?? "all", filterable));
+      shelvesRef.current = next;
+      localStorage.setItem(SHELVES_STORAGE_KEY, serializeShelfStates(next));
       return next;
     });
-    // Expanding a finished section is also the request for its rows, so the snapshot has to be
+    // Unshelving a finished section is also the request for its rows, so the snapshot has to be
     // re-read rather than waiting for the next poll to notice.
     load(true);
   }, [load]);
@@ -694,24 +708,30 @@ export function App(): React.ReactElement {
         }}
         ref={listRef}
       >
-        {groups.map((group) => (
+        {groups.map((group) => {
+          const state = shelfOf(group.key);
+          const filterable = canFilterLive(group.rows);
+          const visible = shelfRows(group.rows, state);
+          // A shelved finished section has no rows to count, so its catalogue total stands in --
+          // otherwise shelving one would make it read as empty.
+          const total = group.rows.length === 0
+            && (group.key === "completed" || group.key === "archived")
+            ? snapshot?.lifecycleCounts[group.key] ?? 0
+            : group.rows.length;
+          return (
           <div key={group.key}>
             {group.label ? (
               <GroupHeader
-                collapsed={collapsed.has(group.key)}
-                count={
-                  // A collapsed finished section has no rows to count, so its catalogue total
-                  // stands in -- otherwise shelving one would make it read as empty.
-                  group.rows.length === 0 && (group.key === "completed" || group.key === "archived")
-                    ? snapshot?.lifecycleCounts[group.key] ?? 0
-                    : group.rows.length
-                }
+                count={total}
+                shown={state === "live" ? visible.length : total}
+                state={state}
+                filterable={filterable}
                 color={group.color}
                 label={group.label}
-                onToggle={() => toggleGroup(group.key)}
+                onCycle={() => cycleShelf(group.key, filterable)}
               />
             ) : null}
-            {(collapsed.has(group.key) ? [] : group.rows).map((row) => (
+            {visible.map((row) => (
               // Density is decided in the projection, so the view only has to honour it. A closed
               // or settled session collapses to a line; anything live keeps the full card.
               row.kind === "session" && row.density !== "full" ? (
@@ -749,7 +769,8 @@ export function App(): React.ReactElement {
               )
             ))}
           </div>
-        ))}
+          );
+        })}
 
         {emptyMessage ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">{emptyMessage}</div>
