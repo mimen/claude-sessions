@@ -85,14 +85,24 @@ export interface IndexedSessionInput {
   readonly lastTs: string | null;
   readonly models: readonly string[];
   readonly costByModel: Readonly<Record<string, number>>;
-  /** Transcript message count, used to age the enrichment summary. */
+  /**
+   * Transcript message count, used to age the enrichment summary.
+   *
+   * The index refreshes on a timer, so its own count trails a session that is still typing. The
+   * snapshot trues this up from the transcript before projecting (see `tail-count.ts`), so what
+   * arrives here is exact whenever it could be established.
+   */
   readonly messageCount?: number | null;
   /** Where the transcript lives, so a caller can stat it. */
   readonly transcriptPath?: string | null;
+  /** Bytes the index had parsed when it recorded `messageCount`. */
+  readonly indexedBytes?: number | null;
   /**
-   * When the transcript was last written, in ms. The message count above comes from the index,
-   * and the index does not move for a live session -- so the count alone reports the sessions
-   * most likely to have drifted as perfectly current. The filesystem is the second opinion.
+   * When the transcript was last written, in ms.
+   *
+   * The fallback, for the sessions whose exact count could not be established -- a truncated file,
+   * or an index predating `file_size`. It cannot say how far a session has moved, only that it
+   * has, which is still better than the silence that would otherwise read as currency.
    */
   readonly transcriptMtimeMs?: number | null;
 }

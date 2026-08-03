@@ -44,6 +44,7 @@ import { loadLaunchers } from "../resume/launchers.ts";
 import { log } from "../logger.ts";
 import { err, ok, type Result } from "../result.ts";
 import { readIndexReadOnly } from "./index-read.ts";
+import { exactMessageCount } from "./tail-count.ts";
 import {
   createCachedStatusReader,
   readClaudeStatuses,
@@ -816,21 +817,30 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
 
       // Delegated seats never reach the shelf or the history scopes; a live one still shows,
       // because a running agent is something you may need to act on.
-      const indexed = index.sessions
-        .filter(
-          (session) => !catalogue.auxiliary.has(session.sessionId)
-            && !catalogue.auxiliary.has(session.resumeId),
-        )
-        // One stat per row, and only for rows that carry an enrichment worth aging. The index's
-        // message count cannot detect drift on a live session -- it is the thing that has not
-        // moved -- so the filesystem is asked instead.
-        .map((session) => ({
+      const visible = index.sessions.filter(
+        (session) => !catalogue.auxiliary.has(session.sessionId)
+          && !catalogue.auxiliary.has(session.resumeId),
+      );
+      // Only rows carrying an enrichment worth aging pay for any of this. The index refreshes on a
+      // timer, so its message count trails a session that is still typing; reading the bytes it has
+      // not parsed yet turns "something happened" into a number. Measured on the live store: 12
+      // rows, 28.8 KB, 1.0 ms -- because the cost is what the session typed since the last refresh,
+      // not what it has ever typed.
+      const indexed = await Promise.all(visible.map(async (session) => {
+        if (!catalogue.summaries.has(session.sessionId)) {
+          return { ...session, transcriptMtimeMs: null };
+        }
+        const exact = await exactMessageCount(session);
+        return {
           ...session,
-          transcriptMtimeMs: session.transcriptPath
-            && catalogue.summaries.has(session.sessionId)
+          messageCount: exact ?? session.messageCount ?? null,
+          // The mtime fallback is only consulted when the exact count could not be established;
+          // asking for it otherwise would be a stat per row for an answer already known.
+          transcriptMtimeMs: exact === null && session.transcriptPath
             ? transcriptMtime(session.transcriptPath)
             : null,
-        }));
+        };
+      }));
 
       const statuses = bridge.readable
         ? await statusReader.read(bridge.workspaceIds())

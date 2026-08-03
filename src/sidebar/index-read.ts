@@ -37,6 +37,7 @@ interface IndexRow {
   cost_by_model: string | null;
   msg_count: number | null;
   path: string | null;
+  file_size: number | null;
 }
 
 function columnsOf(db: Database, table: string): Set<string> {
@@ -92,6 +93,9 @@ export function readIndexReadOnly(
     // The transcript's own path, so a reader can ask the filesystem whether the session has moved
     // since the index last looked. Optional for the same reason as msg_count.
     const pathExpression = available.has("path") ? "path" : "NULL AS path";
+    // The offset `msg_count` is true at. With it, a reader can count the appended bytes and know
+    // exactly how far the session has moved; without it, only that it has. Optional like the rest.
+    const sizeExpression = available.has("file_size") ? "file_size" : "NULL AS file_size";
     const titleSources = TITLE_COLUMNS.filter((column) => available.has(column));
     // COALESCE keeps the index's own title priority; with no title column at all the row still
     // has an id, and the caller falls back to cmux's workspace title.
@@ -101,7 +105,7 @@ export function readIndexReadOnly(
 
     const select =
       `SELECT session_id, resume_id, ${titleExpression} AS title, cwd, last_ts, models, cost_by_model,
-              ${messageCountExpression}, ${pathExpression}
+              ${messageCountExpression}, ${pathExpression}, ${sizeExpression}
          FROM sessions`;
     let rows: IndexRow[];
 
@@ -148,6 +152,7 @@ export function readIndexReadOnly(
       costByModel: parseJson<Record<string, number>>(row.cost_by_model, {}),
       messageCount: row.msg_count ?? null,
       transcriptPath: row.path ?? null,
+      indexedBytes: row.file_size ?? null,
     }));
   } finally {
     db.close();
