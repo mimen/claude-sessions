@@ -711,7 +711,6 @@ export function App(): React.ReactElement {
                 <CompactRow
                   key={row.id}
                   now={now}
-                  onAccept={setLifecycle}
                   onDismiss={declineSuggestion}
                   onLifecycle={setLifecycle}
                   onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}

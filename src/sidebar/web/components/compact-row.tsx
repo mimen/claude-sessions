@@ -12,14 +12,22 @@
  * actually decides whether you would reopen something.
  */
 import type React from "react";
-import { useCallback, useState } from "react";
-import type { SidebarSessionRow } from "../../projection.ts";
+import { useCallback } from "react";
+import type { SidebarSessionRow, SidebarSummary } from "../../projection.ts";
 import { relativeTime } from "../format.ts";
 import { cn } from "@/lib/utils";
 import { SuggestionChip } from "./suggestion-chip.tsx";
 import { ProjectMark } from "./project-mark.tsx";
-import { ArchiveIcon, CheckIcon, SummaryIcon } from "./icons.tsx";
+import { ArchiveIcon, CheckIcon, CloseIcon, CopyIcon, SummaryIcon } from "./icons.tsx";
 import { RowAction } from "./row-action.tsx";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { summaryAsText } from "./summary-card.tsx";
 
 export interface CompactRowProps {
   readonly row: SidebarSessionRow;
@@ -27,8 +35,6 @@ export interface CompactRowProps {
   readonly selected: boolean;
   readonly opening: boolean;
   readonly onOpen: (row: SidebarSessionRow) => void;
-  /** Apply enrichment's verdict. Absent for a row whose verdict is not actionable. */
-  readonly onAccept?: (row: SidebarSessionRow, verb: "complete" | "archive") => void;
   /**
    * Lifecycle actions, the same ones the full rows offer.
    *
@@ -40,6 +46,11 @@ export interface CompactRowProps {
     row: SidebarSessionRow,
     action: "complete" | "archive" | "uncomplete" | "unarchive",
   ) => void;
+  /**
+   * Refuse enrichment's verdict. Lives in the context menu rather than on the row: it is the
+   * rarest of the three things you do with a suggestion, and giving it an icon put a cross beside
+   * controls that already read as "no".
+   */
   readonly onDismiss?: (row: SidebarSessionRow) => void;
   readonly registerRef?: (id: string, element: HTMLElement | null) => void;
   /** Report the pointer entering this row, or leaving it (null); the list owns the card. */
@@ -52,19 +63,17 @@ export function CompactRow({
   selected,
   opening,
   onOpen,
-  onAccept,
   onDismiss,
   onLifecycle,
   registerRef,
   onHover,
 }: CompactRowProps): React.ReactElement {
-  const [hovered, setHovered] = useState(false);
   const age = relativeTime(row.lastActivityAt, now);
   const suggestion = row.suggestion;
 
   const open = useCallback((): void => onOpen(row), [onOpen, row]);
 
-  return (
+  const rowButton = (
     <button
       aria-busy={opening}
       aria-selected={selected}
@@ -82,8 +91,6 @@ export function CompactRow({
         row.density === "settled" && "opacity-60",
       )}
       onClick={open}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       ref={(element) => registerRef?.(row.id, element)}
       type="button"
     >
@@ -91,20 +98,7 @@ export function CompactRow({
       <span className="min-w-0 flex-1 truncate text-[12px] leading-[18px] font-normal text-muted-foreground group-hover:text-foreground">
         {row.name}
       </span>
-      {suggestion ? (
-        <SuggestionChip
-          onAccept={
-            suggestion.actionable && onAccept
-              ? () => onAccept(row, suggestion.verb as "complete" | "archive")
-              : undefined
-          }
-          onDismiss={onDismiss ? () => onDismiss(row) : undefined}
-          // Buttons only once the row is under the pointer: a list of closed sessions should read
-          // as text, not as a wall of controls competing with the live rows above it.
-          revealed={hovered}
-          suggestion={suggestion}
-        />
-      ) : null}
+      {suggestion ? <SuggestionChip suggestion={suggestion} /> : null}
       {/* Lifecycle controls, revealed like the full rows'. A completed row offers only the way
         * back, and an archived one likewise: showing "Archive" beside a completed row invites a
         * second terminal state that says nothing new. */}
@@ -146,4 +140,53 @@ export function CompactRow({
     </button>
   );
 
+  const completed = row.lifecycle === "completed";
+  const archived = row.lifecycle === "archived";
+  const summary = row.summary;
+
+  // The same menu the full rows carry, so right-click means one thing everywhere in the list. It
+  // is also the only home for the actions that do not earn a permanent icon: refusing a verdict,
+  // and reading a summary past the card's clamp.
+  return (
+    <ContextMenu>
+      {/* `render` hands Base UI the row itself, so the row stays one element and one tab stop. */}
+      <ContextMenuTrigger render={rowButton} />
+      <ContextMenuContent>
+        {!archived ? (
+          <ContextMenuItem onClick={() => onLifecycle(row, completed ? "uncomplete" : "complete")}>
+            <CheckIcon />
+            {completed ? "Mark not complete" : "Complete"}
+          </ContextMenuItem>
+        ) : null}
+        {!completed ? (
+          <ContextMenuItem onClick={() => onLifecycle(row, archived ? "unarchive" : "archive")}>
+            <ArchiveIcon />
+            {archived ? "Unarchive" : "Archive"}
+          </ContextMenuItem>
+        ) : null}
+        {suggestion && onDismiss ? (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={() => onDismiss(row)}>
+              <CloseIcon />
+              Dismiss “{suggestion.junk ? "junk" : suggestion.verb}”
+            </ContextMenuItem>
+          </>
+        ) : null}
+        {summary ? (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onClick={() => {
+                void navigator.clipboard.writeText(summaryAsText(summary as SidebarSummary, row.name));
+              }}
+            >
+              <CopyIcon />
+              Copy summary
+            </ContextMenuItem>
+          </>
+        ) : null}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
 }
