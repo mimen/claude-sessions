@@ -18,11 +18,13 @@ import {
   emptyStateMessage,
   GROUPING_LABELS,
   groupSessions,
-  nextShelfState,
+  OPEN_SHELF,
   parseGroupingMode,
   parseShelfStates,
   serializeShelfStates,
   shelfRows,
+  toggleLiveOnly,
+  toggleShelved,
   shouldApplySnapshotResponse,
   shouldReloadSnapshot,
   type GroupingMode,
@@ -170,7 +172,7 @@ export function App(): React.ReactElement {
   const shelvesRef = useRef(shelves);
   /** Everything a group does not say explicitly: show it all. */
   const shelfOf = useCallback(
-    (key: string): ShelfState => shelves.get(key) ?? "all",
+    (key: string): ShelfState => shelves.get(key) ?? OPEN_SHELF,
     [shelves],
   );
   /**
@@ -214,7 +216,7 @@ export function App(): React.ReactElement {
             // A shelved finished section costs nothing: not asking for its rows is the point of
             // the default. Any other state needs them.
             const include = (["completed", "archived"] as const)
-              .filter((section) => (shelvesRef.current.get(section) ?? "all") !== "collapsed")
+              .filter((section) => !(shelvesRef.current.get(section) ?? OPEN_SHELF).shelved)
               .join(",");
             const response = await fetch(
               `/api/snapshot?scope=${requestScope}&limit=${rowLimitRef.current}`
@@ -335,7 +337,7 @@ export function App(): React.ReactElement {
       if (row.lifecycle === scope) return true;
       return scope === "active"
         && (row.lifecycle === "completed" || row.lifecycle === "archived")
-        && shelfOf(row.lifecycle) !== "collapsed";
+        && !shelfOf(row.lifecycle).shelved;
     });
     const needle = query.trim().toLowerCase();
     const matched = needle
@@ -492,24 +494,22 @@ export function App(): React.ReactElement {
     })();
   }, [load]);
 
-  /**
-   * Advance one group to its next state.
-   *
-   * Filterability is decided at the call site from the group's own rows, because only the caller
-   * can see them -- a group of nothing but live sessions has no middle stop to offer.
-   */
-  const cycleShelf = useCallback((key: string, filterable: boolean): void => {
-    setShelves((current) => {
-      const next = new Map(current);
-      next.set(key, nextShelfState(current.get(key) ?? "all", filterable));
-      shelvesRef.current = next;
-      localStorage.setItem(SHELVES_STORAGE_KEY, serializeShelfStates(next));
-      return next;
-    });
-    // Unshelving a finished section is also the request for its rows, so the snapshot has to be
-    // re-read rather than waiting for the next poll to notice.
-    load(true);
-  }, [load]);
+  /** Apply one group's own change, persist it, and re-read if the server now owes rows. */
+  const updateShelf = useCallback(
+    (key: string, change: (state: ShelfState) => ShelfState): void => {
+      setShelves((current) => {
+        const next = new Map(current);
+        next.set(key, change(current.get(key) ?? OPEN_SHELF));
+        shelvesRef.current = next;
+        localStorage.setItem(SHELVES_STORAGE_KEY, serializeShelfStates(next));
+        return next;
+      });
+      // Unshelving a finished section is also the request for its rows, so the snapshot has to be
+      // re-read rather than waiting for the next poll to notice.
+      load(true);
+    },
+    [load],
+  );
 
   const setLifecycle = useCallback((
     row: SidebarSessionRow,
@@ -723,12 +723,13 @@ export function App(): React.ReactElement {
             {group.label ? (
               <GroupHeader
                 count={total}
-                shown={state === "live" ? visible.length : total}
+                shown={state.liveOnly ? visible.length : total}
                 state={state}
                 filterable={filterable}
                 color={group.color}
                 label={group.label}
-                onCycle={() => cycleShelf(group.key, filterable)}
+                onToggleShelved={() => updateShelf(group.key, toggleShelved)}
+                onToggleLiveOnly={() => updateShelf(group.key, toggleLiveOnly)}
               />
             ) : null}
             {visible.map((row) => (

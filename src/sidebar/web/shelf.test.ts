@@ -2,10 +2,12 @@ import { test, expect } from "bun:test";
 import {
   canFilterLive,
   isLiveRow,
-  nextShelfState,
+  OPEN_SHELF,
   parseShelfStates,
   serializeShelfStates,
   shelfRows,
+  toggleLiveOnly,
+  toggleShelved,
   type ShelfState,
 } from "./format.ts";
 
@@ -29,63 +31,70 @@ test("only a group holding both kinds can filter", () => {
   expect(canFilterLive([])).toBe(false);
 });
 
-// The whole point of gating the middle stop: under "by status" no group is ever mixed, so a
-// three-stop cycle there would spend a click on a state that changes nothing.
-test("a filterable group cycles through three states, an unfilterable one through two", () => {
-  const cycle = (filterable: boolean): ShelfState[] => {
-    const seen: ShelfState[] = [];
-    let state: ShelfState = "all";
-    for (let i = 0; i < 3; i++) {
-      state = nextShelfState(state, filterable);
-      seen.push(state);
-    }
-    return seen;
-  };
-  expect(cycle(true)).toEqual(["live", "collapsed", "all"]);
-  expect(cycle(false)).toEqual(["collapsed", "all", "collapsed"]);
+test("each control is binary and reversible in one click", () => {
+  expect(toggleShelved(OPEN_SHELF)).toEqual({ shelved: true, liveOnly: false });
+  expect(toggleShelved(toggleShelved(OPEN_SHELF))).toEqual(OPEN_SHELF);
+  expect(toggleLiveOnly(OPEN_SHELF)).toEqual({ shelved: false, liveOnly: true });
+  expect(toggleLiveOnly(toggleLiveOnly(OPEN_SHELF))).toEqual(OPEN_SHELF);
 });
 
-test("collapsed always reopens to everything, never to a filtered view", () => {
-  expect(nextShelfState("collapsed", true)).toBe("all");
-  expect(nextShelfState("collapsed", false)).toBe("all");
+// The reason the two facts are kept apart rather than cycled: shelving a filtered group and
+// unshelving it must give back the view you left, not a reset one.
+test("the controls do not disturb each other", () => {
+  const filtered = toggleLiveOnly(OPEN_SHELF);
+  const shelved = toggleShelved(filtered);
+  expect(shelved).toEqual({ shelved: true, liveOnly: true });
+  expect(toggleShelved(shelved)).toEqual(filtered);
 });
 
 test("each state shows what it claims", () => {
   const rows = [liveSession, closedSession, tab, settledSession];
-  expect(shelfRows(rows, "all")).toHaveLength(4);
-  expect(shelfRows(rows, "live")).toEqual([liveSession, tab]);
-  expect(shelfRows(rows, "collapsed")).toHaveLength(0);
+  expect(shelfRows(rows, OPEN_SHELF)).toHaveLength(4);
+  expect(shelfRows(rows, { shelved: false, liveOnly: true })).toEqual([liveSession, tab]);
+  expect(shelfRows(rows, { shelved: true, liveOnly: false })).toHaveLength(0);
+  expect(shelfRows(rows, { shelved: true, liveOnly: true })).toHaveLength(0);
 });
 
-// Every existing install has the old shape on disk. Dropping it would silently reopen every
-// section someone had shelved, which is worse than the feature is good.
-test("the older collapsed-key array still reads as collapsed", () => {
+// Two older formats exist in the wild. Dropping either silently reopens sections someone shelved.
+test("the original collapsed-key array still reads as shelved", () => {
   const states = parseShelfStates(JSON.stringify(["completed", "archived", "milad-vault"]));
-  expect(states.get("completed")).toBe("collapsed");
-  expect(states.get("milad-vault")).toBe("collapsed");
+  expect(states.get("completed")).toEqual({ shelved: true, liveOnly: false });
+  expect(states.get("milad-vault")).toEqual({ shelved: true, liveOnly: false });
   expect(states.size).toBe(3);
 });
 
+test("the three-state cycle that briefly replaced it still reads back", () => {
+  const states = parseShelfStates(JSON.stringify({ a: "all", b: "live", c: "collapsed" }));
+  expect(states.get("a")).toEqual(OPEN_SHELF);
+  expect(states.get("b")).toEqual({ shelved: false, liveOnly: true });
+  expect(states.get("c")).toEqual({ shelved: true, liveOnly: false });
+});
+
 test("finished sections start shelved when nothing is stored", () => {
-  expect([...parseShelfStates(null).entries()].sort()).toEqual([
-    ["archived", "collapsed"],
-    ["completed", "collapsed"],
-  ]);
+  const states = parseShelfStates(null);
+  expect(states.get("completed")).toEqual({ shelved: true, liveOnly: false });
+  expect(states.get("archived")).toEqual({ shelved: true, liveOnly: false });
+  expect(states.size).toBe(2);
 });
 
 test("unreadable or nonsense storage falls back rather than throwing", () => {
-  expect(parseShelfStates("{not json").get("archived")).toBe("collapsed");
-  expect(parseShelfStates("42").get("archived")).toBe("collapsed");
+  expect(parseShelfStates("{not json").get("archived")).toEqual({ shelved: true, liveOnly: false });
+  expect(parseShelfStates("42").get("archived")).toEqual({ shelved: true, liveOnly: false });
 });
 
 test("a state this build does not understand is dropped, not trusted", () => {
   const states = parseShelfStates(JSON.stringify({ a: "live", b: "sideways", c: "collapsed" }));
-  expect(states.get("a")).toBe("live");
+  expect(states.get("a")).toEqual({ shelved: false, liveOnly: true });
   expect(states.has("b")).toBe(false);
-  expect(states.get("c")).toBe("collapsed");
+  expect(states.get("c")).toEqual({ shelved: true, liveOnly: false });
 });
 
-test("states survive a round trip through storage", () => {
-  const original = new Map<string, ShelfState>([["p", "live"], ["q", "collapsed"], ["r", "all"]]);
+test("every combination survives a round trip through storage", () => {
+  const original = new Map<string, ShelfState>([
+    ["a", OPEN_SHELF],
+    ["b", { shelved: false, liveOnly: true }],
+    ["c", { shelved: true, liveOnly: false }],
+    ["d", { shelved: true, liveOnly: true }],
+  ]);
   expect(parseShelfStates(serializeShelfStates(original))).toEqual(original);
 });

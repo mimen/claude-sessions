@@ -310,13 +310,18 @@ function groupUnpinned<Row extends GroupableRow>(
 /**
  * How much of a group is showing.
  *
- * Three states rather than two because "collapsed" and "everything" are not the only useful
- * answers: a project with two running sessions and seven finished ones is mostly history, and the
- * history is worth keeping one click away rather than one scroll away.
- *
- * `live` is only offered where it can do something -- see `canFilterLive`.
+ * Two independent facts rather than three stops on one cycle. They answer different questions --
+ * "do I want this group at all" and "do I want its history" -- and a cycle forced you to pass
+ * through one answer to reach the other. Keeping them apart also means the filter survives
+ * shelving: unshelve a group and it comes back the way you left it.
  */
-export type ShelfState = "all" | "live" | "collapsed";
+export interface ShelfState {
+  readonly shelved: boolean;
+  /** Show only rows backed by something running. Kept even while shelved, so it is not forgotten. */
+  readonly liveOnly: boolean;
+}
+
+export const OPEN_SHELF: ShelfState = { shelved: false, liveOnly: false };
 
 /** A row backed by something currently running: an open session, or any cmux tab. */
 export function isLiveRow(row: { readonly kind: string; readonly density?: SidebarDensity }): boolean {
@@ -327,12 +332,12 @@ export function isLiveRow(row: { readonly kind: string; readonly density?: Sideb
 }
 
 /**
- * Would a live-only state show something different from both other states?
+ * Would filtering to live change what this group shows?
  *
  * Only a group holding BOTH kinds qualifies. Measured against the live sidebar, no group under
- * "by status" ever does -- the sections are already split by liveness, so offering the state there
- * would put a stop in the cycle that either changes nothing or empties the group. A control that
- * is present but inert is worse than one that is absent.
+ * "by status" ever does -- the sections are already split by liveness, so the control there would
+ * either do nothing or empty the group. It renders as plain text in that case rather than as a
+ * button that answers a click with nothing.
  */
 export function canFilterLive(rows: readonly { readonly kind: string; readonly density?: SidebarDensity }[]): boolean {
   let live = false;
@@ -345,16 +350,12 @@ export function canFilterLive(rows: readonly { readonly kind: string; readonly d
   return false;
 }
 
-/**
- * The next state one click along: a narrowing progression, wrapping back to everything.
- *
- * Groups that cannot filter skip the middle stop entirely, so their header stays the plain
- * open/closed control it has always been.
- */
-export function nextShelfState(state: ShelfState, filterable: boolean): ShelfState {
-  if (state === "collapsed") return "all";
-  if (state === "all") return filterable ? "live" : "collapsed";
-  return "collapsed";
+export function toggleShelved(state: ShelfState): ShelfState {
+  return { ...state, shelved: !state.shelved };
+}
+
+export function toggleLiveOnly(state: ShelfState): ShelfState {
+  return { ...state, liveOnly: !state.liveOnly };
 }
 
 /** The rows a state actually shows. */
@@ -362,33 +363,52 @@ export function shelfRows<Row extends { readonly kind: string; readonly density?
   rows: readonly Row[],
   state: ShelfState,
 ): readonly Row[] {
-  if (state === "collapsed") return [];
-  if (state === "live") return rows.filter(isLiveRow);
-  return rows;
+  if (state.shelved) return [];
+  return state.liveOnly ? rows.filter(isLiveRow) : rows;
+}
+
+/** Storage form. Compact enough to stay readable in devtools. */
+function encodeShelfState(state: ShelfState): string {
+  if (state.shelved) return state.liveOnly ? "collapsed-live" : "collapsed";
+  return state.liveOnly ? "live" : "all";
+}
+
+function decodeShelfState(value: unknown): ShelfState | null {
+  switch (value) {
+    case "all": return OPEN_SHELF;
+    case "live": return { shelved: false, liveOnly: true };
+    case "collapsed": return { shelved: true, liveOnly: false };
+    case "collapsed-live": return { shelved: true, liveOnly: true };
+    default: return null;
+  }
 }
 
 /**
  * Shelf states read back from storage.
  *
- * Accepts the older format -- a bare array of collapsed keys -- because it is what every existing
- * install has, and dropping it would silently reopen every section someone had shelved.
+ * Two older formats are still accepted, because both exist in the wild: a bare array of collapsed
+ * keys, and the three-state cycle that briefly replaced it. Dropping either would silently reopen
+ * every section someone had shelved.
  */
 export function parseShelfStates(raw: string | null): Map<string, ShelfState> {
-  // Finished sections start shelved: they are the least likely to need you, and expanding one is
+  // Finished sections start shelved: they are the least likely to need you, and unshelving one is
   // also what asks the server for its rows, so the default costs nothing.
-  const fallback = (): Map<string, ShelfState> =>
-    new Map([["completed", "collapsed"], ["archived", "collapsed"]]);
+  const fallback = (): Map<string, ShelfState> => new Map([
+    ["completed", { shelved: true, liveOnly: false }],
+    ["archived", { shelved: true, liveOnly: false }],
+  ]);
   if (raw === null) return fallback();
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (Array.isArray(parsed)) {
       return new Map(parsed.filter((key): key is string => typeof key === "string")
-        .map((key) => [key, "collapsed" as ShelfState]));
+        .map((key) => [key, { shelved: true, liveOnly: false }]));
     }
     if (parsed !== null && typeof parsed === "object") {
       const states = new Map<string, ShelfState>();
       for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-        if (value === "all" || value === "live" || value === "collapsed") states.set(key, value);
+        const state = decodeShelfState(value);
+        if (state) states.set(key, state);
       }
       return states;
     }
@@ -399,5 +419,7 @@ export function parseShelfStates(raw: string | null): Map<string, ShelfState> {
 }
 
 export function serializeShelfStates(states: ReadonlyMap<string, ShelfState>): string {
-  return JSON.stringify(Object.fromEntries(states));
+  return JSON.stringify(
+    Object.fromEntries([...states].map(([key, state]) => [key, encodeShelfState(state)])),
+  );
 }

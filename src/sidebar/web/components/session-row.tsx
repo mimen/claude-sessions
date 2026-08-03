@@ -244,7 +244,11 @@ export function SessionRow({
             </span>
           ) : session && row.workspaceRef ? (
             <Status
-              className="gap-1 border-0 bg-transparent px-0 py-0 text-[10px] text-muted-foreground"
+              // `overflow-visible` matters: the indicator's pulse expands to ~15px around an 8px
+              // dot, and the badge it lives in is overflow-hidden with no left padding, so the
+              // halo was cut off 3.4px on its left and not at all on its right. A pulse clipped
+              // down one side reads as a dot sitting off-centre, which is what it looked like.
+              className="gap-1 overflow-visible border-0 bg-transparent px-0 py-0 text-[10px] text-muted-foreground"
               status={statusTone(row.section)}
             >
               <StatusIndicator />
