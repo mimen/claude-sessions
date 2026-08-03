@@ -13,6 +13,7 @@ export function openInCmux(cmd: ResumeCommand, name: string, binary = "cmux"): b
       argv: cmd.argv,
       cwd: cmd.cwd,
       env: cmd.env,
+      unset: cmd.unset,
       name,
       focus: true,
       cmuxBin: binary,

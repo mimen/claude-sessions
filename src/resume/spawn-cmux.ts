@@ -50,6 +50,12 @@ export interface CmuxNewWorkspaceOpts {
   readonly focus?: boolean;
   /** Explicit launcher environment, scoped only to the launcher child. */
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * Inherited variables the launcher child must NOT see (the launcher's `clears`). Applied as
+   * `env -u` alongside the assignments, because the detached cmux shell inherits its parent's
+   * environment and an assignment map has no way to say "remove this".
+   */
+  readonly unset?: readonly string[];
 }
 
 export interface SpawnCmuxOpts extends CmuxNewWorkspaceOpts {
@@ -184,14 +190,23 @@ function prepareCmuxInvocation(
   cleanupDelayMs: number,
 ): Result<PreparedCmuxInvocation> {
   const environment = Object.entries(opts.env ?? {});
+  const unset = opts.unset ?? [];
   for (const [key] of environment) {
+    if (!ENVIRONMENT_KEY_PATTERN.test(key)) {
+      return err(new Error(`invalid launcher environment key: ${JSON.stringify(key)}`));
+    }
+  }
+  for (const key of unset) {
     if (!ENVIRONMENT_KEY_PATTERN.test(key)) {
       return err(new Error(`invalid launcher environment key: ${JSON.stringify(key)}`));
     }
   }
 
   const launcher = opts.argv.map(shellQuote).join(" ");
-  let command = launcher;
+  // `-u` flags precede assignments so a launcher may clear a family and re-assert one member, the
+  // same order the compiled directive list guarantees.
+  const unsetFlags = unset.map((key) => `-u ${key}`);
+  let command = unsetFlags.length > 0 ? `/usr/bin/env ${unsetFlags.join(" ")} ${launcher}` : launcher;
   let temporaryEnvironment: TemporaryEnvironment | null = null;
 
   if (environment.length > 0) {
@@ -216,7 +231,7 @@ function prepareCmuxInvocation(
       `(set +a; unset ${stagingKeys}; builtin . ${sourceFile} && ` +
       `/bin/rm -f -- ${sourceFile} && ` +
       `{ /bin/rmdir -- ${removeDirectory} 2>/dev/null || true; } && ` +
-      `/usr/bin/env ${realAssignments.join(" ")} ${launcher})`;
+      `/usr/bin/env ${[...unsetFlags, ...realAssignments].join(" ")} ${launcher})`;
   }
 
   const argv = ["new-workspace", "--cwd", opts.cwd, "--name", opts.name, "--command", command];

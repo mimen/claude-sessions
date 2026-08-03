@@ -4,10 +4,24 @@ import { listByRecency } from "../index/index.ts";
 import { openIndex } from "../index/schema.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { buildSessionIntegrityReport } from "./session-integrity.ts";
+import { collectLauncherDrift } from "./launcher-drift-io.ts";
+import { launcherDriftExitCode, renderLauncherDriftReport } from "./launcher-drift.ts";
+
+/**
+ * `ccs doctor launcher` — report-only drift between what is DEPLOYED/INSTALLED and what the
+ * current config declares. Never repairs: every finding names the command that fixes it.
+ */
+function launcherDoctor(args: readonly string[]): number {
+  const report = collectLauncherDrift();
+  if (args.includes("--json")) console.log(JSON.stringify(report, null, 2));
+  else console.log(renderLauncherDriftReport(report));
+  return launcherDriftExitCode(report);
+}
 
 export function doctorCommand(args: readonly string[]): number {
+  if (args[0] === "launcher") return launcherDoctor(args.slice(1));
   if (args[0] !== "sessions") {
-    console.error("usage: ccs doctor sessions [--json]");
+    console.error("usage: ccs doctor sessions [--json]\n       ccs doctor launcher [--json]");
     return 2;
   }
   if (!existsSync(DB_PATH())) {

@@ -88,6 +88,7 @@ done
         argv: [launcherPath, capturedValuePath, childEnvironmentPath],
         cwd: root,
         env: { CCS_OPEN_VALUE: explicitValue },
+        unset: [],
         shell: "legacy shell text that must not be passed",
       };
 
@@ -118,6 +119,7 @@ done
         argv: ["claude", "--resume", "session-id"],
         cwd: "/tmp",
         env: { "INVALID-NAME": "value" },
+        unset: [],
         shell: "unused",
       };
 

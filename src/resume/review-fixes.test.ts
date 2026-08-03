@@ -63,6 +63,7 @@ test("handoffInline returns 127 when the command is missing", () => {
     argv: ["definitely-not-a-real-binary-xyz", "--resume", "id"],
     cwd: tmpdir(),
     env: {},
+    unset: [],
     shell: "definitely-not-a-real-binary-xyz --resume id",
   });
   expect(code).toBe(127);

@@ -48,7 +48,7 @@ import {
 } from "../roles/permission-mode.ts";
 import { shellQuote } from "./command.ts";
 import { spawnCmux } from "./spawn-cmux.ts";
-import type { Launcher } from "./launchers.ts";
+import { launcherEnvironment, type Launcher } from "./launchers.ts";
 import type { BirthModelId } from "./role-model-launch.ts";
 import {
   compileExactBirthRoute,
@@ -741,9 +741,9 @@ export function buildLaunchArgv(id: string, opts: NewSessionOpts, binary = "clau
 /** Launcher overrides that force the stable shim and carry one-birth provenance to it. */
 export function launchEnvironmentOverrides(
   opts: NewSessionOpts,
-  launcherEnvironment: Readonly<Record<string, string>>,
+  launcherEnv: Readonly<Record<string, string>>,
 ): Readonly<Record<string, string>> {
-  const environment: Record<string, string> = { ...launcherEnvironment };
+  const environment: Record<string, string> = { ...launcherEnv };
   const shimDirectory = join(process.env.HOME ?? homedir(), ".ccs", "bin");
   const pathEntries = (environment.PATH ?? process.env.PATH ?? "").split(delimiter).filter(
     (entry) => entry.length > 0 && entry !== shimDirectory,
@@ -759,19 +759,29 @@ export function launchEnvironmentOverrides(
   return environment;
 }
 
-/** Exact inline environment: preserve ordinary variables but remove all inherited birth claims. */
+/**
+ * Exact inline environment: preserve ordinary variables but remove all inherited birth claims.
+ *
+ * `unset` is the launcher's `clears`, applied to the INHERITED environment before its assignments.
+ * An inline birth builds its environment from `process.env`, so without this a `--via
+ * claude-native` birth from inside a gateway session would carry that session's ANTHROPIC_BASE_URL
+ * straight into the "escape hatch" harness.
+ */
 export function inlineLaunchEnvironment(
   opts: NewSessionOpts,
-  launcherEnvironment: Readonly<Record<string, string>>,
+  launcherEnv: Readonly<Record<string, string>>,
+  unset: readonly string[] = [],
 ): Readonly<Record<string, string>> {
+  const cleared = new Set(unset);
   const environment: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
     if (key === "CCS_CREATOR_KIND" || key === "CCS_CREATOR_REF") continue;
     if (key === "CCS_LAUNCH_CREATOR_KIND" || key === "CCS_LAUNCH_CREATOR_REF" || key === "CCS_LAUNCH_PARENT_SESSION_ID") continue;
+    if (cleared.has(key)) continue;
     environment[key] = value;
   }
-  Object.assign(environment, launchEnvironmentOverrides(opts, launcherEnvironment));
+  Object.assign(environment, launchEnvironmentOverrides(opts, launcherEnv));
   delete environment.CCS_CREATOR_KIND;
   delete environment.CCS_CREATOR_REF;
   return environment;
@@ -997,6 +1007,14 @@ export function newSession(
     return 2;
   }
   const launcher: Launcher = resolvedRoute.value.launcher;
+  // Resolve the launcher's environment from the SAME compiled directives the shim's spec file is
+  // rendered from, and fail before an id is minted: a birth that cannot install its launcher's
+  // environment must not become a half-born catalogue row on the wrong backend.
+  const launcherEnv = launcherEnvironment(launcher);
+  if (!launcherEnv.ok) {
+    console.error(`ccs new-session: launcher "${launcher.name}": ${launcherEnv.error.message}`);
+    return 2;
+  }
   recordExactLaunch(opts, resolvedRoute.value.exact);
 
   // Explicit identity births must reject before an id is minted or a catalogue row is created.
@@ -1050,7 +1068,7 @@ export function newSession(
     try {
       const result = Bun.spawnSync(argv, {
         cwd,
-        env: { ...inlineLaunchEnvironment(opts, launcher.env) },
+        env: { ...inlineLaunchEnvironment(opts, launcherEnv.value.assign, launcherEnv.value.unset) },
         stdin: "inherit",
         stdout: "inherit",
         stderr: "inherit",
@@ -1078,8 +1096,9 @@ export function newSession(
     cwd,
     title,
     opts.identity,
-    launchEnvironmentOverrides(opts, launcher.env),
+    launchEnvironmentOverrides(opts, launcherEnv.value.assign),
     launchControls.focus ?? false,
+    launcherEnv.value.unset,
   );
   const receipt = buildLocalLaunchReceipt({
     id,
@@ -1246,8 +1265,9 @@ function spawnDetached(
   identity: string | undefined,
   env: Readonly<Record<string, string>> = {},
   focus = false,
+  unset: readonly string[] = [],
 ): DetachedLaunchOutcome {
-  const ref = spawnCmux({ argv, cwd, name, env, focus });
+  const ref = spawnCmux({ argv, cwd, name, env, unset, focus });
   if (ref === null) {
     const error = `failed to spawn cmux workspace for session ${id} (cwd ${cwd})`;
     console.error(`ccs: ${error}`);

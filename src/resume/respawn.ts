@@ -16,7 +16,13 @@
 import type { Bridge, SurfaceSession } from "../cmux/bridge.ts";
 import { type Result, err, ok } from "../result.ts";
 import { shellQuote } from "./command.ts";
-import { defaultRoute, matchesModel, resolveRoutes, type Launcher } from "./launchers.ts";
+import {
+  defaultRoute,
+  launcherEnvironment,
+  matchesModel,
+  resolveRoutes,
+  type Launcher,
+} from "./launchers.ts";
 import { ROLE_MODEL_IDS, compileRoleModelValue } from "./role-model-launch.ts";
 
 /** Process-side facts a plan is built from — all injected so planning stays pure. */
@@ -47,7 +53,9 @@ export type RespawnRefusalCode =
   | "origin-unknown"
   | "ambiguous-target"
   | "same-harness"
-  | "model-unknown";
+  | "model-unknown"
+  /** the target launcher's `env`/`clears` could not be compiled (bad key, unreadable secret) */
+  | "launcher-env-unresolvable";
 
 export interface RespawnRefusal {
   readonly code: RespawnRefusalCode;
@@ -225,26 +233,49 @@ export function buildRespawnCommand(opts: {
   readonly model: string | null;
   readonly permissionMode: string | null;
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * The launcher's `clears`, rendered as `env -u`. A respawn runs in the surface's existing shell,
+   * which still holds the OUTGOING launcher's variables — so a swap to `claude-native` that only
+   * added assignments would leave the gateway route in place and never reach Anthropic.
+   */
+  readonly unset?: readonly string[];
 }): string {
   const argv = [opts.binary, "--resume", opts.sessionId];
   if (opts.model) argv.push("--model", opts.model);
   if (opts.permissionMode) argv.push("--permission-mode", opts.permissionMode);
   const entries = Object.entries(opts.env ?? {});
-  const prefix = entries.length
-    ? `env ${entries.map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ")} `
-    : "";
+  // `-u` flags precede assignments, matching the compiled directive order.
+  const parts = [
+    ...(opts.unset ?? []).map((key) => `-u ${shellQuote(key)}`),
+    ...entries.map(([k, v]) => `${k}=${shellQuote(v)}`),
+  ];
+  const prefix = parts.length ? `env ${parts.join(" ")} ` : "";
   return `cd -- ${shellQuote(opts.cwd)} && ${prefix}${argv.map(shellQuote).join(" ")}`;
 }
 
-/** Assemble a plan once the target harness and model are settled. */
+/**
+ * Assemble a plan once the target harness and model are settled.
+ *
+ * The target launcher's environment is resolved through `launcherEnvironment` — the same compiled
+ * directives the shim's spec file is rendered from — so a respawn strips what `clears` declares
+ * instead of only adding assignments. Reading `to.env` directly here is what made a
+ * `swap-harness --to claude-native` land on the escape-hatch binary with the gateway route intact.
+ */
 export function respawnPlan(
   proven: ProvenSurface,
   from: Launcher | null,
   to: Launcher,
   model: string | null,
   originCertain: boolean,
-): RespawnPlan {
-  return {
+): Result<RespawnPlan, RespawnRefusal> {
+  const environment = launcherEnvironment(to);
+  if (!environment.ok) {
+    return refuse(
+      "launcher-env-unresolvable",
+      `launcher "${to.name}" environment could not be resolved: ${environment.error.message}`,
+    );
+  }
+  return ok({
     sessionId: proven.sessionId,
     surfaceId: proven.surfaceId,
     from,
@@ -260,9 +291,10 @@ export function respawnPlan(
       sessionId: proven.sessionId,
       model,
       permissionMode: proven.bound.lastPermissionMode,
-      env: to.env,
+      env: environment.value.assign,
+      unset: environment.value.unset,
     }),
-  };
+  });
 }
 
 /** Injected so a respawn is testable without hanging up a real session. */

@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { ok } from "../result.ts";
 import {
+  compileLauncherEnvDirectives,
   compileLauncherEnvSpec,
   launcherEnvSpecFilename,
   parseLauncherEnvValue,
+  resolveLauncherEnv,
 } from "./environment.ts";
 
 describe("parseLauncherEnvValue", () => {
@@ -90,6 +93,90 @@ describe("compileLauncherEnvSpec", () => {
     expect(spec.ok).toBe(false);
     if (spec.ok) return;
     expect(spec.error.message).toContain("single line");
+  });
+});
+
+describe("resolveLauncherEnv", () => {
+  const readSecret = (path: string) => ok(`secret-from:${path}`);
+
+  test("claude-native resolves to unsets, which is the whole escape hatch", () => {
+    const resolved = resolveLauncherEnv(
+      {
+        name: "claude-native",
+        env: {},
+        clears: ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"],
+      },
+      readSecret,
+    );
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.assign).toEqual({});
+    expect(resolved.value.unset).toEqual(["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]);
+  });
+
+  test("a secret is read at resolve time, so config.toml never holds it", () => {
+    const resolved = resolveLauncherEnv(
+      {
+        name: "claudex",
+        env: { ANTHROPIC_AUTH_TOKEN: "@file:/tmp/key" },
+        clears: [],
+      },
+      readSecret,
+    );
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.assign).toEqual({ ANTHROPIC_AUTH_TOKEN: "secret-from:/tmp/key" });
+  });
+
+  test("an unreadable secret FAILS rather than launching unauthenticated", () => {
+    const resolved = resolveLauncherEnv(
+      { name: "claudex", env: { ANTHROPIC_AUTH_TOKEN: "@file:/tmp/missing" }, clears: [] },
+      () => ({ ok: false, error: new Error("ENOENT") }),
+    );
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) return;
+    expect(resolved.error.message).toContain("ANTHROPIC_AUTH_TOKEN");
+  });
+
+  test("a launcher may clear a family and re-assert one member — the set wins", () => {
+    const resolved = resolveLauncherEnv(
+      {
+        name: "mixed",
+        env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" },
+        clears: ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"],
+      },
+      readSecret,
+    );
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    // `clears` is emitted first, so the later assignment wins and only the untouched name is unset.
+    expect(resolved.value.assign).toEqual({ ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" });
+    expect(resolved.value.unset).toEqual(["ANTHROPIC_API_KEY"]);
+  });
+
+  test("the spec file and the resolved env are two renderings of ONE directive list", () => {
+    const input = {
+      name: "claude-native",
+      env: { CCS_MARKER: "kept" },
+      clears: ["ANTHROPIC_BASE_URL"],
+    };
+    const directives = compileLauncherEnvDirectives(input);
+    const spec = compileLauncherEnvSpec(input);
+    const resolved = resolveLauncherEnv(input, readSecret);
+    expect(directives.ok && spec.ok && resolved.ok).toBe(true);
+    if (!directives.ok || !spec.ok || !resolved.ok) return;
+
+    // Whatever the shim's spec clears, the spawn paths must unset — this equality is the
+    // single-rule guarantee that kept `--via` and the shim from drifting apart.
+    const clearedInSpec = spec.value
+      .split("\n")
+      .filter((line) => line.startsWith("clear "))
+      .map((line) => line.slice("clear ".length));
+    expect(clearedInSpec).toEqual([...resolved.value.unset]);
+    expect(directives.value).toEqual([
+      { verb: "clear", key: "ANTHROPIC_BASE_URL" },
+      { verb: "set", key: "CCS_MARKER", value: "kept" },
+    ]);
   });
 });
 

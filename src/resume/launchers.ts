@@ -6,7 +6,12 @@
  * backend, but only a backend that can replay EVERY model in the history may resume it —
  * e.g. Claude-native thinking signatures don't survive a GPT gateway.
  */
-import { loadConfig } from "../config.ts";
+import { loadConfig, type Config } from "../config.ts";
+import {
+  resolveLauncherEnv,
+  type ResolvedLauncherEnv,
+} from "../launcher/environment.ts";
+import { loadLauncherRegistry, mergeLauncherFleet } from "../launcher/registry.ts";
 import { type Result, ok, err } from "../result.ts";
 
 export interface Launcher {
@@ -168,12 +173,47 @@ export function launcherByName(launchers: readonly Launcher[], name: string): La
   return launchers.find((l) => l.name === name) ?? null;
 }
 
-/** Load the launcher fleet from config.toml. Config errors stay LOUD (a silent fall-back to
+/**
+ * The environment a SPAWN PATH must install for a launcher — assignments AND the inherited
+ * variables it has to remove first.
+ *
+ * Every path that starts a process on an explicitly chosen launcher (resume `--via`, birth,
+ * respawn/restart/swap-harness) goes through here, and it delegates to the same
+ * `compileLauncherEnvDirectives` the `~/.ccs/bin/claude` shim's spec file is rendered from. That
+ * shared derivation is the point: reading `launcher.env` directly is what made `--via
+ * claude-native` inherit its parent's gateway variables while the shim correctly stripped them —
+ * the escape hatch failing in exactly the situation it exists for.
+ */
+export function launcherEnvironment(launcher: Launcher): Result<ResolvedLauncherEnv> {
+  return resolveLauncherEnv({
+    name: launcher.name,
+    env: launcher.env,
+    clears: launcher.clears,
+  });
+}
+
+/**
+ * The effective fleet for a loaded config: the SHARED (versioned, vault-backed) registry folded
+ * together with this machine's `[[launcher]]` entries, which override by name.
+ *
+ * Kept separate from `loadLaunchers` so `ccs doctor` can compute the same fleet from an
+ * already-loaded config without re-reading it.
+ */
+export function effectiveLaunchers(config: Config): Result<Launcher[]> {
+  const shared = loadLauncherRegistry(config.routing.launchers);
+  if (!shared.ok) return shared;
+  const entries = shared.value
+    ? mergeLauncherFleet(shared.value.launcher, config.launcher)
+    : config.launcher;
+  const launchers = launchersFrom(entries);
+  if ("error" in launchers) return err(new Error(launchers.error));
+  return ok(launchers);
+}
+
+/** Load the launcher fleet. Config errors stay LOUD (a silent fall-back to
  * plain `claude` would resume a gpt session on the wrong sub). */
 export function loadLaunchers(): Result<Launcher[]> {
   const cfg = loadConfig();
   if (!cfg.ok) return cfg;
-  const launchers = launchersFrom(cfg.value.launcher);
-  if ("error" in launchers) return err(new Error(launchers.error));
-  return ok(launchers);
+  return effectiveLaunchers(cfg.value);
 }

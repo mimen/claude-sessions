@@ -292,6 +292,63 @@ registers the session birth, and is why a wrapper must never exec the raw binary
 
 Re-run `ccs launcher install` after editing `env`, `clears`, or `default_harness`.
 
+`clears` is applied by EVERY path that starts a process on an explicitly chosen launcher — the
+shim, `ccs resume --via`, a managed birth, `ccs swap-harness`, `ccs restart` — all from one
+compiled directive list. That matters because `claude-native` is only a real escape hatch if the
+gateway variables are actually stripped: a `--via claude-native` child of a gateway session would
+otherwise inherit `ANTHROPIC_BASE_URL` and quietly stay on the gateway.
+
+#### The shared launcher registry (versioned)
+
+`~/.ccs/config.toml` is machine-local runtime state — not a git repo, backed up nowhere. Since
+`[[launcher]].env` is the single source of the harness environment, keeping the fleet only there
+means one lost file loses the gateway URL, the token reference, and every model slot with no
+record. So the fleet also has a **shared registry**: a curated TOML file in a git-backed location,
+reached through `[routing].launchers` and defaulting to `~/.ccs/launchers.toml` — normally a
+symlink into the vault, exactly like `locations.toml` and `hosts.toml` already are.
+
+```toml
+# ~/Documents/milad-vault/ClaudeConfig/session-routing/launchers.toml
+version = 1
+
+[[launcher]]
+name = "claudex"
+binary = "claudex"
+serves = ["*"]
+[launcher.env]
+ANTHROPIC_BASE_URL = "http://127.0.0.1:8317"
+ANTHROPIC_AUTH_TOKEN = "@file:~/.cli-proxy-api-key"
+
+[[launcher]]
+name = "claude-native"
+binary = "claude-native"
+serves = ["claude-*", "anthropic.*"]
+clears = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
+```
+
+Link it into place with `ln -s <vault>/ClaudeConfig/session-routing/launchers.toml
+~/.ccs/launchers.toml`, then `ccs launcher install`.
+
+The **secret is still never committed**: values keep the `@file:<path>` shape, so what git holds is
+the NAME of the file containing the token, never the token. **Per-machine differences remain
+possible**: a `[[launcher]]` entry in `config.toml` overrides the shared entry of the same name
+(keeping its registry position, since order is the no-history tie-break) and a name that appears
+only in `config.toml` is appended. That is what lets one host declare a binary the others don't
+have. A host with no registry file behaves exactly as before — `config.toml` is the whole fleet.
+
+#### Drift
+
+```
+ccs doctor launcher [--json]
+```
+
+Reports, and never repairs: the deployed checkout's revision against its **origin default branch**
+(the stale-deploy case that hid behind a local branch 75 commits behind origin), each installed
+wrapper/env-spec against what the current config would generate, and any declared launcher whose
+env spec is missing or unreadable. A launcher with no spec is called out specifically, because the
+shim launches an unknown launcher with the *inherited* environment. Every finding names the command
+that fixes it; exit code is 1 when there is drift, 0 for warnings alone.
+
 The shared host registry defaults to `~/.ccs/hosts.toml`:
 
 ```toml

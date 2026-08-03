@@ -7,10 +7,14 @@ import type { ResumeCommand } from "./command.ts";
  */
 export function handoffInline(cmd: ResumeCommand): number {
   let result;
+  // The launcher's `clears` are applied to the INHERITED environment before its assignments, so an
+  // inline `--via claude-native` from inside a gateway session really does reach Anthropic.
+  const environment: Record<string, string | undefined> = { ...process.env };
+  for (const key of cmd.unset) delete environment[key];
   try {
     result = Bun.spawnSync(cmd.argv, {
       cwd: cmd.cwd,
-      env: { ...process.env, ...cmd.env },
+      env: { ...environment, ...cmd.env },
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",

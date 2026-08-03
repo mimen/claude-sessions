@@ -21,6 +21,12 @@ export const CONFIG_PATH = () => join(runtimeRoot(), "config.toml");
 export const LOCATION_REGISTRY_PATH = () => join(runtimeRoot(), "locations.toml");
 /** Validated remote-host registry, normally a machine-adapter-managed link to shared config. */
 export const HOST_REGISTRY_PATH = () => join(runtimeRoot(), "hosts.toml");
+/**
+ * Shared launcher fleet, normally a link to the git-backed vault copy. Machine-local
+ * `[[launcher]]` entries in config.toml still override it by name, so a host keeps its own facts
+ * (a binary that is not installed here) while the canonical fleet stays versioned and backed up.
+ */
+export const LAUNCHER_REGISTRY_PATH = () => join(runtimeRoot(), "launchers.toml");
 export const DB_PATH = () => join(DATA_DIR(), "index.db");
 /**
  * Catalogue: session metadata (rename, loop, lifecycle, tags). A SEPARATE file from the Index

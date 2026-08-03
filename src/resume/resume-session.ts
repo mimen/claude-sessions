@@ -24,6 +24,7 @@ import {
   DEFAULT_LAUNCHERS,
   defaultRoute,
   launcherByName,
+  launcherEnvironment,
   resolveRoutes,
   type Launcher,
 } from "./launchers.ts";
@@ -39,6 +40,8 @@ export interface ResumeMeta {
   binary?: string | null;
   /** Launcher env for the spawned process. */
   env?: Readonly<Record<string, string>>;
+  /** Launcher `clears` — inherited variables removed before `env` applies. */
+  unset?: readonly string[];
 }
 
 export type ResumePlan =
@@ -74,6 +77,7 @@ export function planResumeSession(
     permissionMode: meta?.permissionMode ?? null,
     binary: meta?.binary ?? undefined,
     env: meta?.env,
+    unset: meta?.unset,
   });
   const name = row.title || row.sessionId;
   return { action: "resume", sessionId: row.sessionId, command, name, note };
@@ -95,7 +99,9 @@ export type ResumeSessionResult =
   /** the requested (or default) launcher can't replay this session's model history */
   | { status: "route-ineligible"; reason: string }
   /** `--via` named a launcher that isn't in config */
-  | { status: "unknown-launcher"; name: string };
+  | { status: "unknown-launcher"; name: string }
+  /** the chosen launcher's `env`/`clears` could not be compiled (bad key, unreadable secret) */
+  | { status: "launcher-env-unresolvable"; name: string; error: string };
 
 /**
  * Pick the launcher for a session's model history: `via` forces one by name (route
@@ -211,12 +217,24 @@ export function resumeSessionEntry(
   const manifestLookup = opts.clusterManifestLookup ?? readClusterManifestForResume;
   const roleDef = cat?.role ? roleLookup(cat.role, cat.cluster) : null;
   const clusterManifest = cat?.cluster ? manifestLookup(cat.cluster) : null;
+  // The launcher's `clears` are resolved HERE, from the same compiled directives the shim's spec
+  // file is rendered from. Passing `chosen.launcher.env` straight through is what let a `--via
+  // claude-native` resume keep its parent's ANTHROPIC_BASE_URL and stay on the gateway.
+  const launcherEnv = launcherEnvironment(chosen.launcher);
+  if (!launcherEnv.ok) {
+    return {
+      status: "launcher-env-unresolvable",
+      name: chosen.launcher.name,
+      error: launcherEnv.error.message,
+    };
+  }
   const plan = planResumeSession(bridge, row, {
     resumeCommand: roleDef?.resumeCommand ?? cat?.resumeCommand ?? null,
     permissionMode: resolvePermissionMode(roleDef, clusterManifest),
     prompt: opts.prompt,
     binary: chosen.launcher.binary,
-    env: chosen.launcher.env,
+    env: launcherEnv.value.assign,
+    unset: launcherEnv.value.unset,
   });
 
   if (plan.action === "skip") return { status: "already-open" };
@@ -279,6 +297,7 @@ export function executeResumePlan(
     argv: plan.command.argv,
     cwd: plan.command.cwd,
     env: plan.command.env,
+    unset: plan.command.unset,
     name: plan.name,
     focus: opts.focus,
     cmuxBin: opts.cmuxBin,

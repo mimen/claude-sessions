@@ -13,7 +13,8 @@ import { dirname, join, resolve } from "node:path";
 import { runtimeRoot } from "../paths.ts";
 import { err, ok, type Result } from "../result.ts";
 import { loadConfig, type Config } from "../config.ts";
-import { launchersFrom, type Launcher } from "../resume/launchers.ts";
+import { effectiveLaunchers, type Launcher } from "../resume/launchers.ts";
+import { loadLauncherRegistry } from "./registry.ts";
 import { loadLocationRegistry } from "../locations/registry.ts";
 import { compileLauncherEnvSpec, launcherEnvSpecFilename } from "./environment.ts";
 
@@ -76,11 +77,15 @@ export function updateZshrc(content: string, shellInitPath: string): string {
  * Null (no registry configured, or none declared) means the shim applies no environment and the
  * raw binary launches on its own defaults, which is precisely today's behavior.
  */
-function resolveDefaultLauncher(config: Config, launchers: readonly Launcher[]): Result<string | null> {
-  // No `[[launcher]]` entries means the fleet is undeclared and `launchers` is the hardcoded
-  // `claude` fallback. There is nothing to point a default at, and `launcher install` must stay
-  // usable on such a host — the feature is invisible until the fleet is configured.
-  if (config.launcher.length === 0) return ok(null);
+function resolveDefaultLauncher(
+  config: Config,
+  launchers: readonly Launcher[],
+  fleetDeclared: boolean,
+): Result<string | null> {
+  // An undeclared fleet (neither the shared registry nor `[[launcher]]` entries) means `launchers`
+  // is the hardcoded `claude` fallback. There is nothing to point a default at, and `launcher
+  // install` must stay usable on such a host — the feature is invisible until a fleet exists.
+  if (!fleetDeclared) return ok(null);
   const registryPath = config.routing.registry;
   if (!registryPath || !existsSync(registryPath)) return ok(null);
   const registry = loadLocationRegistry(registryPath);
@@ -89,8 +94,8 @@ function resolveDefaultLauncher(config: Config, launchers: readonly Launcher[]):
   if (!harness) return ok(null);
   if (!launchers.some((launcher) => launcher.name === harness)) {
     return err(new Error(
-      `location registry default_harness "${harness}" has no [[launcher]] entry in config.toml; ` +
-        `declared launchers: ${launchers.map((l) => l.name).join(", ")}`,
+      `location registry default_harness "${harness}" has no launcher entry in the shared registry ` +
+        `or config.toml; declared launchers: ${launchers.map((l) => l.name).join(", ")}`,
     ));
   }
   return ok(harness);
@@ -152,9 +157,15 @@ export function installClaudeShim(
 
   const config = options.config ? ok(options.config) : loadConfig();
   if (!config.ok) return config;
-  const launchers = launchersFrom(config.value.launcher);
-  if ("error" in launchers) return err(new Error(launchers.error));
-  const defaultLauncher = resolveDefaultLauncher(config.value, launchers);
+  // The SHARED (vault-backed) fleet folded with this machine's overrides — the same list every
+  // spawn path routes on, so the materialized specs can never describe a different fleet.
+  const launchers = effectiveLaunchers(config.value);
+  if (!launchers.ok) return launchers;
+  const sharedRegistry = loadLauncherRegistry(config.value.routing.launchers);
+  if (!sharedRegistry.ok) return sharedRegistry;
+  const fleetDeclared =
+    config.value.launcher.length > 0 || (sharedRegistry.value?.launcher.length ?? 0) > 0;
+  const defaultLauncher = resolveDefaultLauncher(config.value, launchers.value, fleetDeclared);
   if (!defaultLauncher.ok) return defaultLauncher;
 
   try {
@@ -165,7 +176,7 @@ export function installClaudeShim(
 
     const materialized = materializeLauncherEnv(
       launcherEnvDir,
-      launchers,
+      launchers.value,
       defaultLauncher.value,
     );
     if (!materialized.ok) return materialized;
@@ -194,7 +205,7 @@ export function installClaudeShim(
       shellInitPath,
       zshrcPath,
       launcherEnvDir,
-      launchers: launchers.map((launcher) => launcher.name),
+      launchers: launchers.value.map((launcher) => launcher.name),
       defaultLauncher: defaultLauncher.value,
     });
   } catch (error) {

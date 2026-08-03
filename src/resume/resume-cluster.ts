@@ -282,6 +282,10 @@ export function resumeMany(
       case "route-ineligible": summary.routeIneligible++; break;
       // Unknown launcher names would hit every member identically; count as failures.
       case "unknown-launcher": summary.failed++; break;
+      // Likewise an unresolvable launcher environment (bad key, unreadable secret file): it is a
+      // config/host fault that applies to every member, and spawning without it would put the
+      // whole cluster on the wrong backend. Fail, never spawn.
+      case "launcher-env-unresolvable": summary.failed++; break;
       // the shared-bridge gate above already aborts on this, but keep the pass fail-closed if a
       // per-session bridge ever comes back unreadable: count it as a failure, never a spawn.
       case "liveness-unreadable": summary.failed++; break;

@@ -116,7 +116,7 @@ export function planSwap(
   const compiled = shouldCompile ? compileRespawnModel(requestedModel, target) : ok(requestedModel);
   if (!compiled.ok) return compiled;
 
-  return ok(respawnPlan(proven.value, origin, target, compiled.value, certain));
+  return respawnPlan(proven.value, origin, target, compiled.value, certain);
 }
 
 export function describeSwap(plan: RespawnPlan): string {

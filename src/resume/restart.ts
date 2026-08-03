@@ -78,10 +78,10 @@ export function planRestart(
   // gives the operator the chance to pin `--on` before anything is replaced.
   const certain = originIsCertain(launchers, history);
 
-  if (!opts.model) return ok(respawnPlan(proven.value, origin, target, null, certain));
+  if (!opts.model) return respawnPlan(proven.value, origin, target, null, certain);
   const compiled = compileRespawnModel(opts.model, target);
   if (!compiled.ok) return compiled;
-  return ok(respawnPlan(proven.value, origin, target, compiled.value, certain));
+  return respawnPlan(proven.value, origin, target, compiled.value, certain);
 }
 
 export function describeRestart(plan: RespawnPlan): string {

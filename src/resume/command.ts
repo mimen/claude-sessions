@@ -20,7 +20,13 @@ export interface ResumeCommand {
   readonly cwd: string;
   /** Extra env for the spawned process (from the launcher; empty for plain `claude`). */
   readonly env: Readonly<Record<string, string>>;
-  /** Single-string form for display/diagnostics (env-prefixed when env is set). */
+  /**
+   * Inherited variables the spawned process must NOT see (the launcher's `clears`). Carried
+   * separately from `env` because an assignment map cannot express a removal — which is exactly
+   * how `--via claude-native` used to inherit a parent session's gateway route.
+   */
+  readonly unset: readonly string[];
+  /** Single-string form for display/diagnostics (env-prefixed when env is set or cleared). */
   readonly shell: string;
 }
 
@@ -39,6 +45,7 @@ export function buildResumeCommand(
     permissionMode?: string | null;
     binary?: string;
     env?: Readonly<Record<string, string>>;
+    unset?: readonly string[];
   },
 ): ResumeCommand {
   const argv = [opts.binary ?? "claude", "--resume", row.resumeId];
@@ -51,20 +58,34 @@ export function buildResumeCommand(
   // RUNNING (`claude --resume <id> '<resume_command>'`). Workers have none → bare resume.
   if (opts.resumeCommand) argv.push(opts.resumeCommand);
   const env = opts.env ?? {};
+  const unset = opts.unset ?? [];
   return {
     argv,
     cwd: opts.cwd,
     env,
-    shell: shellWithEnv(argv, env),
+    unset,
+    shell: shellWithEnv(argv, env, unset),
   };
 }
 
-/** argv → shell string, prefixed with `env K=V …` when the launcher sets env vars. */
-export function shellWithEnv(argv: readonly string[], env: Readonly<Record<string, string>>): string {
+/**
+ * argv → shell string, prefixed with `env -u K … K=V …` when the launcher clears or sets env vars.
+ * `-u` flags precede assignments so a launcher may clear a family and re-assert one member, the
+ * same order the compiled directive list guarantees.
+ */
+export function shellWithEnv(
+  argv: readonly string[],
+  env: Readonly<Record<string, string>>,
+  unset: readonly string[] = [],
+): string {
   const cmd = argv.map(shellQuote).join(" ");
   const pairs = Object.entries(env);
-  if (pairs.length === 0) return cmd;
-  return `env ${pairs.map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ")} ${cmd}`;
+  if (pairs.length === 0 && unset.length === 0) return cmd;
+  const parts = [
+    ...unset.map((key) => `-u ${shellQuote(key)}`),
+    ...pairs.map(([k, v]) => `${k}=${shellQuote(v)}`),
+  ];
+  return `env ${parts.join(" ")} ${cmd}`;
 }
 
 /** Minimal POSIX shell quoting for building the cmux --command string. */

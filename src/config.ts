@@ -3,7 +3,14 @@ import { readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
-import { CONFIG_PATH, DEFAULT_STORE_PATH, HOST_REGISTRY_PATH, LOCATION_REGISTRY_PATH, expandHome } from "./paths.ts";
+import {
+  CONFIG_PATH,
+  DEFAULT_STORE_PATH,
+  HOST_REGISTRY_PATH,
+  LAUNCHER_REGISTRY_PATH,
+  LOCATION_REGISTRY_PATH,
+  expandHome,
+} from "./paths.ts";
 import { type Result, ok, err } from "./result.ts";
 
 interface HostIdentityRuntime {
@@ -72,6 +79,12 @@ const ConfigSchema = z.object({
       registry: z.string().default(""),
       /** Shared canonical-host to SSH-alias registry; empty resolves to the CCS runtime default. */
       hosts: z.string().default(""),
+      /**
+       * Shared, VERSIONED launcher fleet; empty resolves to the CCS runtime default
+       * (`~/.ccs/launchers.toml`, normally a link into the git-backed vault). Absent file → the
+       * `[[launcher]]` entries below are the whole fleet, exactly as before.
+       */
+      launchers: z.string().default(""),
     })
     .prefault({}),
   /**
@@ -169,5 +182,8 @@ export function loadConfig(
   config.routing.hosts = config.routing.hosts
     ? expandHome(config.routing.hosts)
     : HOST_REGISTRY_PATH();
+  config.routing.launchers = config.routing.launchers
+    ? expandHome(config.routing.launchers)
+    : LAUNCHER_REGISTRY_PATH();
   return ok(config);
 }

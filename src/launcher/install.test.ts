@@ -192,7 +192,7 @@ describe("launcher environment materialization", () => {
     const result = install(fixture, `${FLEET_TOML}\n[routing]\nregistry = "${registry}"\n`);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.message).toContain('default_harness "claude-gpt" has no [[launcher]] entry');
+    expect(result.error.message).toContain('default_harness "claude-gpt" has no launcher entry');
   });
 
   test("an absent registry means no default — the raw binary keeps today's behavior", () => {

@@ -73,6 +73,7 @@ Usage:
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
   ccs launcher install  Install the stable CCS Claude shim and shell initialization
   ccs doctor sessions [--json]  Report post-rollout unclassified or provenance-missing sessions
+  ccs doctor launcher [--json]  Report deployed-vs-origin and installed-vs-config launcher drift
 
 Identities (durable, per-work-unit — ADR-0089):
   ccs identity mint <key> --cluster=<c> --role=<r> [--grouping=<g>]
@@ -736,6 +737,11 @@ function resumeSession(
         return 1;
       case "unknown-launcher":
         console.error(`ccs: unknown launcher "${res.name}" — see [[launcher]] entries in ~/.ccs/config.toml`);
+        return 1;
+      case "launcher-env-unresolvable":
+        console.error(
+          `ccs: launcher "${res.name}" environment could not be resolved: ${res.error}. Nothing spawned.`,
+        );
         return 1;
     }
   } finally {
