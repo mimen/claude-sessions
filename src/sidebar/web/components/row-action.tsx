@@ -18,11 +18,19 @@ const ACTION_TONES: Readonly<Record<ActionTone, string>> = {
   destroy: "text-[color:var(--action-destroy)]",
 };
 
-export function RowAction({ label, onClick, tone, disabled = false, children }: {
+export function RowAction({ label, onClick, tone, disabled = false, onHover, children }: {
   readonly label: string;
   readonly onClick: () => void;
   readonly tone: ActionTone;
   readonly disabled?: boolean;
+  /**
+   * The control is under the pointer (with the row to anchor to), or no longer is (null).
+   *
+   * Per control rather than per cluster: the cluster included the gaps between the icons, so a
+   * pointer merely passing across the row's right edge opened a card. Reaching an icon is the
+   * deliberate act; the 4px between two of them is not.
+   */
+  readonly onHover?: (anchor: HTMLElement | null) => void;
   readonly children: React.ReactNode;
 }): React.ReactElement {
   return (
@@ -40,6 +48,11 @@ export function RowAction({ label, onClick, tone, disabled = false, children }: 
         event.stopPropagation();
         if (!disabled) onClick();
       }}
+      // The card is about the row, so it anchors to the row rather than to this 20px control --
+      // anchored to the control it had a near-zero rect to position against and pinned itself to
+      // the corner of the viewport.
+      onMouseEnter={(event) => onHover?.(event.currentTarget.closest("button"))}
+      onMouseLeave={() => onHover?.(null)}
       role="button"
       title={label}
     >

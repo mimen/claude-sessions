@@ -105,15 +105,12 @@ export function CompactRow({
         *
         * They also open the summary, exactly as on the full rows: a closed session is the one you
         * remember least, so the card is worth most at the moment you reach to decide its fate. */}
-      <span
-        className="hidden shrink-0 items-center gap-1 group-hover:flex"
-        onMouseEnter={(event) => onHover(row, event.currentTarget.closest("button"))}
-        onMouseLeave={() => onHover(row, null)}
-      >
+      <span className="hidden shrink-0 items-center gap-1 group-hover:flex">
         {row.lifecycle !== "archived" ? (
           <RowAction
             label={row.lifecycle === "completed" ? "Mark not complete" : "Complete"}
             onClick={() => onLifecycle(row, row.lifecycle === "completed" ? "uncomplete" : "complete")}
+            onHover={(anchor) => onHover(row, anchor)}
             tone="confirm"
           >
             <CheckIcon className="size-3" />
@@ -123,6 +120,7 @@ export function CompactRow({
           <RowAction
             label={row.lifecycle === "archived" ? "Unarchive" : "Archive"}
             onClick={() => onLifecycle(row, row.lifecycle === "archived" ? "unarchive" : "archive")}
+            onHover={(anchor) => onHover(row, anchor)}
             tone="shelve"
           >
             <ArchiveIcon className="size-2.5" />

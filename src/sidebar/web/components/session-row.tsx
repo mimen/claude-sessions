@@ -321,11 +321,7 @@ export function SessionRow({
              * here. Moving down the list still fires nothing: the controls appear on row hover, so
              * the card needs a deliberate move onto one.
              */
-            <span
-              className="mt-auto hidden h-5 items-center gap-1 group-hover:flex"
-              onMouseEnter={(event) => onHover(row, event.currentTarget.closest("button"))}
-              onMouseLeave={() => onHover(row, null)}
-            >
+            <span className="mt-auto hidden h-5 items-center gap-1 group-hover:flex">
               {/*
                 * A finished session offers only the way back. Showing "Archive" next to a
                 * completed row invited a second terminal state that says nothing new, and
@@ -335,6 +331,7 @@ export function SessionRow({
                 <RowAction
                   label={completed ? "Mark not complete" : "Complete"}
                   onClick={() => onLifecycle(session, completed ? "uncomplete" : "complete")}
+                  onHover={(anchor) => onHover(row, anchor)}
                   tone="confirm"
                 >
                   <CheckIcon className="size-3" />
@@ -344,6 +341,7 @@ export function SessionRow({
                 <RowAction
                   label={archived ? "Unarchive" : "Archive"}
                   onClick={() => onLifecycle(session, archived ? "unarchive" : "archive")}
+                  onHover={(anchor) => onHover(row, anchor)}
                   tone="shelve"
                 >
                   <ArchiveIcon className="size-2.5" />
@@ -353,6 +351,7 @@ export function SessionRow({
                 disabled={!row.workspaceRef}
                 label={row.workspaceRef ? "Close workspace" : "No workspace to close"}
                 onClick={() => onClose(session)}
+                onHover={(anchor) => onHover(row, anchor)}
                 tone="dismiss"
               >
                 <CloseIcon className="size-3" />

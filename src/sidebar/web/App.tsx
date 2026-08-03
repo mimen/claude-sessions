@@ -39,8 +39,15 @@ const SCOPE_STORAGE_KEY = "ccs-sidebar-scope";
 const COLLAPSED_STORAGE_KEY = "ccs-sidebar-collapsed";
 const CLUSTERS_STORAGE_KEY = "ccs-sidebar-clusters";
 const CLOCK_INTERVAL_MS = 30_000;
-/** Long enough not to fire while scanning past rows, short enough not to feel like waiting. */
-const HOVER_DELAY_MS = 220;
+/**
+ * How long a card survives the pointer leaving one control, in case it is on its way to the next.
+ *
+ * Not an open delay -- opening is immediate, because reaching a control is already the deliberate
+ * act a delay would have been waiting for. This is only for the gap between two adjacent icons: a
+ * `mouseleave` and the following `mouseenter` are separate tasks, so clearing on the first would
+ * tear the card down and rebuild it in the time it takes to move 4px sideways.
+ */
+const HOVER_CLOSE_GRACE_MS = 80;
 /** Rows requested initially, and the step added each time the list is scrolled near its end. */
 const ROW_PAGE = 40;
 /** How close to the bottom counts as "near the end", in px. */
@@ -416,20 +423,20 @@ export function App(): React.ReactElement {
   }, [load]);
 
   /**
-   * Open the card after a short rest on a row, and close it the instant the pointer leaves.
+   * Open the card the moment a control is under the pointer; close it just after one is left.
    *
-   * Asymmetric by design: the delay exists so scanning down the list does not fire a paragraph
-   * under the cursor on every row, but once you have left there is nothing to debounce -- a card
-   * that lingers is the bug, not a feature.
+   * Asymmetric, but the other way round from before. An open delay made sense when the whole row
+   * was the trigger and scanning the list would have fired a paragraph per row; now the trigger is
+   * a 20px control you had to travel to, so the intent is already proven and waiting is just lag.
+   * The close is what needs the timer, and only enough of one to cross the gap to the next icon.
    */
   const onHover = useCallback((row: SidebarRow, element: HTMLElement | null): void => {
     if (hoverTimerRef.current !== null) clearTimeout(hoverTimerRef.current);
     if (element === null || row.kind !== "session") {
-      setHoverTarget(null);
+      hoverTimerRef.current = setTimeout(() => setHoverTarget(null), HOVER_CLOSE_GRACE_MS);
       return;
     }
-    const rect = element.getBoundingClientRect();
-    hoverTimerRef.current = setTimeout(() => setHoverTarget({ row, rect }), HOVER_DELAY_MS);
+    setHoverTarget({ row, rect: element.getBoundingClientRect() });
   }, []);
 
   /**
