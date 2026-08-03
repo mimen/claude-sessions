@@ -73,37 +73,6 @@ function surfaceSummary(kinds: readonly string[]): string {
 }
 
 /**
- * cmux's own unread count for the workspace, drawn the way its rail draws it.
- *
- * Rendered only above zero: a "0" badge is noise, and the count is cmux's fact rather than
- * something inferred from status, so an unreadable list simply shows nothing.
- */
-function UnreadBadge({ count }: { count: number }): React.ReactElement | null {
-  if (count < 1) return null;
-  return (
-    <span
-      aria-label={`${count} unread`}
-      // cmux's own notification blue, the same colour its status bells already carry here. The
-      // theme accent was the obvious choice and the wrong one: it made the badge read as a brand
-      // flourish rather than as the same "cmux wants you" signal shown beside it.
-      // Raised 5px off the flex line's bottom edge. Measured against the rendered row: the
-      // title's last-line baseline sits that far above the line box, so this puts the badge's
-      // bottom level with the letters rather than with the descender space below them.
-      className="mb-[5px] inline-flex size-4 shrink-0 items-center justify-center rounded-full
-        bg-[#4C8DFF] text-[9px] font-semibold leading-none text-white tabular-nums"
-    >
-      {/*
-        * Flexbox centres the line box, not the ink. Inter's digits have no descender, but the
-        * line box still reserves room for one, so the glyph lands measurably low — 0.995px at
-        * this size, read off the canvas ink metrics rather than judged by eye. Nudging the digit
-        * instead of the circle keeps the circle aligned with the title beside it.
-        */}
-      <span className="-translate-y-px">{count > 9 ? "9+" : count}</span>
-    </span>
-  );
-}
-
-/**
  * The project's own icon when it publishes one, else a folder glyph.
  *
  * A generic shape rather than an empty outlined box: the earlier placeholder read as an
@@ -191,6 +160,12 @@ export function SessionRow({
         "hover:bg-secondary",
         "focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
         row.focused && "bg-secondary before:bg-primary",
+        // Unread rides the same left edge the focused row uses, in cmux's notification blue. A
+        // badge sat inside the row and pushed the title around, so the one row with news was also
+        // the one row laid out differently; an edge mark says the same thing from outside the
+        // content. Focused wins the edge when both apply: it is where you are, which you need to
+        // know before you need to know what changed, and the unread is about to clear anyway.
+        !row.focused && row.unread > 0 && "before:bg-[#4C8DFF]",
         selected && !row.focused && "ring-1 ring-ring/60 ring-inset",
         opening && "cursor-progress opacity-70",
       )}
@@ -219,13 +194,10 @@ export function SessionRow({
               * that silently went stale would be worse than no badge.
               */}
           </span>
-          {/*
-            * Bottom-aligned, so on a title that wraps the badge rides the last line instead of
-            * the first — on the first line it sat directly under the favicon and read as part of
-            * the project row above it.
-            */}
           <span className="flex items-end gap-1.5">
-            <UnreadBadge count={row.unread} />
+            {/* The edge mark carries "there is news" but not how much, so the count survives here
+              * for anything reading the row rather than looking at it. */}
+            {row.unread > 0 ? <span className="sr-only">{row.unread} unread</span> : null}
             <span
               className={cn(
                 "line-clamp-2 text-[13px] leading-5 text-foreground",
