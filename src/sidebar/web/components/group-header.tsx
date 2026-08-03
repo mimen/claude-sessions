@@ -40,7 +40,14 @@ export interface GroupHeaderProps {
   readonly color?: string | null;
 }
 
-const HEADER_TEXT = "text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground";
+/**
+ * Carried by each control rather than by the row that holds them.
+ *
+ * `uppercase` cannot be inherited onto a button: the UA stylesheet sets `text-transform: none` on
+ * form controls, and that beats an inherited value. Putting the typography on the wrapper silently
+ * un-capitalised every group label the moment the header became two buttons instead of one.
+ */
+const HEADER_TEXT = "text-[10px] font-bold uppercase tracking-[0.08em]";
 
 export function GroupHeader({
   label,
@@ -59,32 +66,34 @@ export function GroupHeader({
   return (
     // A div, not a button: a button inside a button is invalid, and the count has to be its own
     // control rather than a click target smuggled inside the other one.
-    <div className={cn("group/header flex w-full items-center gap-1.5 px-0.5 pt-2 pb-1", HEADER_TEXT)}>
+    <div className="group/header flex w-full items-center gap-1.5 px-0.5 pt-2 pb-1 text-muted-foreground">
       <button
         aria-expanded={!state.shelved}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left hover:text-foreground
-          focus-visible:outline-2 focus-visible:outline-ring"
+        className={cn(
+          "flex min-w-0 flex-1 cursor-pointer items-center gap-1 text-left hover:text-foreground",
+          "focus-visible:outline-2 focus-visible:outline-ring",
+          HEADER_TEXT,
+        )}
         onClick={onToggleShelved}
         title={state.shelved ? "Show this group" : "Hide this group"}
         type="button"
       >
-        {/* Leading, where a disclosure control belongs, and always visible now that it is one of
-          * two things in the header rather than the only one. On the right it had to hide itself
-          * to avoid a column of arrows; on the left a column of them reads as structure. */}
+        {color ? (
+          <span
+            aria-hidden="true"
+            className="mr-0.5 h-2.5 w-[3px] shrink-0 rounded-full"
+            style={{ background: color }}
+          />
+        ) : null}
+        <span className="truncate">{label}</span>
+        {/* Directly after the name, so it reads as belonging to this group rather than as a column
+          * of arrows down the left edge. */}
         <ChevronIcon
           className={cn(
             "size-3 shrink-0 transition-transform opacity-50 group-hover/header:opacity-90",
             state.shelved && "-rotate-90",
           )}
         />
-        {color ? (
-          <span
-            aria-hidden="true"
-            className="h-2.5 w-[3px] shrink-0 rounded-full"
-            style={{ background: color }}
-          />
-        ) : null}
-        <span className="truncate">{label}</span>
       </button>
 
       {/* Always "shown of total", so the count is the filter's own readout: there is no state the
@@ -93,7 +102,7 @@ export function GroupHeader({
         <button
           aria-pressed={state.liveOnly}
           className={cn(
-            "shrink-0 cursor-pointer rounded-(--radius) px-1 font-semibold tabular-nums",
+            "shrink-0 cursor-pointer rounded-(--radius) px-1 text-[10px] font-semibold tracking-[0.08em]",
             "hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring",
             state.liveOnly ? "text-[color:var(--action-confirm)]" : "opacity-70",
           )}
@@ -105,7 +114,7 @@ export function GroupHeader({
         </button>
       ) : (
         // Nothing to filter, so nothing to click. Same text, no affordance, no dead control.
-        <span className="shrink-0 px-1 font-semibold tabular-nums opacity-70">{tally}</span>
+        <span className="shrink-0 px-1 text-[10px] font-semibold tracking-[0.08em] opacity-70">{tally}</span>
       )}
     </div>
   );
