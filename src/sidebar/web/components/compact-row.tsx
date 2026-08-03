@@ -18,7 +18,7 @@ import { relativeTime } from "../format.ts";
 import { cn } from "@/lib/utils";
 import { SuggestionChip } from "./suggestion-chip.tsx";
 import { ProjectMark } from "./project-mark.tsx";
-import { ArchiveIcon, CheckIcon, CloseIcon, CopyIcon, SummaryIcon } from "./icons.tsx";
+import { ArchiveIcon, CheckIcon, CloseIcon, CopyIcon } from "./icons.tsx";
 import { RowAction } from "./row-action.tsx";
 import {
   ContextMenu,
@@ -101,8 +101,15 @@ export function CompactRow({
       {suggestion ? <SuggestionChip suggestion={suggestion} /> : null}
       {/* Lifecycle controls, revealed like the full rows'. A completed row offers only the way
         * back, and an archived one likewise: showing "Archive" beside a completed row invites a
-        * second terminal state that says nothing new. */}
-      <span className="hidden shrink-0 items-center gap-1 group-hover:flex">
+        * second terminal state that says nothing new.
+        *
+        * They also open the summary, exactly as on the full rows: a closed session is the one you
+        * remember least, so the card is worth most at the moment you reach to decide its fate. */}
+      <span
+        className="hidden shrink-0 items-center gap-1 group-hover:flex"
+        onMouseEnter={(event) => onHover(row, event.currentTarget.closest("button"))}
+        onMouseLeave={() => onHover(row, null)}
+      >
         {row.lifecycle !== "archived" ? (
           <RowAction
             label={row.lifecycle === "completed" ? "Mark not complete" : "Complete"}
@@ -121,18 +128,6 @@ export function CompactRow({
             <ArchiveIcon className="size-2.5" />
           </RowAction>
         ) : null}
-      </span>
-      {/* The same trigger the full rows use, so the gesture is one thing to learn. Only on hover:
-        * a column of icons down a list of closed sessions would out-shout the sessions. */}
-      <span
-        aria-label="Show summary"
-        className="hidden size-4 shrink-0 cursor-help items-center justify-center rounded-sm
-          text-muted-foreground/60 hover:text-foreground group-hover:flex"
-        onMouseEnter={(event) => onHover(row, event.currentTarget.closest("button"))}
-        onMouseLeave={() => onHover(row, null)}
-        title="Show summary"
-      >
-        <SummaryIcon className="size-3" />
       </span>
       {age ? (
         <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">{age}</span>
