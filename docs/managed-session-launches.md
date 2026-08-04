@@ -17,17 +17,19 @@ CCS stores two independent facts:
 
 `parent_session_id` means causal/cost ancestry only. It is not ownership, identity, grouping, or fork lineage.
 
-## Choose the launch path
+## What each path produces
 
-| Need | Use | Result |
-|---|---|---|
-| Interactive shell entry point for conversational routing | `ccs start [--] [initial text...]` | Creates one fresh managed top-level launcher, focuses its new cmux workspace, waits for Claude's empty composer, and pre-fills `/ccs:new ` plus argv text without submitting; `/ccs:new` remains the only router |
-| Short same-backend task inside the current Claude session | Native `Agent` tool | Native sidechain; CCS infers the transcript parent and hides it with auxiliary work |
-| Full Claude Code helper using a canonical model/role seat | `ccs delegate` | Persistent auxiliary child with exact creator, route, and causal parent |
-| Persistent supporting session without a seat | `ccs session new --child-of .` | Persistent auxiliary child whose spend rolls into the current session |
-| New durable session Milad will manage independently | `ccs session new --top-level` | Root `work_body`; visible by default; no cost parent |
-| Tiny classification/routing decision inside a script | Raw local gateway call | No Claude Code harness and no persistent session |
-| Resume existing work | `ccs resume <selector>` or `ccs resume-session <id>` | Re-embodies the existing session; does not create a new birth |
+Which path to take is decided in `ClaudeConfig/CLAUDE.md`; this table describes what each one does, so the two cannot drift into disagreeing.
+
+| Path | Produces |
+|---|---|
+| Native `Agent` tool | A sidechain inside the calling session. CCS infers the transcript parent and hides it with auxiliary work. Runs on the caller's harness, so it reaches only the models that harness serves. Ends with the turn. |
+| `ccs delegate <seat>` | A persistent auxiliary child with exact creator, route, and causal parent. Spawns its own harness, so it reaches any model the seat names. Outlives the calling turn. |
+| `ccs session new --child-of .` | A persistent auxiliary child without a seat. Use after seat matching finds nothing, not as a shortcut past it. |
+| `ccs session new --top-level` | A root `work_body`, visible by default and independently managed. Creator provenance still records the launching agent. |
+| `ccs start [--] [initial text...]` | One fresh managed top-level launcher; focuses its new cmux workspace, waits for Claude's empty composer, and pre-fills `/ccs:new ` plus argv text without submitting. `/ccs:new` remains the only router. |
+| `ccs resume <selector>` / `ccs resume-session <id>` | Re-embodies an existing session. Not a birth. |
+| Raw local gateway call | No Claude Code harness and no persistent session. For a classification or routing decision inside a script. |
 
 ## Canonical commands
 
