@@ -39,7 +39,6 @@ import { GroupingSelect } from "./components/grouping-select.tsx";
 import { ScopeSelect } from "./components/scope-select.tsx";
 import { GroupHeader } from "./components/group-header.tsx";
 import { Toasts, type Toast } from "./components/toasts.tsx";
-import { shouldRequestMoreRows } from "./paging.ts";
 import { cn } from "@/lib/utils";
 
 const POLL_INTERVAL_MS = 1_000;
@@ -58,9 +57,18 @@ const CLOCK_INTERVAL_MS = 30_000;
  */
 const HOVER_CLOSE_GRACE_MS = 80;
 /** Rows requested initially, and the step added each time the list is scrolled near its end. */
-const ROW_PAGE = 40;
-/** How close to the bottom counts as "near the end", in px. */
-const SCROLL_THRESHOLD_PX = 240;
+/**
+ * Every row the server will give us, asked for once.
+ *
+ * Paging was the wrong shape for this list. It bought nothing -- the whole active scope is a few
+ * hundred rows -- and it cost a rule about when to ask for more, which is exactly the rule that
+ * broke and silently ended the list a week deep. A list that is entirely present cannot stop
+ * early. If the store ever grows enough for this to hurt, that is a signal to finish sessions,
+ * not to hide them.
+ *
+ * Matches the server's own ceiling; past it, the footer says so rather than trailing off.
+ */
+const ROW_LIMIT = 2_000;
 
 type OpenStatus = "focused" | "resumed" | "not-found" | "liveness-unreadable" | "failed";
 
@@ -185,8 +193,6 @@ export function App(): React.ReactElement {
   const [clusterFirst, setClusterFirst] = useState(
     () => localStorage.getItem(CLUSTERS_STORAGE_KEY) === "1",
   );
-  const [rowLimit, setRowLimit] = useState(ROW_PAGE);
-  const rowLimitRef = useRef(ROW_PAGE);
   const listRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const openingIdsRef = useRef(new Set<string>());
@@ -220,7 +226,7 @@ export function App(): React.ReactElement {
               .filter((section) => !(shelvesRef.current.get(section) ?? OPEN_SHELF).shelved)
               .join(",");
             const response = await fetch(
-              `/api/snapshot?scope=${requestScope}&limit=${rowLimitRef.current}`
+              `/api/snapshot?scope=${requestScope}&limit=${ROW_LIMIT}`
               + (include ? `&include=${include}` : ""),
             );
             if (!response.ok) throw new Error(`snapshot failed (${response.status})`);
@@ -464,8 +470,6 @@ export function App(): React.ReactElement {
     // show completed sessions under an "Archived" heading for one poll.
     setSnapshot(null);
     setSnapshotError(null);
-    rowLimitRef.current = ROW_PAGE;
-    setRowLimit(ROW_PAGE);
     localStorage.setItem(SCOPE_STORAGE_KEY, next);
     load();
   }, [load]);
@@ -695,20 +699,6 @@ export function App(): React.ReactElement {
         * instead of stopping short of it — the last row stays reachable either way. */}
       <div
         className="session-list flex-1 overflow-y-auto px-1.5 pt-1.5 pb-[var(--cmux-sidebar-inset-bottom,0px)]"
-        // Asking for more before the end is reached, so the next rows are already there by the
-        // time you get to them. Only ever grows: shrinking the window mid-scroll would pull rows
-        // out from under the pointer.
-        onScroll={(event) => {
-          const el = event.currentTarget;
-          if (!shouldRequestMoreRows({
-            remainingPx: el.scrollHeight - el.scrollTop - el.clientHeight,
-            thresholdPx: SCROLL_THRESHOLD_PX,
-            hasMoreRows: snapshot?.hasMoreRows,
-          })) return;
-          rowLimitRef.current += ROW_PAGE;
-          setRowLimit(rowLimitRef.current);
-          load(true);
-        }}
         ref={listRef}
       >
         {groups.map((group) => {
@@ -781,6 +771,18 @@ export function App(): React.ReactElement {
         ) : null}
         {!snapshot && !snapshotError ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground">Loading…</div>
+        ) : null}
+        {/*
+          * The list holds everything the server will return, so reaching the bottom normally means
+          * reaching the end of the store. Only when the server is still limit-bound does that stop
+          * being true, and then it has to be said: a list that silently ends looks exactly like a
+          * store that ends, and a session you cannot find looks like a session that is gone.
+          */}
+        {snapshot?.hasMoreRows ? (
+          <div className="px-3 py-4 text-center text-[10px] text-muted-foreground">
+            Showing the first {ROW_LIMIT.toLocaleString()} sessions. Older ones are not listed —
+            search, or finish some.
+          </div>
         ) : null}
       </div>
 
