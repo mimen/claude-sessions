@@ -791,12 +791,19 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       // for the finished ones. Its readability is the answer for the whole snapshot, so it always
       // runs -- skipping it when an id set happened to be empty reported an unreadable index as
       // readable.
+      // Live rows come from cmux, not the index, so the active scan has to cover the shelf plus
+      // the live sessions it must skip over; a flat multiple is enough and stays cheap.
+      const primaryScan = scope === "active"
+        ? Math.max(INDEX_SCAN_LIMIT, recentLimit * 4)
+        : historyLimit;
       const primaryIndex = readIndexedSessionsSafely(
-        // Live rows come from cmux, not the index, so the active scan has to cover the shelf plus
-        // the live sessions it must skip over; a flat multiple is enough and stays cheap.
-        scope === "active" ? Math.max(INDEX_SCAN_LIMIT, recentLimit * 4) : historyLimit,
+        primaryScan,
         scope === "active" ? undefined : catalogue.sessionIds.get(scope) ?? [],
       );
+      // A scan that came back short has reached the end of the index; one that filled its window
+      // has not, whatever survives filtering afterwards. This is the only place that distinction
+      // is observable, so it travels to the client rather than being guessed there.
+      const hasMoreRows = primaryIndex.sessions.length >= primaryScan;
       // A second, purely additive read for sections the client has expanded. They are addressed by
       // id because finished sessions are old enough to fall outside a recency-ordered scan, so one
       // combined query could not serve both halves.
@@ -895,6 +902,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         livenessReadable: bridge.readable,
         indexReadable: index.readable,
         catalogueReadable: catalogue.readable,
+        hasMoreRows,
         now: now(),
         recentLimit,
         historyLimit,

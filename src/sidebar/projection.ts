@@ -252,6 +252,15 @@ export interface ProjectionInput {
   readonly triageOnly?: boolean;
   /** Totals per lifecycle, from the catalogue rather than from the rows in view. */
   readonly lifecycleCounts?: Readonly<Record<SidebarLifecycle, number>>;
+  /**
+   * Whether the index scan hit its limit, and so may have more rows behind it.
+   *
+   * The client cannot work this out from the rows it receives. Most of what the scan reads is
+   * filtered out before projection -- 2107 of 2623 sessions on the live store are delegated seats
+   * -- so a response carrying 58 rows can sit on a scan of 160, and "few rows came back" says
+   * nothing about whether asking again would help.
+   */
+  readonly hasMoreRows?: boolean;
   readonly recentLimit?: number;
   /** How many rows a completed or archived history view may show. */
   readonly historyLimit?: number;
@@ -382,6 +391,8 @@ export interface SidebarSnapshot {
    * flag above already qualifies.
    */
   readonly lifecycleCounts: Readonly<Record<SidebarLifecycle, number>>;
+  /** True while the index scan is still limit-bound: a larger request may return more rows. */
+  readonly hasMoreRows: boolean;
   readonly generatedAt: number;
 }
 
@@ -859,6 +870,7 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     indexReadable: input.indexReadable ?? true,
     catalogueReadable: input.catalogueReadable ?? true,
     lifecycleCounts: input.lifecycleCounts ?? { active: 0, completed: 0, archived: 0 },
+    hasMoreRows: input.hasMoreRows ?? false,
     generatedAt: input.now,
   };
 }

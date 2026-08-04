@@ -20,6 +20,7 @@ const EMPTY_SNAPSHOT: SidebarSnapshot = {
   indexReadable: true,
   catalogueReadable: true,
   lifecycleCounts: { active: 0, completed: 0, archived: 0 },
+  hasMoreRows: false,
   generatedAt: 1,
 };
 

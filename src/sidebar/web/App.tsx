@@ -39,6 +39,7 @@ import { GroupingSelect } from "./components/grouping-select.tsx";
 import { ScopeSelect } from "./components/scope-select.tsx";
 import { GroupHeader } from "./components/group-header.tsx";
 import { Toasts, type Toast } from "./components/toasts.tsx";
+import { shouldRequestMoreRows } from "./paging.ts";
 import { cn } from "@/lib/utils";
 
 const POLL_INTERVAL_MS = 1_000;
@@ -699,9 +700,11 @@ export function App(): React.ReactElement {
         // out from under the pointer.
         onScroll={(event) => {
           const el = event.currentTarget;
-          const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
-          if (remaining > SCROLL_THRESHOLD_PX) return;
-          if (rowLimitRef.current > flatRows.length + ROW_PAGE) return;
+          if (!shouldRequestMoreRows({
+            remainingPx: el.scrollHeight - el.scrollTop - el.clientHeight,
+            thresholdPx: SCROLL_THRESHOLD_PX,
+            hasMoreRows: snapshot?.hasMoreRows,
+          })) return;
           rowLimitRef.current += ROW_PAGE;
           setRowLimit(rowLimitRef.current);
           load(true);
