@@ -13,6 +13,7 @@ import { loadFavicon } from "./favicon.ts";
 import { RECOMMENDATIONS } from "../catalogue/enrichment-schema.ts";
 import type { SidebarLifecycle, SidebarView } from "./projection.ts";
 import type { SessionLifecycleAction, SidebarSource } from "./snapshot.ts";
+import { sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
 
 /**
  * Row-count bounds for `?limit`. Below the minimum the list cannot fill a screen; above it a
@@ -115,6 +116,42 @@ function json(body: object, status = 200): Response {
   return jsonText(JSON.stringify(body), status);
 }
 
+function errorJson(code: SidebarHttpErrorCode): Response {
+  const { status, ...envelope } = sidebarHttpError(code);
+  return json(envelope, status);
+}
+
+function logUnexpected(label: string, error: unknown, details: JsonObject = {}): void {
+  log.warn(label, {
+    ...details,
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
+function actionFailure(status: string | undefined): Response | null {
+  switch (status) {
+    case "not-found":
+    case "not-live":
+      return errorJson("not_found");
+    case "liveness-unreadable":
+      return errorJson("liveness_unreadable");
+    case "catalogue-unreadable":
+      return errorJson("catalogue_unreadable");
+    case "index-unreadable":
+      return errorJson("index_unreadable");
+    case "timeout":
+      return errorJson("timeout");
+    case "failed":
+      return errorJson("action_failed");
+    default:
+      return null;
+  }
+}
+
+function actionJson(outcome: object & { readonly status?: string }): Response {
+  return actionFailure(outcome.status) ?? json(outcome);
+}
+
 /** Only literal loopback addresses are valid sidebar bind targets. */
 export function isLoopbackSidebarHost(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
@@ -151,7 +188,7 @@ function originIsBound(request: Request, hostname: string, port: number): boolea
 }
 
 function forbiddenHost(): Response {
-  return json({ error: "forbidden host" }, 403);
+  return errorJson("denied");
 }
 
 export function createSidebarServer(options: SidebarServerOptions): Bun.Server<undefined> {
@@ -181,7 +218,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         const scopeValues = url.searchParams.getAll("scope");
         const scope = scopeValues.length === 0 ? "active" : scopeValues[0];
         if (scopeValues.length > 1 || scope === undefined || !isSidebarView(scope)) {
-          return json({ error: "invalid snapshot view" }, 400);
+          return errorJson("bad_request");
         }
         // How many rows the client currently has room for. It grows as you scroll, which is what
         // makes the list unbounded; clamped so a hand-typed URL cannot ask for the whole store.
@@ -221,52 +258,55 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
             view: scope,
             error: error instanceof Error ? error.message : String(error),
           });
-          return json({ error: "snapshot failed" }, 500);
+          return errorJson("internal_failure");
         }
       }
 
       if (url.pathname === "/api/open" && request.method === "POST") {
         if (!originIsBound(request, boundHostname, boundPort)) {
-          return json({ error: "forbidden origin" }, 403);
+          return errorJson("denied");
         }
         let sessionId: JsonValue | undefined;
         try {
           sessionId = ((await request.json()) as JsonObject).sessionId;
         } catch {
-          return json({ error: "invalid request body" }, 400);
+          return errorJson("bad_request");
         }
         if (typeof sessionId !== "string" || sessionId.length === 0) {
-          return json({ error: "sessionId is required" }, 400);
+          return errorJson("bad_request");
         }
         try {
-          return json(await source.open(sessionId));
-        } catch {
-          return json({ error: "open failed" }, 500);
+          return actionJson(await source.open(sessionId));
+        } catch (error) {
+          logUnexpected("sidebar open request failed", error, { sessionId });
+          return errorJson("internal_failure");
         }
       }
 
       if (url.pathname === "/api/session/lifecycle" && request.method === "POST") {
         if (!originIsBound(request, boundHostname, boundPort)) {
-          return json({ error: "forbidden origin" }, 403);
+          return errorJson("denied");
         }
 
         let parsedBody: Result<LifecycleRequestBody, string>;
         try {
           parsedBody = parseLifecycleRequest((await request.json()) as JsonValue);
         } catch {
-          return json({ error: "invalid request body" }, 400);
+          return errorJson("bad_request");
         }
-        if (!parsedBody.ok) return json({ error: parsedBody.error }, 400);
+        if (!parsedBody.ok) return errorJson("bad_request");
 
         try {
-          return json(await source.retire(
+          return actionJson(await source.retire(
             parsedBody.value.sessionId,
             parsedBody.value.action,
           ));
-        } catch {
-          // Source implementations should return a typed failure; this is the last boundary if one
-          // violates that contract, and it still must not disclose catalogue paths or handles.
-          return json({ status: "failed", reason: "session lifecycle update failed" });
+        } catch (error) {
+          logUnexpected("sidebar lifecycle request failed", error, {
+            action: parsedBody.value.action,
+            sessionId: parsedBody.value.sessionId,
+          });
+          return errorJson("internal_failure");
         }
       }
 
@@ -274,19 +314,20 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       // its own endpoint rather than another action on the lifecycle one.
       if (url.pathname === "/api/session/decline" && request.method === "POST") {
         if (!originIsBound(request, boundHostname, boundPort)) {
-          return json({ error: "forbidden origin" }, 403);
+          return errorJson("denied");
         }
         let parsed: Result<{ sessionId: string; verb: string }, string>;
         try {
           parsed = parseDeclineRequest((await request.json()) as JsonValue);
         } catch {
-          return json({ error: "invalid request body" }, 400);
+          return errorJson("bad_request");
         }
-        if (!parsed.ok) return json({ error: parsed.error }, 400);
+        if (!parsed.ok) return errorJson("bad_request");
         try {
-          return json(await source.declineSuggestion(parsed.value.sessionId, parsed.value.verb));
-        } catch {
-          return json({ status: "failed", reason: "could not record the decision" });
+          return actionJson(await source.declineSuggestion(parsed.value.sessionId, parsed.value.verb));
+        } catch (error) {
+          logUnexpected("sidebar decline request failed", error, { sessionId: parsed.value.sessionId });
+          return errorJson("internal_failure");
         }
       }
 
@@ -294,44 +335,46 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       // address, so the workspace UUID is the address. Purely a view change in cmux.
       if (url.pathname === "/api/workspace/focus" && request.method === "POST") {
         if (!originIsBound(request, boundHostname, boundPort)) {
-          return json({ error: "forbidden origin" }, 403);
+          return errorJson("denied");
         }
         let workspaceId: unknown;
         try {
           workspaceId = ((await request.json()) as { workspaceId?: unknown }).workspaceId;
         } catch {
-          return json({ error: "invalid request body" }, 400);
+          return errorJson("bad_request");
         }
         if (typeof workspaceId !== "string" || workspaceId.length === 0) {
-          return json({ error: "workspaceId is required" }, 400);
+          return errorJson("bad_request");
         }
         try {
-          return json(await source.focusWorkspace(workspaceId));
-        } catch {
-          return json({ status: "failed", reason: "focusing the workspace failed" });
+          return actionJson(await source.focusWorkspace(workspaceId));
+        } catch (error) {
+          logUnexpected("sidebar workspace focus request failed", error, { workspaceId });
+          return errorJson("internal_failure");
         }
       }
 
       if (url.pathname === "/api/workspace/pin" && request.method === "POST") {
         if (!originIsBound(request, boundHostname, boundPort)) {
-          return json({ error: "forbidden origin" }, 403);
+          return errorJson("denied");
         }
         let body: { workspaceId?: unknown; pinned?: unknown };
         try {
           body = (await request.json()) as { workspaceId?: unknown; pinned?: unknown };
         } catch {
-          return json({ error: "invalid request body" }, 400);
+          return errorJson("bad_request");
         }
         if (typeof body.workspaceId !== "string" || body.workspaceId.length === 0) {
-          return json({ error: "workspaceId is required" }, 400);
+          return errorJson("bad_request");
         }
         if (typeof body.pinned !== "boolean") {
-          return json({ error: "pinned must be a boolean" }, 400);
+          return errorJson("bad_request");
         }
         try {
-          return json(await source.setPinned(body.workspaceId, body.pinned));
-        } catch {
-          return json({ status: "failed", reason: "pinning the workspace failed" });
+          return actionJson(await source.setPinned(body.workspaceId, body.pinned));
+        } catch (error) {
+          logUnexpected("sidebar workspace pin request failed", error, { workspaceId: body.workspaceId });
+          return errorJson("internal_failure");
         }
       }
 
@@ -339,42 +382,43 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       // this can never become a back door around the session close proofs.
       if (url.pathname === "/api/workspace/close" && request.method === "POST") {
         if (!originIsBound(request, boundHostname, boundPort)) {
-          return json({ error: "forbidden origin" }, 403);
+          return errorJson("denied");
         }
         let workspaceId: unknown;
         try {
           workspaceId = ((await request.json()) as { workspaceId?: unknown }).workspaceId;
         } catch {
-          return json({ error: "invalid request body" }, 400);
+          return errorJson("bad_request");
         }
         if (typeof workspaceId !== "string" || workspaceId.length === 0) {
-          return json({ error: "workspaceId is required" }, 400);
+          return errorJson("bad_request");
         }
         try {
-          return json(await source.closeLooseWorkspace(workspaceId));
-        } catch {
-          return json({ status: "failed", reason: "closing the workspace failed" });
+          return actionJson(await source.closeLooseWorkspace(workspaceId));
+        } catch (error) {
+          logUnexpected("sidebar loose workspace close request failed", error, { workspaceId });
+          return errorJson("internal_failure");
         }
       }
 
       if (url.pathname === "/api/session/close" && request.method === "POST") {
         if (!originIsBound(request, boundHostname, boundPort)) {
-          return json({ error: "forbidden origin" }, 403);
+          return errorJson("denied");
         }
         let sessionId: unknown;
         try {
           sessionId = ((await request.json()) as { sessionId?: unknown }).sessionId;
         } catch {
-          return json({ error: "invalid request body" }, 400);
+          return errorJson("bad_request");
         }
         if (typeof sessionId !== "string" || sessionId.length === 0) {
-          return json({ error: "sessionId is required" }, 400);
+          return errorJson("bad_request");
         }
         try {
-          return json(await source.closeWorkspace(sessionId));
-        } catch {
-          // As with lifecycle: never surface a catalogue path or handle to the browser.
-          return json({ status: "failed", reason: "closing the workspace failed" });
+          return actionJson(await source.closeWorkspace(sessionId));
+        } catch (error) {
+          logUnexpected("sidebar session close request failed", error, { sessionId });
+          return errorJson("internal_failure");
         }
       }
 

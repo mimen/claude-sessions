@@ -1,0 +1,83 @@
+import { Database } from "bun:sqlite";
+import type { Bridge } from "../cmux/bridge.ts";
+import { getRow, type CatalogueRow } from "../catalogue/db.ts";
+import { CATALOGUE_PATH, DB_PATH } from "../paths.ts";
+import type { AsyncProcessAdapter } from "../process/async.ts";
+import type { Launcher } from "./launchers.ts";
+import {
+  resumeSessionEntryAsync,
+  type ResumeSessionResult,
+} from "./resume-session.ts";
+
+export type SidebarResumeActionOutcome =
+  | {
+    readonly status: "ok";
+    readonly result: ResumeSessionResult;
+    readonly paintRow: CatalogueRow | null;
+  }
+  | { readonly status: "index-unreadable" }
+  | { readonly status: "catalogue-unreadable" };
+
+export interface SidebarResumeActionInput {
+  readonly bridge: Bridge;
+  readonly sessionId: string;
+  readonly cmuxBin: string;
+  readonly launchers: readonly Launcher[];
+}
+
+export type SidebarResumeAction = (
+  input: SidebarResumeActionInput,
+) => Promise<SidebarResumeActionOutcome>;
+
+export interface SidebarResumeActionOptions {
+  readonly processAdapter: AsyncProcessAdapter;
+}
+
+function openReadOnly(path: string): Database {
+  const db = new Database(path, { readonly: true });
+  db.exec("PRAGMA query_only = ON");
+  return db;
+}
+
+/**
+ * Own the database handles needed by managed resume. Sidebar request and snapshot modules receive
+ * only this typed action, so neither can accidentally turn a read dependency into a mutation path.
+ */
+export function createSidebarResumeAction(
+  options: SidebarResumeActionOptions,
+): SidebarResumeAction {
+  return async (input): Promise<SidebarResumeActionOutcome> => {
+    let indexDb: Database;
+    try {
+      indexDb = openReadOnly(DB_PATH());
+    } catch {
+      return { status: "index-unreadable" };
+    }
+
+    let catalogueDb: Database | null = null;
+    try {
+      try {
+        catalogueDb = openReadOnly(CATALOGUE_PATH());
+      } catch {
+        return { status: "catalogue-unreadable" };
+      }
+      const paintRow = getRow(catalogueDb, input.sessionId);
+      const result = await resumeSessionEntryAsync(
+        indexDb,
+        catalogueDb,
+        input.sessionId,
+        {
+          bridge: input.bridge,
+          focus: true,
+          cmuxBin: input.cmuxBin,
+          launchers: input.launchers,
+        },
+        options.processAdapter,
+      );
+      return { status: "ok", result, paintRow };
+    } finally {
+      catalogueDb?.close();
+      indexDb.close();
+    }
+  };
+}

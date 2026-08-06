@@ -1,0 +1,80 @@
+import { describe, expect, test } from "bun:test";
+import {
+  actionErrorMessage,
+  postSidebarAction,
+  type ActionFetch,
+} from "./action-transport.ts";
+
+function response(body: string, status: number): Response {
+  return new Response(body, {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+describe("sidebar action transport", () => {
+  test("keeps timeout and refused connections distinct", async () => {
+    const timeoutFetch: ActionFetch = (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        reject(new DOMException("request aborted", "AbortError"));
+      });
+    });
+    const timedOut = await postSidebarAction("/api/open", { sessionId: "one" }, {
+      deadlineMs: 1,
+      fetch: timeoutFetch,
+    });
+    expect(timedOut).toEqual({ ok: false, error: { kind: "timeout" } });
+
+    const refused = await postSidebarAction("/api/open", { sessionId: "one" }, {
+      fetch: async () => { throw new TypeError("Load failed"); },
+    });
+    expect(refused).toEqual({ ok: false, error: { kind: "connection-refused" } });
+  });
+
+  test("preserves structured 500 and malformed JSON as different failures", async () => {
+    const internal = await postSidebarAction("/api/open", { sessionId: "one" }, {
+      fetch: async () => response(JSON.stringify({
+        code: "internal_failure",
+        message: "server-only detail must not be rendered",
+        retryable: true,
+      }), 500),
+    });
+    expect(internal).toEqual({
+      ok: false,
+      error: {
+        kind: "server",
+        code: "internal_failure",
+        status: 500,
+        retryable: true,
+      },
+    });
+
+    const malformed = await postSidebarAction("/api/open", { sessionId: "one" }, {
+      fetch: async () => response("not-json", 500),
+    });
+    expect(malformed).toEqual({
+      ok: false,
+      error: { kind: "malformed-json", status: 500 },
+    });
+  });
+
+  test("UI-facing messages never expose WebKit or server exception text", async () => {
+    const refused = actionErrorMessage({ kind: "connection-refused" });
+    const malformed = actionErrorMessage({ kind: "malformed-json", status: 500 });
+    const internal = actionErrorMessage({
+      kind: "server",
+      code: "internal_failure",
+      status: 500,
+      retryable: true,
+    });
+
+    for (const message of [refused, malformed, internal]) {
+      expect(message).not.toContain("TypeError");
+      expect(message).not.toContain("Load failed");
+      expect(message).not.toContain("/private/catalogue.db");
+    }
+    expect(refused).toContain("unreachable");
+    expect(malformed).toContain("invalid response");
+    expect(internal).toContain("internal error");
+  });
+});

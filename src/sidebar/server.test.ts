@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSidebarServer, isLoopbackSidebarHost } from "./server.ts";
+import { sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
 import type {
   OpenSessionOutcome,
   SessionLifecycleAction,
@@ -106,6 +107,12 @@ function postOpen(app: Harness, origin: string | null): Promise<Response> {
   });
 }
 
+async function expectHttpError(response: Response, code: SidebarHttpErrorCode): Promise<void> {
+  const { status, ...envelope } = sidebarHttpError(code);
+  expect(response.status).toBe(status);
+  expect(await response.json()).toEqual(envelope);
+}
+
 function postLifecycle(
   app: Harness,
   origin: string | null,
@@ -167,8 +174,7 @@ describe("sidebar server", () => {
     expect(app.snapshotScopes).toEqual(["completed", "triage"]);
 
     const invalid = await fetch(`${app.url}/api/snapshot?scope=parked`);
-    expect(invalid.status).toBe(400);
-    expect(await invalid.json()).toEqual({ error: "invalid snapshot view" });
+    await expectHttpError(invalid, "bad_request");
     expect(app.snapshotScopes).toEqual(["completed", "triage"]);
   });
 
@@ -176,8 +182,7 @@ describe("sidebar server", () => {
     const app = harness({ snapshot: async () => { throw new Error("cmux is down"); } });
     const response = await fetch(`${app.url}/api/snapshot`);
 
-    expect(response.status).toBe(500);
-    expect(await response.json()).toEqual({ error: "snapshot failed" });
+    await expectHttpError(response, "internal_failure");
   });
 
   test("allows an open request from the bound same origin", async () => {
@@ -197,8 +202,26 @@ describe("sidebar server", () => {
     });
     const response = await postOpen(app, app.url);
 
-    expect(response.status).toBe(500);
-    expect(await response.json()).toEqual({ error: "open failed" });
+    await expectHttpError(response, "internal_failure");
+  });
+
+  test("maps typed action failures to stable structured envelopes", async () => {
+    const cases: ReadonlyArray<{
+      readonly outcome: OpenSessionOutcome;
+      readonly code: SidebarHttpErrorCode;
+    }> = [
+      { outcome: { status: "not-found" }, code: "not_found" },
+      { outcome: { status: "liveness-unreadable" }, code: "liveness_unreadable" },
+      { outcome: { status: "index-unreadable" }, code: "index_unreadable" },
+      { outcome: { status: "catalogue-unreadable" }, code: "catalogue_unreadable" },
+      { outcome: { status: "timeout" }, code: "timeout" },
+      { outcome: { status: "failed", reason: "/private/raw failure" }, code: "action_failed" },
+    ];
+
+    for (const entry of cases) {
+      const app = harness({ open: async () => entry.outcome });
+      await expectHttpError(await postOpen(app, app.url), entry.code);
+    }
   });
 
   test("rejects an open request with no session id", async () => {
@@ -244,8 +267,7 @@ describe("sidebar server", () => {
     });
     const response = await postLifecycle(app, app.url);
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "not-found" });
+    await expectHttpError(response, "not_found");
   });
 
   test("refuses lifecycle changes from a missing or foreign Origin", async () => {
@@ -281,8 +303,7 @@ describe("sidebar server", () => {
       "rebound.attacker.example",
     );
 
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "forbidden host" });
+    await expectHttpError(response, "denied");
     expect(app.lifecycleChanges).toEqual([]);
   });
 
@@ -298,8 +319,7 @@ describe("sidebar server", () => {
       headers: { host: "rebound.attacker.example" },
     });
 
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: "forbidden host" });
+    await expectHttpError(response, "denied");
     expect(snapshotCalls).toBe(0);
   });
 

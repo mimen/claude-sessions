@@ -40,6 +40,7 @@ import { ScopeSelect } from "./components/scope-select.tsx";
 import { GroupHeader } from "./components/group-header.tsx";
 import { Toasts, type Toast } from "./components/toasts.tsx";
 import { cn } from "@/lib/utils";
+import { actionErrorMessage, postSidebarAction } from "./action-transport.ts";
 
 const POLL_INTERVAL_MS = 1_000;
 const GROUPING_STORAGE_KEY = "ccs-sidebar-grouping";
@@ -70,51 +71,29 @@ const HOVER_CLOSE_GRACE_MS = 80;
  */
 const ROW_LIMIT = 2_000;
 
-type OpenStatus = "focused" | "resumed" | "not-found" | "liveness-unreadable" | "failed";
-
 interface OpenResponse {
-  readonly status?: OpenStatus;
-  readonly reason?: string;
-  readonly error?: string;
+  readonly status: "focused" | "resumed";
 }
 
 interface FocusResponse {
-  readonly status?: "focused" | "not-live" | "liveness-unreadable" | "failed";
-  readonly reason?: string;
-  readonly error?: string;
+  readonly status: "focused";
 }
 
-function focusFailure(result: FocusResponse, response: Response): string | null {
-  if (result.error) return result.error;
-  switch (result.status) {
-    case "focused":
-      return null;
-    case "failed":
-      return result.reason ?? "could not focus that tab";
-    case "not-live":
-      return "that tab is no longer open";
-    case "liveness-unreadable":
-      return "cmux state is unreadable; nothing was focused";
-    default:
-      return response.ok ? "could not focus that tab" : `focus failed (${response.status})`;
-  }
+interface LifecycleResponse {
+  readonly status: "ok";
+  readonly closeFailed?: string;
 }
 
-function openFailure(result: OpenResponse, response: Response): string | null {
-  if (result.error) return result.error;
-  switch (result.status) {
-    case "focused":
-    case "resumed":
-      return null;
-    case "failed":
-      return result.reason ?? "could not open the session";
-    case "not-found":
-      return "that session is no longer indexed";
-    case "liveness-unreadable":
-      return "cmux state is unreadable; nothing was opened";
-    default:
-      return response.ok ? "could not open the session" : `open failed (${response.status})`;
-  }
+interface DeclineResponse {
+  readonly status: "ok";
+}
+
+interface PinResponse {
+  readonly status: "pinned";
+}
+
+interface CloseResponse {
+  readonly status: "closed";
 }
 
 export function App(): React.ReactElement {
@@ -413,26 +392,20 @@ export function App(): React.ReactElement {
 
     try {
       // A workspace row has no session to resume — clicking it is purely "show me that tab".
-      if (row.kind === "workspace") {
-        const response = await fetch("/api/workspace/focus", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ workspaceId: row.workspaceId }),
-        });
-        setActionError(focusFailure((await response.json()) as FocusResponse, response));
-        load(true);
-        return;
+      const result = row.kind === "workspace"
+        ? await postSidebarAction<FocusResponse>(
+          "/api/workspace/focus",
+          { workspaceId: row.workspaceId },
+        )
+        : await postSidebarAction<OpenResponse>(
+          "/api/open",
+          { sessionId: row.sessionId },
+        );
+      if (!result.ok) setActionError(actionErrorMessage(result.error));
+      else if (result.value.status !== "focused" && result.value.status !== "resumed") {
+        setActionError("CCS did not confirm that the session opened. Refresh the list and try again.");
       }
-      const response = await fetch("/api/open", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: row.sessionId }),
-      });
-      const result = (await response.json()) as OpenResponse;
-      setActionError(openFailure(result, response));
       load(true);
-    } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : "could not open the session");
     } finally {
       openingIdsRef.current.delete(row.id);
       setOpeningIds(new Set(openingIdsRef.current));
@@ -482,20 +455,14 @@ export function App(): React.ReactElement {
     const verb = row.suggestion?.verb;
     if (!verb) return;
     void (async (): Promise<void> => {
-      try {
-        const response = await fetch("/api/session/decline", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId: row.sessionId, verb }),
-        });
-        const result = (await response.json()) as { status?: string; reason?: string; error?: string };
-        if (result.error) setActionError(result.error);
-        else if (result.status === "failed") setActionError(result.reason ?? "could not record that");
-        else if (result.status === "not-found") setActionError("that session is not in the catalogue");
-        else load(true);
-      } catch (cause) {
-        setActionError(cause instanceof Error ? cause.message : "could not record that");
-      }
+      const result = await postSidebarAction<DeclineResponse>(
+        "/api/session/decline",
+        { sessionId: row.sessionId, verb },
+      );
+      if (!result.ok) setActionError(actionErrorMessage(result.error));
+      else if (result.value.status !== "ok") {
+        setActionError("CCS did not record that decision. Refresh the list and try again.");
+      } else load(true);
     })();
   }, [load]);
 
@@ -536,24 +503,20 @@ export function App(): React.ReactElement {
     };
 
     void (async (): Promise<void> => {
-      try {
-        const response = await fetch("/api/session/lifecycle", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId: row.sessionId, action }),
-        });
-        const result = (await response.json()) as { status?: string; reason?: string; error?: string; closeFailed?: string };
-        // Only a failure is worth saying; the row leaving the list is its own confirmation.
-        if (result.error) { setActionError(result.error); revert(); }
-        else if (result.status === "failed") { setActionError(result.reason ?? `could not ${action} the session`); revert(); }
-        else if (result.status === "not-found") { setActionError("that session is not in the catalogue"); revert(); }
-        else if (result.closeFailed) setActionError(`marked, but the workspace stayed open: ${result.closeFailed}`);
-        else setActionError(null);
-        load(true);
-      } catch (cause) {
-        setActionError(cause instanceof Error ? cause.message : `could not ${action} the session`);
+      const result = await postSidebarAction<LifecycleResponse>(
+        "/api/session/lifecycle",
+        { sessionId: row.sessionId, action },
+      );
+      if (!result.ok) {
+        setActionError(actionErrorMessage(result.error));
         revert();
-      }
+      } else if (result.value.status !== "ok") {
+        setActionError(`CCS did not ${action} the session. Refresh the list and try again.`);
+        revert();
+      } else if (result.value.closeFailed) {
+        setActionError(`Marked, but the workspace stayed open: ${result.value.closeFailed}`);
+      } else setActionError(null);
+      load(true);
     })();
   }, [load]);
 
@@ -566,58 +529,42 @@ export function App(): React.ReactElement {
     const workspaceId = row.workspaceId;
     setOptimisticPins((current) => new Map(current).set(workspaceId, pinned));
     void (async (): Promise<void> => {
-      try {
-        const response = await fetch("/api/workspace/pin", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ workspaceId, pinned }),
-        });
-        const result = (await response.json()) as { status?: string; reason?: string; error?: string };
-        if (result.status !== "pinned") {
-          setActionError(result.error ?? result.reason ?? "could not change the pin");
-          setOptimisticPins((current) => {
-            const next = new Map(current);
-            next.delete(workspaceId);
-            return next;
-          });
-        } else setActionError(null);
-        load(true);
-      } catch (cause) {
-        setActionError(cause instanceof Error ? cause.message : "could not change the pin");
+      const result = await postSidebarAction<PinResponse>(
+        "/api/workspace/pin",
+        { workspaceId, pinned },
+      );
+      if (!result.ok || result.value.status !== "pinned") {
+        setActionError(result.ok
+          ? "CCS did not confirm the pin change. Refresh the list and try again."
+          : actionErrorMessage(result.error));
         setOptimisticPins((current) => {
           const next = new Map(current);
           next.delete(workspaceId);
           return next;
         });
-      }
+      } else setActionError(null);
+      load(true);
     })();
   }, [load]);
 
   const closeWorkspace = useCallback((row: SidebarRow): void => {
     void (async (): Promise<void> => {
-      try {
-        // A sessionless tab has no session to close through; the server refuses this route for
-        // any workspace that does hold one, so the session proofs cannot be sidestepped here.
-        const response = row.kind === "workspace"
-          ? await fetch("/api/workspace/close", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ workspaceId: row.workspaceId }),
-          })
-          : await fetch("/api/session/close", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ sessionId: row.sessionId }),
-          });
-        const result = (await response.json()) as { status?: string; reason?: string; error?: string };
-        if (result.error) setActionError(result.error);
-        else if (result.status === "failed") setActionError(result.reason ?? "could not close the workspace");
-        else if (result.status === "liveness-unreadable") setActionError("cmux state is unreadable; nothing was closed");
-        else setActionError(null);
-        load(true);
-      } catch (cause) {
-        setActionError(cause instanceof Error ? cause.message : "could not close the workspace");
-      }
+      // A sessionless tab has no session to close through; the server refuses this route for
+      // any workspace that does hold one, so the session proofs cannot be sidestepped here.
+      const result = row.kind === "workspace"
+        ? await postSidebarAction<CloseResponse>(
+          "/api/workspace/close",
+          { workspaceId: row.workspaceId },
+        )
+        : await postSidebarAction<CloseResponse>(
+          "/api/session/close",
+          { sessionId: row.sessionId },
+        );
+      if (!result.ok) setActionError(actionErrorMessage(result.error));
+      else if (result.value.status !== "closed") {
+        setActionError("CCS did not confirm the workspace closed. Refresh the list and try again.");
+      } else setActionError(null);
+      load(true);
     })();
   }, [load]);
 

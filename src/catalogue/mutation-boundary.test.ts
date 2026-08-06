@@ -93,3 +93,17 @@ test("only sanctioned modules import a raw catalogue mutation fn (ADR-0068 bound
   }
   expect(violations).toEqual([]);
 });
+
+test("sidebar modules contain no raw catalogue SQL or identity mutation imports", () => {
+  const violations: string[] = [];
+  for (const file of sourceFiles(join(SRC, "sidebar"))) {
+    const rel = file.slice(file.indexOf("/src/") + 5);
+    if (rel.startsWith("sidebar/bench/")) continue; // generated SQLite fixtures, never request code
+    const source = readFileSync(file, "utf8");
+    const rawSql = /\.(?:query|exec)\s*\(\s*["'`]\s*(?:INSERT|UPDATE|DELETE|REPLACE|ALTER|DROP|CREATE)\b/i;
+    const identityMutation = /import\s*\{[^}]*\bsetIdentityFields\b[^}]*\}\s*from\s*["'][^"']*catalogue\/identities(?:\.ts)?["']/s;
+    if (rawSql.test(source)) violations.push(`${rel} constructs catalogue mutation SQL`);
+    if (identityMutation.test(source)) violations.push(`${rel} imports setIdentityFields directly`);
+  }
+  expect(violations).toEqual([]);
+});

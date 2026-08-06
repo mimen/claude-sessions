@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-06T02:04:00.000Z",
+  "commands": {
+    "focusedTests": "bun test src/catalogue/sidebar-command.test.ts src/catalogue/mutation-boundary.test.ts src/sidebar/server.test.ts src/sidebar/snapshot.test.ts src/sidebar/web/action-transport.test.ts",
+    "suiteTests": "bun test src/sidebar src/cmux src/resume src/catalogue",
+    "fullTests": "bun test",
+    "typecheck": "bun run typecheck",
+    "circularLint": "bun run lint:circular",
+    "snapshotBenchmark": "bun run benchmark:sidebar --samples 8 --idle-ms 60000 --contention-ms 5500 --output /tmp/phase4-sidebar-snapshot.json",
+    "actionBenchmark": "bun run benchmark:sidebar:actions --samples 25 --output /tmp/phase4-sidebar-actions.json"
+  },
+  "tests": {
+    "focused": { "passed": 56, "failed": 0, "files": 5 },
+    "sidebarCmuxResumeCatalogue": { "passed": 890, "failed": 0, "files": 80 },
+    "full": {
+      "passed": 1619,
+      "failed": 4,
+      "files": 169,
+      "preExistingFailures": "src/launcher/install.test.ts fixture expectations include host-configured claude-gpt launcher"
+    },
+    "typecheckPassed": true,
+    "circularLint": {
+      "passed": false,
+      "preExistingCycles": 5
+    },
+    "semantics": {
+      "mutationBoundary": true,
+      "phantomRowRefusal": true,
+      "identityMirroring": true,
+      "existingOnlyDecline": true,
+      "lifecycleTimestampAndPrecedence": true
+    },
+    "errors": {
+      "structuredServerEnvelopes": true,
+      "typedStatusMapping": true,
+      "timeoutDistinct": true,
+      "connectionRefusedDistinct": true,
+      "server500Distinct": true,
+      "malformedJsonDistinct": true,
+      "uiMessagesHideRawErrorsAndPaths": true
+    }
+  },
+  "snapshotBenchmark": {
+    "beforeEvidence": "phase1-readonly.json",
+    "writerContentionMs": { "before": 4.813, "after": 5.725 },
+    "idlePollMs": {
+      "p50": { "before": 5.279, "after": 5.595 },
+      "p95": { "before": 7.654, "after": 7.499 }
+    },
+    "idleHeartbeatLongestDelayMs": { "before": 41.682, "after": 23.272 },
+    "idlePayloadBytes": { "before": 18537060, "after": 18537060 },
+    "catalogueReadableUnderContention": true,
+    "readPathByteIdentical": true,
+    "logicalStateUnchanged": true
+  },
+  "actionBenchmark": {
+    "beforeEvidence": "phase3-actions.json",
+    "focusP95Ms": { "before": 0.014, "after": 0.013, "budget": 150 },
+    "resumeAcknowledgementMs": { "before": 6.823, "after": 8.593, "budget": 700 },
+    "concurrentSnapshotMs": { "before": 3.462, "after": 3.95, "budget": 50 },
+    "oneBridgeReadPerOpen": true,
+    "singleFlightResume": true,
+    "deferredPaint": true,
+    "snapshotRespondedWhileResumePending": true,
+    "allAssertionsPassed": true
+  }
+}

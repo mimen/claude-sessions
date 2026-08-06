@@ -216,9 +216,11 @@ function sourceOptions(overrides: Partial<SidebarSourceOptions> = {}): SidebarSo
       value: { logPath: `/runtime/enrich/${sessionId}.log` },
     }),
     loadLaunchers: () => ({ ok: true, value: LAUNCHERS }),
-    resumeSession: () => ({ status: "resumed", note: null, workspaceRef: "workspace:9" }),
-    openIndex: () => new Database(":memory:"),
-    openCatalogue: () => catalogueDb(),
+    resumeAction: async () => ({
+      status: "ok",
+      result: { status: "resumed", note: null, workspaceRef: "workspace:9" },
+      paintRow: null,
+    }),
     readCatalogue: () => catalogueRead(),
     ensureDataDir: () => {},
     indexedSessions: () => [indexed()],
@@ -256,9 +258,13 @@ describe("createSidebarSource open", () => {
     const resumeResult = deferred<ResumeSessionResult>();
     let resumeCalls = 0;
     const source = createSidebarSource(sourceOptions({
-      resumeSession: async () => {
+      resumeAction: async () => {
         resumeCalls += 1;
-        return resumeResult.promise;
+        return {
+          status: "ok",
+          result: await resumeResult.promise,
+          paintRow: null,
+        };
       },
     }));
 
@@ -288,12 +294,16 @@ describe("createSidebarSource open", () => {
           return { ok: true, stdout: "", stderr: "", timedOut: false };
         },
       },
-      resumeSession: () => {
+      resumeAction: async () => {
         resumeCalls += 1;
         return {
-          status: "resumed",
-          note: null,
-          workspaceRef: `workspace:${resumeCalls}`,
+          status: "ok",
+          result: {
+            status: "resumed",
+            note: null,
+            workspaceRef: `workspace:${resumeCalls}`,
+          },
+          paintRow: null,
         };
       },
     }));
@@ -326,9 +336,13 @@ describe("createSidebarSource open", () => {
       indexedSessions: () => {
         throw new Error("the index must not be read");
       },
-      resumeSession: () => {
+      resumeAction: async () => {
         resumeCalls += 1;
-        return { status: "resumed", note: null, workspaceRef: "workspace:1" };
+        return {
+          status: "ok",
+          result: { status: "resumed", note: null, workspaceRef: "workspace:1" },
+          paintRow: null,
+        };
       },
     }));
 
@@ -340,9 +354,13 @@ describe("createSidebarSource open", () => {
     let resumeCalls = 0;
     const source = createSidebarSource(sourceOptions({
       loadLaunchers: () => ({ ok: false, error: new Error("config.toml is malformed") }),
-      resumeSession: () => {
+      resumeAction: async () => {
         resumeCalls += 1;
-        return { status: "resumed", note: null, workspaceRef: "workspace:1" };
+        return {
+          status: "ok",
+          result: { status: "resumed", note: null, workspaceRef: "workspace:1" },
+          paintRow: null,
+        };
       },
     }));
 
@@ -444,8 +462,15 @@ describe("createSidebarSource open", () => {
   test("defers cosmetic paint from the already-read row and ignores paint failure", async () => {
     const deferredTasks: Array<() => void> = [];
     const paintedRows: string[] = [];
+    const paintDb = catalogueDb([{ sessionId: "file-id" }]);
+    const paintRow = getRow(paintDb, "file-id");
+    paintDb.close();
     const source = createSidebarSource(sourceOptions({
-      openCatalogue: () => catalogueDb([{ sessionId: "file-id" }]),
+      resumeAction: async () => ({
+        status: "ok",
+        result: { status: "resumed", note: null, workspaceRef: "workspace:9" },
+        paintRow,
+      }),
       deferActionTask: (task) => deferredTasks.push(task),
       paintWorkspace: async (row) => {
         paintedRows.push(row.sessionId);
@@ -493,7 +518,7 @@ describe("createSidebarSource lifecycle", () => {
       setup.close();
 
       const source = createSidebarSource(sourceOptions({
-        openCatalogue: () => openCatalogue(dbPath),
+        cataloguePath: dbPath,
       }));
       const identityLifecycle = (): { readonly completed: boolean; readonly archived: boolean } => {
         const db = openCatalogue(dbPath);
@@ -544,7 +569,7 @@ describe("createSidebarSource lifecycle", () => {
       setup.close();
 
       const source = createSidebarSource(sourceOptions({
-        openCatalogue: () => openCatalogue(dbPath),
+        cataloguePath: dbPath,
       }));
       await expect(source.setLifecycle("core-session", "archive")).resolves.toEqual({
         status: "ok",
@@ -569,7 +594,7 @@ describe("createSidebarSource lifecycle", () => {
       const setup = openCatalogue(dbPath);
       setup.close();
       const source = createSidebarSource(sourceOptions({
-        openCatalogue: () => openCatalogue(dbPath),
+        cataloguePath: dbPath,
       }));
 
       await expect(source.setLifecycle("missing-session", "complete")).resolves.toEqual({
@@ -601,7 +626,7 @@ describe("createSidebarSource lifecycle", () => {
       setup.close();
 
       const source = createSidebarSource(sourceOptions({
-        openCatalogue: () => openCatalogue(dbPath),
+        cataloguePath: dbPath,
         indexedSessions: () => [indexed({
           sessionId: CANONICAL_SESSION_ID,
           resumeId: RESUME_SESSION_ID,
@@ -653,7 +678,7 @@ describe("createSidebarSource lifecycle", () => {
       setup.close();
 
       const source = createSidebarSource(sourceOptions({
-        openCatalogue: () => openCatalogue(dbPath),
+        cataloguePath: dbPath,
         indexedSessions: () => [indexed({
           sessionId: CANONICAL_SESSION_ID,
           resumeId: RESUME_SESSION_ID,
@@ -684,7 +709,7 @@ describe("createSidebarSource lifecycle", () => {
       setup.close();
 
       const source = createSidebarSource(sourceOptions({
-        openCatalogue: () => openCatalogue(dbPath),
+        cataloguePath: dbPath,
         readBridge: async () => {
           events.push("bridge");
           return retireBridge();
@@ -712,12 +737,12 @@ describe("createSidebarSource lifecycle", () => {
 
 describe("createSidebarSource snapshot", () => {
   test("never opens or materializes the catalogue through a writer path", async () => {
-    let writerOpens = 0;
+    let mutationCalls = 0;
     let dataDirectoryWrites = 0;
     const source = createSidebarSource(sourceOptions({
-      openCatalogue: () => {
-        writerOpens += 1;
-        throw new Error("snapshot attempted a writer open");
+      lifecycleCommand: () => {
+        mutationCalls += 1;
+        return { status: "catalogue-unreadable" };
       },
       ensureDataDir: () => {
         dataDirectoryWrites += 1;
@@ -727,7 +752,7 @@ describe("createSidebarSource snapshot", () => {
 
     await source.snapshot();
 
-    expect(writerOpens).toBe(0);
+    expect(mutationCalls).toBe(0);
     expect(dataDirectoryWrites).toBe(0);
   });
 
@@ -763,15 +788,16 @@ describe("createSidebarSource snapshot", () => {
   });
 
   test("publishes a catalogue id that the lifecycle endpoint can mutate for a live resume alias", async () => {
+    const mutated: string[] = [];
     const source = createSidebarSource(sourceOptions({
       readBridge: async () => multiSurfaceBridge(),
       indexedSessions: () => [
         indexed({ sessionId: "canonical-primary", resumeId: "primary", cwd: "/repo/primary" }),
       ],
-      openCatalogue: () => catalogueDb([{
-        sessionId: "canonical-primary",
-        resumeId: "primary",
-      }]),
+      lifecycleCommand: (sessionId) => {
+        mutated.push(sessionId);
+        return { status: "ok", value: "completed" };
+      },
       readCatalogue: () => catalogueRead([{
         sessionId: "canonical-primary",
         resumeId: "primary",
@@ -788,6 +814,7 @@ describe("createSidebarSource snapshot", () => {
       status: "ok",
       lifecycle: "completed",
     });
+    expect(mutated).toEqual(["canonical-primary"]);
   });
 
   test("joins catalogue lifecycle into active, completed, and archived scopes", async () => {
