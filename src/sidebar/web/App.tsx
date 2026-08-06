@@ -198,6 +198,7 @@ export function App(): React.ReactElement {
       let requestScope = selectedScopeRef.current;
       try {
         do {
+          const refreshLiveness = ensureFresh || snapshotReloadQueuedRef.current;
           snapshotReloadQueuedRef.current = false;
           requestScope = selectedScopeRef.current;
           const requestId = ++nextSnapshotRequestIdRef.current;
@@ -209,7 +210,7 @@ export function App(): React.ReactElement {
               .join(",");
             const requestUrl = `/api/snapshot?scope=${requestScope}&limit=${ROW_LIMIT}`
               + (include ? `&include=${include}` : "");
-            const result = await snapshotTransportRef.current.load(requestUrl);
+            const result = await snapshotTransportRef.current.load(requestUrl, refreshLiveness);
             if (result.kind === "failure") throw result.error;
             consecutiveSnapshotFailuresRef.current = 0;
             if (result.kind === "unchanged") {

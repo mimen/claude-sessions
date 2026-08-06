@@ -84,6 +84,16 @@ export interface EtagLoopbackResult {
   };
 }
 
+export interface LivenessCacheResult {
+  readonly injectedBridgeDelayMs: number;
+  readonly requests: number;
+  readonly bridgeReads: number;
+  readonly statuses: readonly number[];
+  readonly bodyBytes: number;
+  readonly latencyMs: Distribution;
+  readonly refreshPendingWhenFirstResponseCompleted: boolean;
+}
+
 function rounded(value: number): number {
   return Math.round(value * 1_000) / 1_000;
 }
@@ -201,6 +211,8 @@ function sourceFor(
     readonly unreadableIndex?: boolean;
     readonly unreadableLiveness?: boolean;
     readonly focus?: () => boolean;
+    readonly readBridge?: () => Promise<ReturnType<typeof buildBridge>>;
+    readonly snapshotLivenessTtlMs?: number;
   } = {},
 ): SidebarSource {
   const bridge = overrides.unreadableLiveness
@@ -209,7 +221,10 @@ function sourceFor(
   return createSidebarSource({
     now: () => FIXED_NOW,
     cmuxBin: "benchmark-never-runs-cmux",
-    readBridge: async () => bridge,
+    readBridge: overrides.readBridge ?? (async () => bridge),
+    ...(overrides.snapshotLivenessTtlMs === undefined
+      ? {}
+      : { snapshotLivenessTtlMs: overrides.snapshotLivenessTtlMs }),
     ...(overrides.unreadableCatalogue || overrides.unreadableIndex
       ? {
         readCatalogue: overrides.unreadableCatalogue
@@ -423,6 +438,66 @@ export async function measureIdleProfile(
     heartbeatLongestDelayMs: heartbeatResult.longestDelayMs,
     pollLatencyMs: distribution(latencies),
   };
+}
+
+/** Prove a delayed Bridge refresh stays off the conditional-GET response path. */
+export async function measureSnapshotLivenessCache(
+  fixture: SidebarFixture,
+  sampleCount = 30,
+  bridgeDelayMs = 75,
+): Promise<LivenessCacheResult> {
+  let bridgeReads = 0;
+  let refreshPending = false;
+  const source = sourceFor(fixture, [], {
+    snapshotLivenessTtlMs: 60_000,
+    readBridge: async () => {
+      bridgeReads += 1;
+      refreshPending = true;
+      await Bun.sleep(bridgeDelayMs);
+      refreshPending = false;
+      return fixture.bridge;
+    },
+  });
+  const server = createSidebarServer({ source, assets: new Map(), port: 0 });
+  const url = `${server.url.origin}/api/snapshot?scope=active&limit=500&include=completed,archived`;
+  try {
+    const initial = await fetch(url);
+    const etag = initial.headers.get("etag");
+    await initial.arrayBuffer();
+    if (initial.status !== 200 || etag === null) {
+      throw new Error("liveness cache benchmark warmup failed");
+    }
+
+    const statuses: number[] = [];
+    const latencies: number[] = [];
+    let bodyBytes = 0;
+    let firstPending = false;
+    for (let sample = 0; sample < sampleCount; sample += 1) {
+      const startedAt = performance.now();
+      const response = await fetch(url, {
+        headers: {
+          "if-none-match": etag,
+          "x-ccs-refresh-liveness": "1",
+        },
+      });
+      latencies.push(performance.now() - startedAt);
+      statuses.push(response.status);
+      bodyBytes += (await response.arrayBuffer()).byteLength;
+      if (sample === 0) firstPending = refreshPending;
+    }
+
+    return {
+      injectedBridgeDelayMs: bridgeDelayMs,
+      requests: sampleCount,
+      bridgeReads,
+      statuses,
+      bodyBytes,
+      latencyMs: distribution(latencies),
+      refreshPendingWhenFirstResponseCompleted: firstPending,
+    };
+  } finally {
+    server.stop(true);
+  }
 }
 
 /** Exercise conditional GET through a real loopback Bun server, including serialization and HTTP. */

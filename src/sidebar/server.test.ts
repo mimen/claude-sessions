@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { createSidebarServer, isLoopbackSidebarHost } from "./server.ts";
 import { sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
 import { createSidebarSource } from "./snapshot.ts";
-import type { Bridge } from "../cmux/bridge.ts";
+import { buildBridge, type Bridge } from "../cmux/bridge.ts";
+import { createSnapshotLivenessReader } from "./liveness-cache.ts";
 import type {
   OpenSessionOutcome,
   SessionLifecycleAction,
@@ -48,6 +49,26 @@ interface Harness {
 }
 
 const running: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
+
+function deferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void; reject(error: Error): void } {
+  let resolvePromise: ((value: T) => void) | null = null;
+  let rejectPromise: ((error: Error) => void) | null = null;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return {
+    promise,
+    resolve(value: T): void {
+      if (resolvePromise === null) throw new Error("deferred promise was not initialized");
+      resolvePromise(value);
+    },
+    reject(error: Error): void {
+      if (rejectPromise === null) throw new Error("deferred promise was not initialized");
+      rejectPromise(error);
+    },
+  };
+}
 
 function harness(overrides: Partial<SidebarSource> = {}): Harness {
   // Built below from the base source, so a test overriding setLifecycle still drives retire.
@@ -204,6 +225,45 @@ describe("sidebar server", () => {
     expect((await unchanged.arrayBuffer()).byteLength).toBe(0);
   });
 
+  test("returns 304 promptly while a requested liveness refresh is pending", async () => {
+    const pending = deferred<Bridge>();
+    let bridgeReads = 0;
+    const liveness = createSnapshotLivenessReader({
+      ttlMs: 60_000,
+      readBridge: async () => {
+        bridgeReads += 1;
+        return bridgeReads === 1
+          ? buildBridge({ windows: [] }, {}, true)
+          : pending.promise;
+      },
+    });
+    const app = harness({
+      refreshSnapshotLiveness: () => liveness.refresh(),
+      snapshot: async () => ({
+        ...EMPTY_SNAPSHOT,
+        livenessReadable: (await liveness.read()).readable,
+      }),
+    });
+    const first = await fetch(`${app.url}/api/snapshot`);
+    const etag = first.headers.get("etag") ?? "";
+    await first.arrayBuffer();
+
+    const startedAt = performance.now();
+    const unchanged = await fetch(`${app.url}/api/snapshot`, {
+      headers: {
+        "if-none-match": etag,
+        "x-ccs-refresh-liveness": "1",
+      },
+    });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(unchanged.status).toBe(304);
+    expect((await unchanged.arrayBuffer()).byteLength).toBe(0);
+    expect(elapsedMs).toBeLessThan(50);
+    expect(bridgeReads).toBe(2);
+    pending.resolve(buildBridge({ windows: [] }, {}, true));
+  });
+
   test("an advancing production clock does not turn an unchanged projection into 200", async () => {
     let current = 1_000;
     const app = harness({
@@ -227,31 +287,35 @@ describe("sidebar server", () => {
     expect((await second.arrayBuffer()).byteLength).toBe(0);
   });
 
-  test("durable, live, status, and notification changes turn a matching ETag into 200", async () => {
-    let revision = "durable-1";
+  test("equal source refreshes stay 304 while browser-visible changes return 200", async () => {
+    let refreshes = 0;
     let contentVersion = 0;
     const app = harness({
-      snapshotRevision: () => revision,
-      snapshot: async () => ({
-        ...EMPTY_SNAPSHOT,
-        lifecycleCounts: { ...EMPTY_SNAPSHOT.lifecycleCounts, active: contentVersion },
-      }),
+      snapshot: async () => {
+        refreshes += 1;
+        return {
+          ...EMPTY_SNAPSHOT,
+          lifecycleCounts: { ...EMPTY_SNAPSHOT.lifecycleCounts, active: contentVersion },
+        };
+      },
     });
     let response = await fetch(`${app.url}/api/snapshot`);
     let etag = response.headers.get("etag") ?? "";
     await response.arrayBuffer();
 
-    for (const change of ["durable", "live", "status", "notification"] as const) {
-      if (change === "durable") revision = "durable-2";
-      else contentVersion += 1;
-      response = await fetch(`${app.url}/api/snapshot`, { headers: { "if-none-match": etag } });
-      expect(response.status).toBe(200);
-      etag = response.headers.get("etag") ?? "";
-      await response.arrayBuffer();
-    }
+    response = await fetch(`${app.url}/api/snapshot`, { headers: { "if-none-match": etag } });
+    expect(response.status).toBe(304);
+    expect(refreshes).toBe(2);
+    expect((await response.arrayBuffer()).byteLength).toBe(0);
+
+    contentVersion += 1;
+    response = await fetch(`${app.url}/api/snapshot`, { headers: { "if-none-match": etag } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("etag")).not.toBe(etag);
+    await response.arrayBuffer();
   });
 
-  test("scope, limit, and included shelves are part of the representation revision", async () => {
+  test("byte-identical projections share a strong ETag across query shapes", async () => {
     const app = harness();
     const first = await fetch(`${app.url}/api/snapshot?scope=active&limit=20`);
     const etag = first.headers.get("etag") ?? "";
@@ -262,11 +326,11 @@ describe("sidebar server", () => {
       "scope=active&limit=21",
       "scope=active&limit=20&include=completed",
     ]) {
-      const changed = await fetch(`${app.url}/api/snapshot?${query}`, {
+      const unchanged = await fetch(`${app.url}/api/snapshot?${query}`, {
         headers: { "if-none-match": etag },
       });
-      expect(changed.status).toBe(200);
-      await changed.arrayBuffer();
+      expect(unchanged.status).toBe(304);
+      expect((await unchanged.arrayBuffer()).byteLength).toBe(0);
     }
   });
 

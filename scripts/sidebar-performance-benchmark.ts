@@ -6,6 +6,7 @@ import {
   measureContention,
   measureEtagLoopback,
   measureIdleProfile,
+  measureSnapshotLivenessCache,
   witnessDatabase,
 } from "../src/sidebar/bench/benchmark.ts";
 import {
@@ -72,6 +73,7 @@ try {
     indexState: inspectDatabase(fleet.indexPath),
   };
   const etagLoopback = await measureEtagLoopback(fleet, Math.max(20, samples * 4));
+  const livenessCache = await measureSnapshotLivenessCache(fleet, Math.max(20, samples * 4));
 
   const baseline = {
     schemaVersion: 2,
@@ -110,6 +112,7 @@ try {
     contention,
     idleProfile,
     etagLoopback,
+    livenessCache,
     expectedPhase1Gates: {
       writerLockSnapshotMs: 120,
       eventLoopMaximumBlockMs: 50,
@@ -130,6 +133,7 @@ try {
       "The ETag changed-snapshot samples commit title changes to the generated fixture only, after the read-path byte-identity witness is complete.",
       "The contention fixture holds BEGIN IMMEDIATE in a child process. The query-only catalogue reader must remain readable and complete within the Phase 1 latency gate.",
       "Status, notification, directory, and workspace-state subprocesses are deterministic in-memory adapters, so their real process latency is excluded.",
+      "livenessCache injects a 75ms Bridge delay and counts reads; it is red-capable because an uncached GET would inherit that delay and issue one Bridge read per request.",
     ],
   };
 
@@ -140,6 +144,7 @@ try {
     contention,
     idleProfile,
     etagLoopback,
+    livenessCache,
     readPathByteIdentical: baseline.databaseWitness.readPathByteIdentical,
     logicalStateUnchanged: baseline.databaseWitness.logicalStateUnchanged,
   }, null, 2)}\n`);

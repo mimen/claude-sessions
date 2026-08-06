@@ -38,6 +38,31 @@ describe("snapshot transport", () => {
     expect(headers).toEqual([null, '"revision-1"']);
   });
 
+  test("requests an immediate background liveness refresh without discarding the ETag", async () => {
+    const observed: Array<{ etag: string | null; refresh: string | null }> = [];
+    let calls = 0;
+    const transport = createSnapshotTransport({
+      fetch: (async (_input, init) => {
+        const headers = new Headers(init?.headers);
+        observed.push({
+          etag: headers.get("if-none-match"),
+          refresh: headers.get("x-ccs-refresh-liveness"),
+        });
+        calls += 1;
+        return calls === 1
+          ? jsonResponse(SNAPSHOT, { headers: { etag: '"revision-1"' } })
+          : new Response(null, { status: 304 });
+      }),
+    });
+
+    expect((await transport.load("/api/snapshot")).kind).toBe("changed");
+    expect(await transport.load("/api/snapshot", true)).toEqual({ kind: "unchanged" });
+    expect(observed).toEqual([
+      { etag: null, refresh: null },
+      { etag: '"revision-1"', refresh: "1" },
+    ]);
+  });
+
   test("an older server without ETag stays on ordinary 200 responses", async () => {
     const headers: Array<string | null> = [];
     const transport = createSnapshotTransport({

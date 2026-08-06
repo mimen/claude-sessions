@@ -123,18 +123,11 @@ function jsonText(
   });
 }
 
-function snapshotEtag(
-  body: string,
-  revision: string,
-  scope: SidebarView,
-  limit: number | undefined,
-  include: readonly SidebarLifecycle[],
-): string {
-  const digest = createHash("sha256")
-    .update(JSON.stringify({ revision, scope, limit: limit ?? null, include }))
-    .update("\0")
-    .update(body)
-    .digest("base64url");
+function snapshotEtag(body: string): string {
+  // A strong ETag describes the bytes on the wire. Source revision counters also advance for
+  // equal database commits and background refreshes, which turned byte-identical snapshots into
+  // full 200 responses. The serialized projection already includes every browser-visible fact.
+  const digest = createHash("sha256").update(body).digest("base64url");
   return `"${digest}"`;
 }
 
@@ -292,17 +285,14 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
             value === "completed" || value === "archived");
         const startedAt = performance.now();
         try {
+          if (request.headers.get("x-ccs-refresh-liveness") === "1") {
+            source.refreshSnapshotLiveness?.();
+          }
           const snapshot = await source.snapshot(scope, limit, include);
           const serializationStartedAt = performance.now();
           const body = JSON.stringify(snapshot);
           const serializationMs = performance.now() - serializationStartedAt;
-          const etag = snapshotEtag(
-            body,
-            source.snapshotRevision?.(snapshot) ?? "uncached",
-            scope,
-            limit,
-            include,
-          );
+          const etag = snapshotEtag(body);
           const totalMs = performance.now() - startedAt;
           if (totalMs >= 100) {
             logger.warn("slow sidebar snapshot request", {

@@ -7,7 +7,6 @@
  * CCS if it is not" is decided here rather than by every caller, because getting that wrong
  * spawns a duplicate of a running session.
  */
-import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import {
   declineExistingSessionRecommendation,
@@ -85,6 +84,7 @@ import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 import { createSessionActionCoordinator } from "./session-action-coordinator.ts";
 import type { OpenSessionOutcome } from "./session-action-coordinator.ts";
 import { paintResumedWorkspace } from "./cosmetic-paint.ts";
+import { createSnapshotLivenessReader } from "./liveness-cache.ts";
 export type { OpenSessionOutcome } from "./session-action-coordinator.ts";
 
 /** How many indexed sessions are considered before the resume shelf is filled. */
@@ -102,16 +102,8 @@ const STATUS_TTL_MS = 2_500;
 const WORKSPACE_STATE_TTL_MS = 10_000;
 /** One cheap command covers every workspace, so this can stay close to the poll interval. */
 const NOTIFICATION_TTL_MS = 2_000;
-
-function sortedEntries<V>(values: ReadonlyMap<string, V>): readonly (readonly [string, V])[] {
-  return [...values.entries()].sort(([left], [right]) => left.localeCompare(right));
-}
-
-function snapshotSourceRevision(parts: readonly string[]): string {
-  const hash = createHash("sha256");
-  for (const part of parts) hash.update(part).update("\0");
-  return hash.digest("base64url");
-}
+/** The live tree changes quickly, but a subprocess per one-second poll is unnecessary. */
+const SNAPSHOT_LIVENESS_TTL_MS = 2_500;
 
 export type SessionLifecycleAction = "complete" | "archive" | "uncomplete" | "unarchive";
 
@@ -173,8 +165,8 @@ export interface SidebarSource {
     rowLimit?: number,
     include?: readonly SidebarLifecycle[],
   ): Promise<SidebarSnapshot>;
-  /** Exact source revision observed while building this snapshot. */
-  snapshotRevision?(snapshot: SidebarSnapshot): string;
+  /** Start a fresh snapshot-only liveness read without delaying the current response. */
+  refreshSnapshotLiveness?(): void;
   /** Record that the reader refused a verdict, so the same one stops being offered. */
   declineSuggestion(sessionId: string, verb: string): Promise<DeclineOutcome>;
   open(sessionId: string): Promise<OpenSessionOutcome>;
@@ -392,6 +384,8 @@ export interface SidebarSourceOptions {
   readonly recentlyResumedMs?: number;
   /** Narrow I/O seams keep source tests away from the real cmux process and session spawner. */
   readonly readBridge?: () => Promise<Bridge>;
+  /** Test seam for the snapshot-only stale-while-revalidate window. */
+  readonly snapshotLivenessTtlMs?: number;
   readonly readStatuses?: typeof readClaudeStatuses;
   readonly statusReader?: CachedStatusReader;
   readonly workspaceStateReader?: CachedWorkspaceStateReader;
@@ -434,6 +428,11 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const cataloguePath = options.cataloguePath ?? CATALOGUE_PATH();
   const recentlyResumedMs = options.recentlyResumedMs ?? RECENTLY_RESUMED_MS;
   const readBridge = options.readBridge ?? liveBridgeAsync;
+  const snapshotLiveness = createSnapshotLivenessReader({
+    ttlMs: options.snapshotLivenessTtlMs ?? SNAPSHOT_LIVENESS_TTL_MS,
+    readBridge,
+    now,
+  });
   const readStatuses = options.readStatuses ?? readClaudeStatuses;
   // Requests read this cache rather than spawning a subprocess per workspace.
   const statusReader: CachedStatusReader = options.statusReader
@@ -479,7 +478,6 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   // Only directories the latest snapshot published can serve an icon; the map is replaced on
   // each snapshot so a directory that disappears stops being servable.
   let favicons = new Map<string, string>();
-  const snapshotRevisions = new WeakMap<SidebarSnapshot, string>();
   const directoryFacts = options.directoryFacts ?? createDirectoryFactsCache(now);
 
   /**
@@ -641,7 +639,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       let indexMs = 0;
       const scope = lifecycleForView(view);
       const triageOnly = view === "triage";
-      const bridge = await readBridge();
+      const bridge = await snapshotLiveness.read();
       const bridgeMs = performance.now() - phaseStartedAt;
       phaseStartedAt = performance.now();
       const catalogue = readCatalogueLifecyclesSafely();
@@ -799,28 +797,6 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       favicons = new Map(
         [...facts.favicons].filter(([directory]) => publishedDirectories.has(directory)),
       );
-      const durableRevision = readCache?.revision() ?? { catalogue: 0, index: 0 };
-      const revision = snapshotSourceRevision([
-        JSON.stringify(durableRevision),
-        JSON.stringify({
-          readable: bridge.readable,
-          activeWindowId: bridge.activeWindowId,
-          surfaces: [...bridge.surfaces]
-            .sort((left, right) => left.surfaceId.localeCompare(right.surfaceId))
-            .map((surface) => ({ surface, session: bridge.surfaceInfo(surface.surfaceId) })),
-        }),
-        JSON.stringify(sortedEntries(statuses)),
-        JSON.stringify(sortedEntries(workspaceStates)),
-        JSON.stringify({
-          notifications: notifications?.notifications ?? null,
-          unread: notifications ? sortedEntries(notifications.unreadCountsByWorkspaceId) : null,
-        }),
-        JSON.stringify({
-          checkouts: sortedEntries(facts.checkouts),
-          favicons: sortedEntries(facts.favicons),
-        }),
-      ]);
-      snapshotRevisions.set(snapshot, revision);
       const projectionMs = performance.now() - phaseStartedAt;
       observeSnapshot?.({
         view,
@@ -834,8 +810,8 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       return snapshot;
     },
 
-    snapshotRevision(snapshot: SidebarSnapshot): string {
-      return snapshotRevisions.get(snapshot) ?? "untracked";
+    refreshSnapshotLiveness(): void {
+      snapshotLiveness.refresh();
     },
 
     faviconFor(directory: string): string | null {
