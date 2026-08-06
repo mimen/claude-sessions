@@ -7,6 +7,7 @@
  */
 import { execFile } from "node:child_process";
 import type { CmuxClaudeStatus } from "./projection.ts";
+import { createWarmCache } from "./warm-cache.ts";
 
 const STATUS_TIMEOUT_MS = 3_000;
 /** How many `cmux list-status` calls may be in flight at once. */
@@ -125,8 +126,8 @@ export interface CachedStatusReader {
 /**
  * Keep the authoritative statuses warm.
  *
- * A request never waits on 19 subprocesses: it gets whatever the last sweep produced and the
- * next sweep is kicked off in the background. One sweep runs at a time, so a slow cmux cannot
+ * The cold read waits for the first truthful sweep. Warm reads get the last result immediately and
+ * kick an expired refresh into the background. One sweep runs at a time, so a slow cmux cannot
  * pile up work.
  */
 export function createCachedStatusReader(
@@ -135,32 +136,15 @@ export function createCachedStatusReader(
   now: () => number = () => Date.now(),
   read: typeof readClaudeStatuses = readClaudeStatuses,
 ): CachedStatusReader {
-  let cached = new Map<string, CmuxStatusRead>();
-  let readAt = Number.NEGATIVE_INFINITY;
-  let inFlight: Promise<void> | null = null;
-
-  function refresh(workspaceIds: readonly string[]): Promise<void> {
-    if (inFlight) return inFlight;
-    inFlight = (async (): Promise<void> => {
-      try {
-        cached = await read(workspaceIds, cmuxBin);
-        readAt = now();
-      } finally {
-        inFlight = null;
-      }
-    })();
-    return inFlight;
-  }
-
-  return {
-    async read(workspaceIds: readonly string[]): Promise<Map<string, CmuxStatusRead>> {
-      // The very first call has nothing to serve, so it waits; every later one is instant.
-      if (readAt === Number.NEGATIVE_INFINITY) {
-        await refresh(workspaceIds);
-        return cached;
-      }
-      if (now() - readAt >= ttlMs) void refresh(workspaceIds);
-      return cached;
-    },
-  };
+  const cache = createWarmCache<readonly string[], Map<string, CmuxStatusRead>>({
+    ttlMs,
+    initialValue: new Map<string, CmuxStatusRead>(),
+    coldRead: "block",
+    now,
+    load: (workspaceIds) => read(workspaceIds, cmuxBin),
+    // An authoritative read failure must not erase the last truthful status. Leaving it stale makes
+    // the next read retry rather than treating a failed attempt as a fresh observation.
+    failure: { type: "retain-and-retry" },
+  });
+  return { read: (workspaceIds) => cache.read(workspaceIds) };
 }

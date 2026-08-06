@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { parseClaudeStatus, readClaudeStatuses } from "./status.ts";
+import {
+  createCachedStatusReader,
+  parseClaudeStatus,
+  readClaudeStatuses,
+  type CmuxStatusRead,
+} from "./status.ts";
 
 describe("parseClaudeStatus", () => {
   test("reads the label, icon, and color cmux publishes", () => {
@@ -66,5 +71,34 @@ describe("readClaudeStatuses", () => {
 
     expect(absent.get("absent")).toEqual({ state: "absent" });
     expect(unreadable.get("failed")).toEqual({ state: "unreadable" });
+  });
+});
+
+describe("createCachedStatusReader", () => {
+  test("retains stale status after rejection and retries instead of marking the failure fresh", async () => {
+    let clock = 100;
+    let calls = 0;
+    const published = new Map<string, CmuxStatusRead>([[
+      "workspace-uuid",
+      { state: "published", status: { label: "Running", icon: null, color: null } },
+    ]]);
+    const reader = createCachedStatusReader(
+      "fake-cmux",
+      10,
+      () => clock,
+      () => {
+        calls += 1;
+        if (calls === 2) return Promise.reject(new Error("cmux unavailable"));
+        return Promise.resolve(published);
+      },
+    );
+
+    await expect(reader.read(["workspace-uuid"])).resolves.toEqual(published);
+    clock = 110;
+    await expect(reader.read(["workspace-uuid"])).resolves.toEqual(published);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(reader.read(["workspace-uuid"])).resolves.toEqual(published);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toBe(3);
   });
 });

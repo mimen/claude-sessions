@@ -241,6 +241,8 @@ describe("createCachedWorkspaceStateReader", () => {
     refresh.resolve(second);
     await refresh.promise;
     await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     expect(await reader.read(["workspace-uuid"])).toEqual(second);
     expect(calls).toBe(2);
   });

@@ -149,10 +149,27 @@ describe("createCachedNotificationReader", () => {
     pendingRead.resolve(populated);
     await pendingRead.promise;
     await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect((await reader.read()).unreadCountsByWorkspaceId).toEqual(
       populated.unreadCountsByWorkspaceId,
     );
     expect(calls).toBe(1);
+  });
+
+  test("maps a cached loader failure to empty state", async () => {
+    const reader = createCachedNotificationReader(
+      "fake-cmux",
+      1_000,
+      () => 100,
+      () => {
+        throw new Error("unexpected notification failure");
+      },
+    );
+
+    expectEmpty(await reader.read());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expectEmpty(await reader.read());
   });
 });
