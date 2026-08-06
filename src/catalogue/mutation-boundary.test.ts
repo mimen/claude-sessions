@@ -188,6 +188,67 @@ test("sidebar scanner catches aliases, namespace members, and dynamic identity n
   )).toBeFalse();
 });
 
+test("sidebar scanner catches direct dynamic-import member operations", () => {
+  const sidebarFile = join(SRC, "sidebar", "request.ts");
+  const writerTargets = { catalogueSchemaModule: DB_SCHEMA };
+  expect(constructsCatalogueWriter(
+    '(await import("../catalogue/db-schema.ts")).openCatalogue(path);',
+    sidebarFile,
+    writerTargets,
+  )).toBeTrue();
+  expect(constructsCatalogueWriter(
+    'new (await import("bun:sqlite")).Database(path);',
+    sidebarFile,
+    writerTargets,
+  )).toBeTrue();
+  expect(importsNamedBindingFromModule(
+    '(await import("../catalogue/identities.ts")).setIdentityFields(key, fields);',
+    sidebarFile,
+    IDENTITIES,
+    IDENTITY_MUTATIONS,
+  )).toBeTrue();
+});
+
+test("readonly option proof is lexical and mutation-safe", () => {
+  const sidebarFile = join(SRC, "sidebar", "request.ts");
+  const writerTargets = { catalogueSchemaModule: DB_SCHEMA };
+  expect(constructsCatalogueWriter(`
+    import { Database as Sqlite } from "bun:sqlite";
+    function read(path: string): void {
+      const options = { readonly: true };
+      new Sqlite(path, options);
+    }
+  `, sidebarFile, writerTargets)).toBeFalse();
+  expect(constructsCatalogueWriter(`
+    import { Database as Sqlite } from "bun:sqlite";
+    const options = { readonly: true };
+    Object.assign(options, { readonly: false });
+    new Sqlite(path, options);
+  `, sidebarFile, writerTargets)).toBeTrue();
+  expect(constructsCatalogueWriter(`
+    import { Database as Sqlite } from "bun:sqlite";
+    const options = { readonly: false };
+    function unrelated(): void {
+      const options = { readonly: true };
+      void options;
+    }
+    new Sqlite(path, options);
+  `, sidebarFile, writerTargets)).toBeTrue();
+});
+
+test("writer bindings respect lexical shadowing", () => {
+  const sidebarFile = join(SRC, "sidebar", "request.ts");
+  const writerTargets = { catalogueSchemaModule: DB_SCHEMA };
+  expect(constructsCatalogueWriter(`
+    import { openCatalogue as open } from "../catalogue/db-schema.ts";
+    function run(open: (path: string) => void): void { open(path); }
+  `, sidebarFile, writerTargets)).toBeFalse();
+  expect(constructsCatalogueWriter(`
+    import { Database as Sqlite } from "bun:sqlite";
+    function run(Sqlite: new (path: string) => object): void { new Sqlite(path); }
+  `, sidebarFile, writerTargets)).toBeFalse();
+});
+
 test("repository scan includes Bun TypeScript entrypoints and excludes shell binaries", () => {
   const files = repositoryFiles().map(repoPath);
   expect(files).toContain("bin/ccs");

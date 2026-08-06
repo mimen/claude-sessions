@@ -2096,7 +2096,8 @@
       "codeCommit": "44440d9",
       "documentationCommit": "83c52b0",
       "reviewFollowUpCommit": "5493182",
-      "primaryReReviewCommit": "the commit containing this evidence update",
+      "primaryReReviewCommit": "acbeb90",
+      "finalScannerReviewCommit": "the commit containing this evidence update",
       "branch": "worktree-agent-a9807920bbc2bd2f7",
       "generatedOn": "2026-08-05",
       "scope": "mechanical catalogue database split and import enforcement",
@@ -2127,7 +2128,7 @@
     },
     "mutationBoundaryEnforcement": {
       "scanner": "src/catalogue/mutation-boundary-scanner.ts",
-      "method": "TypeScript AST module-reference and literal scanning with importer-relative path resolution",
+      "method": "TypeScript AST module-reference, lexical-binding, and literal scanning with importer-relative path resolution",
       "moduleReferencesCovered": [
         "static import",
         "static export",
@@ -2144,11 +2145,15 @@
       "sidebarDirectIdentityMutationImportsRejected": true,
       "sidebarAliasedAndNamespaceWritersRejected": true,
       "sidebarReadonlyVariableOptionsAccepted": true,
+      "directDynamicImportMemberOperationsRejected": true,
+      "readonlyProofUsesLexicalBindings": true,
+      "readonlyProofRejectsObjectAssignMutation": true,
+      "writerAliasesRespectLexicalShadowing": true,
       "sidebarWriterConstructionRejected": true,
       "bunBinEntrypointsScanned": true,
       "behavioralScannerTests": {
-        "tests": 10,
-        "assertions": 40,
+        "tests": 13,
+        "assertions": 48,
         "failures": 0,
         "fixtures": [
           "nested relative static import",
@@ -2169,6 +2174,13 @@
           "aliased Database construction",
           "namespace Database construction",
           "readonly Database options variable",
+          "direct dynamic-import openCatalogue member",
+          "direct dynamic-import Database member",
+          "direct dynamic-import setIdentityFields member",
+          "Object.assign readonly invalidation",
+          "same-name readonly bindings in separate scopes",
+          "shadowed openCatalogue alias",
+          "shadowed Database alias",
           "extensionless Bun bin entrypoint scan"
         ]
       }
@@ -2252,7 +2264,7 @@
     "targetedValidation": [
       {
         "suite": "catalogue",
-        "tests": 328,
+        "tests": 331,
         "failures": 0
       },
       {
@@ -2290,7 +2302,7 @@
       "validatedAt": "2026-08-06",
       "catalogue": {
         "command": "bun test src/catalogue",
-        "tests": 328,
+        "tests": 331,
         "failures": 0
       },
       "sidebar": {

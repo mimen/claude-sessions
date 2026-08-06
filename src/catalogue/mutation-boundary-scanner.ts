@@ -10,6 +10,120 @@ export interface CatalogueWriterTargets {
   readonly catalogueSchemaModule: string;
 }
 
+interface LexicalScope {
+  readonly parent: LexicalScope | null;
+  readonly bindings: Map<string, ts.Node>;
+}
+
+function functionBody(node: ts.SignatureDeclaration): ts.ConciseBody | null {
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return node.body;
+  if (ts.isFunctionDeclaration(node)
+    || ts.isMethodDeclaration(node)
+    || ts.isConstructorDeclaration(node)
+    || ts.isGetAccessorDeclaration(node)
+    || ts.isSetAccessorDeclaration(node)) return node.body ?? null;
+  return null;
+}
+
+class LexicalBindings {
+  readonly #nodeScopes = new Map<ts.Node, LexicalScope>();
+  readonly #root: LexicalScope = { parent: null, bindings: new Map() };
+
+  constructor(readonly sourceFile: ts.SourceFile) {
+    this.#visitSourceFile(sourceFile);
+  }
+
+  scopeOf(node: ts.Node): LexicalScope | null {
+    return this.#nodeScopes.get(node) ?? null;
+  }
+
+  resolve(identifier: ts.Identifier): ts.Node | null {
+    let scope = this.scopeOf(identifier);
+    while (scope) {
+      const declaration = scope.bindings.get(identifier.text);
+      if (declaration) return declaration;
+      scope = scope.parent;
+    }
+    return null;
+  }
+
+  #record(node: ts.Node, scope: LexicalScope): void {
+    this.#nodeScopes.set(node, scope);
+  }
+
+  #bindName(name: ts.BindingName, declaration: ts.Node, scope: LexicalScope): void {
+    if (ts.isIdentifier(name)) {
+      scope.bindings.set(name.text, declaration);
+      return;
+    }
+    for (const element of name.elements) {
+      if (!ts.isOmittedExpression(element)) this.#bindName(element.name, element, scope);
+    }
+  }
+
+  #visitSourceFile(node: ts.SourceFile): void {
+    this.#record(node, this.#root);
+    for (const statement of node.statements) this.#visit(statement, this.#root);
+  }
+
+  #visit(node: ts.Node, scope: LexicalScope): void {
+    this.#record(node, scope);
+    if (ts.isImportDeclaration(node)) {
+      const clause = node.importClause;
+      if (clause?.name) scope.bindings.set(clause.name.text, clause);
+      if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+        for (const element of clause.namedBindings.elements) {
+          scope.bindings.set(element.name.text, element);
+          this.#record(element, scope);
+          this.#record(element.name, scope);
+        }
+      } else if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+        scope.bindings.set(clause.namedBindings.name.text, clause.namedBindings);
+        this.#record(clause.namedBindings, scope);
+        this.#record(clause.namedBindings.name, scope);
+      }
+      ts.forEachChild(node, (child) => this.#recordTree(child, scope));
+      return;
+    }
+    if (ts.isFunctionDeclaration(node) && node.name) scope.bindings.set(node.name.text, node);
+    if (ts.isClassDeclaration(node) && node.name) scope.bindings.set(node.name.text, node);
+    if (ts.isFunctionLike(node)) {
+      const functionScope: LexicalScope = { parent: scope, bindings: new Map() };
+      for (const parameter of node.parameters) {
+        this.#record(parameter, functionScope);
+        this.#bindName(parameter.name, parameter, functionScope);
+        ts.forEachChild(parameter, (child) => this.#recordTree(child, functionScope));
+      }
+      const body = functionBody(node);
+      if (body) this.#visit(body, functionScope);
+      return;
+    }
+    if (ts.isBlock(node)) {
+      const blockScope: LexicalScope = { parent: scope, bindings: new Map() };
+      this.#record(node, blockScope);
+      for (const statement of node.statements) this.#visit(statement, blockScope);
+      return;
+    }
+    if (ts.isCatchClause(node)) {
+      const catchScope: LexicalScope = { parent: scope, bindings: new Map() };
+      this.#record(node, catchScope);
+      if (node.variableDeclaration) {
+        this.#record(node.variableDeclaration, catchScope);
+        this.#bindName(node.variableDeclaration.name, node.variableDeclaration, catchScope);
+      }
+      this.#visit(node.block, catchScope);
+      return;
+    }
+    if (ts.isVariableDeclaration(node)) this.#bindName(node.name, node, scope);
+    ts.forEachChild(node, (child) => this.#visit(child, scope));
+  }
+
+  #recordTree(node: ts.Node, scope: LexicalScope): void {
+    this.#record(node, scope);
+    ts.forEachChild(node, (child) => this.#recordTree(child, scope));
+  }
+}
+
 function sourceFile(source: string, fileName: string): ts.SourceFile {
   return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 }
@@ -103,14 +217,14 @@ export function importsModule(source: string, importer: string, target: string):
 }
 
 interface ModuleBindings {
-  readonly direct: Map<string, Set<string>>;
-  readonly namespaces: Set<string>;
+  readonly direct: Map<string, Set<ts.Node>>;
+  readonly namespaces: Set<ts.Node>;
 }
 
-function addDirectBinding(bindings: ModuleBindings, exportedName: string, localName: string): void {
-  const locals = bindings.direct.get(exportedName) ?? new Set<string>();
-  locals.add(localName);
-  bindings.direct.set(exportedName, locals);
+function addDirectBinding(bindings: ModuleBindings, exportedName: string, declaration: ts.Node): void {
+  const declarations = bindings.direct.get(exportedName) ?? new Set<ts.Node>();
+  declarations.add(declaration);
+  bindings.direct.set(exportedName, declarations);
 }
 
 function collectModuleBindings(parsed: ts.SourceFile, importer: string, target: string): ModuleBindings {
@@ -121,10 +235,10 @@ function collectModuleBindings(parsed: ts.SourceFile, importer: string, target: 
         const clause = node.importClause;
         if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
           for (const element of clause.namedBindings.elements) {
-            addDirectBinding(bindings, element.propertyName?.text ?? element.name.text, element.name.text);
+            addDirectBinding(bindings, element.propertyName?.text ?? element.name.text, element);
           }
         } else if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
-          bindings.namespaces.add(clause.namedBindings.name.text);
+          bindings.namespaces.add(clause.namedBindings);
         }
       }
     } else if (ts.isVariableDeclaration(node) && node.initializer) {
@@ -132,12 +246,11 @@ function collectModuleBindings(parsed: ts.SourceFile, importer: string, target: 
       const specifier = call ? callSpecifier(call) : null;
       if (specifier && moduleMatches(importer, specifier, target)) {
         if (ts.isIdentifier(node.name)) {
-          bindings.namespaces.add(node.name.text);
+          bindings.namespaces.add(node);
         } else if (ts.isObjectBindingPattern(node.name)) {
           for (const element of node.name.elements) {
             const exportedName = element.propertyName?.getText(parsed) ?? element.name.getText(parsed);
-            const localName = element.name.getText(parsed);
-            addDirectBinding(bindings, exportedName, localName);
+            addDirectBinding(bindings, exportedName, element);
           }
         }
       }
@@ -154,23 +267,39 @@ function memberName(node: ts.PropertyAccessExpression | ts.ElementAccessExpressi
   return argument && ts.isStringLiteralLike(argument) ? argument.text : null;
 }
 
-function usesNamespaceMember(parsed: ts.SourceFile, namespaces: ReadonlySet<string>, names: ReadonlySet<string>): boolean {
-  let found = false;
-  const visit = (node: ts.Node): void => {
-    if (found) return;
-    if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))
-      && ts.isIdentifier(node.expression)
-      && namespaces.has(node.expression.text)) {
-      const name = memberName(node);
-      if (name && names.has(name)) {
-        found = true;
-        return;
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(parsed);
-  return found;
+function directModuleMember(
+  node: ts.Expression,
+  importer: string,
+  target: string,
+  exportedName: string,
+): boolean {
+  const expression = unwrapExpression(node);
+  if (!ts.isPropertyAccessExpression(expression) && !ts.isElementAccessExpression(expression)) return false;
+  if (memberName(expression) !== exportedName) return false;
+  const call = moduleCall(expression.expression);
+  const specifier = call ? callSpecifier(call) : null;
+  return !!specifier && moduleMatches(importer, specifier, target);
+}
+
+function identifierResolvesTo(
+  identifier: ts.Identifier,
+  declarations: ReadonlySet<ts.Node>,
+  lexical: LexicalBindings,
+): boolean {
+  const declaration = lexical.resolve(identifier);
+  return !!declaration && declarations.has(declaration);
+}
+
+function namespaceMemberResolvesTo(
+  node: ts.Expression,
+  declarations: ReadonlySet<ts.Node>,
+  exportedName: string,
+  lexical: LexicalBindings,
+): boolean {
+  const expression = unwrapExpression(node);
+  if (!ts.isPropertyAccessExpression(expression) && !ts.isElementAccessExpression(expression)) return false;
+  if (memberName(expression) !== exportedName || !ts.isIdentifier(expression.expression)) return false;
+  return identifierResolvesTo(expression.expression, declarations, lexical);
 }
 
 export function importsNamedBindingFromModule(
@@ -180,11 +309,28 @@ export function importsNamedBindingFromModule(
   protectedNames: ReadonlySet<string>,
 ): boolean {
   const parsed = sourceFile(source, importer);
+  const lexical = new LexicalBindings(parsed);
   const bindings = collectModuleBindings(parsed, importer, target);
   for (const name of protectedNames) {
     if ((bindings.direct.get(name)?.size ?? 0) > 0) return true;
   }
-  return usesNamespaceMember(parsed, bindings.namespaces, protectedNames);
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      const name = memberName(node);
+      if (name && protectedNames.has(name)) {
+        if (directModuleMember(node, importer, target, name)
+          || namespaceMemberResolvesTo(node, bindings.namespaces, name, lexical)) {
+          found = true;
+          return;
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return found;
 }
 
 function templateText(node: ts.TemplateExpression, parsed: ts.SourceFile): string {
@@ -229,55 +375,80 @@ function hasReadonlyTrue(object: ts.ObjectLiteralExpression): boolean {
   );
 }
 
-function readonlyOptionBindings(parsed: ts.SourceFile): Set<string> {
-  const bindings = new Set<string>();
-  const collect = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node)
-      && ts.isVariableDeclarationList(node.parent)
-      && (node.parent.flags & ts.NodeFlags.Const) !== 0
-      && ts.isIdentifier(node.name)
-      && node.initializer) {
-      const initializer = unwrapExpression(node.initializer);
-      if (ts.isObjectLiteralExpression(initializer) && hasReadonlyTrue(initializer)) {
-        bindings.add(node.name.text);
-      }
-    }
-    ts.forEachChild(node, collect);
-  };
-  collect(parsed);
-  const invalidateMutations = (node: ts.Node): void => {
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-      if ((ts.isPropertyAccessExpression(node.left) || ts.isElementAccessExpression(node.left))
-        && ts.isIdentifier(node.left.expression)) {
-        bindings.delete(node.left.expression.text);
-      }
-    }
-    ts.forEachChild(node, invalidateMutations);
-  };
-  invalidateMutations(parsed);
-  return bindings;
+function isConstVariable(declaration: ts.VariableDeclaration): boolean {
+  return ts.isVariableDeclarationList(declaration.parent)
+    && (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
 }
 
-function isBoundIdentifier(node: ts.Expression, names: ReadonlySet<string>): boolean {
-  return ts.isIdentifier(node) && names.has(node.text);
+function mutatesBinding(parsed: ts.SourceFile, declaration: ts.VariableDeclaration, lexical: LexicalBindings): boolean {
+  let mutated = false;
+  const resolves = (node: ts.Expression): boolean =>
+    ts.isIdentifier(node) && lexical.resolve(node) === declaration;
+  const visit = (node: ts.Node): void => {
+    if (mutated) return;
+    if (ts.isBinaryExpression(node)
+      && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+      && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+      const left = unwrapExpression(node.left);
+      if (resolves(left)
+        || ((ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left))
+          && resolves(left.expression))) {
+        mutated = true;
+        return;
+      }
+    }
+    if (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) {
+      const operand = unwrapExpression(node.operand);
+      if (resolves(operand)
+        || ((ts.isPropertyAccessExpression(operand) || ts.isElementAccessExpression(operand))
+          && resolves(operand.expression))) {
+        mutated = true;
+        return;
+      }
+    }
+    if (ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && ts.isIdentifier(node.expression.expression)
+      && node.expression.expression.text === "Object"
+      && node.expression.name.text === "assign"
+      && node.arguments[0]
+      && resolves(unwrapExpression(node.arguments[0]))) {
+      mutated = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return mutated;
 }
 
-function isBoundNamespaceMember(
-  node: ts.Expression,
-  namespaces: ReadonlySet<string>,
-  exportedName: string,
+function optionIsReadonly(
+  option: ts.Expression | undefined,
+  use: ts.NewExpression,
+  parsed: ts.SourceFile,
+  lexical: LexicalBindings,
 ): boolean {
-  if (!ts.isPropertyAccessExpression(node) && !ts.isElementAccessExpression(node)) return false;
-  return ts.isIdentifier(node.expression)
-    && namespaces.has(node.expression.text)
-    && memberName(node) === exportedName;
-}
-
-function optionIsReadonly(option: ts.Expression | undefined, readonlyBindings: ReadonlySet<string>): boolean {
   if (!option) return false;
   const unwrapped = unwrapExpression(option);
   if (ts.isObjectLiteralExpression(unwrapped)) return hasReadonlyTrue(unwrapped);
-  return ts.isIdentifier(unwrapped) && readonlyBindings.has(unwrapped.text);
+  if (!ts.isIdentifier(unwrapped)) return false;
+  const declaration = lexical.resolve(unwrapped);
+  if (!declaration || !ts.isVariableDeclaration(declaration) || !isConstVariable(declaration)) return false;
+  if (lexical.scopeOf(declaration) !== lexical.scopeOf(use)) return false;
+  if (!declaration.initializer) return false;
+  const initializer = unwrapExpression(declaration.initializer);
+  return ts.isObjectLiteralExpression(initializer)
+    && hasReadonlyTrue(initializer)
+    && !mutatesBinding(parsed, declaration, lexical);
+}
+
+function directBindingCall(
+  expression: ts.Expression,
+  declarations: ReadonlySet<ts.Node>,
+  lexical: LexicalBindings,
+): boolean {
+  const unwrapped = unwrapExpression(expression);
+  return ts.isIdentifier(unwrapped) && identifierResolvesTo(unwrapped, declarations, lexical);
 }
 
 export function constructsCatalogueWriter(
@@ -286,31 +457,35 @@ export function constructsCatalogueWriter(
   targets?: CatalogueWriterTargets,
 ): boolean {
   const parsed = sourceFile(source, fileName);
+  const lexical = new LexicalBindings(parsed);
   const schemaBindings = targets
     ? collectModuleBindings(parsed, fileName, targets.catalogueSchemaModule)
-    : { direct: new Map<string, Set<string>>(), namespaces: new Set<string>() };
+    : { direct: new Map<string, Set<ts.Node>>(), namespaces: new Set<ts.Node>() };
   const sqliteBindings = collectModuleBindings(parsed, fileName, "bun:sqlite");
-  const openNames = new Set(schemaBindings.direct.get("openCatalogue") ?? []);
-  const databaseNames = new Set(sqliteBindings.direct.get("Database") ?? []);
-  if (!targets) openNames.add("openCatalogue");
-  if (databaseNames.size === 0 && sqliteBindings.namespaces.size === 0) databaseNames.add("Database");
-  const readonlyBindings = readonlyOptionBindings(parsed);
+  const openDeclarations = schemaBindings.direct.get("openCatalogue") ?? new Set<ts.Node>();
+  const databaseDeclarations = sqliteBindings.direct.get("Database") ?? new Set<ts.Node>();
   let writer = false;
   const visit = (node: ts.Node): void => {
     if (writer) return;
     if (ts.isCallExpression(node)) {
-      const expression = unwrapExpression(node.expression);
-      if (isBoundIdentifier(expression, openNames)
-        || isBoundNamespaceMember(expression, schemaBindings.namespaces, "openCatalogue")) {
+      const opensCatalogue = directBindingCall(node.expression, openDeclarations, lexical)
+        || namespaceMemberResolvesTo(node.expression, schemaBindings.namespaces, "openCatalogue", lexical)
+        || (!!targets && directModuleMember(
+          node.expression,
+          fileName,
+          targets.catalogueSchemaModule,
+          "openCatalogue",
+        ));
+      if (opensCatalogue) {
         writer = true;
         return;
       }
     }
     if (ts.isNewExpression(node)) {
-      const expression = unwrapExpression(node.expression);
-      const constructsDatabase = isBoundIdentifier(expression, databaseNames)
-        || isBoundNamespaceMember(expression, sqliteBindings.namespaces, "Database");
-      if (constructsDatabase && !optionIsReadonly(node.arguments?.[1], readonlyBindings)) {
+      const constructsDatabase = directBindingCall(node.expression, databaseDeclarations, lexical)
+        || namespaceMemberResolvesTo(node.expression, sqliteBindings.namespaces, "Database", lexical)
+        || directModuleMember(node.expression, fileName, "bun:sqlite", "Database");
+      if (constructsDatabase && !optionIsReadonly(node.arguments?.[1], node, parsed, lexical)) {
         writer = true;
         return;
       }
