@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>CCS Sidebar Performance Architecture</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f2f4f7; --paper: #fff; --ink: #16202b; --muted: #5f6b7c; --line: #d9dfe7;
+      --soft: #edf1f5; --navy: #14233a; --blue: #2f56cf; --green: #166b46;
+      --green-soft: #e6f4ed; --amber: #8c5f0f; --amber-soft: #fdf3d8; --red: #a03832; --red-soft: #fcebea;
+      --shadow: 0 10px 30px rgba(16,24,40,.07);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --serif: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0e141d; --paper:#151d28; --ink:#ecf2f8; --muted:#9da9b8; --line:#2c3949; --soft:#1d2835;
+        --navy:#dbe7ff; --blue:#8ca8ff; --green:#70d4a3; --green-soft:#153a2b; --amber:#f0c56b;
+        --amber-soft:#3a2d12; --red:#f09a94; --red-soft:#3d2221; --shadow:0 10px 30px rgba(0,0,0,.34); }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior:smooth; -webkit-text-size-adjust:100%; }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+    body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); line-height:1.62; -webkit-font-smoothing:antialiased; }
+    main { width:min(1120px, calc(100% - 32px)); margin:0 auto; padding:48px 0 104px; }
+    h1,h2,h3 { line-height:1.15; margin:0; text-wrap:balance; }
+    h1 { max-width:880px; font-family:var(--serif); font-size:clamp(2.4rem,5.4vw,4.5rem); font-weight:600; letter-spacing:-.045em; }
+    h2 { max-width:900px; font-family:var(--serif); font-size:clamp(1.65rem,3vw,2.5rem); font-weight:600; letter-spacing:-.025em; }
+    h3 { font-size:1.05rem; letter-spacing:-.01em; }
+    p { margin:.75rem 0; }
+    a { color:var(--blue); text-underline-offset:3px; }
+    a:focus-visible { outline:2px solid var(--blue); outline-offset:3px; border-radius:4px; }
+    code { font-family:var(--mono); font-size:.88em; background:var(--soft); padding:.08rem .32rem; border-radius:.28rem; }
+    .eyebrow { margin:0 0 .6rem; color:var(--blue); font-size:.72rem; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
+    .lede { max-width:68ch; margin-top:1.25rem; font-size:1.16rem; color:var(--muted); }
+    .section-lede { max-width:70ch; margin-top:1rem; font-size:1.02rem; color:var(--muted); }
+    .artifact { display:flex; flex-wrap:wrap; align-items:baseline; gap:.2rem .6rem; margin-top:1.4rem;
+      color:var(--muted); font-family:var(--mono); font-size:.75rem; overflow-wrap:anywhere; }
+    .artifact-label { font-family:var(--sans); font-size:.66rem; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }
+    .meta-line { margin:.3rem 0 0; color:var(--muted); font-size:.78rem; }
+    .status { display:grid; gap:.25rem; margin-top:1.6rem; border:1px solid color-mix(in srgb,var(--amber) 38%,var(--line)); border-left:5px solid var(--amber);
+      border-radius:0 12px 12px 0; background:var(--amber-soft); padding:1rem 1.2rem; }
+    .status strong { color:var(--amber); }
+    .status span { font-size:.95rem; }
+    .toc { display:flex; flex-wrap:wrap; gap:8px; margin:34px 0 0; padding:0; list-style:none; }
+    .toc a { display:inline-block; padding:.34rem .72rem; border:1px solid var(--line); border-radius:999px;
+      background:var(--paper); color:var(--muted); font-size:.78rem; font-weight:600; text-decoration:none; }
+    .toc a:hover { border-color:var(--blue); color:var(--blue); }
+    section { margin-top:72px; scroll-margin-top:20px; }
+    section>p { max-width:74ch; }
+    .rule { padding-top:36px; border-top:1px solid var(--line); }
+    .paper { border:1px solid var(--line); border-radius:16px; background:var(--paper); box-shadow:var(--shadow); }
+    .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:32px; }
+    .metric { padding:18px 18px 20px; }
+    .metric b { display:block; color:var(--blue); font-family:var(--serif); font-size:clamp(1.5rem,2.4vw,1.95rem); line-height:1.05; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+    .metric span { display:block; margin-top:.55rem; color:var(--muted); font-size:.83rem; line-height:1.45; }
+    .decision-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:26px; }
+    .decision { padding:22px; }
+    .decision .n { display:inline-grid; width:28px; height:28px; place-items:center; margin-bottom:1rem; border-radius:50%; background:var(--navy); color:var(--paper); font-size:.85rem; font-weight:800; }
+    @media (prefers-color-scheme: dark) { .decision .n { background:var(--blue); color:#0d1420; } }
+    .decision p { margin-bottom:0; color:var(--muted); font-size:.92rem; }
+    .architecture { margin-top:24px; padding:24px; overflow:hidden; }
+    .lane-grid { display:grid; grid-template-columns:1fr 56px 1fr 56px 1fr; align-items:stretch; gap:8px; }
+    .lane { display:flex; flex-direction:column; min-height:220px; padding:20px; border:2px solid var(--navy); border-radius:14px; background:color-mix(in srgb,var(--paper) 92%,var(--blue)); }
+    .lane small { display:block; margin-bottom:.5rem; color:var(--blue); font-size:.68rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+    .lane p { color:var(--muted); font-size:.9rem; }
+    .lane ul { margin:auto 0 0; padding-left:1.1rem; padding-top:.9rem; font-size:.87rem; }
+    .lane li { margin:.3rem 0; }
+    .arrow { display:grid; place-items:center; color:var(--blue); font-size:1.9rem; font-weight:300; }
+    .preserve { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:24px; }
+    .preserve>div { padding:22px; }
+    .preserve ul { margin:.8rem 0 0; padding-left:1.1rem; }
+    .preserve li { margin:.45rem 0; }
+    .table-wrap { margin-top:24px; overflow-x:auto; }
+    table { width:100%; min-width:600px; border-collapse:collapse; font-size:.91rem; }
+    th,td { padding:.8rem .9rem; border:1px solid var(--line); background:var(--paper); text-align:left; vertical-align:top; }
+    th { background:var(--soft); color:var(--muted); font-size:.7rem; font-weight:800; letter-spacing:.09em; text-transform:uppercase; }
+    tbody td:first-child { font-weight:600; }
+    tbody tr:nth-child(even) td { background:color-mix(in srgb,var(--soft) 50%,var(--paper)); }
+    td.yes,td.conditional,td.no { font-weight:700; border-left-width:4px; }
+    td.yes { color:var(--green); border-left-color:var(--green); }
+    td.conditional { color:var(--amber); border-left-color:var(--amber); }
+    td.no { color:var(--red); border-left-color:var(--red); }
+    .phase-list { display:grid; gap:16px; margin-top:28px; }
+    .phase { display:grid; grid-template-columns:72px 1fr; overflow:hidden; }
+    .phase-num { display:grid; place-items:start center; padding:24px 10px; background:var(--navy); color:var(--paper); font-family:var(--serif); font-size:2rem; line-height:1; font-variant-numeric:tabular-nums; }
+    @media (prefers-color-scheme: dark) { .phase-num { background:#223451; color:#eef4ff; } }
+    .phase-body { padding:24px 26px; }
+    .phase-body>p { max-width:72ch; margin-top:.35rem; color:var(--muted); }
+    .phase-body ul { margin:.85rem 0 0; padding-left:1.15rem; }
+    .phase-body li { margin:.42rem 0; }
+    .gate { display:flex; flex-wrap:wrap; align-items:baseline; gap:.3rem .7rem; margin-top:18px; padding:12px 14px; border-radius:10px; background:var(--green-soft); color:var(--green); font-size:.87rem; }
+    .gate-label { flex:none; font-size:.66rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+    .gate-text { flex:1 1 300px; font-weight:600; }
+    .interface { margin:18px 0 0; padding:16px 18px; border:1px solid var(--line); border-left:3px solid color-mix(in srgb,var(--blue) 55%,var(--line));
+      border-radius:12px; background:var(--soft); font-family:var(--mono); font-size:.78rem; line-height:1.6; tab-size:2; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .callout { margin-top:22px; padding:18px 20px; border-left:5px solid var(--blue); border-radius:0 12px 12px 0; background:color-mix(in srgb,var(--blue) 8%,var(--paper)); }
+    .callout strong { display:block; margin-bottom:.25rem; }
+    .callout.warn { border-left-color:var(--amber); background:var(--amber-soft); }
+    .callout.warn strong { color:var(--amber); }
+    .callout.danger { border-left-color:var(--red); background:var(--red-soft); }
+    .callout.danger strong { color:var(--red); }
+    .exclusions { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-top:24px; }
+    .exclusion { display:flex; flex-direction:column; align-items:flex-start; padding:18px 20px 20px; }
+    .exclusion h3 { margin-top:.75rem; font-size:1rem; }
+    .exclusion p { margin:.4rem 0 0; color:var(--muted); font-size:.92rem; }
+    .tag { display:inline-block; padding:.16rem .55rem; border-radius:999px; font-size:.66rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+    .tag.no { background:var(--red-soft); color:var(--red); }
+    .tag.conditional { background:var(--amber-soft); color:var(--amber); }
+    .refs { display:grid; gap:.7rem; margin:1.3rem 0 0; padding:0; list-style:none; font-size:.9rem; }
+    .refs li { padding-left:.9rem; border-left:2px solid var(--line); }
+    .closing { padding:34px 36px; border-color:#14233a; background:#14233a; color:#eef4ff; }
+    .closing h2 { color:#fff; }
+    .closing p { max-width:74ch; color:#cbd7e7; }
+    @media (max-width:850px) { .metrics,.decision-grid{grid-template-columns:repeat(2,1fr)} .lane-grid{grid-template-columns:1fr} .lane{min-height:0} .lane ul{margin-top:0} .arrow{transform:rotate(90deg);min-height:40px} .preserve,.exclusions{grid-template-columns:1fr} }
+    @media (max-width:560px) { main{width:min(100% - 20px,1120px);padding-top:28px} .metrics,.decision-grid{grid-template-columns:1fr} .phase{grid-template-columns:52px 1fr} .phase-num{padding:18px 6px;font-size:1.45rem} .phase-body{padding:20px} .closing{padding:24px} table{font-size:.84rem} }
+    @media print {
+      body { background:#fff; }
+      main { width:auto; padding:0; }
+      .toc { display:none; }
+      .paper,.phase { box-shadow:none; }
+      .metric,.decision,.exclusion,.phase,.callout,.gate,table { break-inside:avoid; }
+      section { margin-top:34px; }
+      a { color:inherit; }
+    }
+  </style>
+  <script>
+    (() => {
+      const key = "ccs-sidebar-performance-plan-scroll";
+      window.addEventListener("beforeunload", () => sessionStorage.setItem(key, String(window.scrollY)));
+      window.addEventListener("DOMContentLoaded", () => {
+        const y = Number(sessionStorage.getItem(key) || "0");
+        if (Number.isFinite(y) && y > 0) requestAnimationFrame(() => window.scrollTo({ top: y, behavior: "instant" }));
+      });
+    })();
+  </script>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Implementation plan · read only</p>
+    <h1>Make the sidebar fast by removing work, not hiding rows.</h1>
+    <p class="lede">The product remains intact: every ordinary session loads, liveness remains exact, resume fails closed, and CCS continues to own session lifecycle. The architecture changes underneath it so read traffic cannot acquire write locks, unchanged data is not recomputed or retransmitted, and session actions stop blocking the server.</p>
+    <div class="status">
+      <strong>Status: awaiting implementation authorization.</strong>
+      <span>No implementation has started. The first wave is CCS-only. Fable, the independent second-opinion architecture reviewer, reviewed the diagnosis. The plan deliberately defers SSE and any HTML-to-cmux action bridge until the cheaper fixes are measured.</span>
+    </div>
+    <p class="artifact"><span class="artifact-label">Artifact</span> /Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/sidebar-performance-plan/docs/plans/sidebar-performance-architecture.html</p>
+    <p class="meta-line">This page reloads itself every 30 seconds and restores your scroll position, so edits to the plan appear in place.</p>
+    <div class="metrics">
+      <div class="metric paper"><b>412-474ms</b><span>current warm full snapshot</span></div>
+      <div class="metric paper"><b>257-478ms</b><span>current isolated live-session focus</span></div>
+      <div class="metric paper"><b>20s+</b><span>live <code>/api/open</code> request timed out with zero response bytes while the installed server was contended</span></div>
+      <div class="metric paper"><b>~565KB/s</b><span>unchanged full response at one-second polling</span></div>
+    </div>
+    <nav aria-label="Sections">
+      <ul class="toc">
+        <li><a href="#decision">The decision</a></li>
+        <li><a href="#review">Independent review</a></li>
+        <li><a href="#sequence">Implementation sequence</a></li>
+        <li><a href="#budgets">Performance contract</a></li>
+        <li><a href="#tests">Regression strategy</a></li>
+        <li><a href="#rollout">Rollout and rollback</a></li>
+        <li><a href="#excluded">Excluded until evidence changes</a></li>
+        <li><a href="#references">References</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <section id="decision">
+    <p class="eyebrow">The decision</p>
+    <h2>Three deep modules replace one overloaded request path.</h2>
+    <div class="decision-grid">
+      <div class="decision paper"><span class="n">1</span><h3>CatalogueReader</h3><p>A query-only adapter selects only sidebar fields. It cannot migrate, materialize, run DDL, stamp schema versions, or acquire a reserved write lock.</p></div>
+      <div class="decision paper"><span class="n">2</span><h3>SidebarReadCache</h3><p>SQLite <code>data_version</code> provides exact invalidation for durable projections. A generation tuple produces ETags so unchanged polls return 304 with no JSON body.</p></div>
+      <div class="decision paper"><span class="n">3</span><h3>SessionActionCoordinator</h3><p>One fresh liveness read, per-session single-flight, asynchronous cmux processes, typed results, and cosmetic paint after the response.</p></div>
+    </div>
+    <div class="architecture paper">
+      <div class="lane-grid">
+        <div class="lane"><small>Read lane</small><h3>Query-only durable data</h3><p>Catalogue and index facts are read through narrow adapters and cached by exact source revision.</p><ul><li>No migrations in GET requests</li><li>No <code>SELECT *</code></li><li>No per-row identity N+1</li><li>No duplicate enrichment pass</li></ul></div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="lane"><small>Projection lane</small><h3>Pure sidebar projection</h3><p>The existing product logic remains a pure join of durable facts, live workspace facts, scope, and shelf state.</p><ul><li>Wire shape preserved initially</li><li>All rows still load</li><li>Last good rows survive degraded reads</li><li>ETag represents source generations</li></ul></div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="lane"><small>Action lane</small><h3>Async authoritative actions</h3><p>Server actions recheck liveness, preserve fail-closed resume, and never block unrelated HTTP traffic on synchronous subprocesses.</p><ul><li>One Bridge per action</li><li>No raw SQL mutations</li><li>Paint is best-effort and self-healing</li><li>Structured error envelope</li></ul></div>
+      </div>
+    </div>
+    <div class="preserve">
+      <div class="paper"><h3>Product behavior that does not change</h3><ul><li>All non-auxiliary rows load immediately.</li><li>Completed and archived remain normal shelfable sections.</li><li>Live and closed rows retain current actions and summaries.</li><li>The server remains authoritative about focus versus resume.</li><li>A stale client can never trigger a duplicate resume.</li></ul></div>
+      <div class="paper"><h3>Platform guarantees that become stronger</h3><ul><li>Read requests cannot contend as catalogue writers.</li><li>Unreadable remains distinct from absent.</li><li>Every mutation crosses the command seam from ADR-0068.</li><li>Every network and liveness failure has a stable error kind.</li><li>Performance regressions gain executable budgets.</li></ul></div>
+    </div>
+  </section>
+
+  <section class="rule" id="review">
+    <p class="eyebrow">Independent review</p>
+    <h2>Where the independent Fable review agreed, sharpened, and vetoed.</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Proposal</th><th>Review outcome</th><th>Plan decision</th></tr></thead>
+        <tbody>
+          <tr><td>Read-only catalogue path</td><td class="yes">Confirmed and higher priority</td><td>The current one-second <code>BEGIN IMMEDIATE</code> is a fleet-wide lock generator, not merely sidebar latency. It is Phase 1.</td></tr>
+          <tr><td>Data cache</td><td class="yes">Confirmed with narrower scope</td><td>Cache the durable projection by <code>PRAGMA data_version</code>. Do not introduce a broad whole-response cache keyed by every scope combination.</td></tr>
+          <tr><td>Full-load product decision</td><td class="yes">Preserve</td><td>No paging or row cap redesign. Use 304 responses to eliminate unchanged transfer.</td></tr>
+          <tr><td>Asynchronous action path</td><td class="yes">Confirmed</td><td>Reuse one fresh Bridge, replace sync subprocesses, and defer cosmetic paint.</td></tr>
+          <tr><td>SSE push transport</td><td class="conditional">Measure first</td><td>Keep one-second polling with ETag and backoff. Add server-sent events only if the fixed system still misses idle CPU or freshness budgets.</td></tr>
+          <tr><td>HTML-to-cmux action bridge</td><td class="conditional">Do not ship in the first wave</td><td>The generic interpreted dispatch is unsafe for arbitrary web content. Reconsider only if optimized loopback focus remains slower than 150ms.</td></tr>
+          <tr><td>Worker thread or separate action process</td><td class="no">Excluded initially</td><td>Read-only queries and async subprocesses should remove the motivation. Add process isolation only after a measured remaining stall.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn"><strong>Additional review finding.</strong> The sidebar currently performs raw catalogue <code>INSERT</code> and <code>UPDATE</code> statements for lifecycle, recommendation decline, and session-row creation. That violates ADR-0068 and duplicates identity mirroring logic. This plan routes those writes through the command layer before the physical database split.</div>
+  </section>
+
+  <section class="rule" id="sequence">
+    <p class="eyebrow">Implementation sequence</p>
+    <h2>Eight independently shippable slices.</h2>
+    <p class="section-lede">Behavior changes and file movement do not share a commit. Each slice has one measurable claim, one rollback, and a regression test at the seam where the bug occurred.</p>
+    <div class="phase-list">
+      <article class="phase paper"><div class="phase-num">0</div><div class="phase-body"><h3>Freeze behavior and measure the real flow</h3><p>Add observability and characterization before replacing any implementation.</p><ul><li>Record snapshot phase timings: bridge, catalogue, index, status, projection, serialization.</li><li>Log structured slow requests above 100ms and classify liveness failures by cause.</li><li>Add the live-focus benchmark, writer-lock contention harness, response-size measurement, and a 60-second idle profile.</li><li>Capture normalized snapshots for active, triage, completed, archived, unreadable catalogue, and unreadable index.</li></ul><div class="gate"><span class="gate-label">Exit gate</span><span class="gate-text">Existing behavior is reproducible and the writer-locking snapshot path fails the new contention and latency tests.</span></div></div></article>
+
+      <article class="phase paper"><div class="phase-num">1</div><div class="phase-body"><h3>Remove catalogue writes from the read path</h3><p>Add <code>src/sidebar/catalogue-read.ts</code>, mirroring the version-tolerant shape of <code>index-read.ts</code>.</p><div class="interface">type CatalogueReadError =
+  | { kind: "missing" }
+  | { kind: "unreadable"; message: string }
+  | { kind: "unsupported-schema"; message: string };
+
+function readSidebarCatalogue(path: string): Result&lt;SidebarCatalogueFacts, CatalogueReadError&gt;;</div><ul><li>Open SQLite with <code>{ readonly: true }</code> and <code>PRAGMA query_only = ON</code>.</li><li>Probe table and column presence. Detect <code>enrichment_declined</code> by presence, never by <code>user_version</code>.</li><li>Select only sidebar lifecycle, identity, membership, and enrichment fields with one bounded join.</li><li>No WAL setup, migration, materialization, filesystem migration, schema stamping, or role-config loading.</li><li>Preserve current degradation: missing or unreadable catalogue keeps live rows rather than blanking the sidebar.</li></ul><div class="gate"><span class="gate-label">Exit gate</span><span class="gate-text">A held writer lock cannot delay snapshot generation beyond 120ms, and snapshot reads do not modify the database, WAL, or schema version.</span></div></div></article>
+
+      <article class="phase paper"><div class="phase-num">2</div><div class="phase-body"><h3>Cache exact durable projections and return 304 for unchanged state</h3><p>Introduce <code>SidebarReadCache</code> keyed by catalogue and index <code>data_version</code>, following the existing catalogue authority pattern.</p><div class="interface">interface SidebarReadCache {
+  read(): Result&lt;SidebarDurableFacts, SidebarReadError&gt;;
+  revision(): SidebarDurableRevision;
+  invalidate(): void;
+}</div><ul><li>Cache durable facts, not scope-specific HTTP responses.</li><li>Build an ETag from durable revisions plus live/status cache generations and request scope.</li><li>Honor <code>If-None-Match</code> with 304 and no body.</li><li>Keep the one-second poll initially so freshness behavior does not change.</li><li>Back off consecutive transport failures and refresh immediately on visibility return or successful action.</li></ul><div class="gate"><span class="gate-label">Exit gate</span><span class="gate-text">Unchanged polling responds under 10ms with 304; a write from a second connection invalidates on the next request; every source change yields 200 with the expected snapshot.</span></div></div></article>
+
+      <article class="phase paper"><div class="phase-num">3</div><div class="phase-body"><h3>Deepen the action path and remove synchronous subprocesses</h3><p>Extract <code>SessionActionCoordinator</code> from <code>snapshot.ts</code>. The server route becomes transport only.</p><div class="interface">type OpenResult =
+  | { kind: "focused" }
+  | { kind: "resumed"; workspaceRef: string }
+  | { kind: "already-open" }
+  | { kind: "not-indexed" }
+  | { kind: "liveness-unreadable"; reason: LivenessError }
+  | { kind: "failed"; error: ActionError };
+
+interface SessionActionCoordinator {
+  open(sessionId: string): Promise&lt;OpenResult&gt;;
+}</div><ul><li>Read one fresh Bridge per action and pass its concrete location into focus. Never rebuild liveness synchronously.</li><li>Replace <code>execFileSync</code> and <code>Bun.spawnSync</code> in sidebar action flows with async process adapters.</li><li>Retain per-session single-flight and make a repeat click focus the actual workspace rather than returning a silent recent-success no-op.</li><li>Return after the workspace exists. Queue tab paint afterward; SessionStart and the selector-driven sweep remain the self-healing guarantee from ADR-0056.</li><li>Pass the loaded row or read-only facts into paint so it cannot reopen the catalogue as a writer.</li></ul><div class="gate"><span class="gate-label">Exit gate</span><span class="gate-text">Live focus p95 is below 150ms; resume acknowledgment p95 is below 700ms; snapshot traffic continues responding while an action is in flight.</span></div></div></article>
+
+      <article class="phase paper"><div class="phase-num">4</div><div class="phase-body"><h3>Put mutations and failures through their declared seams</h3><p>Close correctness gaps exposed by the performance work.</p><ul><li>Replace raw sidebar SQL with sanctioned command-layer operations for lifecycle, recommendation decline, and index-gated session adoption.</li><li>Preserve atomic identity mirroring and phantom-row protection from existing commands.</li><li>Return <code>{ code, message, retryable }</code> from server failures and log every catch before responding.</li><li>Add typed browser transport with explicit snapshot and action deadlines. Never render raw WebKit <code>TypeError</code> text.</li><li>Keep absent, unreadable, stale, denied, timed out, and not found distinct.</li></ul><div class="gate"><span class="gate-label">Exit gate</span><span class="gate-text">The mutation-boundary test catches direct sidebar SQL; every transport error has a behavior-level test; no persistent "Load failed" toast exists.</span></div></div></article>
+
+      <article class="phase paper"><div class="phase-num">5</div><div class="phase-body"><h3>Consolidate duplicated concepts behind shared interfaces</h3><p>After latency and correctness are stable, remove implementations that can drift again.</p><ul><li>One <code>StoredEnrichment</code> shape and one reader. Remove conflicting nullability and recommendation fallbacks.</li><li>One recommendation-disagreement function shared by CLI triage and sidebar suggestions.</li><li>One generic warm-cache implementation shared by status, workspace state, and notifications, including the synchronous-throw single-flight fix.</li><li>Split pure projection into live-row construction, indexed-row construction, and section selection while keeping <code>projectSidebar</code> as the composed interface.</li><li>Extract web snapshot transport and action transport from <code>App.tsx</code>; presentation remains in React.</li></ul><div class="gate"><span class="gate-label">Exit gate</span><span class="gate-text">Projection, shelf-storage, triage, and degradation fixtures are equivalent after normalization.</span></div></div></article>
+
+      <article class="phase paper"><div class="phase-num">6</div><div class="phase-body"><h3>Complete the physical module split and enforce it</h3><p>Finish ADR-0068 only after behavior is protected, with file movement isolated from logic changes.</p><ul><li><code>db-schema.ts</code>: schema readiness and migrations.</li><li><code>db-queries.ts</code>: unrestricted query-only functions.</li><li><code>db-mutations.ts</code>: command-layer-only writes.</li><li>Strengthen the import test so raw database construction and mutation SQL outside sanctioned modules fail CI.</li><li>Run <code>lint:circular</code> after every move and keep orchestration importing data, never the reverse.</li><li>Update domain context, system-unit docs, and the sidebar README with the new read, projection, and action vocabulary.</li></ul><div class="gate"><span class="gate-label">Exit gate</span><span class="gate-text">Full tests, typechecks, circular-dependency lint, and snapshot benchmarks are unchanged or better after the mechanical split.</span></div></div></article>
+
+      <article class="phase paper"><div class="phase-num">7</div><div class="phase-body"><h3>Soak, remove fallbacks, then decide whether more machinery is justified</h3><p>Run the installed sidebar against the real fleet before adding another transport.</p><ul><li>Thirty-minute idle soak and a fifty-click focus sample with the live sidebar open.</li><li>Exercise closed resume, repeated clicks, lifecycle changes, writer contention, missing index, missing catalogue, cmux socket failure, and server restart.</li><li>Remove temporary read-path flags and the old snapshot reader that calls <code>openCatalogue()</code> after parity is proven.</li><li>Consider SSE only if 304 polling still exceeds idle CPU or freshness budgets.</li><li>Consider a cmux web action bridge only if optimized focus remains above 150ms.</li></ul><div class="gate"><span class="gate-label">Exit gate</span><span class="gate-text">No false liveness-unreadable state, raw transport error, duplicate resume, blank sidebar, or performance regression across the soak.</span></div></div></article>
+    </div>
+  </section>
+
+  <section class="rule" id="budgets">
+    <p class="eyebrow">Performance contract</p>
+    <h2>Measured budgets become part of the interface.</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Path</th><th>Current evidence</th><th>Required budget</th><th>Failure response</th></tr></thead>
+        <tbody>
+          <tr><td>Unchanged snapshot poll</td><td>Full 565KB every second</td><td>p95 under 10ms, HTTP 304, no body</td><td>Reject if revisioning misses a source change</td></tr>
+          <tr><td>Changed warm snapshot</td><td>412-474ms</td><td>p50 under 40ms, p95 under 120ms</td><td>Profile phases before more caching</td></tr>
+          <tr><td>Event-loop stall</td><td>A fixture held <code>BEGIN IMMEDIATE</code>; <code>openCatalogue()</code> blocked 5.3s and a 10ms heartbeat recorded zero timer ticks</td><td>No sidebar request blocks over 50ms</td><td>No sync process, wait, or writer-open allowed</td></tr>
+          <tr><td>Live focus</td><td>257-478ms isolated</td><td>p95 under 150ms</td><td>Only then evaluate a local typed cmux bridge</td></tr>
+          <tr><td>Resume acknowledgment</td><td>0.5-1.5s typical, worse under timeouts</td><td>p95 under 700ms to workspace creation</td><td>Paint remains deferred and self-healing</td></tr>
+          <tr><td>Idle sidebar</td><td>~565KB/s and repeated source work</td><td>No unchanged JSON transfer; no false degraded state in 30 minutes</td><td>Evaluate SSE only after this result</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout"><strong>Hard review rule.</strong> No <code>execFileSync</code>, <code>Bun.spawnSync</code>, <code>Atomics.wait</code>, read-write catalogue open, migration, or raw catalogue mutation may execute from a sidebar request handler.</div>
+  </section>
+
+  <section class="rule" id="tests">
+    <p class="eyebrow">Regression strategy</p>
+    <h2>Tests target the exact seams that failed.</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Risk</th><th>Regression test</th><th>Real-flow evidence</th></tr></thead>
+        <tbody>
+          <tr><td>Read request becomes a writer</td><td>Hold a writer lock; run snapshot; assert bounded response and unchanged WAL/schema state.</td><td>Concurrent writer while sidebar refreshes.</td></tr>
+          <tr><td>New reader changes rows</td><td>Golden parity across current, missing, old, and partial schema fixtures.</td><td>Compare normalized live snapshots in local shadow mode.</td></tr>
+          <tr><td>Cache serves stale data</td><td>Commit through a second connection; assert <code>data_version</code> invalidates exactly once.</td><td>Lifecycle action appears on the next poll.</td></tr>
+          <tr><td>ETag hides a real change</td><td>Change each generation input independently; each must convert 304 to 200.</td><td>Title, lifecycle, status, notification, and liveness changes all appear.</td></tr>
+          <tr><td>Action duplicates liveness work</td><td>Injected Bridge reader call count equals one per open action.</td><td>Fifty live-row clicks while recording process calls.</td></tr>
+          <tr><td>Deferred paint loses presentation</td><td>Fail immediate paint; run SessionStart or sweep; final tab equals row render.</td><td>Resume with paint failure, then observe self-healing.</td></tr>
+          <tr><td>Error states collapse</td><td>Timeout, refused connection, 500 body, malformed JSON, unreadable cmux, and absent row each assert a different state.</td><td>Kill/restart server and deny the cmux socket.</td></tr>
+          <tr><td>File split changes behavior</td><td>Full suite plus <code>lint:circular</code> before and after.</td><td>No visual or row-count change in the installed sidebar.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">The cmux repository is not modified in the first wave. If a bridge is later justified, cmux requires a failing behavior test commit before the fix, Swift Testing package coverage, the <code>cmux-unit</code> scheme, an app build, and a live WebKit click check. Every entrypoint must converge on the existing shared workspace-selection mutation path.</div>
+  </section>
+
+  <section class="rule" id="rollout">
+    <p class="eyebrow">Rollout and rollback</p>
+    <h2>No phase needs the next phase to be safe.</h2>
+    <div class="preserve">
+      <div class="paper"><h3>Rollout</h3><ul><li>Build each behavioral slice in its own commit and keep mechanical moves separate.</li><li>Use temporary flags only for the read adapter and ETag path.</li><li>Client and server stay version-tolerant: missing ETag support falls back to normal 200 polling.</li><li>Ship the read path before actions so the largest lock hazard disappears first.</li><li>Implementation starts in fresh worktrees that explicitly layer sidebar commit <code>ee0f57e</code> over fresh <code>origin/master</code>.</li></ul></div>
+      <div class="paper"><h3>Rollback</h3><ul><li>Disable the reader flag during the short parity window.</li><li>Disable ETag generation without changing the snapshot body.</li><li>Revert action commits independently; result unions remain compatible until soak completes.</li><li>Restore synchronous paint without touching resume planning if needed.</li><li>No first-wave database schema migration is required.</li></ul></div>
+    </div>
+    <div class="callout danger"><strong>Fallback lifetime is bounded.</strong> The legacy writer-opening read path is removed after the soak. It does not remain as permanent dual architecture.</div>
+  </section>
+
+  <section class="rule" id="excluded">
+    <p class="eyebrow">Excluded until evidence changes</p>
+    <h2>Useful ideas that are not yet no-brainers.</h2>
+    <div class="exclusions">
+      <div class="exclusion paper"><span class="tag no">Rejected</span><h3>Generic HTML-to-cmux dispatch</h3><p>The interpreted dispatch is a raw method passthrough, while a <code>.url</code> custom-sidebar configuration can point its WebView at any HTTP or HTTPS page, including remote content.</p></div>
+      <div class="exclusion paper"><span class="tag conditional">Conditional</span><h3>Typed local focus bridge</h3><p>Consider only after optimized focus remains above 150ms. Local document or exact loopback origin, main frame only, dispatch-time URL verification, fixed focus verb, no redirects, no remote source.</p></div>
+      <div class="exclusion paper"><span class="tag conditional">Conditional</span><h3>SSE or WebSockets</h3><p>ETag polling is simpler and preserves current lifecycle behavior. Add push only if post-fix idle measurements justify it.</p></div>
+      <div class="exclusion paper"><span class="tag conditional">Conditional</span><h3>Worker process or thread</h3><p>First remove writer locks and synchronous subprocesses. Process isolation needs a measured remaining stall.</p></div>
+      <div class="exclusion paper"><span class="tag no">Rejected</span><h3>Pagination or row removal</h3><p>It overturns the deliberate full-list decision and treats a backend defect as a visibility feature.</p></div>
+      <div class="exclusion paper"><span class="tag no">Rejected</span><h3>Cached liveness for resume</h3><p>Display may use cached live facts, but spawn and resume require a fresh readable Bridge under ADR-0054.</p></div>
+      <div class="exclusion paper"><span class="tag no">Rejected</span><h3>Persistent raw cmux socket client</h3><p>It duplicates CLI authentication, normalization, and wire compatibility for little gain after async focus.</p></div>
+      <div class="exclusion paper"><span class="tag no">Rejected</span><h3>Merge catalogue and index</h3><p>Durable identity state and rebuildable transcript facts remain separate by the platform model.</p></div>
+    </div>
+  </section>
+
+  <section class="rule" id="references">
+    <p class="eyebrow">References</p>
+    <h2>Evidence and governing decisions.</h2>
+    <ul class="refs">
+      <li><a href="file:///var/folders/0r/_2hwm94j6c7g2mzt_2d78pd80000gn/T/architecture-review-20260805-163804.html" target="_blank" rel="noopener">Visual architecture review</a> · before and after module map.</li>
+      <li><a href="file:///Users/mimen/Programming/Repos/claude-sessions/docs/CONTEXT.md" target="_blank" rel="noopener">CCS domain context</a> · catalogue, index, bridge, liveness, readable, and resume vocabulary.</li>
+      <li><a href="file:///Users/mimen/Programming/Repos/claude-sessions/docs/adr/0054-cmux-0.64-moved-session-tracking-to-a-hook-store-and-liveness-must-fail-closed.md" target="_blank" rel="noopener">ADR-0054</a> · exact liveness and fail-closed resume.</li>
+      <li><a href="file:///Users/mimen/Programming/Repos/claude-sessions/docs/adr/0066-error-handling-fail-open-catches-must-distinguish-unreadable-from-absent-and-never-swallow-silently.md" target="_blank" rel="noopener">ADR-0066</a> · unreadable versus absent and no silent swallow.</li>
+      <li><a href="file:///Users/mimen/Programming/Repos/claude-sessions/docs/adr/0068-only-the-command-layer-mutates-the-catalogue-split-db-into-schema-queries-mutations.md" target="_blank" rel="noopener">ADR-0068</a> · command-only writes and database module split.</li>
+      <li><a href="file:///Users/mimen/Programming/Repos/claude-sessions/docs/adr/0071-adopt-result-t-at-boundaries-and-a-structured-logger.md" target="_blank" rel="noopener">ADR-0071</a> · Result at fallible seams and structured logging.</li>
+      <li>Reviewed revisions: claude-sessions <code>ee0f57eb510d990da472ad1a705e8a1184267d09</code>; cmux fork <code>065375849237735de8f981bf7a6274cca18b8785</code>.</li>
+    </ul>
+  </section>
+
+  <section class="closing paper">
+    <p class="eyebrow" style="color:#9db7ff">Authorization gate</p>
+    <h2>Ready for approval, not implementation.</h2>
+    <p>The no-brainer package is deliberately conservative: query-only catalogue reads, exact durable-data caching, ETags, one liveness read per action, asynchronous subprocesses, deferred cosmetic paint, command-layer mutations, typed errors, and enforced module seams. SSE, worker isolation, and a cmux web bridge remain evidence-gated follow-ups.</p>
+  </section>
+</main>
+</body>
+</html>
