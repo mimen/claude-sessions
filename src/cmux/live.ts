@@ -20,6 +20,7 @@ function hookStorePath(override?: string): string {
   return override ?? process.env.CMUX_HOOK_STORE_PATH ?? join(homedir(), ".cmuxterm", "claude-hook-sessions.json");
 }
 const VERSION_TIMEOUT_MS = 2_000;
+const VERSION_CACHE_TTL_MS = 60_000;
 const TREE_TIMEOUT_MS = 3_000;
 const HOOK_STORE_TIMEOUT_MS = 2_000;
 
@@ -95,8 +96,11 @@ function finaliseBridge(version: CmuxVersion | null, treeResult: TreeResult, sto
     } else if (version.major >= 1) {
       log.warn("cmux is an untested major version", { version: `${version.major}.${version.minor}.${version.patch}` });
     }
-  } else if (!treeResult.ok) {
-    log.warn("cmux binary not found or socket unauthed — liveness unreadable, resume will fail closed");
+  } else {
+    log.warn("cmux version unreadable; liveness compatibility unknown, resume will fail closed", {
+      tree: treeResult.ok ? "ok" : "failed",
+    });
+    readable = false;
   }
   return buildBridge(treeResult.tree, storeResult.store, readable, pidIsAlive);
 }
@@ -190,11 +194,15 @@ export interface LiveBridgeAsyncOptions {
 }
 
 async function readVersionAsync(io: AsyncCmuxIo, cmuxBin: string): Promise<CmuxVersion | null> {
-  const result = await boundedAsync(
-    io.execFile(cmuxBin, ["--version"], VERSION_TIMEOUT_MS),
-    VERSION_TIMEOUT_MS,
-  );
-  return result?.ok ? parseVersion(result.stdout) : null;
+  try {
+    const result = await boundedAsync(
+      io.execFile(cmuxBin, ["--version"], VERSION_TIMEOUT_MS),
+      VERSION_TIMEOUT_MS,
+    );
+    return result?.ok ? parseVersion(result.stdout) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -217,22 +225,48 @@ export async function liveBridgeAsync(options: LiveBridgeAsyncOptions | AsyncCmu
   return bridge;
 }
 
+export interface LiveBridgeReaderOptions extends Omit<LiveBridgeAsyncOptions, "version"> {
+  /** Successful version probes are reused only within this window. */
+  versionTtlMs?: number;
+}
+
 /**
  * Create a long-lived Bridge reader for request servers. Every call still reads a fresh cmux tree
- * and hook store; only `cmux --version` is single-flighted and reused for the server lifetime.
- * Sidebar restarts accompany binary upgrades, so this removes one process spawn from every poll and
- * action without making liveness state stale.
+ * and hook store. Successful version probes are cached briefly; failed or unparseable probes are
+ * shared only while in flight and retried by the next read. This removes steady-state process
+ * spawns while eventually observing cmux upgrades and downgrades.
  */
 export function createLiveBridgeReader(
-  options: Omit<LiveBridgeAsyncOptions, "version"> = {},
+  options: LiveBridgeReaderOptions = {},
 ): () => Promise<Bridge> {
-  const io = options.io ?? productionAsyncIo;
-  const cmuxBin = options.cmuxBin ?? "cmux";
-  let version: Promise<CmuxVersion | null> | null = null;
-  return () => {
-    version ??= readVersionAsync(io, cmuxBin);
-    return liveBridgeAsync({ ...options, io, cmuxBin, version });
-  };
+  const { versionTtlMs: configuredVersionTtlMs, ...bridgeOptions } = options;
+  const io = bridgeOptions.io ?? productionAsyncIo;
+  const cmuxBin = bridgeOptions.cmuxBin ?? "cmux";
+  const versionTtlMs = Math.max(0, configuredVersionTtlMs ?? VERSION_CACHE_TTL_MS);
+  let cachedVersion: { readonly value: CmuxVersion; readonly expiresAt: number } | null = null;
+  let versionFlight: Promise<CmuxVersion | null> | null = null;
+
+  function versionForRead(): Promise<CmuxVersion | null> {
+    if (cachedVersion && io.now() < cachedVersion.expiresAt) {
+      return Promise.resolve(cachedVersion.value);
+    }
+    cachedVersion = null;
+    if (versionFlight) return versionFlight;
+
+    const flight = readVersionAsync(io, cmuxBin).then((version) => {
+      if (version) {
+        cachedVersion = { value: version, expiresAt: io.now() + versionTtlMs };
+      }
+      return version;
+    });
+    versionFlight = flight;
+    void flight.finally(() => {
+      if (versionFlight === flight) versionFlight = null;
+    });
+    return flight;
+  }
+
+  return () => liveBridgeAsync({ ...bridgeOptions, io, cmuxBin, version: versionForRead() });
 }
 
 /** POSIX liveness probe; EPERM means the process exists but is not signalable by us. */
