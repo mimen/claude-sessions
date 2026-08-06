@@ -402,6 +402,22 @@ interface DirectoryFactsReader {
   lookup(directories: readonly string[]): Promise<DirectoryFactsResult>;
 }
 
+export interface SidebarSnapshotMeasurement {
+  readonly view: SidebarView;
+  readonly rowCount: number;
+  readonly totalMs: number;
+  readonly phases: Readonly<{
+    bridgeMs: number;
+    catalogueMs: number;
+    indexMs: number;
+    statusMs: number;
+    projectionMs: number;
+  }>;
+  readonly livenessReadable: boolean;
+  readonly catalogueReadable: boolean;
+  readonly indexReadable: boolean;
+}
+
 export interface SidebarSourceOptions {
   /** Override the cmux binary used by status, focus, and resume commands. */
   readonly cmuxBin?: string;
@@ -424,8 +440,11 @@ export interface SidebarSourceOptions {
   readonly openIndex?: typeof openIndex;
   readonly openCatalogue?: typeof openCatalogue;
   readonly ensureDataDir?: typeof ensureDataDir;
+  readonly readIndex?: typeof readIndexReadOnly;
   readonly indexedSessions?: () => IndexedSessionInput[];
   readonly directoryFacts?: DirectoryFactsReader;
+  /** Structured timing seam for benchmarks and slow-request diagnostics. */
+  readonly observeSnapshot?: (measurement: SidebarSnapshotMeasurement) => void;
 }
 
 /** The production source, reading live cmux state and the local session index. */
@@ -452,7 +471,9 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const openIndexDb = options.openIndex ?? openIndex;
   const openCatalogueDb = options.openCatalogue ?? openCatalogue;
   const ensureDataDirectory = options.ensureDataDir ?? ensureDataDir;
+  const readIndex = options.readIndex ?? readIndexReadOnly;
   const readIndexedSessionsOverride = options.indexedSessions;
+  const observeSnapshot = options.observeSnapshot;
   // Only directories the latest snapshot published can serve an icon; the map is replaced on
   // each snapshot so a directory that disappears stops being servable.
   let favicons = new Map<string, string>();
@@ -480,7 +501,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     try {
       const sessions = readIndexedSessionsOverride
         ? readIndexedSessionsOverride()
-        : readIndexReadOnly(DB_PATH(), { limit, sessionIds });
+        : readIndex(DB_PATH(), { limit, sessionIds });
       if (sessionIds === undefined || !readIndexedSessionsOverride) {
         return { sessions: sessions.slice(0, limit), readable: true };
       }
@@ -767,10 +788,16 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       rowLimit?: number,
       include: readonly SidebarLifecycle[] = [],
     ): Promise<SidebarSnapshot> {
+      const snapshotStartedAt = performance.now();
+      let phaseStartedAt = snapshotStartedAt;
+      let indexMs = 0;
       const scope = lifecycleForView(view);
       const triageOnly = view === "triage";
       const bridge = await readBridge();
+      const bridgeMs = performance.now() - phaseStartedAt;
+      phaseStartedAt = performance.now();
       const catalogue = readCatalogueLifecyclesSafely();
+      const catalogueMs = performance.now() - phaseStartedAt;
       // Which lifecycles this response carries rows for: the view's own, plus any section the
       // client has expanded. A collapsed section is simply not asked for, so shelving one costs
       // nothing to project while its header keeps a count from `lifecycleCounts`.
@@ -796,10 +823,12 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const primaryScan = scope === "active"
         ? Math.max(INDEX_SCAN_LIMIT, recentLimit * 4)
         : historyLimit;
+      phaseStartedAt = performance.now();
       const primaryIndex = readIndexedSessionsSafely(
         primaryScan,
         scope === "active" ? undefined : catalogue.sessionIds.get(scope) ?? [],
       );
+      indexMs += performance.now() - phaseStartedAt;
       // A scan that came back short has reached the end of the index; one that filled its window
       // has not, whatever survives filtering afterwards. This is the only place that distinction
       // is observable, so it travels to the client rather than being guessed there.
@@ -810,9 +839,11 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const extraIds = lifecycles
         .filter((lifecycle) => lifecycle !== scope)
         .flatMap((lifecycle) => catalogue.sessionIds.get(lifecycle) ?? []);
+      phaseStartedAt = performance.now();
       const extraIndex = extraIds.length > 0
         ? readIndexedSessionsSafely(historyLimit, extraIds)
         : { sessions: [], readable: primaryIndex.readable };
+      indexMs += performance.now() - phaseStartedAt;
       const seenIndexIds = new Set(primaryIndex.sessions.map((session) => session.sessionId));
       const index = {
         sessions: [
@@ -849,6 +880,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         };
       }));
 
+      phaseStartedAt = performance.now();
       const statuses = bridge.readable
         ? await statusReader.read(bridge.workspaceIds())
         : new Map<string, CmuxStatusRead>();
@@ -878,6 +910,8 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const notifications = bridge.readable
         ? await notificationReader.read()
         : null;
+      const statusMs = performance.now() - phaseStartedAt;
+      phaseStartedAt = performance.now();
       const snapshot = projectSidebar({
         live,
         workspaces,
@@ -916,6 +950,16 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       favicons = new Map(
         [...facts.favicons].filter(([directory]) => publishedDirectories.has(directory)),
       );
+      const projectionMs = performance.now() - phaseStartedAt;
+      observeSnapshot?.({
+        view,
+        rowCount: snapshot.rows.length,
+        totalMs: performance.now() - snapshotStartedAt,
+        phases: { bridgeMs, catalogueMs, indexMs, statusMs, projectionMs },
+        livenessReadable: snapshot.livenessReadable,
+        catalogueReadable: snapshot.catalogueReadable,
+        indexReadable: snapshot.indexReadable,
+      });
       return snapshot;
     },
 

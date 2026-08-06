@@ -7,6 +7,7 @@
  * the server itself holds no knowledge of cmux, git, or SQLite.
  */
 import { isIPv4 } from "node:net";
+import { log } from "../logger.ts";
 import { err, ok, type Result } from "../result.ts";
 import { loadFavicon } from "./favicon.ts";
 import { RECOMMENDATIONS } from "../catalogue/enrichment-schema.ts";
@@ -103,11 +104,15 @@ function parseDeclineRequest(value: JsonValue): Result<{ sessionId: string; verb
   return ok({ sessionId, verb });
 }
 
-function json(body: object, status = 200): Response {
-  return new Response(JSON.stringify(body), {
+function jsonText(body: string, status = 200): Response {
+  return new Response(body, {
     status,
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
+}
+
+function json(body: object, status = 200): Response {
+  return jsonText(JSON.stringify(body), status);
 }
 
 /** Only literal loopback addresses are valid sidebar bind targets. */
@@ -191,9 +196,31 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           .map((value) => value.trim())
           .filter((value): value is SidebarLifecycle =>
             value === "completed" || value === "archived");
+        const startedAt = performance.now();
         try {
-          return json(await source.snapshot(scope, limit, include));
-        } catch {
+          const snapshot = await source.snapshot(scope, limit, include);
+          const serializationStartedAt = performance.now();
+          const body = JSON.stringify(snapshot);
+          const serializationMs = performance.now() - serializationStartedAt;
+          const totalMs = performance.now() - startedAt;
+          if (totalMs >= 100) {
+            log.warn("slow sidebar snapshot request", {
+              view: scope,
+              rowCount: snapshot.rows.length,
+              payloadBytes: Buffer.byteLength(body),
+              totalMs,
+              serializationMs,
+              livenessReadable: snapshot.livenessReadable,
+              catalogueReadable: snapshot.catalogueReadable,
+              indexReadable: snapshot.indexReadable,
+            });
+          }
+          return jsonText(body);
+        } catch (error) {
+          log.warn("sidebar snapshot request failed", {
+            view: scope,
+            error: error instanceof Error ? error.message : String(error),
+          });
           return json({ error: "snapshot failed" }, 500);
         }
       }
