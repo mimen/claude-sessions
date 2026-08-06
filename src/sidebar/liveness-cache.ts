@@ -3,7 +3,7 @@ import { buildBridge, type Bridge } from "../cmux/bridge.ts";
 export interface SnapshotLivenessReader {
   /** Serve the last completed read, starting one refresh when it is stale. */
   read(): Promise<Bridge>;
-  /** Start one refresh now without making the caller wait for it. */
+  /** Start a refresh now, or queue one trailing refresh behind the current flight. */
   refresh(): void;
 }
 
@@ -32,6 +32,7 @@ export function createSnapshotLivenessReader(
   let cached: Bridge | null = null;
   let refreshedAt = Number.NEGATIVE_INFINITY;
   let inFlight: Promise<void> | null = null;
+  let forcedTrailingRefresh = false;
 
   function startRefresh(): Promise<void> {
     if (inFlight !== null) return inFlight;
@@ -48,7 +49,12 @@ export function createSnapshotLivenessReader(
         refreshedAt = now();
       })
       .finally(() => {
-        if (inFlight === flight) inFlight = null;
+        if (inFlight !== flight) return;
+        inFlight = null;
+        if (forcedTrailingRefresh) {
+          forcedTrailingRefresh = false;
+          void startRefresh();
+        }
       });
     inFlight = flight;
     return flight;
@@ -61,6 +67,12 @@ export function createSnapshotLivenessReader(
       return cached ?? unreadableBridge();
     },
     refresh(): void {
+      if (inFlight !== null) {
+        // A visibility or post-action hint must observe state newer than the current flight. Several
+        // hints during that flight still need only one trailing read.
+        forcedTrailingRefresh = true;
+        return;
+      }
       void startRefresh();
     },
   };

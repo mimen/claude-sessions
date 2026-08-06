@@ -485,6 +485,9 @@ export async function measureSnapshotLivenessCache(
       bodyBytes += (await response.arrayBuffer()).byteLength;
       if (sample === 0) firstPending = refreshPending;
     }
+    // Let the forced flight and its one coalesced trailing refresh finish so the counter proves the
+    // whole scheduling contract rather than sampling it midway through the first delay.
+    await Bun.sleep((bridgeDelayMs * 2) + 10);
 
     return {
       injectedBridgeDelayMs: bridgeDelayMs,
