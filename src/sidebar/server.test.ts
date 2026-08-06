@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSidebarServer, isLoopbackSidebarHost } from "./server.ts";
 import { sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
+import { createSidebarSource } from "./snapshot.ts";
+import type { Bridge } from "../cmux/bridge.ts";
 import type {
   OpenSessionOutcome,
   SessionLifecycleAction,
@@ -33,6 +35,10 @@ const ASSETS = new Map([
 interface Harness {
   readonly url: string;
   readonly opened: string[];
+  readonly diagnostics: Array<{
+    readonly message: string;
+    readonly context?: Record<string, unknown>;
+  }>;
   readonly snapshotScopes: SidebarView[];
   readonly lifecycleChanges: Array<{
     readonly sessionId: string;
@@ -46,6 +52,10 @@ const running: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
 function harness(overrides: Partial<SidebarSource> = {}): Harness {
   // Built below from the base source, so a test overriding setLifecycle still drives retire.
   const opened: string[] = [];
+  const diagnostics: Array<{
+    message: string;
+    context?: Record<string, unknown>;
+  }> = [];
   const snapshotScopes: SidebarView[] = [];
   const lifecycleChanges: Array<{
     readonly sessionId: string;
@@ -86,11 +96,21 @@ function harness(overrides: Partial<SidebarSource> = {}): Harness {
       ?? ((sessionId: string, action: SessionLifecycleAction) =>
         source.setLifecycle(sessionId, action)),
   };
-  const server = createSidebarServer({ source: withRetire, assets: ASSETS, port: 0 });
+  const server = createSidebarServer({
+    source: withRetire,
+    assets: ASSETS,
+    port: 0,
+    logger: {
+      warn(message, context): void {
+        diagnostics.push({ message, ...(context === undefined ? {} : { context }) });
+      },
+    },
+  });
   running.push(server);
   return {
     url: server.url.origin,
     opened,
+    diagnostics,
     snapshotScopes,
     lifecycleChanges,
     stop: () => void server.stop(true),
@@ -111,6 +131,16 @@ async function expectHttpError(response: Response, code: SidebarHttpErrorCode): 
   const { status, ...envelope } = sidebarHttpError(code);
   expect(response.status).toBe(status);
   expect(await response.json()).toEqual(envelope);
+}
+
+async function expectActionHttpError(
+  response: Response,
+  code: SidebarHttpErrorCode,
+  legacyStatus: "not-found" | "failed",
+): Promise<void> {
+  const { status, ...envelope } = sidebarHttpError(code);
+  expect(response.status).toBe(status);
+  expect(await response.json()).toEqual({ ...envelope, status: legacyStatus });
 }
 
 function postLifecycle(
@@ -283,6 +313,10 @@ describe("sidebar server", () => {
     const response = await postOpen(app, app.url);
 
     await expectHttpError(response, "internal_failure");
+    expect(app.diagnostics).toEqual([{
+      message: "sidebar open request failed",
+      context: { sessionId: "abc", error: "failed at /private/catalogue.db" },
+    }]);
   });
 
   test("maps typed action failures to stable structured envelopes", async () => {
@@ -300,7 +334,20 @@ describe("sidebar server", () => {
 
     for (const entry of cases) {
       const app = harness({ open: async () => entry.outcome });
-      await expectHttpError(await postOpen(app, app.url), entry.code);
+      await expectActionHttpError(
+        await postOpen(app, app.url),
+        entry.code,
+        entry.outcome.status === "not-found" ? "not-found" : "failed",
+      );
+      expect(app.diagnostics).toEqual([{
+        message: "sidebar action failed",
+        context: {
+          operation: "open",
+          sessionId: "abc",
+          status: entry.outcome.status,
+          ...(entry.outcome.status === "failed" ? { reason: entry.outcome.reason } : {}),
+        },
+      }]);
     }
   });
 
@@ -347,7 +394,174 @@ describe("sidebar server", () => {
     });
     const response = await postLifecycle(app, app.url);
 
-    await expectHttpError(response, "not_found");
+    await expectActionHttpError(response, "not_found", "not-found");
+  });
+
+  test("old lifecycle clients roll back optimistic state against the structured server", async () => {
+    for (const outcome of [
+      { status: "not-found" as const },
+      { status: "failed" as const, reason: "/private/catalogue.db could not be written" },
+    ]) {
+      const app = harness({ setLifecycle: async () => outcome });
+      const response = await postLifecycle(app, app.url);
+      const legacyResult = (await response.json()) as { status?: string };
+      let optimistic = true;
+
+      // This is the pre-Phase-4 lifecycle discriminator: both branches call its revert closure.
+      if (legacyResult.status === "failed" || legacyResult.status === "not-found") optimistic = false;
+
+      expect(optimistic).toBeFalse();
+      expect(legacyResult).not.toHaveProperty("reason");
+      expect(JSON.stringify(legacyResult)).not.toContain("/private/catalogue.db");
+    }
+  });
+
+  test("SQLite mutation failures reach diagnostics but not lifecycle or decline envelopes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ccs-sidebar-http-sqlite-failure-"));
+    const diagnostics: Array<{ message: string; context?: Record<string, unknown> }> = [];
+    const logger = {
+      warn(message: string, context?: Record<string, unknown>): void {
+        diagnostics.push({ message, ...(context === undefined ? {} : { context }) });
+      },
+    };
+    try {
+      const source = createSidebarSource({
+        cataloguePath: directory,
+        ensureDataDir: (): void => {},
+        logger,
+      });
+      const server = createSidebarServer({ source, assets: ASSETS, port: 0, logger });
+      running.push(server);
+      const url = server.url.origin;
+
+      const lifecycle = await fetch(`${url}/api/session/lifecycle`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: url },
+        body: JSON.stringify({ sessionId: "concrete-lifecycle", action: "unarchive" }),
+      });
+      const lifecycleBody = await lifecycle.text();
+      expect(lifecycle.status).toBe(503);
+      expect(JSON.parse(lifecycleBody)).toEqual({
+        code: "catalogue_unreadable",
+        message: sidebarHttpError("catalogue_unreadable").message,
+        retryable: true,
+        status: "failed",
+      });
+
+      const decline = await fetch(`${url}/api/session/decline`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: url },
+        body: JSON.stringify({ sessionId: "concrete-decline", verb: "archive" }),
+      });
+      const declineBody = await decline.text();
+      expect(decline.status).toBe(503);
+      expect(JSON.parse(declineBody)).toEqual({
+        code: "catalogue_unreadable",
+        message: sidebarHttpError("catalogue_unreadable").message,
+        retryable: true,
+        status: "failed",
+      });
+
+      expect(lifecycleBody).not.toContain(directory);
+      expect(declineBody).not.toContain(directory);
+      const lifecycleDiagnostic = diagnostics.find((entry) =>
+        entry.message === "sidebar lifecycle catalogue mutation failed");
+      expect(lifecycleDiagnostic).toMatchObject({
+        context: {
+          operation: "lifecycle",
+          sessionId: "concrete-lifecycle",
+          action: "unarchive",
+          cataloguePath: directory,
+          error: "unable to open database file",
+        },
+      });
+      const declineDiagnostic = diagnostics.find((entry) =>
+        entry.message === "sidebar recommendation catalogue mutation failed");
+      expect(declineDiagnostic).toMatchObject({
+        context: {
+          operation: "decline-recommendation",
+          sessionId: "concrete-decline",
+          recommendation: "archive",
+          cataloguePath: directory,
+          error: "unable to open database file",
+        },
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("resume index open failures reach diagnostics but not the HTTP envelope", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ccs-sidebar-http-resume-failure-"));
+    const diagnostics: Array<{ message: string; context?: Record<string, unknown> }> = [];
+    const logger = {
+      warn(message: string, context?: Record<string, unknown>): void {
+        diagnostics.push({ message, ...(context === undefined ? {} : { context }) });
+      },
+    };
+    const bridge: Bridge = {
+      surfaces: [],
+      surfaceToWorkspace: new Map(),
+      workspaceIds: () => [],
+      surfacesInWorkspace: () => [],
+      surfaceInfo: () => null,
+      readable: true,
+      locateSession: () => null,
+      isOpen: () => false,
+      primarySurface: () => null,
+      activeWindowId: null,
+    };
+    try {
+      const source = createSidebarSource({
+        indexPath: directory,
+        cataloguePath: join(directory, "unused-catalogue.db"),
+        indexedSessions: () => [{
+          sessionId: "abc",
+          resumeId: "abc",
+          title: "Concrete resume",
+          cwd: directory,
+          lastTs: null,
+          models: [],
+          costByModel: {},
+        }],
+        readBridge: async () => bridge,
+        loadLaunchers: () => ({ ok: true as const, value: [] }),
+        logger,
+      });
+      const server = createSidebarServer({ source, assets: ASSETS, port: 0, logger });
+      running.push(server);
+      const url = server.url.origin;
+
+      const response = await postOpen({
+        url,
+        opened: [],
+        diagnostics,
+        snapshotScopes: [],
+        lifecycleChanges: [],
+        stop: () => void server.stop(true),
+      }, url);
+      const body = await response.text();
+
+      expect(response.status).toBe(503);
+      expect(JSON.parse(body)).toEqual({
+        code: "index_unreadable",
+        message: sidebarHttpError("index_unreadable").message,
+        retryable: true,
+        status: "failed",
+      });
+      expect(body).not.toContain(directory);
+      const diagnostic = diagnostics.find((entry) => entry.message === "sidebar resume index open failed");
+      expect(diagnostic).toMatchObject({
+        context: {
+          operation: "resume",
+          sessionId: "abc",
+          indexPath: directory,
+          error: "unable to open database file",
+        },
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("refuses lifecycle changes from a missing or foreign Origin", async () => {

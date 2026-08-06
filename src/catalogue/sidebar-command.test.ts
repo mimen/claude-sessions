@@ -82,6 +82,43 @@ describe("sidebar catalogue commands", () => {
     }
   });
 
+  test("logs concrete SQLite open failures before returning unreadable outcomes", () => {
+    const { directory } = fixture("sidebar-command-open-failure");
+    const diagnostics: Array<{ message: string; context?: Record<string, unknown> }> = [];
+    const options = {
+      cataloguePath: directory,
+      ensureDataDir: (): void => {},
+      logger: {
+        warn(message: string, context?: Record<string, unknown>): void {
+          diagnostics.push({ message, ...(context === undefined ? {} : { context }) });
+        },
+      },
+    };
+    try {
+      expect(setExistingSessionLifecycle("known", "archive", options)).toEqual({
+        status: "catalogue-unreadable",
+      });
+      expect(declineExistingSessionRecommendation("known", "archive", options)).toEqual({
+        status: "catalogue-unreadable",
+      });
+
+      expect(diagnostics).toHaveLength(2);
+      expect(diagnostics[0]).toMatchObject({
+        message: "sidebar lifecycle catalogue mutation failed",
+        context: { operation: "lifecycle", sessionId: "known", cataloguePath: directory },
+      });
+      expect(diagnostics[1]).toMatchObject({
+        message: "sidebar recommendation catalogue mutation failed",
+        context: { operation: "decline-recommendation", sessionId: "known", cataloguePath: directory },
+      });
+      for (const diagnostic of diagnostics) {
+        expect(diagnostic.context?.error).toBe("unable to open database file");
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("declines recommendations only for existing rows", () => {
     const { directory, path } = fixture("sidebar-decline-command");
     try {

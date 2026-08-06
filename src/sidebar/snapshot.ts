@@ -409,8 +409,10 @@ export interface SidebarSourceOptions {
   readonly loadLaunchers?: typeof loadLaunchers;
   /** Managed resume owns its database handles outside the sidebar request/snapshot layer. */
   readonly resumeAction?: SidebarResumeAction;
+  readonly logger?: Pick<typeof log, "warn">;
   readonly paintWorkspace?: typeof paintResumedWorkspace;
   readonly deferActionTask?: (task: () => void) => void;
+  readonly indexPath?: string;
   readonly cataloguePath?: string;
   readonly lifecycleCommand?: typeof setExistingSessionLifecycle;
   readonly declineCommand?: typeof declineExistingSessionRecommendation;
@@ -449,7 +451,12 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const runFinishSession = options.finishSession ?? finishSession;
   const launchEnrichment = options.launchEnrichment ?? launchImmediateEnrichment;
   const launcherLoader = options.loadLaunchers ?? loadLaunchers;
-  const resumeAction = options.resumeAction ?? createSidebarResumeAction({ processAdapter });
+  const resumeAction = options.resumeAction ?? createSidebarResumeAction({
+    processAdapter,
+    indexPath: options.indexPath,
+    cataloguePath: options.cataloguePath,
+    logger: options.logger,
+  });
   const ensureDataDirectory = options.ensureDataDir ?? ensureDataDir;
   const readCache = options.readCache
     ?? (options.readCatalogue === undefined && options.readIndex === undefined
@@ -461,6 +468,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     cataloguePath: options.cataloguePath,
     now: () => new Date(now()),
     ensureDataDir: ensureDataDirectory,
+    logger: options.logger,
   };
   const readCatalogue = options.readCatalogue ?? readCatalogueReadOnly;
   const readIndex = options.readIndex ?? readIndexReadOnly;
