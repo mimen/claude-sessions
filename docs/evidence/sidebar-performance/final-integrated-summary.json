@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-06T04:01:00.000Z",
+  "integrationCommit": "210ebf9",
+  "commands": {
+    "snapshotRuns": "bun run benchmark:sidebar --samples 12 --idle-ms 10000 --contention-ms 1500 (three runs), plus --samples 30 --idle-ms 30000 --contention-ms 2000 (one extended run)",
+    "actionRuns": "bun run benchmark:sidebar:actions --samples 50 (three runs)",
+    "typecheck": "bun run typecheck",
+    "fullTest": "bun test",
+    "circularLint": "bun run lint:circular"
+  },
+  "rawEvidence": {
+    "snapshot": [
+      "final-integrated-snapshot-run1.json",
+      "final-integrated-snapshot-run2.json",
+      "final-integrated-snapshot-run3.json",
+      "final-integrated-snapshot-run4.json"
+    ],
+    "actions": [
+      "final-integrated-actions-run1.json",
+      "final-integrated-actions-run2.json",
+      "final-integrated-actions-run3.json"
+    ]
+  },
+  "safety": {
+    "generatedSqliteOnly": true,
+    "liveCatalogueRead": false,
+    "liveIndexRead": false,
+    "realCmuxFocusInvoked": false,
+    "databaseWitnessByteIdenticalEveryRun": true,
+    "logicalStateUnchangedEveryRun": true
+  },
+  "phaseEffects": [
+    {
+      "phase": "baseline",
+      "effect": "Characterized the blocking architecture without changing behavior.",
+      "activeSnapshotP50Ms": 10.343,
+      "activeSnapshotP95Ms": 20.943,
+      "writerContentionMs": 5015.843,
+      "idlePollP50Ms": 6.84,
+      "idlePollP95Ms": 15.858,
+      "idleHeartbeatLongestDelayMs": 61.606,
+      "idlePayloadBytesPer60s": 18537060
+    },
+    {
+      "phase": "1-readonly-catalogue",
+      "effect": "Removed writer initialization, migrations, and lock acquisition from snapshot GET.",
+      "activeSnapshotP50Ms": 4.801,
+      "activeSnapshotP95Ms": 6.097,
+      "writerContentionMs": 4.813,
+      "idlePollP50Ms": 5.279,
+      "idlePollP95Ms": 7.654
+    },
+    {
+      "phase": "2-cache-etag",
+      "effect": "Added long-lived query-only readers, exact data_version invalidation, strong ETags, zero-body 304, typed browser transport, deadlines, and backoff.",
+      "activeSnapshotP50Ms": 0.874,
+      "activeSnapshotP95Ms": 1.098,
+      "writerContentionMs": 2.918,
+      "unchangedP50Ms": 1.298,
+      "unchangedP95Ms": 1.663,
+      "changedWarmP50Ms": 1.683,
+      "changedWarmP95Ms": 3.499,
+      "unchangedBodyBytes": 0
+    },
+    {
+      "phase": "3-async-actions",
+      "effect": "Removed synchronous process work from open/resume, made Bridge reads single-pass, added single-flight resume, and deferred cosmetic paint.",
+      "syntheticFocusP95Ms": 0.014,
+      "resumeAcknowledgementMs": 6.823,
+      "concurrentSnapshotMs": 3.462
+    },
+    {
+      "phase": "4-command-mutations-errors",
+      "effect": "Moved sidebar writes behind sanctioned catalogue commands and replaced raw transport failures with stable public envelopes plus private diagnostics.",
+      "syntheticFocusP95Ms": 0.013,
+      "resumeAcknowledgementMs": 8.593,
+      "concurrentSnapshotMs": 3.95,
+      "writerContentionMs": 5.725
+    },
+    {
+      "phase": "5-consolidation",
+      "effect": "Centralized warm caches, canonical enrichment and disagreement logic, and staged projection internals while preserving the browser wire shape.",
+      "writerContentionMs": 9.519,
+      "unchangedP95Ms": 6.268,
+      "changedWarmP95Ms": 5.467,
+      "idlePollP95Ms": 8.194
+    },
+    {
+      "phase": "6-catalogue-split",
+      "effect": "Physically separated schema, queries, and mutations; removed catalogue-owned cycles; and enforced exact mutation/import boundaries.",
+      "writerContentionMs": 3.828,
+      "unchangedP95Ms": 4.019,
+      "changedWarmP95Ms": 4.386,
+      "idlePollP95Ms": 4.382,
+      "remainingUnrelatedCycles": 3
+    }
+  ],
+  "finalIntegrated": {
+    "snapshotRuns": 4,
+    "actionRuns": 3,
+    "unchanged": {
+      "samples": 264,
+      "statuses": [304],
+      "bodyBytes": 0,
+      "p50Ms": 1.805,
+      "p95Ms": 6.84,
+      "maxMs": 14.302,
+      "p95BudgetMs": 10,
+      "passed": true
+    },
+    "changedWarm": {
+      "samples": 80,
+      "statuses": [200],
+      "p50Ms": 2.156,
+      "p95Ms": 4.994,
+      "maxMs": 5.477,
+      "p50BudgetMs": 40,
+      "p95BudgetMs": 120,
+      "passed": true
+    },
+    "idleProjection": {
+      "samples": 61,
+      "p50Ms": 1.504,
+      "p95Ms": 5.81,
+      "maxMs": 6.928
+    },
+    "writerContention": {
+      "runMs": [4.151, 10.51, 5.546, 2.964],
+      "maxMs": 10.51,
+      "budgetMs": 120,
+      "passed": true
+    },
+    "eventLoopObservation": {
+      "heartbeatLongestDelayRunMs": [5.033, 56.465, 35.706, 50.28],
+      "maximumObservedRequestMs": 14.302,
+      "requestBlockBudgetMs": 50,
+      "requestExceededBudget": false,
+      "note": "Two scheduler heartbeat samples crossed 50ms while every measured request remained below 15ms; the delay was not correlated with request execution and is retained rather than normalized away."
+    },
+    "syntheticFocus": {
+      "samples": 150,
+      "p50Ms": 0.009,
+      "p95Ms": 0.101,
+      "maxMs": 0.876,
+      "budgetMs": 150,
+      "passed": true
+    },
+    "resumeAcknowledgement": {
+      "runMs": [14.639, 11.435, 10.027],
+      "maxMs": 14.639,
+      "budgetMs": 700,
+      "passed": true
+    },
+    "concurrentSnapshotDuringResume": {
+      "runMs": [13.014, 8.527, 8.825],
+      "maxMs": 13.014,
+      "budgetMs": 50,
+      "passed": true
+    },
+    "allActionAssertionsPassed": true
+  },
+  "validation": {
+    "mutationBoundary": { "passed": 15, "failed": 0, "assertions": 59 },
+    "catalogue": { "passed": 362, "failed": 0 },
+    "sidebar": { "passed": 202, "failed": 0 },
+    "resume": { "passed": 97, "failed": 0 },
+    "typecheckPassed": true,
+    "fullRepository": {
+      "passed": 1670,
+      "failed": 4,
+      "knownUnrelatedFailureFile": "src/launcher/install.test.ts",
+      "taskDiffTouchesFailureFile": false
+    },
+    "circularDependencies": {
+      "remaining": 3,
+      "newCatalogueModuleCycles": 0,
+      "remainingCyclesUnrelated": true
+    }
+  },
+  "transportDecision": {
+    "sse": "not justified by synthetic measurements; unchanged polling is zero-body and combined p95 is 6.84ms",
+    "typedCmuxFocusBridge": "deferred pending live 50-click measurement; synthetic action path p95 is 0.101ms"
+  }
+}
