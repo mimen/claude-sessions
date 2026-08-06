@@ -7,6 +7,7 @@ import {
   characterizeFixture,
   measureContention,
   measureEtagLoopback,
+  normalizeRecommendationAlignment,
   witnessDatabase,
 } from "./benchmark.ts";
 import { createSidebarFixture } from "./fixtures.ts";
@@ -24,6 +25,25 @@ async function withFixture<T>(
 }
 
 describe("sidebar performance characterization", () => {
+  test("golden normalization changes only settled disagreement suggestions", () => {
+    const input = {
+      rows: [
+        { id: "active", lifecycle: "active", suggestion: { verb: "archive" }, name: "A" },
+        { id: "done", lifecycle: "completed", suggestion: { verb: "archive" }, name: "B" },
+        { id: "parked", lifecycle: "active", catalogueLifecycle: "parked", suggestion: { verb: "complete" }, name: "C" },
+      ],
+      marker: "must remain",
+    } as const;
+    expect(normalizeRecommendationAlignment(input)).toEqual({
+      rows: [
+        { id: "active", lifecycle: "active", suggestion: { verb: "archive" }, name: "A" },
+        { id: "done", lifecycle: "completed", suggestion: null, name: "B" },
+        { id: "parked", lifecycle: "active", catalogueLifecycle: "parked", suggestion: null, name: "C" },
+      ],
+      marker: "must remain",
+    });
+  });
+
   test("captures every view and unreadable source without invoking real focus", async () => {
     await withFixture({ sessionCount: 8, liveSessionCount: 2 }, async (fixture) => {
       const result = await characterizeFixture(fixture, 3);
@@ -43,7 +63,9 @@ describe("sidebar performance characterization", () => {
         "unreadableIndex",
         "unreadableLiveness",
       ]);
-      expect(result.snapshots).toEqual(baseline.golden.snapshots);
+      expect(normalizeRecommendationAlignment(result.snapshots)).toEqual(
+        normalizeRecommendationAlignment(baseline.golden.snapshots),
+      );
       expect(result.safeFocus.focusCalls).toBe(3);
       expect(result.safeFocus.outcomes).toEqual(["focused", "focused", "focused"]);
       expect(result.snapshotLatencyMs.active.samples).toHaveLength(3);

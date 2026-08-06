@@ -554,6 +554,33 @@ describe("declined verdicts", () => {
     } as never;
   }
 
+  test("serialized sidebar summaries keep the established wire shape", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [indexed({ sessionId: "s1", resumeId: "s1" })],
+      summaries: new Map([["s1", enrichment({
+        title: "internal title",
+        cwdCorrect: false,
+        suggestedLocation: "repo",
+        suggestedCwd: "/repo",
+        legacyShape: true,
+      })]]),
+    }));
+    const body = JSON.parse(JSON.stringify(snapshot)) as {
+      rows: Array<{ summary?: Record<string, unknown> | null }>;
+    };
+    const summary = body.rows.find((row) => row.summary)?.summary;
+    expect(summary).not.toBeNull();
+    expect(Object.keys(summary ?? {}).sort()).toEqual([
+      "at", "atMessages", "declined", "driftLabel", "history", "junk", "messagesSince",
+      "next", "reason", "recommendation", "remaining", "state",
+    ]);
+    for (const internal of [
+      "title", "cwdCorrect", "suggestedLocation", "suggestedCwd", "legacyShape",
+    ]) {
+      expect(summary).not.toHaveProperty(internal);
+    }
+  });
+
   test("a verdict that has not been declined is offered", () => {
     const snapshot = projectSidebar(input({
       indexed: [indexed({ sessionId: "s1", resumeId: "s1" })],

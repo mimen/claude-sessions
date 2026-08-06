@@ -50,6 +50,9 @@ interface CatalogueQueryRow {
   readonly identity_cluster: string | null;
   readonly identity_role: string | null;
   readonly identity_kind: string | null;
+  readonly identity_completed: number | null;
+  readonly identity_archived: number | null;
+  readonly identity_parked_task_id: string | null;
   readonly enrichment_state: string | null;
   readonly enrichment_summary: string | null;
   readonly enrichment_history: string | null;
@@ -113,11 +116,13 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
 
   // Canonical ids win when a historical resume alias collides with another canonical row.
   for (const row of rows) {
-    const catalogueLifecycle: Lifecycle = row.archived === 1
+    // Match full CatalogueRow hydration exactly: session-scoped non-default flags win, while the
+    // joined identity supplies durable lifecycle for rows whose session flags remain at defaults.
+    const catalogueLifecycle: Lifecycle = row.archived === 1 || row.identity_archived === 1
       ? "archived"
-      : row.completed === 1
+      : row.completed === 1 || row.identity_completed === 1
       ? "completed"
-      : text(row.parked_task_id) !== null
+      : text(row.parked_task_id) !== null || text(row.identity_parked_task_id) !== null
       ? "parked"
       : "idle";
     const lifecycle: SidebarLifecycle = catalogueLifecycle === "archived"
@@ -204,18 +209,19 @@ export function readCatalogueDatabase(db: Database): CatalogueReadOutcome {
       ? columnsOf(db, "identities")
       : new Set<string>();
     const canJoinIdentity = catalogueColumns.has("identity_key")
-      && ["identity_key", "cluster", "role", "kind"].every((name) => identityColumns.has(name));
-    const identitySelections = canJoinIdentity
-      ? [
-        "i.cluster AS identity_cluster",
-        "i.role AS identity_role",
-        "i.kind AS identity_kind",
-      ]
-      : [
-        "NULL AS identity_cluster",
-        "NULL AS identity_role",
-        "NULL AS identity_kind",
-      ];
+      && identityColumns.has("identity_key");
+    const identitySelection = (name: string, fallback = "NULL"): string =>
+      canJoinIdentity && identityColumns.has(name)
+        ? `i.${name} AS identity_${name}`
+        : `${fallback} AS identity_${name}`;
+    const identitySelections = [
+      identitySelection("cluster"),
+      identitySelection("role"),
+      identitySelection("kind"),
+      identitySelection("completed", "0"),
+      identitySelection("archived", "0"),
+      identitySelection("parked_task_id"),
+    ];
     const join = canJoinIdentity
       ? "LEFT JOIN identities i ON i.identity_key = c.identity_key"
       : "";

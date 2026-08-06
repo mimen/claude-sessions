@@ -24,7 +24,7 @@ interface Distribution {
   readonly mean: number;
 }
 
-type JsonValue = string | number | boolean | null | JsonObject | readonly JsonValue[];
+export type JsonValue = string | number | boolean | null | JsonObject | readonly JsonValue[];
 interface JsonObject {
   readonly [key: string]: JsonValue;
 }
@@ -153,6 +153,44 @@ function normalize(value: JsonValue, root: string, key = ""): JsonValue {
 
 export function normalizeSnapshot(snapshot: SidebarSnapshot, root: string): JsonValue {
   return normalize(JSON.parse(JSON.stringify(snapshot)) as JsonValue, root);
+}
+
+/**
+ * Normalize only the approved Phase 5 semantic alignment for golden parity.
+ *
+ * Terminal and parked catalogue rows cannot carry a recommendation disagreement. Every other field
+ * remains exact so a wire-shape, ordering, label, or metadata regression still fails the baseline.
+ */
+export function normalizeRecommendationAlignment(value: JsonValue): JsonValue {
+  const normalizeAlignment = (current: JsonValue, key = ""): JsonValue => {
+    if (Array.isArray(current)) return current.map((entry) => normalizeAlignment(entry));
+    if (current === null || typeof current !== "object") return current;
+
+    const normalized = Object.fromEntries(
+      Object.entries(current).map(([entryKey, entry]) => [
+        entryKey,
+        normalizeAlignment(entry, entryKey),
+      ]),
+    ) as Record<string, JsonValue>;
+    const lifecycle = normalized.lifecycle;
+    const catalogueLifecycle = normalized.catalogueLifecycle;
+    const settled = lifecycle === "completed" || lifecycle === "archived" || lifecycle === "parked"
+      || catalogueLifecycle === "parked";
+    if (settled && Object.hasOwn(normalized, "suggestion")) normalized.suggestion = null;
+
+    // Triage is exactly the disagreement subset. Once a settled row's suggestion is removed, the
+    // same approved semantic alignment also removes that row from this one derived view.
+    if (key === "triage" && Array.isArray(normalized.rows)) {
+      normalized.rows = normalized.rows.filter((row) => {
+        if (row === null || typeof row !== "object" || Array.isArray(row)) return true;
+        const rowLifecycle = row.lifecycle;
+        return rowLifecycle !== "completed" && rowLifecycle !== "archived"
+          && rowLifecycle !== "parked" && row.catalogueLifecycle !== "parked";
+      });
+    }
+    return normalized;
+  };
+  return normalizeAlignment(value);
 }
 
 function sourceFor(

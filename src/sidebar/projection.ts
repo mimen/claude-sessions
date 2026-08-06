@@ -17,7 +17,7 @@ import type { Recommendation } from "../catalogue/enrichment-schema.ts";
 import { familyOf } from "../display/format.ts";
 import { enrichmentDriftLabel } from "../enrich/staleness.ts";
 
-export type { StoredEnrichment, Recommendation };
+export type { Recommendation };
 
 /** cmux's own `claude_code` status entry, exactly as cmux renders it. */
 export interface CmuxClaudeStatus {
@@ -120,8 +120,18 @@ export interface CheckoutInput {
   readonly branch: string | null;
 }
 
-/** An enrichment record plus how far the transcript has moved since it was written. */
-export interface SidebarSummary extends StoredEnrichment {
+/** The established enrichment wire shape exposed by sidebar snapshots. */
+export interface SidebarSummary {
+  readonly state: string | null;
+  readonly history: string | null;
+  readonly next: string | null;
+  readonly remaining: string | null;
+  readonly recommendation: Recommendation | null;
+  readonly reason: string | null;
+  readonly junk: boolean;
+  readonly atMessages: number | null;
+  readonly at: string | null;
+  readonly declined: Recommendation | null;
   /**
    * How out of date this enrichment is, or null when it is genuinely current.
    *
@@ -130,11 +140,7 @@ export interface SidebarSummary extends StoredEnrichment {
    * happened". A transcript newer than the enrichment says so even when the count cannot.
    */
   readonly driftLabel: string | null;
-  /**
-   * Messages appended since the enrichment was generated, or null when either count is unknown.
-   * Messages rather than turns: the catalogue records a message count at enrichment time and
-   * never recorded a turn count, so turns cannot be derived without inventing one.
-   */
+  /** Messages appended since generation, or null when either count is unknown. */
   readonly messagesSince: number | null;
 }
 
@@ -629,7 +635,16 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     if (!found) return null;
     const since = messagesSince(found, indexed?.messageCount ?? null);
     return {
-      ...found,
+      state: found.state,
+      history: found.history,
+      next: found.next,
+      remaining: found.remaining,
+      recommendation: found.recommendation,
+      reason: found.reason,
+      junk: found.junk,
+      atMessages: found.atMessages,
+      at: found.at,
+      declined: found.declined,
       messagesSince: since,
       driftLabel: found.at === null
         ? null
