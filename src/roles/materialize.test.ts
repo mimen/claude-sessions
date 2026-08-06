@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { planReconcile, desiredLinksForRoles, type LinkState } from "./materialize.ts";
-import type { RoleDef } from "../catalogue/db.ts";
+import type { RoleDef } from "../catalogue/db-schema.ts";
 
 function role(over: Partial<RoleDef>): RoleDef {
   return {

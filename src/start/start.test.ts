@@ -10,7 +10,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getRow, openCatalogue, setSessionClass } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
+import { setSessionClass } from "../catalogue/db-mutations.ts";
 import type { SurfaceLocation } from "../cmux/bridge.ts";
 import { err, ok } from "../result.ts";
 import {

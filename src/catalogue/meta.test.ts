@@ -3,7 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { openCatalogue, setMeta, getMeta, getRow, ensureRow } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getMeta, getRow } from "./db-queries.ts";
+import { setMeta, ensureRow } from "./db-mutations.ts";
 
 const NOW = "2026-07-11T12:00:00Z";
 

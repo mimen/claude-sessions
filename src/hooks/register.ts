@@ -12,7 +12,8 @@
  * unregistered / un-armed session is reported `degraded` so the TUI can surface it.
  */
 import type { Database } from "bun:sqlite";
-import { getRow, touch } from "../catalogue/db.ts";
+import { getRow } from "../catalogue/db-queries.ts";
+import { touch } from "../catalogue/db-mutations.ts";
 
 export interface SessionStartPayload {
   session_id: string;

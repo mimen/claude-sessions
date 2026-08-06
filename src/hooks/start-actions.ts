@@ -1,4 +1,4 @@
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import { drain } from "../inbox/inbox.ts";
 import { identityDir, ccsRuntimeRoot, type Responsibility } from "../inbox/identity-path.ts";
 import { resolveConfig } from "./resolve-config.ts";

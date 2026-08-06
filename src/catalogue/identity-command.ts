@@ -17,7 +17,8 @@
  *
  * The legacy `resolve` verb is kept until step 9 rewrites engine callers.
  */
-import { openCatalogue, getRow, deriveIdentityKey } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getRow, deriveIdentityKey } from "./db-queries.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import type { Database } from "bun:sqlite";
 import {

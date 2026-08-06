@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { boardIndex } from "./indexer.ts";
 import { boardPath, writeBoard } from "./paths.ts";
 import type { Board } from "./types.ts";
-import { openCatalogue, ensureRow, setCluster, setKey } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { ensureRow, setCluster, setKey } from "../catalogue/db-mutations.ts";
 
 let tempRoot: string;
 let origCcsRoot: string | undefined;

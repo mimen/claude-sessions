@@ -1,4 +1,4 @@
-import type { CatalogueRow } from "./db.ts";
+import type { CatalogueRow } from "./db-schema.ts";
 import { familyOf } from "../display/format.ts";
 import { theme, costColor, fullnessColor } from "../display/theme.ts";
 import { formatCost } from "../cost.ts";

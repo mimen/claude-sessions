@@ -1,17 +1,8 @@
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import type { InferenceEngine } from "../inference/engine.ts";
-import {
-  setKey,
-  setParent,
-  setProject,
-  setCompleted,
-  setArchived,
-  setCustomTitle,
-  addTag,
-  removeTag,
-  type Kind,
-} from "./db.ts";
+import { type Kind } from "./db-schema.ts";
+import { setKey, setParent, setProject, setCompleted, setArchived, setCustomTitle, addTag, removeTag } from "./db-mutations.ts";
 
 /**
  * Natural-language editor for session ORGANIZATION METADATA, backed by an inference engine. The

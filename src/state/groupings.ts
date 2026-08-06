@@ -1,4 +1,4 @@
-import { openCatalogue } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import {
   appendNote,

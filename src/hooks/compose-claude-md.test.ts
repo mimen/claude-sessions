@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import { composeClaudeMd } from "./compose-claude-md.ts";
 
 /**

@@ -29,7 +29,8 @@
  * }
  */
 import type { Database } from "bun:sqlite";
-import { openCatalogue, getAll, type CatalogueRow } from "./db.ts";
+import { openCatalogue, type CatalogueRow } from "./db-schema.ts";
+import { getAll } from "./db-queries.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 
 export const EXPORT_SCHEMA_VERSION = 1;

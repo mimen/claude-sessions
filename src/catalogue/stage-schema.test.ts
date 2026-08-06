@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { validateStageTransition } from "./stage-schema.ts";
-import type { StageSchema } from "./db.ts";
+import type { StageSchema } from "./db-schema.ts";
 
 const PR: StageSchema = {
   values: ["building", "milad-review", "in-review", "approved", "merged"],

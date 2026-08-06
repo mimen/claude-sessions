@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { openCatalogue } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
 import { mintIdentity, setIdentityFields } from "../catalogue/identities.ts";
 import { upsertGrouping } from "../state/groupings-db.ts";
 import { resolveSelector } from "./selector.ts";

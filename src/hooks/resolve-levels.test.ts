@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolveLevels, workUnitOf, hookFileBase, type ResolveCtx } from "./resolve-levels.ts";
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 
 const ctx: ResolveCtx = {
   configRoot: "/cfg",

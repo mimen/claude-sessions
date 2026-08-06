@@ -1,4 +1,4 @@
-import type { CatalogueRow } from "./db.ts";
+import type { CatalogueRow } from "./db-schema.ts";
 
 /**
  * spawn-location resolution (ADR-0046): a role's launch cwd is config, not hardcoded. Because

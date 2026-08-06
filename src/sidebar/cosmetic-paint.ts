@@ -1,4 +1,4 @@
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import {
   ALERT_PILL_KEY,
   applyPaintOverride,

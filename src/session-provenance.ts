@@ -1,4 +1,4 @@
-import type { CreatorKind } from "./catalogue/db.ts";
+import type { CreatorKind } from "./catalogue/db-schema.ts";
 import { err, ok, type Result } from "./result.ts";
 
 export interface CreatorProvenance {

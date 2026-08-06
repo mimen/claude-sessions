@@ -2,7 +2,8 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getRow, openCatalogue } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
 import { err, ok, type Result } from "../result.ts";
 import type { CloseSessionWorkspaceOutcome } from "./close-current.ts";
 import {

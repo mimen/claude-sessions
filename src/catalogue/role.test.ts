@@ -2,7 +2,8 @@ import { expect, test, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue, getRow, _resetRoleResumeCache } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getRow, _resetRoleResumeCache } from "./db-queries.ts";
 import { mintIdentity } from "./identities.ts";
 
 const NOW = "2026-07-09T00:00:00Z";

@@ -2,7 +2,8 @@ import { describe, expect, test, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue, getRow, _resetRoleResumeCache } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow, _resetRoleResumeCache } from "../catalogue/db-queries.ts";
 import { mintIdentity } from "../catalogue/identities.ts";
 import { handleSessionStart } from "./register.ts";
 

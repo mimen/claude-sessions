@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { openCatalogue, getRow } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
 import { openIndex } from "../index/schema.ts";
 import { CATALOGUE_PATH, DB_PATH } from "../paths.ts";
 import { resolvePredecessors } from "../catalogue/lineage.ts";

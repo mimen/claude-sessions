@@ -3,7 +3,9 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue, getRow, setEnrichment, recordEnrichmentFailure, setCompleted } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getRow } from "./db-queries.ts";
+import { setEnrichment, recordEnrichmentFailure, setCompleted } from "./db-mutations.ts";
 import type { Enrichment } from "./enrichment-schema.ts";
 
 const NOW = "2026-07-24T12:00:00.000Z";

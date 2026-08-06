@@ -12,8 +12,9 @@
  *
  * Dry-run by default. Pass --apply to write. Pass --identity=<key> to scope to one identity.
  */
-import { openCatalogue, setArchived } from "../src/catalogue/db.ts";
-import { setMeta } from "../src/catalogue/db.ts";
+import { openCatalogue } from "../src/catalogue/db-schema.ts";
+import { setArchived } from "../src/catalogue/db-mutations.ts";
+import { setMeta } from "../src/catalogue/db-mutations.ts";
 import { runtimeRoot } from "../src/paths.ts";
 import { join } from "node:path";
 

@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import type { Bridge } from "../cmux/bridge.ts";
-import { getRow, type CatalogueRow } from "../catalogue/db.ts";
+import { type CatalogueRow } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
 import { CATALOGUE_PATH, DB_PATH } from "../paths.ts";
 import type { AsyncProcessAdapter } from "../process/async.ts";
 import type { Launcher } from "./launchers.ts";

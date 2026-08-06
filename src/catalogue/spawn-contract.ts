@@ -1,4 +1,4 @@
-import type { CatalogueRow } from "./db.ts";
+import type { CatalogueRow } from "./db-schema.ts";
 
 /**
  * The worker spawn contract (ADR-0047): a fleet worker is born CORRECT or not at all. These are

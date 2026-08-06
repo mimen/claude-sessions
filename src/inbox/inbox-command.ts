@@ -13,7 +13,8 @@
  * Ccs synthesizes an identity_key from the tuple. This is a courtesy for step 5; engine
  * scripts migrate to explicit identity_keys in step 9.
  */
-import { openCatalogue, getRow, deriveIdentityKey } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow, deriveIdentityKey } from "../catalogue/db-queries.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { drainForIdentity, historyForIdentity, pendingForIdentity, sendMessage } from "./inbox-db.ts";
 import { liveBridge } from "../cmux/live.ts";

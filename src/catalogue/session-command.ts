@@ -18,7 +18,8 @@
  * surface; the old ones become deprecation candidates once the sweep lands.
  */
 import { randomUUID } from "node:crypto";
-import { openCatalogue, getRow } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getRow } from "./db-queries.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { existsSync } from "node:fs";
 import { openIndex } from "../index/schema.ts";

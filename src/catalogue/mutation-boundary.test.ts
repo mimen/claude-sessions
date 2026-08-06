@@ -1,109 +1,140 @@
 import { expect, test } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 /**
- * ADR-0068 (enforced, lighter form): the catalogue's MUTATION surface has a bounded set of
- * importers. This is the "who can change the catalogue" answer as an enforced test rather than a
- * dependency-cruiser toolchain — the repo has no eslint/depcruise, so a grep-test is the
- * proportionate mechanism. It fails the build if a NEW module starts importing a raw mutation
- * function from db.ts, forcing that write to go through the command layer (commands.ts) or to be
- * consciously added to the allowlist here with a reason.
- *
- * The full ADR-0068 physical split (db-schema / db-queries / db-mutations) is deferred; this test
- * captures its GUARANTEE (bounded, auditable mutation surface) so the boundary can't erode
- * meanwhile.
+ * ADR-0068: imports of the physical catalogue mutation module are the enforced mutation boundary.
+ * Query/schema imports are unrestricted; direct writers remain bounded and auditable here.
  */
 
-// Every db.ts export that MUTATES the catalogue (writes a row). Queries + pure helpers are free.
-const MUTATION_FNS = [
-  "ensureRow", "touch", "setCustomTitle", "setKind", "setCompleted", "setArchived", "setParked",
-  "setResumeId", "setKey", "setParent", "setSessionClass", "setRole", "setResumeCommand", "setProject", "setCluster",
-  "setGusWork", "setWorkUnitId", "setStage", "setActivity", "setStatusLine", "setMeta",
-  "setSessionEpic", "stampPrFacts", "addTag", "removeTag",
-  "createHistoricalDetachedChildBackfillAudit", "markHistoricalDetachedChildBackfillReverted",
-  "deleteHistoricalDetachedChildBackfillPlaceholder",
-];
+const ROOT = new URL("../../", import.meta.url).pathname;
+const SRC = join(ROOT, "src");
+const SCRIPTS = join(ROOT, "scripts");
 
-/**
- * The SANCTIONED mutators — the only non-test modules allowed to import a raw mutation fn.
- * Each is a platform-internal writer with a reason; a new entry needs a deliberate justification.
- */
-const ALLOWLIST: Record<string, string> = {
-  "catalogue/commands.ts": "the command layer — the canonical mutation door (validation + stamping)",
-  "catalogue/command.ts": "the natural-language catalogue editor — a command surface (applies inferred mutations)",
-  "catalogue/session-fields-command.ts": "the atomic multi-field CLI (ADR-0078 finish-line) — a batch of the same setters commands.ts uses",
-  "catalogue/backfill-work-units.ts": "one-time ADR-0057 migration command (setWorkUnitId)",
-  "resume/new-session.ts": "the spawn primitive — writes a session's birth metadata (ADR-0065)",
-  "delegate/command.ts": "the canonical delegated-child launcher — atomically reserves causal auxiliary metadata before transport",
-  "catalogue/historical-detached-child-backfill.ts": "the reviewed exact-manifest backfill command — transactional causal metadata writes with audit snapshots",
-  "roles/materialize.ts": "touches updated_at when materializing role config",
-  "hooks/register.ts": "SessionStart hook — touches updated_at (the heartbeat)",
-  "hooks/worker-stop-command.ts": "Stop hook — touches updated_at (the heartbeat)",
-  "tui/App.tsx": "the TUI's direct user actions (rename/complete/archive) — interactive, in-process",
+const SANCTIONED_MUTATION_IMPORTERS: Record<string, string> = {
+  "src/catalogue/commands.ts": "the command layer, the canonical validated and stamped mutation door",
+  "src/catalogue/command.ts": "the natural-language catalogue editor command surface",
+  "src/catalogue/session-fields-command.ts": "the atomic multi-field CLI command surface",
+  "src/catalogue/historical-detached-child-backfill.ts": "the reviewed exact-manifest transactional backfill",
+  "src/resume/new-session.ts": "the spawn primitive writes session birth metadata",
+  "src/delegate/command.ts": "the delegated-child launcher reserves causal birth metadata",
+  "src/roles/materialize.ts": "role materialization stamps the session heartbeat",
+  "src/hooks/register.ts": "the SessionStart hook stamps the session heartbeat",
+  "src/hooks/worker-stop-command.ts": "the Stop hook stamps the session heartbeat",
+  "src/enrich/enrich.ts": "the enrichment worker atomically stores observations and retry failures",
+  "src/tui/App.tsx": "the TUI applies direct interactive user actions",
+  "scripts/backfill-identity-from-cwd.ts": "the one-time identity-from-cwd maintenance script",
+  "scripts/dedup-sessions-per-identity.ts": "the reviewed identity deduplication maintenance script",
 };
 
-const SRC = new URL("../", import.meta.url).pathname; // .../src/
+const SANCTIONED_RAW_SQL_WRITERS: Record<string, string> = {
+  "src/catalogue/db-schema.ts": "owns catalogue schema creation and migrations",
+  "src/catalogue/db-mutations.ts": "owns raw catalogue row and tag mutations",
+  "src/catalogue/commands.ts": "mirrors validated command writes into identity tables",
+  "src/catalogue/identities.ts": "owns identity CRUD",
+  "src/catalogue/identity-schema.ts": "materializes declared identity schemas",
+  "src/catalogue/session-command.ts": "owns the bounded session purge transaction",
+  "src/catalogue-service/authority.ts": "owns authoritative catalogue-service transactions",
+  "src/resume/new-session.ts": "atomically links a newly spawned session to its identity",
+  "src/state/groupings-db.ts": "owns grouping persistence in the catalogue database",
+  "src/state/groupings-migrate.ts": "migrates legacy grouping state into catalogue storage",
+  "src/inbox/inbox-db.ts": "owns inbox persistence in the catalogue database",
+  "src/sidebar/bench/fixtures.ts": "creates generated SQLite fixtures outside request paths",
+  "src/sidebar/bench/benchmark.ts": "mutates generated fixtures only to measure changed snapshots and contention",
+  "scripts/backfill-identity-from-cwd.ts": "the one-time maintenance script links catalogue rows to recovered identities",
+};
 
-/** Recursively list .ts/.tsx files under src, excluding tests + the db module itself. */
-function sourceFiles(dir: string, out: string[] = []): string[] {
+function filesUnder(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
-    if (statSync(full).isDirectory()) { sourceFiles(full, out); continue; }
-    if (!/\.(ts|tsx)$/.test(name)) continue;
-    if (name.endsWith(".test.ts") || name.endsWith(".test.tsx")) continue;
-    if (full.endsWith("catalogue/db.ts")) continue; // the module that DEFINES them
-    out.push(full);
+    if (statSync(full).isDirectory()) {
+      filesUnder(full, out);
+      continue;
+    }
+    if (/\.(?:ts|tsx)$/.test(name)) out.push(full);
   }
   return out;
 }
 
-/** The import specifiers a file pulls from the CATALOGUE db module (best-effort: scan import
- * blocks). `inCatalogueDir` gates the same-dir `./db` form so a `src/skills/db.ts` sibling (a
- * DIFFERENT db that happens to export addTag/removeTag) isn't mistaken for the catalogue db. */
-function dbImports(src: string, inCatalogueDir: boolean): string[] {
-  const names: string[] = [];
-  // A cross-dir import must spell out `.../catalogue/db`. A bare `./db` counts ONLY when the
-  // importing file lives in src/catalogue/ (then `./db` IS the catalogue db).
-  const sameDir = inCatalogueDir ? "\\.\\/db|" : "";
-  const re = new RegExp(
-    `import\\s*(?:type\\s*)?\\{([^}]*)\\}\\s*from\\s*["'](?:${sameDir}[^"']*\\/catalogue\\/db)(?:\\.ts)?["']`,
-    "g",
-  );
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(src))) {
-    for (const raw of m[1]!.split(",")) {
-      const id = raw.replace(/\btype\b/, "").trim().split(/\s+as\s+/)[0]!.trim();
-      if (id) names.push(id);
-    }
-  }
-  return names;
+function repositoryFiles(): string[] {
+  return [...filesUnder(SRC), ...filesUnder(SCRIPTS)];
 }
 
-test("only sanctioned modules import a raw catalogue mutation fn (ADR-0068 boundary)", () => {
+function repoPath(file: string): string {
+  return relative(ROOT, file);
+}
+
+function isTest(file: string): boolean {
+  return /\.test\.tsx?$/.test(file);
+}
+
+const OLD_CROSS_DIRECTORY_BARREL_IMPORT = /(?:from\s*|import\s*\(\s*)["'][^"']*catalogue\/db(?:\.ts)?["']/;
+const OLD_SAME_DIRECTORY_BARREL_IMPORT = /(?:from\s*|import\s*\(\s*)["']\.\/db(?:\.ts)?["']/;
+const MUTATION_MODULE_IMPORT = /(?:from\s*|import\s*\(\s*)["'][^"']*catalogue\/db-mutations(?:\.ts)?["']|from\s*["']\.\/db-mutations(?:\.ts)?["']/;
+const MUTATION_SQL = /\b(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM|REPLACE\s+INTO|ALTER\s+TABLE|DROP\s+TABLE|CREATE\s+TABLE)\b/i;
+const PROTECTED_TABLE = /\b(?:catalogue|session_tags|identities|identity_[a-z_]+|groupings|inboxes|historical_detached_child_backfills)\b/i;
+
+function containsProtectedMutationSql(source: string): boolean {
+  for (const match of source.matchAll(/\.(?:query|exec)\s*\(\s*(["'`])([\s\S]*?)\1/g)) {
+    const sql = match[2] ?? "";
+    if (MUTATION_SQL.test(sql) && PROTECTED_TABLE.test(sql)) return true;
+  }
+  return false;
+}
+
+test("the deleted catalogue db barrel cannot be imported from source, tests, or scripts", () => {
+  const violations = repositoryFiles()
+    .filter((file) => {
+      const source = readFileSync(file, "utf8");
+      return OLD_CROSS_DIRECTORY_BARREL_IMPORT.test(source)
+        || (file.startsWith(join(SRC, "catalogue")) && OLD_SAME_DIRECTORY_BARREL_IMPORT.test(source));
+    })
+    .map(repoPath);
+  expect(violations).toEqual([]);
+});
+
+test("only sanctioned production modules import db-mutations.ts", () => {
   const violations: string[] = [];
-  for (const file of sourceFiles(SRC)) {
-    const rel = file.slice(file.indexOf("/src/") + 5); // e.g. "hooks/register.ts"
-    const inCatalogueDir = rel.startsWith("catalogue/");
-    const mutated = dbImports(readFileSync(file, "utf8"), inCatalogueDir).filter((n) => MUTATION_FNS.includes(n));
-    if (mutated.length === 0) continue;
-    if (!(rel in ALLOWLIST)) {
-      violations.push(`${rel} imports mutation fn(s) [${mutated.join(", ")}] — route through commands.ts or add to the ADR-0068 allowlist with a reason`);
+  for (const file of repositoryFiles()) {
+    if (isTest(file)) continue;
+    const source = readFileSync(file, "utf8");
+    if (!MUTATION_MODULE_IMPORT.test(source)) continue;
+    const path = repoPath(file);
+    if (!(path in SANCTIONED_MUTATION_IMPORTERS)) {
+      violations.push(`${path} imports db-mutations.ts without a sanctioned-writer reason`);
     }
   }
   expect(violations).toEqual([]);
 });
 
-test("sidebar modules contain no raw catalogue SQL or identity mutation imports", () => {
+test("raw protected catalogue mutation SQL stays in sanctioned storage modules", () => {
   const violations: string[] = [];
-  for (const file of sourceFiles(join(SRC, "sidebar"))) {
-    const rel = file.slice(file.indexOf("/src/") + 5);
-    if (rel.startsWith("sidebar/bench/")) continue; // generated SQLite fixtures, never request code
+  for (const file of repositoryFiles()) {
+    if (isTest(file)) continue;
     const source = readFileSync(file, "utf8");
-    const rawSql = /\.(?:query|exec)\s*\(\s*["'`]\s*(?:INSERT|UPDATE|DELETE|REPLACE|ALTER|DROP|CREATE)\b/i;
-    const identityMutation = /import\s*\{[^}]*\bsetIdentityFields\b[^}]*\}\s*from\s*["'][^"']*catalogue\/identities(?:\.ts)?["']/s;
-    if (rawSql.test(source)) violations.push(`${rel} constructs catalogue mutation SQL`);
-    if (identityMutation.test(source)) violations.push(`${rel} imports setIdentityFields directly`);
+    if (!containsProtectedMutationSql(source)) continue;
+    const path = repoPath(file);
+    if (!(path in SANCTIONED_RAW_SQL_WRITERS)) {
+      violations.push(`${path} constructs protected catalogue mutation SQL without a storage-owner reason`);
+    }
+  }
+  expect(violations).toEqual([]);
+});
+
+test("sidebar request modules use query-only adapters and never construct a writer", () => {
+  const violations: string[] = [];
+  for (const file of filesUnder(join(SRC, "sidebar"))) {
+    const path = repoPath(file);
+    if (isTest(file) || path.startsWith("src/sidebar/bench/")) continue;
+    const source = readFileSync(file, "utf8");
+    if (MUTATION_MODULE_IMPORT.test(source)) violations.push(`${path} imports db-mutations.ts`);
+    if (/\bopenCatalogue\s*\(/.test(source)) violations.push(`${path} opens the catalogue writer`);
+    for (const match of source.matchAll(/new\s+Database\s*\(([^;]+)\)/g)) {
+      if (!/readonly\s*:\s*true/.test(match[1] ?? "")) {
+        violations.push(`${path} constructs a non-readonly Database`);
+      }
+    }
+    if (containsProtectedMutationSql(source)) violations.push(`${path} constructs protected mutation SQL`);
   }
   expect(violations).toEqual([]);
 });

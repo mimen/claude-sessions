@@ -16,7 +16,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
 
 const NOW = "2026-07-15T00:00:00Z";
 

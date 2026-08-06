@@ -1,4 +1,4 @@
-import type { StageSchema } from "./db.ts";
+import type { StageSchema } from "./db-schema.ts";
 
 /**
  * Pure validation of a stage transition against a role-declared schema (ADR-0064).

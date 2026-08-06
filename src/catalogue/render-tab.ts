@@ -1,5 +1,5 @@
-import type { CatalogueRow, Kind } from "./db.ts";
-import { lifecycleOf, identityKeyOf } from "./db.ts";
+import type { CatalogueRow, Kind } from "./db-schema.ts";
+import { lifecycleOf, identityKeyOf } from "./db-queries.ts";
 import { humanizeSlug, workRefOfIdentityKey } from "./identity-key.ts";
 import { boardIndex } from "../board/indexer.ts";
 import type { BoardRow } from "../board/types.ts";

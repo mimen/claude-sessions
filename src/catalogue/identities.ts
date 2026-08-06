@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { deriveIdentityKey } from "./db.ts";
+import { deriveIdentityKey } from "./db-queries.ts";
 import { loadIdentitySchema, tableSlug } from "./identity-schema.ts";
 import { ccsConfigRoot } from "../roles/role-files.ts";
 import { join } from "node:path";

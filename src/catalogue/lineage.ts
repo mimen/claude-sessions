@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
-import type { CatalogueRow } from "./db.ts";
-import { getAll, identityKeyOf } from "./db.ts";
+import type { CatalogueRow } from "./db-schema.ts";
+import { getAll, identityKeyOf } from "./db-queries.ts";
 
 /**
  * Identity lineage (ADR-0038): a durable identity may have had SEVERAL session embodiments over

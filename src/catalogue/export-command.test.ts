@@ -8,7 +8,8 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue, setCustomTitle } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { setCustomTitle } from "./db-mutations.ts";
 import { mintIdentity, setIdentityFields } from "./identities.ts";
 import { catalogueExport, buildExport, EXPORT_SCHEMA_VERSION } from "./export-command.ts";
 

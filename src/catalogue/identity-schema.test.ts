@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
 import {
   loadIdentitySchema,
   loadAllIdentitySchemas,

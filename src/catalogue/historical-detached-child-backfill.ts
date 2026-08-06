@@ -2,20 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Database } from "bun:sqlite";
-import {
-  addTag,
-  createHistoricalDetachedChildBackfillAudit,
-  deleteHistoricalDetachedChildBackfillPlaceholder,
-  ensureRow,
-  getHistoricalDetachedChildBackfillAudit,
-  markHistoricalDetachedChildBackfillReverted,
-  openCatalogue,
-  removeTag,
-  setMeta,
-  setParent,
-  setSessionClass,
-  type SessionClass,
-} from "./db.ts";
+import { openCatalogue, type SessionClass } from "./db-schema.ts";
+import { getHistoricalDetachedChildBackfillAudit } from "./db-queries.ts";
+import { addTag, createHistoricalDetachedChildBackfillAudit, deleteHistoricalDetachedChildBackfillPlaceholder, ensureRow, markHistoricalDetachedChildBackfillReverted, removeTag, setMeta, setParent, setSessionClass } from "./db-mutations.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import {
   exactHistoricalDetachedChildBackfillProposals,

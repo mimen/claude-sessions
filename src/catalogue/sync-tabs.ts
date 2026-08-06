@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { ensureDataDir, CATALOGUE_PATH, DB_PATH } from "../paths.ts";
-import { openCatalogue, getRow, getAll, lifecycleOf, type CatalogueRow } from "./db.ts";
+import { openCatalogue, type CatalogueRow } from "./db-schema.ts";
+import { getRow, getAll, lifecycleOf } from "./db-queries.ts";
 import { openIndex } from "../index/schema.ts";
 import { resolveSelector, type SelectorKind } from "../resume/selector.ts";
 import { workspaceForSession } from "../cmux/liveness.ts";

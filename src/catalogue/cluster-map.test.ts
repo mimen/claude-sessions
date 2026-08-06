@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { toMember, buildClusterMap, isCoreRole, clusterMapToJson } from "./cluster-map.ts";
-import type { CatalogueRow } from "./db.ts";
+import type { CatalogueRow } from "./db-schema.ts";
 
 const row = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,

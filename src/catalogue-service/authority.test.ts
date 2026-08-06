@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFile
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Config } from "../config.ts";
-import { openCatalogue } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
 import { CatalogueAuthority } from "./authority.ts";
 import type { RootSessionQuery } from "./protocol.ts";
 

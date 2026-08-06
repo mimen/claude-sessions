@@ -3,15 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
-import {
-  getRow,
-  openCatalogue,
-  setCreatorKind,
-  setCreatorRef,
-  setLaunchChannel,
-  setParent,
-  setSessionClass,
-} from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getRow } from "./db-queries.ts";
+import { setCreatorKind, setCreatorRef, setLaunchChannel, setParent, setSessionClass } from "./db-mutations.ts";
 import { openIndex } from "../index/schema.ts";
 import { mintIdentity } from "./identities.ts";
 import { sessionCommand } from "./session-command.ts";

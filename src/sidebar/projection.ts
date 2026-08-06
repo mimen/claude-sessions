@@ -7,7 +7,7 @@
  *
  * Every input is supplied by the caller so this module stays free of cmux, SQLite, and git I/O.
  */
-import type { Lifecycle } from "../catalogue/db.ts";
+import type { Lifecycle } from "../catalogue/db-schema.ts";
 import {
   messagesSince,
   recommendationDisagreement,

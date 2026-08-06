@@ -39,12 +39,9 @@
  * validation error on non-zero exit).
  */
 import { z } from "zod";
-import { openCatalogue, getRow,
-  setCustomTitle, setRole, setProject, setCluster, setGusWork, setWorkUnitId,
-  setStatusLine, setParked, setParent, setKey, setCompleted, setArchived,
-  setMeta, setStage, setEnrichment,
-  setSessionEpic,
-} from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getRow } from "./db-queries.ts";
+import { setCustomTitle, setRole, setProject, setCluster, setGusWork, setWorkUnitId, setStatusLine, setParked, setParent, setKey, setCompleted, setArchived, setMeta, setStage, setEnrichment, setSessionEpic } from "./db-mutations.ts";
 import { validateStageTransition } from "./stage-schema.ts";
 import { EnrichmentPayloadSchema, validateEnrichment } from "./enrichment-schema.ts";
 import { loadEnrichmentLocations, locationKeySet } from "../enrich/locations.ts";

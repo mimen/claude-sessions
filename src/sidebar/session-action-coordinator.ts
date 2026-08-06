@@ -1,4 +1,4 @@
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import type { Bridge, SurfaceLocation } from "../cmux/bridge.ts";
 import { log } from "../logger.ts";
 import type { AsyncProcessAdapter } from "../process/async.ts";

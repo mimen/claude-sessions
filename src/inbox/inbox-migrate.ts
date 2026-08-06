@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, renameSync, statSync } from "nod
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { ccsRuntimeRoot } from "./identity-path.ts";
-import { deriveIdentityKey } from "../catalogue/db.ts";
+import { deriveIdentityKey } from "../catalogue/db-queries.ts";
 import { sendMessage } from "./inbox-db.ts";
 
 /**

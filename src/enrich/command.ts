@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { openIndex } from "../index/schema.ts";
 import { sessionById, type SessionRow } from "../index/index.ts";
 import { err, ok, type Result } from "../result.ts";
-import { openCatalogue } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { loadEnrichmentLocations, LOCATION_REGISTRY_PATH } from "./locations.ts";
 import { enrichCandidates, enrichOne, sweep } from "./enrich.ts";
