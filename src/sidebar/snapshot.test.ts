@@ -1041,7 +1041,7 @@ describe("createSidebarSource snapshot", () => {
     });
   });
 
-  test("equal warm-cache refreshes keep the snapshot source revision stable for ETags", async () => {
+  test("equal warm-cache refreshes keep the serialized snapshot stable", async () => {
     let clock = 100;
     let statusReads = 0;
     const source = createSidebarSource(sourceOptions({
@@ -1060,16 +1060,15 @@ describe("createSidebarSource snapshot", () => {
     }));
 
     const first = await source.snapshot();
-    const firstRevision = source.snapshotRevision?.(first);
     clock += 2_500;
     const stale = await source.snapshot();
-    expect(source.snapshotRevision?.(stale)).toBe(firstRevision);
+    expect(stale).toEqual(first);
     await waitFor(() => statusReads === 2);
     await Promise.resolve();
     await Promise.resolve();
 
     const refreshed = await source.snapshot();
-    expect(source.snapshotRevision?.(refreshed)).toBe(firstRevision);
+    expect(refreshed).toEqual(first);
     expect(statusReads).toBe(2);
   });
 

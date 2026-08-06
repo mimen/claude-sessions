@@ -12,7 +12,7 @@ export type SnapshotTransportResult =
   | { readonly kind: "failure"; readonly error: SnapshotFailure };
 
 export interface SnapshotTransport {
-  load(url: string): Promise<SnapshotTransportResult>;
+  load(url: string, refreshLiveness?: boolean): Promise<SnapshotTransportResult>;
 }
 
 export type SnapshotFetch = (
@@ -60,14 +60,17 @@ export function createSnapshotTransport(
   const etags = new Map<string, string>();
 
   return {
-    async load(url: string): Promise<SnapshotTransportResult> {
+    async load(url: string, refreshLiveness = false): Promise<SnapshotTransportResult> {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), deadlineMs);
       const etag = etags.get(url);
       try {
+        const headers: Record<string, string> = {};
+        if (etag) headers["if-none-match"] = etag;
+        if (refreshLiveness) headers["x-ccs-refresh-liveness"] = "1";
         const response = await request(url, {
           signal: controller.signal,
-          headers: etag ? { "if-none-match": etag } : undefined,
+          headers: Object.keys(headers).length > 0 ? headers : undefined,
         });
         if (response.status === 304) return { kind: "unchanged" };
         if (!response.ok) {
