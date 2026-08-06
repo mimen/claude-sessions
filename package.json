@@ -7,7 +7,7 @@
     "ccs": "bin/ccs"
   },
   "scripts": {
-    "ccs": "bun run bin/ccs",
+    "ccs": "./bin/ccs",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "setup": "bun run scripts/setup.ts",
