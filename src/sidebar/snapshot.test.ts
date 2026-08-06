@@ -787,6 +787,38 @@ describe("createSidebarSource snapshot", () => {
     });
   });
 
+  test("equal warm-cache refreshes keep the snapshot source revision stable for ETags", async () => {
+    let clock = 100;
+    let statusReads = 0;
+    const source = createSidebarSource(sourceOptions({
+      now: () => clock,
+      readBridge: async () => multiSurfaceBridge(),
+      readStatuses: async () => {
+        statusReads += 1;
+        return new Map<string, CmuxStatusRead>([[
+          "workspace-uuid",
+          { state: "published", status: { label: "Running", icon: null, color: null } },
+        ]]);
+      },
+      notificationReader: {
+        read: async () => ({ notifications: [], unreadCountsByWorkspaceId: new Map() }),
+      },
+    }));
+
+    const first = await source.snapshot();
+    const firstRevision = source.snapshotRevision?.(first);
+    clock += 2_500;
+    const stale = await source.snapshot();
+    expect(source.snapshotRevision?.(stale)).toBe(firstRevision);
+    await waitFor(() => statusReads === 2);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const refreshed = await source.snapshot();
+    expect(source.snapshotRevision?.(refreshed)).toBe(firstRevision);
+    expect(statusReads).toBe(2);
+  });
+
   test("publishes a catalogue id that the lifecycle endpoint can mutate for a live resume alias", async () => {
     const mutated: string[] = [];
     const source = createSidebarSource(sourceOptions({

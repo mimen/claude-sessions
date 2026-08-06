@@ -10,6 +10,7 @@
  * join that badges the wrong row.
  */
 import { execFile } from "node:child_process";
+import { createWarmCache } from "./warm-cache.ts";
 
 const NOTIFICATION_TIMEOUT_MS = 3_000;
 const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -186,29 +187,13 @@ export function createCachedNotificationReader(
   now: () => number = () => Date.now(),
   read: typeof readNotifications = readNotifications,
 ): CachedNotificationReader {
-  let cached = emptyNotificationState();
-  let readAt = Number.NEGATIVE_INFINITY;
-  let inFlight: Promise<void> | null = null;
-
-  function refresh(): Promise<void> {
-    if (inFlight) return inFlight;
-    inFlight = (async (): Promise<void> => {
-      try {
-        cached = await read(cmuxBin);
-      } catch {
-        cached = emptyNotificationState();
-      } finally {
-        readAt = now();
-        inFlight = null;
-      }
-    })();
-    return inFlight;
-  }
-
-  return {
-    async read(): Promise<CmuxNotificationState> {
-      if (readAt === Number.NEGATIVE_INFINITY || now() - readAt >= ttlMs) void refresh();
-      return cached;
-    },
-  };
+  const cache = createWarmCache<void, CmuxNotificationState>({
+    ttlMs,
+    initialValue: emptyNotificationState(),
+    coldRead: "serve-initial",
+    now,
+    load: () => read(cmuxBin),
+    failure: { type: "replace", value: emptyNotificationState },
+  });
+  return { read: () => cache.read() };
 }

@@ -6,6 +6,7 @@
  * cache, later reads return immediately, and an expired cache refreshes once in the background.
  */
 import { execFile } from "node:child_process";
+import { createWarmCache } from "./warm-cache.ts";
 
 const WORKSPACE_STATE_TIMEOUT_MS = 3_000;
 const WORKSPACE_STATE_CONCURRENCY = 8;
@@ -259,38 +260,16 @@ export function createCachedWorkspaceStateReader(
   now: () => number = () => Date.now(),
   read: typeof readWorkspaceStates = readWorkspaceStates,
 ): CachedWorkspaceStateReader {
-  let cached = new Map<string, WorkspaceState | null>();
-  let readAt = Number.NEGATIVE_INFINITY;
-  let inFlight: Promise<void> | null = null;
-
-  function refresh(workspaceIds: readonly string[]): Promise<void> {
-    if (inFlight) return inFlight;
-    const requested = [...new Set(workspaceIds)];
-    inFlight = (async (): Promise<void> => {
-      // Defer the body so `inFlight` is assigned before even a synchronously throwing test double
-      // can reach the finally block.
-      await Promise.resolve();
-      try {
-        cached = completeStates(requested, await read(requested, cmuxBin));
-      } catch {
-        cached = nullStates(requested);
-      } finally {
-        readAt = now();
-        inFlight = null;
-      }
-    })();
-    return inFlight;
-  }
-
-  return {
-    async read(workspaceIds: readonly string[]): Promise<Map<string, WorkspaceState | null>> {
-      // The first call has no state to serve, so it waits; every later call stays off the hot path.
-      if (readAt === Number.NEGATIVE_INFINITY) {
-        await refresh(workspaceIds);
-        return cached;
-      }
-      if (now() - readAt >= ttlMs) void refresh(workspaceIds);
-      return cached;
+  const cache = createWarmCache<readonly string[], Map<string, WorkspaceState | null>>({
+    ttlMs,
+    initialValue: new Map<string, WorkspaceState | null>(),
+    coldRead: "block",
+    now,
+    load: async (workspaceIds) => {
+      const requested = [...new Set(workspaceIds)];
+      return completeStates(requested, await read(requested, cmuxBin));
     },
-  };
+    failure: { type: "replace", value: nullStates },
+  });
+  return { read: (workspaceIds) => cache.read(workspaceIds) };
 }
