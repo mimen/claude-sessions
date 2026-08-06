@@ -43,7 +43,6 @@ import { cn } from "@/lib/utils";
 import { actionErrorMessage, postSidebarAction } from "./action-transport.ts";
 import { focusWorkspaceRow } from "./focus-bridge.ts";
 import { createSnapshotTransport, snapshotPollDelay } from "./snapshot-transport.ts";
-import { scheduleBridgeBenchmark } from "./bridge-benchmark.ts";
 
 const POLL_INTERVAL_MS = 1_000;
 const GROUPING_STORAGE_KEY = "ccs-sidebar-grouping";
@@ -311,8 +310,6 @@ export function App(): React.ReactElement {
       window.removeEventListener("blur", leave);
     };
   }, []);
-
-  useEffect(() => scheduleBridgeBenchmark(), []);
 
   useEffect(() => {
     let stopped = false;

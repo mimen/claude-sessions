@@ -7,9 +7,7 @@
  * the server itself holds no knowledge of cmux, git, or SQLite.
  */
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
 import { isIPv4 } from "node:net";
-import { isAbsolute } from "node:path";
 import { log } from "../logger.ts";
 import { err, ok, type Result } from "../result.ts";
 import { loadFavicon } from "./favicon.ts";
@@ -17,13 +15,6 @@ import { RECOMMENDATIONS } from "../catalogue/enrichment-schema.ts";
 import type { SidebarLifecycle, SidebarView } from "./projection.ts";
 import type { SessionLifecycleAction, SidebarSource } from "./snapshot.ts";
 import { sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
-import {
-  MAX_BRIDGE_BENCH_REPORT_BYTES,
-  parseBridgeBenchmarkReport,
-  type JsonValue as BenchmarkJsonValue,
-  type ServerObservedActionPosts,
-  type StoredBridgeBenchmarkReport,
-} from "./bridge-benchmark.ts";
 
 /**
  * Row-count bounds for `?limit`. Below the minimum the list cannot fill a screen; above it a
@@ -249,40 +240,11 @@ function forbiddenHost(): Response {
   return errorJson("denied");
 }
 
-function resolveBenchReportPath(): string | null {
-  const value = process.env.CCS_SIDEBAR_BENCH_REPORT;
-  if (value === undefined || value.length === 0) return null;
-  if (!isAbsolute(value)) {
-    throw new Error("CCS_SIDEBAR_BENCH_REPORT must be an absolute output path");
-  }
-  return value;
-}
-
-async function readBridgeBenchmarkReport(request: Request): Promise<BenchmarkJsonValue | null> {
-  const contentLength = request.headers.get("content-length");
-  if (contentLength !== null) {
-    const declaredBytes = Number(contentLength);
-    if (!Number.isFinite(declaredBytes) || declaredBytes < 0 || declaredBytes > MAX_BRIDGE_BENCH_REPORT_BYTES) {
-      return null;
-    }
-  }
-  const body = await request.text();
-  if (Buffer.byteLength(body) > MAX_BRIDGE_BENCH_REPORT_BYTES) return null;
-  try {
-    return JSON.parse(body) as BenchmarkJsonValue;
-  } catch {
-    return null;
-  }
-}
-
 export function createSidebarServer(options: SidebarServerOptions): Bun.Server<undefined> {
   const port = options.port ?? DEFAULT_SIDEBAR_PORT;
   const hostname = options.hostname ?? DEFAULT_SIDEBAR_HOST;
   const { source, assets } = options;
   const logger = options.logger ?? log;
-  const benchReportPath = resolveBenchReportPath();
-  let observedOpenPosts = 0;
-  let observedWorkspaceFocusPosts = 0;
 
   if (!isLoopbackSidebarHost(hostname)) {
     const renderedHostname = JSON.stringify(hostname);
@@ -301,45 +263,6 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       if (!hostIsBound(request, boundHostname, boundPort)) return forbiddenHost();
 
       const url = new URL(request.url);
-
-      if (url.pathname === "/api/dev/bench-report") {
-        if (benchReportPath === null || request.method !== "POST") {
-          return new Response("Not found", { status: 404 });
-        }
-        if (!originIsBound(request, boundHostname, boundPort)) {
-          return errorJson("denied");
-        }
-        if (request.headers.get("content-type")?.split(";", 1)[0]?.trim() !== "application/json") {
-          return errorJson("bad_request");
-        }
-        let body: BenchmarkJsonValue | null;
-        try {
-          body = await readBridgeBenchmarkReport(request);
-        } catch {
-          return errorJson("bad_request");
-        }
-        if (body === null) return errorJson("bad_request");
-        const parsed = parseBridgeBenchmarkReport(body);
-        if (!parsed.ok) return errorJson("bad_request");
-        const serverObservedActionPosts: ServerObservedActionPosts = {
-          open: observedOpenPosts,
-          workspaceFocus: observedWorkspaceFocusPosts,
-          total: observedOpenPosts + observedWorkspaceFocusPosts,
-        };
-        const report: StoredBridgeBenchmarkReport = {
-          ...parsed.value,
-          serverObservedActionPosts,
-        };
-        try {
-          await writeFile(benchReportPath, `${JSON.stringify(report, null, 2)}\n`, { flag: "wx" });
-          return new Response(null, { status: 204 });
-        } catch (error) {
-          logUnexpected(logger, "sidebar bridge benchmark report write failed", error, {
-            benchReportPath,
-          });
-          return errorJson("internal_failure");
-        }
-      }
 
       if (url.pathname === "/api/snapshot" && request.method === "GET") {
         const scopeValues = url.searchParams.getAll("scope");
@@ -400,7 +323,6 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       }
 
       if (url.pathname === "/api/open" && request.method === "POST") {
-        observedOpenPosts += 1;
         if (!originIsBound(request, boundHostname, boundPort)) {
           return errorJson("denied");
         }
@@ -483,7 +405,6 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       // Focusing a sessionless workspace: a browser split or plain shell has no session id to
       // address, so the workspace UUID is the address. Purely a view change in cmux.
       if (url.pathname === "/api/workspace/focus" && request.method === "POST") {
-        observedWorkspaceFocusPosts += 1;
         if (!originIsBound(request, boundHostname, boundPort)) {
           return errorJson("denied");
         }
