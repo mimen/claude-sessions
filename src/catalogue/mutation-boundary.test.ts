@@ -236,6 +236,53 @@ test("readonly option proof is lexical and mutation-safe", () => {
   `, sidebarFile, writerTargets)).toBeTrue();
 });
 
+test("readonly proof accepts ancestor bindings and rejects every other runtime reference", () => {
+  const sidebarFile = join(SRC, "sidebar", "request.ts");
+  const writerTargets = { catalogueSchemaModule: DB_SCHEMA };
+  expect(constructsCatalogueWriter(`
+    import { Database as Sqlite } from "bun:sqlite";
+    const options = { readonly: true };
+    if (enabled) { new Sqlite(path, options); }
+  `, sidebarFile, writerTargets)).toBeFalse();
+  const invalidatingReferences = [
+    "Reflect.set(options, 'readonly', false);",
+    "Object.defineProperty(options, 'readonly', { value: false });",
+    "mutateOptions(options);",
+    "const alias = options;",
+    "function expose(): object { return options; }",
+    "void options.readonly;",
+  ];
+  for (const reference of invalidatingReferences) {
+    expect(constructsCatalogueWriter(`
+      import { Database as Sqlite } from "bun:sqlite";
+      const options = { readonly: true };
+      ${reference}
+      new Sqlite(path, options);
+    `, sidebarFile, writerTargets)).toBeTrue();
+  }
+});
+
+test("loop-local bindings do not overwrite outer imported writer aliases", () => {
+  const sidebarFile = join(SRC, "sidebar", "request.ts");
+  const writerTargets = { catalogueSchemaModule: DB_SCHEMA };
+  const loops = [
+    "for (let Sqlite = local; active; Sqlite = next) { void Sqlite; }",
+    "for (const Sqlite in constructors) { void Sqlite; }",
+    "for (const Sqlite of constructors) { void Sqlite; }",
+  ];
+  for (const loop of loops) {
+    expect(constructsCatalogueWriter(`
+      import { Database as Sqlite } from "bun:sqlite";
+      ${loop}
+      new Sqlite(path);
+    `, sidebarFile, writerTargets)).toBeTrue();
+  }
+  expect(constructsCatalogueWriter(`
+    import { Database as Sqlite } from "bun:sqlite";
+    for (const Sqlite of constructors) { new Sqlite(path); }
+  `, sidebarFile, writerTargets)).toBeFalse();
+});
+
 test("writer bindings respect lexical shadowing", () => {
   const sidebarFile = join(SRC, "sidebar", "request.ts");
   const writerTargets = { catalogueSchemaModule: DB_SCHEMA };

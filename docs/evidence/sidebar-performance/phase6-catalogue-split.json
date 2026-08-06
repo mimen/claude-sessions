@@ -2097,7 +2097,8 @@
       "documentationCommit": "83c52b0",
       "reviewFollowUpCommit": "5493182",
       "primaryReReviewCommit": "acbeb90",
-      "finalScannerReviewCommit": "the commit containing this evidence update",
+      "finalScannerReviewCommit": "50a20bc",
+      "readonlyProofReviewCommit": "the commit containing this evidence update",
       "branch": "worktree-agent-a9807920bbc2bd2f7",
       "generatedOn": "2026-08-05",
       "scope": "mechanical catalogue database split and import enforcement",
@@ -2148,12 +2149,15 @@
       "directDynamicImportMemberOperationsRejected": true,
       "readonlyProofUsesLexicalBindings": true,
       "readonlyProofRejectsObjectAssignMutation": true,
+      "readonlyProofRejectsAllOtherRuntimeReferences": true,
+      "readonlyProofAcceptsAncestorScopeBinding": true,
+      "loopDeclarationsUseLexicalScopes": true,
       "writerAliasesRespectLexicalShadowing": true,
       "sidebarWriterConstructionRejected": true,
       "bunBinEntrypointsScanned": true,
       "behavioralScannerTests": {
-        "tests": 13,
-        "assertions": 48,
+        "tests": 15,
+        "assertions": 59,
         "failures": 0,
         "fixtures": [
           "nested relative static import",
@@ -2181,6 +2185,16 @@
           "same-name readonly bindings in separate scopes",
           "shadowed openCatalogue alias",
           "shadowed Database alias",
+          "ancestor-scope readonly options",
+          "Reflect.set readonly invalidation",
+          "Object.defineProperty readonly invalidation",
+          "mutating helper readonly invalidation",
+          "readonly options alias invalidation",
+          "readonly options return invalidation",
+          "readonly property access invalidation",
+          "for loop alias scope",
+          "for-in alias scope",
+          "for-of alias scope",
           "extensionless Bun bin entrypoint scan"
         ]
       }
@@ -2264,7 +2278,7 @@
     "targetedValidation": [
       {
         "suite": "catalogue",
-        "tests": 331,
+        "tests": 333,
         "failures": 0
       },
       {
@@ -2302,7 +2316,7 @@
       "validatedAt": "2026-08-06",
       "catalogue": {
         "command": "bun test src/catalogue",
-        "tests": 331,
+        "tests": 333,
         "failures": 0
       },
       "sidebar": {

@@ -114,6 +114,23 @@ class LexicalBindings {
       this.#visit(node.block, catchScope);
       return;
     }
+    if (ts.isForStatement(node)) {
+      const loopScope: LexicalScope = { parent: scope, bindings: new Map() };
+      this.#record(node, loopScope);
+      if (node.initializer) this.#visit(node.initializer, loopScope);
+      if (node.condition) this.#visit(node.condition, loopScope);
+      if (node.incrementor) this.#visit(node.incrementor, loopScope);
+      this.#visit(node.statement, loopScope);
+      return;
+    }
+    if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+      const loopScope: LexicalScope = { parent: scope, bindings: new Map() };
+      this.#record(node, loopScope);
+      this.#visit(node.initializer, loopScope);
+      this.#visit(node.expression, loopScope);
+      this.#visit(node.statement, loopScope);
+      return;
+    }
     if (ts.isVariableDeclaration(node)) this.#bindName(node.name, node, scope);
     ts.forEachChild(node, (child) => this.#visit(child, scope));
   }
@@ -380,53 +397,66 @@ function isConstVariable(declaration: ts.VariableDeclaration): boolean {
     && (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
 }
 
-function mutatesBinding(parsed: ts.SourceFile, declaration: ts.VariableDeclaration, lexical: LexicalBindings): boolean {
-  let mutated = false;
-  const resolves = (node: ts.Expression): boolean =>
-    ts.isIdentifier(node) && lexical.resolve(node) === declaration;
+type DatabaseConstructorCheck = (node: ts.NewExpression) => boolean;
+
+function isTypeOnlyReference(identifier: ts.Identifier): boolean {
+  let node: ts.Node = identifier;
+  while (node.parent && !ts.isStatement(node.parent) && !ts.isSourceFile(node.parent)) {
+    node = node.parent;
+    if (ts.isTypeNode(node)) return true;
+  }
+  return false;
+}
+
+function isAcceptedOptionsArgument(
+  identifier: ts.Identifier,
+  constructsDatabase: DatabaseConstructorCheck,
+): boolean {
+  let expression: ts.Expression = identifier;
+  while (
+    expression.parent
+    && (ts.isParenthesizedExpression(expression.parent)
+      || ts.isAsExpression(expression.parent)
+      || ts.isSatisfiesExpression(expression.parent)
+      || ts.isTypeAssertionExpression(expression.parent))
+    && expression.parent.expression === expression
+  ) {
+    expression = expression.parent;
+  }
+  const parent = expression.parent;
+  return ts.isNewExpression(parent)
+    && parent.arguments?.[1] === expression
+    && constructsDatabase(parent);
+}
+
+function hasOnlyAcceptedReadonlyReferences(
+  parsed: ts.SourceFile,
+  declaration: ts.VariableDeclaration,
+  lexical: LexicalBindings,
+  constructsDatabase: DatabaseConstructorCheck,
+): boolean {
+  let accepted = true;
   const visit = (node: ts.Node): void => {
-    if (mutated) return;
-    if (ts.isBinaryExpression(node)
-      && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
-      && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
-      const left = unwrapExpression(node.left);
-      if (resolves(left)
-        || ((ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left))
-          && resolves(left.expression))) {
-        mutated = true;
-        return;
-      }
-    }
-    if (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) {
-      const operand = unwrapExpression(node.operand);
-      if (resolves(operand)
-        || ((ts.isPropertyAccessExpression(operand) || ts.isElementAccessExpression(operand))
-          && resolves(operand.expression))) {
-        mutated = true;
-        return;
-      }
-    }
-    if (ts.isCallExpression(node)
-      && ts.isPropertyAccessExpression(node.expression)
-      && ts.isIdentifier(node.expression.expression)
-      && node.expression.expression.text === "Object"
-      && node.expression.name.text === "assign"
-      && node.arguments[0]
-      && resolves(unwrapExpression(node.arguments[0]))) {
-      mutated = true;
+    if (!accepted) return;
+    if (ts.isIdentifier(node)
+      && !(node.pos >= declaration.pos && node.end <= declaration.end)
+      && lexical.resolve(node) === declaration
+      && !isTypeOnlyReference(node)
+      && !isAcceptedOptionsArgument(node, constructsDatabase)) {
+      accepted = false;
       return;
     }
     ts.forEachChild(node, visit);
   };
   visit(parsed);
-  return mutated;
+  return accepted;
 }
 
 function optionIsReadonly(
   option: ts.Expression | undefined,
-  use: ts.NewExpression,
   parsed: ts.SourceFile,
   lexical: LexicalBindings,
+  constructsDatabase: DatabaseConstructorCheck,
 ): boolean {
   if (!option) return false;
   const unwrapped = unwrapExpression(option);
@@ -434,12 +464,11 @@ function optionIsReadonly(
   if (!ts.isIdentifier(unwrapped)) return false;
   const declaration = lexical.resolve(unwrapped);
   if (!declaration || !ts.isVariableDeclaration(declaration) || !isConstVariable(declaration)) return false;
-  if (lexical.scopeOf(declaration) !== lexical.scopeOf(use)) return false;
   if (!declaration.initializer) return false;
   const initializer = unwrapExpression(declaration.initializer);
   return ts.isObjectLiteralExpression(initializer)
     && hasReadonlyTrue(initializer)
-    && !mutatesBinding(parsed, declaration, lexical);
+    && hasOnlyAcceptedReadonlyReferences(parsed, declaration, lexical, constructsDatabase);
 }
 
 function directBindingCall(
@@ -464,6 +493,10 @@ export function constructsCatalogueWriter(
   const sqliteBindings = collectModuleBindings(parsed, fileName, "bun:sqlite");
   const openDeclarations = schemaBindings.direct.get("openCatalogue") ?? new Set<ts.Node>();
   const databaseDeclarations = sqliteBindings.direct.get("Database") ?? new Set<ts.Node>();
+  const constructsDatabase: DatabaseConstructorCheck = (node) =>
+    directBindingCall(node.expression, databaseDeclarations, lexical)
+      || namespaceMemberResolvesTo(node.expression, sqliteBindings.namespaces, "Database", lexical)
+      || directModuleMember(node.expression, fileName, "bun:sqlite", "Database");
   let writer = false;
   const visit = (node: ts.Node): void => {
     if (writer) return;
@@ -481,11 +514,8 @@ export function constructsCatalogueWriter(
         return;
       }
     }
-    if (ts.isNewExpression(node)) {
-      const constructsDatabase = directBindingCall(node.expression, databaseDeclarations, lexical)
-        || namespaceMemberResolvesTo(node.expression, sqliteBindings.namespaces, "Database", lexical)
-        || directModuleMember(node.expression, fileName, "bun:sqlite", "Database");
-      if (constructsDatabase && !optionIsReadonly(node.arguments?.[1], node, parsed, lexical)) {
+    if (ts.isNewExpression(node) && constructsDatabase(node)) {
+      if (!optionIsReadonly(node.arguments?.[1], parsed, lexical, constructsDatabase)) {
         writer = true;
         return;
       }
