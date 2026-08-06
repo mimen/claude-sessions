@@ -17,6 +17,10 @@ import type {
   PinWorkspaceOutcome,
 } from "./snapshot.ts";
 import { projectSidebar, type SidebarSnapshot, type SidebarView } from "./projection.ts";
+import type {
+  BridgeBenchmarkReport,
+  StoredBridgeBenchmarkReport,
+} from "./bridge-benchmark.ts";
 
 const EMPTY_SNAPSHOT: SidebarSnapshot = {
   rows: [],
@@ -70,7 +74,10 @@ function deferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void;
   };
 }
 
-function harness(overrides: Partial<SidebarSource> = {}): Harness {
+function harness(
+  overrides: Partial<SidebarSource> = {},
+  benchReportPath: string | null = null,
+): Harness {
   // Built below from the base source, so a test overriding setLifecycle still drives retire.
   const opened: string[] = [];
   const diagnostics: Array<{
@@ -117,16 +124,25 @@ function harness(overrides: Partial<SidebarSource> = {}): Harness {
       ?? ((sessionId: string, action: SessionLifecycleAction) =>
         source.setLifecycle(sessionId, action)),
   };
-  const server = createSidebarServer({
-    source: withRetire,
-    assets: ASSETS,
-    port: 0,
-    logger: {
-      warn(message, context): void {
-        diagnostics.push({ message, ...(context === undefined ? {} : { context }) });
+  const previousBenchReportPath = process.env.CCS_SIDEBAR_BENCH_REPORT;
+  if (benchReportPath === null) delete process.env.CCS_SIDEBAR_BENCH_REPORT;
+  else process.env.CCS_SIDEBAR_BENCH_REPORT = benchReportPath;
+  let server: Bun.Server<undefined>;
+  try {
+    server = createSidebarServer({
+      source: withRetire,
+      assets: ASSETS,
+      port: 0,
+      logger: {
+        warn(message, context): void {
+          diagnostics.push({ message, ...(context === undefined ? {} : { context }) });
+        },
       },
-    },
-  });
+    });
+  } finally {
+    if (previousBenchReportPath === undefined) delete process.env.CCS_SIDEBAR_BENCH_REPORT;
+    else process.env.CCS_SIDEBAR_BENCH_REPORT = previousBenchReportPath;
+  }
   running.push(server);
   return {
     url: server.url.origin,
@@ -180,6 +196,47 @@ function postLifecycle(
   });
 }
 
+const BENCH_A = "11111111-1111-4111-8111-111111111111";
+const BENCH_B = "22222222-2222-4222-8222-222222222222";
+
+function validBridgeBenchmarkReport(): BridgeBenchmarkReport {
+  return {
+    benchmark: "native-sidebar-focus-bridge",
+    samplesRequested: 2,
+    targets: { a: BENCH_A, b: BENCH_B },
+    samples: [
+      {
+        index: 0,
+        target: "a",
+        workspaceId: BENCH_A,
+        outcome: "focused",
+        latencyMs: 1.25,
+        fallbackHttpInvocations: 0,
+      },
+      {
+        index: 1,
+        target: "b",
+        workspaceId: BENCH_B,
+        outcome: "focused",
+        latencyMs: 2.5,
+        fallbackHttpInvocations: 0,
+      },
+    ],
+    focusedLatencyMs: { count: 2, min: 1.25, p50: 1.25, p95: 2.5, max: 2.5 },
+    fallbackHttpThunkInvocations: 0,
+    startedAt: "2026-08-06T00:00:00.000Z",
+    completedAt: "2026-08-06T00:00:01.000Z",
+  };
+}
+
+function postBenchReport(app: Harness, body: string): Promise<Response> {
+  return fetch(`${app.url}/api/dev/bench-report`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: app.url },
+    body,
+  });
+}
+
 afterEach(() => {
   while (running.length > 0) running.pop()?.stop(true);
 });
@@ -200,6 +257,65 @@ describe("sidebar server", () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("console.log(1)");
+  });
+
+  test("keeps the temporary benchmark report path at ordinary 404 when unarmed", async () => {
+    const app = harness();
+    const response = await postBenchReport(app, JSON.stringify(validBridgeBenchmarkReport()));
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("Not found");
+  });
+
+  test("writes one validated benchmark report with server-observed action POST counts", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ccs-sidebar-bridge-bench-"));
+    const reportPath = join(directory, "report.json");
+    try {
+      const app = harness({}, reportPath);
+      await postOpen(app, app.url);
+      await fetch(`${app.url}/api/workspace/focus`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: app.url },
+        body: JSON.stringify({ workspaceId: BENCH_A }),
+      });
+
+      const response = await postBenchReport(app, JSON.stringify(validBridgeBenchmarkReport()));
+      expect(response.status).toBe(204);
+      expect((await response.arrayBuffer()).byteLength).toBe(0);
+
+      const stored = JSON.parse(await Bun.file(reportPath).text()) as StoredBridgeBenchmarkReport;
+      expect(stored.serverObservedActionPosts).toEqual({
+        open: 1,
+        workspaceFocus: 1,
+        total: 2,
+      });
+      expect(stored.samples).toEqual(validBridgeBenchmarkReport().samples);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects malformed or inconsistent benchmark reports without writing a file", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ccs-sidebar-bridge-bench-invalid-"));
+    const reportPath = join(directory, "report.json");
+    try {
+      const app = harness({}, reportPath);
+      const invalid = {
+        ...validBridgeBenchmarkReport(),
+        fallbackHttpThunkInvocations: 1,
+      };
+      expect((await postBenchReport(app, JSON.stringify(invalid))).status).toBe(400);
+      expect(await Bun.file(reportPath).exists()).toBeFalse();
+      expect((await postBenchReport(app, "not json")).status).toBe(400);
+      expect(await Bun.file(reportPath).exists()).toBeFalse();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses a relative benchmark report output path", () => {
+    expect(() => harness({}, "relative-report.json"))
+      .toThrow("CCS_SIDEBAR_BENCH_REPORT must be an absolute output path");
   });
 
   test("returns the snapshot as json", async () => {
