@@ -10,6 +10,8 @@ import type {
   SessionClass,
 } from "./db-schema.ts";
 
+export { deriveIdentityKey } from "./db-schema.ts";
+
 /** (cluster, role) → resume_command (or null), memoized. ADR-D3 (2026-07-14): key by
  * (cluster,role), not just role — two clusters with the same role name would collide otherwise
  * (a live P0 risk before this change). A null cluster is the standalone bucket.
@@ -218,40 +220,6 @@ export function deriveKey(row: {
   if (row.gusWork) return `gus:${row.gusWork}`;
   if (row.role) return `role:${row.role}`;
   return null;
-}
-
-/**
- * ADR-0089: derive the structured identity key `<cluster>:<role>:<work_ref>` for fleet, or
- * `<cluster>:<role>` for core. Nullable if we don't have enough to pin an identity (e.g. a
- * loose session with no role/cluster). This is a DIFFERENT SHAPE from deriveKey() — the old
- * `pr:owner/repo#12345` was a "generic identity fingerprint" that ignored cluster/role; the
- * new form makes cluster + role first-class so pr-agent on pr-watch and (hypothetical)
- * pr-agent on another cluster never collide.
- *
- * Preferred work_ref shapes, in priority order:
- *   1. PR (repo#number) — pr-watch's canonical worker
- *   2. GUS work item — a ticketed-no-PR row
- *   3. work_unit_id — an opaque work-unit entity
- * Core roles (no work_ref) collapse to `<cluster>:<role>`.
- */
-export function deriveIdentityKey(row: {
-  cluster?: string | null;
-  role?: string | null;
-  prRepo?: string | null;
-  prNumber?: number | null;
-  gusWork?: string | null;
-  workUnitId?: string | null;
-}): string | null {
-  if (!row.cluster || !row.role) return null;
-  const workRef =
-    row.prRepo && row.prNumber != null
-      ? `${row.prRepo}#${row.prNumber}`
-      : row.gusWork
-      ? row.gusWork
-      : row.workUnitId
-      ? row.workUnitId
-      : null;
-  return workRef ? `${row.cluster}:${row.role}:${workRef}` : `${row.cluster}:${row.role}`;
 }
 
 /**

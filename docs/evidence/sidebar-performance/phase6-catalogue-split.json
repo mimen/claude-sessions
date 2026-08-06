@@ -2094,6 +2094,8 @@
     "provenance": {
       "integratedHead": "8237258",
       "codeCommit": "44440d9",
+      "documentationCommit": "83c52b0",
+      "reviewFollowUpCommit": "the commit containing this evidence update",
       "branch": "worktree-agent-a9807920bbc2bd2f7",
       "generatedOn": "2026-08-05",
       "scope": "mechanical catalogue database split and import enforcement",
@@ -2110,8 +2112,50 @@
       "dependencyDag": "db-schema.ts <- db-queries.ts <- db-mutations.ts",
       "bodyParity": {
         "method": "TypeScript AST function bodies tokenized after comment removal against 8237258:src/catalogue/db.ts",
+        "baselineDeclarations": 71,
         "checkedFunctions": 71,
+        "implementationCount": 71,
+        "extras": [],
         "mismatches": []
+      },
+      "singleDeriveIdentityKeyImplementation": {
+        "implementationModule": "src/catalogue/db-schema.ts",
+        "queryLayerReExport": "src/catalogue/db-queries.ts",
+        "implementationBodies": 1
+      }
+    },
+    "mutationBoundaryEnforcement": {
+      "scanner": "src/catalogue/mutation-boundary-scanner.ts",
+      "method": "TypeScript AST module-reference and literal scanning with importer-relative path resolution",
+      "moduleReferencesCovered": [
+        "static import",
+        "static export",
+        "dynamic import()",
+        "require()"
+      ],
+      "mutationImporterAllowlistExact": true,
+      "unexpectedMutationImporters": [],
+      "staleMutationImporterAuthorizations": [],
+      "protectedSqlScannedIndependentOfCallSite": true,
+      "sidebarDirectIdentityMutationImportsRejected": true,
+      "sidebarWriterConstructionRejected": true,
+      "behavioralScannerTests": {
+        "tests": 9,
+        "assertions": 20,
+        "failures": 0,
+        "fixtures": [
+          "nested relative static import",
+          "re-export",
+          "dynamic import",
+          "require",
+          "destructured require",
+          "stale allowlist entry",
+          "prepare mutation SQL",
+          "variable-held template mutation SQL",
+          "sidebar setIdentityFields import",
+          "writable Database construction",
+          "openCatalogue construction"
+        ]
       }
     },
     "circularDependencies": {
@@ -2193,7 +2237,7 @@
     "targetedValidation": [
       {
         "suite": "catalogue",
-        "tests": 322,
+        "tests": 327,
         "failures": 0
       },
       {
@@ -2227,6 +2271,33 @@
         "failures": 0
       }
     ],
+    "reviewFollowUpValidation": {
+      "validatedAt": "2026-08-06",
+      "catalogue": {
+        "command": "bun test src/catalogue",
+        "tests": 327,
+        "failures": 0
+      },
+      "sidebar": {
+        "command": "bun test src/sidebar",
+        "tests": 198,
+        "failures": 0
+      },
+      "resume": {
+        "command": "bun test src/resume/new-session.test.ts src/resume/resume-session.test.ts src/resume/resume-cluster.test.ts src/resume/selector.test.ts",
+        "tests": 97,
+        "failures": 0
+      },
+      "bodyParity": {
+        "baselineDeclarations": 71,
+        "checkedFunctions": 71,
+        "implementationCount": 71,
+        "extras": [],
+        "mismatches": []
+      },
+      "benchmarkClaimsRemainApplicable": true,
+      "benchmarkRationale": "The review follow-up changes only boundary enforcement and replaces a duplicate pure helper body with a lower-layer implementation plus query-layer re-export; catalogue and sidebar behavior suites remain green."
+    },
     "actionBenchmark": {
       "schemaVersion": 1,
       "generatedAt": "2026-08-06T03:02:43.956Z",
@@ -2325,8 +2396,8 @@
       "fullTest": {
         "command": "bun test",
         "passed": false,
-        "tests": 1659,
-        "passes": 1655,
+        "tests": 1664,
+        "passes": 1660,
         "failures": [
           "launcher environment materialization > writes one spec per configured launcher",
           "launcher environment materialization > a default_harness with no [[launcher]] entry fails loudly",

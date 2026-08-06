@@ -138,7 +138,21 @@ type StoredMetaValue =
   | StoredMetaValue[]
   | { [key: string]: StoredMetaValue };
 
-function deriveIdentityKey(row: {
+/**
+ * ADR-0089: derive the structured identity key `<cluster>:<role>:<work_ref>` for fleet, or
+ * `<cluster>:<role>` for core. Nullable if we don't have enough to pin an identity (e.g. a
+ * loose session with no role/cluster). This is a DIFFERENT SHAPE from deriveKey() — the old
+ * `pr:owner/repo#12345` was a "generic identity fingerprint" that ignored cluster/role; the
+ * new form makes cluster + role first-class so pr-agent on pr-watch and (hypothetical)
+ * pr-agent on another cluster never collide.
+ *
+ * Preferred work_ref shapes, in priority order:
+ *   1. PR (repo#number) — pr-watch's canonical worker
+ *   2. GUS work item — a ticketed-no-PR row
+ *   3. work_unit_id — an opaque work-unit entity
+ * Core roles (no work_ref) collapse to `<cluster>:<role>`.
+ */
+export function deriveIdentityKey(row: {
   cluster?: string | null;
   role?: string | null;
   prRepo?: string | null;
