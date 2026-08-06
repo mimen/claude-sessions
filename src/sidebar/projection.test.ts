@@ -687,6 +687,59 @@ describe("projectSidebar", () => {
     expect(sessionRows(snapshot.rows)[0]?.model).toBeNull();
   });
 
+  test("applies triage after the active shelf capacity is spent", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [
+        indexed({ sessionId: "plain-first", resumeId: "plain-first" }),
+        indexed({ sessionId: "suggestible-second", resumeId: "suggestible-second" }),
+      ],
+      summaries: new Map([["suggestible-second", storedEnrichment("archive")]]),
+      recentLimit: 1,
+      triageOnly: true,
+    }));
+
+    expect(snapshot.rows).toEqual([]);
+  });
+
+  test("caps terminal live history after sorting it by descending recency", () => {
+    const snapshot = projectSidebar(input({
+      live: [
+        live({ sessionId: "oldest-live", updatedAt: 100 }),
+        live({ sessionId: "newest-live", updatedAt: 300 }),
+        live({ sessionId: "middle-live", updatedAt: 200 }),
+      ],
+      lifecycles: new Map([
+        ["oldest-live", "completed"],
+        ["newest-live", "completed"],
+        ["middle-live", "completed"],
+      ]),
+      scope: "completed",
+      historyLimit: 2,
+    }));
+
+    expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual([
+      "newest-live",
+      "middle-live",
+    ]);
+    expect(snapshot.rows.map((row) => row.lastActivityAt)).toEqual([300_000, 200_000]);
+  });
+
+  test("keeps unreadable terminal history known live only through its resume alias", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [indexed({ sessionId: "terminal-file", resumeId: "terminal-resume" })],
+      liveSessionIds: new Set(["terminal-resume"]),
+      lifecycles: new Map([["terminal-resume", "completed"]]),
+      scope: "completed",
+      livenessReadable: false,
+    }));
+
+    expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual(["terminal-file"]);
+    expect(snapshot.rows[0]).toMatchObject({
+      statusAvailability: "absent",
+      lifecycle: "completed",
+    });
+  });
+
   test("keeps the mixed projection byte-equivalent to the pre-staging golden", () => {
     const serialized = JSON.stringify([
       projectSidebar(mixedProjectionInput()),
