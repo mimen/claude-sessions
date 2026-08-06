@@ -146,6 +146,38 @@ test("SQL scanner catches every catalogue-owned table and dynamic identity table
   expect(protectedMutationSql('const sql = "UPDATE unrelated SET value = 1";')).toEqual([]);
 });
 
+test("SQL scanner evaluates immutable local string assembly", () => {
+  const assembledMutations = [
+    'const table = "catalogue"; const sql = `UPDATE ${table} SET updated_at = 1`;',
+    'const sql = "UPDATE " + "catalogue SET updated_at = 1";',
+    'const relation = "identity_pr_agent"; db.exec(`ALTER TABLE ${relation} ADD COLUMN value TEXT`);',
+    'const relation = "catalogue"; const alias = relation; db.run(`DELETE FROM ${alias} WHERE session_id = ?`);',
+    'const prefix = "CREATE INDEX idx ON "; const relation = `session_tags`; db.exec(prefix + relation + "(entity)");',
+  ];
+  for (const source of assembledMutations) expect(protectedMutationSql(source)).toHaveLength(1);
+});
+
+test("SQL scanner preserves sanctioned dynamic identity SQL detection", () => {
+  const dynamicIdentityMutations = [
+    'db.exec(`CREATE TABLE IF NOT EXISTS ${schema.tableName} (identity_key TEXT)`);',
+    'db.exec(`ALTER TABLE ${schema.tableName} ADD COLUMN value TEXT`);',
+    'db.exec(`CREATE INDEX idx ON ${schema.tableName}(value)`);',
+  ];
+  for (const source of dynamicIdentityMutations) expect(protectedMutationSql(source)).toHaveLength(1);
+});
+
+test("SQL scanner does not infer mutable or runtime-computed table names", () => {
+  const controls = [
+    'let relation = "catalogue"; const sql = `UPDATE ${relation} SET updated_at = 1`;',
+    'const relation = getTable(); const sql = `UPDATE ${relation} SET updated_at = 1`;',
+    'const relation = enabled ? "catalogue" : "other"; const sql = `UPDATE ${relation} SET updated_at = 1`;',
+    'const relation = "unrelated"; const sql = `UPDATE ${relation} SET updated_at = 1`;',
+    'const relation = "catalogue"; function build(relation: string): string { return `UPDATE ${relation} SET updated_at = 1`; }',
+    'const sql = "UPDATE " + runtimeRelation + " SET updated_at = 1";',
+  ];
+  for (const source of controls) expect(protectedMutationSql(source)).toEqual([]);
+});
+
 test("sidebar scanner catches aliases, namespace members, and dynamic identity namespaces", () => {
   const sidebarFile = join(SRC, "sidebar", "request.ts");
   const writerTargets = { catalogueSchemaModule: DB_SCHEMA };

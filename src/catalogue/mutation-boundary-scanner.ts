@@ -356,6 +356,57 @@ function templateText(node: ts.TemplateExpression, parsed: ts.SourceFile): strin
   ).join("")}`;
 }
 
+function isConstVariable(declaration: ts.VariableDeclaration): boolean {
+  return ts.isVariableDeclarationList(declaration.parent)
+    && (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
+}
+
+function constantString(
+  expression: ts.Expression,
+  lexical: LexicalBindings,
+  resolving: ReadonlySet<ts.VariableDeclaration> = new Set(),
+): string | null {
+  const node = unwrapExpression(expression);
+  if (ts.isStringLiteralLike(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isIdentifier(node)) {
+    const declaration = lexical.resolve(node);
+    if (!declaration
+      || !ts.isVariableDeclaration(declaration)
+      || !isConstVariable(declaration)
+      || !declaration.initializer
+      || resolving.has(declaration)) return null;
+    const nextResolving = new Set(resolving);
+    nextResolving.add(declaration);
+    return constantString(declaration.initializer, lexical, nextResolving);
+  }
+  if (ts.isTemplateExpression(node)) {
+    let value = node.head.text;
+    for (const span of node.templateSpans) {
+      const substitution = constantString(span.expression, lexical, resolving);
+      if (substitution === null) return null;
+      value += substitution + span.literal.text;
+    }
+    return value;
+  }
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = constantString(node.left, lexical, resolving);
+    if (left === null) return null;
+    const right = constantString(node.right, lexical, resolving);
+    return right === null ? null : left + right;
+  }
+  return null;
+}
+
+function parentConstantConcatenation(
+  node: ts.Expression,
+  lexical: LexicalBindings,
+): boolean {
+  const parent = node.parent;
+  return ts.isBinaryExpression(parent)
+    && parent.operatorToken.kind === ts.SyntaxKind.PlusToken
+    && constantString(parent, lexical) !== null;
+}
+
 const CATALOGUE_TABLE = "(?:catalogue|dispositions|epics|groupings|historical_detached_child_backfills|identities|identity_[a-z_]+|inboxes|roles|schema_migrations|session_tags)";
 const DYNAMIC_IDENTITY_TABLE = "(?:\\$\\{[^}]*\\btableName\\b[^}]*\\})";
 const TABLE_TARGET = `(?:["\`\\[]?(?:${CATALOGUE_TABLE})\\b|${DYNAMIC_IDENTITY_TABLE})`;
@@ -370,11 +421,17 @@ const PROTECTED_INDEX_MUTATION_SQL = new RegExp(
 
 export function protectedMutationSql(source: string, fileName = "source.ts"): string[] {
   const parsed = sourceFile(source, fileName);
+  const lexical = new LexicalBindings(parsed);
   const matches: string[] = [];
   const visit = (node: ts.Node): void => {
     let text: string | null = null;
-    if (ts.isStringLiteralLike(node) || ts.isNoSubstitutionTemplateLiteral(node)) text = node.text;
-    else if (ts.isTemplateExpression(node)) text = templateText(node, parsed);
+    if (ts.isStringLiteralLike(node)
+      || ts.isNoSubstitutionTemplateLiteral(node)
+      || ts.isTemplateExpression(node)
+      || (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken)) {
+      if (!parentConstantConcatenation(node, lexical)) text = constantString(node, lexical);
+      if (text === null && ts.isTemplateExpression(node)) text = templateText(node, parsed);
+    }
     if (text && (PROTECTED_TABLE_MUTATION_SQL.test(text) || PROTECTED_INDEX_MUTATION_SQL.test(text))) matches.push(text);
     ts.forEachChild(node, visit);
   };
@@ -390,11 +447,6 @@ function hasReadonlyTrue(object: ts.ObjectLiteralExpression): boolean {
         || (ts.isStringLiteralLike(property.name) && property.name.text === "readonly"))
       && property.initializer.kind === ts.SyntaxKind.TrueKeyword
   );
-}
-
-function isConstVariable(declaration: ts.VariableDeclaration): boolean {
-  return ts.isVariableDeclarationList(declaration.parent)
-    && (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
 }
 
 type DatabaseConstructorCheck = (node: ts.NewExpression) => boolean;

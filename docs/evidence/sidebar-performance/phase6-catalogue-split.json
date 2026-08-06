@@ -2129,7 +2129,7 @@
     },
     "mutationBoundaryEnforcement": {
       "scanner": "src/catalogue/mutation-boundary-scanner.ts",
-      "method": "TypeScript AST module-reference, lexical-binding, and literal scanning with importer-relative path resolution",
+      "method": "TypeScript AST module-reference, lexical-binding, local constant-string evaluation, and literal scanning with importer-relative path resolution",
       "moduleReferencesCovered": [
         "static import",
         "static export",
@@ -2142,6 +2142,10 @@
       "protectedSqlScannedIndependentOfCallSite": true,
       "protectedCatalogueTablesComplete": true,
       "dynamicIdentityTableSqlDetected": true,
+      "immutableTemplateTableConstantsDetected": true,
+      "immutableStringConcatenationDetected": true,
+      "immutableAliasChainsDetected": true,
+      "runtimeComputedTableNamesRejected": true,
       "rawSqlWriterAllowlistExact": true,
       "sidebarDirectIdentityMutationImportsRejected": true,
       "sidebarAliasedAndNamespaceWritersRejected": true,
@@ -2156,8 +2160,8 @@
       "sidebarWriterConstructionRejected": true,
       "bunBinEntrypointsScanned": true,
       "behavioralScannerTests": {
-        "tests": 15,
-        "assertions": 59,
+        "tests": 18,
+        "assertions": 73,
         "failures": 0,
         "fixtures": [
           "nested relative static import",
@@ -2168,6 +2172,17 @@
           "stale allowlist entry",
           "prepare mutation SQL",
           "variable-held template mutation SQL",
+          "immutable template table constant",
+          "literal plus-concatenated mutation SQL",
+          "immutable table alias chain",
+          "constant-assembled protected index SQL",
+          "immutable dynamic identity name not called tableName",
+          "mutable table-name false-positive control",
+          "runtime-computed table-name false-positive control",
+          "conditional table-name false-positive control",
+          "unrelated table false-positive control",
+          "shadowed table constant false-positive control",
+          "partially dynamic concatenation false-positive control",
           "all catalogue-owned tables",
           "dynamic identity table DDL",
           "exact raw SQL allowlist",
@@ -2316,17 +2331,17 @@
       "validatedAt": "2026-08-06",
       "catalogue": {
         "command": "bun test src/catalogue",
-        "tests": 333,
+        "tests": 365,
         "failures": 0
       },
       "sidebar": {
         "command": "bun test src/sidebar",
-        "tests": 198,
+        "tests": 202,
         "failures": 0
       },
       "resume": {
-        "command": "bun test src/resume/new-session.test.ts src/resume/resume-session.test.ts src/resume/resume-cluster.test.ts src/resume/selector.test.ts",
-        "tests": 97,
+        "command": "bun test src/resume",
+        "tests": 261,
         "failures": 0
       },
       "bodyParity": {
