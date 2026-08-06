@@ -17,7 +17,8 @@
  *
  * The legacy `resolve` verb is kept until step 9 rewrites engine callers.
  */
-import { openCatalogue, getRow, deriveIdentityKey } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getRow, deriveIdentityKey } from "./db-queries.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import type { Database } from "bun:sqlite";
 import {
@@ -307,7 +308,7 @@ function doResolve(db: Database, args: string[]): number {
     );
     return 0;
   }
-  // Compute both the LEGACY key (from db.ts identityKeyOf, backwards compat) and the NEW
+  // Compute both the LEGACY key (from db-queries.ts identityKeyOf, backwards compat) and the NEW
   // structured key. Emit legacy in the `key` field for now; engines migrate in step 9.
   const legacyKey = row.key;
   const newKey = deriveIdentityKey({

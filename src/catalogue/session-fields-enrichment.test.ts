@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sessionFieldsCommand } from "./session-fields-command.ts";
-import { openCatalogue, getRow } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getRow } from "./db-queries.ts";
 import { CATALOGUE_PATH } from "../paths.ts";
 
 /**

@@ -1,4 +1,4 @@
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import type { SessionRow } from "../index/index.ts";
 import { SESSION_PROVENANCE_ROLLOUT_AT, SESSION_PROVENANCE_ROLLOUT_MS } from "../session-class.ts";
 

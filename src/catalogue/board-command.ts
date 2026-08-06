@@ -13,7 +13,8 @@ import { readClusterManifest, checkClusterGate } from "../cluster/manifest.ts";
 import { ccsConfigRoot } from "../roles/role-files.ts";
 import { boardIndex } from "../board/indexer.ts";
 import { runDefaultComposer } from "../board/default-composer.ts";
-import { openCatalogue, identityKeyOf, getRow } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { identityKeyOf, getRow } from "./db-queries.ts";
 import { CATALOGUE_PATH } from "../paths.ts";
 
 export function boardCommand(args: string[]): number {

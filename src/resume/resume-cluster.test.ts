@@ -1,9 +1,10 @@
 import { test, expect } from "bun:test";
 import { openIndex } from "../index/schema.ts";
-import { openCatalogue, setResumeId, setCompleted, setArchived } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { setResumeId, setCompleted, setArchived } from "../catalogue/db-mutations.ts";
 import { mintIdentity, completeIdentity, archiveIdentity } from "../catalogue/identities.ts";
 import { resumeClusterEntry, planClusterMembers, planPin } from "./resume-cluster.ts";
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import type { Database } from "bun:sqlite";
 

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { spawnWorkUnit, rowWorkUnit, workUnitKey, workUnitPath, spawnContractError, type SpawnFacts, type WorktreeState } from "./spawn-contract.ts";
 import { workUnitOf } from "../hooks/resolve-levels.ts";
-import type { CatalogueRow } from "./db.ts";
+import type { CatalogueRow } from "./db-schema.ts";
 
 const gitFeature: WorktreeState = { isGitWorktree: true, branch: "feature/fix-navbar" };
 

@@ -11,7 +11,8 @@
  *
  * Dry-run by default. Pass --apply to write.
  */
-import { openCatalogue, ensureRow } from "../src/catalogue/db.ts";
+import { openCatalogue } from "../src/catalogue/db-schema.ts";
+import { ensureRow } from "../src/catalogue/db-mutations.ts";
 import { mintIdentity } from "../src/catalogue/identities.ts";
 import { openIndex } from "../src/index/schema.ts";
 import { ccsConfigRoot } from "../src/roles/role-files.ts";

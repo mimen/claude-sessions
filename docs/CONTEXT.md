@@ -64,8 +64,11 @@ Post-ADR-0089, identity is a **first-class entity** with its own table — no lo
 
 The full backbone lives in one SQLite file (`~/.ccs/cache/catalogue.db`) as of ADR-0089. Only sensor outputs remain as JSON files.
 
-- **catalogue** — the SQLite file that holds the whole model:
-  - `sessions` (was `catalogue` — the table name stays for now) — one row per Claude Code session; carries `identity_key` FK, custom_title, parent, timestamps.
+- **catalogue** — the SQLite file that holds the whole model. Its TypeScript access layer is capability-split:
+  `catalogue/db-schema.ts` owns types/open/migrations, `catalogue/db-queries.ts` owns unrestricted reads, and
+  `catalogue/db-mutations.ts` owns raw writes. The dependency direction is schema ← queries ← mutations, with
+  no compatibility barrel; mutation imports are enforced by `catalogue/mutation-boundary.test.ts`.
+  - `sessions` (the table is still named `catalogue`) — one row per Claude Code session; carries `identity_key` FK, custom_title, parent, timestamps.
   - `identities` — one row per durable work-item identity (universal columns: cluster, role, kind, grouping_id, stage, status_line, lifecycle flags, meta).
   - `identity_<role>` — per-fleet-role attribute tables, materialized at boot from each role's `identity-schema.toml`.
   - `groupings` — display metadata for epics/sprints/whatever the role's `grouping_type` calls them.

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { identityKey, predecessorsOf } from "./lineage.ts";
-import { deriveKey, type CatalogueRow } from "./db.ts";
+import { type CatalogueRow } from "./db-schema.ts";
+import { deriveKey } from "./db-queries.ts";
 
 /**
  * Synthetic-row helper. Pre-ADR-0089 tests set `key: null` and relied on identityKey() to

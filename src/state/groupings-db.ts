@@ -4,7 +4,7 @@ import type { Database } from "bun:sqlite";
  * ADR-0089 step 4: groupings live in the `groupings` table (created by v32 migration).
  * Replaces the per-cluster `groupings.json` file store from src/state/groupings.ts.
  *
- * Columns (see catalogue/db.ts v32 block for CREATE):
+ * Columns (see catalogue/db-schema.ts v32 block for CREATE):
  *   grouping_id  PK   opaque id from tracker (GUS ADM_Work__c, Linear project id, …)
  *   cluster           which cluster this grouping belongs to
  *   role              which fleet role uses this grouping (identifies the type via role.toml)

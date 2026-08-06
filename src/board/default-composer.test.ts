@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import type { Database } from "bun:sqlite";
 import { runDefaultComposer } from "./default-composer.ts";
 import { readBoard } from "./paths.ts";
-import { openCatalogue, ensureRow } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { ensureRow } from "../catalogue/db-mutations.ts";
 import { mintIdentity, setIdentityFields } from "../catalogue/identities.ts";
 
 let tempRoot: string;

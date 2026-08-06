@@ -8,7 +8,7 @@
  * pass, atomic per session, and each field goes through the same setter the CLI's single-field
  * commands use.
  *
- * Every field routed through this command uses the SAME db.ts setter the equivalent CLI command
+ * Every field routed through this command uses the SAME db-mutations.ts setter the equivalent CLI command
  * uses. There is no new mutation path — this is just batching, not a bypass.
  *
  * Stage writes require --sensor <name> for the same reason `ccs stage` does (D5 / ADR-0079):
@@ -39,12 +39,9 @@
  * validation error on non-zero exit).
  */
 import { z } from "zod";
-import { openCatalogue, getRow,
-  setCustomTitle, setRole, setProject, setCluster, setGusWork, setWorkUnitId,
-  setStatusLine, setParked, setParent, setKey, setCompleted, setArchived,
-  setMeta, setStage, setEnrichment,
-  setSessionEpic,
-} from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getRow } from "./db-queries.ts";
+import { setCustomTitle, setRole, setProject, setCluster, setGusWork, setWorkUnitId, setStatusLine, setParked, setParent, setKey, setCompleted, setArchived, setMeta, setStage, setEnrichment, setSessionEpic } from "./db-mutations.ts";
 import { validateStageTransition } from "./stage-schema.ts";
 import { EnrichmentPayloadSchema, validateEnrichment } from "./enrichment-schema.ts";
 import { loadEnrichmentLocations, locationKeySet } from "../enrich/locations.ts";

@@ -12,7 +12,7 @@
  *   ccs grouping close|reopen <id>
  *   ccs grouping delete <id>
  */
-import { openCatalogue } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { readFileSync } from "node:fs";
 import type { Database } from "bun:sqlite";

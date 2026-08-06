@@ -9,7 +9,8 @@
  * whole-board recompose catches up. Skip on dry-run.
  */
 import { spawnSync } from "node:child_process";
-import { openCatalogue, getRow, identityKeyOf } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow, identityKeyOf } from "../catalogue/db-queries.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { readClusterManifest } from "../cluster/manifest.ts";
 import { boardIndex } from "./indexer.ts";

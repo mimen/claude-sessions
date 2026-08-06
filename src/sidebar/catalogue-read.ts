@@ -8,7 +8,7 @@
  */
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import type { Lifecycle } from "../catalogue/db.ts";
+import type { Lifecycle } from "../catalogue/db-schema.ts";
 import {
   hydrateStoredEnrichment,
   OPTIONAL_ENRICHMENT_COLUMNS,

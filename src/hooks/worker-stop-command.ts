@@ -12,7 +12,9 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { openCatalogue, getRow, touch } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
+import { touch } from "../catalogue/db-mutations.ts";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import { resolveConfig } from "./resolve-config.ts";
 import { liveResolveCtx, composeStopContext } from "./compose-claude-md.ts";

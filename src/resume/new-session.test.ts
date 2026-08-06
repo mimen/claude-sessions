@@ -3,7 +3,9 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue, getRow, lifecycleOf, identityKeyOf, setCluster, stampPrFacts, setWorkUnitId, getMeta, _resetRoleResumeCache } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow, lifecycleOf, identityKeyOf, getMeta, _resetRoleResumeCache } from "../catalogue/db-queries.ts";
+import { setCluster, stampPrFacts, setWorkUnitId } from "../catalogue/db-mutations.ts";
 import { getIdentity } from "../catalogue/identities.ts";
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import {
@@ -1357,7 +1359,7 @@ test("writeSessionMetadata: only the provided fields are written (no clobber to 
 });
 
 import { validateSpawn } from "./new-session.ts";
-import type { RoleDef } from "../catalogue/db.ts";
+import type { RoleDef } from "../catalogue/db-schema.ts";
 
 const loopDef: RoleDef = {
   role: "control", cluster: "pr-watch", kind: "loop", workUnit: "none", homeDir: "/tmp",

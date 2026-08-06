@@ -1,35 +1,8 @@
 import { existsSync } from "node:fs";
 import { ensureDataDir, CATALOGUE_PATH, DB_PATH } from "../paths.ts";
-import {
-  openCatalogue,
-  ensureRow,
-  setCustomTitle,
-  setCompleted,
-  setArchived,
-  setKey,
-  setParent,
-  setResumeId,
-  setSessionClass,
-  setCreatorKind,
-  setLaunchChannel,
-  setLauncherIdentity,
-  setRole,
-  setGusWork,
-  setSessionEpic,
-  setStage,
-  setStatusLine,
-  setMeta,
-  setProject,
-  setCluster,
-  addTag,
-  removeTag,
-  childrenOf,
-  getRow,
-  getTags,
-  lifecycleOf,
-  identityKeyOf,
-  parentEdges,
-} from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { childrenOf, getRow, getTags, lifecycleOf, identityKeyOf, parentEdges } from "./db-queries.ts";
+import { ensureRow, setCustomTitle, setCompleted, setArchived, setKey, setParent, setResumeId, setSessionClass, setCreatorKind, setLaunchChannel, setLauncherIdentity, setRole, setGusWork, setSessionEpic, setStage, setStatusLine, setMeta, setProject, setCluster, addTag, removeTag } from "./db-mutations.ts";
 import { openIndex } from "../index/schema.ts";
 import { titleOf, usageOf, listByRecency, type SessionUsage } from "../index/index.ts";
 import { buildCostRollup, type SessionCostRollup } from "../index/cost-rollup.ts";

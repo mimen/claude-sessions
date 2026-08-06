@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
 import { materializeAllIdentityTables } from "./identity-schema.ts";
 import {
   archiveIdentity,
@@ -126,7 +126,7 @@ describe("identity CRUD", () => {
         const key = `pr-watch:pr-agent:owner/repo#race-${round}`;
         const child = `
           import { existsSync } from "node:fs";
-          import { openCatalogue } from ${JSON.stringify(join(process.cwd(), "src/catalogue/db.ts"))};
+          import { openCatalogue } from ${JSON.stringify(join(process.cwd(), "src/catalogue/db-schema.ts"))};
           import { mintIdentity } from ${JSON.stringify(join(process.cwd(), "src/catalogue/identities.ts"))};
           const db = openCatalogue(${JSON.stringify(dbFile)});
           // Busy-wait on the barrier file so both processes cross the line at

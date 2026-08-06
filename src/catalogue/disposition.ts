@@ -1,4 +1,4 @@
-import type { Lifecycle } from "./db.ts";
+import type { Lifecycle } from "./db-schema.ts";
 
 /**
  * Disposition is NOT stored — it's computed from two orthogonal axes so it can never rot:

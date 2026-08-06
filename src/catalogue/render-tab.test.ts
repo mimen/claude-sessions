@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { CatalogueRow, Kind } from "./db.ts";
+import type { CatalogueRow, Kind } from "./db-schema.ts";
 import { renderTab, applyPaintOverride, EPIC_PILL_KEY, type TabRenderOps } from "./render-tab.ts";
 
 /** Build a full CatalogueRow fixture. */

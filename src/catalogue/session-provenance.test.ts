@@ -1,12 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import {
-  getRow,
-  openCatalogue,
-  setCreatorKind,
-  setCreatorRef,
-  setForkedFromSessionId,
-  setLaunchChannel,
-} from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getRow } from "./db-queries.ts";
+import { setCreatorKind, setCreatorRef, setForkedFromSessionId, setLaunchChannel } from "./db-mutations.ts";
 
 describe("catalogue session provenance", () => {
   test("persists typed creator, launch, and fork fields", () => {

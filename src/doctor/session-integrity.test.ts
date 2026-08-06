@@ -1,12 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import {
-  getRow,
-  openCatalogue,
-  setCreatorKind,
-  setLaunchChannel,
-  setSessionClass,
-  type CatalogueRow,
-} from "../catalogue/db.ts";
+import { openCatalogue, type CatalogueRow } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
+import { setCreatorKind, setLaunchChannel, setSessionClass } from "../catalogue/db-mutations.ts";
 import type { SessionRow } from "../index/index.ts";
 import { buildSessionIntegrityReport } from "./session-integrity.ts";
 

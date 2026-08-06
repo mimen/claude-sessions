@@ -17,18 +17,18 @@ Post-ADR-0089, identity is a first-class database row, not a computed tuple.
 - **session** — one Claude Code conversation: a transcript file plus its ccs metadata. Identified by a
   **sessionId**. A session is a *vessel* — it can be closed and resumed; the **identity** it embodies
   outlives it. Every session carries an `identity_key` FK pointing at its identity row.
-  (`src/index`, `src/catalogue/db.ts`)
+  (`src/index`, `src/catalogue/db-schema.ts`, `src/catalogue/db-queries.ts`)
 - **sessionId** — the UUID that names a **session** (the transcript filename, the primary key everywhere).
-  (`db.ts:15`)
+  (`catalogue/db-schema.ts`)
 - **resumeId** — the UUID passed to `claude --resume`. For a freshly minted **session** it equals the
   **sessionId** (forward reference); for older indexed sessions it can differ. **Liveness** and resume
-  check both. (`db.ts:16`, `resume-session.ts:31`)
+  check both. (`catalogue/db-schema.ts`, `catalogue/db-queries.ts`, `resume-session.ts`)
 - **identity** — a row in the `identities` table (ADR-0089). Carries durable per-work-item state (cluster,
   role, kind, grouping_id, stage, status_line, lifecycle flags, meta). Two twin sessions on the same PR
   share ONE identity row. (`catalogue/identities.ts`)
 - **identity_key** — the structured string that names an identity: `<cluster>:<role>:<work_ref>` for a
   fleet identity, `<cluster>:<role>` for core. Used as PK on `identities` and FK on `sessions`. Human-
-  readable, greppable, URL-safe. (`db.ts:deriveIdentityKey`, `identities.ts`)
+  readable, greppable, URL-safe. (`catalogue/db-queries.ts:deriveIdentityKey`, `identities.ts`)
 - **per-role attributes** — fleet identities carry a matching row in `identity_<role_slug>` (e.g.
   `identity_pr_agent`) with role-declared columns. The role's `identity-schema.toml` declares them; ccs
   materializes the table at boot. Core identities have no such table.
@@ -58,26 +58,26 @@ Post-ADR-0089, identity is a first-class database row, not a computed tuple.
 - **cluster** — a named set of sessions that run one operation together (e.g. `pr-watch`). The **fleet**
   plus the **core** roles. Canonical everywhere; the DB column is `cluster` (renamed from the legacy
   `system` in migration v27, ADR-0059). Set via `ccs set-cluster` (`ccs system` is a back-compat alias);
-  `ccs cluster <slug>` is the map VIEW. (`cluster-map.ts`, `db.ts`)
+  `ccs cluster <slug>` is the map VIEW. (`cluster-map.ts`, `catalogue/db-queries.ts`, `catalogue/db-mutations.ts`)
 - **grouping** — a mid-level work grouping bigger than a **work-unit**. The platform concept is **grouping**;
   a grouping has a **type**, and pr-watch uses an **epic**-type grouping (ADR-0059). A **session** carries an
   `epicId` FK (a typed grouping reference); the display metadata (label/url/shortName/notes) lives in
   **cluster state**, not the **catalogue**. (`state/groupings.ts:18`)
 - **project** — a loose user label grouping otherwise-unrelated sessions (an initiative name). Distinct
-  from **cluster** (operation) and **grouping** (work). (`db.ts` project column)
+  from **cluster** (operation) and **grouping** (work). (`catalogue/db-schema.ts`, `catalogue/db-mutations.ts`)
 - **key** — an opaque identity-grouping slug. Canonical (ADR-0059); the deprecated **event** column/command
-  is being removed. (`db.ts`, ADR-0026/0030)
-- **tag** — an ad-hoc many-to-many entity label on a session (`session_tags`). (`db.ts:668`)
+  is being removed. (`catalogue/db-schema.ts`, `catalogue/db-queries.ts`, ADR-0026/0030)
+- **tag** — an ad-hoc many-to-many entity label on a session (`session_tags`). (`catalogue/db-queries.ts`, `catalogue/db-mutations.ts`)
 - **parent** / **constellation** — a session's optional `parentSessionId` edge; the tree of edges is the
-  constellation. (`db.ts` parent, `lineage.ts`)
+  constellation. (`catalogue/db-schema.ts`, `catalogue/db-queries.ts`, `lineage.ts`)
 
 ## Role & kind
 
 - **role** — a session's first-class identity axis: what it *is* (`control`, `concierge`, `slack-scout`,
   `eval`, `pr-agent`, `designer`). Drives which **skills**/**commands**/**hooks** materialize. Canonical
-  (ADR-0015); the deprecated **skill** column is being removed (ADR-0059). (`db.ts:29-34`)
+  (ADR-0015); the deprecated **skill** column is being removed (ADR-0059). (`catalogue/db-schema.ts`)
 - **kind** — a **role**'s classification: **`loop`** (re-arms on resume via **resume_command**, comes back
-  running) or **`session`** (bare; rehydrates from **inbox**/**state**). (`db.ts:11`)
+  running) or **`session`** (bare; rehydrates from **inbox**/**state**). (`catalogue/db-schema.ts`)
 - **core** vs **fleet** — **core** = the singleton infrastructure roles (control/concierge/slack-scout/
   eval/designer); **fleet** = the per-**work-unit** workers (pr-agents). (`cluster-map.ts`)
 - **role-def** — a **role**'s DEFINITION, read from files (`role.toml` + directory structure), never a DB
@@ -86,15 +86,15 @@ Post-ADR-0089, identity is a first-class database row, not a computed tuple.
 - **role.toml** — the TOML manifest in a role directory holding the non-derivable bits (`kind`,
   `resume_command`); everything else is derived from the directory. (`role-files.ts:34`)
 - **resume_command** — the command a **loop** re-fires on resume so it comes back running
-  (e.g. `/loop 15m /pr-watch-control`). (`db.ts:35`)
+  (e.g. `/loop 15m /pr-watch-control`). (`catalogue/db-schema.ts`, `catalogue/db-queries.ts`)
 
 ## Stores (where state lives)
 
 - **catalogue** — the durable, user/agent-authored metadata store (SQLite). One **row** per **session**
-  (**CatalogueRow**). Survives **index** rebuilds. (`catalogue/db.ts`)
+  (**CatalogueRow**). Survives **index** rebuilds. (`catalogue/db-schema.ts`, `catalogue/db-queries.ts`, `catalogue/db-mutations.ts`)
 - **CatalogueRow** — the metadata record for a session: identity axes (role, cluster, key, epicId,
   gusWork), PR facts, **stage**/**activity**, **statusLine**, **miladReview**, **buildComplete**, lifecycle
-  bits. (`db.ts:15-79`)
+  bits. (`catalogue/db-schema.ts`)
 - **index** — the ephemeral cache of parsed transcripts (SQLite). Dropped and rebuilt on schema bump; pure
   cache, reconstructable from the transcript files. One **SessionRow** per transcript. (`src/index`)
 - **SessionRow** — the parsed-transcript record: cwd, project, timestamps, **resumeId**, cost/tokens,
@@ -153,7 +153,7 @@ Post-ADR-0089, identity is a first-class database row, not a computed tuple.
   and at **resume** (**supersede-dedup**). (`spawn-contract.ts`, ADR-0032)
 - **supersede-dedup** — in a **cluster** resume, if a **work-unit** already has a live **session**, older
   dead siblings are *superseded* (not resumed), so one PR never gets duplicate panes. (`resume-cluster.ts`)
-- **retired** — a **session** marked **completed** or **archived**; never revived. (`db.ts:394` lifecycle)
+- **retired** — a **session** marked **completed** or **archived**; never revived. (`catalogue/db-queries.ts:lifecycleOf`)
 - **selector** — a token that resolves to **sessionId**s: an id, `#pr` / `repo#pr`, `W-id`, an **grouping**
   short-name, a **role**, or a **cluster**. (`resume/selector.ts`)
 
@@ -197,7 +197,7 @@ Post-ADR-0089, identity is a first-class database row, not a computed tuple.
 
 - **stage** — a blessed first-class string column ccs stores + displays; its *values* and transitions are
   defined by the **cluster** **state machine**, not by ccs (ADR-0060). ccs treats it as monotonic/latched in
-  shape. pr-watch's values: `building → milad-review → in-review → approved → merged`. (`db.ts:487`, ADR-0019)
+  shape. pr-watch's values: `building → milad-review → in-review → approved → merged`. (`catalogue/db-schema.ts`, `catalogue/db-mutations.ts`, ADR-0019)
 - **meta** — a generic per-**session** map (`Record<string, unknown>`) on the **CatalogueRow** for
   role-specific scratch/state-machine storage. ccs stores/stamps/returns it but does NOT interpret it; a
   cluster adds keys without a schema migration. **miladReview** and **buildComplete** are meta keys, not
@@ -206,15 +206,15 @@ Post-ADR-0089, identity is a first-class database row, not a computed tuple.
   transitions, when activity clears. Lives in **cluster** config; ccs provides the columns + **meta** scratch
   it needs, not the rules (ADR-0060/0061).
 - **activity** — the transient state *within* a **stage**: `working` (resting baseline) / `needs-you`
-  (worker self-reports stuck) / `fixing` (engine-sensed CI/conflict). Orthogonal to **stage**. (`db.ts:492`)
+  (worker self-reports stuck) / `fixing` (engine-sensed CI/conflict). Orthogonal to **stage**. (`catalogue/db-schema.ts`, `catalogue/db-mutations.ts`)
   - The deprecated single **phase** column (free-form) was replaced by **stage × activity** (v19) and is
-    being removed entirely (ADR-0059) — renderers move fully to stage × activity. (`db.ts` phase)
+    being removed entirely (ADR-0059) — renderers move fully to stage × activity. (`catalogue/db-schema.ts` migrations)
 - **buildComplete** — a monotonic latch: true once **stage** first reaches `milad-review`; afterward the
-  build stage is sealed (ADR-0018). (`db.ts` build_complete)
+  build stage is sealed (ADR-0018). (`catalogue/db-schema.ts` migrations)
 - **statusLine (field)** — the human-authored freeform status on the **CatalogueRow** (`ccs status`),
-  distinct from the computed **statusline** render. (`db.ts` status_line)
+  distinct from the computed **statusline** render. (`catalogue/db-schema.ts`, `catalogue/db-mutations.ts`)
 - **miladReview** — Milad's +1 verdict on a PR (`approved`/null); the submitter-review signal the **gate**
-  reads. A **meta** key, not a column (ADR-0060). (`db.ts:502`)
+  reads. A **meta** key, not a column (ADR-0060). (`catalogue/db-queries.ts:getMeta`, `catalogue/db-mutations.ts:setMeta`)
 - **buildComplete** — pr-watch latch: true once **stage** first hits `milad-review` (build sealed). A
   **meta** key, not a column (ADR-0060).
 - **gate** — the pr-watch invariant: a PR clears internal agent review AND Milad's own review before ANY
@@ -225,4 +225,4 @@ Post-ADR-0089, identity is a first-class database row, not a computed tuple.
   (`catalogue_sync.py`, `sense.sh`); state is sensor-driven, never session-remembered.
 - **tick** — one cadence beat of a **loop** role (e.g. control every 15m), re-armed by **resume_command**.
 - **mark** — `ccs mark`, the control-owned lifecycle transition (**completed**/**archived**); workers never
-  self-**mark**. (`db.ts` setCompleted/setArchived)
+  self-**mark**. (`catalogue/db-mutations.ts` setCompleted/setArchived)

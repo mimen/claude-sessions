@@ -1,4 +1,4 @@
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import { join } from "node:path";
 import { workUnitPath } from "../catalogue/spawn-contract.ts";
 

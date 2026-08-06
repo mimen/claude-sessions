@@ -93,7 +93,7 @@ export const EnrichmentPayloadSchema = z.object({
    * The existing titles come from the first message (a fallback label), or from Claude Code's own
    * early `ai-title`, or from the codex titler — all of which see the opening of a session and
    * guess where it is going. Enrichment reads how it actually ended, so it is simply better
-   * positioned. This never overwrites a title a human set; see `enrichment_title` in db.ts.
+   * positioned. This never overwrites a title a human set; see `enrichment_title` in db-schema.ts.
    */
   title: z.string().trim().min(1).max(MAX_TITLE),
   /** Where the session stands now. The only field a reader is guaranteed to see. */

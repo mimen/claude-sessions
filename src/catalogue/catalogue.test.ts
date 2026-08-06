@@ -3,21 +3,9 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, symlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  addTag,
-  childrenOf,
-  getRow,
-  getTags,
-  lifecycleOf,
-  openCatalogue,
-  parentEdges,
-  sessionsForEntity,
-  setArchived,
-  setCompleted,
-  setCustomTitle,
-  setParent,
-  setParked,
-} from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { childrenOf, getRow, getTags, lifecycleOf, parentEdges, sessionsForEntity } from "./db-queries.ts";
+import { addTag, setArchived, setCompleted, setCustomTitle, setParent, setParked } from "./db-mutations.ts";
 import { describe as dispo } from "./disposition.ts";
 
 /**

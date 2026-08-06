@@ -1,13 +1,5 @@
 import type { Database } from "bun:sqlite";
-import {
-  sessionsForCluster,
-  sessionsForRole,
-  sessionsForPr,
-  sessionsForGusWork,
-  sessionsForEpic,
-  sessionsForKey,
-  getRow,
-} from "../catalogue/db.ts";
+import { sessionsForCluster, sessionsForRole, sessionsForPr, sessionsForGusWork, sessionsForEpic, sessionsForKey, getRow } from "../catalogue/db-queries.ts";
 import { sessionById } from "../index/index.ts";
 import { allGroupings } from "../state/groupings.ts";
 

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { getAll, openCatalogue } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getAll } from "../catalogue/db-queries.ts";
 import { listByRecency } from "../index/index.ts";
 import { openIndex } from "../index/schema.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";

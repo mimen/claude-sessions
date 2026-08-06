@@ -1,5 +1,5 @@
-import type { CatalogueRow } from "./db.ts";
-import { lifecycleOf } from "./db.ts";
+import type { CatalogueRow } from "./db-schema.ts";
+import { lifecycleOf } from "./db-queries.ts";
 import { workUnitKey } from "./spawn-contract.ts";
 import { allRolesFromFiles } from "../roles/role-files.ts";
 

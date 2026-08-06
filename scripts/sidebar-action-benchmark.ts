@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildBridge } from "../src/cmux/bridge.ts";
-import { getRow } from "../src/catalogue/db.ts";
+import { getRow } from "../src/catalogue/db-queries.ts";
 import { distribution } from "../src/sidebar/bench/benchmark.ts";
 import { createSidebarFixture, FIXED_NOW } from "../src/sidebar/bench/fixtures.ts";
 import type { IndexedSessionInput } from "../src/sidebar/projection.ts";

@@ -2,7 +2,7 @@ import { realpathSync, statSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 import type { Database } from "bun:sqlite";
 import type { Config } from "../config.ts";
-import { openCatalogue } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
 import { buildEngine, resolveEngine } from "../inference/engine.ts";
 import {
   recordTitleFailure,

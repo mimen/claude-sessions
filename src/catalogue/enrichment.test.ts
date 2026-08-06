@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import type { Lifecycle } from "./db.ts";
+import type { Lifecycle } from "./db-schema.ts";
 import type { Recommendation } from "./enrichment-schema.ts";
 import {
   hydrateStoredEnrichment,

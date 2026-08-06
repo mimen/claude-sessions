@@ -73,7 +73,9 @@ Ground truth: extracted from `src/` on 2026-07-11. `⚠` marks a known issue.
 - **Inputs:** a DB handle + sessionId; mutations also take a value + `now` timestamp.
 - **Outputs:** a **CatalogueRow** (includes `identityKey`) / lists of sessionIds / void (mutations).
 - **Composes:** S6b (identity_key FK).
-- **Code:** `catalogue/db.ts` (CatalogueRow `:15-79`; migrations v1–v32 `:99-717`).
+- **Code:** `catalogue/db-schema.ts` (types, open, migrations), `catalogue/db-queries.ts` (hydration and reads),
+  `catalogue/db-mutations.ts` (raw writes). The enforced dependency direction is schema ← queries ← mutations;
+  sanctioned mutation importers are bounded by `catalogue/mutation-boundary.test.ts`.
 
 ### S6b · Identity + per-role attributes  ·  [U2, P0, ADR-0089]
 - **Definition:** the `identities` table — one row per durable work-item identity, keyed by the structured

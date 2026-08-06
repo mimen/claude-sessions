@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { renderStatusline, renderMeters, osc8, DEFAULT_STALENESS_MS } from "./render-statusline.ts";
-import type { CatalogueRow } from "./db.ts";
+import type { CatalogueRow } from "./db-schema.ts";
 
 const NOW = Date.parse("2026-07-10T12:00:00Z");
 

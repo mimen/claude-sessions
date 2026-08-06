@@ -4,33 +4,9 @@ import { constants, homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
-import {
-  openCatalogue,
-  setCustomTitle,
-  setKey,
-  setParent,
-  setSessionClass,
-  setCreatorKind,
-  setCreatorRef,
-  setLaunchChannel,
-  setForkedFromSessionId,
-  setLauncherIdentity,
-  setRole,
-  setProject,
-  setCluster,
-  setResumeId,
-  setGusWork,
-  setWorkUnitId,
-  setArchived,
-  setMeta,
-  getRow,
-  lifecycleOf,
-  sessionsForWorkUnit,
-  stampPrFacts,
-  type CreatorKind,
-  type LaunchChannel,
-  type RoleDef,
-} from "../catalogue/db.ts";
+import { openCatalogue, type CreatorKind, type LaunchChannel, type RoleDef } from "../catalogue/db-schema.ts";
+import { getRow, lifecycleOf, sessionsForWorkUnit } from "../catalogue/db-queries.ts";
+import { setCustomTitle, setKey, setParent, setSessionClass, setCreatorKind, setCreatorRef, setLaunchChannel, setForkedFromSessionId, setLauncherIdentity, setRole, setProject, setCluster, setResumeId, setGusWork, setWorkUnitId, setArchived, setMeta, stampPrFacts } from "../catalogue/db-mutations.ts";
 import pkg from "../../package.json" with { type: "json" };
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import { getIdentity } from "../catalogue/identities.ts";

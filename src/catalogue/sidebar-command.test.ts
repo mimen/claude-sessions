@@ -6,7 +6,8 @@ import {
   declineExistingSessionRecommendation,
   setExistingSessionLifecycle,
 } from "./commands.ts";
-import { getRow, openCatalogue } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { getRow } from "./db-queries.ts";
 import { getIdentity, mintIdentity } from "./identities.ts";
 
 function fixture(name: string): { readonly directory: string; readonly path: string } {

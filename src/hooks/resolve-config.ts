@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import { hookTypeDef } from "./hook-types.ts";
 import { resolveLevels, hookFileBase, type Level, type ResolveCtx } from "./resolve-levels.ts";
 import { mergeByKind } from "./merge.ts";

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
-import type { RoleDef, Kind, WorkUnitAnchorType, StageSchema } from "../catalogue/db.ts";
+import type { RoleDef, Kind, WorkUnitAnchorType, StageSchema } from "../catalogue/db-schema.ts";
 import { ROLE_MODEL_IDS, parseRoleModel, type RoleModelId } from "../resume/role-model-launch.ts";
 import { isPermissionMode, permissionModeValidationError } from "./permission-mode.ts";
 

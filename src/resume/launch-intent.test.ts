@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseOpts, resolveLaunchIntent, writeSessionMetadata, type NewSessionOpts } from "./new-session.ts";
-import { getRow, openCatalogue } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
 
 const PARENT = "11111111-1111-4111-8111-111111111111";
 

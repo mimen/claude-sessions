@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveConfig, parseMd } from "./resolve-config.ts";
 import type { ResolveCtx } from "./resolve-levels.ts";
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 
 function row(over: Partial<CatalogueRow>): CatalogueRow {
   return {

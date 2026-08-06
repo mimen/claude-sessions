@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { openCatalogue } from "../../catalogue/db.ts";
+import { openCatalogue } from "../../catalogue/db-schema.ts";
 import { buildBridge, type Bridge, type CmuxHookStore, type CmuxTree } from "../../cmux/bridge.ts";
 import { openIndex } from "../../index/schema.ts";
 import { CATALOGUE_PATH, DB_PATH } from "../../paths.ts";

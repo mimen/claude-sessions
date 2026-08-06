@@ -10,7 +10,8 @@
  */
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { openCatalogue, getRow } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { ccsRuntimeRoot } from "../inbox/identity-path.ts";
 import { ccsConfigRoot } from "../roles/role-files.ts";

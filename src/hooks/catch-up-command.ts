@@ -13,7 +13,8 @@
  * Exit codes: 0 = nothing new OR surfaced-no-restart; 2 = surfaced AND an entry needs a restart
  * (control keys on this to restart affected workers). 1 = not resolvable to a session.
  */
-import { openCatalogue, getRow } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
 import { CATALOGUE_PATH } from "../paths.ts";
 import { existsSync } from "node:fs";
 import { catchUp } from "../cluster/changelog.ts";

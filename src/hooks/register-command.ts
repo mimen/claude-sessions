@@ -6,7 +6,8 @@
  * a SessionStart hook's stdout to the agent as context). ALWAYS exits 0 — a hook must never
  * block session start (fail-open, ADR-0035).
  */
-import { openCatalogue, getRow } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
 import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
 import { handleSessionStart, type SessionStartPayload } from "./register.ts";
 import { composeClaudeMd } from "./compose-claude-md.ts";

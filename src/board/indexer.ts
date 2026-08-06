@@ -1,7 +1,8 @@
 import { statSync } from "node:fs";
 import { boardPath, readBoard } from "./paths.ts";
 import type { Board, BoardRow } from "./types.ts";
-import { openCatalogue, identityKeyOf, getRow } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { identityKeyOf, getRow } from "../catalogue/db-queries.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 
 export interface BoardIndex {

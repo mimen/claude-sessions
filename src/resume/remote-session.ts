@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
-import type { CreatorKind } from "../catalogue/db.ts";
+import type { CreatorKind } from "../catalogue/db-schema.ts";
 import { type Result, err, ok } from "../result.ts";
 import { shellQuote } from "./command.ts";
 import { BIRTH_MODEL_IDS, type BirthModelId } from "./role-model-launch.ts";

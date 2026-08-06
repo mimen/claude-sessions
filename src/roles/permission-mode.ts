@@ -1,5 +1,5 @@
 import type { ClusterManifest } from "../cluster/manifest.ts";
-import type { RoleDef } from "../catalogue/db.ts";
+import type { RoleDef } from "../catalogue/db-schema.ts";
 
 /** Claude Code's closed `--permission-mode` vocabulary (verified against `claude --help`). */
 export const PERMISSION_MODES = [

@@ -21,7 +21,8 @@
  */
 import { existsSync, mkdirSync, appendFileSync, statSync, readdirSync, readFileSync, writeFileSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { openCatalogue, getRow, type CatalogueRow } from "../catalogue/db.ts";
+import { openCatalogue, type CatalogueRow } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
 import { CATALOGUE_PATH, DEFAULT_STORE_PATH, runtimeRoot, ensureDataDir } from "../paths.ts";
 import { composeStopContext } from "./compose-claude-md.ts";
 

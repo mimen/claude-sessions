@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { getAll, lifecycleOf, type CatalogueRow, type Lifecycle } from "../catalogue/db.ts";
+import { type CatalogueRow, type Lifecycle } from "../catalogue/db-schema.ts";
+import { getAll, lifecycleOf } from "../catalogue/db-queries.ts";
 import { recommendationDisagreement } from "../catalogue/enrichment.ts";
 import { listByRecency, type SessionRow } from "../index/index.ts";
 import type { Recommendation } from "../catalogue/enrichment-schema.ts";

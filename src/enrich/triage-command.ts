@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline";
 import { openIndex } from "../index/schema.ts";
-import { openCatalogue } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
 import { mark } from "../catalogue/commands.ts";
 import { DB_PATH, CATALOGUE_PATH } from "../paths.ts";
 import { triageQueue, nextActions, type TriageItem } from "./triage.ts";

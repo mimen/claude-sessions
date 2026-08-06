@@ -1,7 +1,8 @@
 import { test, expect } from "bun:test";
 import { chooseLauncher, planResumeSession, resumeSessionEntry } from "./resume-session.ts";
 import { openIndex } from "../index/schema.ts";
-import { openCatalogue, setCluster, setResumeId, setRole } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { setCluster, setResumeId, setRole } from "../catalogue/db-mutations.ts";
 import type { SessionRow } from "../index/index.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 

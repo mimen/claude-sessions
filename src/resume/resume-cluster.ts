@@ -13,7 +13,8 @@
  */
 import type { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
-import { sessionsForCluster, getRow, lifecycleOf, type CatalogueRow, type RoleDef } from "../catalogue/db.ts";
+import { type CatalogueRow, type RoleDef } from "../catalogue/db-schema.ts";
+import { sessionsForCluster, getRow, lifecycleOf } from "../catalogue/db-queries.ts";
 import { liveBridge } from "../cmux/live.ts";
 import { openSessionIdsFrom, workspaceForSessionFrom } from "../cmux/liveness.ts";
 import type { Bridge } from "../cmux/bridge.ts";

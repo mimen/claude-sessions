@@ -4,21 +4,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Database } from "bun:sqlite";
-import {
-  addTag,
-  ensureRow,
-  getRow,
-  openCatalogue,
-  setMeta,
-  setParent,
-  setResumeId,
-  setSessionClass,
-  setCreatorKind,
-  setCreatorRef,
-  setLaunchChannel,
-  setLauncherIdentity,
-  type CreatorKind,
-} from "../catalogue/db.ts";
+import { openCatalogue, type CreatorKind } from "../catalogue/db-schema.ts";
+import { getRow } from "../catalogue/db-queries.ts";
+import { addTag, ensureRow, setMeta, setParent, setResumeId, setSessionClass, setCreatorKind, setCreatorRef, setLaunchChannel, setLauncherIdentity } from "../catalogue/db-mutations.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { err, ok, type Result } from "../result.ts";
 import { parseDelegateArgs } from "./args.ts";

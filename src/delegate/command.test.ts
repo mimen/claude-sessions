@@ -3,7 +3,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Database } from "bun:sqlite";
-import { openCatalogue, setSessionClass } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { setSessionClass } from "../catalogue/db-mutations.ts";
 import { delegateCommand } from "./command.ts";
 
 const PARENT = "754b9a1a-e5e0-49b7-8e45-d433e82621bf";

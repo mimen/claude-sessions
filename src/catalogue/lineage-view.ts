@@ -1,7 +1,7 @@
 import { createReadStream, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { ensureDataDir, CATALOGUE_PATH, DB_PATH } from "../paths.ts";
-import { openCatalogue } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
 import { sessionsForIdentity } from "./identities.ts";
 import { openIndex } from "../index/schema.ts";
 import { sessionById } from "../index/index.ts";

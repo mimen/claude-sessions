@@ -1,6 +1,6 @@
 import { expect, test, describe } from "bun:test";
 import { disagreement } from "./triage.ts";
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 import type { SessionRow } from "../index/index.ts";
 import type { Recommendation } from "../catalogue/enrichment-schema.ts";

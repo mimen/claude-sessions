@@ -13,7 +13,7 @@
  * This module has no I/O — the caller supplies an `onDisk` probe and applies the plan. That
  * keeps the reconcile logic (the risky part) fully testable.
  */
-import type { RoleDef } from "../catalogue/db.ts";
+import type { RoleDef } from "../catalogue/db-schema.ts";
 
 export interface DesiredLink {
   linkPath: string;

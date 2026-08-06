@@ -1,4 +1,4 @@
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import { resolveRole, ccsConfigRoot } from "../roles/role-files.ts";
 import { ccsRuntimeRoot } from "../inbox/identity-path.ts";
 import { resolveConfig } from "./resolve-config.ts";

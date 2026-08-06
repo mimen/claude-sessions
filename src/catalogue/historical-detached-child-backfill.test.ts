@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { openIndex } from "../index/schema.ts";
-import { openCatalogue } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
 import { historicalDetachedChildBackfillCommand } from "./historical-detached-child-backfill.ts";
 
 const PARENT = "11111111-1111-4111-8111-111111111111";

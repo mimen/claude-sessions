@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { openCatalogue, deriveIdentityKey } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
+import { deriveIdentityKey } from "./db-queries.ts";
 
 /**
  * ADR-0089 migration (v32 introduced identities + universal tables; v33 dropped legacy

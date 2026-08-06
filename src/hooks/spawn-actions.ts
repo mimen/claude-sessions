@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import { resolveConfig } from "./resolve-config.ts";
 import { liveResolveCtx } from "./compose-claude-md.ts";
 import type { Action } from "./merge.ts";

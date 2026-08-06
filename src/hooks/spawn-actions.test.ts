@@ -2,7 +2,7 @@ import { expect, test, afterEach } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import { runSpawnActions, BUILTIN_SPAWN_ACTIONS, knownSpawnActions, type SpawnActionHandler, type SpawnActionCtx } from "./spawn-actions.ts";
 
 const dirs: string[] = [];

@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { openCatalogue } from "./db.ts";
+import { openCatalogue } from "./db-schema.ts";
 
 const NOW = "2026-07-15T00:00:00Z";
 

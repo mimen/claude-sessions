@@ -1,4 +1,5 @@
-import { openCatalogue, getAll, identityKeyOf } from "../catalogue/db.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { getAll, identityKeyOf } from "../catalogue/db-queries.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import type { Board, BoardRow } from "./types.ts";
 import { readBoard, writeBoard } from "./paths.ts";
