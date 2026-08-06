@@ -1,4 +1,4 @@
-import type { StoredEnrichment } from "../catalogue/db.ts";
+import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 
 /**
  * When an enrichment is worth regenerating.
@@ -71,7 +71,9 @@ export function enrichmentStaleness(input: StalenessInput): StalenessVerdict {
     return { stale: true, reason: "never-enriched", messagesSince: messageCount };
   }
 
-  const messagesSince = Math.max(0, messageCount - enrichment.atMessages);
+  // Full catalogue hydration used to synthesize zero for a missing stored count. Keep that cadence
+  // fallback here while the canonical storage shape reports the absence honestly as null.
+  const messagesSince = Math.max(0, messageCount - (enrichment.atMessages ?? 0));
   if (attempts >= MAX_ENRICHMENT_ATTEMPTS) {
     return { stale: false, reason: "attempts-exhausted", messagesSince };
   }
@@ -96,7 +98,7 @@ export function enrichmentStaleness(input: StalenessInput): StalenessVerdict {
     return { stale: true, reason: "advanced", messagesSince };
   }
   if (messagesSince > 0) {
-    const enrichedAtMs = Date.parse(enrichment.at);
+    const enrichedAtMs = Date.parse(enrichment.at ?? "");
     // An unparseable timestamp means the row is damaged; treat it as due rather than trusting it.
     if (Number.isNaN(enrichedAtMs)) {
       return { stale: true, reason: "aged", messagesSince };

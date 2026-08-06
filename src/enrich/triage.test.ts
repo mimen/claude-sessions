@@ -1,6 +1,7 @@
 import { expect, test, describe } from "bun:test";
 import { disagreement } from "./triage.ts";
-import type { CatalogueRow, StoredEnrichment } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db.ts";
+import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 import type { SessionRow } from "../index/index.ts";
 import type { Recommendation } from "../catalogue/enrichment-schema.ts";
 
@@ -40,6 +41,7 @@ function enrichment(overrides: Partial<StoredEnrichment> = {}): StoredEnrichment
     atMessages: 120,
     at: NOW,
     legacyShape: false,
+    declined: null,
     ...overrides,
   };
 }
@@ -109,6 +111,17 @@ describe("disagreement", () => {
     // the queue second-guessing a choice that was already made.
     const item = disagreement(session(), row({ parkedTaskId: "task-1" }));
     expect(item).toBeNull();
+  });
+
+  test("the same declined verdict stays quiet while a different verdict resurfaces", () => {
+    expect(disagreement(
+      session(),
+      row({ enrichment: enrichment({ recommendation: "archive", declined: "archive" }) }),
+    )).toBeNull();
+    expect(disagreement(
+      session(),
+      row({ enrichment: enrichment({ recommendation: "complete", declined: "archive" }) }),
+    )?.target).toBe("completed");
   });
 
   test("junk is flagged so the queue can group it", () => {

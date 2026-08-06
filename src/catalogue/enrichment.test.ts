@@ -1,16 +1,23 @@
-import { test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { messagesSince, readEnrichments } from "./enrichment.ts";
+import type { Lifecycle } from "./db.ts";
+import type { Recommendation } from "./enrichment-schema.ts";
+import {
+  hydrateStoredEnrichment,
+  messagesSince,
+  OPTIONAL_ENRICHMENT_COLUMNS,
+  readEnrichments,
+  recommendationDisagreement,
+} from "./enrichment.ts";
 
-/** A catalogue carrying only the columns a given generation of the schema had. */
 function catalogueWith(columns: readonly string[], rows: ReadonlyArray<Record<string, unknown>>): Database {
   const db = new Database(":memory:");
   db.exec(`CREATE TABLE catalogue (${columns.join(", ")})`);
   for (const row of rows) {
     const names = Object.keys(row);
     db.query(
-      `INSERT INTO catalogue (${names.join(", ")}) VALUES (${names.map((n) => `$${n}`).join(", ")})`,
-    ).run(Object.fromEntries(names.map((n) => [`$${n}`, row[n] as never])));
+      `INSERT INTO catalogue (${names.join(", ")}) VALUES (${names.map((name) => `$${name}`).join(", ")})`,
+    ).run(Object.fromEntries(names.map((name) => [`$${name}`, row[name] as never])));
   }
   return db;
 }
@@ -18,6 +25,7 @@ function catalogueWith(columns: readonly string[], rows: ReadonlyArray<Record<st
 const V40 = [
   "session_id TEXT PRIMARY KEY",
   "resume_id TEXT",
+  "enrichment_title TEXT",
   "enrichment_state TEXT",
   "enrichment_summary TEXT",
   "enrichment_history TEXT",
@@ -27,168 +35,213 @@ const V40 = [
   "enrichment_recommendation TEXT",
   "enrichment_reason TEXT",
   "enrichment_junk INTEGER",
+  "enrichment_cwd_correct INTEGER",
+  "enrichment_suggested_location TEXT",
+  "enrichment_suggested_cwd TEXT",
   "enrichment_at_messages INTEGER",
   "enrichment_at TEXT",
+  "enrichment_declined TEXT",
 ];
 
 const V39 = [
   "session_id TEXT PRIMARY KEY",
   "resume_id TEXT",
+  "enrichment_title TEXT",
   "enrichment_summary TEXT",
   "enrichment_outstanding TEXT",
+  "enrichment_recommendation TEXT",
   "enrichment_reason TEXT",
   "enrichment_at_messages INTEGER",
+  "enrichment_at TEXT",
 ];
 
-test("reads a v40 row whole", () => {
-  const db = catalogueWith(V40, [{
-    session_id: "s1",
-    enrichment_state: "  The sidebar renders in the left rail  ",
-    enrichment_history: "Built the projection, then the web host",
-    enrichment_next: "Wire the suggestion chips",
-    enrichment_remaining: "Infinite scroll",
-    enrichment_recommendation: "continue",
-    enrichment_reason: "",
-    enrichment_junk: 0,
-    enrichment_at_messages: 120,
-    enrichment_at: "2026-07-27T00:00:00.000Z",
-  }]);
-  expect(readEnrichments(db).get("s1")).toEqual({
-    state: "The sidebar renders in the left rail",
-    history: "Built the projection, then the web host",
-    next: "Wire the suggestion chips",
-    remaining: "Infinite scroll",
-    recommendation: "continue",
-    reason: null,
-    junk: false,
-    atMessages: 120,
-    at: "2026-07-27T00:00:00.000Z",
-    declined: null,
+describe("canonical enrichment hydration", () => {
+  test("the shared optional-column list covers the canonical and compatibility inputs", () => {
+    expect(OPTIONAL_ENRICHMENT_COLUMNS).toEqual([
+      "enrichment_title", "enrichment_state", "enrichment_summary", "enrichment_history",
+      "enrichment_next", "enrichment_remaining", "enrichment_outstanding",
+      "enrichment_recommendation", "enrichment_reason", "enrichment_junk",
+      "enrichment_cwd_correct", "enrichment_suggested_location", "enrichment_suggested_cwd",
+      "enrichment_at_messages", "enrichment_at", "enrichment_declined",
+    ]);
+  });
+
+  test("hydrates a valid v40 row and normalizes whitespace and optional values", () => {
+    expect(hydrateStoredEnrichment({
+      enrichment_title: "  Sidebar phase five  ",
+      enrichment_state: "  Integrated and green  ",
+      enrichment_history: "   ",
+      enrichment_next: " Verify snapshots ",
+      enrichment_remaining: null,
+      enrichment_recommendation: "archive",
+      enrichment_reason: " Superseded ",
+      enrichment_junk: 1,
+      enrichment_cwd_correct: 0,
+      enrichment_suggested_location: " worktree ",
+      enrichment_suggested_cwd: " /tmp/worktree ",
+      enrichment_at_messages: 42,
+      enrichment_at: " 2026-08-05T12:00:00.000Z ",
+      enrichment_declined: "complete",
+    })).toEqual({
+      title: "Sidebar phase five",
+      state: "Integrated and green",
+      history: null,
+      next: "Verify snapshots",
+      remaining: null,
+      recommendation: "archive",
+      reason: "Superseded",
+      junk: true,
+      cwdCorrect: false,
+      suggestedLocation: "worktree",
+      suggestedCwd: "/tmp/worktree",
+      atMessages: 42,
+      at: "2026-08-05T12:00:00.000Z",
+      legacyShape: false,
+      declined: "complete",
+    });
+  });
+
+  test("hydrates valid v39 prose through canonical fields and marks the legacy shape", () => {
+    expect(hydrateStoredEnrichment({
+      enrichment_summary: "Legacy state",
+      enrichment_outstanding: "Legacy next",
+      enrichment_at: "2026-07-01T00:00:00.000Z",
+    })).toMatchObject({
+      state: "Legacy state",
+      next: "Legacy next",
+      legacyShape: true,
+    });
+  });
+
+  test("keeps state without at and at without state literal", () => {
+    expect(hydrateStoredEnrichment({ enrichment_state: "state" })).toMatchObject({
+      state: "state",
+      at: null,
+      legacyShape: false,
+    });
+    expect(hydrateStoredEnrichment({ enrichment_at: "2026-08-05T12:00:00.000Z" })).toMatchObject({
+      state: null,
+      at: "2026-08-05T12:00:00.000Z",
+      legacyShape: false,
+    });
+  });
+
+  test("runtime-validates recommendation and declined independently", () => {
+    expect(hydrateStoredEnrichment({
+      enrichment_recommendation: "delete",
+      enrichment_declined: "archive",
+    })).toMatchObject({ recommendation: null, declined: "archive" });
+    expect(hydrateStoredEnrichment({
+      enrichment_recommendation: "complete",
+      enrichment_declined: "delete",
+    })).toMatchObject({ recommendation: "complete", declined: null });
+    expect(hydrateStoredEnrichment({})).toMatchObject({ recommendation: null, declined: null });
+  });
+
+  test("a missing count is null rather than a synthesized zero", () => {
+    expect(hydrateStoredEnrichment({}).atMessages).toBeNull();
   });
 });
 
-// The split was additive, so most rows in a real catalogue are still v39 shaped. Falling back is
-// the normal path, not an edge case.
-test("a v39 row falls back to summary and outstanding", () => {
-  const db = catalogueWith(V39, [{
-    session_id: "s1",
-    enrichment_summary: "Legacy prose",
-    enrichment_outstanding: "The one open thing",
-    enrichment_at_messages: 50,
-  }]);
-  const found = readEnrichments(db).get("s1")!;
-  expect(found.state).toBe("Legacy prose");
-  expect(found.next).toBe("The one open thing");
-  expect(found.history).toBeNull();
-  expect(found.remaining).toBeNull();
+describe("optional enrichment map adapter", () => {
+  test("reads valid v40 and v39 rows", () => {
+    const v40 = catalogueWith(V40, [{
+      session_id: "v40",
+      enrichment_title: "Current",
+      enrichment_state: "State",
+      enrichment_next: "Next",
+      enrichment_recommendation: "continue",
+      enrichment_at: "2026-08-05T12:00:00.000Z",
+    }]);
+    expect(readEnrichments(v40).get("v40")).toMatchObject({
+      title: "Current", state: "State", next: "Next", legacyShape: false,
+    });
+
+    const v39 = catalogueWith(V39, [{
+      session_id: "v39",
+      enrichment_summary: "Legacy",
+      enrichment_outstanding: "Open",
+    }]);
+    expect(readEnrichments(v39).get("v39")).toMatchObject({
+      state: "Legacy", next: "Open", legacyShape: true,
+    });
+  });
+
+  test("state is the optional-map presence key even when at is absent", () => {
+    const db = catalogueWith(V40, [
+      { session_id: "state-only", enrichment_state: "Readable" },
+      { session_id: "at-only", enrichment_at: "2026-08-05T12:00:00.000Z" },
+    ]);
+    expect(readEnrichments(db).has("state-only")).toBeTrue();
+    expect(readEnrichments(db).has("at-only")).toBeFalse();
+  });
+
+  test("canonical and resume aliases share one record", () => {
+    const db = catalogueWith(V40, [{
+      session_id: "canonical",
+      resume_id: "resume",
+      enrichment_state: "same record",
+    }]);
+    const found = readEnrichments(db);
+    expect(found.get("canonical")).toBe(found.get("resume"));
+  });
+
+  test("blank rows and pre-enrichment catalogues yield no entry", () => {
+    const blank = catalogueWith(V40, [
+      { session_id: "blank", enrichment_state: "   " },
+      { session_id: "null", enrichment_state: null },
+    ]);
+    expect(readEnrichments(blank).size).toBe(0);
+    expect(readEnrichments(catalogueWith(["session_id TEXT PRIMARY KEY"], [{ session_id: "s" }])).size)
+      .toBe(0);
+  });
+
+  test("an unreadable catalogue remains fail-open", () => {
+    expect(readEnrichments(new Database(":memory:")).size).toBe(0);
+  });
 });
 
-test("v40 state wins over a legacy summary on the same row", () => {
-  const db = catalogueWith(V40, [{
-    session_id: "s1",
-    enrichment_state: "current",
-    enrichment_summary: "stale",
-    enrichment_next: "do this",
-    enrichment_outstanding: "old open work",
-  }]);
-  const found = readEnrichments(db).get("s1")!;
-  expect(found.state).toBe("current");
-  expect(found.next).toBe("do this");
+describe("recommendation disagreement", () => {
+  const recommendations: Array<Recommendation | null> = [
+    null, "continue", "complete", "archive", "handoff",
+  ];
+  const lifecycles: Lifecycle[] = ["idle", "parked", "completed", "archived"];
+
+  test("characterizes every recommendation against every catalogue lifecycle", () => {
+    for (const recommendation of recommendations) {
+      for (const lifecycle of lifecycles) {
+        const expected = lifecycle !== "idle" || recommendation === null || recommendation === "continue"
+          ? null
+          : recommendation === "complete"
+          ? "completed"
+          : "archived";
+        expect(recommendationDisagreement(recommendation, null, lifecycle)).toBe(expected);
+      }
+    }
+  });
+
+  test("same declined verdict is quiet and a different verdict is new information", () => {
+    expect(recommendationDisagreement("archive", "archive", "idle")).toBeNull();
+    expect(recommendationDisagreement("archive", "complete", "idle")).toBe("archived");
+    expect(recommendationDisagreement("complete", "archive", "idle")).toBe("completed");
+  });
+
+  test("cross-terminal, handoff-terminal, parked, and junk-archive domain cases stay quiet or map once", () => {
+    expect(recommendationDisagreement("complete", null, "archived")).toBeNull();
+    expect(recommendationDisagreement("archive", null, "completed")).toBeNull();
+    expect(recommendationDisagreement("handoff", null, "archived")).toBeNull();
+    expect(recommendationDisagreement("complete", null, "parked")).toBeNull();
+    // Junk is presentation metadata; its archive recommendation follows the ordinary domain rule.
+    expect(recommendationDisagreement("archive", null, "idle")).toBe("archived");
+  });
 });
 
-test("recommendation is constrained to the shipped vocabulary", () => {
-  const db = catalogueWith(V40, [
-    { session_id: "ok", enrichment_state: "s", enrichment_recommendation: "archive" },
-    { session_id: "bogus", enrichment_state: "s", enrichment_recommendation: "delete" },
-    { session_id: "none", enrichment_state: "s", enrichment_recommendation: null },
-  ]);
-  const found = readEnrichments(db);
-  expect(found.get("ok")!.recommendation).toBe("archive");
-  // A verb outside the enum reads as no recommendation rather than passing through, so a UI can
-  // never be handed an action it has no button for.
-  expect(found.get("bogus")!.recommendation).toBeNull();
-  expect(found.get("none")!.recommendation).toBeNull();
-});
-
-test("junk is a real boolean", () => {
-  const db = catalogueWith(V40, [
-    { session_id: "junk", enrichment_state: "s", enrichment_junk: 1 },
-    { session_id: "kept", enrichment_state: "s", enrichment_junk: 0 },
-    { session_id: "unasked", enrichment_state: "s", enrichment_junk: null },
-  ]);
-  const found = readEnrichments(db);
-  expect(found.get("junk")!.junk).toBe(true);
-  expect(found.get("kept")!.junk).toBe(false);
-  expect(found.get("unasked")!.junk).toBe(false);
-});
-
-test("a resumed session finds its enrichment under either identity", () => {
-  const db = catalogueWith(V40, [{
-    session_id: "canonical",
-    resume_id: "resumed",
-    enrichment_state: "same record",
-  }]);
-  const found = readEnrichments(db);
-  expect(found.get("canonical")).toBe(found.get("resumed")!);
-});
-
-test("blank and missing enrichments yield no entry", () => {
-  const db = catalogueWith(V40, [
-    { session_id: "blank", enrichment_state: "   " },
-    { session_id: "null", enrichment_state: null },
-  ]);
-  expect(readEnrichments(db).size).toBe(0);
-});
-
-// v40 requires `reason` to be EMPTY on continue and complete, so empty has to read as "no reason"
-// rather than as an empty string a UI would render as a blank line.
-test("an empty reason reads as null", () => {
-  const db = catalogueWith(V40, [{
-    session_id: "s1",
-    enrichment_state: "s",
-    enrichment_recommendation: "complete",
-    enrichment_reason: "",
-  }]);
-  expect(readEnrichments(db).get("s1")!.reason).toBeNull();
-});
-
-test("a catalogue predating enrichment entirely yields nothing", () => {
-  const db = catalogueWith(["session_id TEXT PRIMARY KEY"], [{ session_id: "s1" }]);
-  expect(readEnrichments(db).size).toBe(0);
-});
-
-test("an unreadable catalogue costs the caller nothing", () => {
-  expect(readEnrichments(new Database(":memory:")).size).toBe(0);
-});
-
-test("a declined verb is read back, and an unknown one is not", () => {
-  const db = catalogueWith([...V40, "enrichment_declined TEXT"], [
-    { session_id: "declined", enrichment_state: "s", enrichment_declined: "archive" },
-    { session_id: "bogus", enrichment_state: "s", enrichment_declined: "delete" },
-    { session_id: "none", enrichment_state: "s" },
-  ]);
-  const found = readEnrichments(db);
-  expect(found.get("declined")!.declined).toBe("archive");
-  expect(found.get("bogus")!.declined).toBeNull();
-  expect(found.get("none")!.declined).toBeNull();
-});
-
-test("a catalogue without the declined column reads as nothing declined", () => {
-  const db = catalogueWith(V40, [{ session_id: "s1", enrichment_state: "s" }]);
-  expect(readEnrichments(db).get("s1")!.declined).toBeNull();
-});
-
-test("staleness counts messages appended since the enrichment", () => {
-  expect(messagesSince({ atMessages: 100 }, 142)).toBe(42);
-  expect(messagesSince({ atMessages: 100 }, 100)).toBe(0);
-});
-
-test("an enrichment ahead of the current count reads as current, never negative", () => {
-  expect(messagesSince({ atMessages: 200 }, 150)).toBe(0);
-});
-
-test("staleness is unknown, not zero, when either count is missing", () => {
-  expect(messagesSince({ atMessages: null }, 142)).toBeNull();
-  expect(messagesSince({ atMessages: 100 }, null)).toBeNull();
-  expect(messagesSince({ atMessages: 100 }, undefined)).toBeNull();
+describe("messagesSince", () => {
+  test("counts progress, clamps rewinds, and preserves unknown counts", () => {
+    expect(messagesSince({ atMessages: 100 }, 142)).toBe(42);
+    expect(messagesSince({ atMessages: 200 }, 150)).toBe(0);
+    expect(messagesSince({ atMessages: null }, 142)).toBeNull();
+    expect(messagesSince({ atMessages: 100 }, null)).toBeNull();
+    expect(messagesSince({ atMessages: 100 }, undefined)).toBeNull();
+  });
 });

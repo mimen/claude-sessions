@@ -95,6 +95,7 @@ function catalogueRead(rows: ReadonlyArray<{
   readonly archived?: boolean;
 }> = []): CatalogueReadOutcome {
   const lifecycles = new Map<string, "active" | "completed" | "archived">();
+  const catalogueLifecycles = new Map<string, "idle" | "completed" | "archived">();
   const canonicalSessionIds = new Map<string, string>();
   const sessionIds = new Map<"active" | "completed" | "archived", string[]>([
     ["active", []],
@@ -104,6 +105,7 @@ function catalogueRead(rows: ReadonlyArray<{
   for (const row of rows) {
     const lifecycle = row.archived ? "archived" : row.completed ? "completed" : "active";
     lifecycles.set(row.sessionId, lifecycle);
+    catalogueLifecycles.set(row.sessionId, lifecycle === "active" ? "idle" : lifecycle);
     canonicalSessionIds.set(row.sessionId, row.sessionId);
     sessionIds.get(lifecycle)?.push(row.sessionId);
   }
@@ -111,10 +113,12 @@ function catalogueRead(rows: ReadonlyArray<{
     const resumeId = row.resumeId ?? row.sessionId;
     if (lifecycles.has(resumeId)) continue;
     lifecycles.set(resumeId, lifecycles.get(row.sessionId) ?? "active");
+    catalogueLifecycles.set(resumeId, catalogueLifecycles.get(row.sessionId) ?? "idle");
     canonicalSessionIds.set(resumeId, row.sessionId);
   }
   const facts: CatalogueSnapshotFacts = {
     lifecycles,
+    catalogueLifecycles,
     canonicalSessionIds,
     preferredTitles: new Map(),
     memberships: new Map(),

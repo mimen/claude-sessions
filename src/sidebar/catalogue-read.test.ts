@@ -3,9 +3,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openCatalogue } from "../catalogue/db.ts";
+import { getRow, lifecycleOf, openCatalogue } from "../catalogue/db.ts";
 import { mintIdentity } from "../catalogue/identities.ts";
+import { disagreement } from "../enrich/triage.ts";
+import type { SessionRow } from "../index/index.ts";
 import { readCatalogueReadOnly } from "./catalogue-read.ts";
+import { projectSidebar, type IndexedSessionInput } from "./projection.ts";
 
 function temporaryCatalogue(
   name: string,
@@ -53,6 +56,7 @@ describe("readCatalogueReadOnly", () => {
 
       expect(outcome.facts.lifecycles.get("canonical")).toBe("completed");
       expect(outcome.facts.lifecycles.get("resume")).toBe("completed");
+      expect(outcome.facts.catalogueLifecycles.get("resume")).toBe("completed");
       expect(outcome.facts.canonicalSessionIds.get("resume")).toBe("canonical");
       expect(outcome.facts.preferredTitles.get("canonical")).toBe("Human title");
       expect(outcome.facts.preferredTitles.get("resume")).toBe("Human title");
@@ -66,6 +70,7 @@ describe("readCatalogueReadOnly", () => {
       expect(outcome.facts.auxiliary.has("auxiliary")).toBeTrue();
       expect(outcome.facts.auxiliary.has("aux-resume")).toBeTrue();
       expect(outcome.facts.summaries.get("resume")).toEqual({
+        title: "Generated title",
         state: "Current state",
         history: "History",
         next: "Next action",
@@ -73,8 +78,12 @@ describe("readCatalogueReadOnly", () => {
         recommendation: "archive",
         reason: "Reason",
         junk: true,
+        cwdCorrect: null,
+        suggestedLocation: null,
+        suggestedCwd: null,
         atMessages: 42,
         at: "2026-08-05T12:00:00.000Z",
+        legacyShape: false,
         declined: "archive",
       });
     } finally {
@@ -147,6 +156,129 @@ describe("readCatalogueReadOnly", () => {
       expect(outcome.facts.lifecycles.get("partial")).toBe("archived");
       expect(outcome.facts.memberships.size).toBe(0);
       expect(outcome.facts.summaries.size).toBe(0);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test("identity-only archived, completed, and parked lifecycle matches full hydration and CLI triage", () => {
+    const fixture = temporaryCatalogue("identity-lifecycle", (path) => {
+      const db = openCatalogue(path, { materialize: false });
+      try {
+        for (const [suffix, field] of [
+          ["archived", "archived"],
+          ["completed", "completed"],
+          ["parked", "parked_task_id"],
+        ] as const) {
+          const identityKey = `sidebar:worker:${suffix}`;
+          mintIdentity(
+            db,
+            identityKey,
+            { cluster: "sidebar", role: "worker" },
+            "2026-08-05T12:00:00.000Z",
+          );
+          const value = field === "parked_task_id" ? "task-1" : 1;
+          db.query(`UPDATE identities SET ${field} = $value WHERE identity_key = $key`).run({
+            $value: value,
+            $key: identityKey,
+          });
+          db.query(
+            `INSERT INTO catalogue
+               (session_id, identity_key, enrichment_state, enrichment_recommendation, enrichment_at)
+             VALUES ($id, $key, 'Observed state', $recommendation, '2026-08-05T12:00:00.000Z')`,
+          ).run({
+            $id: suffix,
+            $key: identityKey,
+            $recommendation: suffix === "completed" ? "archive" : "complete",
+          });
+        }
+      } finally {
+        db.close();
+      }
+    });
+
+    try {
+      const full = openCatalogue(fixture.path, { materialize: false });
+      const fullRows = new Map(
+        ["archived", "completed", "parked"].map((id) => [id, getRow(full, id)] as const),
+      );
+      full.close();
+      const outcome = readCatalogueReadOnly(fixture.path);
+      expect(outcome.status).toBe("ok");
+      if (outcome.status !== "ok") throw new Error("identity lifecycle catalogue was not readable");
+
+      for (const id of ["archived", "completed", "parked"] as const) {
+        const fullRow = fullRows.get(id) ?? null;
+        const fullLifecycle = lifecycleOf(fullRow);
+        expect(outcome.facts.catalogueLifecycles.get(id)).toBe(fullLifecycle);
+        const session = {
+          sessionId: id,
+          title: id,
+          cwd: "/repo",
+          msgCount: 10,
+          lastTs: "2026-08-05T12:00:00.000Z",
+          isSubagent: false,
+        } as SessionRow;
+        expect(disagreement(session, fullRow)).toBeNull();
+
+        const browserLifecycle = outcome.facts.lifecycles.get(id) ?? "active";
+        const indexed: IndexedSessionInput = {
+          sessionId: id,
+          resumeId: id,
+          title: id,
+          cwd: "/repo",
+          lastTs: "2026-08-05T12:00:00.000Z",
+          models: [],
+          costByModel: {},
+        };
+        const snapshot = projectSidebar({
+          live: [],
+          indexed: [indexed],
+          lifecycles: outcome.facts.lifecycles,
+          catalogueLifecycles: outcome.facts.catalogueLifecycles,
+          summaries: outcome.facts.summaries,
+          checkouts: new Map(),
+          scope: browserLifecycle,
+          livenessReadable: true,
+          now: Date.parse("2026-08-05T12:00:00.000Z"),
+        });
+        const sidebarRow = snapshot.rows.find((row) => row.kind === "session" && row.id === id);
+        expect(sidebarRow?.kind === "session" && sidebarRow.suggestion).toBeNull();
+      }
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps parked distinct for decisions while preserving the three-state browser lifecycle", () => {
+    const fixture = temporaryCatalogue("catalogue-parked", (path) => {
+      const db = new Database(path);
+      db.exec(`
+        CREATE TABLE catalogue (
+          session_id TEXT PRIMARY KEY,
+          resume_id TEXT,
+          parked_task_id TEXT,
+          enrichment_state TEXT,
+          enrichment_recommendation TEXT,
+          enrichment_declined TEXT
+        );
+        INSERT INTO catalogue VALUES
+          ('parked', 'parked-resume', 'task-1', 'Waiting', 'complete', NULL),
+          ('invalid', NULL, NULL, 'Readable', 'delete', 'delete');
+      `);
+      db.close();
+    });
+
+    try {
+      const outcome = readCatalogueReadOnly(fixture.path);
+      expect(outcome.status).toBe("ok");
+      if (outcome.status !== "ok") throw new Error("parked catalogue was not readable");
+      expect(outcome.facts.lifecycles.get("parked-resume")).toBe("active");
+      expect(outcome.facts.catalogueLifecycles.get("parked-resume")).toBe("parked");
+      expect(outcome.facts.summaries.get("invalid")).toMatchObject({
+        recommendation: null,
+        declined: null,
+      });
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }

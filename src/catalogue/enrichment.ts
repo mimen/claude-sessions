@@ -1,54 +1,30 @@
-/**
- * Reading enrichment back out of the catalogue.
- *
- * `enrichment-schema.ts` owns the write side: what a valid enrichment is, and the vocabulary the
- * model may use. This is the read side, and it lives here rather than inside any one UI because
- * every reader must agree about what a session's verdict is. A verdict that disagreed between two
- * surfaces would be worse than showing none.
- *
- * The catalogue row type does not carry these columns, so they are queried directly. Roughly a
- * fifth of sessions have ever been enriched, so a missing enrichment is the normal case and yields
- * no entry rather than an empty record every caller would have to special-case.
- */
 import type { Database } from "bun:sqlite";
 import { RECOMMENDATIONS, type Recommendation } from "./enrichment-schema.ts";
 
+/** Catalogue lifecycle vocabulary needed by recommendation decisions. */
+export type RecommendationLifecycle = "idle" | "parked" | "completed" | "archived";
+
 /**
- * What enrichment concluded, as stored.
+ * The complete stored enrichment shape shared by catalogue, sidebar, staleness, and triage.
  *
- * v40 split the two prose fields that had been doing double duty: `summary` became `state` (where
- * it stands) plus `history` (how it got there), and `outstanding` became `next` (one imperative
- * action) plus `remaining`. Both generations are readable here, because the split was additive and
- * only recently-swept rows carry the new columns.
+ * Storage hydration stays literal: optional prose, timestamps, and counts are null when absent.
+ * Callers own display defaults such as an empty line, the indexed title, or `continue`.
  */
 export interface StoredEnrichment {
-  /** Where the session stands now. The one field a reader is guaranteed to get. */
-  readonly state: string;
-  /** How it got there. Empty on a short session. */
+  readonly title: string | null;
+  readonly state: string | null;
   readonly history: string | null;
-  /** The one thing to do first on resuming. Empty when nothing is open. */
   readonly next: string | null;
-  /** Everything still open after `next`. */
   readonly remaining: string | null;
-  /** What should happen to this session. */
   readonly recommendation: Recommendation | null;
-  /**
-   * Why the recommendation follows. Conditional by design: v40 requires it for archive, handoff and
-   * junk, and requires it EMPTY for continue and complete, where it only ever restated the verdict.
-   */
   readonly reason: string | null;
-  /** Never worth starting. v40 makes junk imply an archive recommendation. */
   readonly junk: boolean;
-  /** Transcript message count when the enrichment was written. */
+  readonly cwdCorrect: boolean | null;
+  readonly suggestedLocation: string | null;
+  readonly suggestedCwd: string | null;
   readonly atMessages: number | null;
-  /** ISO timestamp of generation. */
   readonly at: string | null;
-  /**
-   * A verdict the reader declined, if any.
-   *
-   * The verb rather than a flag: enrichment reaching a DIFFERENT conclusion later is new
-   * information and should surface, while the same one staying quiet is the whole point.
-   */
+  readonly legacyShape: boolean;
   readonly declined: Recommendation | null;
 }
 
@@ -58,30 +34,13 @@ export interface EnrichmentWithStaleness extends StoredEnrichment {
 }
 
 /**
- * How far the transcript has moved since an enrichment was written, or null when either count is
- * unknown.
+ * Every enrichment column a compatibility reader may select opportunistically.
  *
- * Messages rather than turns: `enrichment_at_messages` is stamped from `msg_count`, so it has to be
- * compared against that same counter. Comparing it to `user_turns`, which runs 20-30x smaller,
- * would report every enrichment as wildly stale.
+ * The legacy summary/outstanding columns remain inputs to the canonical fields until the additive
+ * schema has fully drained. Readers decide which columns exist and select missing ones as NULL.
  */
-export function messagesSince(
-  enrichment: Pick<StoredEnrichment, "atMessages">,
-  currentMessageCount: number | null | undefined,
-): number | null {
-  if (enrichment.atMessages === null) return null;
-  if (currentMessageCount === null || currentMessageCount === undefined) return null;
-  // A negative would say the transcript went backwards; an enrichment stamped ahead of the current
-  // count is simply current.
-  return Math.max(0, currentMessageCount - enrichment.atMessages);
-}
-
-function isRecommendation(value: string | null): value is Recommendation {
-  return value !== null && (RECOMMENDATIONS as readonly string[]).includes(value);
-}
-
-/** Columns read opportunistically: absent ones are selected as NULL rather than failing the query. */
-const OPTIONAL_COLUMNS = [
+export const OPTIONAL_ENRICHMENT_COLUMNS = [
+  "enrichment_title",
   "enrichment_state",
   "enrichment_summary",
   "enrichment_history",
@@ -91,17 +50,85 @@ const OPTIONAL_COLUMNS = [
   "enrichment_recommendation",
   "enrichment_reason",
   "enrichment_junk",
+  "enrichment_cwd_correct",
+  "enrichment_suggested_location",
+  "enrichment_suggested_cwd",
   "enrichment_at_messages",
   "enrichment_at",
   "enrichment_declined",
 ] as const;
 
+function text(value: unknown): string | null {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function recommendation(value: unknown): Recommendation | null {
+  const candidate = text(value);
+  return candidate !== null && (RECOMMENDATIONS as readonly string[]).includes(candidate)
+    ? candidate as Recommendation
+    : null;
+}
+
+/** Purely normalize one selected SQLite row into the canonical stored shape. */
+export function hydrateStoredEnrichment(row: Readonly<Record<string, unknown>>): StoredEnrichment {
+  const nativeState = text(row.enrichment_state);
+  return {
+    title: text(row.enrichment_title),
+    state: nativeState ?? text(row.enrichment_summary),
+    history: text(row.enrichment_history),
+    next: text(row.enrichment_next) ?? text(row.enrichment_outstanding),
+    remaining: text(row.enrichment_remaining),
+    recommendation: recommendation(row.enrichment_recommendation),
+    reason: text(row.enrichment_reason),
+    junk: row.enrichment_junk === 1 || row.enrichment_junk === true,
+    cwdCorrect: row.enrichment_cwd_correct === null || row.enrichment_cwd_correct === undefined
+      ? null
+      : row.enrichment_cwd_correct === 1 || row.enrichment_cwd_correct === true,
+    suggestedLocation: text(row.enrichment_suggested_location),
+    suggestedCwd: text(row.enrichment_suggested_cwd),
+    atMessages: typeof row.enrichment_at_messages === "number"
+      ? row.enrichment_at_messages
+      : null,
+    at: text(row.enrichment_at),
+    legacyShape: nativeState === null && text(row.enrichment_summary) !== null,
+    declined: recommendation(row.enrichment_declined),
+  };
+}
+
 /**
- * Every enrichment in the catalogue, keyed by session id and by resume alias so a resumed session
- * finds the record written under either identity.
+ * How far the transcript has moved since an enrichment was written, or null when either count is
+ * unknown.
+ */
+export function messagesSince(
+  enrichment: Pick<StoredEnrichment, "atMessages">,
+  currentMessageCount: number | null | undefined,
+): number | null {
+  if (enrichment.atMessages === null) return null;
+  if (currentMessageCount === null || currentMessageCount === undefined) return null;
+  return Math.max(0, currentMessageCount - enrichment.atMessages);
+}
+
+/**
+ * The lifecycle change implied by an unhandled recommendation, or null when there is no domain
+ * disagreement worth surfacing.
+ */
+export function recommendationDisagreement(
+  recommendationValue: Recommendation | null,
+  declined: Recommendation | null,
+  lifecycle: RecommendationLifecycle,
+): RecommendationLifecycle | null {
+  if (recommendationValue === null || recommendationValue === "continue") return null;
+  if (declined === recommendationValue) return null;
+  if (lifecycle === "parked" || lifecycle === "completed" || lifecycle === "archived") return null;
+  return recommendationValue === "complete" ? "completed" : "archived";
+}
+
+/**
+ * Every enrichment in the catalogue, keyed by session id and by resume alias.
  *
- * A catalogue predating any of these columns yields the fields it does have; one predating
- * enrichment entirely yields nothing.
+ * This optional feature remains fail-open: an old schema or failed query yields no enrichments and
+ * never hides lifecycle data owned by the full catalogue reader.
  */
 export function readEnrichments(db: Database): Map<string, StoredEnrichment> {
   const found = new Map<string, StoredEnrichment>();
@@ -110,64 +137,33 @@ export function readEnrichments(db: Database): Map<string, StoredEnrichment> {
       (db.query("PRAGMA table_info(catalogue)").all() as Array<{ name: string }>)
         .map((column) => column.name),
     );
-
-    // `state` is v40's guaranteed field, `summary` its predecessor. Naming a column that does not
-    // exist is a hard SQL error, so the filter is built from what is actually present, and with
-    // neither there is no enrichment to read.
-    const present = ["enrichment_state", "enrichment_summary"].filter((c) => columns.has(c));
+    const present = ["enrichment_state", "enrichment_summary"].filter((name) => columns.has(name));
     if (present.length === 0) return found;
+
     const where = present
       .map((column) => `(${column} IS NOT NULL AND TRIM(${column}) != '')`)
       .join(" OR ");
-
-    const selected = OPTIONAL_COLUMNS
+    const selected = OPTIONAL_ENRICHMENT_COLUMNS
       .map((name) => (columns.has(name) ? name : `NULL AS ${name}`))
       .join(",\n              ");
-
     const rows = db.query(
       `SELECT session_id, resume_id,
               ${selected}
          FROM catalogue
         WHERE ${where}`,
-    ).all() as Array<Record<string, string | number | null>>;
-
-    const text = (value: string | number | null | undefined): string | null => {
-      const trimmed = typeof value === "string" ? value.trim() : "";
-      return trimmed.length > 0 ? trimmed : null;
-    };
+    ).all() as Array<Record<string, unknown>>;
 
     for (const row of rows) {
-      // v40's `state` wins wherever a sweep has produced one: it answers the same question more
-      // directly than the legacy `summary`.
-      const state = text(row.enrichment_state) ?? text(row.enrichment_summary);
-      if (state === null) continue;
-
-      const record: StoredEnrichment = {
-        state,
-        history: text(row.enrichment_history),
-        // `outstanding` was v39's single open-work field; v40 promoted its first action to `next`.
-        next: text(row.enrichment_next) ?? text(row.enrichment_outstanding),
-        remaining: text(row.enrichment_remaining),
-        recommendation: isRecommendation(text(row.enrichment_recommendation))
-          ? (text(row.enrichment_recommendation) as Recommendation)
-          : null,
-        reason: text(row.enrichment_reason),
-        junk: row.enrichment_junk === 1,
-        atMessages: typeof row.enrichment_at_messages === "number"
-          ? row.enrichment_at_messages
-          : null,
-        at: text(row.enrichment_at),
-        declined: isRecommendation(text(row.enrichment_declined))
-          ? (text(row.enrichment_declined) as Recommendation)
-          : null,
-      };
-
-      found.set(row.session_id as string, record);
-      const resumeId = row.resume_id as string | null;
+      const record = hydrateStoredEnrichment(row);
+      if (record.state === null) continue;
+      const sessionId = typeof row.session_id === "string" ? row.session_id : null;
+      if (sessionId === null) continue;
+      found.set(sessionId, record);
+      const resumeId = typeof row.resume_id === "string" ? row.resume_id : null;
       if (resumeId) found.set(resumeId, record);
     }
   } catch {
-    // An enrichment is a nicety; failing to read one must never cost the caller its lifecycle data.
+    // Enrichment is optional here; lifecycle ownership stays with the caller's catalogue adapter.
   }
   return found;
 }

@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { getAll, lifecycleOf, type CatalogueRow, type Lifecycle } from "../catalogue/db.ts";
+import { recommendationDisagreement } from "../catalogue/enrichment.ts";
 import { listByRecency, type SessionRow } from "../index/index.ts";
 import type { Recommendation } from "../catalogue/enrichment-schema.ts";
 
@@ -15,17 +16,6 @@ import type { Recommendation } from "../catalogue/enrichment-schema.ts";
  * This module is the pure half: it decides what disagrees and how, and holds no I/O and no
  * rendering, so the rule is testable without a terminal.
  */
-
-/** What a verdict implies the lifecycle should be. `continue` implies nothing — idle is correct. */
-const IMPLIED_LIFECYCLE: Readonly<Record<Recommendation, Lifecycle | null>> = {
-  continue: null,
-  complete: "completed",
-  archive: "archived",
-  // A handoff is not itself a lifecycle change: the thread moves, and THIS session is then done
-  // with. Archived is the honest resting place, but it needs a human to actually pass the thread
-  // first, so it is surfaced separately rather than folded in with the plain archives.
-  handoff: "archived",
-};
 
 export interface TriageItem {
   readonly sessionId: string;
@@ -83,23 +73,19 @@ export function triageQueue(index: Database, catalogue: Database): TriageQueue {
 export function disagreement(session: SessionRow, row: CatalogueRow | null): TriageItem | null {
   const enrichment = row?.enrichment;
   if (!enrichment) return null;
-  const target = IMPLIED_LIFECYCLE[enrichment.recommendation];
-  if (!target) return null;
   const lifecycle = lifecycleOf(row);
-  // Already filed correctly, or filed somewhere the recommendation does not contradict. An
-  // archived session recommended for `complete` is not worth re-litigating: both mean "done", the
-  // human already made a call, and surfacing it would be the queue arguing with its reader.
-  if (lifecycle === target) return null;
-  if (lifecycle === "archived" || lifecycle === "completed") return null;
-  // Parked means a human deliberately set it aside with a task to come back to. That is an active
-  // decision, not an oversight, so it is not a gap to close.
-  if (lifecycle === "parked") return null;
+  const target = recommendationDisagreement(
+    enrichment.recommendation,
+    enrichment.declined,
+    lifecycle,
+  );
+  if (!target || !enrichment.recommendation) return null;
 
   return {
     sessionId: session.sessionId,
     title: enrichment.title || session.title,
-    state: enrichment.state,
-    reason: enrichment.reason,
+    state: enrichment.state ?? "",
+    reason: enrichment.reason ?? "",
     recommendation: enrichment.recommendation,
     lifecycle,
     target,
@@ -143,7 +129,7 @@ export function nextActions(index: Database, catalogue: Database): NextItem[] {
       sessionId: session.sessionId,
       title: enrichment.title || session.title,
       next: enrichment.next,
-      remaining: enrichment.remaining,
+      remaining: enrichment.remaining ?? "",
       cwd: session.cwd,
       lastTs: session.lastTs,
     });

@@ -8,12 +8,18 @@
  */
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { RECOMMENDATIONS, type Recommendation } from "../catalogue/enrichment-schema.ts";
-import type { StoredEnrichment } from "../catalogue/enrichment.ts";
+import type { Lifecycle } from "../catalogue/db.ts";
+import {
+  hydrateStoredEnrichment,
+  OPTIONAL_ENRICHMENT_COLUMNS,
+  type StoredEnrichment,
+} from "../catalogue/enrichment.ts";
 import type { SidebarLifecycle, SidebarMembership } from "./projection.ts";
 
 export interface CatalogueSnapshotFacts {
   readonly lifecycles: ReadonlyMap<string, SidebarLifecycle>;
+  /** Full catalogue lifecycle retained for recommendation decisions; browser shape stays three-state. */
+  readonly catalogueLifecycles: ReadonlyMap<string, Lifecycle>;
   readonly canonicalSessionIds: ReadonlyMap<string, string>;
   readonly preferredTitles: ReadonlyMap<string, string>;
   readonly memberships: ReadonlyMap<string, SidebarMembership>;
@@ -36,6 +42,7 @@ interface CatalogueQueryRow {
   readonly resume_id: string | null;
   readonly completed: number | null;
   readonly archived: number | null;
+  readonly parked_task_id: string | null;
   readonly custom_title: string | null;
   readonly enrichment_title: string | null;
   readonly session_class: string | null;
@@ -43,6 +50,9 @@ interface CatalogueQueryRow {
   readonly identity_cluster: string | null;
   readonly identity_role: string | null;
   readonly identity_kind: string | null;
+  readonly identity_completed: number | null;
+  readonly identity_archived: number | null;
+  readonly identity_parked_task_id: string | null;
   readonly enrichment_state: string | null;
   readonly enrichment_summary: string | null;
   readonly enrichment_history: string | null;
@@ -52,6 +62,9 @@ interface CatalogueQueryRow {
   readonly enrichment_recommendation: string | null;
   readonly enrichment_reason: string | null;
   readonly enrichment_junk: number | null;
+  readonly enrichment_cwd_correct: number | null;
+  readonly enrichment_suggested_location: string | null;
+  readonly enrichment_suggested_cwd: string | null;
   readonly enrichment_at_messages: number | null;
   readonly enrichment_at: string | null;
   readonly enrichment_declined: string | null;
@@ -83,13 +96,6 @@ function text(value: string | null): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function recommendation(value: string | null): Recommendation | null {
-  const candidate = text(value);
-  return candidate !== null && (RECOMMENDATIONS as readonly string[]).includes(candidate)
-    ? candidate as Recommendation
-    : null;
-}
-
 function emptyLifecycleIds(): Map<SidebarLifecycle, string[]> {
   return new Map<SidebarLifecycle, string[]>([
     ["active", []],
@@ -100,6 +106,7 @@ function emptyLifecycleIds(): Map<SidebarLifecycle, string[]> {
 
 function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFacts {
   const lifecycles = new Map<string, SidebarLifecycle>();
+  const catalogueLifecycles = new Map<string, Lifecycle>();
   const canonicalSessionIds = new Map<string, string>();
   const preferredTitles = new Map<string, string>();
   const memberships = new Map<string, SidebarMembership>();
@@ -109,12 +116,22 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
 
   // Canonical ids win when a historical resume alias collides with another canonical row.
   for (const row of rows) {
-    const lifecycle: SidebarLifecycle = row.archived === 1
+    // Match full CatalogueRow hydration exactly: session-scoped non-default flags win, while the
+    // joined identity supplies durable lifecycle for rows whose session flags remain at defaults.
+    const catalogueLifecycle: Lifecycle = row.archived === 1 || row.identity_archived === 1
       ? "archived"
-      : row.completed === 1
+      : row.completed === 1 || row.identity_completed === 1
+      ? "completed"
+      : text(row.parked_task_id) !== null || text(row.identity_parked_task_id) !== null
+      ? "parked"
+      : "idle";
+    const lifecycle: SidebarLifecycle = catalogueLifecycle === "archived"
+      ? "archived"
+      : catalogueLifecycle === "completed"
       ? "completed"
       : "active";
     lifecycles.set(row.session_id, lifecycle);
+    catalogueLifecycles.set(row.session_id, catalogueLifecycle);
     canonicalSessionIds.set(row.session_id, row.session_id);
 
     const preferred = text(row.custom_title) ?? text(row.enrichment_title);
@@ -139,22 +156,8 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
       if (row.resume_id) memberships.set(row.resume_id, membership);
     }
 
-    const state = text(row.enrichment_state) ?? text(row.enrichment_summary);
-    if (state !== null) {
-      const summary: StoredEnrichment = {
-        state,
-        history: text(row.enrichment_history),
-        next: text(row.enrichment_next) ?? text(row.enrichment_outstanding),
-        remaining: text(row.enrichment_remaining),
-        recommendation: recommendation(row.enrichment_recommendation),
-        reason: text(row.enrichment_reason),
-        junk: row.enrichment_junk === 1,
-        atMessages: typeof row.enrichment_at_messages === "number"
-          ? row.enrichment_at_messages
-          : null,
-        at: text(row.enrichment_at),
-        declined: recommendation(row.enrichment_declined),
-      };
+    if (text(row.enrichment_state) !== null || text(row.enrichment_summary) !== null) {
+      const summary = hydrateStoredEnrichment({ ...row });
       summaries.set(row.session_id, summary);
       if (row.resume_id) summaries.set(row.resume_id, summary);
     }
@@ -170,11 +173,16 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
   for (const row of rows) {
     if (!row.resume_id || lifecycles.has(row.resume_id)) continue;
     lifecycles.set(row.resume_id, lifecycles.get(row.session_id) ?? "active");
+    catalogueLifecycles.set(
+      row.resume_id,
+      catalogueLifecycles.get(row.session_id) ?? "idle",
+    );
     canonicalSessionIds.set(row.resume_id, row.session_id);
   }
 
   return {
     lifecycles,
+    catalogueLifecycles,
     canonicalSessionIds,
     preferredTitles,
     memberships,
@@ -201,44 +209,36 @@ export function readCatalogueDatabase(db: Database): CatalogueReadOutcome {
       ? columnsOf(db, "identities")
       : new Set<string>();
     const canJoinIdentity = catalogueColumns.has("identity_key")
-      && ["identity_key", "cluster", "role", "kind"].every((name) => identityColumns.has(name));
-    const identitySelections = canJoinIdentity
-      ? [
-        "i.cluster AS identity_cluster",
-        "i.role AS identity_role",
-        "i.kind AS identity_kind",
-      ]
-      : [
-        "NULL AS identity_cluster",
-        "NULL AS identity_role",
-        "NULL AS identity_kind",
-      ];
+      && identityColumns.has("identity_key");
+    const identitySelection = (name: string, fallback = "NULL"): string =>
+      canJoinIdentity && identityColumns.has(name)
+        ? `i.${name} AS identity_${name}`
+        : `${fallback} AS identity_${name}`;
+    const identitySelections = [
+      identitySelection("cluster"),
+      identitySelection("role"),
+      identitySelection("kind"),
+      identitySelection("completed", "0"),
+      identitySelection("archived", "0"),
+      identitySelection("parked_task_id"),
+    ];
     const join = canJoinIdentity
       ? "LEFT JOIN identities i ON i.identity_key = c.identity_key"
       : "";
+    const enrichmentSelections = OPTIONAL_ENRICHMENT_COLUMNS
+      .map((name) => selected(catalogueColumns, name, name === "enrichment_junk" ? "0" : "NULL"));
 
     const rows = db.query(
       `SELECT c.session_id,
               ${selected(catalogueColumns, "resume_id")},
               ${selected(catalogueColumns, "completed", "0")},
               ${selected(catalogueColumns, "archived", "0")},
+              ${selected(catalogueColumns, "parked_task_id")},
               ${selected(catalogueColumns, "custom_title")},
-              ${selected(catalogueColumns, "enrichment_title")},
               ${selected(catalogueColumns, "session_class")},
               ${selected(catalogueColumns, "identity_key")},
               ${identitySelections.join(",\n              ")},
-              ${selected(catalogueColumns, "enrichment_state")},
-              ${selected(catalogueColumns, "enrichment_summary")},
-              ${selected(catalogueColumns, "enrichment_history")},
-              ${selected(catalogueColumns, "enrichment_next")},
-              ${selected(catalogueColumns, "enrichment_remaining")},
-              ${selected(catalogueColumns, "enrichment_outstanding")},
-              ${selected(catalogueColumns, "enrichment_recommendation")},
-              ${selected(catalogueColumns, "enrichment_reason")},
-              ${selected(catalogueColumns, "enrichment_junk", "0")},
-              ${selected(catalogueColumns, "enrichment_at_messages")},
-              ${selected(catalogueColumns, "enrichment_at")},
-              ${selected(catalogueColumns, "enrichment_declined")}
+              ${enrichmentSelections.join(",\n              ")}
          FROM catalogue c
          ${join}`,
     ).all() as CatalogueQueryRow[];

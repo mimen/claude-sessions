@@ -36,7 +36,7 @@ describe("enrichment storage", () => {
       next: ENRICHMENT.next,
       remaining: ENRICHMENT.remaining,
       recommendation: "continue",
-      reason: ENRICHMENT.reason,
+      reason: null,
       junk: false,
       cwdCorrect: false,
       suggestedLocation: "repos-ccs",
@@ -45,6 +45,7 @@ describe("enrichment storage", () => {
       legacyShape: false,
       atMessages: 412,
       at: NOW,
+      declined: null,
     });
     db.close();
   });
@@ -53,6 +54,21 @@ describe("enrichment storage", () => {
     const db = openCatalogue(":memory:");
     setCompleted(db, "s1", true, NOW);
     expect(getRow(db, "s1")?.enrichment).toBeNull();
+    db.close();
+  });
+
+  test("full catalogue hydration retains enrichment_at as its ownership boundary", () => {
+    const db = openCatalogue(":memory:");
+    db.query("INSERT INTO catalogue (session_id, enrichment_state) VALUES ('state-only', 'readable')").run();
+    db.query("INSERT INTO catalogue (session_id, enrichment_at) VALUES ('at-only', $at)").run({ $at: NOW });
+
+    expect(getRow(db, "state-only")?.enrichment).toBeNull();
+    expect(getRow(db, "at-only")?.enrichment).toMatchObject({
+      state: null,
+      at: NOW,
+      recommendation: null,
+      atMessages: null,
+    });
     db.close();
   });
 

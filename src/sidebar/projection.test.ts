@@ -535,6 +535,7 @@ describe("declined verdicts", () => {
   /** The one enrichment field shape these tests care about; the rest is inert. */
   function enrichment(overrides: Record<string, unknown> = {}): never {
     return {
+      title: null,
       state: "where it stands",
       history: null,
       next: null,
@@ -542,12 +543,43 @@ describe("declined verdicts", () => {
       recommendation: "archive",
       reason: "a dead end",
       junk: false,
+      cwdCorrect: null,
+      suggestedLocation: null,
+      suggestedCwd: null,
       atMessages: null,
       at: null,
+      legacyShape: false,
       declined: null,
       ...overrides,
     } as never;
   }
+
+  test("serialized sidebar summaries keep the established wire shape", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [indexed({ sessionId: "s1", resumeId: "s1" })],
+      summaries: new Map([["s1", enrichment({
+        title: "internal title",
+        cwdCorrect: false,
+        suggestedLocation: "repo",
+        suggestedCwd: "/repo",
+        legacyShape: true,
+      })]]),
+    }));
+    const body = JSON.parse(JSON.stringify(snapshot)) as {
+      rows: Array<{ summary?: Record<string, unknown> | null }>;
+    };
+    const summary = body.rows.find((row) => row.summary)?.summary;
+    expect(summary).not.toBeNull();
+    expect(Object.keys(summary ?? {}).sort()).toEqual([
+      "at", "atMessages", "declined", "driftLabel", "history", "junk", "messagesSince",
+      "next", "reason", "recommendation", "remaining", "state",
+    ]);
+    for (const internal of [
+      "title", "cwdCorrect", "suggestedLocation", "suggestedCwd", "legacyShape",
+    ]) {
+      expect(summary).not.toHaveProperty(internal);
+    }
+  });
 
   test("a verdict that has not been declined is offered", () => {
     const snapshot = projectSidebar(input({
@@ -576,5 +608,46 @@ describe("declined verdicts", () => {
     }));
     const row = snapshot.rows.find((r) => r.id === "s1");
     expect(row?.kind === "session" && row.suggestion?.verb).toBe("complete");
+  });
+
+  test("parked and either terminal catalogue lifecycle suppress every recommendation", () => {
+    for (const lifecycle of ["parked", "completed", "archived"] as const) {
+      const browserLifecycle = lifecycle === "parked" ? "active" : lifecycle;
+      const snapshot = projectSidebar(input({
+        indexed: [indexed({ sessionId: "s1", resumeId: "s1" })],
+        lifecycles: new Map([["s1", browserLifecycle]]),
+        catalogueLifecycles: new Map([["s1", lifecycle]]),
+        summaries: new Map([["s1", enrichment({ recommendation: "archive" })]]),
+        scope: browserLifecycle,
+      }));
+      const row = snapshot.rows.find((candidate) => candidate.id === "s1");
+      expect(row?.kind === "session" && row.suggestion).toBeNull();
+    }
+  });
+
+  test("handoff stays visible but non-actionable", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [indexed({ sessionId: "s1", resumeId: "s1" })],
+      summaries: new Map([["s1", enrichment({ recommendation: "handoff" })]]),
+    }));
+    const row = snapshot.rows.find((candidate) => candidate.id === "s1");
+    expect(row?.kind === "session" && row.suggestion).toMatchObject({
+      verb: "handoff",
+      actionable: false,
+    });
+  });
+
+  test("junk and reason remain presentation metadata on an archive disagreement", () => {
+    const snapshot = projectSidebar(input({
+      indexed: [indexed({ sessionId: "s1", resumeId: "s1" })],
+      summaries: new Map([["s1", enrichment({ junk: true, reason: "Probe" })]]),
+    }));
+    const row = snapshot.rows.find((candidate) => candidate.id === "s1");
+    expect(row?.kind === "session" && row.suggestion).toMatchObject({
+      verb: "archive",
+      actionable: true,
+      junk: true,
+      reason: "Probe",
+    });
   });
 });

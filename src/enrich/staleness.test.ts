@@ -5,7 +5,7 @@ import {
   MAX_ENRICHMENT_ATTEMPTS,
   STALE_AFTER_MESSAGES,
 } from "./staleness.ts";
-import type { StoredEnrichment } from "../catalogue/db.ts";
+import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 
 const NOW = new Date("2026-07-24T12:00:00.000Z");
 
@@ -25,6 +25,7 @@ function enrichedAt(at: string, atMessages: number): StoredEnrichment {
     atMessages,
     at,
     legacyShape: false,
+    declined: null,
   };
 }
 
@@ -103,6 +104,13 @@ describe("enrichmentStaleness", () => {
     });
     expect(verdict.messagesSince).toBe(0);
     expect(verdict.stale).toBe(false);
+  });
+
+  test("a missing stored count keeps the historical zero-count cadence fallback", () => {
+    const missingCount = { ...enrichedAt("2026-07-24T11:00:00.000Z", 0), atMessages: null };
+    expect(enrichmentStaleness({
+      messageCount: 12, enrichment: missingCount, attempts: 0, now: NOW,
+    })).toEqual({ stale: true, reason: "advanced", messagesSince: 12 });
   });
 });
 
