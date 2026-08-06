@@ -520,14 +520,82 @@ export function sectionForStatus(
   return "ready";
 }
 
-/**
- * Build the sidebar's rows.
- *
- * Active live sessions keep cmux's ordering, while lifecycle history follows indexed recency.
- * Closed rows are emitted only after a readable liveness check, because otherwise a running
- * session could be represented as resumable.
- */
-export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
+/** Lookup functions and joined identity state shared by every projection stage. */
+interface ProjectionLookups {
+  readonly indexedById: ReadonlyMap<string, IndexedSessionInput>;
+  readonly liveIds: ReadonlySet<string>;
+  readonly liveById: ReadonlyMap<string, LiveSessionInput>;
+  readonly lifecycleFor: (
+    sessionId: string,
+    indexed: IndexedSessionInput | undefined,
+  ) => SidebarLifecycle;
+  readonly catalogueLifecycleFor: (
+    sessionId: string,
+    indexed: IndexedSessionInput | undefined,
+  ) => Lifecycle;
+  readonly canonicalSessionIdFor: (
+    sessionId: string,
+    indexed: IndexedSessionInput | undefined,
+  ) => string;
+  readonly unreadFor: (workspaceId: string | null) => number;
+  readonly preferredTitleFor: (sessionId: string, resumeId?: string) => string | null;
+  readonly membershipFor: (sessionId: string, resumeId?: string) => SidebarMembership | null;
+  readonly summaryFor: (
+    sessionId: string,
+    indexed: IndexedSessionInput | undefined,
+  ) => SidebarSummary | null;
+  readonly faviconUrlFor: (cwd: string | null) => string | null;
+  readonly projectFor: (cwd: string | null) => string | null;
+  readonly worktreeFor: (cwd: string | null) => string | null;
+}
+
+/** Immutable facts passed between the private projection stages. */
+interface ProjectionContext {
+  readonly input: ProjectionInput;
+  readonly scope: SidebarScope;
+  readonly lookups: ProjectionLookups;
+}
+
+interface HistoryCandidate {
+  readonly row: SidebarRow;
+  readonly timestamp: number | null;
+  readonly order: number;
+}
+
+/** Finished work belongs to its disposition, whatever its liveness would otherwise say. */
+function sectionForLifecycle(
+  lifecycle: SidebarLifecycle,
+  whenActive: SidebarSection,
+): SidebarSection {
+  return lifecycle === "active" ? whenActive : lifecycle;
+}
+
+/** Liveness decides active density; terminal lifecycle always wins. */
+function densityFor(live: boolean, lifecycle: SidebarLifecycle): SidebarDensity {
+  return lifecycle !== "active" ? "settled" : live ? "full" : "line";
+}
+
+/** Enrichment's verdict, but only while it still contradicts the catalogue lifecycle. */
+function suggestionFor(
+  summary: SidebarSummary | null,
+  lifecycle: Lifecycle,
+): SidebarSuggestion | null {
+  const verb = summary?.recommendation ?? null;
+  if (recommendationDisagreement(verb, summary?.declined ?? null, lifecycle) === null || !verb) {
+    return null;
+  }
+  return {
+    verb,
+    // Handoff is deliberately inert here: passing a thread on is work done inside the session,
+    // not a flag flipped from a list.
+    actionable: verb === "complete" || verb === "archive",
+    reason: summary?.reason ?? null,
+    junk: summary?.junk ?? false,
+  };
+}
+
+/** Construct every alias-sensitive lookup once, before any row stage runs. */
+function buildProjectionContext(input: ProjectionInput): ProjectionContext {
   const indexedById = new Map<string, IndexedSessionInput>();
   for (const session of input.indexed) {
     indexedById.set(session.sessionId, session);
@@ -536,7 +604,6 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     if (!indexedById.has(session.resumeId)) indexedById.set(session.resumeId, session);
   }
 
-  const scope = input.scope ?? "active";
   const lifecycles = input.lifecycles ?? new Map<string, SidebarLifecycle>();
   const lifecycleFor = (
     sessionId: string,
@@ -545,6 +612,7 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     lifecycles.get(sessionId)
       ?? (indexed ? lifecycles.get(indexed.sessionId) ?? lifecycles.get(indexed.resumeId) : undefined)
       ?? "active";
+
   const catalogueLifecycles = input.catalogueLifecycles ?? new Map<string, Lifecycle>();
   const catalogueLifecycleFor = (
     sessionId: string,
@@ -560,6 +628,7 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
         : lifecycleFor(sessionId, indexed) === "archived"
         ? "archived"
         : "idle");
+
   const canonicalSessionIds = input.canonicalSessionIds ?? new Map<string, string>();
   const canonicalSessionIdFor = (
     sessionId: string,
@@ -571,61 +640,25 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
         : undefined)
       ?? sessionId;
 
+  const liveIds = new Set(input.liveSessionIds ?? []);
+  const liveById = new Map<string, LiveSessionInput>();
+  for (const live of input.live) {
+    liveIds.add(live.sessionId);
+    liveById.set(live.sessionId, live);
+    const indexed = indexedById.get(live.sessionId);
+    if (!indexed) continue;
+    liveIds.add(indexed.sessionId);
+    liveIds.add(indexed.resumeId);
+    if (!liveById.has(indexed.sessionId)) liveById.set(indexed.sessionId, live);
+    if (!liveById.has(indexed.resumeId)) liveById.set(indexed.resumeId, live);
+  }
+
   const faviconDirectories = input.faviconDirectories ?? new Set<string>();
   const unreadByWorkspaceId = input.unreadByWorkspaceId ?? new Map<string, number>();
-  const unreadFor = (workspaceId: string | null): number =>
-    (workspaceId ? unreadByWorkspaceId.get(workspaceId) : 0) ?? 0;
-  /**
-   * Height a row is worth: live work gets the full card, closed work one line, settled work one
-   * line inside a collapsed section. Liveness rather than lifecycle decides the first split,
-   * because closing is a memory decision and completing is a judgment about the work.
-   */
-  /**
-   * Finished work belongs to its disposition, whatever its liveness would otherwise say. A
-   * completed session that happens to still be open is still completed, and burying it under
-   * "Ready" would put it back in the queue it just left.
-   */
-  const sectionForLifecycle = (
-    lifecycle: SidebarLifecycle,
-    whenActive: SidebarSection,
-  ): SidebarSection => (lifecycle === "active" ? whenActive : lifecycle);
-
-  const densityFor = (live: boolean, lifecycle: SidebarLifecycle): SidebarDensity =>
-    lifecycle !== "active" ? "settled" : live ? "full" : "line";
-
-  /**
-   * Enrichment's verdict, but only while it still contradicts reality.
-   *
-   * `continue` is dropped because it asks for nothing, and a verb already applied is dropped
-   * because a row cannot be archived twice. What survives is exactly the set worth a chip.
-   */
-  const suggestionFor = (
-    summary: SidebarSummary | null,
-    lifecycle: Lifecycle,
-  ): SidebarSuggestion | null => {
-    const verb = summary?.recommendation ?? null;
-    if (recommendationDisagreement(verb, summary?.declined ?? null, lifecycle) === null || !verb) {
-      return null;
-    }
-    return {
-      verb,
-      // Handoff is deliberately inert here: passing a thread on is work done inside the session,
-      // not a flag flipped from a list.
-      actionable: verb === "complete" || verb === "archive",
-      reason: summary?.reason ?? null,
-      junk: summary?.junk ?? false,
-    };
-  };
-
   const preferredTitles = input.preferredTitles ?? new Map<string, string>();
-  const preferredTitleFor = (sessionId: string, resumeId?: string): string | null =>
-    preferredTitles.get(sessionId) ?? (resumeId ? preferredTitles.get(resumeId) ?? null : null);
-
   const memberships = input.memberships ?? new Map<string, SidebarMembership>();
-  const membershipFor = (sessionId: string, resumeId?: string): SidebarMembership | null =>
-    memberships.get(sessionId) ?? (resumeId ? memberships.get(resumeId) ?? null : null);
-
   const summaries = input.summaries ?? new Map<string, StoredEnrichment>();
+
   const summaryFor = (
     sessionId: string,
     indexed: IndexedSessionInput | undefined,
@@ -655,127 +688,147 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
           }),
     };
   };
-  const faviconUrlFor = (cwd: string | null): string | null =>
-    cwd && faviconDirectories.has(cwd) ? `/api/favicon?dir=${encodeURIComponent(cwd)}` : null;
 
-  /**
-   * The top line names the project, not the folder the session happens to sit in. Ten worktrees
-   * of one repository are ten checkouts of the same project, and reading them as ten different
-   * projects is what makes a worktree-heavy fleet illegible. Outside git, the folder is all we
-   * can truthfully say.
-   */
-  const projectFor = (cwd: string | null): string | null =>
-    (cwd ? input.checkouts.get(cwd)?.project : null) ?? directoryLabel(cwd);
-
-  /** The second line answers "which checkout", so it appears only for a linked worktree. */
-  const worktreeFor = (cwd: string | null): string | null =>
-    (cwd ? input.checkouts.get(cwd)?.worktree : null) ?? null;
-
-  const rowForLive = (
-    live: LiveSessionInput,
-    indexed: IndexedSessionInput | undefined,
-  ): SidebarSessionRow => {
-    const cwd = live.cwd ?? indexed?.cwd ?? null;
-    const cmuxActivity = live.updatedAt === null ? null : live.updatedAt * 1000;
-    const liveSummary = summaryFor(live.sessionId, indexed);
-    const liveLifecycle = lifecycleFor(live.sessionId, indexed);
-    return {
-      kind: "session",
-      id: canonicalSessionIdFor(live.sessionId, indexed),
-      workspaceId: live.workspaceId,
-      windowId: live.windowId,
-      windowRef: live.windowRef,
-      unread: unreadFor(live.workspaceId),
-      shortcut: live.shortcut,
-      summary: liveSummary,
-      suggestion: suggestionFor(
-        liveSummary,
-        catalogueLifecycleFor(live.sessionId, indexed),
-      ),
-      membership: membershipFor(live.sessionId, indexed?.resumeId),
-      density: densityFor(true, liveLifecycle),
-      sessionId: canonicalSessionIdFor(live.sessionId, indexed),
-      lifecycle: liveLifecycle,
-      name: cleanSessionName(
-        preferredTitleFor(live.sessionId, indexed?.resumeId)
-          ?? live.workspaceTitle ?? indexed?.title ?? "Untitled session",
-      ),
-      directory: projectFor(cwd),
-      directoryPath: cwd,
-      faviconUrl: faviconUrlFor(cwd),
-      worktree: worktreeFor(cwd),
-      model: indexed ? dominantModel(indexed) : null,
-      status: live.status,
-      statusAvailability: live.statusAvailability,
-      lastActivityAt: cmuxActivity ?? parseTimestamp(indexed?.lastTs ?? null),
-      section: sectionForLifecycle(
-        liveLifecycle,
-        sectionForStatus(live.status, live.statusAvailability),
-      ),
-      workspaceRef: live.workspaceRef,
-      pinned: live.pinned,
-      focused: live.focused,
-    };
+  return {
+    input,
+    scope: input.scope ?? "active",
+    lookups: {
+      indexedById,
+      liveIds,
+      liveById,
+      lifecycleFor,
+      catalogueLifecycleFor,
+      canonicalSessionIdFor,
+      unreadFor: (workspaceId: string | null): number =>
+        (workspaceId ? unreadByWorkspaceId.get(workspaceId) : 0) ?? 0,
+      preferredTitleFor: (sessionId: string, resumeId?: string): string | null =>
+        preferredTitles.get(sessionId) ?? (resumeId ? preferredTitles.get(resumeId) ?? null : null),
+      membershipFor: (sessionId: string, resumeId?: string): SidebarMembership | null =>
+        memberships.get(sessionId) ?? (resumeId ? memberships.get(resumeId) ?? null : null),
+      summaryFor,
+      faviconUrlFor: (cwd: string | null): string | null =>
+        cwd && faviconDirectories.has(cwd) ? `/api/favicon?dir=${encodeURIComponent(cwd)}` : null,
+      // The top line names the project, not the linked worktree's folder.
+      projectFor: (cwd: string | null): string | null =>
+        (cwd ? input.checkouts.get(cwd)?.project : null) ?? directoryLabel(cwd),
+      worktreeFor: (cwd: string | null): string | null =>
+        (cwd ? input.checkouts.get(cwd)?.worktree : null) ?? null,
+    },
   };
+}
 
-  const rowForIndexed = (
-    session: IndexedSessionInput,
-    knownLive: boolean,
-  ): SidebarSessionRow => ({
+/** Construct one visible live-session row without selecting whether it belongs in the result. */
+function buildLiveSessionRow(
+  context: ProjectionContext,
+  live: LiveSessionInput,
+  indexed: IndexedSessionInput | undefined,
+): SidebarSessionRow {
+  const { lookups } = context;
+  const cwd = live.cwd ?? indexed?.cwd ?? null;
+  const cmuxActivity = live.updatedAt === null ? null : live.updatedAt * 1000;
+  const liveSummary = lookups.summaryFor(live.sessionId, indexed);
+  const liveLifecycle = lookups.lifecycleFor(live.sessionId, indexed);
+  return {
     kind: "session",
-    id: canonicalSessionIdFor(session.sessionId, session),
+    id: lookups.canonicalSessionIdFor(live.sessionId, indexed),
+    workspaceId: live.workspaceId,
+    windowId: live.windowId,
+    windowRef: live.windowRef,
+    unread: lookups.unreadFor(live.workspaceId),
+    shortcut: live.shortcut,
+    summary: liveSummary,
+    suggestion: suggestionFor(
+      liveSummary,
+      lookups.catalogueLifecycleFor(live.sessionId, indexed),
+    ),
+    membership: lookups.membershipFor(live.sessionId, indexed?.resumeId),
+    density: densityFor(true, liveLifecycle),
+    sessionId: lookups.canonicalSessionIdFor(live.sessionId, indexed),
+    lifecycle: liveLifecycle,
+    name: cleanSessionName(
+      lookups.preferredTitleFor(live.sessionId, indexed?.resumeId)
+        ?? live.workspaceTitle ?? indexed?.title ?? "Untitled session",
+    ),
+    directory: lookups.projectFor(cwd),
+    directoryPath: cwd,
+    faviconUrl: lookups.faviconUrlFor(cwd),
+    worktree: lookups.worktreeFor(cwd),
+    model: indexed ? dominantModel(indexed) : null,
+    status: live.status,
+    statusAvailability: live.statusAvailability,
+    lastActivityAt: cmuxActivity ?? parseTimestamp(indexed?.lastTs ?? null),
+    section: sectionForLifecycle(
+      liveLifecycle,
+      sectionForStatus(live.status, live.statusAvailability),
+    ),
+    workspaceRef: live.workspaceRef,
+    pinned: live.pinned,
+    focused: live.focused,
+  };
+}
+
+/** Construct one indexed-session row without selecting shelf or history capacity. */
+function buildIndexedSessionRow(
+  context: ProjectionContext,
+  session: IndexedSessionInput,
+  knownLive: boolean,
+): SidebarSessionRow {
+  const { lookups } = context;
+  const summary = lookups.summaryFor(session.sessionId, session);
+  const lifecycle = lookups.lifecycleFor(session.sessionId, session);
+  return {
+    kind: "session",
+    id: lookups.canonicalSessionIdFor(session.sessionId, session),
     workspaceId: null,
     windowId: null,
     windowRef: null,
     unread: 0,
     shortcut: null,
-    summary: summaryFor(session.sessionId, session),
+    summary,
     suggestion: suggestionFor(
-      summaryFor(session.sessionId, session),
-      catalogueLifecycleFor(session.sessionId, session),
+      summary,
+      lookups.catalogueLifecycleFor(session.sessionId, session),
     ),
-    membership: membershipFor(session.sessionId, session.resumeId),
-    density: densityFor(knownLive, lifecycleFor(session.sessionId, session)),
-    sessionId: canonicalSessionIdFor(session.sessionId, session),
-    lifecycle: lifecycleFor(session.sessionId, session),
+    membership: lookups.membershipFor(session.sessionId, session.resumeId),
+    density: densityFor(knownLive, lifecycle),
+    sessionId: lookups.canonicalSessionIdFor(session.sessionId, session),
+    lifecycle,
     name: cleanSessionName(
-      preferredTitleFor(session.sessionId, session.resumeId) ?? session.title,
+      lookups.preferredTitleFor(session.sessionId, session.resumeId) ?? session.title,
     ),
-    directory: projectFor(session.cwd),
+    directory: lookups.projectFor(session.cwd),
     directoryPath: session.cwd,
-    faviconUrl: faviconUrlFor(session.cwd),
-    worktree: worktreeFor(session.cwd),
+    faviconUrl: lookups.faviconUrlFor(session.cwd),
+    worktree: lookups.worktreeFor(session.cwd),
     model: dominantModel(session),
     status: null,
     statusAvailability: knownLive ? "absent" : "not-live",
     lastActivityAt: parseTimestamp(session.lastTs),
-    section: sectionForLifecycle(
-      lifecycleFor(session.sessionId, session),
-      knownLive ? "ready" : "recent",
-    ),
+    section: sectionForLifecycle(lifecycle, knownLive ? "ready" : "recent"),
     workspaceRef: null,
     pinned: false,
     focused: false,
-  });
+  };
+}
 
-  /**
-   * A workspace no session owns. Activity is left null rather than guessed: cmux records
-   * timestamps against sessions, so a browser pane genuinely has no last-activity we can read,
-   * and inventing one would sort it against sessions on a number that means nothing.
-   */
-  const rowForWorkspace = (workspace: LiveWorkspaceInput): SidebarWorkspaceRow => ({
+/** Construct one sessionless cmux workspace row. */
+function buildSessionlessWorkspaceRow(
+  context: ProjectionContext,
+  workspace: LiveWorkspaceInput,
+): SidebarWorkspaceRow {
+  const { lookups } = context;
+  return {
     kind: "workspace",
     id: workspace.workspaceId,
-    // A workspace only appears here while it is open, so it is always live and never settled:
-    // there is no lifecycle on a browser pane to complete or archive.
+    // A workspace only appears here while it is open, so it is always live and never settled.
     density: "full",
     name: cleanSessionName(
       workspace.workspaceTitle ?? directoryLabel(workspace.cwd) ?? "Untitled tab",
     ),
-    directory: projectFor(workspace.cwd),
+    directory: lookups.projectFor(workspace.cwd),
     directoryPath: workspace.cwd,
-    faviconUrl: faviconUrlFor(workspace.cwd),
-    worktree: worktreeFor(workspace.cwd),
+    faviconUrl: lookups.faviconUrlFor(workspace.cwd),
+    worktree: lookups.worktreeFor(workspace.cwd),
     status: null,
     statusAvailability: "absent",
     lastActivityAt: null,
@@ -784,125 +837,120 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     workspaceRef: workspace.workspaceRef,
     windowId: workspace.windowId,
     windowRef: workspace.windowRef,
-    unread: unreadFor(workspace.workspaceId),
+    unread: lookups.unreadFor(workspace.workspaceId),
     shortcut: workspace.shortcut,
     surfaceKinds: workspace.surfaceKinds,
     pinned: workspace.pinned,
     focused: workspace.focused,
-  });
+  };
+}
 
-  const liveIds = new Set(input.liveSessionIds ?? []);
-  const liveById = new Map<string, LiveSessionInput>();
-  for (const live of input.live) {
-    liveIds.add(live.sessionId);
-    liveById.set(live.sessionId, live);
-    const indexed = indexedById.get(live.sessionId);
-    if (!indexed) continue;
-    liveIds.add(indexed.sessionId);
-    liveIds.add(indexed.resumeId);
-    if (!liveById.has(indexed.sessionId)) liveById.set(indexed.sessionId, live);
-    if (!liveById.has(indexed.resumeId)) liveById.set(indexed.resumeId, live);
-  }
-
+/** Select active live rows, sessionless workspaces, and the separately capped resume shelf. */
+function selectActiveRows(context: ProjectionContext): SidebarRow[] {
+  const { input, lookups } = context;
   const rows: SidebarRow[] = [];
-  if (scope === "active") {
-    for (const live of input.live) {
-      const indexed = indexedById.get(live.sessionId);
-      if (lifecycleFor(live.sessionId, indexed) !== "active") continue;
-      rows.push(rowForLive(live, indexed));
-    }
-
-    // Sessionless workspaces are live tabs, so they belong to the active scope only — there is no
-    // completed or archived state for a browser pane to be browsed under.
-    for (const workspace of input.workspaces ?? []) rows.push(rowForWorkspace(workspace));
-
-    // The shelf only makes sense when liveness is readable; otherwise a live session could be
-    // presented as resumable and clicking it would spawn a duplicate.
-    if (input.livenessReadable) {
-      const limit = input.recentLimit ?? DEFAULT_RECENT_LIMIT;
-      const seen = new Set<string>();
-      let added = 0;
-      const shelfLifecycles = new Set<SidebarLifecycle>([
-        "active",
-        ...(input.includeLifecycles ?? []),
-      ]);
-      for (const session of input.indexed) {
-        if (added >= limit) break;
-        // A finished session reaches the shelf only while its section is expanded; the section it
-        // lands in is decided by `sectionForLifecycle`, not here.
-        if (!shelfLifecycles.has(lifecycleFor(session.sessionId, session))) continue;
-        if (liveIds.has(session.sessionId) || liveIds.has(session.resumeId)) continue;
-        if (seen.has(session.sessionId)) continue;
-        seen.add(session.sessionId);
-        rows.push(rowForIndexed(session, false));
-        added += 1;
-      }
-    }
-  } else {
-    const limit = input.historyLimit ?? DEFAULT_HISTORY_LIMIT;
-    type HistoryCandidate = {
-      readonly row: SidebarRow;
-      readonly timestamp: number | null;
-      readonly order: number;
-    };
-    const liveCandidates: HistoryCandidate[] = [];
-    const closedCandidates: HistoryCandidate[] = [];
-    const seen = new Set<string>();
-    const compareHistory = (left: HistoryCandidate, right: HistoryCandidate): number => {
-      if (left.timestamp !== right.timestamp) {
-        return (right.timestamp ?? Number.NEGATIVE_INFINITY)
-          - (left.timestamp ?? Number.NEGATIVE_INFINITY);
-      }
-      return left.order - right.order;
-    };
-
-    // Terminal live sessions remain actionable even when their transcript has not reached the
-    // index yet or falls outside the capped history query.
-    for (const [order, live] of input.live.entries()) {
-      const indexed = indexedById.get(live.sessionId);
-      if (lifecycleFor(live.sessionId, indexed) !== scope) continue;
-      const row = rowForLive(live, indexed);
-      if (seen.has(row.sessionId)) continue;
-      seen.add(row.sessionId);
-      liveCandidates.push({ row, timestamp: row.lastActivityAt, order });
-    }
-
-    for (const [index, session] of input.indexed.entries()) {
-      if (lifecycleFor(session.sessionId, session) !== scope) continue;
-      const live = liveById.get(session.sessionId) ?? liveById.get(session.resumeId);
-      const knownLive = live !== undefined
-        || liveIds.has(session.sessionId)
-        || liveIds.has(session.resumeId);
-      const row = live ? rowForLive(live, session) : rowForIndexed(session, knownLive);
-      if (seen.has(row.sessionId)) continue;
-      // Without a readable liveness snapshot, every unobserved indexed row might still be running.
-      if (!input.livenessReadable && !knownLive) continue;
-      seen.add(row.sessionId);
-      const candidate = {
-        row,
-        timestamp: row.lastActivityAt,
-        order: input.live.length + index,
-      };
-      if (knownLive) liveCandidates.push(candidate);
-      else closedCandidates.push(candidate);
-    }
-
-    liveCandidates.sort(compareHistory);
-    closedCandidates.sort(compareHistory);
-    const selected = liveCandidates.slice(0, limit);
-    selected.push(...closedCandidates.slice(0, Math.max(0, limit - selected.length)));
-    selected.sort(compareHistory);
-    rows.push(...selected.map((candidate) => candidate.row));
+  for (const live of input.live) {
+    const indexed = lookups.indexedById.get(live.sessionId);
+    if (lookups.lifecycleFor(live.sessionId, indexed) !== "active") continue;
+    rows.push(buildLiveSessionRow(context, live, indexed));
   }
 
-  // Triage is a filter over the finished list rather than a different projection: the rows a
-  // session shows in triage must be the same rows it shows anywhere else.
-  const visible = input.triageOnly
-    ? rows.filter((row) => row.kind === "session" && row.suggestion !== null)
-    : rows;
+  for (const workspace of input.workspaces ?? []) {
+    rows.push(buildSessionlessWorkspaceRow(context, workspace));
+  }
 
+  // The shelf only makes sense when liveness is readable; otherwise resuming could duplicate work.
+  if (!input.livenessReadable) return rows;
+
+  const limit = input.recentLimit ?? DEFAULT_RECENT_LIMIT;
+  const seen = new Set<string>();
+  let added = 0;
+  const shelfLifecycles = new Set<SidebarLifecycle>([
+    "active",
+    ...(input.includeLifecycles ?? []),
+  ]);
+  for (const session of input.indexed) {
+    if (added >= limit) break;
+    if (!shelfLifecycles.has(lookups.lifecycleFor(session.sessionId, session))) continue;
+    if (lookups.liveIds.has(session.sessionId) || lookups.liveIds.has(session.resumeId)) continue;
+    if (seen.has(session.sessionId)) continue;
+    seen.add(session.sessionId);
+    rows.push(buildIndexedSessionRow(context, session, false));
+    added += 1;
+  }
+  return rows;
+}
+
+function compareHistory(left: HistoryCandidate, right: HistoryCandidate): number {
+  if (left.timestamp !== right.timestamp) {
+    return (right.timestamp ?? Number.NEGATIVE_INFINITY)
+      - (left.timestamp ?? Number.NEGATIVE_INFINITY);
+  }
+  return left.order - right.order;
+}
+
+/** Select terminal live rows before spending the remaining history capacity on closed rows. */
+function selectHistoryRows(context: ProjectionContext): SidebarRow[] {
+  const { input, lookups, scope } = context;
+  const limit = input.historyLimit ?? DEFAULT_HISTORY_LIMIT;
+  const liveCandidates: HistoryCandidate[] = [];
+  const closedCandidates: HistoryCandidate[] = [];
+  const seen = new Set<string>();
+
+  // Terminal live sessions remain actionable even without an index join or within the index cap.
+  for (const [order, live] of input.live.entries()) {
+    const indexed = lookups.indexedById.get(live.sessionId);
+    if (lookups.lifecycleFor(live.sessionId, indexed) !== scope) continue;
+    const row = buildLiveSessionRow(context, live, indexed);
+    if (seen.has(row.sessionId)) continue;
+    seen.add(row.sessionId);
+    liveCandidates.push({ row, timestamp: row.lastActivityAt, order });
+  }
+
+  for (const [index, session] of input.indexed.entries()) {
+    if (lookups.lifecycleFor(session.sessionId, session) !== scope) continue;
+    const live = lookups.liveById.get(session.sessionId) ?? lookups.liveById.get(session.resumeId);
+    const knownLive = live !== undefined
+      || lookups.liveIds.has(session.sessionId)
+      || lookups.liveIds.has(session.resumeId);
+    const row = live
+      ? buildLiveSessionRow(context, live, session)
+      : buildIndexedSessionRow(context, session, knownLive);
+    if (seen.has(row.sessionId)) continue;
+    // Without a readable liveness snapshot, every unobserved indexed row might still be running.
+    if (!input.livenessReadable && !knownLive) continue;
+    seen.add(row.sessionId);
+    const candidate = {
+      row,
+      timestamp: row.lastActivityAt,
+      order: input.live.length + index,
+    };
+    if (knownLive) liveCandidates.push(candidate);
+    else closedCandidates.push(candidate);
+  }
+
+  liveCandidates.sort(compareHistory);
+  closedCandidates.sort(compareHistory);
+  const selected = liveCandidates.slice(0, limit);
+  selected.push(...closedCandidates.slice(0, Math.max(0, limit - selected.length)));
+  selected.sort(compareHistory);
+  return selected.map((candidate) => candidate.row);
+}
+
+/** Apply the final view filter only after selection and capacity decisions are complete. */
+function selectVisibleRows(context: ProjectionContext, rows: readonly SidebarRow[]): SidebarRow[] {
+  return context.input.triageOnly
+    ? rows.filter((row) => row.kind === "session" && row.suggestion !== null)
+    : [...rows];
+}
+
+/** Assemble stable snapshot metadata without allowing the clock to perturb the wire body. */
+function assembleSidebarSnapshot(
+  input: ProjectionInput,
+  rows: readonly SidebarRow[],
+): SidebarSnapshot {
   return {
-    rows: visible,
+    rows,
     livenessReadable: input.livenessReadable,
     indexReadable: input.indexReadable ?? true,
     catalogueReadable: input.catalogueReadable ?? true,
@@ -912,6 +960,22 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     // can share one strong ETag instead of changing merely because another poll happened later.
     generatedAt: 0,
   };
+}
+
+/**
+ * Build the sidebar's rows.
+ *
+ * Active live sessions keep cmux's ordering, while lifecycle history follows indexed recency.
+ * Closed rows are emitted only after a readable liveness check, because otherwise a running
+ * session could be represented as resumable.
+ */
+export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
+  const context = buildProjectionContext(input);
+  const selected = context.scope === "active"
+    ? selectActiveRows(context)
+    : selectHistoryRows(context);
+  const visible = selectVisibleRows(context, selected);
+  return assembleSidebarSnapshot(input, visible);
 }
 
 /** Directories the caller should resolve worktrees for, deduplicated. */

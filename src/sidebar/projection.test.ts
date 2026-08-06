@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
+import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 import {
   cleanSessionName,
   directoriesToResolve,
@@ -78,6 +80,172 @@ function input(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
     now: 1_700_000_500_000,
     ...overrides,
   };
+}
+
+function storedEnrichment(
+  recommendation: StoredEnrichment["recommendation"],
+  declined: StoredEnrichment["declined"] = null,
+): StoredEnrichment {
+  return {
+    title: null,
+    state: "Mixed fixture state",
+    history: "Mixed fixture history",
+    next: "Mixed fixture next",
+    remaining: null,
+    recommendation,
+    reason: "Mixed fixture reason",
+    junk: false,
+    cwdCorrect: true,
+    suggestedLocation: null,
+    suggestedCwd: null,
+    atMessages: 10,
+    at: "2026-08-05T11:00:00.000Z",
+    legacyShape: false,
+    declined,
+  };
+}
+
+/** One deliberately cross-cutting input used to freeze the projection's serialized contract. */
+function mixedProjectionInput(overrides: Partial<ProjectionInput> = {}): ProjectionInput {
+  const root = "/Users/m/Repos/mixed";
+  return input({
+    live: [
+      live({
+        sessionId: "resume-live",
+        workspaceId: "ws-live",
+        workspaceRef: "workspace:1",
+        workspaceTitle: "⠐ Live alias",
+        pinned: true,
+        shortcut: 1,
+        updatedAt: 1_785_931_199,
+      }),
+      live({
+        sessionId: "terminal-live",
+        workspaceId: "ws-terminal",
+        workspaceRef: "workspace:2",
+        workspaceTitle: "Terminal live",
+        status: null,
+        statusAvailability: "absent",
+        updatedAt: 1_785_931_100,
+      }),
+      live({
+        sessionId: "declined-live",
+        workspaceId: "ws-declined",
+        workspaceRef: "workspace:3",
+        workspaceTitle: "Declined live",
+        status: { label: "Needs input", icon: null, color: "#f00" },
+        updatedAt: 1_785_931_050,
+      }),
+    ],
+    workspaces: [workspace({
+      workspaceId: "ws-browser",
+      workspaceRef: "workspace:4",
+      workspaceTitle: "Reference browser",
+      cwd: root,
+      surfaceKinds: ["browser", "terminal"],
+    })],
+    liveSessionIds: new Set([
+      "resume-live",
+      "terminal-live",
+      "declined-live",
+      "secondary-resume",
+    ]),
+    indexed: [
+      indexed({
+        sessionId: "canonical-live",
+        resumeId: "resume-live",
+        title: "Indexed alias",
+        cwd: root,
+        lastTs: "2026-08-05T11:59:00.000Z",
+        messageCount: 14,
+        transcriptMtimeMs: Date.parse("2026-08-05T11:30:00.000Z"),
+      }),
+      indexed({
+        sessionId: "declined-live",
+        resumeId: "declined-resume",
+        title: "Declined indexed",
+        cwd: root,
+        lastTs: "2026-08-05T11:58:00.000Z",
+      }),
+      indexed({
+        sessionId: "closed-triage",
+        resumeId: "closed-triage-resume",
+        title: "Closed triage",
+        cwd: root,
+        lastTs: "2026-08-05T11:57:00.000Z",
+      }),
+      indexed({
+        sessionId: "secondary-file",
+        resumeId: "secondary-resume",
+        title: "Non-primary live surface",
+        cwd: root,
+        lastTs: "2026-08-05T11:56:00.000Z",
+      }),
+      indexed({
+        sessionId: "terminal-closed",
+        resumeId: "terminal-closed-resume",
+        title: "Terminal closed",
+        cwd: root,
+        lastTs: "2026-08-05T11:55:00.000Z",
+      }),
+      indexed({
+        sessionId: "archived-id",
+        resumeId: "archived-resume",
+        title: "Archived closed",
+        cwd: root,
+        lastTs: "2026-08-05T11:54:00.000Z",
+      }),
+      indexed({
+        sessionId: "identity-file",
+        resumeId: "identity-resume",
+        title: "Parked identity",
+        cwd: root,
+        lastTs: "2026-08-05T11:53:00.000Z",
+      }),
+    ],
+    lifecycles: new Map([
+      ["terminal-live", "completed"],
+      ["terminal-closed-resume", "completed"],
+      ["archived-resume", "archived"],
+    ]),
+    catalogueLifecycles: new Map([
+      ["resume-live", "idle"],
+      ["terminal-live", "completed"],
+      ["declined-resume", "idle"],
+      ["closed-triage-resume", "idle"],
+      ["terminal-closed-resume", "completed"],
+      ["archived-resume", "archived"],
+      ["identity-resume", "parked"],
+    ]),
+    canonicalSessionIds: new Map([
+      ["canonical-live", "canonical-live"],
+      ["resume-live", "canonical-live"],
+      ["terminal-live", "terminal-live"],
+      ["closed-triage-resume", "closed-triage"],
+    ]),
+    summaries: new Map([
+      ["resume-live", storedEnrichment("archive")],
+      ["declined-resume", storedEnrichment("archive", "archive")],
+      ["closed-triage-resume", storedEnrichment("complete")],
+      ["identity-resume", storedEnrichment("complete")],
+    ]),
+    preferredTitles: new Map([["resume-live", "Canonical live title"]]),
+    memberships: new Map([["resume-live", {
+      identityKey: "identity:live",
+      cluster: "projection",
+      role: "core",
+      kind: "core",
+    }]]),
+    checkouts: new Map([[root, { project: "mixed", worktree: "projection", branch: "phase-5" }]]),
+    faviconDirectories: new Set([root]),
+    unreadByWorkspaceId: new Map([["ws-live", 2], ["ws-browser", 1]]),
+    includeLifecycles: ["completed", "archived"],
+    lifecycleCounts: { active: 5, completed: 2, archived: 1 },
+    recentLimit: 4,
+    historyLimit: 2,
+    hasMoreRows: true,
+    ...overrides,
+  });
 }
 
 describe("modelOf", () => {
@@ -517,6 +685,18 @@ describe("projectSidebar", () => {
     const snapshot = projectSidebar(input({ live: [live()] }));
 
     expect(sessionRows(snapshot.rows)[0]?.model).toBeNull();
+  });
+
+  test("keeps the mixed projection byte-equivalent to the pre-staging golden", () => {
+    const serialized = JSON.stringify([
+      projectSidebar(mixedProjectionInput()),
+      projectSidebar(mixedProjectionInput({ triageOnly: true })),
+      projectSidebar(mixedProjectionInput({ scope: "completed" })),
+      projectSidebar(mixedProjectionInput({ livenessReadable: false })),
+      projectSidebar(mixedProjectionInput({ scope: "completed", livenessReadable: false })),
+    ]);
+
+    expect(createHash("sha256").update(serialized).digest("hex")).toBe("5e895d3a155745ea6a474ddf6e0613ca2709ad772d821a7510d485fbf675e2fe");
   });
 });
 
