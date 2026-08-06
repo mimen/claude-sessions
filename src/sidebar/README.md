@@ -73,20 +73,28 @@ Three endpoints, and nothing else:
 | File | Responsibility |
 | --- | --- |
 | `projection.ts` | Pure projection: sections, row anatomy, model identity, name cleaning. No I/O. |
+| `catalogue-read.ts` | Query-only catalogue adapter. Opens SQLite readonly and preserves the catalogue hydration contract needed by snapshots. |
+| `index-read.ts` | Query-only transcript-index adapter. |
+| `read-cache.ts` / `warm-cache.ts` | Reuse readonly handles and the latest complete snapshot without placing writers in request code. |
 | `status.ts` | Parsing and bounded reading of cmux's `claude_code` status. |
 | `worktree.ts` | Resolving a directory to its project and, if linked, its worktree. |
 | `favicon.ts` | Finding a project's icon in conventional locations. |
-| `snapshot.ts` | The one interface — `snapshot()`, `open()`, `faviconFor()` — over all of the above. |
-| `server.ts` | The loopback host. |
+| `snapshot.ts` | Builds normalized snapshots and exact ETags over the adapters above. |
+| `session-action-coordinator.ts` | Runs focus/resume and mutation actions outside snapshot construction. |
+| `server.ts` | The loopback host and conditional-GET transport. |
 | `bundle.ts` | Builds the browser bundle at startup, so the served page always matches source. |
 | `web/` | The React app. Typechecked by its own project (`bun run typecheck:web`). |
 
+The import boundary is deliberate: sidebar request modules may use readonly query adapters, but may not
+import `catalogue/db-mutations.ts`, call `openCatalogue`, construct a writable SQLite handle, or issue raw
+catalogue mutation SQL. `catalogue/mutation-boundary.test.ts` enforces this.
+
 ## Limits
 
-The snapshot costs roughly a second on a large fleet: it reads the cmux tree, one
-`cmux list-status` per workspace, and `git` per distinct directory. The page polls every four
-seconds. There is no push transport; the UI shows what the last snapshot said and labels an
-unreadable cmux rather than implying freshness it does not have.
+The page polls every four seconds. Unchanged polls use the snapshot ETag and return an empty `304`; changed
+snapshots are built asynchronously and served from the centralized warm cache. There is no push transport;
+the UI shows what the last complete snapshot said and labels unreadable sources rather than implying
+freshness it does not have.
 
 This is separate from the interpreted Swift sidebar in `integrations/cmux/`, which remains the
 compact left-sidebar navigator.

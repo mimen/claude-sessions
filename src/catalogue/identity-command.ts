@@ -308,7 +308,7 @@ function doResolve(db: Database, args: string[]): number {
     );
     return 0;
   }
-  // Compute both the LEGACY key (from db.ts identityKeyOf, backwards compat) and the NEW
+  // Compute both the LEGACY key (from db-queries.ts identityKeyOf, backwards compat) and the NEW
   // structured key. Emit legacy in the `key` field for now; engines migrate in step 9.
   const legacyKey = row.key;
   const newKey = deriveIdentityKey({

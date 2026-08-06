@@ -8,7 +8,7 @@
  * pass, atomic per session, and each field goes through the same setter the CLI's single-field
  * commands use.
  *
- * Every field routed through this command uses the SAME db.ts setter the equivalent CLI command
+ * Every field routed through this command uses the SAME db-mutations.ts setter the equivalent CLI command
  * uses. There is no new mutation path — this is just batching, not a bypass.
  *
  * Stage writes require --sensor <name> for the same reason `ccs stage` does (D5 / ADR-0079):

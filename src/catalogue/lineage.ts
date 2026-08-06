@@ -9,7 +9,7 @@ import { getAll, identityKeyOf } from "./db-queries.ts";
  * embodiments + each one's transcript path.
  *
  * ADR-0089 (2026-07-14): the identity key is stored as `catalogue.identity_key` — a real FK
- * into the identities table. Callers here read it via `identityKeyOf(row)` from db.ts (which
+ * into the identities table. Callers here read it via `identityKeyOf(row)` from db-queries.ts (which
  * prefers the new structured key). The legacy `deriveKey` fallback is gone — a row without an
  * identity_key is a loose session that has no lineage anyway.
  */

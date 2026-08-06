@@ -1,0 +1,2351 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-05T12:00:00.000Z",
+  "command": "bun run benchmark:sidebar --samples 8 --idle-ms 5000 --contention-ms 1000",
+  "safety": {
+    "fixtureRoot": "<os-tmpdir>/ccs-sidebar-performance-*/fleet",
+    "generatedSqliteOnly": true,
+    "liveCatalogueRead": false,
+    "liveIndexRead": false,
+    "cmuxProcessesInvoked": false,
+    "cmuxFocusInvoked": false,
+    "cleanupUnderTmpdir": true
+  },
+  "fixture": {
+    "golden": {
+      "sessions": 8,
+      "liveSessions": 2
+    },
+    "fleet": {
+      "sessions": 480,
+      "liveSessions": 24
+    },
+    "fixedClockEpochMs": 1785931200000,
+    "sampleCount": 8
+  },
+  "databaseWitness": {
+    "before": {
+      "catalogue": {
+        "path": "<fixture-root>/cache/catalogue.db",
+        "bytes": 225280,
+        "sha256": "f188192c81899b099889350b31d859618b17fbdbb2c4469e4e15a925b346cb96",
+        "walExists": true,
+        "walBytes": 3629752,
+        "walSha256": "f3ee0d96f075eb7c8b8a3b2f75b86e1797d75e14ffca78768dd069fa101f5a06",
+        "shmExists": true,
+        "userVersion": 40,
+        "schemaSha256": "c5740d9f695416243322aceefe22a3fe7a25e5ada6382042a4ca14f744fc3035"
+      },
+      "index": {
+        "path": "<fixture-root>/cache/index.db",
+        "bytes": 434176,
+        "sha256": "5bed1a7babcabd704a8e0ddf9c60c20be8415a7fd90b81a3e5436b491b342d05",
+        "walExists": true,
+        "walBytes": 0,
+        "walSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true,
+        "userVersion": 12,
+        "schemaSha256": "62e34b2e0c66f83c90c790ef58529d7618473057e58ae01e22fa499f0dd50477"
+      },
+      "catalogueState": {
+        "userVersion": 40,
+        "journalMode": "wal",
+        "catalogueRows": 480,
+        "indexRows": null
+      },
+      "indexState": {
+        "userVersion": 12,
+        "journalMode": "wal",
+        "catalogueRows": null,
+        "indexRows": 480
+      }
+    },
+    "afterCharacterization": {
+      "catalogue": {
+        "path": "<fixture-root>/cache/catalogue.db",
+        "bytes": 225280,
+        "sha256": "f188192c81899b099889350b31d859618b17fbdbb2c4469e4e15a925b346cb96",
+        "walExists": true,
+        "walBytes": 3629752,
+        "walSha256": "f3ee0d96f075eb7c8b8a3b2f75b86e1797d75e14ffca78768dd069fa101f5a06",
+        "shmExists": true,
+        "userVersion": 40,
+        "schemaSha256": "c5740d9f695416243322aceefe22a3fe7a25e5ada6382042a4ca14f744fc3035"
+      },
+      "index": {
+        "path": "<fixture-root>/cache/index.db",
+        "bytes": 434176,
+        "sha256": "5bed1a7babcabd704a8e0ddf9c60c20be8415a7fd90b81a3e5436b491b342d05",
+        "walExists": true,
+        "walBytes": 0,
+        "walSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true,
+        "userVersion": 12,
+        "schemaSha256": "62e34b2e0c66f83c90c790ef58529d7618473057e58ae01e22fa499f0dd50477"
+      },
+      "catalogueState": {
+        "userVersion": 40,
+        "journalMode": "wal",
+        "catalogueRows": 480,
+        "indexRows": null
+      },
+      "indexState": {
+        "userVersion": 12,
+        "journalMode": "wal",
+        "catalogueRows": null,
+        "indexRows": 480
+      }
+    },
+    "after": {
+      "catalogue": {
+        "path": "<fixture-root>/cache/catalogue.db",
+        "bytes": 225280,
+        "sha256": "f188192c81899b099889350b31d859618b17fbdbb2c4469e4e15a925b346cb96",
+        "walExists": true,
+        "walBytes": 3629752,
+        "walSha256": "f3ee0d96f075eb7c8b8a3b2f75b86e1797d75e14ffca78768dd069fa101f5a06",
+        "shmExists": true,
+        "userVersion": 40,
+        "schemaSha256": "c5740d9f695416243322aceefe22a3fe7a25e5ada6382042a4ca14f744fc3035"
+      },
+      "index": {
+        "path": "<fixture-root>/cache/index.db",
+        "bytes": 434176,
+        "sha256": "5bed1a7babcabd704a8e0ddf9c60c20be8415a7fd90b81a3e5436b491b342d05",
+        "walExists": true,
+        "walBytes": 0,
+        "walSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true,
+        "userVersion": 12,
+        "schemaSha256": "62e34b2e0c66f83c90c790ef58529d7618473057e58ae01e22fa499f0dd50477"
+      },
+      "catalogueState": {
+        "userVersion": 40,
+        "journalMode": "wal",
+        "catalogueRows": 480,
+        "indexRows": null
+      },
+      "indexState": {
+        "userVersion": 12,
+        "journalMode": "wal",
+        "catalogueRows": null,
+        "indexRows": 480
+      }
+    },
+    "readPathByteIdentical": true,
+    "logicalStateUnchanged": true
+  },
+  "golden": {
+    "snapshots": {
+      "active": {
+        "rows": [
+          {
+            "kind": "session",
+            "id": "session-0000",
+            "workspaceId": "workspace-0000",
+            "windowId": "window-0",
+            "windowRef": "window:1",
+            "unread": 0,
+            "shortcut": 1,
+            "summary": {
+              "state": "State 0",
+              "history": "History 0",
+              "next": "Next 0",
+              "remaining": "Remaining 0",
+              "recommendation": "archive",
+              "reason": "Reason 0",
+              "junk": false,
+              "atMessages": 0,
+              "at": "2026-08-05T11:59:00.000Z",
+              "declined": null,
+              "messagesSince": null,
+              "driftLabel": null
+            },
+            "suggestion": {
+              "verb": "archive",
+              "actionable": true,
+              "reason": "Reason 0",
+              "junk": false
+            },
+            "membership": null,
+            "density": "full",
+            "sessionId": "session-0000",
+            "lifecycle": "active",
+            "name": "Catalogue title 0",
+            "directory": "project-0",
+            "directoryPath": "<fixture-root>/repos/project-0",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": null,
+            "status": {
+              "label": "Needs input",
+              "icon": null,
+              "color": null
+            },
+            "statusAvailability": "published",
+            "lastActivityAt": 1785931200000,
+            "section": "needs-you",
+            "workspaceRef": "workspace:1",
+            "pinned": true,
+            "focused": true
+          },
+          {
+            "kind": "session",
+            "id": "session-0001",
+            "workspaceId": "workspace-0001",
+            "windowId": "window-0",
+            "windowRef": "window:1",
+            "unread": 0,
+            "shortcut": 2,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "full",
+            "sessionId": "session-0001",
+            "lifecycle": "active",
+            "name": "Live session 1",
+            "directory": "project-1",
+            "directoryPath": "<fixture-root>/repos/project-1",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": {
+              "label": "Running",
+              "icon": null,
+              "color": null
+            },
+            "statusAvailability": "published",
+            "lastActivityAt": 1785931199000,
+            "section": "working",
+            "workspaceRef": "workspace:2",
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0002",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "settled",
+            "sessionId": "session-0002",
+            "lifecycle": "completed",
+            "name": "Indexed session 2",
+            "directory": "project-2",
+            "directoryPath": "<fixture-root>/repos/project-2",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785931080000,
+            "section": "completed",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0003",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "settled",
+            "sessionId": "session-0003",
+            "lifecycle": "archived",
+            "name": "Indexed session 3",
+            "directory": "project-3",
+            "directoryPath": "<fixture-root>/repos/project-3",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785931020000,
+            "section": "archived",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0004",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "line",
+            "sessionId": "session-0004",
+            "lifecycle": "active",
+            "name": "Indexed session 4",
+            "directory": "project-4",
+            "directoryPath": "<fixture-root>/repos/project-4",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785930960000,
+            "section": "recent",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0005",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "line",
+            "sessionId": "session-0005",
+            "lifecycle": "active",
+            "name": "Indexed session 5",
+            "directory": "project-5",
+            "directoryPath": "<fixture-root>/repos/project-5",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785930900000,
+            "section": "recent",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0006",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "settled",
+            "sessionId": "session-0006",
+            "lifecycle": "completed",
+            "name": "Indexed session 6",
+            "directory": "project-6",
+            "directoryPath": "<fixture-root>/repos/project-6",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785930840000,
+            "section": "completed",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0007",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": {
+              "state": "State 7",
+              "history": "History 7",
+              "next": "Next 7",
+              "remaining": "Remaining 7",
+              "recommendation": "complete",
+              "reason": "Reason 7",
+              "junk": false,
+              "atMessages": 7,
+              "at": "2026-08-05T11:52:00.000Z",
+              "declined": null,
+              "messagesSince": 3,
+              "driftLabel": "not updated in 3 turns"
+            },
+            "suggestion": null,
+            "membership": null,
+            "density": "settled",
+            "sessionId": "session-0007",
+            "lifecycle": "archived",
+            "name": "Enriched session 7",
+            "directory": "project-7",
+            "directoryPath": "<fixture-root>/repos/project-7",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785930780000,
+            "section": "archived",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          }
+        ],
+        "livenessReadable": true,
+        "indexReadable": true,
+        "catalogueReadable": true,
+        "lifecycleCounts": {
+          "active": 3,
+          "completed": 2,
+          "archived": 2
+        },
+        "hasMoreRows": false,
+        "generatedAt": 0
+      },
+      "triage": {
+        "rows": [
+          {
+            "kind": "session",
+            "id": "session-0000",
+            "workspaceId": "workspace-0000",
+            "windowId": "window-0",
+            "windowRef": "window:1",
+            "unread": 0,
+            "shortcut": 1,
+            "summary": {
+              "state": "State 0",
+              "history": "History 0",
+              "next": "Next 0",
+              "remaining": "Remaining 0",
+              "recommendation": "archive",
+              "reason": "Reason 0",
+              "junk": false,
+              "atMessages": 0,
+              "at": "2026-08-05T11:59:00.000Z",
+              "declined": null,
+              "messagesSince": null,
+              "driftLabel": null
+            },
+            "suggestion": {
+              "verb": "archive",
+              "actionable": true,
+              "reason": "Reason 0",
+              "junk": false
+            },
+            "membership": null,
+            "density": "full",
+            "sessionId": "session-0000",
+            "lifecycle": "active",
+            "name": "Catalogue title 0",
+            "directory": "project-0",
+            "directoryPath": "<fixture-root>/repos/project-0",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": null,
+            "status": {
+              "label": "Needs input",
+              "icon": null,
+              "color": null
+            },
+            "statusAvailability": "published",
+            "lastActivityAt": 1785931200000,
+            "section": "needs-you",
+            "workspaceRef": "workspace:1",
+            "pinned": true,
+            "focused": true
+          }
+        ],
+        "livenessReadable": true,
+        "indexReadable": true,
+        "catalogueReadable": true,
+        "lifecycleCounts": {
+          "active": 3,
+          "completed": 2,
+          "archived": 2
+        },
+        "hasMoreRows": false,
+        "generatedAt": 0
+      },
+      "completed": {
+        "rows": [
+          {
+            "kind": "session",
+            "id": "session-0002",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "settled",
+            "sessionId": "session-0002",
+            "lifecycle": "completed",
+            "name": "Indexed session 2",
+            "directory": "project-2",
+            "directoryPath": "<fixture-root>/repos/project-2",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785931080000,
+            "section": "completed",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0006",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "settled",
+            "sessionId": "session-0006",
+            "lifecycle": "completed",
+            "name": "Indexed session 6",
+            "directory": "project-6",
+            "directoryPath": "<fixture-root>/repos/project-6",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785930840000,
+            "section": "completed",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          }
+        ],
+        "livenessReadable": true,
+        "indexReadable": true,
+        "catalogueReadable": true,
+        "lifecycleCounts": {
+          "active": 3,
+          "completed": 2,
+          "archived": 2
+        },
+        "hasMoreRows": false,
+        "generatedAt": 0
+      },
+      "archived": {
+        "rows": [
+          {
+            "kind": "session",
+            "id": "session-0003",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "settled",
+            "sessionId": "session-0003",
+            "lifecycle": "archived",
+            "name": "Indexed session 3",
+            "directory": "project-3",
+            "directoryPath": "<fixture-root>/repos/project-3",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785931020000,
+            "section": "archived",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0007",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": {
+              "state": "State 7",
+              "history": "History 7",
+              "next": "Next 7",
+              "remaining": "Remaining 7",
+              "recommendation": "complete",
+              "reason": "Reason 7",
+              "junk": false,
+              "atMessages": 7,
+              "at": "2026-08-05T11:52:00.000Z",
+              "declined": null,
+              "messagesSince": 3,
+              "driftLabel": "not updated in 3 turns"
+            },
+            "suggestion": null,
+            "membership": null,
+            "density": "settled",
+            "sessionId": "session-0007",
+            "lifecycle": "archived",
+            "name": "Enriched session 7",
+            "directory": "project-7",
+            "directoryPath": "<fixture-root>/repos/project-7",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785930780000,
+            "section": "archived",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          }
+        ],
+        "livenessReadable": true,
+        "indexReadable": true,
+        "catalogueReadable": true,
+        "lifecycleCounts": {
+          "active": 3,
+          "completed": 2,
+          "archived": 2
+        },
+        "hasMoreRows": false,
+        "generatedAt": 0
+      },
+      "unreadableCatalogue": {
+        "rows": [
+          {
+            "kind": "session",
+            "id": "session-0000",
+            "workspaceId": "workspace-0000",
+            "windowId": "window-0",
+            "windowRef": "window:1",
+            "unread": 0,
+            "shortcut": 1,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "full",
+            "sessionId": "session-0000",
+            "lifecycle": "active",
+            "name": "Live session 0",
+            "directory": "project-0",
+            "directoryPath": "<fixture-root>/repos/project-0",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": {
+              "label": "Needs input",
+              "icon": null,
+              "color": null
+            },
+            "statusAvailability": "published",
+            "lastActivityAt": 1785931200000,
+            "section": "needs-you",
+            "workspaceRef": "workspace:1",
+            "pinned": true,
+            "focused": true
+          },
+          {
+            "kind": "session",
+            "id": "session-0001",
+            "workspaceId": "workspace-0001",
+            "windowId": "window-0",
+            "windowRef": "window:1",
+            "unread": 0,
+            "shortcut": 2,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "full",
+            "sessionId": "session-0001",
+            "lifecycle": "active",
+            "name": "Live session 1",
+            "directory": "project-1",
+            "directoryPath": "<fixture-root>/repos/project-1",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": {
+              "label": "Running",
+              "icon": null,
+              "color": null
+            },
+            "statusAvailability": "published",
+            "lastActivityAt": 1785931199000,
+            "section": "working",
+            "workspaceRef": "workspace:2",
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0002",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "line",
+            "sessionId": "session-0002",
+            "lifecycle": "active",
+            "name": "Indexed session 2",
+            "directory": "project-2",
+            "directoryPath": "<fixture-root>/repos/project-2",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785931080000,
+            "section": "recent",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0003",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "line",
+            "sessionId": "session-0003",
+            "lifecycle": "active",
+            "name": "Indexed session 3",
+            "directory": "project-3",
+            "directoryPath": "<fixture-root>/repos/project-3",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785931020000,
+            "section": "recent",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0004",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "line",
+            "sessionId": "session-0004",
+            "lifecycle": "active",
+            "name": "Indexed session 4",
+            "directory": "project-4",
+            "directoryPath": "<fixture-root>/repos/project-4",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785930960000,
+            "section": "recent",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0005",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "line",
+            "sessionId": "session-0005",
+            "lifecycle": "active",
+            "name": "Indexed session 5",
+            "directory": "project-5",
+            "directoryPath": "<fixture-root>/repos/project-5",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785930900000,
+            "section": "recent",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0006",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "line",
+            "sessionId": "session-0006",
+            "lifecycle": "active",
+            "name": "Indexed session 6",
+            "directory": "project-6",
+            "directoryPath": "<fixture-root>/repos/project-6",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785930840000,
+            "section": "recent",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          },
+          {
+            "kind": "session",
+            "id": "session-0007",
+            "workspaceId": null,
+            "windowId": null,
+            "windowRef": null,
+            "unread": 0,
+            "shortcut": null,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "line",
+            "sessionId": "session-0007",
+            "lifecycle": "active",
+            "name": "Indexed session 7",
+            "directory": "project-7",
+            "directoryPath": "<fixture-root>/repos/project-7",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": {
+              "id": "gpt-5.6-sol",
+              "label": "Sol",
+              "provider": "openai",
+              "color": "#4fb3a9"
+            },
+            "status": null,
+            "statusAvailability": "not-live",
+            "lastActivityAt": 1785930780000,
+            "section": "recent",
+            "workspaceRef": null,
+            "pinned": false,
+            "focused": false
+          }
+        ],
+        "livenessReadable": true,
+        "indexReadable": true,
+        "catalogueReadable": false,
+        "lifecycleCounts": {
+          "active": 0,
+          "completed": 0,
+          "archived": 0
+        },
+        "hasMoreRows": false,
+        "generatedAt": 0
+      },
+      "unreadableIndex": {
+        "rows": [
+          {
+            "kind": "session",
+            "id": "session-0000",
+            "workspaceId": "workspace-0000",
+            "windowId": "window-0",
+            "windowRef": "window:1",
+            "unread": 0,
+            "shortcut": 1,
+            "summary": {
+              "state": "State 0",
+              "history": "History 0",
+              "next": "Next 0",
+              "remaining": "Remaining 0",
+              "recommendation": "archive",
+              "reason": "Reason 0",
+              "junk": false,
+              "atMessages": 0,
+              "at": "2026-08-05T11:59:00.000Z",
+              "declined": null,
+              "messagesSince": null,
+              "driftLabel": null
+            },
+            "suggestion": {
+              "verb": "archive",
+              "actionable": true,
+              "reason": "Reason 0",
+              "junk": false
+            },
+            "membership": null,
+            "density": "full",
+            "sessionId": "session-0000",
+            "lifecycle": "active",
+            "name": "Catalogue title 0",
+            "directory": "project-0",
+            "directoryPath": "<fixture-root>/repos/project-0",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": null,
+            "status": {
+              "label": "Needs input",
+              "icon": null,
+              "color": null
+            },
+            "statusAvailability": "published",
+            "lastActivityAt": 1785931200000,
+            "section": "needs-you",
+            "workspaceRef": "workspace:1",
+            "pinned": true,
+            "focused": true
+          },
+          {
+            "kind": "session",
+            "id": "session-0001",
+            "workspaceId": "workspace-0001",
+            "windowId": "window-0",
+            "windowRef": "window:1",
+            "unread": 0,
+            "shortcut": 2,
+            "summary": null,
+            "suggestion": null,
+            "membership": null,
+            "density": "full",
+            "sessionId": "session-0001",
+            "lifecycle": "active",
+            "name": "Live session 1",
+            "directory": "project-1",
+            "directoryPath": "<fixture-root>/repos/project-1",
+            "faviconUrl": null,
+            "worktree": null,
+            "model": null,
+            "status": {
+              "label": "Running",
+              "icon": null,
+              "color": null
+            },
+            "statusAvailability": "published",
+            "lastActivityAt": 1785931199000,
+            "section": "working",
+            "workspaceRef": "workspace:2",
+            "pinned": false,
+            "focused": false
+          }
+        ],
+        "livenessReadable": true,
+        "indexReadable": false,
+        "catalogueReadable": true,
+        "lifecycleCounts": {
+          "active": 3,
+          "completed": 2,
+          "archived": 2
+        },
+        "hasMoreRows": false,
+        "generatedAt": 0
+      },
+      "unreadableLiveness": {
+        "rows": [],
+        "livenessReadable": false,
+        "indexReadable": true,
+        "catalogueReadable": true,
+        "lifecycleCounts": {
+          "active": 3,
+          "completed": 2,
+          "archived": 2
+        },
+        "hasMoreRows": false,
+        "generatedAt": 0
+      }
+    },
+    "snapshotLatencyMs": {
+      "active": {
+        "samples": [
+          0.149,
+          0.154,
+          0.155,
+          0.192,
+          0.491
+        ],
+        "min": 0.149,
+        "p50": 0.155,
+        "p95": 0.491,
+        "max": 0.491,
+        "mean": 0.228
+      },
+      "triage": {
+        "samples": [
+          0.094,
+          0.102,
+          0.107,
+          0.117,
+          0.139
+        ],
+        "min": 0.094,
+        "p50": 0.107,
+        "p95": 0.139,
+        "max": 0.139,
+        "mean": 0.112
+      },
+      "completed": {
+        "samples": [
+          0.116,
+          0.127,
+          0.205,
+          0.273,
+          0.325
+        ],
+        "min": 0.116,
+        "p50": 0.205,
+        "p95": 0.325,
+        "max": 0.325,
+        "mean": 0.209
+      },
+      "archived": {
+        "samples": [
+          0.071,
+          0.08,
+          0.083,
+          0.087,
+          0.101
+        ],
+        "min": 0.071,
+        "p50": 0.083,
+        "p95": 0.101,
+        "max": 0.101,
+        "mean": 0.084
+      }
+    },
+    "payloadBytes": {
+      "active": {
+        "samples": [
+          6193,
+          6193,
+          6193,
+          6193,
+          6193
+        ],
+        "min": 6193,
+        "p50": 6193,
+        "p95": 6193,
+        "max": 6193,
+        "mean": 6193
+      },
+      "triage": {
+        "samples": [
+          1156,
+          1156,
+          1156,
+          1156,
+          1156
+        ],
+        "min": 1156,
+        "p50": 1156,
+        "p95": 1156,
+        "max": 1156,
+        "mean": 1156
+      },
+      "completed": {
+        "samples": [
+          1528,
+          1528,
+          1528,
+          1528,
+          1528
+        ],
+        "min": 1528,
+        "p50": 1528,
+        "p95": 1528,
+        "max": 1528,
+        "mean": 1528
+      },
+      "archived": {
+        "samples": [
+          1784,
+          1784,
+          1784,
+          1784,
+          1784
+        ],
+        "min": 1784,
+        "p50": 1784,
+        "p95": 1784,
+        "max": 1784,
+        "mean": 1784
+      }
+    },
+    "serializationMs": {
+      "active": {
+        "samples": [
+          0.004,
+          0.004,
+          0.005,
+          0.007,
+          0.007
+        ],
+        "min": 0.004,
+        "p50": 0.005,
+        "p95": 0.007,
+        "max": 0.007,
+        "mean": 0.005
+      },
+      "triage": {
+        "samples": [
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001
+        ],
+        "min": 0.001,
+        "p50": 0.001,
+        "p95": 0.001,
+        "max": 0.001,
+        "mean": 0.001
+      },
+      "completed": {
+        "samples": [
+          0.001,
+          0.001,
+          0.002,
+          0.002,
+          0.003
+        ],
+        "min": 0.001,
+        "p50": 0.002,
+        "p95": 0.003,
+        "max": 0.003,
+        "mean": 0.002
+      },
+      "archived": {
+        "samples": [
+          0.001,
+          0.002,
+          0.002,
+          0.002,
+          0.002
+        ],
+        "min": 0.001,
+        "p50": 0.002,
+        "p95": 0.002,
+        "max": 0.002,
+        "mean": 0.002
+      }
+    },
+    "seamTimingsMs": {
+      "bridgeMs": {
+        "samples": [
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.002,
+          0.002,
+          0.002,
+          0.002
+        ],
+        "min": 0.001,
+        "p50": 0.001,
+        "p95": 0.002,
+        "max": 0.002,
+        "mean": 0.001
+      },
+      "catalogueMs": {
+        "samples": [
+          0.006,
+          0.006,
+          0.006,
+          0.007,
+          0.007,
+          0.007,
+          0.008,
+          0.008,
+          0.008,
+          0.008,
+          0.009,
+          0.01,
+          0.011,
+          0.011,
+          0.013,
+          0.014,
+          0.015,
+          0.03,
+          0.15,
+          0.761
+        ],
+        "min": 0.006,
+        "p50": 0.008,
+        "p95": 0.15,
+        "max": 0.761,
+        "mean": 0.055
+      },
+      "indexMs": {
+        "samples": [
+          0.011,
+          0.011,
+          0.012,
+          0.013,
+          0.014,
+          0.014,
+          0.016,
+          0.016,
+          0.017,
+          0.017,
+          0.02,
+          0.022,
+          0.023,
+          0.023,
+          0.024,
+          0.026,
+          0.036,
+          0.039,
+          0.214,
+          0.263
+        ],
+        "min": 0.011,
+        "p50": 0.017,
+        "p95": 0.214,
+        "max": 0.263,
+        "mean": 0.042
+      },
+      "statusMs": {
+        "samples": [
+          0.008,
+          0.008,
+          0.01,
+          0.01,
+          0.011,
+          0.011,
+          0.014,
+          0.014,
+          0.016,
+          0.017,
+          0.019,
+          0.019,
+          0.02,
+          0.022,
+          0.027,
+          0.036,
+          0.043,
+          0.05,
+          0.063,
+          0.137
+        ],
+        "min": 0.008,
+        "p50": 0.017,
+        "p95": 0.063,
+        "max": 0.137,
+        "mean": 0.028
+      },
+      "projectionMs": {
+        "samples": [
+          0.022,
+          0.026,
+          0.029,
+          0.033,
+          0.037,
+          0.038,
+          0.039,
+          0.043,
+          0.043,
+          0.043,
+          0.044,
+          0.046,
+          0.051,
+          0.061,
+          0.068,
+          0.073,
+          0.08,
+          0.086,
+          0.096,
+          0.414
+        ],
+        "min": 0.022,
+        "p50": 0.043,
+        "p95": 0.096,
+        "max": 0.414,
+        "mean": 0.069
+      }
+    },
+    "safeFocus": {
+      "latencyMs": {
+        "samples": [
+          0.012,
+          0.013,
+          0.017,
+          0.027,
+          0.647
+        ],
+        "min": 0.012,
+        "p50": 0.017,
+        "p95": 0.647,
+        "max": 0.647,
+        "mean": 0.143
+      },
+      "focusCalls": 5,
+      "outcomes": [
+        "focused",
+        "focused",
+        "focused",
+        "focused",
+        "focused"
+      ]
+    }
+  },
+  "fleet": {
+    "snapshots": {},
+    "snapshotLatencyMs": {
+      "active": {
+        "samples": [
+          0.974,
+          0.977,
+          0.991,
+          1.008,
+          1.087,
+          1.13,
+          1.263,
+          1.912
+        ],
+        "min": 0.974,
+        "p50": 1.008,
+        "p95": 1.912,
+        "max": 1.912,
+        "mean": 1.168
+      },
+      "triage": {
+        "samples": [
+          1.5,
+          1.595,
+          1.663,
+          2.193,
+          2.384,
+          2.655,
+          2.7,
+          3.854
+        ],
+        "min": 1.5,
+        "p50": 2.193,
+        "p95": 3.854,
+        "max": 3.854,
+        "mean": 2.318
+      },
+      "completed": {
+        "samples": [
+          0.437,
+          0.457,
+          0.47,
+          0.479,
+          0.481,
+          0.489,
+          0.517,
+          0.637
+        ],
+        "min": 0.437,
+        "p50": 0.479,
+        "p95": 0.637,
+        "max": 0.637,
+        "mean": 0.496
+      },
+      "archived": {
+        "samples": [
+          0.496,
+          0.549,
+          0.598,
+          0.732,
+          0.781,
+          0.893,
+          1.35,
+          1.381
+        ],
+        "min": 0.496,
+        "p50": 0.732,
+        "p95": 1.381,
+        "max": 1.381,
+        "mean": 0.848
+      }
+    },
+    "payloadBytes": {
+      "active": {
+        "samples": [
+          306987,
+          306987,
+          306987,
+          306987,
+          306987,
+          306987,
+          306987,
+          306987
+        ],
+        "min": 306987,
+        "p50": 306987,
+        "p95": 306987,
+        "max": 306987,
+        "mean": 306987
+      },
+      "triage": {
+        "samples": [
+          32447,
+          32447,
+          32447,
+          32447,
+          32447,
+          32447,
+          32447,
+          32447
+        ],
+        "min": 32447,
+        "p50": 32447,
+        "p95": 32447,
+        "max": 32447,
+        "mean": 32447
+      },
+      "completed": {
+        "samples": [
+          79217,
+          79217,
+          79217,
+          79217,
+          79217,
+          79217,
+          79217,
+          79217
+        ],
+        "min": 79217,
+        "p50": 79217,
+        "p95": 79217,
+        "max": 79217,
+        "mean": 79217
+      },
+      "archived": {
+        "samples": [
+          79276,
+          79276,
+          79276,
+          79276,
+          79276,
+          79276,
+          79276,
+          79276
+        ],
+        "min": 79276,
+        "p50": 79276,
+        "p95": 79276,
+        "max": 79276,
+        "mean": 79276
+      }
+    },
+    "serializationMs": {
+      "active": {
+        "samples": [
+          0.224,
+          0.227,
+          0.228,
+          0.231,
+          0.234,
+          0.26,
+          0.297,
+          0.363
+        ],
+        "min": 0.224,
+        "p50": 0.231,
+        "p95": 0.363,
+        "max": 0.363,
+        "mean": 0.258
+      },
+      "triage": {
+        "samples": [
+          0.033,
+          0.036,
+          0.037,
+          0.037,
+          0.041,
+          0.042,
+          0.091,
+          0.167
+        ],
+        "min": 0.033,
+        "p50": 0.037,
+        "p95": 0.167,
+        "max": 0.167,
+        "mean": 0.061
+      },
+      "completed": {
+        "samples": [
+          0.055,
+          0.057,
+          0.057,
+          0.058,
+          0.059,
+          0.061,
+          0.064,
+          0.066
+        ],
+        "min": 0.055,
+        "p50": 0.058,
+        "p95": 0.066,
+        "max": 0.066,
+        "mean": 0.06
+      },
+      "archived": {
+        "samples": [
+          0.052,
+          0.057,
+          0.066,
+          0.07,
+          0.071,
+          0.094,
+          0.143,
+          0.292
+        ],
+        "min": 0.052,
+        "p50": 0.07,
+        "p95": 0.292,
+        "max": 0.292,
+        "mean": 0.106
+      }
+    },
+    "seamTimingsMs": {
+      "bridgeMs": {
+        "samples": [
+          0,
+          0,
+          0,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.002,
+          0.002,
+          0.002,
+          0.002,
+          0.002,
+          0.002,
+          0.003,
+          0.003,
+          0.003,
+          0.003,
+          0.003,
+          0.004,
+          0.004,
+          0.004,
+          0.004,
+          0.004,
+          0.005,
+          0.006,
+          0.016
+        ],
+        "min": 0,
+        "p50": 0.002,
+        "p95": 0.006,
+        "max": 0.016,
+        "mean": 0.003
+      },
+      "catalogueMs": {
+        "samples": [
+          0.006,
+          0.007,
+          0.007,
+          0.007,
+          0.007,
+          0.008,
+          0.008,
+          0.008,
+          0.008,
+          0.012,
+          0.012,
+          0.013,
+          0.015,
+          0.015,
+          0.015,
+          0.017,
+          0.022,
+          0.022,
+          0.03,
+          0.032,
+          0.039,
+          0.044,
+          0.045,
+          0.048,
+          0.05,
+          0.053,
+          0.059,
+          0.066,
+          0.092,
+          0.099,
+          0.126,
+          0.203
+        ],
+        "min": 0.006,
+        "p50": 0.017,
+        "p95": 0.126,
+        "max": 0.203,
+        "mean": 0.037
+      },
+      "indexMs": {
+        "samples": [
+          0.045,
+          0.045,
+          0.047,
+          0.048,
+          0.049,
+          0.05,
+          0.052,
+          0.052,
+          0.056,
+          0.058,
+          0.06,
+          0.06,
+          0.064,
+          0.065,
+          0.066,
+          0.068,
+          0.073,
+          0.081,
+          0.084,
+          0.087,
+          0.088,
+          0.095,
+          0.096,
+          0.097,
+          0.135,
+          0.136,
+          0.146,
+          0.149,
+          0.151,
+          0.38,
+          1.518,
+          2.628
+        ],
+        "min": 0.045,
+        "p50": 0.068,
+        "p95": 1.518,
+        "max": 2.628,
+        "mean": 0.213
+      },
+      "statusMs": {
+        "samples": [
+          0.032,
+          0.033,
+          0.035,
+          0.037,
+          0.037,
+          0.038,
+          0.039,
+          0.041,
+          0.041,
+          0.042,
+          0.048,
+          0.048,
+          0.052,
+          0.053,
+          0.054,
+          0.058,
+          0.06,
+          0.061,
+          0.082,
+          0.087,
+          0.088,
+          0.091,
+          0.095,
+          0.114,
+          0.116,
+          0.122,
+          0.15,
+          0.192,
+          0.204,
+          0.208,
+          0.254,
+          0.676
+        ],
+        "min": 0.032,
+        "p50": 0.058,
+        "p95": 0.254,
+        "max": 0.676,
+        "mean": 0.103
+      },
+      "projectionMs": {
+        "samples": [
+          0.16,
+          0.161,
+          0.163,
+          0.17,
+          0.18,
+          0.183,
+          0.19,
+          0.192,
+          0.195,
+          0.197,
+          0.203,
+          0.209,
+          0.219,
+          0.232,
+          0.255,
+          0.311,
+          0.351,
+          0.361,
+          0.403,
+          0.453,
+          0.475,
+          0.485,
+          0.574,
+          0.622,
+          0.657,
+          0.859,
+          1.037,
+          1.166,
+          1.196,
+          1.224,
+          1.271,
+          3.228
+        ],
+        "min": 0.16,
+        "p50": 0.311,
+        "p95": 1.271,
+        "max": 3.228,
+        "mean": 0.549
+      }
+    },
+    "safeFocus": {
+      "latencyMs": {
+        "samples": [
+          0.008,
+          0.01,
+          0.011,
+          0.013,
+          0.021,
+          0.023,
+          0.032,
+          0.889
+        ],
+        "min": 0.008,
+        "p50": 0.013,
+        "p95": 0.889,
+        "max": 0.889,
+        "mean": 0.126
+      },
+      "focusCalls": 8,
+      "outcomes": [
+        "focused",
+        "focused",
+        "focused",
+        "focused",
+        "focused",
+        "focused",
+        "focused",
+        "focused"
+      ]
+    }
+  },
+  "contention": {
+    "snapshotMs": 3.828,
+    "heartbeatTicks": 0,
+    "heartbeatLongestDelayMs": 0,
+    "catalogueReadable": true
+  },
+  "idleProfile": {
+    "durationMs": 5000,
+    "polls": 6,
+    "payloadBytes": 1841922,
+    "heartbeatTicks": 460,
+    "heartbeatLongestDelayMs": 3.241,
+    "pollLatencyMs": {
+      "samples": [
+        1.448,
+        1.496,
+        1.582,
+        1.766,
+        2.583,
+        4.382
+      ],
+      "min": 1.448,
+      "p50": 1.582,
+      "p95": 4.382,
+      "max": 4.382,
+      "mean": 2.21
+    }
+  },
+  "etagLoopback": {
+    "initialBodyBytes": 306987,
+    "unchanged": {
+      "statuses": [
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304,
+        304
+      ],
+      "bodyBytes": 0,
+      "latencyMs": {
+        "samples": [
+          1.415,
+          1.423,
+          1.426,
+          1.43,
+          1.452,
+          1.493,
+          1.507,
+          1.557,
+          1.592,
+          1.671,
+          1.717,
+          1.736,
+          1.807,
+          1.867,
+          1.938,
+          1.942,
+          1.969,
+          2.057,
+          2.148,
+          2.225,
+          2.345,
+          2.473,
+          2.474,
+          2.492,
+          2.519,
+          2.655,
+          2.764,
+          2.893,
+          3.177,
+          3.449,
+          4.019,
+          6.78
+        ],
+        "min": 1.415,
+        "p50": 1.942,
+        "p95": 4.019,
+        "max": 6.78,
+        "mean": 2.263
+      }
+    },
+    "changedWarm": {
+      "statuses": [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "bodyBytes": {
+        "samples": [
+          306989,
+          306991,
+          306993,
+          306995,
+          306997,
+          306999,
+          307001,
+          307003,
+          307005,
+          307007,
+          307010,
+          307013,
+          307016,
+          307019,
+          307022,
+          307025,
+          307028,
+          307031,
+          307034,
+          307037
+        ],
+        "min": 306989,
+        "p50": 307007,
+        "p95": 307034,
+        "max": 307037,
+        "mean": 307010.75
+      },
+      "latencyMs": {
+        "samples": [
+          1.97,
+          2.003,
+          2.063,
+          2.064,
+          2.089,
+          2.096,
+          2.147,
+          2.165,
+          2.165,
+          2.29,
+          2.368,
+          2.391,
+          2.411,
+          2.597,
+          2.598,
+          2.635,
+          3.314,
+          3.424,
+          4.386,
+          5.515
+        ],
+        "min": 1.97,
+        "p50": 2.29,
+        "p95": 4.386,
+        "max": 5.515,
+        "mean": 2.635
+      }
+    }
+  },
+  "expectedPhase1Gates": {
+    "writerLockSnapshotMs": 120,
+    "eventLoopMaximumBlockMs": 50,
+    "changedWarmSnapshotP50Ms": 40,
+    "changedWarmSnapshotP95Ms": 120,
+    "liveFocusP95Ms": 150
+  },
+  "expectedPhase2Gates": {
+    "unchangedPollP95Ms": 10,
+    "unchangedBodyBytes": 0,
+    "unchangedStatus": 304,
+    "changedStatus": 200
+  },
+  "limitations": [
+    "Synthetic fixture timings characterize this machine and Bun/SQLite build, not production fleet variance.",
+    "The safe-focus benchmark executes the authoritative source path with an injected focus adapter; it never calls cmux or changes focus.",
+    "The idle profile preserves the Phase 1 full-snapshot comparison; etagLoopback separately measures Phase 2 conditional GET through a real server.",
+    "The ETag changed-snapshot samples commit title changes to the generated fixture only, after the read-path byte-identity witness is complete.",
+    "The contention fixture holds BEGIN IMMEDIATE in a child process. The query-only catalogue reader must remain readable and complete within the Phase 1 latency gate.",
+    "Status, notification, directory, and workspace-state subprocesses are deterministic in-memory adapters, so their real process latency is excluded."
+  ],
+  "phase6": {
+    "provenance": {
+      "integratedHead": "8237258",
+      "codeCommit": "44440d9",
+      "branch": "worktree-agent-a9807920bbc2bd2f7",
+      "generatedOn": "2026-08-05",
+      "scope": "mechanical catalogue database split and import enforcement",
+      "phase0BaselineImmutable": true,
+      "phase0BaselinePath": "docs/evidence/sidebar-performance/baseline.json"
+    },
+    "physicalSplit": {
+      "modules": [
+        "src/catalogue/db-schema.ts",
+        "src/catalogue/db-queries.ts",
+        "src/catalogue/db-mutations.ts"
+      ],
+      "deletedCompatibilityBarrel": "src/catalogue/db.ts",
+      "dependencyDag": "db-schema.ts <- db-queries.ts <- db-mutations.ts",
+      "bodyParity": {
+        "method": "TypeScript AST function bodies tokenized after comment removal against 8237258:src/catalogue/db.ts",
+        "checkedFunctions": 71,
+        "mismatches": []
+      }
+    },
+    "circularDependencies": {
+      "command": "bun run lint:circular",
+      "before": [
+        "catalogue/db.ts > roles/role-files.ts",
+        "catalogue/db.ts > roles/role-files.ts > roles/permission-mode.ts",
+        "roles/permission-mode.ts > cluster/manifest.ts",
+        "roles/role-files.ts > roles/permission-mode.ts > cluster/manifest.ts",
+        "cli.ts > hooks/self-check-sidecar.ts"
+      ],
+      "after": [
+        "roles/permission-mode.ts > cluster/manifest.ts",
+        "roles/role-files.ts > roles/permission-mode.ts > cluster/manifest.ts",
+        "cli.ts > hooks/self-check-sidecar.ts"
+      ],
+      "beforeCount": 5,
+      "afterCount": 3,
+      "removed": [
+        "catalogue/db.ts > roles/role-files.ts",
+        "catalogue/db.ts > roles/role-files.ts > roles/permission-mode.ts"
+      ],
+      "newDbModuleCycles": [],
+      "unrelatedCyclesDeliberatelyUnchanged": [
+        "roles/permission-mode.ts > cluster/manifest.ts",
+        "roles/role-files.ts > roles/permission-mode.ts > cluster/manifest.ts",
+        "cli.ts > hooks/self-check-sidecar.ts"
+      ]
+    },
+    "behaviorParity": {
+      "normalizedGoldenSnapshotsEqualPhase5": true,
+      "normalizedFleetSnapshotsEqualPhase5": true,
+      "wireBodiesEqualPhase5": true,
+      "lifecycleProjectionEqualPhase5": true,
+      "sqliteReadWitnessByteIdentical": true,
+      "sqliteLogicalStateUnchanged": true,
+      "etagUnchangedStatuses": [
+        304
+      ],
+      "etagUnchangedBodyBytes": 0,
+      "etagChangedStatuses": [
+        200
+      ],
+      "actionResults": {
+        "first": "resumed",
+        "duplicate": "focused",
+        "repeat": "focused",
+        "allAssertionsPassed": true,
+        "phase3ExpectedResults": {
+          "first": "resumed",
+          "duplicate": "focused",
+          "repeat": "focused"
+        }
+      }
+    },
+    "benchmarkComparison": {
+      "phase5": {
+        "contentionSnapshotMs": 9.519,
+        "unchangedPollP95Ms": 6.268,
+        "changedWarmP95Ms": 5.467
+      },
+      "phase6": {
+        "contentionSnapshotMs": 3.828,
+        "unchangedPollP95Ms": 4.019,
+        "changedWarmP95Ms": 4.386,
+        "focusP95Ms": 0.014,
+        "resumeAcknowledgementMs": 9.534,
+        "concurrentSnapshotMs": 5.596
+      },
+      "gates": {
+        "contentionUnder120Ms": true,
+        "unchangedPollUnder10Ms": true,
+        "changedWarmUnder120Ms": true,
+        "focusUnder150Ms": true,
+        "resumeUnder700Ms": true,
+        "concurrentSnapshotUnder50Ms": true
+      }
+    },
+    "targetedValidation": [
+      {
+        "suite": "catalogue",
+        "tests": 322,
+        "failures": 0
+      },
+      {
+        "suite": "resume new/resume/cluster/selector",
+        "tests": 97,
+        "failures": 0
+      },
+      {
+        "suite": "sidebar catalogue/snapshot/server/benchmark/actions",
+        "tests": 69,
+        "failures": 0
+      },
+      {
+        "suite": "enrichment",
+        "tests": 122,
+        "failures": 0
+      },
+      {
+        "suite": "backfill and dedup",
+        "tests": 6,
+        "failures": 0
+      },
+      {
+        "suite": "schema/migration/query/identity boundary subset",
+        "tests": 79,
+        "failures": 0
+      },
+      {
+        "suite": "full sidebar",
+        "tests": 198,
+        "failures": 0
+      }
+    ],
+    "actionBenchmark": {
+      "schemaVersion": 1,
+      "generatedAt": "2026-08-06T03:02:43.956Z",
+      "command": "bun run benchmark:sidebar:actions --samples 25",
+      "safety": {
+        "fixtureRoot": "<os-tmpdir>/ccs-sidebar-actions-*/fleet",
+        "generatedSqliteOnly": true,
+        "cmuxProcessesInvoked": false,
+        "injectedAsyncProcessAdapter": true,
+        "baselineOverwritten": false
+      },
+      "focus": {
+        "samples": 25,
+        "latencyMs": {
+          "samples": [
+            0.004,
+            0.004,
+            0.004,
+            0.004,
+            0.004,
+            0.004,
+            0.004,
+            0.006,
+            0.006,
+            0.006,
+            0.006,
+            0.006,
+            0.006,
+            0.006,
+            0.006,
+            0.007,
+            0.008,
+            0.008,
+            0.009,
+            0.01,
+            0.01,
+            0.01,
+            0.01,
+            0.014,
+            0.453
+          ],
+          "min": 0.004,
+          "p50": 0.006,
+          "p95": 0.014,
+          "max": 0.453,
+          "mean": 0.025
+        },
+        "bridgeReads": 25,
+        "bridgeReadsPerOpen": 1,
+        "processCommands": 50,
+        "p95BudgetMs": 150,
+        "baselineFleetP95Ms": 2.88,
+        "p95DeltaMs": -2.866
+      },
+      "resume": {
+        "acknowledgementMs": 9.534,
+        "acknowledgementBudgetMs": 700,
+        "resumeCalls": 1,
+        "openActions": 3,
+        "bridgeReadsForConcurrentOpens": 2,
+        "bridgeReadsForSnapshot": 1,
+        "bridgeReadsForRepeatOpen": 1,
+        "bridgeReadsPerOpen": 1,
+        "firstOutcome": "resumed",
+        "duplicateOutcome": "focused",
+        "repeatOutcome": "focused",
+        "repeatFocusCommands": 2,
+        "deferredPaintTasks": 1,
+        "paintWasDeferredAtAcknowledgement": true,
+        "paintCallsAfterDrain": 1
+      },
+      "concurrency": {
+        "snapshotMs": 5.596,
+        "snapshotRespondedBeforeResume": true,
+        "snapshotLivenessReadable": true,
+        "maximumRequestBlockBudgetMs": 50
+      },
+      "assertions": {
+        "oneBridgeReadPerFocusOpen": true,
+        "oneBridgeReadPerResumeOpen": true,
+        "singleFlightResume": true,
+        "duplicateFocusedCreatedWorkspace": true,
+        "repeatFocusedCreatedWorkspace": true,
+        "deferredPaintFailureDidNotFailAction": true,
+        "focusWithinBudget": true,
+        "resumeWithinBudget": true,
+        "snapshotRespondedWhileResumePending": true,
+        "snapshotWithinBlockBudget": true
+      }
+    },
+    "repositoryValidation": {
+      "typecheck": {
+        "command": "bun run typecheck",
+        "passed": true
+      },
+      "fullTest": {
+        "command": "bun test",
+        "passed": false,
+        "tests": 1659,
+        "passes": 1655,
+        "failures": [
+          "launcher environment materialization > writes one spec per configured launcher",
+          "launcher environment materialization > a default_harness with no [[launcher]] entry fails loudly",
+          "launcher environment materialization > an undeclared fleet installs cleanly and materializes no default",
+          "launcher environment materialization > a launcher removed from config stops resolving"
+        ],
+        "knownUnrelatedFailureFile": "src/launcher/install.test.ts",
+        "taskDiffTouchesFailureFile": false
+      },
+      "circular": {
+        "command": "bun run lint:circular",
+        "passed": false,
+        "expectedUnrelatedCycles": 3,
+        "newDbModuleCycles": 0
+      },
+      "diffCheck": {
+        "command": "git diff --check",
+        "passed": true
+      }
+    }
+  }
+}

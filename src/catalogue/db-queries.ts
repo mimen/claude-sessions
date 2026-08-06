@@ -189,7 +189,7 @@ export function lifecycleOf(row: CatalogueRow | null): Lifecycle {
  * SINGLE SOURCE OF TRUTH — the `key` column is auto-derived on every mutation that touches an
  * identity-relevant field (see `deriveKey`), so `row.key` is authoritative and no consumer (TS
  * or Python engine) ever re-derives. Historical bug: three parallel implementations (lineage.ts,
- * db.ts, compose_board.py) drifted; centralizing derivation kills the drift class at the root.
+ * db-queries.ts, compose_board.py) drifted; centralizing derivation kills the drift class at the root.
  */
 export function identityKeyOf(row: CatalogueRow | null): string | null {
   if (!row) return null;
