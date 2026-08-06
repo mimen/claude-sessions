@@ -1,13 +1,10 @@
-import type { Database } from "bun:sqlite";
-import { getRow, type CatalogueRow } from "../catalogue/db.ts";
+import type { CatalogueRow } from "../catalogue/db.ts";
 import type { Bridge, SurfaceLocation } from "../cmux/bridge.ts";
 import { log } from "../logger.ts";
 import type { AsyncProcessAdapter } from "../process/async.ts";
 import type { Launcher } from "../resume/launchers.ts";
-import type {
-  ResumeSessionOptions,
-  ResumeSessionResult,
-} from "../resume/resume-session.ts";
+import type { ResumeSessionResult } from "../resume/resume-session.ts";
+import type { SidebarResumeAction } from "../resume/sidebar-action.ts";
 import type { Result } from "../result.ts";
 import type { IndexedSessionInput } from "./projection.ts";
 
@@ -23,6 +20,7 @@ export type SessionFocusResult =
   | { readonly status: "focused"; readonly workspaceRef: string }
   | { readonly status: "not-live" }
   | { readonly status: "liveness-unreadable" }
+  | { readonly status: "timeout" }
   | { readonly status: "failed"; readonly reason: string };
 
 export type SessionResumeResult =
@@ -30,6 +28,9 @@ export type SessionResumeResult =
   | { readonly status: "already-open" }
   | { readonly status: "not-found" }
   | { readonly status: "liveness-unreadable" }
+  | { readonly status: "index-unreadable" }
+  | { readonly status: "catalogue-unreadable" }
+  | { readonly status: "timeout" }
   | { readonly status: "failed"; readonly reason: string };
 
 export type OpenSessionOutcome =
@@ -37,6 +38,9 @@ export type OpenSessionOutcome =
   | { readonly status: "resumed"; readonly workspaceRef: string | null }
   | { readonly status: "not-found" }
   | { readonly status: "liveness-unreadable" }
+  | { readonly status: "index-unreadable" }
+  | { readonly status: "catalogue-unreadable" }
+  | { readonly status: "timeout" }
   | { readonly status: "failed"; readonly reason: string };
 
 export type IndexedSessionLookup =
@@ -49,13 +53,6 @@ export interface SessionActionCoordinator {
   focusWorkspace(workspaceId: string): Promise<SessionFocusResult>;
 }
 
-type ResumeSessionCall = (
-  indexDb: Database,
-  catalogueDb: Database,
-  sessionId: string,
-  options: ResumeSessionOptions,
-) => ResumeSessionResult | Promise<ResumeSessionResult>;
-
 export interface SessionActionCoordinatorOptions {
   readonly cmuxBin: string;
   readonly now?: () => number;
@@ -63,9 +60,7 @@ export interface SessionActionCoordinatorOptions {
   readonly readBridge: () => Promise<Bridge>;
   readonly lookupIndexedSession: (sessionId: string) => IndexedSessionLookup;
   readonly loadLaunchers: () => Result<readonly Launcher[]>;
-  readonly openIndex: () => Database;
-  readonly openCatalogue: () => Database;
-  readonly resumeSession: ResumeSessionCall;
+  readonly resumeSession: SidebarResumeAction;
   readonly processAdapter: AsyncProcessAdapter;
   readonly paintWorkspace: (
     row: CatalogueRow,
@@ -118,6 +113,7 @@ export function createSessionActionCoordinator(
       case "focused":
         return { status: "focused", workspaceRef: outcome.workspaceRef };
       case "liveness-unreadable":
+      case "timeout":
         return outcome;
       case "not-live":
         return { status: "failed", reason: "the resolved workspace is no longer live" };
@@ -132,6 +128,7 @@ export function createSessionActionCoordinator(
     const selected = await options.processAdapter.run(options.cmuxBin, selectArgs, {
       timeoutMs: FOCUS_TIMEOUT_MS,
     });
+    if (selected.timedOut) return { status: "timeout" };
     if (!selected.ok) return { status: "failed", reason: "cmux refused to focus the workspace" };
     if (target.windowRef) {
       const focused = await options.processAdapter.run(
@@ -139,6 +136,7 @@ export function createSessionActionCoordinator(
         ["focus-window", "--window", target.windowRef],
         { timeoutMs: FOCUS_TIMEOUT_MS },
       );
+      if (focused.timedOut) return { status: "timeout" };
       if (!focused.ok) return { status: "failed", reason: "cmux refused to focus the workspace" };
     }
     return { status: "focused", workspaceRef: target.workspaceRef };
@@ -175,56 +173,33 @@ export function createSessionActionCoordinator(
       };
     }
 
-    let indexDb: Database;
-    try {
-      indexDb = options.openIndex();
-    } catch (error) {
-      return {
-        status: "failed",
-        reason: `the session index cannot be opened for resume: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
+    const resumed = await options.resumeSession({
+      bridge,
+      sessionId: row.sessionId,
+      cmuxBin: options.cmuxBin,
+      launchers: launchers.value,
+    });
+    if (resumed.status !== "ok") return resumed;
 
-    let catalogueDb: Database | null = null;
-    try {
-      try {
-        catalogueDb = options.openCatalogue();
-      } catch (error) {
-        log.warn("sidebar could not open the session catalogue for resume", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return { status: "failed", reason: "the session catalogue cannot be opened for resume" };
-      }
-
-      const paintRow = getRow(catalogueDb, row.sessionId);
-      const result = await options.resumeSession(indexDb, catalogueDb, row.sessionId, {
-        bridge,
-        focus: true,
-        cmuxBin: options.cmuxBin,
-        launchers: launchers.value,
-      });
-      switch (result.status) {
-        case "resumed": {
-          if (!result.workspaceRef) {
-            return { status: "failed", reason: "cmux created no addressable workspace" };
-          }
-          const target = { workspaceRef: result.workspaceRef, windowRef: null };
-          rememberResume(sessionIds, target);
-          queuePaint(paintRow, result.workspaceRef);
-          return { status: "resumed", target };
+    const result: ResumeSessionResult = resumed.result;
+    switch (result.status) {
+      case "resumed": {
+        if (!result.workspaceRef) {
+          return { status: "failed", reason: "cmux created no addressable workspace" };
         }
-        case "already-open":
-          return { status: "already-open" };
-        case "not-indexed":
-          return { status: "not-found" };
-        case "liveness-unreadable":
-          return { status: "liveness-unreadable" };
-        default:
-          return { status: "failed", reason: result.status };
+        const target = { workspaceRef: result.workspaceRef, windowRef: null };
+        rememberResume(sessionIds, target);
+        queuePaint(resumed.paintRow, result.workspaceRef);
+        return { status: "resumed", target };
       }
-    } finally {
-      catalogueDb?.close();
-      indexDb.close();
+      case "already-open":
+        return { status: "already-open" };
+      case "not-indexed":
+        return { status: "not-found" };
+      case "liveness-unreadable":
+        return { status: "liveness-unreadable" };
+      default:
+        return { status: "failed", reason: result.status };
     }
   }
 
@@ -258,12 +233,7 @@ export function createSessionActionCoordinator(
       }
 
       if (lookup.status === "absent") return { status: "not-found" };
-      if (lookup.status === "unreadable") {
-        return {
-          status: "failed",
-          reason: `the session index is unreadable, so this session cannot be resumed: ${lookup.reason}`,
-        };
-      }
+      if (lookup.status === "unreadable") return { status: "index-unreadable" };
       const sessionIds = identityIds(sessionId, lookup.row);
       const recent = recentTargetFor(sessionIds);
       if (recent) {
@@ -275,9 +245,19 @@ export function createSessionActionCoordinator(
       if (existingFlight) {
         const outcome = await existingFlight;
         if (outcome.status !== "resumed") {
-          return outcome.status === "not-found" || outcome.status === "liveness-unreadable"
-            ? outcome
-            : { status: "failed", reason: outcome.status === "failed" ? outcome.reason : "session is already open but its workspace was not in the action's liveness read" };
+          if (
+            outcome.status === "not-found"
+            || outcome.status === "liveness-unreadable"
+            || outcome.status === "index-unreadable"
+            || outcome.status === "catalogue-unreadable"
+            || outcome.status === "timeout"
+          ) return outcome;
+          return {
+            status: "failed",
+            reason: outcome.status === "failed"
+              ? outcome.reason
+              : "session is already open but its workspace was not in the action's liveness read",
+          };
         }
         const focused = await focusTarget(outcome.target);
         return openOutcomeFromFocus(focused);
@@ -292,6 +272,9 @@ export function createSessionActionCoordinator(
             return { status: "resumed", workspaceRef: outcome.target.workspaceRef };
           case "not-found":
           case "liveness-unreadable":
+          case "index-unreadable":
+          case "catalogue-unreadable":
+          case "timeout":
             return outcome;
           case "already-open":
             return {

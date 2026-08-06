@@ -9,14 +9,11 @@
  */
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
-import { Database } from "bun:sqlite";
-import { openIndex } from "../index/schema.ts";
 import {
-  getRow,
-  lifecycleOf,
-  openCatalogue,
-} from "../catalogue/db.ts";
-import { setIdentityFields } from "../catalogue/identities.ts";
+  declineExistingSessionRecommendation,
+  setExistingSessionLifecycle,
+  type CatalogueCommandOptions,
+} from "../catalogue/commands.ts";
 import { DB_PATH, CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { liveBridgeAsync } from "../cmux/live.ts";
 import type { Bridge } from "../cmux/bridge.ts";
@@ -33,10 +30,9 @@ import {
 } from "../cmux/finish-current.ts";
 import { launchImmediateEnrichment } from "../cmux/launch-enrichment.ts";
 import {
-  resumeSessionEntryAsync,
-  type ResumeSessionOptions,
-  type ResumeSessionResult,
-} from "../resume/resume-session.ts";
+  createSidebarResumeAction,
+  type SidebarResumeAction,
+} from "../resume/sidebar-action.ts";
 import { loadLaunchers } from "../resume/launchers.ts";
 import {
   bunAsyncProcessAdapter,
@@ -127,6 +123,7 @@ export type SessionLifecycleOutcome =
     readonly closeFailed?: string;
   }
   | { readonly status: "not-found" }
+  | { readonly status: "catalogue-unreadable" }
   | { readonly status: "failed"; readonly reason: string };
 
 /** Read the current picture and act on one row. Nothing else is exposed to callers. */
@@ -135,6 +132,7 @@ export type CloseWorkspaceOutcome =
   /** Nothing to close: the session has no live workspace. */
   | { readonly status: "not-live" }
   | { readonly status: "liveness-unreadable" }
+  | { readonly status: "timeout" }
   | { readonly status: "failed"; readonly reason: string };
 
 export type FocusWorkspaceOutcome =
@@ -142,18 +140,21 @@ export type FocusWorkspaceOutcome =
   /** The workspace is no longer in the live tree, so there is nothing to focus. */
   | { readonly status: "not-live" }
   | { readonly status: "liveness-unreadable" }
+  | { readonly status: "timeout" }
   | { readonly status: "failed"; readonly reason: string };
 
 export type PinWorkspaceOutcome =
   | { readonly status: "pinned"; readonly pinned: boolean }
   | { readonly status: "not-live" }
   | { readonly status: "liveness-unreadable" }
+  | { readonly status: "timeout" }
   | { readonly status: "failed"; readonly reason: string };
 
 /** Declining touches one column and nothing else, so there is little that can go wrong loudly. */
 export type DeclineOutcome =
   | { readonly status: "ok" }
   | { readonly status: "not-found" }
+  | { readonly status: "catalogue-unreadable" }
   | { readonly status: "failed"; readonly reason: string };
 
 export interface SidebarSource {
@@ -364,33 +365,6 @@ function lifecycleForIndexedSession(
   return lifecycles.get(session.sessionId) ?? lifecycles.get(session.resumeId) ?? "active";
 }
 
-function mirrorLifecycleToFleetIdentity(
-  db: Database,
-  identityKey: string | null,
-  field: "completed" | "archived",
-  value: boolean,
-  changedAt: string,
-): void {
-  if (!identityKey) return;
-  try {
-    const identity = db.query(
-      "SELECT kind FROM identities WHERE identity_key = $key",
-    ).get({ $key: identityKey }) as { kind: string } | null;
-    // Core identities span several session lifetimes, so retiring one body must stay per-session.
-    if (!identity || identity.kind === "core") return;
-    setIdentityFields(db, identityKey, { [field]: value }, changedAt);
-  } catch {
-    // The session write is authoritative; mark() also treats an identity mirror as best-effort.
-  }
-}
-
-type ResumeSessionCall = (
-  indexDb: Database,
-  catalogueDb: Database,
-  sessionId: string,
-  options: ResumeSessionOptions,
-) => ResumeSessionResult | Promise<ResumeSessionResult>;
-
 interface DirectoryFactsReader {
   lookup(directories: readonly string[]): Promise<DirectoryFactsResult>;
 }
@@ -433,13 +407,13 @@ export interface SidebarSourceOptions {
   readonly finishSession?: typeof finishSession;
   readonly launchEnrichment?: FinishSessionDependencies["launchEnrichment"];
   readonly loadLaunchers?: typeof loadLaunchers;
-  readonly resumeSession?: ResumeSessionCall;
+  /** Managed resume owns its database handles outside the sidebar request/snapshot layer. */
+  readonly resumeAction?: SidebarResumeAction;
   readonly paintWorkspace?: typeof paintResumedWorkspace;
   readonly deferActionTask?: (task: () => void) => void;
-  readonly openIndex?: typeof openIndex;
-  readonly openCatalogue?: typeof openCatalogue;
-  readonly openActionIndex?: () => Database;
-  readonly openActionCatalogue?: () => Database;
+  readonly cataloguePath?: string;
+  readonly lifecycleCommand?: typeof setExistingSessionLifecycle;
+  readonly declineCommand?: typeof declineExistingSessionRecommendation;
   readonly ensureDataDir?: typeof ensureDataDir;
   readonly readCatalogue?: typeof readCatalogueReadOnly;
   readonly readIndex?: typeof readIndexReadOnly;
@@ -475,26 +449,19 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const runFinishSession = options.finishSession ?? finishSession;
   const launchEnrichment = options.launchEnrichment ?? launchImmediateEnrichment;
   const launcherLoader = options.loadLaunchers ?? loadLaunchers;
-  const resume: ResumeSessionCall = options.resumeSession ?? ((indexDb, catalogueDb, sessionId, resumeOptions) =>
-    resumeSessionEntryAsync(indexDb, catalogueDb, sessionId, resumeOptions, processAdapter));
-  const openIndexDb = options.openIndex ?? openIndex;
-  const openCatalogueDb = options.openCatalogue ?? openCatalogue;
-  const openReadOnlyDatabase = (path: string): Database => {
-    const db = new Database(path, { readonly: true });
-    db.exec("PRAGMA query_only = ON");
-    return db;
-  };
-  const openActionIndex = options.openActionIndex
-    ?? (options.openIndex ? () => openIndexDb(DB_PATH()) : () => openReadOnlyDatabase(DB_PATH()));
-  const openActionCatalogue = options.openActionCatalogue
-    ?? (options.openCatalogue
-      ? () => openCatalogueDb(CATALOGUE_PATH())
-      : () => openReadOnlyDatabase(CATALOGUE_PATH()));
+  const resumeAction = options.resumeAction ?? createSidebarResumeAction({ processAdapter });
   const ensureDataDirectory = options.ensureDataDir ?? ensureDataDir;
   const readCache = options.readCache
     ?? (options.readCatalogue === undefined && options.readIndex === undefined
       ? createSidebarReadCache(CATALOGUE_PATH(), DB_PATH())
       : null);
+  const lifecycleCommand = options.lifecycleCommand ?? setExistingSessionLifecycle;
+  const declineCommand = options.declineCommand ?? declineExistingSessionRecommendation;
+  const catalogueCommandOptions: CatalogueCommandOptions = {
+    cataloguePath: options.cataloguePath,
+    now: () => new Date(now()),
+    ensureDataDir: ensureDataDirectory,
+  };
   const readCatalogue = options.readCatalogue ?? readCatalogueReadOnly;
   const readIndex = options.readIndex ?? readIndexReadOnly;
   const readIndexedSessionsOverride = options.indexedSessions;
@@ -580,65 +547,10 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     sessionId: string,
     action: SessionLifecycleAction,
   ): SessionLifecycleOutcome {
-    let catalogueDb: Database | null = null;
-    try {
-      ensureDataDirectory();
-      catalogueDb = openCatalogueDb(CATALOGUE_PATH());
-      const existing = getRow(catalogueDb, sessionId);
-      if (existing === null) return { status: "not-found" };
-
-      const changedAt = new Date(now()).toISOString();
-      const field = action === "complete" || action === "uncomplete"
-        ? "completed"
-        : "archived";
-      const value = action === "complete" || action === "archive";
-      const lifecycleUpdate = field === "completed"
-        ? "UPDATE catalogue SET completed = $value, updated_at = $changedAt WHERE session_id = $sessionId"
-        : "UPDATE catalogue SET archived = $value, updated_at = $changedAt WHERE session_id = $sessionId";
-      catalogueDb.query(lifecycleUpdate).run({
-        $value: value ? 1 : 0,
-        $changedAt: changedAt,
-        $sessionId: sessionId,
-      });
-      mirrorLifecycleToFleetIdentity(
-        catalogueDb,
-        existing.identityKey,
-        field,
-        value,
-        changedAt,
-      );
-
-      return {
-        status: "ok",
-        lifecycle: sidebarLifecycleOf(lifecycleOf(getRow(catalogueDb, sessionId))),
-      };
-    } catch (error) {
-      log.warn("sidebar could not update session lifecycle", {
-        error: error instanceof Error ? error.message : String(error),
-        action,
-        sessionId,
-      });
-      return { status: "failed", reason: "the session catalogue could not be updated" };
-    } finally {
-      catalogueDb?.close();
-    }
-  }
-
-  function ensureCatalogueSessionRow(sessionId: string): Result<void> {
-    let catalogueDb: Database | null = null;
-    try {
-      ensureDataDirectory();
-      catalogueDb = openCatalogueDb(CATALOGUE_PATH());
-      catalogueDb.query(
-        "INSERT INTO catalogue (session_id, updated_at) VALUES ($id, $now) "
-          + "ON CONFLICT(session_id) DO NOTHING",
-      ).run({ $id: sessionId, $now: new Date(now()).toISOString() });
-      return ok(undefined);
-    } catch (error) {
-      return err(error instanceof Error ? error : new Error(String(error)));
-    } finally {
-      catalogueDb?.close();
-    }
+    const outcome = lifecycleCommand(sessionId, action, catalogueCommandOptions);
+    if (outcome.status === "not-found") return outcome;
+    if (outcome.status === "catalogue-unreadable") return outcome;
+    return { status: "ok", lifecycle: sidebarLifecycleOf(outcome.value) };
   }
 
   function closeCandidateIds(sessionId: string): readonly string[] {
@@ -700,9 +612,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         : { status: "unreadable", reason: "session index read failed" };
     },
     loadLaunchers: launcherLoader,
-    openIndex: openActionIndex,
-    openCatalogue: openActionCatalogue,
-    resumeSession: resume,
+    resumeSession: resumeAction,
     processAdapter,
     paintWorkspace: options.paintWorkspace ?? paintResumedWorkspace,
     defer: options.deferActionTask,
@@ -937,6 +847,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         ["close-workspace", "--workspace", workspaceId],
         { timeoutMs: 5_000 },
       );
+      if (closed.timedOut) return { status: "timeout" };
       return closed.ok
         ? { status: "closed" }
         : { status: "failed", reason: "cmux refused to close the workspace" };
@@ -951,6 +862,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         ["workspace-action", "--action", pinned ? "pin" : "unpin", "--workspace", workspaceId],
         { timeoutMs: 3_000 },
       );
+      if (changed.timedOut) return { status: "timeout" };
       return changed.ok
         ? { status: "pinned", pinned }
         : { status: "failed", reason: `cmux refused to ${pinned ? "pin" : "unpin"} the workspace` };
@@ -1002,6 +914,9 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
           if (outcome.status === "not-found") {
             return err(new Error("the session is absent from the catalogue"));
           }
+          if (outcome.status === "catalogue-unreadable") {
+            return err(new Error("the session catalogue is unavailable"));
+          }
           return err(new Error(outcome.reason));
         },
         launchEnrichment,
@@ -1019,6 +934,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
           return { status: "failed", reason: finished.error.message };
         case "lifecycle-failed":
           if (recorded.outcome?.status === "not-found") return recorded.outcome;
+          if (recorded.outcome?.status === "catalogue-unreadable") return recorded.outcome;
           if (recorded.outcome?.status === "failed") return recorded.outcome;
           return { status: "failed", reason: "the session lifecycle could not be updated" };
         case "close-result": {
@@ -1058,25 +974,10 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     },
 
     async declineSuggestion(sessionId: string, verb: string): Promise<DeclineOutcome> {
-      let db: Database | null = null;
-      try {
-        ensureDataDirectory();
-        db = openCatalogueDb(CATALOGUE_PATH());
-        // Only an existing row: declining a verdict for a session the catalogue has never heard of
-        // would create a row whose only content is a refusal, which is not a session.
-        const existing = getRow(db, sessionId);
-        if (!existing) return { status: "not-found" };
-        db.query("UPDATE catalogue SET enrichment_declined = $verb WHERE session_id = $id")
-          .run({ $verb: verb, $id: sessionId });
-        return { status: "ok" };
-      } catch (error) {
-        return {
-          status: "failed",
-          reason: error instanceof Error ? error.message : "could not record the decision",
-        };
-      } finally {
-        db?.close();
-      }
+      const outcome = declineCommand(sessionId, verb, catalogueCommandOptions);
+      if (outcome.status === "not-found") return outcome;
+      if (outcome.status === "catalogue-unreadable") return outcome;
+      return { status: "ok" };
     },
 
     async open(sessionId: string): Promise<OpenSessionOutcome> {

@@ -26,6 +26,7 @@ import {
   childrenOf,
   getRow,
   getTags,
+  lifecycleOf,
   identityKeyOf,
   parentEdges,
 } from "./db.ts";
@@ -55,6 +56,88 @@ export type ShimBirthRegistration =
   | { readonly status: "existing" }
   | { readonly status: "missing" }
   | { readonly status: "mismatch"; readonly reason: string };
+
+export type SessionLifecycleAction = "complete" | "archive" | "uncomplete" | "unarchive";
+
+export type CatalogueMutationOutcome<T> =
+  | { readonly status: "ok"; readonly value: T }
+  | { readonly status: "not-found" }
+  | { readonly status: "catalogue-unreadable" };
+
+export interface CatalogueCommandOptions {
+  readonly cataloguePath?: string;
+  readonly now?: () => Date;
+  readonly openCatalogue?: typeof openCatalogue;
+  readonly ensureDataDir?: typeof ensureDataDir;
+}
+
+function commandContext(options: CatalogueCommandOptions): {
+  readonly path: string;
+  readonly nowIso: string;
+  readonly open: typeof openCatalogue;
+  readonly ensure: typeof ensureDataDir;
+} {
+  return {
+    path: options.cataloguePath ?? CATALOGUE_PATH(),
+    nowIso: (options.now ?? (() => new Date()))().toISOString(),
+    open: options.openCatalogue ?? openCatalogue,
+    ensure: options.ensureDataDir ?? ensureDataDir,
+  };
+}
+
+/**
+ * Change lifecycle only for a row the catalogue already owns. The existence check is inside the
+ * same transaction as the write, so typoed or stale ids can never become phantom rows through the
+ * raw setters' upsert behavior. Identity mirroring deliberately remains best-effort, matching the
+ * CLI contract: the session row is authoritative and a mirror failure cannot roll it back.
+ */
+export function setExistingSessionLifecycle(
+  sessionId: string,
+  action: SessionLifecycleAction,
+  options: CatalogueCommandOptions = {},
+): CatalogueMutationOutcome<ReturnType<typeof lifecycleOf>> {
+  const context = commandContext(options);
+  let db: ReturnType<typeof openCatalogue> | null = null;
+  try {
+    context.ensure();
+    db = context.open(context.path);
+    return db.transaction((): CatalogueMutationOutcome<ReturnType<typeof lifecycleOf>> => {
+      if (getRow(db!, sessionId) === null) return { status: "not-found" };
+      const field = action === "complete" || action === "uncomplete" ? "completed" : "archived";
+      const value = action === "complete" || action === "archive";
+      if (field === "completed") setCompleted(db!, sessionId, value, context.nowIso);
+      else setArchived(db!, sessionId, value, context.nowIso);
+      mirrorToIdentity(db!, sessionId, { [field]: value }, context.nowIso);
+      return { status: "ok", value: lifecycleOf(getRow(db!, sessionId)) };
+    })();
+  } catch {
+    return { status: "catalogue-unreadable" };
+  } finally {
+    db?.close();
+  }
+}
+
+/** Record a refused recommendation without creating a catalogue row for an unknown session. */
+export function declineExistingSessionRecommendation(
+  sessionId: string,
+  recommendation: string,
+  options: CatalogueCommandOptions = {},
+): CatalogueMutationOutcome<void> {
+  const context = commandContext(options);
+  let db: ReturnType<typeof openCatalogue> | null = null;
+  try {
+    context.ensure();
+    db = context.open(context.path);
+    if (getRow(db, sessionId) === null) return { status: "not-found" };
+    db.query("UPDATE catalogue SET enrichment_declined = $recommendation WHERE session_id = $sessionId")
+      .run({ $recommendation: recommendation, $sessionId: sessionId });
+    return { status: "ok", value: undefined };
+  } catch {
+    return { status: "catalogue-unreadable" };
+  } finally {
+    db?.close();
+  }
+}
 
 /** Register or verify a persistent birth passing through the stable Claude shim. */
 export function registerShimBirth(

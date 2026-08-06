@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildBridge } from "../src/cmux/bridge.ts";
-import { openCatalogue } from "../src/catalogue/db.ts";
+import { getRow } from "../src/catalogue/db.ts";
 import { distribution } from "../src/sidebar/bench/benchmark.ts";
 import { createSidebarFixture, FIXED_NOW } from "../src/sidebar/bench/fixtures.ts";
 import type { IndexedSessionInput } from "../src/sidebar/projection.ts";
@@ -57,6 +57,9 @@ try {
   const fixture = createSidebarFixture(fixtureRoot);
   process.env.CCS_ROOT = fixtureRoot;
   const closed = indexed("session-0025", "resume-0025");
+  const paintDb = new Database(fixture.cataloguePath, { readonly: true });
+  const paintRow = getRow(paintDb, closed.sessionId);
+  paintDb.close();
   const emptyBridge = buildBridge({ windows: [] }, {});
   const baseOptions: SidebarSourceOptions = {
     now: () => FIXED_NOW,
@@ -66,9 +69,7 @@ try {
     notificationReader: { read: async () => ({ notifications: [], unreadCountsByWorkspaceId: new Map() }) },
     directoryFacts: { lookup: async () => ({ checkouts: new Map(), favicons: new Map() }) },
     loadLaunchers: () => ({ ok: true, value: [{ name: "gateway", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] }] }),
-    openCatalogue: () => openCatalogue(fixture.cataloguePath, { materialize: false }),
-    openActionCatalogue: () => new Database(fixture.cataloguePath, { readonly: true }),
-    openActionIndex: () => new Database(fixture.indexPath, { readonly: true }),
+    cataloguePath: fixture.cataloguePath,
     ensureDataDir: () => {},
   };
 
@@ -119,9 +120,9 @@ try {
         return { ok: true, stdout: "", stderr: "", timedOut: false };
       },
     },
-    resumeSession: async () => {
+    resumeAction: async () => {
       resumeCalls += 1;
-      return resumeGate.promise;
+      return { status: "ok", result: await resumeGate.promise, paintRow };
     },
     deferActionTask: (task) => deferredPaint.push(task),
     paintWorkspace: async () => {
