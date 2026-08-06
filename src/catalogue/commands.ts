@@ -39,6 +39,7 @@ import { resolveRole } from "../roles/role-files.ts";
 import { validateStageTransition } from "./stage-schema.ts";
 import { recomposeForSession } from "../board/recompose.ts";
 import { err, ok, type Result } from "../result.ts";
+import { log } from "../logger.ts";
 
 /**
  * CLI surface for the catalogue. These are the primitives the in-session slash commands
@@ -69,6 +70,7 @@ export interface CatalogueCommandOptions {
   readonly now?: () => Date;
   readonly openCatalogue?: typeof openCatalogue;
   readonly ensureDataDir?: typeof ensureDataDir;
+  readonly logger?: Pick<typeof log, "warn">;
 }
 
 function commandContext(options: CatalogueCommandOptions): {
@@ -110,7 +112,14 @@ export function setExistingSessionLifecycle(
       mirrorToIdentity(db!, sessionId, { [field]: value }, context.nowIso);
       return { status: "ok", value: lifecycleOf(getRow(db!, sessionId)) };
     })();
-  } catch {
+  } catch (error) {
+    (options.logger ?? log).warn("sidebar lifecycle catalogue mutation failed", {
+      operation: "lifecycle",
+      sessionId,
+      action,
+      cataloguePath: context.path,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return { status: "catalogue-unreadable" };
   } finally {
     db?.close();
@@ -132,7 +141,14 @@ export function declineExistingSessionRecommendation(
     db.query("UPDATE catalogue SET enrichment_declined = $recommendation WHERE session_id = $sessionId")
       .run({ $recommendation: recommendation, $sessionId: sessionId });
     return { status: "ok", value: undefined };
-  } catch {
+  } catch (error) {
+    (options.logger ?? log).warn("sidebar recommendation catalogue mutation failed", {
+      operation: "decline-recommendation",
+      sessionId,
+      recommendation,
+      cataloguePath: context.path,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return { status: "catalogue-unreadable" };
   } finally {
     db?.close();

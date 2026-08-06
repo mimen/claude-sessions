@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSidebarServer, isLoopbackSidebarHost } from "./server.ts";
 import { sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
+import { createSidebarSource } from "./snapshot.ts";
+import type { Bridge } from "../cmux/bridge.ts";
 import type {
   OpenSessionOutcome,
   SessionLifecycleAction,
@@ -411,6 +413,154 @@ describe("sidebar server", () => {
       expect(optimistic).toBeFalse();
       expect(legacyResult).not.toHaveProperty("reason");
       expect(JSON.stringify(legacyResult)).not.toContain("/private/catalogue.db");
+    }
+  });
+
+  test("SQLite mutation failures reach diagnostics but not lifecycle or decline envelopes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ccs-sidebar-http-sqlite-failure-"));
+    const diagnostics: Array<{ message: string; context?: Record<string, unknown> }> = [];
+    const logger = {
+      warn(message: string, context?: Record<string, unknown>): void {
+        diagnostics.push({ message, ...(context === undefined ? {} : { context }) });
+      },
+    };
+    try {
+      const source = createSidebarSource({
+        cataloguePath: directory,
+        ensureDataDir: (): void => {},
+        logger,
+      });
+      const server = createSidebarServer({ source, assets: ASSETS, port: 0, logger });
+      running.push(server);
+      const url = server.url.origin;
+
+      const lifecycle = await fetch(`${url}/api/session/lifecycle`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: url },
+        body: JSON.stringify({ sessionId: "concrete-lifecycle", action: "unarchive" }),
+      });
+      const lifecycleBody = await lifecycle.text();
+      expect(lifecycle.status).toBe(503);
+      expect(JSON.parse(lifecycleBody)).toEqual({
+        code: "catalogue_unreadable",
+        message: sidebarHttpError("catalogue_unreadable").message,
+        retryable: true,
+        status: "failed",
+      });
+
+      const decline = await fetch(`${url}/api/session/decline`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: url },
+        body: JSON.stringify({ sessionId: "concrete-decline", verb: "archive" }),
+      });
+      const declineBody = await decline.text();
+      expect(decline.status).toBe(503);
+      expect(JSON.parse(declineBody)).toEqual({
+        code: "catalogue_unreadable",
+        message: sidebarHttpError("catalogue_unreadable").message,
+        retryable: true,
+        status: "failed",
+      });
+
+      expect(lifecycleBody).not.toContain(directory);
+      expect(declineBody).not.toContain(directory);
+      const lifecycleDiagnostic = diagnostics.find((entry) =>
+        entry.message === "sidebar lifecycle catalogue mutation failed");
+      expect(lifecycleDiagnostic).toMatchObject({
+        context: {
+          operation: "lifecycle",
+          sessionId: "concrete-lifecycle",
+          action: "unarchive",
+          cataloguePath: directory,
+          error: "unable to open database file",
+        },
+      });
+      const declineDiagnostic = diagnostics.find((entry) =>
+        entry.message === "sidebar recommendation catalogue mutation failed");
+      expect(declineDiagnostic).toMatchObject({
+        context: {
+          operation: "decline-recommendation",
+          sessionId: "concrete-decline",
+          recommendation: "archive",
+          cataloguePath: directory,
+          error: "unable to open database file",
+        },
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("resume index open failures reach diagnostics but not the HTTP envelope", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ccs-sidebar-http-resume-failure-"));
+    const diagnostics: Array<{ message: string; context?: Record<string, unknown> }> = [];
+    const logger = {
+      warn(message: string, context?: Record<string, unknown>): void {
+        diagnostics.push({ message, ...(context === undefined ? {} : { context }) });
+      },
+    };
+    const bridge: Bridge = {
+      surfaces: [],
+      surfaceToWorkspace: new Map(),
+      workspaceIds: () => [],
+      surfacesInWorkspace: () => [],
+      surfaceInfo: () => null,
+      readable: true,
+      locateSession: () => null,
+      isOpen: () => false,
+      primarySurface: () => null,
+      activeWindowId: null,
+    };
+    try {
+      const source = createSidebarSource({
+        indexPath: directory,
+        cataloguePath: join(directory, "unused-catalogue.db"),
+        indexedSessions: () => [{
+          sessionId: "abc",
+          resumeId: "abc",
+          title: "Concrete resume",
+          cwd: directory,
+          lastTs: null,
+          models: [],
+          costByModel: {},
+        }],
+        readBridge: async () => bridge,
+        loadLaunchers: () => ({ ok: true as const, value: [] }),
+        logger,
+      });
+      const server = createSidebarServer({ source, assets: ASSETS, port: 0, logger });
+      running.push(server);
+      const url = server.url.origin;
+
+      const response = await postOpen({
+        url,
+        opened: [],
+        diagnostics,
+        snapshotScopes: [],
+        lifecycleChanges: [],
+        stop: () => void server.stop(true),
+      }, url);
+      const body = await response.text();
+
+      expect(response.status).toBe(503);
+      expect(JSON.parse(body)).toEqual({
+        code: "index_unreadable",
+        message: sidebarHttpError("index_unreadable").message,
+        retryable: true,
+        status: "failed",
+      });
+      expect(body).not.toContain(directory);
+      const diagnostic = diagnostics.find((entry) => entry.message === "sidebar resume index open failed");
+      expect(diagnostic).toMatchObject({
+        context: {
+          operation: "resume",
+          sessionId: "abc",
+          indexPath: directory,
+          error: "unable to open database file",
+        },
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

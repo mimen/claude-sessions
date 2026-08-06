@@ -4,6 +4,7 @@ import { getRow, type CatalogueRow } from "../catalogue/db.ts";
 import { CATALOGUE_PATH, DB_PATH } from "../paths.ts";
 import type { AsyncProcessAdapter } from "../process/async.ts";
 import type { Launcher } from "./launchers.ts";
+import { log } from "../logger.ts";
 import {
   resumeSessionEntryAsync,
   type ResumeSessionResult,
@@ -31,6 +32,9 @@ export type SidebarResumeAction = (
 
 export interface SidebarResumeActionOptions {
   readonly processAdapter: AsyncProcessAdapter;
+  readonly indexPath?: string;
+  readonly cataloguePath?: string;
+  readonly logger?: Pick<typeof log, "warn">;
 }
 
 function openReadOnly(path: string): Database {
@@ -46,19 +50,34 @@ function openReadOnly(path: string): Database {
 export function createSidebarResumeAction(
   options: SidebarResumeActionOptions,
 ): SidebarResumeAction {
+  const logger = options.logger ?? log;
+  const indexPath = options.indexPath ?? DB_PATH();
+  const cataloguePath = options.cataloguePath ?? CATALOGUE_PATH();
   return async (input): Promise<SidebarResumeActionOutcome> => {
     let indexDb: Database;
     try {
-      indexDb = openReadOnly(DB_PATH());
-    } catch {
+      indexDb = openReadOnly(indexPath);
+    } catch (error) {
+      logger.warn("sidebar resume index open failed", {
+        operation: "resume",
+        sessionId: input.sessionId,
+        indexPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return { status: "index-unreadable" };
     }
 
     let catalogueDb: Database | null = null;
     try {
       try {
-        catalogueDb = openReadOnly(CATALOGUE_PATH());
-      } catch {
+        catalogueDb = openReadOnly(cataloguePath);
+      } catch (error) {
+        logger.warn("sidebar resume catalogue open failed", {
+          operation: "resume",
+          sessionId: input.sessionId,
+          cataloguePath,
+          error: error instanceof Error ? error.message : String(error),
+        });
         return { status: "catalogue-unreadable" };
       }
       const paintRow = getRow(catalogueDb, input.sessionId);
