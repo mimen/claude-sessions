@@ -207,7 +207,9 @@ function sourceOptions(overrides: Partial<SidebarSourceOptions> = {}): SidebarSo
     cmuxBin: "never-run-cmux",
     readBridge: async () => emptyBridge(),
     readStatuses: async () => new Map<string, CmuxStatusRead>(),
-    focus: () => true,
+    processAdapter: {
+      run: async () => ({ ok: true, stdout: "", stderr: "", timedOut: false }),
+    },
     closeCmuxWorkspace: () => true,
     launchEnrichment: (sessionId) => ({
       ok: true,
@@ -273,12 +275,19 @@ describe("createSidebarSource open", () => {
     expect(resumeCalls).toBe(1);
   });
 
-  test("suppresses a repeat resume until the SessionStart binding window has elapsed", async () => {
+  test("focuses the concrete workspace on a repeat click before SessionStart binds it", async () => {
     let current = 10_000;
     let resumeCalls = 0;
+    const processCalls: string[][] = [];
     const source = createSidebarSource(sourceOptions({
       now: () => current,
       recentlyResumedMs: 500,
+      processAdapter: {
+        run: async (_file, args) => {
+          processCalls.push([...args]);
+          return { ok: true, stdout: "", stderr: "", timedOut: false };
+        },
+      },
       resumeSession: () => {
         resumeCalls += 1;
         return {
@@ -298,6 +307,9 @@ describe("createSidebarSource open", () => {
       workspaceRef: "workspace:1",
     });
     expect(resumeCalls).toBe(1);
+    expect(processCalls).toEqual([
+      ["select-workspace", "--workspace", "workspace:1"],
+    ]);
 
     current += 501;
     await expect(source.open("file-id")).resolves.toEqual({
@@ -339,6 +351,131 @@ describe("createSidebarSource open", () => {
       reason: "launcher configuration could not be loaded: config.toml is malformed",
     });
     expect(resumeCalls).toBe(0);
+  });
+
+  test("reads exactly one fresh Bridge and focuses the location from that read", async () => {
+    const bridge = buildBridge(
+      {
+        windows: [{
+          id: "window-id",
+          ref: "window:4",
+          workspaces: [{
+            id: "workspace-id",
+            ref: "workspace:8",
+            title: "Live",
+            panes: [{
+              id: "pane-id",
+              ref: "pane:1",
+              index: 0,
+              surfaces: [{ id: "surface-id", ref: "surface:1", index_in_pane: 0 }],
+            }],
+          }],
+        }],
+      },
+      { sessions: { "file-id": { surfaceId: "surface-id", workspaceId: "workspace-id", cwd: "/repo" } } },
+    );
+    let bridgeReads = 0;
+    const processCalls: string[][] = [];
+    const source = createSidebarSource(sourceOptions({
+      readBridge: async () => {
+        bridgeReads += 1;
+        return bridge;
+      },
+      processAdapter: {
+        run: async (_file, args) => {
+          processCalls.push([...args]);
+          return { ok: true, stdout: "", stderr: "", timedOut: false };
+        },
+      },
+    }));
+
+    await expect(source.open("file-id")).resolves.toEqual({
+      status: "focused",
+      workspaceRef: "workspace:8",
+    });
+    expect(bridgeReads).toBe(1);
+    expect(processCalls).toEqual([
+      ["select-workspace", "--workspace", "workspace:8", "--window", "window:4"],
+      ["focus-window", "--window", "window:4"],
+    ]);
+  });
+
+  test("keeps snapshots responsive while an async focus action is in flight", async () => {
+    const processResult = deferred<{ ok: boolean; stdout: string; stderr: string; timedOut: boolean }>();
+    const bridge = buildBridge(
+      {
+        windows: [{
+          id: "window-id",
+          ref: "window:4",
+          workspaces: [{
+            id: "workspace-id",
+            ref: "workspace:8",
+            title: "Live",
+            panes: [{
+              id: "pane-id",
+              ref: "pane:1",
+              index: 0,
+              surfaces: [{ id: "surface-id", ref: "surface:1", index_in_pane: 0 }],
+            }],
+          }],
+        }],
+      },
+      { sessions: { "file-id": { surfaceId: "surface-id", workspaceId: "workspace-id", cwd: "/repo" } } },
+    );
+    let processCalls = 0;
+    const source = createSidebarSource(sourceOptions({
+      readBridge: async () => bridge,
+      processAdapter: {
+        run: async () => {
+          processCalls += 1;
+          if (processCalls === 1) return processResult.promise;
+          return { ok: true, stdout: "", stderr: "", timedOut: false };
+        },
+      },
+    }));
+
+    const opening = source.open("file-id");
+    await waitFor(() => processCalls === 1);
+    await expect(source.snapshot()).resolves.toMatchObject({ livenessReadable: true });
+    processResult.resolve({ ok: true, stdout: "", stderr: "", timedOut: false });
+    await expect(opening).resolves.toEqual({ status: "focused", workspaceRef: "workspace:8" });
+  });
+
+  test("defers cosmetic paint from the already-read row and ignores paint failure", async () => {
+    const deferredTasks: Array<() => void> = [];
+    const paintedRows: string[] = [];
+    const source = createSidebarSource(sourceOptions({
+      openCatalogue: () => catalogueDb([{ sessionId: "file-id" }]),
+      deferActionTask: (task) => deferredTasks.push(task),
+      paintWorkspace: async (row) => {
+        paintedRows.push(row.sessionId);
+        throw new Error("paint unavailable");
+      },
+    }));
+
+    await expect(source.open("file-id")).resolves.toEqual({
+      status: "resumed",
+      workspaceRef: "workspace:9",
+    });
+    expect(deferredTasks).toHaveLength(1);
+    expect(paintedRows).toEqual([]);
+    deferredTasks[0]?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(paintedRows).toEqual(["file-id"]);
+  });
+
+  test("keeps absent and unreadable liveness as distinct typed outcomes", async () => {
+    const absent = createSidebarSource(sourceOptions({ indexedSessions: () => [] }));
+    await expect(absent.open("missing")).resolves.toEqual({ status: "not-found" });
+
+    const unreadable = createSidebarSource(sourceOptions({
+      readBridge: async () => emptyBridge(false),
+      indexedSessions: () => [],
+    }));
+    await expect(unreadable.open("missing")).resolves.toEqual({
+      status: "liveness-unreadable",
+    });
   });
 });
 

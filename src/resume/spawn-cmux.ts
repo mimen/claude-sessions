@@ -11,6 +11,10 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { err, ok, type Result } from "../result.ts";
+import {
+  bunAsyncProcessAdapter,
+  type AsyncProcessAdapter,
+} from "../process/async.ts";
 import { shellQuote } from "./command.ts";
 
 /**
@@ -278,22 +282,46 @@ export function invokeCmuxNewWorkspace(
   }
 }
 
-/** The new workspace ref (e.g. "workspace:60") on success, or null on any failure. */
-export function spawnCmux(opts: SpawnCmuxOpts): string | null {
-  const output = invokeCmuxNewWorkspace(opts, 10000);
-  if (output === null) return null;
-
+function workspaceRefFromOutput(output: CmuxInvocationOutput): string | null {
   // Parse the workspace ref: JSON-first (look for a ref or id field), then regex fallback
   // to preserve current behavior if cmux returns plain text. Current 0.64.20 prints text,
   // so the regex is the live path; the JSON parse future-proofs for structured output.
   try {
-    const json = JSON.parse(output.stdout);
-    if (json?.ref) return json.ref;
-    if (json?.id) return json.id;
+    const json = JSON.parse(output.stdout) as { readonly ref?: string; readonly id?: string };
+    if (json.ref) return json.ref;
+    if (json.id) return json.id;
   } catch {
     // Not JSON, fall through to regex.
   }
 
   const combined = output.stdout + output.stderr;
   return combined.match(/workspace:[0-9]+/)?.[0] ?? null;
+}
+
+/** The new workspace ref (e.g. "workspace:60") on success, or null on any failure. */
+export function spawnCmux(opts: SpawnCmuxOpts): string | null {
+  const output = invokeCmuxNewWorkspace(opts, 10000);
+  return output === null ? null : workspaceRefFromOutput(output);
+}
+
+/** Async sidebar/action variant with the same workspace receipt and environment cleanup contract. */
+export async function spawnCmuxAsync(
+  opts: SpawnCmuxOpts,
+  processAdapter: AsyncProcessAdapter = bunAsyncProcessAdapter,
+): Promise<string | null> {
+  const prepared = prepareCmuxInvocation(opts, TEMP_CLEANUP_DELAY_MS);
+  if (!prepared.ok) return null;
+
+  const cmux = opts.cmuxBin ?? process.env.CMUX_BIN ?? "cmux";
+  const result = await processAdapter.run(cmux, prepared.value.argv, {
+    timeoutMs: 10_000,
+    captureOutput: true,
+  });
+  if (!result.ok) {
+    if (prepared.value.temporaryEnvironment !== null) {
+      cleanupTemporaryEnvironment(prepared.value.temporaryEnvironment);
+    }
+    return null;
+  }
+  return workspaceRefFromOutput({ stdout: result.stdout, stderr: result.stderr });
 }

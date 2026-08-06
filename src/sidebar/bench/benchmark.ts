@@ -185,7 +185,12 @@ function sourceFor(
         favicons: new Map(),
       }),
     },
-    focus: overrides.focus ?? (() => true),
+    processAdapter: {
+      run: async (_file, args) => {
+        if (args[0] === "select-workspace") overrides.focus?.();
+        return { ok: true, stdout: "", stderr: "", timedOut: false };
+      },
+    },
     observeSnapshot: (measurement) => measurements.push(measurement),
   });
 }

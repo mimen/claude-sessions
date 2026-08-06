@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-06T01:26:29.777Z",
+  "command": "bun run benchmark:sidebar:actions --samples 25",
+  "safety": {
+    "fixtureRoot": "<os-tmpdir>/ccs-sidebar-actions-*/fleet",
+    "generatedSqliteOnly": true,
+    "cmuxProcessesInvoked": false,
+    "injectedAsyncProcessAdapter": true,
+    "baselineOverwritten": false
+  },
+  "focus": {
+    "samples": 25,
+    "latencyMs": {
+      "samples": [
+        0.004,
+        0.004,
+        0.004,
+        0.004,
+        0.006,
+        0.006,
+        0.006,
+        0.006,
+        0.006,
+        0.006,
+        0.006,
+        0.007,
+        0.007,
+        0.008,
+        0.008,
+        0.008,
+        0.008,
+        0.008,
+        0.009,
+        0.01,
+        0.01,
+        0.011,
+        0.012,
+        0.021,
+        0.58
+      ],
+      "min": 0.004,
+      "p50": 0.007,
+      "p95": 0.021,
+      "max": 0.58,
+      "mean": 0.031
+    },
+    "bridgeReads": 25,
+    "bridgeReadsPerOpen": 1,
+    "processCommands": 50,
+    "p95BudgetMs": 150,
+    "baselineFleetP95Ms": 2.88,
+    "p95DeltaMs": -2.859
+  },
+  "resume": {
+    "acknowledgementMs": 6.851,
+    "acknowledgementBudgetMs": 700,
+    "resumeCalls": 1,
+    "openActions": 3,
+    "bridgeReadsForConcurrentOpens": 2,
+    "bridgeReadsForSnapshot": 1,
+    "bridgeReadsForRepeatOpen": 1,
+    "bridgeReadsPerOpen": 1,
+    "firstOutcome": "resumed",
+    "duplicateOutcome": "focused",
+    "repeatOutcome": "focused",
+    "repeatFocusCommands": 2,
+    "deferredPaintTasks": 1,
+    "paintWasDeferredAtAcknowledgement": true,
+    "paintCallsAfterDrain": 1
+  },
+  "concurrency": {
+    "snapshotMs": 3.933,
+    "snapshotRespondedBeforeResume": true,
+    "snapshotLivenessReadable": true,
+    "maximumRequestBlockBudgetMs": 50
+  },
+  "assertions": {
+    "oneBridgeReadPerFocusOpen": true,
+    "oneBridgeReadPerResumeOpen": true,
+    "singleFlightResume": true,
+    "duplicateFocusedCreatedWorkspace": true,
+    "repeatFocusedCreatedWorkspace": true,
+    "deferredPaintFailureDidNotFailAction": true,
+    "focusWithinBudget": true,
+    "resumeWithinBudget": true,
+    "snapshotRespondedWhileResumePending": true,
+    "snapshotWithinBlockBudget": true
+  }
+}
