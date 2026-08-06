@@ -12,7 +12,7 @@ import type {
   FocusWorkspaceOutcome,
   PinWorkspaceOutcome,
 } from "./snapshot.ts";
-import type { SidebarSnapshot, SidebarView } from "./projection.ts";
+import { projectSidebar, type SidebarSnapshot, type SidebarView } from "./projection.ts";
 
 const EMPTY_SNAPSHOT: SidebarSnapshot = {
   rows: [],
@@ -21,7 +21,7 @@ const EMPTY_SNAPSHOT: SidebarSnapshot = {
   catalogueReadable: true,
   lifecycleCounts: { active: 0, completed: 0, archived: 0 },
   hasMoreRows: false,
-  generatedAt: 1,
+  generatedAt: 0,
 };
 
 const ASSETS = new Map([
@@ -151,6 +151,86 @@ describe("sidebar server", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(EMPTY_SNAPSHOT);
     expect(app.snapshotScopes).toEqual(["active"]);
+  });
+
+  test("returns a strong ETag, then 304 with a zero-byte body when unchanged", async () => {
+    const app = harness();
+    const first = await fetch(`${app.url}/api/snapshot`);
+    const etag = first.headers.get("etag");
+    expect(etag).toMatch(/^"[A-Za-z0-9_-]+"$/);
+    await first.arrayBuffer();
+
+    const unchanged = await fetch(`${app.url}/api/snapshot`, {
+      headers: { "if-none-match": etag ?? "" },
+    });
+    expect(unchanged.status).toBe(304);
+    expect((await unchanged.arrayBuffer()).byteLength).toBe(0);
+  });
+
+  test("an advancing production clock does not turn an unchanged projection into 200", async () => {
+    let current = 1_000;
+    const app = harness({
+      snapshot: async () => projectSidebar({
+        live: [],
+        indexed: [],
+        checkouts: new Map(),
+        livenessReadable: true,
+        now: current++,
+      }),
+    });
+    const first = await fetch(`${app.url}/api/snapshot`);
+    const firstBody = await first.text();
+    const etag = first.headers.get("etag") ?? "";
+    expect(JSON.parse(firstBody)).toMatchObject({ generatedAt: 0 });
+
+    const second = await fetch(`${app.url}/api/snapshot`, {
+      headers: { "if-none-match": etag },
+    });
+    expect(second.status).toBe(304);
+    expect((await second.arrayBuffer()).byteLength).toBe(0);
+  });
+
+  test("durable, live, status, and notification changes turn a matching ETag into 200", async () => {
+    let revision = "durable-1";
+    let contentVersion = 0;
+    const app = harness({
+      snapshotRevision: () => revision,
+      snapshot: async () => ({
+        ...EMPTY_SNAPSHOT,
+        lifecycleCounts: { ...EMPTY_SNAPSHOT.lifecycleCounts, active: contentVersion },
+      }),
+    });
+    let response = await fetch(`${app.url}/api/snapshot`);
+    let etag = response.headers.get("etag") ?? "";
+    await response.arrayBuffer();
+
+    for (const change of ["durable", "live", "status", "notification"] as const) {
+      if (change === "durable") revision = "durable-2";
+      else contentVersion += 1;
+      response = await fetch(`${app.url}/api/snapshot`, { headers: { "if-none-match": etag } });
+      expect(response.status).toBe(200);
+      etag = response.headers.get("etag") ?? "";
+      await response.arrayBuffer();
+    }
+  });
+
+  test("scope, limit, and included shelves are part of the representation revision", async () => {
+    const app = harness();
+    const first = await fetch(`${app.url}/api/snapshot?scope=active&limit=20`);
+    const etag = first.headers.get("etag") ?? "";
+    await first.arrayBuffer();
+
+    for (const query of [
+      "scope=completed&limit=20",
+      "scope=active&limit=21",
+      "scope=active&limit=20&include=completed",
+    ]) {
+      const changed = await fetch(`${app.url}/api/snapshot?${query}`, {
+        headers: { "if-none-match": etag },
+      });
+      expect(changed.status).toBe(200);
+      await changed.arrayBuffer();
+    }
   });
 
   test("passes a valid view and rejects an unknown one", async () => {

@@ -6,6 +6,7 @@ import baseline from "../../../docs/evidence/sidebar-performance/baseline.json" 
 import {
   characterizeFixture,
   measureContention,
+  measureEtagLoopback,
   witnessDatabase,
 } from "./benchmark.ts";
 import { createSidebarFixture } from "./fixtures.ts";
@@ -65,6 +66,18 @@ describe("sidebar performance characterization", () => {
 
       expect(after).toEqual(before);
     });
+  });
+});
+
+test("Phase 2 gate: loopback unchanged polls return fast, empty 304 responses", async () => {
+  await withFixture({ sessionCount: 120, liveSessionCount: 8 }, async (fixture) => {
+    const result = await measureEtagLoopback(fixture, 20);
+
+    expect(new Set(result.unchanged.statuses)).toEqual(new Set([304]));
+    expect(result.unchanged.bodyBytes).toBe(0);
+    expect(result.unchanged.latencyMs.p95).toBeLessThan(10);
+    expect(new Set(result.changedWarm.statuses)).toEqual(new Set([200]));
+    expect(result.changedWarm.bodyBytes.min).toBeGreaterThan(0);
   });
 });
 

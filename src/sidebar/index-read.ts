@@ -75,85 +75,93 @@ function compareIndexRecency(left: IndexRow, right: IndexRow): number {
  * Throws when the index cannot be read at all or has lost a column the projection needs; the
  * caller degrades to live cmux rows in that case rather than showing a broken page.
  */
+export function readIndexDatabase(
+  db: Database,
+  options: ReadIndexOptions,
+): IndexedSessionInput[] {
+  const available = columnsOf(db, "sessions");
+  const missing = REQUIRED_COLUMNS.filter((column) => !available.has(column));
+  if (missing.length > 0) {
+    throw new Error(`session index is missing column(s): ${missing.join(", ")}`);
+  }
+
+  // Optional, not required: it only ages the enrichment summary, so an index without it should
+  // cost the summary its age — never the whole session list.
+  const messageCountExpression = available.has("msg_count") ? "msg_count" : "NULL AS msg_count";
+  // The transcript's own path, so a reader can ask the filesystem whether the session has moved
+  // since the index last looked. Optional for the same reason as msg_count.
+  const pathExpression = available.has("path") ? "path" : "NULL AS path";
+  // The offset `msg_count` is true at. With it, a reader can count the appended bytes and know
+  // exactly how far the session has moved; without it, only that it has. Optional like the rest.
+  const sizeExpression = available.has("file_size") ? "file_size" : "NULL AS file_size";
+  const titleSources = TITLE_COLUMNS.filter((column) => available.has(column));
+  // COALESCE keeps the index's own title priority; with no title column at all the row still
+  // has an id, and the caller falls back to cmux's workspace title.
+  const titleExpression = titleSources.length > 1
+    ? `COALESCE(${titleSources.join(", ")})`
+    : titleSources[0] ?? "NULL";
+
+  const select =
+    `SELECT session_id, resume_id, ${titleExpression} AS title, cwd, last_ts, models, cost_by_model,
+            ${messageCountExpression}, ${pathExpression}, ${sizeExpression}
+       FROM sessions`;
+  let rows: IndexRow[];
+
+  if (options.sessionIds === undefined) {
+    rows = db.query(
+      `${select}
+        WHERE is_subagent = 0
+        ORDER BY last_ts DESC NULLS LAST, session_id
+        LIMIT $limit`,
+    ).all({ $limit: options.limit }) as IndexRow[];
+  } else {
+    const requestedIds = [...new Set(options.sessionIds)];
+    const rowsBySessionId = new Map<string, IndexRow>();
+    for (let offset = 0; offset < requestedIds.length; offset += MAX_IDS_PER_QUERY) {
+      const chunk = requestedIds.slice(offset, offset + MAX_IDS_PER_QUERY);
+      const bindings: Record<string, string | number> = { $limit: options.limit };
+      const placeholders = chunk.map((sessionId, index) => {
+        const placeholder = `$id${index}`;
+        bindings[placeholder] = sessionId;
+        return placeholder;
+      });
+      const joined = placeholders.join(", ");
+      const matches = db.query(
+        `${select}
+          WHERE is_subagent = 0
+            AND (session_id IN (${joined}) OR resume_id IN (${joined}))
+          ORDER BY last_ts DESC NULLS LAST, session_id
+          LIMIT $limit`,
+      ).all(bindings) as IndexRow[];
+      for (const row of matches) rowsBySessionId.set(row.session_id, row);
+    }
+    // An empty lifecycle has no rows, but opening and validating the index above still reports
+    // whether history is unavailable because the index itself is unreadable.
+    rows = [...rowsBySessionId.values()].sort(compareIndexRecency).slice(0, options.limit);
+  }
+
+  return rows.map((row) => ({
+    sessionId: row.session_id,
+    resumeId: row.resume_id ?? row.session_id,
+    title: row.title ?? "",
+    cwd: row.cwd,
+    lastTs: row.last_ts,
+    models: parseJson<string[]>(row.models, []),
+    costByModel: parseJson<Record<string, number>>(row.cost_by_model, {}),
+    messageCount: row.msg_count ?? null,
+    transcriptPath: row.path ?? null,
+    indexedBytes: row.file_size ?? null,
+  }));
+}
+
 export function readIndexReadOnly(
   dbPath: string,
   options: ReadIndexOptions,
 ): IndexedSessionInput[] {
   const db = new Database(dbPath, { readonly: true });
   try {
-    const available = columnsOf(db, "sessions");
-    const missing = REQUIRED_COLUMNS.filter((column) => !available.has(column));
-    if (missing.length > 0) {
-      throw new Error(`session index is missing column(s): ${missing.join(", ")}`);
-    }
-
-    // Optional, not required: it only ages the enrichment summary, so an index without it should
-    // cost the summary its age — never the whole session list.
-    const messageCountExpression = available.has("msg_count") ? "msg_count" : "NULL AS msg_count";
-    // The transcript's own path, so a reader can ask the filesystem whether the session has moved
-    // since the index last looked. Optional for the same reason as msg_count.
-    const pathExpression = available.has("path") ? "path" : "NULL AS path";
-    // The offset `msg_count` is true at. With it, a reader can count the appended bytes and know
-    // exactly how far the session has moved; without it, only that it has. Optional like the rest.
-    const sizeExpression = available.has("file_size") ? "file_size" : "NULL AS file_size";
-    const titleSources = TITLE_COLUMNS.filter((column) => available.has(column));
-    // COALESCE keeps the index's own title priority; with no title column at all the row still
-    // has an id, and the caller falls back to cmux's workspace title.
-    const titleExpression = titleSources.length > 0
-      ? `COALESCE(${titleSources.join(", ")})`
-      : "NULL";
-
-    const select =
-      `SELECT session_id, resume_id, ${titleExpression} AS title, cwd, last_ts, models, cost_by_model,
-              ${messageCountExpression}, ${pathExpression}, ${sizeExpression}
-         FROM sessions`;
-    let rows: IndexRow[];
-
-    if (options.sessionIds === undefined) {
-      rows = db.query(
-        `${select}
-          WHERE is_subagent = 0
-          ORDER BY last_ts DESC NULLS LAST, session_id
-          LIMIT $limit`,
-      ).all({ $limit: options.limit }) as IndexRow[];
-    } else {
-      const requestedIds = [...new Set(options.sessionIds)];
-      const rowsBySessionId = new Map<string, IndexRow>();
-      for (let offset = 0; offset < requestedIds.length; offset += MAX_IDS_PER_QUERY) {
-        const chunk = requestedIds.slice(offset, offset + MAX_IDS_PER_QUERY);
-        const bindings: Record<string, string | number> = { $limit: options.limit };
-        const placeholders = chunk.map((sessionId, index) => {
-          const placeholder = `$id${index}`;
-          bindings[placeholder] = sessionId;
-          return placeholder;
-        });
-        const joined = placeholders.join(", ");
-        const matches = db.query(
-          `${select}
-            WHERE is_subagent = 0
-              AND (session_id IN (${joined}) OR resume_id IN (${joined}))
-            ORDER BY last_ts DESC NULLS LAST, session_id
-            LIMIT $limit`,
-        ).all(bindings) as IndexRow[];
-        for (const row of matches) rowsBySessionId.set(row.session_id, row);
-      }
-      // An empty lifecycle has no rows, but opening and validating the index above still reports
-      // whether history is unavailable because the index itself is unreadable.
-      rows = [...rowsBySessionId.values()].sort(compareIndexRecency).slice(0, options.limit);
-    }
-
-    return rows.map((row) => ({
-      sessionId: row.session_id,
-      resumeId: row.resume_id ?? row.session_id,
-      title: row.title ?? "",
-      cwd: row.cwd,
-      lastTs: row.last_ts,
-      models: parseJson<string[]>(row.models, []),
-      costByModel: parseJson<Record<string, number>>(row.cost_by_model, {}),
-      messageCount: row.msg_count ?? null,
-      transcriptPath: row.path ?? null,
-      indexedBytes: row.file_size ?? null,
-    }));
+    db.exec("PRAGMA query_only = ON;");
+    return readIndexDatabase(db, options);
   } finally {
     db.close();
   }

@@ -393,7 +393,8 @@ export interface SidebarSnapshot {
   readonly lifecycleCounts: Readonly<Record<SidebarLifecycle, number>>;
   /** True while the index scan is still limit-bound: a larger request may return more rows. */
   readonly hasMoreRows: boolean;
-  readonly generatedAt: number;
+  /** Compatibility field retained for older clients; stable because no shipped client consumes it. */
+  readonly generatedAt: 0;
 }
 
 const DEFAULT_RECENT_LIMIT = 8;
@@ -871,7 +872,9 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     catalogueReadable: input.catalogueReadable ?? true,
     lifecycleCounts: input.lifecycleCounts ?? { active: 0, completed: 0, archived: 0 },
     hasMoreRows: input.hasMoreRows ?? false,
-    generatedAt: input.now,
+    // The browser does not consume this field. Keep it byte-stable so an unchanged representation
+    // can share one strong ETag instead of changing merely because another poll happened later.
+    generatedAt: 0,
   };
 }
 

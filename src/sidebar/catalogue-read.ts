@@ -184,15 +184,9 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
   };
 }
 
-/** Read only the catalogue facts needed to project one sidebar snapshot. */
-export function readCatalogueReadOnly(dbPath: string): CatalogueReadOutcome {
-  if (!existsSync(dbPath)) return { status: "missing" };
-
-  let db: Database | null = null;
+/** Read only the catalogue facts needed to project one sidebar snapshot from an open reader. */
+export function readCatalogueDatabase(db: Database): CatalogueReadOutcome {
   try {
-    db = new Database(dbPath, { readonly: true });
-    db.exec("PRAGMA query_only = ON;");
-
     const tables = tableNames(db);
     if (!tables.has("catalogue")) {
       return { status: "unsupported-schema", missing: ["table:catalogue"] };
@@ -250,6 +244,23 @@ export function readCatalogueReadOnly(dbPath: string): CatalogueReadOutcome {
     ).all() as CatalogueQueryRow[];
 
     return { status: "ok", facts: factsFromRows(rows) };
+  } catch (error) {
+    return {
+      status: "unreadable",
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+
+/** Read only the catalogue facts needed to project one sidebar snapshot. */
+export function readCatalogueReadOnly(dbPath: string): CatalogueReadOutcome {
+  if (!existsSync(dbPath)) return { status: "missing" };
+
+  let db: Database | null = null;
+  try {
+    db = new Database(dbPath, { readonly: true });
+    db.exec("PRAGMA query_only = ON;");
+    return readCatalogueDatabase(db);
   } catch (error) {
     return {
       status: "unreadable",

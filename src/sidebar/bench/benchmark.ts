@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { buildBridge } from "../../cmux/bridge.ts";
 import { readCatalogueReadOnly } from "../catalogue-read.ts";
 import { readIndexReadOnly } from "../index-read.ts";
+import { createSidebarReadCache } from "../read-cache.ts";
+import { createSidebarServer } from "../server.ts";
 import {
   createSidebarSource,
   type SidebarSnapshotMeasurement,
@@ -66,6 +68,20 @@ export interface IdleProfileResult {
   readonly heartbeatTicks: number;
   readonly heartbeatLongestDelayMs: number;
   readonly pollLatencyMs: Distribution;
+}
+
+export interface EtagLoopbackResult {
+  readonly initialBodyBytes: number;
+  readonly unchanged: {
+    readonly statuses: readonly number[];
+    readonly bodyBytes: number;
+    readonly latencyMs: Distribution;
+  };
+  readonly changedWarm: {
+    readonly statuses: readonly number[];
+    readonly bodyBytes: Distribution;
+    readonly latencyMs: Distribution;
+  };
 }
 
 function rounded(value: number): number {
@@ -156,12 +172,17 @@ function sourceFor(
     now: () => FIXED_NOW,
     cmuxBin: "benchmark-never-runs-cmux",
     readBridge: async () => bridge,
-    readCatalogue: overrides.unreadableCatalogue
-      ? () => ({ status: "unreadable", error: new Error("fixture catalogue unreadable") })
-      : () => readCatalogueReadOnly(fixture.cataloguePath),
-    readIndex: overrides.unreadableIndex
-      ? () => { throw new Error("fixture index unreadable"); }
-      : (_path, options) => readIndexReadOnly(fixture.indexPath, options),
+    ...(overrides.unreadableCatalogue || overrides.unreadableIndex
+      ? {
+        readCatalogue: overrides.unreadableCatalogue
+          ? () => ({ status: "unreadable" as const, error: new Error("fixture catalogue unreadable") })
+          : () => readCatalogueReadOnly(fixture.cataloguePath),
+        readIndex: overrides.unreadableIndex
+          ? () => { throw new Error("fixture index unreadable"); }
+          : (_path: string, options: Parameters<typeof readIndexReadOnly>[1]) =>
+            readIndexReadOnly(fixture.indexPath, options),
+      }
+      : { readCache: createSidebarReadCache(fixture.cataloguePath, fixture.indexPath) }),
     ensureDataDir: () => {},
     statusReader: {
       read: async (workspaceIds) => new Map(workspaceIds.map((workspaceId, index) => [
@@ -364,4 +385,70 @@ export async function measureIdleProfile(
     heartbeatLongestDelayMs: heartbeatResult.longestDelayMs,
     pollLatencyMs: distribution(latencies),
   };
+}
+
+/** Exercise conditional GET through a real loopback Bun server, including serialization and HTTP. */
+export async function measureEtagLoopback(
+  fixture: SidebarFixture,
+  sampleCount = 50,
+): Promise<EtagLoopbackResult> {
+  const source = sourceFor(fixture, []);
+  const server = createSidebarServer({ source, assets: new Map(), port: 0 });
+  const url = `${server.url.origin}/api/snapshot?scope=active&limit=500&include=completed,archived`;
+  try {
+    const initial = await fetch(url);
+    const initialBodyBytes = (await initial.arrayBuffer()).byteLength;
+    const initialEtag = initial.headers.get("etag");
+    if (initial.status !== 200 || initialEtag === null) throw new Error("ETag benchmark warmup failed");
+    let etag: string = initialEtag;
+
+    const unchangedLatencies: number[] = [];
+    const unchangedStatuses: number[] = [];
+    let unchangedBodyBytes = 0;
+    for (let sample = 0; sample < sampleCount; sample += 1) {
+      const startedAt = performance.now();
+      const response = await fetch(url, { headers: { "if-none-match": etag } });
+      unchangedLatencies.push(performance.now() - startedAt);
+      unchangedStatuses.push(response.status);
+      unchangedBodyBytes += (await response.arrayBuffer()).byteLength;
+    }
+
+    const writer = new Database(fixture.cataloguePath);
+    const changedLatencies: number[] = [];
+    const changedStatuses: number[] = [];
+    const changedBodyBytes: number[] = [];
+    try {
+      for (let sample = 0; sample < Math.max(8, Math.min(sampleCount, 20)); sample += 1) {
+        writer.query(
+          `UPDATE catalogue
+              SET custom_title = COALESCE(custom_title, session_id) || $suffix
+            WHERE session_id = (SELECT session_id FROM catalogue ORDER BY session_id LIMIT 1)`,
+        ).run({ $suffix: `-${sample}` });
+        const startedAt = performance.now();
+        const response = await fetch(url, { headers: { "if-none-match": etag } });
+        changedLatencies.push(performance.now() - startedAt);
+        changedStatuses.push(response.status);
+        changedBodyBytes.push((await response.arrayBuffer()).byteLength);
+        etag = response.headers.get("etag") ?? etag;
+      }
+    } finally {
+      writer.close();
+    }
+
+    return {
+      initialBodyBytes,
+      unchanged: {
+        statuses: unchangedStatuses,
+        bodyBytes: unchangedBodyBytes,
+        latencyMs: distribution(unchangedLatencies),
+      },
+      changedWarm: {
+        statuses: changedStatuses,
+        bodyBytes: distribution(changedBodyBytes),
+        latencyMs: distribution(changedLatencies),
+      },
+    };
+  } finally {
+    server.stop(true);
+  }
 }
