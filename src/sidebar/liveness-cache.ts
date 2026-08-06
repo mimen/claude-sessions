@@ -21,9 +21,9 @@ function unreadableBridge(): Bridge {
  * Keep the snapshot's cmux tree warm without weakening action safety.
  *
  * The first snapshot waits for a truthful read. Later snapshots serve the last completed Bridge
- * immediately while one stale refresh runs in the background. A failed read replaces the cache
- * with an unreadable Bridge, so stale-while-revalidate never turns a liveness failure into a
- * readable empty fleet. Actions do not use this reader and continue to call the live seam directly.
+ * immediately while one stale refresh runs in the background. A refresh retries one unreadable or
+ * rejected read immediately, then replaces the cache with an unreadable Bridge only if both attempts
+ * fail. Actions do not use this reader and continue to call the live seam directly.
  */
 export function createSnapshotLivenessReader(
   options: SnapshotLivenessReaderOptions,
@@ -34,12 +34,28 @@ export function createSnapshotLivenessReader(
   let inFlight: Promise<void> | null = null;
   let forcedTrailingRefresh = false;
 
+  async function readBridgeWithRetry(): Promise<Bridge> {
+    try {
+      const bridge = await options.readBridge();
+      if (bridge.readable) return bridge;
+    } catch {
+      // Rejections and unreadable Bridges are the same liveness failure and get one immediate retry.
+    }
+
+    try {
+      const bridge = await options.readBridge();
+      return bridge.readable ? bridge : unreadableBridge();
+    } catch {
+      return unreadableBridge();
+    }
+  }
+
   function startRefresh(): Promise<void> {
     if (inFlight !== null) return inFlight;
 
     let flight: Promise<void>;
     flight = Promise.resolve()
-      .then(options.readBridge)
+      .then(readBridgeWithRetry)
       .then((bridge) => {
         cached = bridge;
         refreshedAt = now();

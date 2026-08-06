@@ -119,65 +119,98 @@ describe("snapshot liveness cache", () => {
     expect(reads).toBe(3);
   });
 
-  test("publishes fail-closed unreadability after a background refresh rejects", async () => {
+  test("a cold read awaits and suppresses one transient unreadable Bridge", async () => {
     let reads = 0;
-    const failed = deferred<Bridge>();
+    let completed = false;
+    const retry = deferred<Bridge>();
+    const reader = createSnapshotLivenessReader({
+      ttlMs: 10,
+      readBridge: async () => {
+        reads += 1;
+        return reads === 1 ? buildBridge({ windows: [] }, {}, false) : retry.promise;
+      },
+    });
+
+    const coldRead = reader.read().then((bridge) => {
+      completed = true;
+      return bridge;
+    });
+    await waitFor(() => reads === 2);
+    expect(completed).toBeFalse();
+
+    retry.resolve(workspaceBridge("retry"));
+    expect((await coldRead).workspaceIds()).toEqual(["retry"]);
+    expect(reads).toBe(2);
+  });
+
+  test("suppresses one transient rejected liveness read", async () => {
+    let reads = 0;
+    const reader = createSnapshotLivenessReader({
+      ttlMs: 10,
+      readBridge: async () => {
+        reads += 1;
+        if (reads === 1) throw new Error("cmux socket unavailable");
+        return workspaceBridge("retry");
+      },
+    });
+
+    expect((await reader.read()).workspaceIds()).toEqual(["retry"]);
+    expect(reads).toBe(2);
+  });
+
+  test("publishes fail-closed unreadability only after both refresh attempts fail", async () => {
+    let reads = 0;
     const reader = createSnapshotLivenessReader({
       ttlMs: 60_000,
       readBridge: async () => {
         reads += 1;
-        return reads === 1 ? readableBridge() : failed.promise;
+        if (reads === 1) return readableBridge();
+        if (reads === 2) return buildBridge({ windows: [] }, {}, false);
+        throw new Error("cmux socket unavailable");
       },
     });
 
     expect((await reader.read()).readable).toBeTrue();
     reader.refresh();
-    await Promise.resolve();
-    expect(reads).toBe(2);
-    failed.reject(new Error("cmux socket unavailable"));
+    await waitFor(() => reads === 3);
     await settle();
-    await Bun.sleep(0);
 
     expect((await reader.read()).readable).toBeFalse();
+    expect(reads).toBe(3);
   });
 
-  test("runs a queued forced refresh after an older failure and keeps trailing failure fail-closed", async () => {
+  test("queues one forced trailing refresh behind both attempts of the current refresh", async () => {
     let clock = 0;
     let reads = 0;
-    const oldFailure = deferred<Bridge>();
-    const trailingFailure = deferred<Bridge>();
+    const oldRetry = deferred<Bridge>();
     const reader = createSnapshotLivenessReader({
       ttlMs: 10,
       now: () => clock,
       readBridge: async () => {
         reads += 1;
-        if (reads === 1) return readableBridge();
-        return reads === 2 ? oldFailure.promise : trailingFailure.promise;
+        if (reads === 1) return workspaceBridge("initial");
+        if (reads === 2 || reads === 4) return buildBridge({ windows: [] }, {}, false);
+        if (reads === 3) return oldRetry.promise;
+        return workspaceBridge("post-action");
       },
     });
 
-    expect((await reader.read()).readable).toBeTrue();
+    expect((await reader.read()).workspaceIds()).toEqual(["initial"]);
     clock = 10;
-    expect((await reader.read()).readable).toBeTrue();
-    await waitFor(() => reads === 2);
-    reader.refresh();
-    oldFailure.reject(new Error("older read failed"));
+    expect((await reader.read()).workspaceIds()).toEqual(["initial"]);
     await waitFor(() => reads === 3);
-    expect((await reader.read()).readable).toBeFalse();
 
-    trailingFailure.reject(new Error("forced trailing read failed"));
+    reader.refresh();
+    reader.refresh();
+    reader.refresh();
+    expect((await reader.read()).workspaceIds()).toEqual(["initial"]);
+
+    oldRetry.resolve(workspaceBridge("pre-action"));
+    await waitFor(() => reads === 5);
     await settle();
+
+    expect((await reader.read()).workspaceIds()).toEqual(["post-action"]);
     await Bun.sleep(0);
-    expect((await reader.read()).readable).toBeFalse();
-    expect(reads).toBe(3);
-  });
-
-  test("a cold failure also returns an unreadable Bridge instead of an empty readable fleet", async () => {
-    const reader = createSnapshotLivenessReader({
-      ttlMs: 10,
-      readBridge: async () => { throw new Error("cmux missing"); },
-    });
-
-    expect((await reader.read()).readable).toBeFalse();
+    expect(reads).toBe(5);
   });
 });
