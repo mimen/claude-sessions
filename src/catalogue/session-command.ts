@@ -137,9 +137,9 @@ function doRead(idArg: string, rest: string[]): number {
       // would naturally run to ask "what was this?" could not answer.
       const enrichment = row.enrichment;
       if (enrichment) {
-        console.log(`  ─ enrichment (${enrichment.recommendation}${enrichment.junk ? ", junk" : ""})`);
+        console.log(`  ─ enrichment (${enrichment.recommendation ?? "continue"}${enrichment.junk ? ", junk" : ""})`);
         console.log(`  named:        ${enrichment.title || "-"}`);
-        console.log(`  now:          ${enrichment.state}`);
+        console.log(`  now:          ${enrichment.state ?? ""}`);
         if (enrichment.next) console.log(`  next:         ${enrichment.next}`);
         if (enrichment.remaining) console.log(`  also:         ${enrichment.remaining}`);
         if (enrichment.reason) console.log(`  because:      ${enrichment.reason}`);

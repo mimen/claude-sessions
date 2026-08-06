@@ -8,7 +8,11 @@
  * Every input is supplied by the caller so this module stays free of cmux, SQLite, and git I/O.
  */
 import type { Lifecycle } from "../catalogue/db.ts";
-import { messagesSince, type StoredEnrichment } from "../catalogue/enrichment.ts";
+import {
+  messagesSince,
+  recommendationDisagreement,
+  type StoredEnrichment,
+} from "../catalogue/enrichment.ts";
 import type { Recommendation } from "../catalogue/enrichment-schema.ts";
 import { familyOf } from "../display/format.ts";
 import { enrichmentDriftLabel } from "../enrich/staleness.ts";
@@ -208,8 +212,10 @@ export interface ProjectionInput {
   /** Every live cmux session id, including non-primary surfaces that do not get their own row. */
   readonly liveSessionIds?: ReadonlySet<string>;
   readonly indexed: readonly IndexedSessionInput[];
-  /** Catalogue lifecycle keyed by canonical session id and any known resume alias. */
+  /** Three-state browser lifecycle keyed by canonical session id and any known resume alias. */
   readonly lifecycles?: ReadonlyMap<string, SidebarLifecycle>;
+  /** Full catalogue lifecycle used for decisions that must distinguish idle from parked. */
+  readonly catalogueLifecycles?: ReadonlyMap<string, Lifecycle>;
   /** Canonical catalogue id keyed by itself and any known resume alias. */
   readonly canonicalSessionIds?: ReadonlyMap<string, string>;
   /** Which lifecycle the caller is browsing. */
@@ -533,6 +539,21 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     lifecycles.get(sessionId)
       ?? (indexed ? lifecycles.get(indexed.sessionId) ?? lifecycles.get(indexed.resumeId) : undefined)
       ?? "active";
+  const catalogueLifecycles = input.catalogueLifecycles ?? new Map<string, Lifecycle>();
+  const catalogueLifecycleFor = (
+    sessionId: string,
+    indexed: IndexedSessionInput | undefined,
+  ): Lifecycle =>
+    catalogueLifecycles.get(sessionId)
+      ?? (indexed
+        ? catalogueLifecycles.get(indexed.sessionId)
+          ?? catalogueLifecycles.get(indexed.resumeId)
+        : undefined)
+      ?? (lifecycleFor(sessionId, indexed) === "completed"
+        ? "completed"
+        : lifecycleFor(sessionId, indexed) === "archived"
+        ? "archived"
+        : "idle");
   const canonicalSessionIds = input.canonicalSessionIds ?? new Map<string, string>();
   const canonicalSessionIdFor = (
     sessionId: string,
@@ -574,15 +595,12 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
    */
   const suggestionFor = (
     summary: SidebarSummary | null,
-    lifecycle: SidebarLifecycle,
+    lifecycle: Lifecycle,
   ): SidebarSuggestion | null => {
-    const verb = summary?.recommendation;
-    if (!verb || verb === "continue") return null;
-    // Declining is a decision, so the same verdict stays gone. A different one is new
-    // information and comes back.
-    if (summary?.declined === verb) return null;
-    if (verb === "complete" && lifecycle === "completed") return null;
-    if (verb === "archive" && lifecycle === "archived") return null;
+    const verb = summary?.recommendation ?? null;
+    if (recommendationDisagreement(verb, summary?.declined ?? null, lifecycle) === null || !verb) {
+      return null;
+    }
     return {
       verb,
       // Handoff is deliberately inert here: passing a thread on is work done inside the session,
@@ -655,7 +673,10 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
       unread: unreadFor(live.workspaceId),
       shortcut: live.shortcut,
       summary: liveSummary,
-      suggestion: suggestionFor(liveSummary, liveLifecycle),
+      suggestion: suggestionFor(
+        liveSummary,
+        catalogueLifecycleFor(live.sessionId, indexed),
+      ),
       membership: membershipFor(live.sessionId, indexed?.resumeId),
       density: densityFor(true, liveLifecycle),
       sessionId: canonicalSessionIdFor(live.sessionId, indexed),
@@ -696,7 +717,7 @@ export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
     summary: summaryFor(session.sessionId, session),
     suggestion: suggestionFor(
       summaryFor(session.sessionId, session),
-      lifecycleFor(session.sessionId, session),
+      catalogueLifecycleFor(session.sessionId, session),
     ),
     membership: membershipFor(session.sessionId, session.resumeId),
     density: densityFor(knownLive, lifecycleFor(session.sessionId, session)),

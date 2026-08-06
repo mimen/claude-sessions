@@ -528,6 +528,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     });
     return {
       lifecycles: new Map(),
+      catalogueLifecycles: new Map(),
       canonicalSessionIds: new Map(),
       preferredTitles: new Map<string, string>(),
       memberships: new Map<string, SidebarMembership>(),
@@ -759,6 +760,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         liveSessionIds: allLiveSessionIdsFrom(bridge),
         indexed,
         lifecycles: catalogue.lifecycles,
+        catalogueLifecycles: catalogue.catalogueLifecycles,
         canonicalSessionIds: catalogue.canonicalSessionIds,
         scope,
         checkouts: facts.checkouts,

@@ -40,7 +40,7 @@ export function summaryAge(driftLabel: string | null): string | null {
 export function summaryAsText(summary: SidebarSummary, name: string): string {
   const parts = [name, ""];
   if (summary.recommendation) parts.push(`Recommendation: ${summary.recommendation}`, "");
-  parts.push(summary.state);
+  parts.push(summary.state ?? "");
   if (summary.reason) parts.push("", `Reason: ${summary.reason}`);
   if (summary.next) parts.push("", `Next: ${summary.next}`);
   if (summary.remaining) parts.push("", `Remaining: ${summary.remaining}`);

@@ -1,5 +1,8 @@
 import { Database } from "bun:sqlite";
-import type { Enrichment, Recommendation } from "./enrichment-schema.ts";
+import { hydrateStoredEnrichment, type StoredEnrichment } from "./enrichment.ts";
+import type { Enrichment } from "./enrichment-schema.ts";
+
+export type { StoredEnrichment } from "./enrichment.ts";
 
 /**
  * The Catalogue: durable, user-authored session metadata that the Index cache cannot hold
@@ -103,43 +106,6 @@ export interface CatalogueRow {
   enrichment?: StoredEnrichment | null;
   /** Failed enrichment attempts. Capped so one unparseable session never retries forever. */
   enrichmentAttempts?: number;
-}
-
-/** An enrichment as hydrated off a catalogue row. Mirrors `Enrichment` with nullable suggestions. */
-export interface StoredEnrichment {
-  /** Enrichment's own name for the session. Never overwrites a human-set `customTitle`. */
-  readonly title: string;
-  /** v40: where the session stands now. The field a reader is guaranteed to see. */
-  readonly state: string;
-  /** v40: how it got there. Rendered on demand. */
-  readonly history: string;
-  /** v40: the one thing to do first on resuming. */
-  readonly next: string;
-  /** v40: everything still open after `next`. */
-  readonly remaining: string;
-  readonly recommendation: Recommendation;
-  readonly reason: string;
-  readonly junk: boolean;
-  /**
-   * Null when the cwd question was never asked — i.e. no location registry was installed at
-   * generation time. Distinct from `false`, which is a judgement that the directory is wrong;
-   * readers must not render a warning for "not judged".
-   */
-  readonly cwdCorrect: boolean | null;
-  readonly suggestedLocation: string | null;
-  readonly suggestedCwd: string | null;
-  readonly atMessages: number;
-  readonly at: string;
-  /**
-   * True when this row was written under the v39 shape and `state`/`next` above are the old
-   * `summary`/`outstanding` text showing through the compatibility fallback.
-   *
-   * Display can ignore this — falling back is the point, so no panel goes blank mid-cutover. The
-   * STALENESS check cannot: `!state` is false for a legacy row precisely because the fallback
-   * filled it, so without this flag the sweep would consider the whole v39 store fresh and the
-   * cutover would never happen.
-   */
-  readonly legacyShape: boolean;
 }
 
 /** Effective substrate for a row (defaults unset rows to claude-code). */
@@ -1296,35 +1262,10 @@ function rowFrom(r: Record<string, unknown> | null, db?: Database): CatalogueRow
  * whose columns exist but were never written) reads as null instead of a half-built object.
  */
 function enrichmentFrom(r: Record<string, unknown>): StoredEnrichment | null {
-  const at = (r.enrichment_at as string) ?? null;
-  if (!at) return null;
-  // Between v40 and the cutover sweep, a row can be enriched under the v39 shape: `state` is null
-  // and the prose lives in `enrichment_summary`. Falling back keeps every panel readable during
-  // that window rather than showing a blank where a description used to be. The v41 migration
-  // drops the old columns once the sweep has run, and this coalesce becomes inert.
-  const nativeState = (r.enrichment_state as string) || "";
-  const state = nativeState || (r.enrichment_summary as string) || "";
-  const next = (r.enrichment_next as string) || (r.enrichment_outstanding as string) || "";
-  const cwdRaw = r.enrichment_cwd_correct;
-  return {
-    title: (r.enrichment_title as string) ?? "",
-    state,
-    history: (r.enrichment_history as string) ?? "",
-    next,
-    remaining: (r.enrichment_remaining as string) ?? "",
-    recommendation: (r.enrichment_recommendation as Recommendation) ?? "continue",
-    reason: (r.enrichment_reason as string) ?? "",
-    junk: !!r.enrichment_junk,
-    // Null means "never judged" (no location registry at generation time) and must stay
-    // distinguishable from a judgement of "wrong directory", or every unjudged session renders a
-    // warning it never earned.
-    cwdCorrect: cwdRaw === null || cwdRaw === undefined ? null : !!cwdRaw,
-    suggestedLocation: (r.enrichment_suggested_location as string) || null,
-    suggestedCwd: (r.enrichment_suggested_cwd as string) || null,
-    atMessages: (r.enrichment_at_messages as number) ?? 0,
-    at,
-    legacyShape: nativeState === "",
-  };
+  // Full catalogue ownership keeps its historical presence key: rows without enrichment_at were
+  // never atomically written by setEnrichment and remain absent here, even if optional prose exists.
+  if (typeof r.enrichment_at !== "string" || r.enrichment_at.trim() === "") return null;
+  return hydrateStoredEnrichment(r);
 }
 
 /**

@@ -53,6 +53,7 @@ describe("readCatalogueReadOnly", () => {
 
       expect(outcome.facts.lifecycles.get("canonical")).toBe("completed");
       expect(outcome.facts.lifecycles.get("resume")).toBe("completed");
+      expect(outcome.facts.catalogueLifecycles.get("resume")).toBe("completed");
       expect(outcome.facts.canonicalSessionIds.get("resume")).toBe("canonical");
       expect(outcome.facts.preferredTitles.get("canonical")).toBe("Human title");
       expect(outcome.facts.preferredTitles.get("resume")).toBe("Human title");
@@ -66,6 +67,7 @@ describe("readCatalogueReadOnly", () => {
       expect(outcome.facts.auxiliary.has("auxiliary")).toBeTrue();
       expect(outcome.facts.auxiliary.has("aux-resume")).toBeTrue();
       expect(outcome.facts.summaries.get("resume")).toEqual({
+        title: "Generated title",
         state: "Current state",
         history: "History",
         next: "Next action",
@@ -73,8 +75,12 @@ describe("readCatalogueReadOnly", () => {
         recommendation: "archive",
         reason: "Reason",
         junk: true,
+        cwdCorrect: null,
+        suggestedLocation: null,
+        suggestedCwd: null,
         atMessages: 42,
         at: "2026-08-05T12:00:00.000Z",
+        legacyShape: false,
         declined: "archive",
       });
     } finally {
@@ -147,6 +153,40 @@ describe("readCatalogueReadOnly", () => {
       expect(outcome.facts.lifecycles.get("partial")).toBe("archived");
       expect(outcome.facts.memberships.size).toBe(0);
       expect(outcome.facts.summaries.size).toBe(0);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps parked distinct for decisions while preserving the three-state browser lifecycle", () => {
+    const fixture = temporaryCatalogue("catalogue-parked", (path) => {
+      const db = new Database(path);
+      db.exec(`
+        CREATE TABLE catalogue (
+          session_id TEXT PRIMARY KEY,
+          resume_id TEXT,
+          parked_task_id TEXT,
+          enrichment_state TEXT,
+          enrichment_recommendation TEXT,
+          enrichment_declined TEXT
+        );
+        INSERT INTO catalogue VALUES
+          ('parked', 'parked-resume', 'task-1', 'Waiting', 'complete', NULL),
+          ('invalid', NULL, NULL, 'Readable', 'delete', 'delete');
+      `);
+      db.close();
+    });
+
+    try {
+      const outcome = readCatalogueReadOnly(fixture.path);
+      expect(outcome.status).toBe("ok");
+      if (outcome.status !== "ok") throw new Error("parked catalogue was not readable");
+      expect(outcome.facts.lifecycles.get("parked-resume")).toBe("active");
+      expect(outcome.facts.catalogueLifecycles.get("parked-resume")).toBe("parked");
+      expect(outcome.facts.summaries.get("invalid")).toMatchObject({
+        recommendation: null,
+        declined: null,
+      });
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
