@@ -15,6 +15,8 @@ import {
 const ROOT = new URL("../../", import.meta.url).pathname;
 const SRC = join(ROOT, "src");
 const SCRIPTS = join(ROOT, "scripts");
+const BIN = join(ROOT, "bin");
+const DB_SCHEMA = join(SRC, "catalogue", "db-schema.ts");
 const DB_MUTATIONS = join(SRC, "catalogue", "db-mutations.ts");
 const OLD_DB_BARREL = join(SRC, "catalogue", "db.ts");
 const IDENTITIES = join(SRC, "catalogue", "identities.ts");
@@ -41,8 +43,10 @@ const SANCTIONED_RAW_SQL_WRITERS: Record<string, string> = {
   "src/catalogue/identities.ts": "owns identity CRUD",
   "src/catalogue/identity-schema.ts": "materializes declared identity schemas",
   "src/catalogue/session-command.ts": "owns the bounded session purge transaction",
-  "src/catalogue-service/authority.ts": "owns authoritative catalogue-service transactions",
   "src/resume/new-session.ts": "atomically links a newly spawned session to its identity",
+  "src/state/groupings-db.ts": "owns grouping persistence in the catalogue database",
+  "src/state/groupings-migrate.ts": "migrates legacy grouping state into catalogue storage",
+  "src/inbox/inbox-db.ts": "owns inbox persistence in the catalogue database",
   "src/sidebar/bench/fixtures.ts": "creates generated catalogue fixtures outside request paths",
   "src/sidebar/bench/benchmark.ts": "mutates generated fixtures to measure changed snapshots and contention",
   "scripts/backfill-identity-from-cwd.ts": "links catalogue rows to recovered identities in reviewed maintenance",
@@ -60,8 +64,20 @@ function filesUnder(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+function bunEntrypointsUnder(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) {
+      bunEntrypointsUnder(full, out);
+      continue;
+    }
+    if (readFileSync(full, "utf8").startsWith("#!/usr/bin/env bun\n")) out.push(full);
+  }
+  return out;
+}
+
 function repositoryFiles(): string[] {
-  return [...filesUnder(SRC), ...filesUnder(SCRIPTS)];
+  return [...filesUnder(SRC), ...filesUnder(SCRIPTS), ...bunEntrypointsUnder(BIN)];
 }
 
 function repoPath(file: string): string {
@@ -102,30 +118,80 @@ test("exact allowlists reject both unexpected importers and stale pre-authorizat
   )).toEqual({ unexpected: ["src/unexpected.ts"], stale: ["src/stale.ts"] });
 });
 
-test("SQL scanner catches prepare calls and variable-held protected mutations", () => {
-  expect(protectedMutationSql('db.prepare("UPDATE catalogue SET updated_at = $now")')).toHaveLength(1);
+test("SQL scanner catches every catalogue-owned table and dynamic identity tables", () => {
+  const catalogueTables = [
+    "catalogue",
+    "dispositions",
+    "epics",
+    "groupings",
+    "historical_detached_child_backfills",
+    "identities",
+    "identity_state",
+    "identity_pr_agent",
+    "inboxes",
+    "roles",
+    "schema_migrations",
+    "session_tags",
+  ];
+  for (const table of catalogueTables) {
+    expect(protectedMutationSql(`db.prepare("UPDATE ${table} SET updated_at = $now")`)).toHaveLength(1);
+  }
   expect(protectedMutationSql('const sql = `DELETE FROM session_tags WHERE session_id = ${id}`; db.run(sql);')).toHaveLength(1);
+  expect(protectedMutationSql('db.run("UPDATE groupings SET label = ?")')).toHaveLength(1);
+  expect(protectedMutationSql('db.run("INSERT INTO inboxes (message) VALUES (?)")')).toHaveLength(1);
+  expect(protectedMutationSql('db.exec(`CREATE TABLE IF NOT EXISTS ${schema.tableName} (identity_key TEXT)`)')).toHaveLength(1);
+  expect(protectedMutationSql('db.exec(`ALTER TABLE ${schema.tableName} ADD COLUMN value TEXT`)')).toHaveLength(1);
+  expect(protectedMutationSql('db.exec(`CREATE INDEX idx ON ${schema.tableName}(value)`)')).toHaveLength(1);
   expect(protectedMutationSql('const sql = "SELECT * FROM catalogue";')).toEqual([]);
   expect(protectedMutationSql('const sql = "UPDATE unrelated SET value = 1";')).toEqual([]);
 });
 
-test("sidebar scanner catches direct identity mutation imports and writer construction", () => {
+test("sidebar scanner catches aliases, namespace members, and dynamic identity namespaces", () => {
   const sidebarFile = join(SRC, "sidebar", "request.ts");
+  const writerTargets = { catalogueSchemaModule: DB_SCHEMA };
   expect(importsNamedBindingFromModule(
-    'import { setIdentityFields } from "../catalogue/identities.ts";',
+    'import { setIdentityFields as setFields } from "../catalogue/identities.ts";',
     sidebarFile,
     IDENTITIES,
     IDENTITY_MUTATIONS,
   )).toBeTrue();
   expect(importsNamedBindingFromModule(
-    'const { setIdentityFields } = require("../catalogue/identities.ts");',
+    'const identities = await import("../catalogue/identities.ts"); identities.setIdentityFields(key, fields);',
     sidebarFile,
     IDENTITIES,
     IDENTITY_MUTATIONS,
   )).toBeTrue();
-  expect(constructsCatalogueWriter('const db = new Database(path);')).toBeTrue();
-  expect(constructsCatalogueWriter('const db = new Database(path, { readonly: true });')).toBeFalse();
-  expect(constructsCatalogueWriter('const db = openCatalogue(path);')).toBeTrue();
+  expect(constructsCatalogueWriter(
+    'import { openCatalogue as open } from "../catalogue/db-schema.ts"; open(path);',
+    sidebarFile,
+    writerTargets,
+  )).toBeTrue();
+  expect(constructsCatalogueWriter(
+    'const schema = await import("../catalogue/db-schema.ts"); schema.openCatalogue(path);',
+    sidebarFile,
+    writerTargets,
+  )).toBeTrue();
+  expect(constructsCatalogueWriter(
+    'import { Database as Sqlite } from "bun:sqlite"; new Sqlite(path);',
+    sidebarFile,
+    writerTargets,
+  )).toBeTrue();
+  expect(constructsCatalogueWriter(
+    'import * as sqlite from "bun:sqlite"; new sqlite.Database(path);',
+    sidebarFile,
+    writerTargets,
+  )).toBeTrue();
+  expect(constructsCatalogueWriter(
+    'import { Database as Sqlite } from "bun:sqlite"; const options = { readonly: true }; new Sqlite(path, options);',
+    sidebarFile,
+    writerTargets,
+  )).toBeFalse();
+});
+
+test("repository scan includes Bun TypeScript entrypoints and excludes shell binaries", () => {
+  const files = repositoryFiles().map(repoPath);
+  expect(files).toContain("bin/ccs");
+  expect(files).not.toContain("bin/ccs-claude-shim");
 });
 
 test("the deleted catalogue db barrel cannot be imported from source, tests, or scripts", () => {
@@ -145,17 +211,14 @@ test("actual production mutation importers exactly equal the sanctioned allowlis
   expect(differences).toEqual({ unexpected: [], stale: [] });
 });
 
-test("raw protected catalogue mutation SQL stays in sanctioned storage modules", () => {
-  const violations: string[] = [];
+test("actual raw catalogue SQL writers exactly equal the sanctioned allowlist", () => {
+  const actual = new Set<string>();
   for (const file of repositoryFiles()) {
     if (isTest(file)) continue;
-    if (protectedMutationSql(readFileSync(file, "utf8"), file).length === 0) continue;
-    const path = repoPath(file);
-    if (!(path in SANCTIONED_RAW_SQL_WRITERS)) {
-      violations.push(`${path} contains protected catalogue mutation SQL without a storage-owner reason`);
-    }
+    if (protectedMutationSql(readFileSync(file, "utf8"), file).length > 0) actual.add(repoPath(file));
   }
-  expect(violations).toEqual([]);
+  const differences = exactAllowlistDifferences(actual, new Set(Object.keys(SANCTIONED_RAW_SQL_WRITERS)));
+  expect(differences).toEqual({ unexpected: [], stale: [] });
 });
 
 test("sidebar request modules use query-only adapters and never construct a writer", () => {
@@ -168,7 +231,9 @@ test("sidebar request modules use query-only adapters and never construct a writ
     if (importsNamedBindingFromModule(source, file, IDENTITIES, IDENTITY_MUTATIONS)) {
       violations.push(`${path} imports setIdentityFields directly`);
     }
-    if (constructsCatalogueWriter(source, file)) violations.push(`${path} constructs a catalogue writer`);
+    if (constructsCatalogueWriter(source, file, { catalogueSchemaModule: DB_SCHEMA })) {
+      violations.push(`${path} constructs a catalogue writer`);
+    }
     if (protectedMutationSql(source, file).length > 0) violations.push(`${path} contains protected mutation SQL`);
   }
   expect(violations).toEqual([]);

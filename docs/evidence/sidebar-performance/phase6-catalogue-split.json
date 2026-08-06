@@ -2095,7 +2095,8 @@
       "integratedHead": "8237258",
       "codeCommit": "44440d9",
       "documentationCommit": "83c52b0",
-      "reviewFollowUpCommit": "the commit containing this evidence update",
+      "reviewFollowUpCommit": "5493182",
+      "primaryReReviewCommit": "the commit containing this evidence update",
       "branch": "worktree-agent-a9807920bbc2bd2f7",
       "generatedOn": "2026-08-05",
       "scope": "mechanical catalogue database split and import enforcement",
@@ -2137,11 +2138,17 @@
       "unexpectedMutationImporters": [],
       "staleMutationImporterAuthorizations": [],
       "protectedSqlScannedIndependentOfCallSite": true,
+      "protectedCatalogueTablesComplete": true,
+      "dynamicIdentityTableSqlDetected": true,
+      "rawSqlWriterAllowlistExact": true,
       "sidebarDirectIdentityMutationImportsRejected": true,
+      "sidebarAliasedAndNamespaceWritersRejected": true,
+      "sidebarReadonlyVariableOptionsAccepted": true,
       "sidebarWriterConstructionRejected": true,
+      "bunBinEntrypointsScanned": true,
       "behavioralScannerTests": {
-        "tests": 9,
-        "assertions": 20,
+        "tests": 10,
+        "assertions": 40,
         "failures": 0,
         "fixtures": [
           "nested relative static import",
@@ -2152,9 +2159,17 @@
           "stale allowlist entry",
           "prepare mutation SQL",
           "variable-held template mutation SQL",
-          "sidebar setIdentityFields import",
-          "writable Database construction",
-          "openCatalogue construction"
+          "all catalogue-owned tables",
+          "dynamic identity table DDL",
+          "exact raw SQL allowlist",
+          "sidebar setIdentityFields alias import",
+          "sidebar dynamic namespace identity mutation",
+          "aliased openCatalogue construction",
+          "namespace openCatalogue construction",
+          "aliased Database construction",
+          "namespace Database construction",
+          "readonly Database options variable",
+          "extensionless Bun bin entrypoint scan"
         ]
       }
     },
@@ -2237,7 +2252,7 @@
     "targetedValidation": [
       {
         "suite": "catalogue",
-        "tests": 327,
+        "tests": 328,
         "failures": 0
       },
       {
@@ -2275,7 +2290,7 @@
       "validatedAt": "2026-08-06",
       "catalogue": {
         "command": "bun test src/catalogue",
-        "tests": 327,
+        "tests": 328,
         "failures": 0
       },
       "sidebar": {
