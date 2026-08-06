@@ -71,8 +71,10 @@ export async function postSidebarAction<T extends object>(
         return { ok: false, error: { kind: "malformed-json", status: response.status } };
       }
       parsed = value;
-    } catch {
-      return { ok: false, error: { kind: "malformed-json", status: response.status } };
+    } catch (cause) {
+      return controller.signal.aborted || isAbortFailure(cause as object | string)
+        ? { ok: false, error: { kind: "timeout" } }
+        : { ok: false, error: { kind: "malformed-json", status: response.status } };
     }
 
     if (!response.ok) {

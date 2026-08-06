@@ -31,6 +31,26 @@ describe("sidebar action transport", () => {
     expect(refused).toEqual({ ok: false, error: { kind: "connection-refused" } });
   });
 
+  test("classifies a deadline during response parsing as timeout", async () => {
+    const delayedBodyFetch: ActionFetch = async (_input, init) => new Response(new ReadableStream({
+      start(controller): void {
+        init.signal?.addEventListener("abort", () => {
+          controller.error(new DOMException("response body aborted", "AbortError"));
+        }, { once: true });
+      },
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+    const result = await postSidebarAction("/api/open", { sessionId: "one" }, {
+      deadlineMs: 0,
+      fetch: delayedBodyFetch,
+    });
+
+    expect(result).toEqual({ ok: false, error: { kind: "timeout" } });
+  });
+
   test("preserves structured 500 and malformed JSON as different failures", async () => {
     const internal = await postSidebarAction("/api/open", { sessionId: "one" }, {
       fetch: async () => response(JSON.stringify({

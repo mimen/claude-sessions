@@ -27,12 +27,18 @@ const MAX_ROW_LIMIT = 2_000;
 export const DEFAULT_SIDEBAR_PORT = 8787;
 export const DEFAULT_SIDEBAR_HOST = "127.0.0.1";
 
+export interface SidebarServerLogger {
+  warn(message: string, context?: Record<string, unknown>): void;
+}
+
 export interface SidebarServerOptions {
   readonly source: SidebarSource;
   /** The built browser bundle: the page, plus the assets it references. */
   readonly assets: ReadonlyMap<string, { readonly body: string; readonly type: string }>;
   readonly port?: number;
   readonly hostname?: string;
+  /** Injectable so action diagnostics can be asserted without scraping source or stderr. */
+  readonly logger?: SidebarServerLogger;
 }
 
 type JsonValue = string | number | boolean | null | JsonObject | readonly JsonValue[];
@@ -144,40 +150,62 @@ function json(body: object, status = 200): Response {
   return jsonText(JSON.stringify(body), status);
 }
 
-function errorJson(code: SidebarHttpErrorCode): Response {
-  const { status, ...envelope } = sidebarHttpError(code);
-  return json(envelope, status);
+function errorJson(code: SidebarHttpErrorCode, legacyStatus?: "not-found" | "failed"): Response {
+  const { status: httpStatus, ...envelope } = sidebarHttpError(code);
+  return json(legacyStatus === undefined ? envelope : { ...envelope, status: legacyStatus }, httpStatus);
 }
 
-function logUnexpected(label: string, error: unknown, details: JsonObject = {}): void {
-  log.warn(label, {
+function logUnexpected(
+  logger: SidebarServerLogger,
+  label: string,
+  error: unknown,
+  details: JsonObject = {},
+): void {
+  logger.warn(label, {
     ...details,
     error: error instanceof Error ? error.message : String(error),
   });
 }
 
-function actionFailure(status: string | undefined): Response | null {
+function actionFailureCode(status: string | undefined): SidebarHttpErrorCode | null {
   switch (status) {
     case "not-found":
     case "not-live":
-      return errorJson("not_found");
+      return "not_found";
     case "liveness-unreadable":
-      return errorJson("liveness_unreadable");
+      return "liveness_unreadable";
     case "catalogue-unreadable":
-      return errorJson("catalogue_unreadable");
+      return "catalogue_unreadable";
     case "index-unreadable":
-      return errorJson("index_unreadable");
+      return "index_unreadable";
     case "timeout":
-      return errorJson("timeout");
+      return "timeout";
     case "failed":
-      return errorJson("action_failed");
+      return "action_failed";
     default:
       return null;
   }
 }
 
-function actionJson(outcome: object & { readonly status?: string }): Response {
-  return actionFailure(outcome.status) ?? json(outcome);
+function actionJson(
+  logger: SidebarServerLogger,
+  operation: string,
+  outcome: object & { readonly status?: string; readonly reason?: string },
+  details: JsonObject,
+): Response {
+  const code = actionFailureCode(outcome.status);
+  if (code === null) return json(outcome);
+
+  logger.warn("sidebar action failed", {
+    operation,
+    ...details,
+    status: outcome.status,
+    ...(outcome.reason === undefined ? {} : { reason: outcome.reason }),
+  });
+  const legacyStatus = outcome.status === "not-found" || outcome.status === "not-live"
+    ? "not-found"
+    : "failed";
+  return errorJson(code, legacyStatus);
 }
 
 /** Only literal loopback addresses are valid sidebar bind targets. */
@@ -223,6 +251,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
   const port = options.port ?? DEFAULT_SIDEBAR_PORT;
   const hostname = options.hostname ?? DEFAULT_SIDEBAR_HOST;
   const { source, assets } = options;
+  const logger = options.logger ?? log;
 
   if (!isLoopbackSidebarHost(hostname)) {
     const renderedHostname = JSON.stringify(hostname);
@@ -276,7 +305,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           );
           const totalMs = performance.now() - startedAt;
           if (totalMs >= 100) {
-            log.warn("slow sidebar snapshot request", {
+            logger.warn("slow sidebar snapshot request", {
               view: scope,
               rowCount: snapshot.rows.length,
               payloadBytes: Buffer.byteLength(body),
@@ -295,7 +324,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           }
           return jsonText(body, 200, { etag, "cache-control": "no-cache" });
         } catch (error) {
-          log.warn("sidebar snapshot request failed", {
+          logger.warn("sidebar snapshot request failed", {
             view: scope,
             error: error instanceof Error ? error.message : String(error),
           });
@@ -317,9 +346,9 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           return errorJson("bad_request");
         }
         try {
-          return actionJson(await source.open(sessionId));
+          return actionJson(logger, "open", await source.open(sessionId), { sessionId });
         } catch (error) {
-          logUnexpected("sidebar open request failed", error, { sessionId });
+          logUnexpected(logger, "sidebar open request failed", error, { sessionId });
           return errorJson("internal_failure");
         }
       }
@@ -338,12 +367,15 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         if (!parsedBody.ok) return errorJson("bad_request");
 
         try {
-          return actionJson(await source.retire(
+          return actionJson(logger, "lifecycle", await source.retire(
             parsedBody.value.sessionId,
             parsedBody.value.action,
-          ));
+          ), {
+            action: parsedBody.value.action,
+            sessionId: parsedBody.value.sessionId,
+          });
         } catch (error) {
-          logUnexpected("sidebar lifecycle request failed", error, {
+          logUnexpected(logger, "sidebar lifecycle request failed", error, {
             action: parsedBody.value.action,
             sessionId: parsedBody.value.sessionId,
           });
@@ -365,9 +397,17 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         }
         if (!parsed.ok) return errorJson("bad_request");
         try {
-          return actionJson(await source.declineSuggestion(parsed.value.sessionId, parsed.value.verb));
+          return actionJson(
+            logger,
+            "decline",
+            await source.declineSuggestion(parsed.value.sessionId, parsed.value.verb),
+            { sessionId: parsed.value.sessionId, verb: parsed.value.verb },
+          );
         } catch (error) {
-          logUnexpected("sidebar decline request failed", error, { sessionId: parsed.value.sessionId });
+          logUnexpected(logger, "sidebar decline request failed", error, {
+            sessionId: parsed.value.sessionId,
+            verb: parsed.value.verb,
+          });
           return errorJson("internal_failure");
         }
       }
@@ -388,9 +428,11 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           return errorJson("bad_request");
         }
         try {
-          return actionJson(await source.focusWorkspace(workspaceId));
+          return actionJson(logger, "workspace-focus", await source.focusWorkspace(workspaceId), {
+            workspaceId,
+          });
         } catch (error) {
-          logUnexpected("sidebar workspace focus request failed", error, { workspaceId });
+          logUnexpected(logger, "sidebar workspace focus request failed", error, { workspaceId });
           return errorJson("internal_failure");
         }
       }
@@ -412,9 +454,15 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           return errorJson("bad_request");
         }
         try {
-          return actionJson(await source.setPinned(body.workspaceId, body.pinned));
+          return actionJson(logger, "workspace-pin", await source.setPinned(
+            body.workspaceId,
+            body.pinned,
+          ), { workspaceId: body.workspaceId, pinned: body.pinned });
         } catch (error) {
-          logUnexpected("sidebar workspace pin request failed", error, { workspaceId: body.workspaceId });
+          logUnexpected(logger, "sidebar workspace pin request failed", error, {
+            workspaceId: body.workspaceId,
+            pinned: body.pinned,
+          });
           return errorJson("internal_failure");
         }
       }
@@ -435,9 +483,11 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           return errorJson("bad_request");
         }
         try {
-          return actionJson(await source.closeLooseWorkspace(workspaceId));
+          return actionJson(logger, "workspace-close", await source.closeLooseWorkspace(workspaceId), {
+            workspaceId,
+          });
         } catch (error) {
-          logUnexpected("sidebar loose workspace close request failed", error, { workspaceId });
+          logUnexpected(logger, "sidebar loose workspace close request failed", error, { workspaceId });
           return errorJson("internal_failure");
         }
       }
@@ -456,9 +506,9 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           return errorJson("bad_request");
         }
         try {
-          return actionJson(await source.closeWorkspace(sessionId));
+          return actionJson(logger, "session-close", await source.closeWorkspace(sessionId), { sessionId });
         } catch (error) {
-          logUnexpected("sidebar session close request failed", error, { sessionId });
+          logUnexpected(logger, "sidebar session close request failed", error, { sessionId });
           return errorJson("internal_failure");
         }
       }
