@@ -25,6 +25,22 @@ export const CCS_SIDEBAR_SOURCE_PATH = join(
   "ccs.swift",
 );
 
+/**
+ * The web sidebar is a second, separate artifact: a one-line `.url` pointing cmux at the local
+ * host. It is installed under its own name so it never competes with the interpreted Swift
+ * sidebar — both can be present, and which one is active stays the user's choice in cmux.
+ */
+export const CCS_WEB_SIDEBAR_NAME = "ccs-web";
+export const CCS_WEB_SIDEBAR_SOURCE_PATH = join(
+  import.meta.dir,
+  "..",
+  "..",
+  "integrations",
+  "cmux",
+  "sidebars",
+  `${CCS_WEB_SIDEBAR_NAME}.url`,
+);
+
 export type CcsSidebarInstallState = "installed" | "unchanged" | "overwritten";
 export type CcsSidebarInspectionState = "missing" | "current" | "different";
 export type CcsSidebarInstallErrorCode =
@@ -70,6 +86,10 @@ export interface CcsSidebarInspection {
 
 export function ccsSidebarTargetPath(homeDirectory: string = homedir()): string {
   return join(homeDirectory, ".config", "cmux", "sidebars", `${CCS_SIDEBAR_NAME}.swift`);
+}
+
+export function ccsWebSidebarTargetPath(homeDirectory: string = homedir()): string {
+  return join(homeDirectory, ".config", "cmux", "sidebars", `${CCS_WEB_SIDEBAR_NAME}.url`);
 }
 
 function backupPathFor(targetPath: string): string {
@@ -239,4 +259,30 @@ export function installCcsSidebar(
   }
 
   return ok({ state: "overwritten", sourcePath, targetPath, backupPath });
+}
+
+/**
+ * The same install and inspection, addressed at the web sidebar's own pair of paths.
+ *
+ * Only the defaults differ, so the two artifacts cannot drift in how they back up, refuse a
+ * differing target, or reject a non-regular entry — and installing one never reads or writes the
+ * other's file.
+ */
+export function inspectCcsWebSidebar(
+  options: Pick<CcsSidebarInstallOptions, "sourcePath" | "targetPath"> = {},
+): Result<CcsSidebarInspection, CcsSidebarInstallError> {
+  return inspectCcsSidebar({
+    sourcePath: options.sourcePath ?? CCS_WEB_SIDEBAR_SOURCE_PATH,
+    targetPath: options.targetPath ?? ccsWebSidebarTargetPath(),
+  });
+}
+
+export function installCcsWebSidebar(
+  options: CcsSidebarInstallOptions = {},
+): Result<CcsSidebarInstallResult, CcsSidebarInstallError> {
+  return installCcsSidebar({
+    ...options,
+    sourcePath: options.sourcePath ?? CCS_WEB_SIDEBAR_SOURCE_PATH,
+    targetPath: options.targetPath ?? ccsWebSidebarTargetPath(),
+  });
 }

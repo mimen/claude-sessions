@@ -3,13 +3,25 @@ import {
   CCS_SIDEBAR_NAME,
   inspectCcsSidebar,
   installCcsSidebar,
+  installCcsWebSidebar,
 } from "../src/cmux/sidebar.ts";
+import type {
+  CcsSidebarInstallError,
+  CcsSidebarInstallOptions,
+  CcsSidebarInstallResult,
+} from "../src/cmux/sidebar.ts";
+import type { Result } from "../src/result.ts";
 
 const usage = `Usage:
   bun run cmux:sidebar:install [--force]
+  bun run cmux:sidebar:install:web [--force]
   bun run cmux:sidebar:validate
   bun run cmux:sidebar:open
   bun run cmux:sidebar:select`;
+
+type SidebarInstaller = (
+  options: CcsSidebarInstallOptions,
+) => Result<CcsSidebarInstallResult, CcsSidebarInstallError>;
 
 type CmuxSidebarCommand = "validate" | "open" | "select";
 
@@ -46,7 +58,7 @@ function runCmux(command: CmuxSidebarCommand): number {
   }
 }
 
-function runInstall(args: readonly string[]): number {
+function runInstall(args: readonly string[], install: SidebarInstaller): number {
   const unexpected = args.filter((arg) => arg !== "--force");
   if (unexpected.length > 0) {
     console.error(`Unknown install argument: ${unexpected[0]}`);
@@ -54,7 +66,7 @@ function runInstall(args: readonly string[]): number {
     return 2;
   }
 
-  const result = installCcsSidebar({ force: args.includes("--force") });
+  const result = install({ force: args.includes("--force") });
   if (!result.ok) {
     console.error(result.error.message);
     return result.error.code === "conflict" ? 2 : 1;
@@ -73,7 +85,8 @@ function runInstall(args: readonly string[]): number {
 
 function main(args: readonly string[]): number {
   const [command, ...rest] = args;
-  if (command === "install") return runInstall(rest);
+  if (command === "install") return runInstall(rest, installCcsSidebar);
+  if (command === "install-web") return runInstall(rest, installCcsWebSidebar);
   if (rest.length > 0) {
     console.error(`Unexpected arguments for ${command ?? "sidebar command"}: ${rest.join(" ")}`);
     console.error(usage);

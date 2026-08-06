@@ -18,6 +18,17 @@ bun run cmux:sidebar:install:force
 
 A forced replacement first copies the existing regular file to the backup path printed by the command. The target must be a regular file or absent; the installer refuses symlinks, directories, and other filesystem entry types. Backup and rollback preserve file contents, not original timestamps, extended attributes, or hard-link identity.
 
+## The web sidebar
+
+[`sidebars/ccs-web.url`](sidebars/ccs-web.url) is a separate artifact: one loopback URL pointing cmux at the local host served by `ccs sidebar serve`. It installs under its own name at `~/.config/cmux/sidebars/ccs-web.url`, so it neither replaces nor outranks `ccs.swift`; both can be installed and cmux decides which is active.
+
+```sh
+bun run cmux:sidebar:install:web        # add --force via cmux:sidebar:install:web:force
+cmux sidebar open ccs-web
+```
+
+Same install contract as the Swift sidebar: idempotent when unchanged, refuses a differing target without a force, backs the previous file up when forced. Start the server first — the URL is only useful while something is listening on it.
+
 ## Validate and use
 
 ```sh

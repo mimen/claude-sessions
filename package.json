@@ -15,6 +15,8 @@
     "cmux:sidebar": "bun run scripts/cmux-sidebar.ts",
     "cmux:sidebar:install": "bun run scripts/cmux-sidebar.ts install",
     "cmux:sidebar:install:force": "bun run scripts/cmux-sidebar.ts install --force",
+    "cmux:sidebar:install:web": "bun run scripts/cmux-sidebar.ts install-web",
+    "cmux:sidebar:install:web:force": "bun run scripts/cmux-sidebar.ts install-web --force",
     "cmux:sidebar:validate": "bun run scripts/cmux-sidebar.ts validate",
     "cmux:sidebar:select": "bun run scripts/cmux-sidebar.ts select",
     "cmux:sidebar:open": "bun run scripts/cmux-sidebar.ts open",

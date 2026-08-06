@@ -28,6 +28,18 @@ Dock configuration is not written by this repository. cmux restores its own save
 so a `~/.config/cmux/dock.json` entry only seeds an initial layout and may be ignored once a
 snapshot exists.
 
+Alternatively, install the URL as its own custom sidebar and let cmux open it:
+
+```sh
+bun run cmux:sidebar:install:web    # ~/.config/cmux/sidebars/ccs-web.url
+cmux sidebar open ccs-web
+```
+
+That artifact is versioned at `integrations/cmux/sidebars/ccs-web.url` and installs under its own
+name, so it neither replaces nor outranks the interpreted `ccs.swift` navigator; both can be
+present and cmux decides which is active. It refuses to overwrite a differing installed URL unless
+`bun run cmux:sidebar:install:web:force` is used, which first backs the old one up.
+
 ## The row
 
 ```
@@ -57,6 +69,30 @@ through CCS when it is not. The browser never chooses between them, because choo
 spawns a duplicate of a running session. When cmux state is unreadable the sidebar says so and
 refuses to resume anything.
 
+### The native focus bridge
+
+Hosted inside cmux's own web view, the page can skip the HTTP round trip for the most common
+click of all — "show me that tab". `web/focus-bridge.ts` posts one versioned message and waits at
+most a second:
+
+```
+window.webkit.messageHandlers.cmuxSidebarFocusWorkspace
+  .postMessage({ v: 1, workspaceId })      →  { v: 1, status: "focused" | "not-found" | "unavailable" }
+```
+
+Only a row that has a workspace is ever offered to the bridge; a sessionless-but-workspaceless row
+has no native address, so it goes straight to HTTP without a message. A reply is read strictly:
+the version must be `1` and the status one of those three. A near-miss is a mismatched host, and
+guessing at it is how a click quietly stops focusing anything.
+
+`focused` is the only outcome that ends the action, and it costs zero requests. Every other
+outcome — `no-bridge` (an ordinary browser tab, or a cmux without the handler), `not-found`,
+`unavailable`, `rejected`, `timeout`, `malformed-reply` — falls through **exactly once** to the
+same request as before: `/api/open` for a session row, `/api/workspace/focus` for a workspace row.
+The list re-reads afterwards either way. The bridge is therefore pure latency: it can never be the
+reason a click fails, and it changes nothing about what the page can reach or what the server
+believes.
+
 ## What the browser can reach
 
 Three endpoints, and nothing else:
@@ -83,6 +119,7 @@ Three endpoints, and nothing else:
 | `session-action-coordinator.ts` | Runs focus/resume and mutation actions outside snapshot construction. |
 | `server.ts` | The loopback host and conditional-GET transport. |
 | `bundle.ts` | Builds the browser bundle at startup, so the served page always matches source. |
+| `web/focus-bridge.ts` | The optional native focus handler, and the single fall-through to HTTP when it does not focus. |
 | `web/` | The React app. Typechecked by its own project (`bun run typecheck:web`). |
 
 The import boundary is deliberate: sidebar request modules may use readonly query adapters, but may not

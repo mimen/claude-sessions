@@ -41,6 +41,7 @@ import { GroupHeader } from "./components/group-header.tsx";
 import { Toasts, type Toast } from "./components/toasts.tsx";
 import { cn } from "@/lib/utils";
 import { actionErrorMessage, postSidebarAction } from "./action-transport.ts";
+import { focusWorkspaceRow } from "./focus-bridge.ts";
 import { createSnapshotTransport, snapshotPollDelay } from "./snapshot-transport.ts";
 
 const POLL_INTERVAL_MS = 1_000;
@@ -421,19 +422,26 @@ export function App(): React.ReactElement {
     setActionError(null);
 
     try {
-      // A workspace row has no session to resume — clicking it is purely "show me that tab".
-      const result = row.kind === "workspace"
-        ? await postSidebarAction<FocusResponse>(
-          "/api/workspace/focus",
-          { workspaceId: row.workspaceId },
-        )
-        : await postSidebarAction<OpenResponse>(
-          "/api/open",
-          { sessionId: row.sessionId },
-        );
-      if (!result.ok) setActionError(actionErrorMessage(result.error));
-      else if (result.value.status !== "focused" && result.value.status !== "resumed") {
-        setActionError("CCS did not confirm that the session opened. Refresh the list and try again.");
+      // Inside cmux's own web view the host can focus the workspace directly, which is the whole
+      // action for a row that is already live. Anything else — no bridge, a stale host, a
+      // workspace it does not know — falls through once to the request that always worked.
+      const { fallback } = await focusWorkspaceRow(row, async () =>
+        // A workspace row has no session to resume — clicking it is purely "show me that tab".
+        row.kind === "workspace"
+          ? await postSidebarAction<FocusResponse>(
+            "/api/workspace/focus",
+            { workspaceId: row.workspaceId },
+          )
+          : await postSidebarAction<OpenResponse>(
+            "/api/open",
+            { sessionId: row.sessionId },
+          ));
+      if (fallback.performed) {
+        const result = fallback.value;
+        if (!result.ok) setActionError(actionErrorMessage(result.error));
+        else if (result.value.status !== "focused" && result.value.status !== "resumed") {
+          setActionError("CCS did not confirm that the session opened. Refresh the list and try again.");
+        }
       }
       load(true);
     } finally {
