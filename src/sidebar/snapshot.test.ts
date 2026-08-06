@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openCatalogue } from "../catalogue/db-schema.ts";
@@ -128,6 +128,66 @@ function catalogueRead(rows: ReadonlyArray<{
     summaries: new Map(),
   };
   return { status: "ok", facts };
+}
+
+function pathDatabases(
+  root: string,
+  sessionCount: number,
+  prefix: string,
+): { readonly cataloguePath: string; readonly indexPath: string } {
+  mkdirSync(root, { recursive: true });
+  const cataloguePath = join(root, "catalogue.db");
+  const catalogue = openCatalogue(cataloguePath, { materialize: false });
+  try {
+    const insert = catalogue.query(
+      `INSERT INTO catalogue (session_id, resume_id, custom_title, updated_at)
+       VALUES ($sessionId, $resumeId, $title, $updatedAt)`,
+    );
+    for (let index = 0; index < sessionCount; index += 1) {
+      insert.run({
+        $sessionId: `${prefix}-session-${index}`,
+        $resumeId: `${prefix}-resume-${index}`,
+        $title: `${prefix} title ${index}`,
+        $updatedAt: new Date(Date.UTC(2026, 7, 5) - index * 60_000).toISOString(),
+      });
+    }
+  } finally {
+    catalogue.close();
+  }
+
+  const indexPath = join(root, "index.db");
+  const indexDb = new Database(indexPath);
+  try {
+    indexDb.exec(`
+      CREATE TABLE sessions (
+        session_id TEXT PRIMARY KEY,
+        resume_id TEXT,
+        cwd TEXT,
+        last_ts TEXT,
+        models TEXT,
+        cost_by_model TEXT,
+        is_subagent INTEGER NOT NULL DEFAULT 0,
+        native_title TEXT
+      );
+    `);
+    const insert = indexDb.query(
+      `INSERT INTO sessions
+         (session_id, resume_id, cwd, last_ts, models, cost_by_model, native_title)
+       VALUES ($sessionId, $resumeId, $cwd, $lastTs, '[]', '{}', $title)`,
+    );
+    for (let row = 0; row < sessionCount; row += 1) {
+      insert.run({
+        $sessionId: `${prefix}-session-${row}`,
+        $resumeId: `${prefix}-resume-${row}`,
+        $cwd: join(root, `repo-${row}`),
+        $lastTs: new Date(Date.UTC(2026, 7, 5) - row * 60_000).toISOString(),
+        $title: `${prefix} title ${row}`,
+      });
+    }
+  } finally {
+    indexDb.close();
+  }
+  return { cataloguePath, indexPath };
 }
 
 function emptyBridge(readable = true): Bridge {
@@ -421,6 +481,54 @@ describe("createSidebarSource open", () => {
       ["select-workspace", "--workspace", "workspace:8", "--window", "window:4"],
       ["focus-window", "--window", "window:4"],
     ]);
+  });
+
+  test("opens the oldest row in a 250-row snapshot through its resume alias", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ccs-sidebar-old-row-open-"));
+    try {
+      const paths = pathDatabases(directory, 250, "history");
+      let bridgeReads = 0;
+      const resumedSessionIds: string[] = [];
+      const source = createSidebarSource({
+        ...paths,
+        cmuxBin: "never-run-cmux",
+        readBridge: async () => {
+          bridgeReads += 1;
+          return emptyBridge();
+        },
+        readStatuses: async () => new Map<string, CmuxStatusRead>(),
+        processAdapter: {
+          run: async () => ({ ok: true, stdout: "", stderr: "", timedOut: false }),
+        },
+        loadLaunchers: () => ({ ok: true, value: LAUNCHERS }),
+        resumeAction: async ({ sessionId }) => {
+          resumedSessionIds.push(sessionId);
+          return {
+            status: "ok",
+            result: { status: "resumed", note: null, workspaceRef: "workspace:oldest" },
+            paintRow: null,
+          };
+        },
+        directoryFacts: {
+          lookup: async () => ({ checkouts: new Map(), favicons: new Map() }),
+        },
+      });
+
+      const snapshot = await source.snapshot("active", 250);
+      const rows = sessionRows(snapshot.rows);
+      expect(rows).toHaveLength(250);
+      expect(rows.at(-1)?.sessionId).toBe("history-session-249");
+      const bridgeReadsBeforeOpen = bridgeReads;
+
+      await expect(source.open("history-resume-249")).resolves.toEqual({
+        status: "resumed",
+        workspaceRef: "workspace:oldest",
+      });
+      expect(resumedSessionIds).toEqual(["history-session-249"]);
+      expect(bridgeReads - bridgeReadsBeforeOpen).toBe(1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("keeps snapshots responsive while an async focus action is in flight", async () => {
@@ -759,6 +867,72 @@ describe("createSidebarSource snapshot", () => {
 
     expect(mutationCalls).toBe(0);
     expect(dataDirectoryWrites).toBe(0);
+  });
+
+  test("uses explicit index and catalogue paths for snapshots and actions when CCS_ROOT differs", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ccs-sidebar-custom-paths-"));
+    const previousRoot = process.env.CCS_ROOT;
+    try {
+      const globalRoot = join(directory, "global-root");
+      const globalPaths = pathDatabases(join(globalRoot, "cache"), 1, "global");
+      const customPaths = pathDatabases(join(directory, "custom"), 1, "custom");
+      process.env.CCS_ROOT = globalRoot;
+      const resumedSessionIds: string[] = [];
+      const source = createSidebarSource({
+        ...customPaths,
+        cmuxBin: "never-run-cmux",
+        readBridge: async () => emptyBridge(),
+        readStatuses: async () => new Map<string, CmuxStatusRead>(),
+        notificationReader: {
+          read: async () => ({ notifications: [], unreadCountsByWorkspaceId: new Map() }),
+        },
+        processAdapter: {
+          run: async () => ({ ok: true, stdout: "", stderr: "", timedOut: false }),
+        },
+        loadLaunchers: () => ({ ok: true, value: LAUNCHERS }),
+        resumeAction: async ({ sessionId }) => {
+          resumedSessionIds.push(sessionId);
+          return {
+            status: "ok",
+            result: { status: "resumed", note: null, workspaceRef: "workspace:custom" },
+            paintRow: null,
+          };
+        },
+        ensureDataDir: () => {},
+        directoryFacts: {
+          lookup: async () => ({ checkouts: new Map(), favicons: new Map() }),
+        },
+      });
+
+      const snapshot = await source.snapshot("active", 20);
+      expect(snapshot.indexReadable).toBeTrue();
+      expect(snapshot.catalogueReadable).toBeTrue();
+      expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual(["custom-session-0"]);
+
+      await expect(source.open("custom-resume-0")).resolves.toEqual({
+        status: "resumed",
+        workspaceRef: "workspace:custom",
+      });
+      expect(resumedSessionIds).toEqual(["custom-session-0"]);
+      await expect(source.setLifecycle("custom-session-0", "complete")).resolves.toEqual({
+        status: "ok",
+        lifecycle: "completed",
+      });
+
+      const customCatalogue = openCatalogue(customPaths.cataloguePath, { materialize: false });
+      const globalCatalogue = openCatalogue(globalPaths.cataloguePath, { materialize: false });
+      try {
+        expect(getRow(customCatalogue, "custom-session-0")?.completed).toBeTrue();
+        expect(getRow(globalCatalogue, "global-session-0")?.completed).toBeFalse();
+      } finally {
+        customCatalogue.close();
+        globalCatalogue.close();
+      }
+    } finally {
+      if (previousRoot === undefined) delete process.env.CCS_ROOT;
+      else process.env.CCS_ROOT = previousRoot;
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("uses stable workspace ids and never shelves a live secondary surface", async () => {

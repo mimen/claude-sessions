@@ -430,6 +430,8 @@ export interface SidebarSourceOptions {
 export function createSidebarSource(options: SidebarSourceOptions = {}): SidebarSource {
   const cmuxBin = options.cmuxBin ?? "cmux";
   const now = options.now ?? (() => Date.now());
+  const indexPath = options.indexPath ?? DB_PATH();
+  const cataloguePath = options.cataloguePath ?? CATALOGUE_PATH();
   const recentlyResumedMs = options.recentlyResumedMs ?? RECENTLY_RESUMED_MS;
   const readBridge = options.readBridge ?? liveBridgeAsync;
   const readStatuses = options.readStatuses ?? readClaudeStatuses;
@@ -453,19 +455,19 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const launcherLoader = options.loadLaunchers ?? loadLaunchers;
   const resumeAction = options.resumeAction ?? createSidebarResumeAction({
     processAdapter,
-    indexPath: options.indexPath,
-    cataloguePath: options.cataloguePath,
+    indexPath,
+    cataloguePath,
     logger: options.logger,
   });
   const ensureDataDirectory = options.ensureDataDir ?? ensureDataDir;
   const readCache = options.readCache
     ?? (options.readCatalogue === undefined && options.readIndex === undefined
-      ? createSidebarReadCache(CATALOGUE_PATH(), DB_PATH())
+      ? createSidebarReadCache(cataloguePath, indexPath)
       : null);
   const lifecycleCommand = options.lifecycleCommand ?? setExistingSessionLifecycle;
   const declineCommand = options.declineCommand ?? declineExistingSessionRecommendation;
   const catalogueCommandOptions: CatalogueCommandOptions = {
-    cataloguePath: options.cataloguePath,
+    cataloguePath,
     now: () => new Date(now()),
     ensureDataDir: ensureDataDirectory,
     logger: options.logger,
@@ -499,7 +501,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         ? readIndexedSessionsOverride()
         : readCache
           ? readCache.readIndex({ limit, sessionIds })
-          : readIndex(DB_PATH(), { limit, sessionIds });
+          : readIndex(indexPath, { limit, sessionIds });
       if (sessionIds === undefined || !readIndexedSessionsOverride) {
         return { sessions: sessions.slice(0, limit), readable: true };
       }
@@ -522,7 +524,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   } {
     const outcome: CatalogueReadOutcome = readCache
       ? readCache.readCatalogue()
-      : readCatalogue(CATALOGUE_PATH());
+      : readCatalogue(cataloguePath);
     if (outcome.status === "ok") return { ...outcome.facts, readable: true };
 
     const reason = outcome.status === "missing"
@@ -563,10 +565,8 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   }
 
   function closeCandidateIds(sessionId: string): readonly string[] {
-    const index = readIndexedSessionsSafely(INDEX_SCAN_LIMIT);
-    const row = index.sessions.find(
-      (candidate) => candidate.sessionId === sessionId || candidate.resumeId === sessionId,
-    );
+    const index = readIndexedSessionsSafely(1, [sessionId]);
+    const row = index.sessions[0];
     return [...new Set([sessionId, row?.sessionId, row?.resumeId].filter(
       (candidate): candidate is string => candidate !== undefined,
     ))];
@@ -611,10 +611,8 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     recentlyResumedMs,
     readBridge,
     lookupIndexedSession(sessionId) {
-      const index = readIndexedSessionsSafely(INDEX_SCAN_LIMIT);
-      const row = index.sessions.find(
-        (candidate) => candidate.sessionId === sessionId || candidate.resumeId === sessionId,
-      );
+      const index = readIndexedSessionsSafely(1, [sessionId]);
+      const row = index.sessions[0];
       if (row) return { status: "found", row };
       return index.readable
         ? { status: "absent" }
