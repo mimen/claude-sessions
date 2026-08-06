@@ -22,7 +22,7 @@ function sessionRows(rows: readonly SidebarRow[]): SidebarSessionRow[] {
 }
 
 const LAUNCHERS: Launcher[] = [
-  { name: "gateway", binary: "claude-gpt", serves: ["gpt-*"], env: {} },
+  { name: "gateway", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] },
 ];
 
 const CANONICAL_SESSION_ID = "11111111-1111-4111-8111-111111111111";
