@@ -15,7 +15,7 @@ import {
   type CatalogueCommandOptions,
 } from "../catalogue/commands.ts";
 import { DB_PATH, CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
-import { liveBridgeAsync } from "../cmux/live.ts";
+import { createLiveBridgeReader } from "../cmux/live.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import {
   closeSessionWorkspaceCandidates,
@@ -433,7 +433,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const indexPath = options.indexPath ?? DB_PATH();
   const cataloguePath = options.cataloguePath ?? CATALOGUE_PATH();
   const recentlyResumedMs = options.recentlyResumedMs ?? RECENTLY_RESUMED_MS;
-  const readBridge = options.readBridge ?? liveBridgeAsync;
+  const readBridge = options.readBridge ?? createLiveBridgeReader({ cmuxBin });
   const readStatuses = options.readStatuses ?? readClaudeStatuses;
   // Requests read this cache rather than spawning a subprocess per workspace.
   const statusReader: CachedStatusReader = options.statusReader

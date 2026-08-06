@@ -436,9 +436,10 @@ describe("createSidebarSource open", () => {
     expect(resumeCalls).toBe(0);
   });
 
-  test("reads exactly one fresh Bridge and focuses the location from that read", async () => {
+  test("reads one fresh Bridge and uses one command for a workspace in the active window", async () => {
     const bridge = buildBridge(
       {
+        active: { window_id: "window-id" },
         windows: [{
           id: "window-id",
           ref: "window:4",
@@ -464,6 +465,9 @@ describe("createSidebarSource open", () => {
         bridgeReads += 1;
         return bridge;
       },
+      indexedSessions: () => {
+        throw new Error("direct live focus must not touch the synchronous index");
+      },
       processAdapter: {
         run: async (_file, args) => {
           processCalls.push([...args]);
@@ -478,8 +482,7 @@ describe("createSidebarSource open", () => {
     });
     expect(bridgeReads).toBe(1);
     expect(processCalls).toEqual([
-      ["select-workspace", "--workspace", "workspace:8", "--window", "window:4"],
-      ["focus-window", "--window", "window:4"],
+      ["select-workspace", "--workspace", "workspace:8"],
     ]);
   });
 
@@ -531,12 +534,12 @@ describe("createSidebarSource open", () => {
     }
   });
 
-  test("keeps snapshots responsive while an async focus action is in flight", async () => {
-    const processResult = deferred<{ ok: boolean; stdout: string; stderr: string; timedOut: boolean }>();
+  test("keeps explicit window targeting for a workspace in a background window", async () => {
     const bridge = buildBridge(
       {
+        active: { window_id: "active-window-id" },
         windows: [{
-          id: "window-id",
+          id: "background-window-id",
           ref: "window:4",
           workspaces: [{
             id: "workspace-id",
@@ -553,23 +556,95 @@ describe("createSidebarSource open", () => {
       },
       { sessions: { "file-id": { surfaceId: "surface-id", workspaceId: "workspace-id", cwd: "/repo" } } },
     );
-    let processCalls = 0;
+    const processCalls: string[][] = [];
     const source = createSidebarSource(sourceOptions({
       readBridge: async () => bridge,
       processAdapter: {
-        run: async () => {
-          processCalls += 1;
-          if (processCalls === 1) return processResult.promise;
+        run: async (_file, args) => {
+          processCalls.push([...args]);
           return { ok: true, stdout: "", stderr: "", timedOut: false };
         },
       },
     }));
 
-    const opening = source.open("file-id");
-    await waitFor(() => processCalls === 1);
+    await expect(source.open("file-id")).resolves.toEqual({
+      status: "focused",
+      workspaceRef: "workspace:8",
+    });
+    expect(processCalls).toEqual([
+      ["select-workspace", "--workspace", "workspace:8", "--window", "window:4"],
+      ["focus-window", "--window", "window:4"],
+    ]);
+  });
+
+  test("keeps snapshots responsive while real-shaped focus commands are pending", async () => {
+    const processGate = deferred<void>();
+    const bridge = buildBridge(
+      {
+        active: { window_id: "window-id" },
+        windows: [{
+          id: "window-id",
+          ref: "window:4",
+          workspaces: [
+            {
+              id: "workspace-one",
+              ref: "workspace:8",
+              title: "Live one",
+              panes: [{
+                id: "pane-one",
+                ref: "pane:1",
+                index: 0,
+                surfaces: [{ id: "surface-one", ref: "surface:1", index_in_pane: 0 }],
+              }],
+            },
+            {
+              id: "workspace-two",
+              ref: "workspace:9",
+              title: "Live two",
+              panes: [{
+                id: "pane-two",
+                ref: "pane:2",
+                index: 0,
+                surfaces: [{ id: "surface-two", ref: "surface:2", index_in_pane: 0 }],
+              }],
+            },
+          ],
+        }],
+      },
+      {
+        sessions: {
+          "file-id": { surfaceId: "surface-one", workspaceId: "workspace-one", cwd: "/repo" },
+          "other-id": { surfaceId: "surface-two", workspaceId: "workspace-two", cwd: "/repo" },
+        },
+      },
+    );
+    const processCalls: string[][] = [];
+    const source = createSidebarSource(sourceOptions({
+      readBridge: async () => bridge,
+      processAdapter: {
+        run: async (_file, args) => {
+          processCalls.push([...args]);
+          await processGate.promise;
+          return { ok: true, stdout: "", stderr: "", timedOut: false };
+        },
+      },
+    }));
+
+    const firstOpening = source.open("file-id");
+    const secondOpening = source.open("other-id");
+    await waitFor(() => processCalls.length === 2);
+    expect(processCalls).toEqual([
+      ["select-workspace", "--workspace", "workspace:8"],
+      ["select-workspace", "--workspace", "workspace:9"],
+    ]);
+
+    const snapshotStartedAt = performance.now();
     await expect(source.snapshot()).resolves.toMatchObject({ livenessReadable: true });
-    processResult.resolve({ ok: true, stdout: "", stderr: "", timedOut: false });
-    await expect(opening).resolves.toEqual({ status: "focused", workspaceRef: "workspace:8" });
+    expect(performance.now() - snapshotStartedAt).toBeLessThan(50);
+
+    processGate.resolve(undefined);
+    await expect(firstOpening).resolves.toEqual({ status: "focused", workspaceRef: "workspace:8" });
+    await expect(secondOpening).resolves.toEqual({ status: "focused", workspaceRef: "workspace:9" });
   });
 
   test("defers cosmetic paint from the already-read row and ignores paint failure", async () => {
