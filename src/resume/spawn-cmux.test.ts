@@ -14,6 +14,7 @@ import { shellQuote } from "./command.ts";
 import {
   invokeCmuxNewWorkspace,
   spawnCmux,
+  spawnCmuxAsync,
   type SpawnCmuxOpts,
 } from "./spawn-cmux.ts";
 
@@ -82,6 +83,33 @@ function withoutLauncherEnvironment(keys: readonly string[]): NodeJS.ProcessEnv 
 }
 
 describe("spawnCmux", () => {
+  test("uses the injected async process adapter and preserves the workspace receipt", async () => {
+    const calls: Array<{ file: string; args: readonly string[]; timeoutMs: number }> = [];
+    const ref = await spawnCmuxAsync({
+      argv: ["claude", "--resume", "s123"],
+      cwd: "/tmp/test-dir",
+      name: "my-session",
+      cmuxBin: "fake-cmux",
+    }, {
+      run: async (file, args, options) => {
+        calls.push({ file, args, timeoutMs: options.timeoutMs });
+        return { ok: true, stdout: "created workspace:42\n", stderr: "", timedOut: false };
+      },
+    });
+
+    expect(ref).toBe("workspace:42");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.file).toBe("fake-cmux");
+    expect(calls[0]?.args.slice(0, 5)).toEqual([
+      "new-workspace",
+      "--cwd",
+      "/tmp/test-dir",
+      "--name",
+      "my-session",
+    ]);
+    expect(calls[0]?.timeoutMs).toBe(10_000);
+  });
+
   test("constructs argv: new-workspace --cwd <cwd> --name <name> --command <shell-quoted argv>", () => {
     withFakeCmux((cmuxPath, callsFile) => {
       writeFileSync(

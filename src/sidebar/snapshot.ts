@@ -8,7 +8,7 @@
  * spawns a duplicate of a running session.
  */
 import { statSync } from "node:fs";
-import type { Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 import { openIndex } from "../index/schema.ts";
 import {
   displayTitle,
@@ -20,15 +20,9 @@ import {
 import { setIdentityFields } from "../catalogue/identities.ts";
 import { DB_PATH, CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { liveBridgeAsync } from "../cmux/live.ts";
-import {
-  focusSession,
-  focusWorkspace as focusWorkspaceById,
-  setWorkspacePinned,
-} from "../cmux/liveness.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import {
   closeSessionWorkspaceCandidates,
-  closeWorkspaceByStableIdWithCmux,
   type CloseSessionWorkspaceDependencies,
   type CloseSessionWorkspaceOutcome as PrimitiveCloseOutcome,
 } from "../cmux/close-current.ts";
@@ -39,8 +33,16 @@ import {
   type FinishSessionOutcome,
 } from "../cmux/finish-current.ts";
 import { launchImmediateEnrichment } from "../cmux/launch-enrichment.ts";
-import { resumeSessionEntry } from "../resume/resume-session.ts";
+import {
+  resumeSessionEntryAsync,
+  type ResumeSessionOptions,
+  type ResumeSessionResult,
+} from "../resume/resume-session.ts";
 import { loadLaunchers } from "../resume/launchers.ts";
+import {
+  bunAsyncProcessAdapter,
+  type AsyncProcessAdapter,
+} from "../process/async.ts";
 import { log } from "../logger.ts";
 import { err, ok, type Result } from "../result.ts";
 import { readIndexReadOnly } from "./index-read.ts";
@@ -82,6 +84,10 @@ import {
   readEnrichments,
   type StoredEnrichment,
 } from "../catalogue/enrichment.ts";
+import { createSessionActionCoordinator } from "./session-action-coordinator.ts";
+import type { OpenSessionOutcome } from "./session-action-coordinator.ts";
+import { paintResumedWorkspace } from "./cosmetic-paint.ts";
+export type { OpenSessionOutcome } from "./session-action-coordinator.ts";
 
 /** How many indexed sessions are considered before the resume shelf is filled. */
 const INDEX_SCAN_LIMIT = 200;
@@ -98,13 +104,6 @@ const STATUS_TTL_MS = 2_500;
 const WORKSPACE_STATE_TTL_MS = 10_000;
 /** One cheap command covers every workspace, so this can stay close to the poll interval. */
 const NOTIFICATION_TTL_MS = 2_000;
-
-export type OpenSessionOutcome =
-  | { readonly status: "focused"; readonly workspaceRef: string | null }
-  | { readonly status: "resumed"; readonly workspaceRef: string | null }
-  | { readonly status: "not-found" }
-  | { readonly status: "liveness-unreadable" }
-  | { readonly status: "failed"; readonly reason: string };
 
 export type SessionLifecycleAction = "complete" | "archive" | "uncomplete" | "unarchive";
 
@@ -318,14 +317,6 @@ function pinnedWorkspacesFrom(bridge: Bridge): Set<string> {
   return pinned;
 }
 
-/**
- * Execute the primitive's already-authorized stable-UUID close. The sidebar never calls cmux's
- * close verb on its own; all target resolution and both safety proofs stay in close-current.ts.
- */
-function closeWorkspaceRef(workspaceId: string, _windowRef: string, cmuxBin: string): boolean {
-  return closeWorkspaceByStableIdWithCmux(cmuxBin, workspaceId).ok;
-}
-
 /** Every bound session remains live even when another surface owns its workspace's one visible row. */
 function allLiveSessionIdsFrom(bridge: Bridge): Set<string> {
   const sessionIds = new Set<string>();
@@ -395,8 +386,8 @@ type ResumeSessionCall = (
   indexDb: Database,
   catalogueDb: Database,
   sessionId: string,
-  options: Parameters<typeof resumeSessionEntry>[3],
-) => ReturnType<typeof resumeSessionEntry> | Promise<ReturnType<typeof resumeSessionEntry>>;
+  options: ResumeSessionOptions,
+) => ResumeSessionResult | Promise<ResumeSessionResult>;
 
 interface DirectoryFactsReader {
   lookup(directories: readonly string[]): Promise<DirectoryFactsResult>;
@@ -429,16 +420,24 @@ export interface SidebarSourceOptions {
   readonly statusReader?: CachedStatusReader;
   readonly workspaceStateReader?: CachedWorkspaceStateReader;
   readonly notificationReader?: CachedNotificationReader;
-  readonly focus?: typeof focusSession;
+  readonly processAdapter?: AsyncProcessAdapter;
   /** Invoked only after the CCS primitive authorizes a stable workspace UUID twice. */
-  readonly closeCmuxWorkspace?: (workspaceId: string, windowRef: string, cmuxBin: string) => boolean;
+  readonly closeCmuxWorkspace?: (
+    workspaceId: string,
+    windowRef: string,
+    cmuxBin: string,
+  ) => boolean | Promise<boolean>;
   readonly closeSessionWorkspaces?: typeof closeSessionWorkspaceCandidates;
   readonly finishSession?: typeof finishSession;
   readonly launchEnrichment?: FinishSessionDependencies["launchEnrichment"];
   readonly loadLaunchers?: typeof loadLaunchers;
   readonly resumeSession?: ResumeSessionCall;
+  readonly paintWorkspace?: typeof paintResumedWorkspace;
+  readonly deferActionTask?: (task: () => void) => void;
   readonly openIndex?: typeof openIndex;
   readonly openCatalogue?: typeof openCatalogue;
+  readonly openActionIndex?: () => Database;
+  readonly openActionCatalogue?: () => Database;
   readonly ensureDataDir?: typeof ensureDataDir;
   readonly readIndex?: typeof readIndexReadOnly;
   readonly indexedSessions?: () => IndexedSessionInput[];
@@ -461,15 +460,32 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     ?? createCachedWorkspaceStateReader(cmuxBin, WORKSPACE_STATE_TTL_MS, now);
   const notificationReader: CachedNotificationReader = options.notificationReader
     ?? createCachedNotificationReader(cmuxBin, NOTIFICATION_TTL_MS, now);
-  const focus = options.focus ?? focusSession;
-  const closeCmux = options.closeCmuxWorkspace ?? closeWorkspaceRef;
+  const processAdapter = options.processAdapter ?? bunAsyncProcessAdapter;
+  const closeCmux = options.closeCmuxWorkspace ?? (async (workspaceId: string) =>
+    (await processAdapter.run(
+      cmuxBin,
+      ["close-workspace", "--workspace", workspaceId],
+      { timeoutMs: 5_000 },
+    )).ok);
   const closeSessionWorkspaces = options.closeSessionWorkspaces ?? closeSessionWorkspaceCandidates;
   const runFinishSession = options.finishSession ?? finishSession;
   const launchEnrichment = options.launchEnrichment ?? launchImmediateEnrichment;
   const launcherLoader = options.loadLaunchers ?? loadLaunchers;
-  const resume = options.resumeSession ?? resumeSessionEntry;
+  const resume: ResumeSessionCall = options.resumeSession ?? ((indexDb, catalogueDb, sessionId, resumeOptions) =>
+    resumeSessionEntryAsync(indexDb, catalogueDb, sessionId, resumeOptions, processAdapter));
   const openIndexDb = options.openIndex ?? openIndex;
   const openCatalogueDb = options.openCatalogue ?? openCatalogue;
+  const openReadOnlyDatabase = (path: string): Database => {
+    const db = new Database(path, { readonly: true });
+    db.exec("PRAGMA query_only = ON");
+    return db;
+  };
+  const openActionIndex = options.openActionIndex
+    ?? (options.openIndex ? () => openIndexDb(DB_PATH()) : () => openReadOnlyDatabase(DB_PATH()));
+  const openActionCatalogue = options.openActionCatalogue
+    ?? (options.openCatalogue
+      ? () => openCatalogueDb(CATALOGUE_PATH())
+      : () => openReadOnlyDatabase(CATALOGUE_PATH()));
   const ensureDataDirectory = options.ensureDataDir ?? ensureDataDir;
   const readIndex = options.readIndex ?? readIndexReadOnly;
   const readIndexedSessionsOverride = options.indexedSessions;
@@ -478,11 +494,6 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   // each snapshot so a directory that disappears stops being servable.
   let favicons = new Map<string, string>();
   const directoryFacts = options.directoryFacts ?? createDirectoryFactsCache(now);
-  const resumeFlights = new Map<string, Promise<OpenSessionOutcome>>();
-  const recentlyResumed = new Map<
-    string,
-    { readonly until: number; readonly workspaceRef: string | null }
-  >();
 
   /**
    * The index is a convenience here, not a dependency.
@@ -728,8 +739,8 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   function primitiveCloseDependencies(): CloseSessionWorkspaceDependencies {
     return {
       bridge: readBridge,
-      close: (workspaceId, location) => ({
-        ok: closeCmux(workspaceId, location.windowRef, cmuxBin),
+      close: async (workspaceId, location) => ({
+        ok: await closeCmux(workspaceId, location.windowRef, cmuxBin),
       }),
     };
   }
@@ -758,24 +769,29 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     }
   }
 
-  function recentResumeFor(sessionIds: readonly string[]): OpenSessionOutcome | null {
-    const current = now();
-    for (const [rememberedId, recent] of recentlyResumed) {
-      if (recent.until <= current) recentlyResumed.delete(rememberedId);
-    }
-    for (const sessionId of sessionIds) {
-      const recent = recentlyResumed.get(sessionId);
-      if (recent) return { status: "focused", workspaceRef: recent.workspaceRef };
-    }
-    return null;
-  }
-
-  function rememberResume(sessionIds: readonly string[], workspaceRef: string | null): void {
-    const until = now() + Math.max(0, recentlyResumedMs);
-    for (const sessionId of sessionIds) {
-      recentlyResumed.set(sessionId, { until, workspaceRef });
-    }
-  }
+  const actionCoordinator = createSessionActionCoordinator({
+    cmuxBin,
+    now,
+    recentlyResumedMs,
+    readBridge,
+    lookupIndexedSession(sessionId) {
+      const index = readIndexedSessionsSafely(INDEX_SCAN_LIMIT);
+      const row = index.sessions.find(
+        (candidate) => candidate.sessionId === sessionId || candidate.resumeId === sessionId,
+      );
+      if (row) return { status: "found", row };
+      return index.readable
+        ? { status: "absent" }
+        : { status: "unreadable", reason: "session index read failed" };
+    },
+    loadLaunchers: launcherLoader,
+    openIndex: openActionIndex,
+    openCatalogue: openActionCatalogue,
+    resumeSession: resume,
+    processAdapter,
+    paintWorkspace: options.paintWorkspace ?? paintResumedWorkspace,
+    defer: options.deferActionTask,
+  });
 
   return {
     /**
@@ -975,7 +991,12 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       if (surfaces.some((surface) => bridge.surfaceInfo(surface.surfaceId) !== null)) {
         return { status: "failed", reason: "that workspace runs a session; close it as a session" };
       }
-      return closeWorkspaceByStableIdWithCmux(cmuxBin, workspaceId).ok
+      const closed = await processAdapter.run(
+        cmuxBin,
+        ["close-workspace", "--workspace", workspaceId],
+        { timeoutMs: 5_000 },
+      );
+      return closed.ok
         ? { status: "closed" }
         : { status: "failed", reason: "cmux refused to close the workspace" };
     },
@@ -984,22 +1005,19 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const bridge = await readBridge();
       if (!bridge.readable) return { status: "liveness-unreadable" };
       if (bridge.surfacesInWorkspace(workspaceId).length === 0) return { status: "not-live" };
-      return setWorkspacePinned(workspaceId, pinned, cmuxBin)
+      const changed = await processAdapter.run(
+        cmuxBin,
+        ["workspace-action", "--action", pinned ? "pin" : "unpin", "--workspace", workspaceId],
+        { timeoutMs: 3_000 },
+      );
+      return changed.ok
         ? { status: "pinned", pinned }
         : { status: "failed", reason: `cmux refused to ${pinned ? "pin" : "unpin"} the workspace` };
     },
 
     async focusWorkspace(workspaceId: string): Promise<FocusWorkspaceOutcome> {
-      const bridge = await readBridge();
-      // Fail closed on an unreadable tree: without it there is no way to tell a live workspace
-      // from one cmux closed a moment ago, and focusing blind is how you land on the wrong tab.
-      if (!bridge.readable) return { status: "liveness-unreadable" };
-      const surfaces = bridge.surfacesInWorkspace(workspaceId);
-      const location = surfaces[0];
-      if (!location) return { status: "not-live" };
-      return focusWorkspaceById(workspaceId, location.windowId, cmuxBin)
-        ? { status: "focused" }
-        : { status: "failed", reason: "cmux refused to focus the workspace" };
+      const outcome = await actionCoordinator.focusWorkspace(workspaceId);
+      return outcome.status === "focused" ? { status: "focused" } : outcome;
     },
 
     async closeWorkspace(sessionId: string): Promise<CloseWorkspaceOutcome> {
@@ -1121,127 +1139,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     },
 
     async open(sessionId: string): Promise<OpenSessionOutcome> {
-      const bridge = await readBridge();
-      if (!bridge.readable) return { status: "liveness-unreadable" };
-
-      const index = readIndexedSessionsSafely(INDEX_SCAN_LIMIT);
-      const row = index.sessions.find(
-        (candidate) => candidate.sessionId === sessionId || candidate.resumeId === sessionId,
-      );
-
-      {
-
-        // A live session is addressed by either id depending on whether it was resumed, so both
-        // are tried before concluding it is closed and spawning anything.
-        for (const candidate of [sessionId, row?.sessionId, row?.resumeId]) {
-          if (!candidate) continue;
-          const location = bridge.locateSession(candidate);
-          if (!location) continue;
-          return focus(candidate, cmuxBin)
-            ? { status: "focused", workspaceRef: location.workspaceRef }
-            : { status: "failed", reason: "cmux refused to focus the workspace" };
-        }
-
-        if (!row) {
-          return index.readable
-            ? { status: "not-found" }
-            : { status: "failed", reason: "the session index is unreadable, so this session cannot be resumed" };
-        }
-        const identityIds = [...new Set([sessionId, row.sessionId, row.resumeId])];
-        const recent = recentResumeFor(identityIds);
-        if (recent) return recent;
-
-        // Canonicalize aliases to the indexed session id before coordinating. A second request may
-        // have read the same pre-hook bridge, but it shares this flight and therefore cannot spawn.
-        const existingFlight = resumeFlights.get(row.sessionId);
-        if (existingFlight) {
-          const outcome = await existingFlight;
-          return outcome.status === "resumed"
-            ? recentResumeFor(identityIds) ?? {
-              status: "focused",
-              workspaceRef: outcome.workspaceRef,
-            }
-            : outcome;
-        }
-
-        const flight = (async (): Promise<OpenSessionOutcome> => {
-          const recentInsideFlight = recentResumeFor(identityIds);
-          if (recentInsideFlight) return recentInsideFlight;
-
-          const launchers = launcherLoader();
-          if (!launchers.ok) {
-            return {
-              status: "failed",
-              reason: `launcher configuration could not be loaded: ${launchers.error.message}`,
-            };
-          }
-
-          let indexDb: Database;
-          try {
-            indexDb = openIndexDb(DB_PATH());
-          } catch (error) {
-            return {
-              status: "failed",
-              reason: `the session index cannot be opened for resume: ${error instanceof Error ? error.message : String(error)}`,
-            };
-          }
-
-          let catalogueDb: Database | null = null;
-          try {
-            try {
-              catalogueDb = openCatalogueDb(CATALOGUE_PATH());
-            } catch (error) {
-              log.warn("sidebar could not open the session catalogue for resume", {
-                error: error instanceof Error ? error.message : String(error),
-              });
-              return {
-                status: "failed",
-                reason: "the session catalogue cannot be opened for resume",
-              };
-            }
-
-            const result = await resume(indexDb, catalogueDb, row.sessionId, {
-              bridge,
-              focus: true,
-              cmuxBin,
-              launchers: launchers.value,
-            });
-            switch (result.status) {
-              case "resumed":
-                rememberResume(identityIds, result.workspaceRef);
-                return { status: "resumed", workspaceRef: result.workspaceRef };
-              case "already-open": {
-                const focusedId = identityIds.find((candidate) => focus(candidate, cmuxBin));
-                return focusedId
-                  ? {
-                    status: "focused",
-                    workspaceRef: bridge.locateSession(focusedId)?.workspaceRef ?? null,
-                  }
-                  : {
-                    status: "failed",
-                    reason: "session is already open but could not be focused",
-                  };
-              }
-              case "not-indexed":
-                return { status: "not-found" };
-              case "liveness-unreadable":
-                return { status: "liveness-unreadable" };
-              default:
-                return { status: "failed", reason: result.status };
-            }
-          } finally {
-            catalogueDb?.close();
-            indexDb.close();
-          }
-        })();
-
-        resumeFlights.set(row.sessionId, flight);
-        try {
-          return await flight;
-        } finally {
-          if (resumeFlights.get(row.sessionId) === flight) resumeFlights.delete(row.sessionId);
-        }
-      }
+      return actionCoordinator.open(sessionId);
     },
   };
 }

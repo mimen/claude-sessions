@@ -18,7 +18,8 @@ import { resolveRole } from "../roles/role-files.ts";
 import { readClusterManifest, type ClusterManifest } from "../cluster/manifest.ts";
 import { resolvePermissionMode } from "../roles/permission-mode.ts";
 import { buildResumeCommand, resolveResumeCwd, type ResumeCommand } from "./command.ts";
-import { spawnCmux } from "./spawn-cmux.ts";
+import { spawnCmux, spawnCmuxAsync } from "./spawn-cmux.ts";
+import type { AsyncProcessAdapter } from "../process/async.ts";
 import { pushRenderOps } from "../catalogue/sync-tabs.ts";
 import {
   DEFAULT_LAUNCHERS,
@@ -162,41 +163,45 @@ function readClusterManifestForResume(cluster: string): ClusterManifest | null {
  * The full `ccs resume-session <id>` entry: resolve the row + its resume_command, plan, and
  * (unless dry-run) execute. `bridge` defaults to the live cmux state; injectable for tests.
  */
-export function resumeSessionEntry(
+export interface ResumeSessionOptions {
+  readonly dryRun?: boolean;
+  readonly cmuxBin?: string;
+  readonly bridge?: Bridge;
+  readonly focus?: boolean;
+  /** One-shot trailing prompt; takes precedence over the role/session recurring resume command. */
+  readonly prompt?: string;
+  /** Launcher name to resume through; default = origin-backend route from the model history. */
+  readonly via?: string;
+  /** Bypass route eligibility for an explicit `via` (loud override). */
+  readonly force?: boolean;
+  /** Configured launcher fleet; default = plain `claude` (byte-identical to pre-routes ccs). */
+  readonly launchers?: readonly Launcher[];
+  /** Internal shared lookup from resumeMany; defaults to a fail-open file read for one resume. */
+  readonly roleLookup?: (role: string, cluster: string | null) => RoleDef | null;
+  /** Internal shared lookup from resumeMany; defaults to a fail-open manifest read for one resume. */
+  readonly clusterManifestLookup?: (cluster: string) => ClusterManifest | null;
+}
+
+type PreparedResumeSession =
+  | { readonly ready: false; readonly result: ResumeSessionResult }
+  | { readonly ready: true; readonly plan: Extract<ResumePlan, { readonly action: "resume" }> };
+
+function prepareResumeSession(
   indexDb: Database,
   catalogueDb: Database,
   sessionId: string,
-  opts: {
-    dryRun?: boolean;
-    cmuxBin?: string;
-    bridge?: Bridge;
-    focus?: boolean;
-    /** One-shot trailing prompt; takes precedence over the role/session recurring resume command. */
-    prompt?: string;
-    /** Launcher name to resume through; default = origin-backend route from the model history. */
-    via?: string;
-    /** Bypass route eligibility for an explicit `via` (loud override). */
-    force?: boolean;
-    /** Configured launcher fleet; default = plain `claude` (byte-identical to pre-routes ccs). */
-    launchers?: readonly Launcher[];
-    /** Internal shared lookup from resumeMany; defaults to a fail-open file read for one resume. */
-    roleLookup?: (role: string, cluster: string | null) => RoleDef | null;
-    /** Internal shared lookup from resumeMany; defaults to a fail-open manifest read for one resume. */
-    clusterManifestLookup?: (cluster: string) => ClusterManifest | null;
-  } = {},
-): ResumeSessionResult {
+  opts: ResumeSessionOptions,
+): PreparedResumeSession {
   const row = sessionById(indexDb, sessionId);
-  if (!row) return { status: "not-indexed" };
+  if (!row) return { ready: false, result: { status: "not-indexed" } };
 
   const cat = getRow(catalogueDb, sessionId);
   const bridge = opts.bridge ?? liveBridge();
   // FAIL CLOSED: if we can't read liveness we can't tell "already open" from "closed". Treating
   // unreadable as closed would re-spawn a session that's actually running → duplicate-fleet
   // runaway (ADR-0054). Abort instead — spawn nothing, report the reason.
-  if (!bridge.readable) return { status: "liveness-unreadable" };
-  // Route BEFORE planning so an ineligible `--via` can never spawn (an already-open session
-  // still reports already-open first — route choice is irrelevant for a live tab).
-  if (sessionIsOpen(bridge, row)) return { status: "already-open" };
+  if (!bridge.readable) return { ready: false, result: { status: "liveness-unreadable" } };
+  if (sessionIsOpen(bridge, row)) return { ready: false, result: { status: "already-open" } };
   const launchers = opts.launchers ?? DEFAULT_LAUNCHERS;
   const chosen = chooseLauncher(launchers, row.models, {
     via: opts.via,
@@ -204,28 +209,26 @@ export function resumeSessionEntry(
     lastModel: row.lastModel,
   });
   if (!chosen.ok) {
-    return chosen.status === "unknown-launcher"
-      ? { status: "unknown-launcher", name: chosen.name }
-      : { status: "route-ineligible", reason: chosen.reason };
+    return {
+      ready: false,
+      result: chosen.status === "unknown-launcher"
+        ? { status: "unknown-launcher", name: chosen.name }
+        : { status: "route-ineligible", reason: chosen.reason },
+    };
   }
-  // ADR-0062: re-arm from the ROLE's authored resume_command (files-are-truth), not the session
-  // column copy that can drift from a config edit. Fall back to the session column for a row whose
-  // role isn't resolvable (unregistered/standalone) so nothing regresses. ADR-0094 resolves the
-  // embodiment posture from the same already-loaded role plus its cluster manifest. Both lookups
-  // fail open on resume: history remains reachable even when config was removed or malformed.
   const roleLookup = opts.roleLookup ?? resolveRoleForResume;
   const manifestLookup = opts.clusterManifestLookup ?? readClusterManifestForResume;
   const roleDef = cat?.role ? roleLookup(cat.role, cat.cluster) : null;
   const clusterManifest = cat?.cluster ? manifestLookup(cat.cluster) : null;
-  // The launcher's `clears` are resolved HERE, from the same compiled directives the shim's spec
-  // file is rendered from. Passing `chosen.launcher.env` straight through is what let a `--via
-  // claude-native` resume keep its parent's ANTHROPIC_BASE_URL and stay on the gateway.
   const launcherEnv = launcherEnvironment(chosen.launcher);
   if (!launcherEnv.ok) {
     return {
-      status: "launcher-env-unresolvable",
-      name: chosen.launcher.name,
-      error: launcherEnv.error.message,
+      ready: false,
+      result: {
+        status: "launcher-env-unresolvable",
+        name: chosen.launcher.name,
+        error: launcherEnv.error.message,
+      },
     };
   }
   const plan = planResumeSession(bridge, row, {
@@ -236,17 +239,51 @@ export function resumeSessionEntry(
     env: launcherEnv.value.assign,
     unset: launcherEnv.value.unset,
   });
-
-  if (plan.action === "skip") return { status: "already-open" };
-  if (plan.action === "fail") return { status: "cwd-unreadable", error: plan.error };
-  // ADR-0073: a second embodiment of an identity is TOLERATED, not refused — but surface it so the
-  // operator can close a stale twin if they want. Best-effort + non-blocking: we're about to open
-  // this (MRU) session; if OTHER live sessions share its identity-key, just warn.
+  if (plan.action === "skip") return { ready: false, result: { status: "already-open" } };
+  if (plan.action === "fail") {
+    return { ready: false, result: { status: "cwd-unreadable", error: plan.error } };
+  }
   if (cat) warnLiveSiblings(catalogueDb, bridge, cat.sessionId, identityKey(cat));
-  if (opts.dryRun) return { status: "resumed", note: plan.note, workspaceRef: null };
-  const ref = executeResumePlan(plan, { cmuxBin: opts.cmuxBin, focus: opts.focus });
+  return { ready: true, plan };
+}
+
+export function resumeSessionEntry(
+  indexDb: Database,
+  catalogueDb: Database,
+  sessionId: string,
+  opts: ResumeSessionOptions = {},
+): ResumeSessionResult {
+  const prepared = prepareResumeSession(indexDb, catalogueDb, sessionId, opts);
+  if (!prepared.ready) return prepared.result;
+  if (opts.dryRun) return { status: "resumed", note: prepared.plan.note, workspaceRef: null };
+  const ref = executeResumePlan(prepared.plan, { cmuxBin: opts.cmuxBin, focus: opts.focus });
   return ref !== null
-    ? { status: "resumed", note: plan.note, workspaceRef: ref }
+    ? { status: "resumed", note: prepared.plan.note, workspaceRef: ref }
+    : { status: "spawn-failed" };
+}
+
+/** Non-blocking action-lane entry. Cosmetic paint is deliberately owned by its caller. */
+export async function resumeSessionEntryAsync(
+  indexDb: Database,
+  catalogueDb: Database,
+  sessionId: string,
+  opts: ResumeSessionOptions = {},
+  processAdapter?: AsyncProcessAdapter,
+): Promise<ResumeSessionResult> {
+  const prepared = prepareResumeSession(indexDb, catalogueDb, sessionId, opts);
+  if (!prepared.ready) return prepared.result;
+  if (opts.dryRun) return { status: "resumed", note: prepared.plan.note, workspaceRef: null };
+  const ref = await spawnCmuxAsync({
+    argv: prepared.plan.command.argv,
+    cwd: prepared.plan.command.cwd,
+    env: prepared.plan.command.env,
+    unset: prepared.plan.command.unset,
+    name: prepared.plan.name,
+    focus: opts.focus,
+    cmuxBin: opts.cmuxBin,
+  }, processAdapter);
+  return ref !== null
+    ? { status: "resumed", note: prepared.plan.note, workspaceRef: ref }
     : { status: "spawn-failed" };
 }
 
