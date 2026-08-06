@@ -40,6 +40,7 @@ import { ScopeSelect } from "./components/scope-select.tsx";
 import { GroupHeader } from "./components/group-header.tsx";
 import { Toasts, type Toast } from "./components/toasts.tsx";
 import { cn } from "@/lib/utils";
+import { createSnapshotTransport, snapshotPollDelay } from "./snapshot-transport.ts";
 
 const POLL_INTERVAL_MS = 1_000;
 const GROUPING_STORAGE_KEY = "ccs-sidebar-grouping";
@@ -201,6 +202,8 @@ export function App(): React.ReactElement {
   const snapshotReloadQueuedRef = useRef(false);
   const nextSnapshotRequestIdRef = useRef(0);
   const latestAppliedSnapshotRequestIdRef = useRef(0);
+  const snapshotTransportRef = useRef(createSnapshotTransport());
+  const consecutiveSnapshotFailuresRef = useRef(0);
 
   // Polls share one flight. The selected scope lives in a ref so the stable poll callback always
   // reads the current value. Scope changes trigger one trailing read only when the active request
@@ -225,12 +228,16 @@ export function App(): React.ReactElement {
             const include = (["completed", "archived"] as const)
               .filter((section) => !(shelvesRef.current.get(section) ?? OPEN_SHELF).shelved)
               .join(",");
-            const response = await fetch(
-              `/api/snapshot?scope=${requestScope}&limit=${ROW_LIMIT}`
-              + (include ? `&include=${include}` : ""),
-            );
-            if (!response.ok) throw new Error(`snapshot failed (${response.status})`);
-            const nextSnapshot = (await response.json()) as SidebarSnapshot;
+            const requestUrl = `/api/snapshot?scope=${requestScope}&limit=${ROW_LIMIT}`
+              + (include ? `&include=${include}` : "");
+            const result = await snapshotTransportRef.current.load(requestUrl);
+            if (result.kind === "failure") throw result.error;
+            consecutiveSnapshotFailuresRef.current = 0;
+            if (result.kind === "unchanged") {
+              if (requestScope === selectedScopeRef.current) setSnapshotError(null);
+              continue;
+            }
+            const nextSnapshot = result.snapshot;
             // The server has spoken; stop overriding any row it now agrees about.
             setOptimistic((current) => {
               if (current.size === 0) return current;
@@ -262,8 +269,15 @@ export function App(): React.ReactElement {
               setSnapshotError(null);
             }
           } catch (cause) {
+            consecutiveSnapshotFailuresRef.current += 1;
             if (requestScope === selectedScopeRef.current) {
-              setSnapshotError(cause instanceof Error ? cause.message : "snapshot failed");
+              const message = typeof cause === "object"
+                  && cause !== null
+                  && "message" in cause
+                  && typeof cause.message === "string"
+                ? cause.message
+                : "Sidebar refresh failed.";
+              setSnapshotError(message);
             }
           }
         } while (shouldReloadSnapshot(
@@ -318,12 +332,28 @@ export function App(): React.ReactElement {
   }, []);
 
   useEffect(() => {
+    let stopped = false;
+    let poll: ReturnType<typeof setTimeout> | null = null;
+    const schedule = (): void => {
+      poll = setTimeout(() => {
+        load();
+        if (!stopped) schedule();
+      }, consecutiveSnapshotFailuresRef.current === 0
+        ? POLL_INTERVAL_MS
+        : snapshotPollDelay(consecutiveSnapshotFailuresRef.current));
+    };
+    const refreshVisible = (): void => {
+      if (document.visibilityState === "visible") load(true);
+    };
     load();
-    const poll = setInterval(() => load(), POLL_INTERVAL_MS);
+    schedule();
+    document.addEventListener("visibilitychange", refreshVisible);
     const clock = setInterval(() => setNow(Date.now()), CLOCK_INTERVAL_MS);
     return () => {
-      clearInterval(poll);
+      stopped = true;
+      if (poll !== null) clearTimeout(poll);
       clearInterval(clock);
+      document.removeEventListener("visibilitychange", refreshVisible);
     };
   }, [load]);
 

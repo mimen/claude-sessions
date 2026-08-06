@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import {
   characterizeFixture,
   measureContention,
+  measureEtagLoopback,
   measureIdleProfile,
   witnessDatabase,
 } from "../src/sidebar/bench/benchmark.ts";
@@ -32,7 +33,7 @@ const contentionMs = Math.trunc(numberArgument("--contention-ms", 5_500));
 const outputIndex = process.argv.indexOf("--output");
 const outputPath = outputIndex >= 0
   ? process.argv[outputIndex + 1]
-  : join(import.meta.dir, "..", "docs", "evidence", "sidebar-performance", "baseline.json");
+  : join(import.meta.dir, "..", "docs", "evidence", "sidebar-performance", "phase2-etag.json");
 if (!outputPath) throw new Error("--output requires a path");
 
 const temporaryRoot = mkdtempSync(join(tmpdir(), "ccs-sidebar-performance-"));
@@ -70,9 +71,10 @@ try {
     catalogueState: inspectDatabase(fleet.cataloguePath),
     indexState: inspectDatabase(fleet.indexPath),
   };
+  const etagLoopback = await measureEtagLoopback(fleet, Math.max(20, samples * 4));
 
   const baseline = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date(FIXED_NOW).toISOString(),
     command: `bun run benchmark:sidebar --samples ${samples} --idle-ms ${idleMs} --contention-ms ${contentionMs}`,
     safety: {
@@ -107,6 +109,7 @@ try {
     fleet: fleetCharacterization,
     contention,
     idleProfile,
+    etagLoopback,
     expectedPhase1Gates: {
       writerLockSnapshotMs: 120,
       eventLoopMaximumBlockMs: 50,
@@ -114,10 +117,17 @@ try {
       changedWarmSnapshotP95Ms: 120,
       liveFocusP95Ms: 150,
     },
+    expectedPhase2Gates: {
+      unchangedPollP95Ms: 10,
+      unchangedBodyBytes: 0,
+      unchangedStatus: 304,
+      changedStatus: 200,
+    },
     limitations: [
       "Synthetic fixture timings characterize this machine and Bun/SQLite build, not production fleet variance.",
       "The safe-focus benchmark executes the authoritative source path with an injected focus adapter; it never calls cmux or changes focus.",
-      "The idle profile measures repeated full JSON snapshots. Phase 0 intentionally has no ETag/304 implementation yet.",
+      "The idle profile preserves the Phase 1 full-snapshot comparison; etagLoopback separately measures Phase 2 conditional GET through a real server.",
+      "The ETag changed-snapshot samples commit title changes to the generated fixture only, after the read-path byte-identity witness is complete.",
       "The contention fixture holds BEGIN IMMEDIATE in a child process. The query-only catalogue reader must remain readable and complete within the Phase 1 latency gate.",
       "Status, notification, directory, and workspace-state subprocesses are deterministic in-memory adapters, so their real process latency is excluded.",
     ],
@@ -129,6 +139,7 @@ try {
     outputPath,
     contention,
     idleProfile,
+    etagLoopback,
     readPathByteIdentical: baseline.databaseWitness.readPathByteIdentical,
     logicalStateUnchanged: baseline.databaseWitness.logicalStateUnchanged,
   }, null, 2)}\n`);

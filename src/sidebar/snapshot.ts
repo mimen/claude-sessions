@@ -7,6 +7,7 @@
  * CCS if it is not" is decided here rather than by every caller, because getting that wrong
  * spawns a duplicate of a running session.
  */
+import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import type { Database } from "bun:sqlite";
 import { openIndex } from "../index/schema.ts";
@@ -42,6 +43,7 @@ import { loadLaunchers } from "../resume/launchers.ts";
 import { log } from "../logger.ts";
 import { err, ok, type Result } from "../result.ts";
 import { readIndexReadOnly } from "./index-read.ts";
+import { createSidebarReadCache, type SidebarReadCache } from "./read-cache.ts";
 import {
   readCatalogueReadOnly,
   type CatalogueReadOutcome,
@@ -98,6 +100,16 @@ const STATUS_TTL_MS = 2_500;
 const WORKSPACE_STATE_TTL_MS = 10_000;
 /** One cheap command covers every workspace, so this can stay close to the poll interval. */
 const NOTIFICATION_TTL_MS = 2_000;
+
+function sortedEntries<V>(values: ReadonlyMap<string, V>): readonly (readonly [string, V])[] {
+  return [...values.entries()].sort(([left], [right]) => left.localeCompare(right));
+}
+
+function snapshotSourceRevision(parts: readonly string[]): string {
+  const hash = createHash("sha256");
+  for (const part of parts) hash.update(part).update("\0");
+  return hash.digest("base64url");
+}
 
 export type OpenSessionOutcome =
   | { readonly status: "focused"; readonly workspaceRef: string | null }
@@ -161,6 +173,8 @@ export interface SidebarSource {
     rowLimit?: number,
     include?: readonly SidebarLifecycle[],
   ): Promise<SidebarSnapshot>;
+  /** Exact source revision observed while building this snapshot. */
+  snapshotRevision?(snapshot: SidebarSnapshot): string;
   /** Record that the reader refused a verdict, so the same one stops being offered. */
   declineSuggestion(sessionId: string, verb: string): Promise<DeclineOutcome>;
   open(sessionId: string): Promise<OpenSessionOutcome>;
@@ -430,6 +444,7 @@ export interface SidebarSourceOptions {
   readonly ensureDataDir?: typeof ensureDataDir;
   readonly readCatalogue?: typeof readCatalogueReadOnly;
   readonly readIndex?: typeof readIndexReadOnly;
+  readonly readCache?: SidebarReadCache;
   readonly indexedSessions?: () => IndexedSessionInput[];
   readonly directoryFacts?: DirectoryFactsReader;
   /** Structured timing seam for benchmarks and slow-request diagnostics. */
@@ -460,6 +475,10 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const openIndexDb = options.openIndex ?? openIndex;
   const openCatalogueDb = options.openCatalogue ?? openCatalogue;
   const ensureDataDirectory = options.ensureDataDir ?? ensureDataDir;
+  const readCache = options.readCache
+    ?? (options.readCatalogue === undefined && options.readIndex === undefined
+      ? createSidebarReadCache(CATALOGUE_PATH(), DB_PATH())
+      : null);
   const readCatalogue = options.readCatalogue ?? readCatalogueReadOnly;
   const readIndex = options.readIndex ?? readIndexReadOnly;
   const readIndexedSessionsOverride = options.indexedSessions;
@@ -467,6 +486,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   // Only directories the latest snapshot published can serve an icon; the map is replaced on
   // each snapshot so a directory that disappears stops being servable.
   let favicons = new Map<string, string>();
+  const snapshotRevisions = new WeakMap<SidebarSnapshot, string>();
   const directoryFacts = options.directoryFacts ?? createDirectoryFactsCache(now);
   const resumeFlights = new Map<string, Promise<OpenSessionOutcome>>();
   const recentlyResumed = new Map<
@@ -491,7 +511,9 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     try {
       const sessions = readIndexedSessionsOverride
         ? readIndexedSessionsOverride()
-        : readIndex(DB_PATH(), { limit, sessionIds });
+        : readCache
+          ? readCache.readIndex({ limit, sessionIds })
+          : readIndex(DB_PATH(), { limit, sessionIds });
       if (sessionIds === undefined || !readIndexedSessionsOverride) {
         return { sessions: sessions.slice(0, limit), readable: true };
       }
@@ -512,7 +534,9 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   function readCatalogueLifecyclesSafely(): CatalogueLifecycleState & {
     readonly readable: boolean;
   } {
-    const outcome: CatalogueReadOutcome = readCatalogue(CATALOGUE_PATH());
+    const outcome: CatalogueReadOutcome = readCache
+      ? readCache.readCatalogue()
+      : readCatalogue(CATALOGUE_PATH());
     if (outcome.status === "ok") return { ...outcome.facts, readable: true };
 
     const reason = outcome.status === "missing"
@@ -841,6 +865,28 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       favicons = new Map(
         [...facts.favicons].filter(([directory]) => publishedDirectories.has(directory)),
       );
+      const durableRevision = readCache?.revision() ?? { catalogue: 0, index: 0 };
+      const revision = snapshotSourceRevision([
+        JSON.stringify(durableRevision),
+        JSON.stringify({
+          readable: bridge.readable,
+          activeWindowId: bridge.activeWindowId,
+          surfaces: [...bridge.surfaces]
+            .sort((left, right) => left.surfaceId.localeCompare(right.surfaceId))
+            .map((surface) => ({ surface, session: bridge.surfaceInfo(surface.surfaceId) })),
+        }),
+        JSON.stringify(sortedEntries(statuses)),
+        JSON.stringify(sortedEntries(workspaceStates)),
+        JSON.stringify({
+          notifications: notifications?.notifications ?? null,
+          unread: notifications ? sortedEntries(notifications.unreadCountsByWorkspaceId) : null,
+        }),
+        JSON.stringify({
+          checkouts: sortedEntries(facts.checkouts),
+          favicons: sortedEntries(facts.favicons),
+        }),
+      ]);
+      snapshotRevisions.set(snapshot, revision);
       const projectionMs = performance.now() - phaseStartedAt;
       observeSnapshot?.({
         view,
@@ -852,6 +898,10 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         indexReadable: snapshot.indexReadable,
       });
       return snapshot;
+    },
+
+    snapshotRevision(snapshot: SidebarSnapshot): string {
+      return snapshotRevisions.get(snapshot) ?? "untracked";
     },
 
     faviconFor(directory: string): string | null {

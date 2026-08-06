@@ -6,6 +6,7 @@
  * arbitrary command execution. Every request is answered by the injected `SidebarSource`, so
  * the server itself holds no knowledge of cmux, git, or SQLite.
  */
+import { createHash } from "node:crypto";
 import { isIPv4 } from "node:net";
 import { log } from "../logger.ts";
 import { err, ok, type Result } from "../result.ts";
@@ -104,10 +105,37 @@ function parseDeclineRequest(value: JsonValue): Result<{ sessionId: string; verb
   return ok({ sessionId, verb });
 }
 
-function jsonText(body: string, status = 200): Response {
+function jsonText(
+  body: string,
+  status = 200,
+  headers: Readonly<Record<string, string>> = {},
+): Response {
   return new Response(body, {
     status,
-    headers: { "content-type": "application/json", "cache-control": "no-store" },
+    headers: { "content-type": "application/json", "cache-control": "no-store", ...headers },
+  });
+}
+
+function snapshotEtag(
+  body: string,
+  revision: string,
+  scope: SidebarView,
+  limit: number | undefined,
+  include: readonly SidebarLifecycle[],
+): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify({ revision, scope, limit: limit ?? null, include }))
+    .update("\0")
+    .update(body)
+    .digest("base64url");
+  return `"${digest}"`;
+}
+
+function etagMatches(header: string | null, etag: string): boolean {
+  if (header === null) return false;
+  return header.split(",").some((candidate) => {
+    const value = candidate.trim();
+    return value === "*" || value === etag;
   });
 }
 
@@ -202,6 +230,13 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           const serializationStartedAt = performance.now();
           const body = JSON.stringify(snapshot);
           const serializationMs = performance.now() - serializationStartedAt;
+          const etag = snapshotEtag(
+            body,
+            source.snapshotRevision?.(snapshot) ?? "uncached",
+            scope,
+            limit,
+            include,
+          );
           const totalMs = performance.now() - startedAt;
           if (totalMs >= 100) {
             log.warn("slow sidebar snapshot request", {
@@ -215,7 +250,13 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
               indexReadable: snapshot.indexReadable,
             });
           }
-          return jsonText(body);
+          if (etagMatches(request.headers.get("if-none-match"), etag)) {
+            return new Response(null, {
+              status: 304,
+              headers: { etag, "cache-control": "no-cache" },
+            });
+          }
+          return jsonText(body, 200, { etag, "cache-control": "no-cache" });
         } catch (error) {
           log.warn("sidebar snapshot request failed", {
             view: scope,
