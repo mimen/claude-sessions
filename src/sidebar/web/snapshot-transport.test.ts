@@ -12,6 +12,16 @@ const SNAPSHOT: SidebarSnapshot = {
   generatedAt: 0,
 };
 
+const ACTIVE_SNAPSHOT: SidebarSnapshot = {
+  ...SNAPSHOT,
+  lifecycleCounts: { active: 7, completed: 3, archived: 1 },
+};
+
+const COMPLETED_SNAPSHOT: SidebarSnapshot = {
+  ...SNAPSHOT,
+  lifecycleCounts: { active: 6, completed: 4, archived: 1 },
+};
+
 function jsonResponse(body: object, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
     ...init,
@@ -34,8 +44,44 @@ describe("snapshot transport", () => {
     });
 
     expect((await transport.load("/api/snapshot")).kind).toBe("changed");
-    expect(await transport.load("/api/snapshot")).toEqual({ kind: "unchanged" });
+    expect(await transport.load("/api/snapshot")).toEqual({ kind: "unchanged", snapshot: SNAPSHOT });
     expect(headers).toEqual([null, '"revision-1"']);
+  });
+
+  test("restores each exact URL's cached snapshot when returning to a scope with 304", async () => {
+    const observed: Array<{ url: string; etag: string | null }> = [];
+    let activeCalls = 0;
+    const transport = createSnapshotTransport({
+      fetch: (async (input, init) => {
+        const url = String(input);
+        observed.push({ url, etag: new Headers(init?.headers).get("if-none-match") });
+        if (url.includes("scope=active")) {
+          activeCalls += 1;
+          return activeCalls === 1
+            ? jsonResponse(ACTIVE_SNAPSHOT, { headers: { etag: '"active-1"' } })
+            : new Response(null, { status: 304 });
+        }
+        return jsonResponse(COMPLETED_SNAPSHOT, { headers: { etag: '"completed-1"' } });
+      }),
+    });
+
+    await expect(transport.load("/api/snapshot?scope=active")).resolves.toEqual({
+      kind: "changed",
+      snapshot: ACTIVE_SNAPSHOT,
+    });
+    await expect(transport.load("/api/snapshot?scope=completed")).resolves.toEqual({
+      kind: "changed",
+      snapshot: COMPLETED_SNAPSHOT,
+    });
+    await expect(transport.load("/api/snapshot?scope=active")).resolves.toEqual({
+      kind: "unchanged",
+      snapshot: ACTIVE_SNAPSHOT,
+    });
+    expect(observed).toEqual([
+      { url: "/api/snapshot?scope=active", etag: null },
+      { url: "/api/snapshot?scope=completed", etag: null },
+      { url: "/api/snapshot?scope=active", etag: '"active-1"' },
+    ]);
   });
 
   test("requests an immediate background liveness refresh without discarding the ETag", async () => {
@@ -56,7 +102,7 @@ describe("snapshot transport", () => {
     });
 
     expect((await transport.load("/api/snapshot")).kind).toBe("changed");
-    expect(await transport.load("/api/snapshot", true)).toEqual({ kind: "unchanged" });
+    expect(await transport.load("/api/snapshot", true)).toEqual({ kind: "unchanged", snapshot: SNAPSHOT });
     expect(observed).toEqual([
       { etag: null, refresh: null },
       { etag: '"revision-1"', refresh: "1" },
@@ -75,6 +121,35 @@ describe("snapshot transport", () => {
     expect((await transport.load("/api/snapshot")).kind).toBe("changed");
     expect((await transport.load("/api/snapshot")).kind).toBe("changed");
     expect(headers).toEqual([null, null]);
+  });
+
+  test("a failed changed response does not corrupt the last validated representation", async () => {
+    const etags: Array<string | null> = [];
+    let calls = 0;
+    const transport = createSnapshotTransport({
+      fetch: (async (_input, init) => {
+        etags.push(new Headers(init?.headers).get("if-none-match"));
+        calls += 1;
+        if (calls === 1) {
+          return jsonResponse(ACTIVE_SNAPSHOT, { headers: { etag: '"active-1"' } });
+        }
+        if (calls === 2) {
+          return new Response("not-json", { status: 200, headers: { etag: '"broken-2"' } });
+        }
+        return new Response(null, { status: 304 });
+      }),
+    });
+
+    expect((await transport.load("/api/snapshot?scope=active")).kind).toBe("changed");
+    expect(await transport.load("/api/snapshot?scope=active")).toEqual({
+      kind: "failure",
+      error: { kind: "malformed", message: "Sidebar server returned an invalid snapshot." },
+    });
+    expect(await transport.load("/api/snapshot?scope=active")).toEqual({
+      kind: "unchanged",
+      snapshot: ACTIVE_SNAPSHOT,
+    });
+    expect(etags).toEqual([null, '"active-1"', '"active-1"']);
   });
 
   test("keeps deadline, refused, HTTP, and malformed failures distinct", async () => {

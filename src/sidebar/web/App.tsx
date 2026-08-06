@@ -213,10 +213,9 @@ export function App(): React.ReactElement {
             const result = await snapshotTransportRef.current.load(requestUrl, refreshLiveness);
             if (result.kind === "failure") throw result.error;
             consecutiveSnapshotFailuresRef.current = 0;
-            if (result.kind === "unchanged") {
-              if (requestScope === selectedScopeRef.current) setSnapshotError(null);
-              continue;
-            }
+            // A 304 still carries the transport's validated representation for this exact URL. That
+            // matters after a scope switch clears the displayed snapshot: the cached value must be
+            // applied again rather than leaving the view permanently loading.
             const nextSnapshot = result.snapshot;
             // The server has spoken; stop overriding any row it now agrees about.
             setOptimistic((current) => {

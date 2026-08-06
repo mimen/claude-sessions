@@ -8,7 +8,7 @@ export type SnapshotFailure =
 
 export type SnapshotTransportResult =
   | { readonly kind: "changed"; readonly snapshot: SidebarSnapshot }
-  | { readonly kind: "unchanged" }
+  | { readonly kind: "unchanged"; readonly snapshot: SidebarSnapshot }
   | { readonly kind: "failure"; readonly error: SnapshotFailure };
 
 export interface SnapshotTransport {
@@ -51,28 +51,40 @@ function httpMessage(status: number): string {
   return `Sidebar refresh failed with HTTP ${status}.`;
 }
 
-/** A typed conditional-GET client that retains one ETag per exact snapshot request. */
+interface CachedSnapshot {
+  readonly etag: string;
+  readonly snapshot: SidebarSnapshot;
+}
+
+/** A typed conditional-GET client that retains one validated representation per exact URL. */
 export function createSnapshotTransport(
   options: SnapshotTransportOptions = {},
 ): SnapshotTransport {
   const request = options.fetch ?? fetch;
   const deadlineMs = options.deadlineMs ?? DEFAULT_DEADLINE_MS;
-  const etags = new Map<string, string>();
+  const cache = new Map<string, CachedSnapshot>();
 
   return {
     async load(url: string, refreshLiveness = false): Promise<SnapshotTransportResult> {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), deadlineMs);
-      const etag = etags.get(url);
+      const cached = cache.get(url);
       try {
         const headers: Record<string, string> = {};
-        if (etag) headers["if-none-match"] = etag;
+        if (cached) headers["if-none-match"] = cached.etag;
         if (refreshLiveness) headers["x-ccs-refresh-liveness"] = "1";
         const response = await request(url, {
           signal: controller.signal,
           headers: Object.keys(headers).length > 0 ? headers : undefined,
         });
-        if (response.status === 304) return { kind: "unchanged" };
+        if (response.status === 304) {
+          return cached
+            ? { kind: "unchanged", snapshot: cached.snapshot }
+            : {
+              kind: "failure",
+              error: { kind: "malformed", message: "Sidebar server returned an invalid snapshot." },
+            };
+        }
         if (!response.ok) {
           return {
             kind: "failure",
@@ -97,8 +109,8 @@ export function createSnapshotTransport(
         }
 
         const nextEtag = response.headers.get("etag");
-        if (nextEtag !== null) etags.set(url, nextEtag);
-        else etags.delete(url);
+        if (nextEtag !== null) cache.set(url, { etag: nextEtag, snapshot: parsed });
+        else cache.delete(url);
         return { kind: "changed", snapshot: parsed };
       } catch {
         if (controller.signal.aborted) {
