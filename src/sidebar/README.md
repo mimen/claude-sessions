@@ -81,9 +81,14 @@ window.webkit.messageHandlers.cmuxSidebarFocusWorkspace
 ```
 
 Only a row that has a workspace is ever offered to the bridge; a sessionless-but-workspaceless row
-has no native address, so it goes straight to HTTP without a message. A reply is read strictly:
-the version must be `1` and the status one of those three. A near-miss is a mismatched host, and
-guessing at it is how a click quietly stops focusing anything.
+has no native address, so it goes straight to HTTP without a message.
+
+A reply is read exactly, not leniently. It must be a plain object — not an array — whose own keys
+are precisely `v` and `status`, with `v === 1` and the status one of those three. **Extra keys are
+a rejection**, because the fields a host would grow are the ones that change what the reply means:
+a capability list, an error detail, a partial focus. Reading `focused` out of such an envelope and
+discarding the rest answers a question that was not asked. A host that adds a field bumps `v`;
+until then the unfamiliar shape falls through to HTTP, which is always correct and merely slower.
 
 `focused` is the only outcome that ends the action, and it costs zero requests. Every other
 outcome — `no-bridge` (an ordinary browser tab, or a cmux without the handler), `not-found`,

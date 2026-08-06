@@ -97,17 +97,33 @@ function resolveHandler(options: FocusBridgeOptions): CmuxFocusMessageHandler | 
 /**
  * Read one reply.
  *
- * Strict on purpose: the version must be the one this page speaks and the status must be one of
- * the three it knows. A reply that is close but not exact is a mismatched host, and guessing at
- * its meaning would be how a click silently stops focusing anything.
+ * Exact on purpose. The envelope must be a plain object carrying `v` and `status` and nothing
+ * else: the version this page speaks, and one of the three statuses it knows.
+ *
+ * The extra-key rule is the part that matters. A host that has grown a fourth field is a host
+ * speaking a protocol this page has not been taught, and the fields it would grow are exactly the
+ * ones that change what the reply means -- a capability list, an error detail, a partial focus. To
+ * read `status: "focused"` out of such an envelope and drop the rest is to answer a question that
+ * was not asked. Bumping `v` is how a host adds a field; until then, an unfamiliar shape falls
+ * through to HTTP, which is always correct and merely slower.
  */
+/** A JSON object and not an array, narrowed once so the reader never has to assert a shape. */
+function isJsonRecord(value: JsonValue): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function readReply(reply: JsonValue): FocusBridgeOutcome {
-  if (typeof reply !== "object" || reply === null || Array.isArray(reply)) {
+  if (!isJsonRecord(reply)) return "malformed-reply";
+
+  // `Object.keys` sees own enumerable keys only, so a value inherited from a mangled prototype is
+  // absent here and the envelope fails the count -- it can never stand in for a real `status`.
+  const keys = Object.keys(reply);
+  if (keys.length !== 2 || !keys.includes("v") || !keys.includes("status")) {
     return "malformed-reply";
   }
-  const envelope = reply as JsonObject;
-  if (envelope["v"] !== FOCUS_BRIDGE_VERSION) return "malformed-reply";
-  const status = envelope["status"];
+  if (reply["v"] !== FOCUS_BRIDGE_VERSION) return "malformed-reply";
+
+  const status = reply["status"];
   if (status === "focused" || status === "not-found" || status === "unavailable") return status;
   return "malformed-reply";
 }

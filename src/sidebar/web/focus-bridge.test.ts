@@ -72,6 +72,63 @@ describe("requestCmuxFocus", () => {
     }
   });
 
+  test("refuses an otherwise-valid envelope that carries any extra key", async () => {
+    // Each of these is a host that has grown a field this page was never taught to weigh. Reading
+    // `focused` out of them and dropping the rest would answer a question that was not asked.
+    const replies: readonly Reply[] = [
+      { v: 1, status: "focused", capabilities: ["focus", "close"] },
+      { v: 1, status: "focused", error: "focused the wrong window" },
+      { v: 1, status: "focused", partial: true },
+      { v: 1, status: "not-found", suggestion: "w2" },
+      { v: 1, status: "unavailable", retryAfterMs: 500 },
+      { v: 1, status: "focused", extra: null },
+      { v: 1, status: "focused", v2: 2 },
+    ];
+    for (const reply of replies) {
+      expect(await requestCmuxFocus("w1", { bridge: bridgeReplying(reply).bridge }))
+        .toBe("malformed-reply");
+    }
+  });
+
+  test("refuses an envelope that renames or drops either required key", async () => {
+    const replies: readonly Reply[] = [
+      { v: 1, state: "focused" },
+      { version: 1, status: "focused" },
+      { v: 1, Status: "focused" },
+      {},
+    ];
+    for (const reply of replies) {
+      expect(await requestCmuxFocus("w1", { bridge: bridgeReplying(reply).bridge }))
+        .toBe("malformed-reply");
+    }
+  });
+
+  test("does not accept an inherited status or a status-shaped array", async () => {
+    // A prototype-supplied field is not an own key, so this envelope has one own key and fails the
+    // count rather than borrowing `status` from up the chain.
+    const inherited: Record<string, number> = Object.create({ status: "focused" }) as Record<
+      string,
+      number
+    >;
+    inherited["v"] = 1;
+    expect(await requestCmuxFocus("w1", { bridge: bridgeReplying(inherited).bridge }))
+      .toBe("malformed-reply");
+
+    // A null-prototype object with exactly the right own keys is still a valid reply: the rule is
+    // about which own keys are present, not about which constructor made the object.
+    const bare: Record<string, string | number> = Object.create(null) as Record<
+      string,
+      string | number
+    >;
+    bare["v"] = 1;
+    bare["status"] = "focused";
+    expect(await requestCmuxFocus("w1", { bridge: bridgeReplying(bare).bridge })).toBe("focused");
+
+    // An array is typeof "object", so it is refused explicitly rather than by key count.
+    expect(await requestCmuxFocus("w1", { bridge: bridgeReplying(["focused", 1]).bridge }))
+      .toBe("malformed-reply");
+  });
+
   test("treats a rejected or throwing postMessage as a bridge failure", async () => {
     const rejecting: CmuxWebkitBridge = {
       messageHandlers: {
