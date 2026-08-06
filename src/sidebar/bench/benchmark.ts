@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { Database } from "bun:sqlite";
 import { join } from "node:path";
-import { openCatalogue } from "../../catalogue/db.ts";
 import { buildBridge } from "../../cmux/bridge.ts";
+import { readCatalogueReadOnly } from "../catalogue-read.ts";
 import { readIndexReadOnly } from "../index-read.ts";
 import {
   createSidebarSource,
@@ -31,7 +32,11 @@ export interface DatabaseWitness {
   readonly bytes: number;
   readonly sha256: string;
   readonly walExists: boolean;
+  readonly walBytes: number | null;
+  readonly walSha256: string | null;
   readonly shmExists: boolean;
+  readonly userVersion: number;
+  readonly schemaSha256: string;
 }
 
 export interface CharacterizationResult {
@@ -86,13 +91,33 @@ export function distribution(values: readonly number[]): Distribution {
 
 export function witnessDatabase(path: string, root: string): DatabaseWitness {
   const bytes = readFileSync(path);
-  return {
-    path: path.replaceAll(root, "<fixture-root>"),
-    bytes: statSync(path).size,
-    sha256: createHash("sha256").update(bytes).digest("hex"),
-    walExists: existsSync(`${path}-wal`),
-    shmExists: existsSync(`${path}-shm`),
-  };
+  const walPath = `${path}-wal`;
+  const walExists = existsSync(walPath);
+  const wal = walExists ? readFileSync(walPath) : null;
+  const db = new Database(path, { readonly: true });
+  try {
+    const userVersion = (db.query("PRAGMA user_version").get() as { readonly user_version: number })
+      .user_version;
+    const schema = db.query(
+      `SELECT type, name, tbl_name, sql
+         FROM sqlite_master
+        WHERE name NOT LIKE 'sqlite_%'
+        ORDER BY type, name`,
+    ).all();
+    return {
+      path: path.replaceAll(root, "<fixture-root>"),
+      bytes: statSync(path).size,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      walExists,
+      walBytes: wal?.byteLength ?? null,
+      walSha256: wal ? createHash("sha256").update(wal).digest("hex") : null,
+      shmExists: existsSync(`${path}-shm`),
+      userVersion,
+      schemaSha256: createHash("sha256").update(JSON.stringify(schema)).digest("hex"),
+    };
+  } finally {
+    db.close();
+  }
 }
 
 function normalize(value: JsonValue, root: string, key = ""): JsonValue {
@@ -131,9 +156,9 @@ function sourceFor(
     now: () => FIXED_NOW,
     cmuxBin: "benchmark-never-runs-cmux",
     readBridge: async () => bridge,
-    openCatalogue: overrides.unreadableCatalogue
-      ? () => { throw new Error("fixture catalogue unreadable"); }
-      : () => openCatalogue(fixture.cataloguePath, { materialize: false }),
+    readCatalogue: overrides.unreadableCatalogue
+      ? () => ({ status: "unreadable", error: new Error("fixture catalogue unreadable") })
+      : () => readCatalogueReadOnly(fixture.cataloguePath),
     readIndex: overrides.unreadableIndex
       ? () => { throw new Error("fixture index unreadable"); }
       : (_path, options) => readIndexReadOnly(fixture.indexPath, options),

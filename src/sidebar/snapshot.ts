@@ -11,8 +11,6 @@ import { statSync } from "node:fs";
 import type { Database } from "bun:sqlite";
 import { openIndex } from "../index/schema.ts";
 import {
-  displayTitle,
-  getAll,
   getRow,
   lifecycleOf,
   openCatalogue,
@@ -44,6 +42,11 @@ import { loadLaunchers } from "../resume/launchers.ts";
 import { log } from "../logger.ts";
 import { err, ok, type Result } from "../result.ts";
 import { readIndexReadOnly } from "./index-read.ts";
+import {
+  readCatalogueReadOnly,
+  type CatalogueReadOutcome,
+  type CatalogueSnapshotFacts,
+} from "./catalogue-read.ts";
 import { exactMessageCount } from "./tail-count.ts";
 import {
   createCachedStatusReader,
@@ -78,10 +81,7 @@ import {
   type SidebarView,
   type SidebarMembership,
 } from "./projection.ts";
-import {
-  readEnrichments,
-  type StoredEnrichment,
-} from "../catalogue/enrichment.ts";
+import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 
 /** How many indexed sessions are considered before the resume shelf is filled. */
 const INDEX_SCAN_LIMIT = 200;
@@ -336,19 +336,7 @@ function allLiveSessionIdsFrom(bridge: Bridge): Set<string> {
   return sessionIds;
 }
 
-interface CatalogueLifecycleState {
-  readonly lifecycles: ReadonlyMap<string, SidebarLifecycle>;
-  readonly canonicalSessionIds: ReadonlyMap<string, string>;
-  /** Titles the catalogue owns (human, then enrichment); the index title is the fallback. */
-  readonly preferredTitles: ReadonlyMap<string, string>;
-  /** Cluster membership keyed by session id and resume alias. */
-  readonly memberships: ReadonlyMap<string, SidebarMembership>;
-  readonly sessionIds: ReadonlyMap<SidebarLifecycle, readonly string[]>;
-  /** Delegated seats, hidden the way `ccs ls` hides them. */
-  readonly auxiliary: ReadonlySet<string>;
-  /** Enrichment summaries keyed by canonical id and resume alias; absent for unenriched sessions. */
-  readonly summaries: ReadonlyMap<string, StoredEnrichment>;
-}
+type CatalogueLifecycleState = CatalogueSnapshotFacts;
 
 /**
  * When the transcript was last written, or null when it cannot be read.
@@ -440,6 +428,7 @@ export interface SidebarSourceOptions {
   readonly openIndex?: typeof openIndex;
   readonly openCatalogue?: typeof openCatalogue;
   readonly ensureDataDir?: typeof ensureDataDir;
+  readonly readCatalogue?: typeof readCatalogueReadOnly;
   readonly readIndex?: typeof readIndexReadOnly;
   readonly indexedSessions?: () => IndexedSessionInput[];
   readonly directoryFacts?: DirectoryFactsReader;
@@ -471,6 +460,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const openIndexDb = options.openIndex ?? openIndex;
   const openCatalogueDb = options.openCatalogue ?? openCatalogue;
   const ensureDataDirectory = options.ensureDataDir ?? ensureDataDir;
+  const readCatalogue = options.readCatalogue ?? readCatalogueReadOnly;
   const readIndex = options.readIndex ?? readIndexReadOnly;
   const readIndexedSessionsOverride = options.indexedSessions;
   const observeSnapshot = options.observeSnapshot;
@@ -519,119 +509,20 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     }
   }
 
-  function readCatalogueLifecycles(): Result<CatalogueLifecycleState> {
-    let catalogueDb: Database | null = null;
-    try {
-      ensureDataDirectory();
-      catalogueDb = openCatalogueDb(CATALOGUE_PATH());
-      const rows = getAll(catalogueDb);
-      // One read of the identity table, keyed for the join below. Sessions far outnumber
-      // identities, so this is cheaper than asking per row.
-      //
-      // Guarded separately from the lifecycle read around it: a catalogue predating ADR-0089 has
-      // no `identities` table at all, and letting that throw would cost the caller every lifecycle
-      // in the store to learn that nothing belongs to a cluster. Membership is a garnish; lifecycle
-      // is not.
-      const identitiesByKey = new Map<string, { cluster: string; role: string; kind: string }>();
-      try {
-        const identityRows = catalogueDb.query(
-          "SELECT identity_key, cluster, role, kind FROM identities WHERE cluster IS NOT NULL",
-        ).all() as Array<{ identity_key: string; cluster: string; role: string; kind: string }>;
-        for (const identity of identityRows) {
-          identitiesByKey.set(identity.identity_key, {
-            cluster: identity.cluster,
-            role: identity.role,
-            kind: identity.kind,
-          });
-        }
-      } catch {
-        // No identities table, or a shape that predates it: nothing belongs to a cluster.
-      }
-      const lifecycles = new Map<string, SidebarLifecycle>();
-      /**
-       * Catalogue-owned titles, resolved by `displayTitle` itself rather than by reimplementing
-       * its precedence here. Passing an empty fallback makes it return only what the catalogue
-       * owns -- a human's title, then enrichment's -- so the projection supplies the index title
-       * as the last resort and the ordering stays defined in exactly one place.
-       */
-      const preferredTitles = new Map<string, string>();
-      /**
-       * Cluster membership per session. Read here because the projection stays free of SQLite;
-       * the identity is the durable thing and the session merely points at it.
-       */
-      const memberships = new Map<string, SidebarMembership>();
-      // Delegated seats — reviewers, implementers — are real sessions but not work anyone
-      // browses. `ccs ls` hides `sessionClass === "auxiliary"` unless asked, and the sidebar
-      // is the same kind of surface, so it hides them too.
-      const auxiliary = new Set<string>();
-      const canonicalSessionIds = new Map<string, string>();
-      const sessionIds = new Map<SidebarLifecycle, string[]>([
-        ["active", []],
-        ["completed", []],
-        ["archived", []],
-      ]);
-
-      // Canonical ids win over aliases when a historical resume id collides with another row.
-      for (const row of rows.values()) {
-        const lifecycle = sidebarLifecycleOf(lifecycleOf(row));
-        lifecycles.set(row.sessionId, lifecycle);
-        canonicalSessionIds.set(row.sessionId, row.sessionId);
-        // Empty fallback: whatever comes back is catalogue-owned, so an absent one means the
-        // index title still wins.
-        if (row.identityKey) {
-          const identity = identitiesByKey.get(row.identityKey);
-          if (identity) {
-            const membership: SidebarMembership = {
-              identityKey: row.identityKey,
-              cluster: identity.cluster,
-              role: identity.role,
-              kind: identity.kind === "core" ? "core" : "fleet",
-            };
-            memberships.set(row.sessionId, membership);
-            if (row.resumeId) memberships.set(row.resumeId, membership);
-          }
-        }
-        const preferred = displayTitle(row, "");
-        if (preferred) {
-          preferredTitles.set(row.sessionId, preferred);
-          if (row.resumeId) preferredTitles.set(row.resumeId, preferred);
-        }
-        if (row.sessionClass === "auxiliary") {
-          auxiliary.add(row.sessionId);
-          if (row.resumeId) auxiliary.add(row.resumeId);
-          continue;
-        }
-        sessionIds.get(lifecycle)?.push(row.sessionId);
-      }
-      for (const row of rows.values()) {
-        if (!row.resumeId || lifecycles.has(row.resumeId)) continue;
-        lifecycles.set(row.resumeId, sidebarLifecycleOf(lifecycleOf(row)));
-        canonicalSessionIds.set(row.resumeId, row.sessionId);
-      }
-
-      return ok({
-        lifecycles,
-        preferredTitles,
-        memberships,
-        canonicalSessionIds,
-        sessionIds,
-        auxiliary,
-        summaries: readEnrichments(catalogueDb),
-      });
-    } catch (error) {
-      return err(error instanceof Error ? error : new Error(String(error)));
-    } finally {
-      catalogueDb?.close();
-    }
-  }
-
   function readCatalogueLifecyclesSafely(): CatalogueLifecycleState & {
     readonly readable: boolean;
   } {
-    const result = readCatalogueLifecycles();
-    if (result.ok) return { ...result.value, readable: true };
+    const outcome: CatalogueReadOutcome = readCatalogue(CATALOGUE_PATH());
+    if (outcome.status === "ok") return { ...outcome.facts, readable: true };
+
+    const reason = outcome.status === "missing"
+      ? "catalogue file is missing"
+      : outcome.status === "unsupported-schema"
+      ? `unsupported schema (${outcome.missing.join(", ")})`
+      : outcome.error.message;
     log.warn("sidebar could not read the session catalogue; lifecycle degraded to active", {
-      error: result.error.message,
+      error: reason,
+      status: outcome.status,
     });
     return {
       lifecycles: new Map(),

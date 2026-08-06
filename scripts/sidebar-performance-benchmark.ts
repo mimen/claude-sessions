@@ -118,7 +118,7 @@ try {
       "Synthetic fixture timings characterize this machine and Bun/SQLite build, not production fleet variance.",
       "The safe-focus benchmark executes the authoritative source path with an injected focus adapter; it never calls cmux or changes focus.",
       "The idle profile measures repeated full JSON snapshots. Phase 0 intentionally has no ETag/304 implementation yet.",
-      "The contention fixture holds BEGIN IMMEDIATE in a child process. The current writer-opening catalogue read is expected to block the event loop and may degrade catalogueReadable after busy_timeout.",
+      "The contention fixture holds BEGIN IMMEDIATE in a child process. The query-only catalogue reader must remain readable and complete within the Phase 1 latency gate.",
       "Status, notification, directory, and workspace-state subprocesses are deterministic in-memory adapters, so their real process latency is excluded.",
     ],
   };

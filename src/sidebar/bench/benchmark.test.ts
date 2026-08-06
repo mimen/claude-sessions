@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import baseline from "../../../docs/evidence/sidebar-performance/baseline.json" with { type: "json" };
 import {
   characterizeFixture,
   measureContention,
@@ -23,7 +24,7 @@ async function withFixture<T>(
 
 describe("sidebar performance characterization", () => {
   test("captures every view and unreadable source without invoking real focus", async () => {
-    await withFixture({ sessionCount: 16, liveSessionCount: 3 }, async (fixture) => {
+    await withFixture({ sessionCount: 8, liveSessionCount: 2 }, async (fixture) => {
       const result = await characterizeFixture(fixture, 3);
 
       expect(Object.keys(result.snapshotLatencyMs)).toEqual([
@@ -41,6 +42,7 @@ describe("sidebar performance characterization", () => {
         "unreadableIndex",
         "unreadableLiveness",
       ]);
+      expect(result.snapshots).toEqual(baseline.golden.snapshots);
       expect(result.safeFocus.focusCalls).toBe(3);
       expect(result.safeFocus.outcomes).toEqual(["focused", "focused", "focused"]);
       expect(result.snapshotLatencyMs.active.samples).toHaveLength(3);
@@ -66,14 +68,15 @@ describe("sidebar performance characterization", () => {
   });
 });
 
-const contentionGate = process.env.CCS_SIDEBAR_CONTENTION_GATE === "1" ? test : test.skip;
-contentionGate(
-  "Phase 1 gate: held catalogue writer does not block snapshot or heartbeat",
+test(
+  "Phase 1 gate: held catalogue writer does not block snapshot",
   async () => {
     await withFixture({ sessionCount: 12, liveSessionCount: 2 }, async (fixture) => {
       const result = await measureContention(fixture, 350);
+
       expect(result.snapshotMs).toBeLessThan(120);
-      expect(result.heartbeatTicks).toBeGreaterThan(0);
+      expect(result.heartbeatLongestDelayMs).toBeLessThan(50);
+      expect(result.catalogueReadable).toBeTrue();
     });
   },
 );

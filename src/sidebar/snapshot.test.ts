@@ -13,6 +13,7 @@ import type {
   SidebarRow,
   SidebarSessionRow,
 } from "./projection.ts";
+import type { CatalogueReadOutcome, CatalogueSnapshotFacts } from "./catalogue-read.ts";
 import { createSidebarSource, type SidebarSourceOptions } from "./snapshot.ts";
 import type { CmuxStatusRead } from "./status.ts";
 
@@ -85,6 +86,43 @@ function catalogueDb(rows: ReadonlyArray<{
     });
   }
   return db;
+}
+
+function catalogueRead(rows: ReadonlyArray<{
+  readonly sessionId: string;
+  readonly resumeId?: string;
+  readonly completed?: boolean;
+  readonly archived?: boolean;
+}> = []): CatalogueReadOutcome {
+  const lifecycles = new Map<string, "active" | "completed" | "archived">();
+  const canonicalSessionIds = new Map<string, string>();
+  const sessionIds = new Map<"active" | "completed" | "archived", string[]>([
+    ["active", []],
+    ["completed", []],
+    ["archived", []],
+  ]);
+  for (const row of rows) {
+    const lifecycle = row.archived ? "archived" : row.completed ? "completed" : "active";
+    lifecycles.set(row.sessionId, lifecycle);
+    canonicalSessionIds.set(row.sessionId, row.sessionId);
+    sessionIds.get(lifecycle)?.push(row.sessionId);
+  }
+  for (const row of rows) {
+    const resumeId = row.resumeId ?? row.sessionId;
+    if (lifecycles.has(resumeId)) continue;
+    lifecycles.set(resumeId, lifecycles.get(row.sessionId) ?? "active");
+    canonicalSessionIds.set(resumeId, row.sessionId);
+  }
+  const facts: CatalogueSnapshotFacts = {
+    lifecycles,
+    canonicalSessionIds,
+    preferredTitles: new Map(),
+    memberships: new Map(),
+    sessionIds,
+    auxiliary: new Set(),
+    summaries: new Map(),
+  };
+  return { status: "ok", facts };
 }
 
 function emptyBridge(readable = true): Bridge {
@@ -179,6 +217,7 @@ function sourceOptions(overrides: Partial<SidebarSourceOptions> = {}): SidebarSo
     resumeSession: () => ({ status: "resumed", note: null, workspaceRef: "workspace:9" }),
     openIndex: () => new Database(":memory:"),
     openCatalogue: () => catalogueDb(),
+    readCatalogue: () => catalogueRead(),
     ensureDataDir: () => {},
     indexedSessions: () => [indexed()],
     directoryFacts: {
@@ -535,6 +574,26 @@ describe("createSidebarSource lifecycle", () => {
 });
 
 describe("createSidebarSource snapshot", () => {
+  test("never opens or materializes the catalogue through a writer path", async () => {
+    let writerOpens = 0;
+    let dataDirectoryWrites = 0;
+    const source = createSidebarSource(sourceOptions({
+      openCatalogue: () => {
+        writerOpens += 1;
+        throw new Error("snapshot attempted a writer open");
+      },
+      ensureDataDir: () => {
+        dataDirectoryWrites += 1;
+      },
+      readCatalogue: () => catalogueRead([{ sessionId: "file-id" }]),
+    }));
+
+    await source.snapshot();
+
+    expect(writerOpens).toBe(0);
+    expect(dataDirectoryWrites).toBe(0);
+  });
+
   test("uses stable workspace ids and never shelves a live secondary surface", async () => {
     const statusTargets: string[][] = [];
     const source = createSidebarSource(sourceOptions({
@@ -576,6 +635,10 @@ describe("createSidebarSource snapshot", () => {
         sessionId: "canonical-primary",
         resumeId: "primary",
       }]),
+      readCatalogue: () => catalogueRead([{
+        sessionId: "canonical-primary",
+        resumeId: "primary",
+      }]),
       readStatuses: async () => new Map([[
         "workspace-uuid",
         { state: "absent" },
@@ -598,7 +661,7 @@ describe("createSidebarSource snapshot", () => {
     ];
     const source = createSidebarSource(sourceOptions({
       indexedSessions: () => sessions,
-      openCatalogue: () => catalogueDb([
+      readCatalogue: () => catalogueRead([
         { sessionId: "active" },
         { sessionId: "completed", completed: true },
         { sessionId: "archived", archived: true },
@@ -616,9 +679,10 @@ describe("createSidebarSource snapshot", () => {
 
   test("degrades every visible row to active and reports an unreadable catalogue", async () => {
     const source = createSidebarSource(sourceOptions({
-      openCatalogue: () => {
-        throw new Error("catalogue is locked");
-      },
+      readCatalogue: () => ({
+        status: "unreadable",
+        error: new Error("catalogue is locked"),
+      }),
     }));
 
     const snapshot = await source.snapshot();
@@ -628,13 +692,35 @@ describe("createSidebarSource snapshot", () => {
     expect(sessionRows(snapshot.rows)[0]?.lifecycle).toBe("active");
   });
 
+  for (const unavailable of [
+    { status: "missing" as const },
+    { status: "unreadable" as const, error: new Error("catalogue unreadable") },
+  ]) {
+    test(`keeps live rows when the catalogue is ${unavailable.status}`, async () => {
+      const source = createSidebarSource(sourceOptions({
+        readBridge: async () => multiSurfaceBridge(),
+        readCatalogue: () => unavailable,
+        readStatuses: async () => new Map([[
+          "workspace-uuid",
+          { state: "published", status: { label: "Running", icon: null, color: null } },
+        ]]),
+      }));
+
+      const snapshot = await source.snapshot();
+
+      expect(snapshot.catalogueReadable).toBeFalse();
+      expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toContain("primary");
+      expect(snapshot.rows[0]).toMatchObject({ lifecycle: "active", section: "working" });
+    });
+  }
+
   test("keeps a completed live session reachable when the index cannot be read", async () => {
     const source = createSidebarSource(sourceOptions({
       readBridge: async () => multiSurfaceBridge(),
       indexedSessions: () => {
         throw new Error("index unreadable");
       },
-      openCatalogue: () => catalogueDb([{ sessionId: "primary", completed: true }]),
+      readCatalogue: () => catalogueRead([{ sessionId: "primary", completed: true }]),
       readStatuses: async () => new Map([
         ["workspace-uuid", {
           state: "published",
