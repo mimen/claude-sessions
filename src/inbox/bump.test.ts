@@ -21,6 +21,7 @@ function stubBridge(liveSession: string | null, loc?: SurfaceLocation): Bridge {
     locateSession: (id) => (id === liveSession ? loc ?? null : null),
     isOpen: (id) => id === liveSession,
     primarySurface: () => null,
+    activeWindowId: null,
     readable: true,
   };
 }

@@ -5,13 +5,18 @@ import { join } from "node:path";
 import type { Bridge, SurfaceLocation, SurfaceSession } from "./bridge.ts";
 import {
   closeCurrentWorkspaceCommand,
+  closeSessionWorkspace,
+  closeSessionWorkspaceCandidates,
   closeWorkspaceByStableId,
   currentWorkspaceIdentity,
   planCloseCurrentWorkspace,
+  planCloseSessionWorkspace,
+  planCloseSessionWorkspaceCandidates,
   type CloseAttempt,
   type CloseCurrentWorkspaceDependencies,
   type CloseProcessRunner,
   type CloseRefusalReason,
+  type CloseSessionWorkspaceDependencies,
   type CurrentWorkspaceEnvironment,
 } from "./close-current.ts";
 
@@ -51,11 +56,11 @@ function binding(overrides: Partial<SurfaceSession> = {}): SurfaceSession {
     sessionId: SESSION_ID,
     workspaceId: WORKSPACE_ID,
     cwd: null,
-    transcriptPath: null,
     agentLifecycle: "running",
     isRestorable: true,
-    lastPermissionMode: null,
     pid: 123,
+    transcriptPath: null,
+    lastPermissionMode: null,
     ...overrides,
   };
 }
@@ -69,6 +74,7 @@ function bridge(overrides: Partial<Bridge> = {}): Bridge {
     workspaceIds: () => [WORKSPACE_ID],
     surfacesInWorkspace: (workspaceId) => workspaceId === WORKSPACE_ID ? [current] : [],
     surfaceInfo: (surfaceId) => surfaceId === SURFACE_ID ? currentBinding : null,
+    activeWindowId: null,
     readable: true,
     locateSession: (sessionId) => sessionId === SESSION_ID ? current : null,
     isOpen: (sessionId) => sessionId === SESSION_ID,
@@ -243,6 +249,126 @@ describe("planCloseCurrentWorkspace", () => {
       ),
       "shared-workspace",
     );
+  });
+});
+
+describe("explicit-session close planning", () => {
+  test("resolves the session through the bridge without current-workspace environment", () => {
+    expect(planCloseSessionWorkspace(bridge(), SESSION_ID)).toEqual({
+      status: "authorized",
+      identity: {
+        sessionId: SESSION_ID,
+        surfaceId: SURFACE_ID,
+        workspaceId: WORKSPACE_ID,
+      },
+    });
+  });
+
+  test("accepts canonical/resume candidates only when exactly one live body resolves", () => {
+    expect(planCloseSessionWorkspaceCandidates(
+      bridge(),
+      [OTHER_SESSION_ID, SESSION_ID],
+    )).toEqual({
+      status: "authorized",
+      identity: {
+        sessionId: SESSION_ID,
+        surfaceId: SURFACE_ID,
+        workspaceId: WORKSPACE_ID,
+      },
+    });
+  });
+
+  test("refuses invalid ids and absent sessions rather than guessing", () => {
+    expect(planCloseSessionWorkspace(bridge(), "not-a-uuid")).toEqual({
+      status: "refused",
+      reason: "invalid-session-id",
+    });
+    expect(planCloseSessionWorkspace(bridge(), OTHER_SESSION_ID)).toEqual({
+      status: "refused",
+      reason: "session-not-live",
+    });
+  });
+});
+
+function explicitCloseDeps(
+  bridges: Bridge[],
+  closeResult: CloseAttempt = { ok: true },
+): {
+  readonly deps: CloseSessionWorkspaceDependencies;
+  readonly closed: Array<{ readonly workspaceId: string; readonly workspaceRef: string }>;
+  bridgeCalls(): number;
+} {
+  let bridgeIndex = 0;
+  const closed: Array<{ readonly workspaceId: string; readonly workspaceRef: string }> = [];
+  return {
+    deps: {
+      bridge: () => {
+        const selected = bridges[Math.min(bridgeIndex, bridges.length - 1)];
+        bridgeIndex += 1;
+        if (!selected) throw new Error("test requires at least one bridge");
+        return selected;
+      },
+      close: (workspaceId, location) => {
+        closed.push({ workspaceId, workspaceRef: location.workspaceRef });
+        return closeResult;
+      },
+    },
+    closed,
+    bridgeCalls: () => bridgeIndex,
+  };
+}
+
+describe("closeSessionWorkspace", () => {
+  test("dry-run performs one bridge proof and never invokes close", async () => {
+    const state = explicitCloseDeps([bridge()]);
+
+    await expect(closeSessionWorkspace(SESSION_ID, false, state.deps)).resolves.toEqual({
+      status: "authorized",
+      dryRun: true,
+      identity: { sessionId: SESSION_ID, surfaceId: SURFACE_ID, workspaceId: WORKSPACE_ID },
+    });
+    expect(state.bridgeCalls()).toBe(1);
+    expect(state.closed).toEqual([]);
+  });
+
+  test("mutation revalidates the first stable identity and closes by workspace UUID", async () => {
+    const state = explicitCloseDeps([bridge(), bridge()]);
+
+    await expect(closeSessionWorkspaceCandidates(
+      [OTHER_SESSION_ID, SESSION_ID],
+      true,
+      state.deps,
+    )).resolves.toEqual({
+      status: "closed",
+      identity: { sessionId: SESSION_ID, surfaceId: SURFACE_ID, workspaceId: WORKSPACE_ID },
+    });
+    expect(state.bridgeCalls()).toBe(2);
+    expect(state.closed).toEqual([{ workspaceId: WORKSPACE_ID, workspaceRef: "workspace:1" }]);
+  });
+
+  test("reattach drift between proofs refuses without invoking close", async () => {
+    const moved = surface({ surfaceId: OTHER_SURFACE_ID, workspaceId: OTHER_WORKSPACE_ID });
+    const state = explicitCloseDeps([
+      bridge(),
+      bridge({ locateSession: () => moved }),
+    ]);
+
+    await expect(closeSessionWorkspace(SESSION_ID, true, state.deps)).resolves.toEqual({
+      status: "refused",
+      phase: "revalidation",
+      reason: "session-surface-mismatch",
+    });
+    expect(state.closed).toEqual([]);
+  });
+
+  test("close failure is returned once without retry", async () => {
+    const state = explicitCloseDeps([bridge(), bridge()], { ok: false });
+
+    await expect(closeSessionWorkspace(SESSION_ID, true, state.deps)).resolves.toMatchObject({
+      status: "close-failed",
+      identity: { workspaceId: WORKSPACE_ID },
+    });
+    expect(state.closed).toHaveLength(1);
   });
 });
 

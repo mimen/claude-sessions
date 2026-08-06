@@ -44,6 +44,7 @@ function surfaceSession(over: Partial<SurfaceSession> = {}): SurfaceSession {
 function stubBridge(bound: SurfaceSession | null, readable = true): Bridge {
   return {
     surfaces: [],
+    activeWindowId: null,
     surfaceToWorkspace: new Map(),
     workspaceIds: () => [],
     surfacesInWorkspace: () => [],

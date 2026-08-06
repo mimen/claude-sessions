@@ -48,7 +48,7 @@ function attach(cat: Database, sid: string, cluster: string, role: string, now =
 const EMPTY_READABLE_BRIDGE: Bridge = {
   surfaces: [], surfaceToWorkspace: new Map(), workspaceIds: () => [],
   surfacesInWorkspace: () => [], surfaceInfo: () => null, locateSession: () => null,
-  isOpen: () => false, primarySurface: () => null, readable: true,
+  isOpen: () => false, primarySurface: () => null, activeWindowId: null, readable: true,
 };
 
 test("resume-cluster fans out over members; dry-run resumes the closed ones", () => {
@@ -153,7 +153,7 @@ test("cluster resume ABORTS (spawns nothing) when liveness is unreadable (ADR-00
     const unreadable: Bridge = {
       surfaces: [], surfaceToWorkspace: new Map(), workspaceIds: () => [],
       surfacesInWorkspace: () => [], surfaceInfo: () => null, locateSession: () => null,
-      isOpen: () => false, primarySurface: () => null, readable: false,
+      isOpen: () => false, primarySurface: () => null, activeWindowId: null, readable: false,
     };
     const s = resumeClusterEntry(idx, cat, "pr-watch", { dryRun: true, bridge: unreadable });
     expect(s.abortedUnreadable).toBe(true);

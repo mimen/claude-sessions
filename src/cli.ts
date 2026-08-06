@@ -22,6 +22,7 @@ import { launcherCommand } from "./launcher/command.ts";
 import { syncTabs } from "./catalogue/sync-tabs.ts";
 import { boardCommand } from "./catalogue/board-command.ts";
 import { catalogueServiceCommand } from "./catalogue-service/command.ts";
+import { sidebarCommand } from "./sidebar/command.ts";
 import { refreshCatalogueAuthority } from "./catalogue-service/client.ts";
 import { handoffInline } from "./resume/inline.ts";
 import type { ResumeCommand } from "./resume/command.ts";
@@ -156,7 +157,9 @@ Resume & tabs:
                                                   Claude Code, and a fresh process. Bare form is a
                                                   preflight; passes no --model so aliases re-resolve
   ccs sync-tabs [<selector>|.|--all]              Paint cmux tabs from catalogue metadata
+  ccs finish <id> <complete|archive> [--do]       Same as finish-current, for a named session
   ccs finish-current <complete|archive> [--do]    Preflight, or record lifecycle + enrich + close this workspace
+  ccs sidebar serve [--port N]                    Serve the productivity sidebar on loopback
   ccs close-current-workspace [--do]              Prove or close only this session's cmux workspace
   ccs reap-duplicates [--do]                      Close cmux dupes for sessions with >1 live \`claude --resume\`
 
@@ -208,6 +211,8 @@ export async function main(argv: string[]): Promise<number> {
       return await reindex({ titles: args.includes("--titles") });
     case "catalogue-service":
       return await catalogueServiceCommand(args.slice(1));
+    case "sidebar":
+      return await sidebarCommand(args.slice(1));
     case "enrich": {
       const { enrichCommand } = await import("./enrich/command.ts");
       return await enrichCommand(args.slice(1));
@@ -314,6 +319,13 @@ export async function main(argv: string[]): Promise<number> {
     case "bump-session": {
       const { bumpSessionCommand } = await import("./inbox/bump-session-command.ts");
       return bumpSessionCommand(args.slice(1));
+    }
+    case "finish": {
+      // The same lifecycle-then-close path as `finish-current`, but for an explicitly named session
+      // rather than the caller's own, which is what lets the sidebar finish a row it is not running
+      // inside.
+      const { finishSessionCommand } = await import("./cmux/finish-current.ts");
+      return await finishSessionCommand(args.slice(1));
     }
     case "finish-current": {
       const { finishCurrentCommand } = await import("./cmux/finish-current.ts");

@@ -28,6 +28,7 @@ function stubBridge(openIds: string[], readable = true): Bridge {
     locateSession: () => null,
     isOpen: (id: string) => open.has(id),
     primarySurface: () => null,
+    activeWindowId: null,
     readable,
   };
 }

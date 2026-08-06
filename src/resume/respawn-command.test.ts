@@ -72,6 +72,7 @@ function fixture(): Fixture {
   };
   const bridge: Bridge = {
     surfaces: [],
+    activeWindowId: null,
     surfaceToWorkspace: new Map(),
     workspaceIds: () => [],
     surfacesInWorkspace: () => [],

@@ -70,6 +70,50 @@ export function primaryWorkspaceForSession(
 }
 
 /**
+ * Pin or unpin a workspace by its stable UUID.
+ *
+ * cmux has no toggle verb — `pin` and `unpin` are both idempotent, so the caller states the
+ * intended end state rather than flipping whatever it last saw. That matters here because the
+ * sidebar polls: a toggle racing a refresh would land on the wrong value.
+ */
+export function setWorkspacePinned(
+  workspaceId: string,
+  pinned: boolean,
+  cmuxBin = "cmux",
+): boolean {
+  try {
+    execFileSync(
+      cmuxBin,
+      ["workspace-action", "--action", pinned ? "pin" : "unpin", "--workspace", workspaceId],
+      { timeout: 3000, stdio: "ignore" },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Focus a workspace addressed directly by its own stable UUID.
+ *
+ * `focusSession` resolves a workspace from a session; a workspace with no session — a plain shell,
+ * a browser split — has nothing to resolve from, so its UUID is the address. Both ids come from
+ * the live tree, and cmux rejects an unknown one, so no stale ref can be focused by accident.
+ */
+export function focusWorkspace(workspaceId: string, windowId: string, cmuxBin = "cmux"): boolean {
+  try {
+    execFileSync(cmuxBin, ["select-workspace", "--workspace", workspaceId, "--window", windowId], {
+      timeout: 3000,
+      stdio: "ignore",
+    });
+    execFileSync(cmuxBin, ["focus-window", "--window", windowId], { timeout: 3000, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Focus the live workspace running a session (switch to its tab), if it's open. Resolves
  * the workspace + window by surface UUID (exact, ADR-0040). Returns whether it focused —
  * false if the session isn't live (caller should then resume instead).

@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="30">
+<title>Clusters in the sidebar</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa; --fg: #1a1a18; --muted: #6b6b66; --rule: #e4e4e0;
+    --card: #ffffff; --accent: #b4531f; --ok: #2f6f4f; --warn: #8a6d1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16161a; --fg: #e8e8e4; --muted: #9d9d96; --rule: #2c2c30;
+            --card: #1d1d22; --accent: #e08a4c; --ok: #7cc39b; --warn: #d7b45c; }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16161a; --fg: #e8e8e4; --muted: #9d9d96; --rule: #2c2c30;
+    --card: #1d1d22; --accent: #e08a4c; --ok: #7cc39b; --warn: #d7b45c;
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfbfa; --fg: #1a1a18; --muted: #6b6b66; --rule: #e4e4e0;
+    --card: #ffffff; --accent: #b4531f; --ok: #2f6f4f; --warn: #8a6d1f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 3rem 1.5rem 6rem; background: var(--bg); color: var(--fg);
+    font: 15px/1.62 ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif; }
+  main { max-width: 62rem; margin: 0 auto; }
+  h1 { font-size: 1.9rem; line-height: 1.15; margin: 0 0 .3rem; letter-spacing: -.02em; }
+  h2 { font-size: 1.15rem; margin: 2.6rem 0 .8rem; border-bottom: 1px solid var(--rule);
+       padding-bottom: .35rem; letter-spacing: -.01em; }
+  h3 { font-size: .95rem; margin: 1.6rem 0 .5rem; }
+  .sub { color: var(--muted); margin: 0 0 1.6rem; }
+  .status { display: inline-block; font-size: .74rem; letter-spacing: .07em; text-transform: uppercase;
+            font-weight: 700; padding: .2rem .5rem; border: 1px solid var(--accent); color: var(--accent); }
+  code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  code { font-size: .87em; background: color-mix(in oklab, var(--fg) 7%, transparent);
+         padding: .1em .35em; border-radius: 2px; }
+  pre { background: var(--card); border: 1px solid var(--rule); border-radius: 3px; padding: 1rem;
+        overflow-x: auto; font-size: .8rem; line-height: 1.5; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: .88rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  ul { padding-left: 1.15rem; } li { margin: .3rem 0; }
+  .decided { border-left: 3px solid var(--ok); padding-left: .8rem; margin: .8rem 0; }
+  .open { border-left: 3px solid var(--warn); padding-left: .8rem; margin: .8rem 0; }
+  .note { color: var(--muted); font-size: .9rem; }
+  .scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Clusters in the sidebar</h1>
+<p class="sub">
+  <span class="status">Decisions settled &mdash; awaiting implementation authorization</span><br>
+  <code>/Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/sidebar-triage-ia/docs/plans/sidebar-clusters.html</code>
+</p>
+
+<h2>Goal</h2>
+<p>
+  A cluster is a <em>fleet with a shape</em> &mdash; roles, a coordinator, workers per unit of work
+  &mdash; and the sidebar currently shows it as unrelated rows scattered through a flat list. The
+  aim is an optional Clusters toggle that lifts cluster sessions into their own group at the top,
+  makes the cluster's shape legible, and lets it be managed as a unit: which workers are open, which
+  are closed, which slots exist but are not running.
+</p>
+<p>
+  The memory point is the sharp end. Eleven event-workers cannot all be open at once, and now that
+  closed sessions are first-class the sidebar can show a cluster's full roster while only a couple
+  of its members cost anything.
+</p>
+
+<h2>How clusters actually work</h2>
+<p class="note">Read from the live catalogue, 2026-07-28. This is ADR-0089's model, not a column.</p>
+
+<h3>Three tables, not one</h3>
+<div class="scroll">
+<table>
+  <tr><th>Table</th><th>Holds</th><th>Live state</th></tr>
+  <tr>
+    <td><code>identities</code></td>
+    <td><code>identity_key</code>, <code>cluster</code>, <code>role</code>, <code>kind</code>,
+        <code>grouping_id</code>, <code>stage</code>, <code>status_line</code>,
+        <code>completed</code>, <code>archived</code>, <code>parked_task_id</code>, <code>meta</code></td>
+    <td>14 rows</td>
+  </tr>
+  <tr>
+    <td><code>identity_&lt;role&gt;</code></td>
+    <td>Per-role attributes. <code>identity_event_worker</code> carries <code>event_slug</code>;
+        <code>identity_pr_agent</code> its own set.</td>
+    <td>2 role tables, both empty</td>
+  </tr>
+  <tr>
+    <td><code>groupings</code></td>
+    <td><code>label</code>, <code>short_name</code>, <code>url</code>, <code>notes</code>,
+        <code>context</code>, <code>closed</code> &mdash; display metadata for an epic-like grouping</td>
+    <td><strong>empty</strong></td>
+  </tr>
+</table>
+</div>
+<p>
+  A session joins a cluster through <code>catalogue.identity_key</code>. The identity is the durable
+  thing; sessions come and go beneath it.
+</p>
+
+<h3>What is actually out there</h3>
+<div class="scroll">
+<table>
+  <tr><th>Cluster</th><th>Role</th><th>Kind</th><th class="num">Identities</th><th class="num">With a session</th></tr>
+  <tr><td rowspan="3">event-watch</td><td>coordinator</td><td>core</td><td class="num">1</td><td class="num">1</td></tr>
+  <tr><td>scout</td><td>core</td><td class="num">1</td><td class="num">1</td></tr>
+  <tr><td>event-worker</td><td>fleet</td><td class="num">11</td><td class="num">8</td></tr>
+  <tr><td>control-plane</td><td>&mdash;</td><td>&mdash;</td><td class="num">1</td><td class="num">&mdash;</td></tr>
+</table>
+</div>
+<ul>
+  <li><strong>Three identities have no session at all</strong> &mdash; <code>mogan-3oz-august</code>,
+      <code>pizza-popup-august</code>, <code>ubtb-bay-august</code>. The slot exists; nothing is
+      running in it. Today they are invisible everywhere.</li>
+  <li><strong>Nothing is completed or archived at identity level.</strong> All 14 read active, so
+      the cluster never shrinks.</li>
+  <li><strong><code>stage</code> and <code>status_line</code> are populated on zero rows.</strong>
+      The columns exist and nothing writes them, so a "status" column would render empty today.</li>
+  <li><strong>Custom titles are half-applied.</strong> <code>Events · Coordinator</code>,
+      <code>Gio Lucca 3oz August</code> and <code>Daisychain Zachfox</code> read well; the rest fall
+      back to the raw key, e.g. <code>event-watch:event-worker:glizzy-galaxy</code>.</li>
+</ul>
+
+<h3>The constraint on colours</h3>
+<p>
+  cmux can <em>set</em> a workspace colour (<code>workspace-action --action set-color</code>) but
+  neither <code>tree --json</code> nor <code>list-workspaces</code> <em>reports</em> it &mdash;
+  verified: the workspace fields are <code>active, description, index, panes, pinned, ref, selected,
+  title</code>, with no colour among them. <strong>The sidebar cannot mirror cmux's colours.</strong>
+  Any colour here has to be the sidebar's own, which is arguably better: derived from the cluster
+  name, it stays consistent whether or not a workspace is open, and a closed session keeps its
+  colour where a mirrored one would lose it.
+</p>
+
+<h3>Where the sidebar stands</h3>
+<p>
+  It already <em>writes</em> identity fields &mdash; <code>setIdentityFields</code> in
+  <code>snapshot.ts</code> propagates lifecycle to the identity &mdash; but never <em>reads</em>
+  <code>cluster</code> or <code>role</code> for display. Cluster membership is therefore entirely
+  invisible in the UI while already being maintained by it.
+</p>
+
+<h2>Proposed shape</h2>
+<pre>
+CLUSTERS  2                                    &lt;- toggle on
+  ▾ event-watch          2 open · 8 closed · 3 idle
+      coordinator   Events · Coordinator          ● live
+      scout         Events · Scout                ● live
+      ── workers 11 ──────────────────────────────────
+      · Gio Lucca 3oz August                        2d
+      · Daisychain Zachfox                          2d
+      · Freakuency                                  4d
+      + mogan-3oz-august            (slot, not running)
+      + pizza-popup-august          (slot, not running)
+  ▸ control-plane        1 identity
+
+NEEDS YOU  13    &lt;- everything else, unchanged
+  …
+</pre>
+<ul>
+  <li><strong>Core roles lead, fleet follows.</strong> <code>kind</code> already distinguishes them:
+      a coordinator is the way into a cluster, a worker is one unit of its work.</li>
+  <li><strong>Open, closed and idle are counted separately</strong> on the cluster header, so the
+      memory question is answered without expanding anything.</li>
+  <li><strong>Slots with no session are shown</strong>, because an event with no worker is exactly
+      the thing you would want to notice, and it is currently invisible.</li>
+</ul>
+
+<h2>Confirmed decisions</h2>
+
+<div class="decided">
+  <strong>1. The toggle MOVES rows.</strong>
+  A cluster session appears under CLUSTERS and leaves the flat groups, so every session has exactly
+  one home and the counts elsewhere are honest. The cost is accepted: a coordinator that needs input
+  shows in its cluster rather than in NEEDS YOU.
+</div>
+
+<div class="decided">
+  <strong>2. Unfilled slots are rows.</strong>
+  An identity with no session is a slot that exists and is not running, which is exactly what you
+  want to notice. It renders as a row like anything else. (As of 2026-07-30 there are none left --
+  all three were mislinked sessions, now repaired.)
+</div>
+
+<div class="decided">
+  <strong>3. Cluster rows behave like every other row.</strong>
+  Same complete and archive actions, same open/close, no bespoke cluster verbs. The only additions
+  are a role colour on rows that have a role, and a shelvable header. Nothing about being in a
+  cluster changes what a session <em>is</em>.
+</div>
+
+<div class="decided">
+  <strong>4. Every grouping is shelvable, not just clusters.</strong>
+  "Today", "This week", a project, a cluster -- any header can be collapsed. Shelving is a property
+  of grouping itself rather than a feature of one kind of group, so there is one interaction to
+  learn and one place it is implemented.
+</div>
+
+<div class="decided">
+  <strong>5. Complete and Archived become ordinary headers, NOT bottom bars.</strong>
+  This reverses the sticky-bar decision from the triage plan. With every header collapsible, the
+  original objection disappears: they no longer need pinning to stay reachable, because a collapsed
+  list is short enough to scroll past. They become sections with sessions under them, opened and
+  closed like anything else.
+</div>
+
+<h2>Superseded</h2>
+<p class="note">
+  Decision 5 of <code>sidebar-triage-ia.html</code> made COMPLETE and ARCHIVED sticky bars pinned to
+  the bottom edge, because sections placed after an infinitely-scrolling list are unreachable. That
+  reasoning held only while every group was permanently expanded. Collapsible headers solve the same
+  problem without a second, differently-shaped affordance at the bottom of the sidebar &mdash; and
+  one interaction beats two.
+</p>
+
+<h2>What this does not need</h2>
+<ul>
+  <li><strong>No schema change.</strong> Everything above is already stored; the sidebar simply does
+      not read it.</li>
+  <li><strong>No new cmux capability.</strong> Colour is derived locally, so nothing waits on cmux
+      exposing it.</li>
+  <li><strong>No change to the flat list</strong> when the toggle is off. The default view stays what
+      it is today.</li>
+</ul>
+
+<h2>Open risk</h2>
+<p class="note">
+  <code>stage</code> and <code>status_line</code> are the natural source for a per-member status
+  column, and both are empty on every row. Building a status column against them would ship an
+  always-blank column whose emptiness looks like a bug. Either event-watch starts writing them
+  first, or the status column waits.
+</p>
+
+<h2>What changed</h2>
+<ul>
+  <li><strong>2026-07-28</strong> &mdash; research complete against the live catalogue; five
+      decisions raised, no implementation started.</li>
+  <li><strong>2026-07-30</strong> &mdash; all five settled. The toggle moves rows, slots are rows,
+      cluster rows keep the ordinary actions, every grouping is shelvable, and Complete/Archived
+      become headers &mdash; superseding the sticky bars already built.</li>
+  <li><strong>2026-07-30</strong> &mdash; the three "unfilled slots" turned out to be sessions with
+      <code>identity_key = NULL</code>. Linked via <code>ccs session set --identity</code>; six
+      workers carrying their raw key as a title were retitled. Cluster is now fully linked.</li>
+</ul>
+
+</main>
+<script>
+  const KEY = "sidebar-clusters:scroll";
+  const saved = sessionStorage.getItem(KEY);
+  if (saved) window.scrollTo(0, parseInt(saved, 10) || 0);
+  addEventListener("scroll", () => sessionStorage.setItem(KEY, String(window.scrollY)), { passive: true });
+</script>
+</body>
+</html>
