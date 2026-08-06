@@ -71,8 +71,18 @@ export interface SessionActionCoordinatorOptions {
   readonly defer?: (task: () => void) => void;
 }
 
-function focusTargetFromLocation(location: SurfaceLocation): WorkspaceFocusTarget {
-  return { workspaceRef: location.workspaceRef, windowRef: location.windowRef };
+function focusTargetFromLocation(
+  location: SurfaceLocation,
+  activeWindowId: string | null,
+): WorkspaceFocusTarget {
+  return {
+    workspaceRef: location.workspaceRef,
+    // select-workspace already changes the active workspace inside the focused window. Calling
+    // focus-window after every same-window selection doubles cmux socket traffic without changing
+    // the result. Unknown/background windows still take the explicit second command so targeting
+    // remains exact rather than assuming which window the user can see.
+    windowRef: location.windowId === activeWindowId ? null : location.windowRef,
+  };
 }
 
 export function createSessionActionCoordinator(
@@ -209,26 +219,30 @@ export function createSessionActionCoordinator(
       if (!bridge.readable) return { status: "liveness-unreadable" };
       const location = bridge.surfacesInWorkspace(workspaceId)[0];
       if (!location) return { status: "not-live" };
-      return focusTarget({
-        workspaceRef: location.workspaceRef,
-        windowRef: location.windowRef,
-      });
+      return focusTarget(focusTargetFromLocation(location, bridge.activeWindowId));
     },
 
     async open(sessionId: string): Promise<OpenSessionOutcome> {
       const bridge = await options.readBridge();
       if (!bridge.readable) return { status: "liveness-unreadable" };
 
+      // The row clicked by the sidebar carries the live hook-store id. Resolve that direct path
+      // before touching SQLite: the index is only needed for a resume-id alias or a closed session.
+      // This keeps ordinary focus actions free of synchronous database work on Bun's event loop.
+      const directLocation = bridge.locateSession(sessionId);
+      if (directLocation) {
+        const focused = await focusTarget(focusTargetFromLocation(directLocation, bridge.activeWindowId));
+        return openOutcomeFromFocus(focused);
+      }
+
       const lookup = options.lookupIndexedSession(sessionId);
       const row = lookup.status === "found" ? lookup.row : null;
-      const candidates = [...new Set([sessionId, row?.sessionId, row?.resumeId].filter(
-        (candidate): candidate is string => candidate !== undefined,
-      ))];
-      const liveLocation = candidates
+      const aliasLocation = [row?.sessionId, row?.resumeId]
+        .filter((candidate): candidate is string => candidate !== undefined && candidate !== sessionId)
         .map((candidate) => bridge.locateSession(candidate))
         .find((location): location is SurfaceLocation => location !== null);
-      if (liveLocation) {
-        const focused = await focusTarget(focusTargetFromLocation(liveLocation));
+      if (aliasLocation) {
+        const focused = await focusTarget(focusTargetFromLocation(aliasLocation, bridge.activeWindowId));
         return openOutcomeFromFocus(focused);
       }
 

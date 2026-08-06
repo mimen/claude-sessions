@@ -74,7 +74,7 @@ try {
   };
 
   let focusBridgeReads = 0;
-  let focusCommands = 0;
+  const focusCommands: string[] = [];
   const focusSource = createSidebarSource({
     ...baseOptions,
     readBridge: async () => {
@@ -83,8 +83,8 @@ try {
     },
     indexedSessions: () => [],
     processAdapter: {
-      run: async () => {
-        focusCommands += 1;
+      run: async (_file, args) => {
+        focusCommands.push(args[0] ?? "<missing>");
         return { ok: true, stdout: "", stderr: "", timedOut: false };
       },
     },
@@ -179,7 +179,12 @@ try {
       latencyMs: focus,
       bridgeReads: focusBridgeReads,
       bridgeReadsPerOpen: focusBridgeReads / samples,
-      processCommands: focusCommands,
+      processCommands: focusCommands.length,
+      commandsPerOpen: focusCommands.length / samples,
+      commandCounts: {
+        selectWorkspace: focusCommands.filter((command) => command === "select-workspace").length,
+        focusWindow: focusCommands.filter((command) => command === "focus-window").length,
+      },
       p95BudgetMs: 150,
       baselineFleetP95Ms: baseline.fleet.safeFocus.latencyMs.p95,
       p95DeltaMs: Math.round((focus.p95 - baseline.fleet.safeFocus.latencyMs.p95) * 1_000) / 1_000,
@@ -209,6 +214,8 @@ try {
     },
     assertions: {
       oneBridgeReadPerFocusOpen: focusBridgeReads === samples,
+      oneFocusCommandPerActiveWindowOpen: focusCommands.length === samples
+        && focusCommands.every((command) => command === "select-workspace"),
       oneBridgeReadPerResumeOpen: bridgeReadsAfterConcurrentOpens === 2
         && bridgeReadsAfterSnapshot - bridgeReadsAfterConcurrentOpens === 1
         && resumeBridgeReads - bridgeReadsAfterSnapshot === 1,

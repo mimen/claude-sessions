@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { cmuxVersion, liveBridgeAsync, type AsyncCmuxIo } from "./live.ts";
+import {
+  cmuxVersion,
+  createLiveBridgeReader,
+  liveBridgeAsync,
+  type AsyncCmuxIo,
+} from "./live.ts";
 
 const fixtures = join(import.meta.dir, "__fixtures__");
 const tree = readFileSync(join(fixtures, "tree.json"), "utf8");
@@ -66,6 +71,17 @@ describe("liveBridgeAsync", () => {
     const io = fakeIo();
     await liveBridgeAsync(io);
     expect(io.calls).toContainEqual(["tree", "--all", "--json", "--id-format", "both"]);
+  });
+
+  test("server-scoped reads refresh tree and store without respawning the version probe", async () => {
+    const io = fakeIo();
+    const readBridge = createLiveBridgeReader({ io, cmuxBin: "custom-cmux" });
+
+    expect((await readBridge()).readable).toBe(true);
+    expect((await readBridge()).readable).toBe(true);
+
+    expect(io.calls.filter((args) => args[0] === "--version")).toHaveLength(1);
+    expect(io.calls.filter((args) => args[0] === "tree")).toHaveLength(2);
   });
 
   test("is unreadable when tree fails or JSON is invalid", async () => {
