@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-06T01:26:29.777Z",
+  "generatedAt": "2026-08-06T01:29:53.729Z",
   "command": "bun run benchmark:sidebar:actions --samples 25",
   "safety": {
     "fixtureRoot": "<os-tmpdir>/ccs-sidebar-actions-*/fleet",
@@ -17,7 +17,7 @@
         0.004,
         0.004,
         0.004,
-        0.006,
+        0.004,
         0.006,
         0.006,
         0.006,
@@ -35,14 +35,14 @@
         0.01,
         0.01,
         0.011,
-        0.012,
-        0.021,
-        0.58
+        0.013,
+        0.014,
+        0.591
       ],
       "min": 0.004,
       "p50": 0.007,
-      "p95": 0.021,
-      "max": 0.58,
+      "p95": 0.014,
+      "max": 0.591,
       "mean": 0.031
     },
     "bridgeReads": 25,
@@ -50,10 +50,10 @@
     "processCommands": 50,
     "p95BudgetMs": 150,
     "baselineFleetP95Ms": 2.88,
-    "p95DeltaMs": -2.859
+    "p95DeltaMs": -2.866
   },
   "resume": {
-    "acknowledgementMs": 6.851,
+    "acknowledgementMs": 6.823,
     "acknowledgementBudgetMs": 700,
     "resumeCalls": 1,
     "openActions": 3,
@@ -70,7 +70,7 @@
     "paintCallsAfterDrain": 1
   },
   "concurrency": {
-    "snapshotMs": 3.933,
+    "snapshotMs": 3.462,
     "snapshotRespondedBeforeResume": true,
     "snapshotLivenessReadable": true,
     "maximumRequestBlockBudgetMs": 50
