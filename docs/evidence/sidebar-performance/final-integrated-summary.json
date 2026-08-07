@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-07T08:55:00Z",
+  "generatedAt": "2026-08-07T19:29:39Z",
   "integrationCommit": "5d9196f2f72c5cf03eda84621ba35f4a468b10f5",
-  "cmuxCommit": "626c1d1c97aa210cb9dec52aa60518bb48d74883",
+  "cmuxCommit": "a3a5541cb5614821bfd47aa375d5c2a967d3fe7e",
   "commands": {
     "snapshot": "bun run benchmark:sidebar --samples 8 --idle-ms 60000 --contention-ms 5500 --output docs/evidence/sidebar-performance/phase8-final-synthetic.json",
     "actions": "bun run benchmark:sidebar:actions --samples 50 --output docs/evidence/sidebar-performance/phase8-final-actions.json",
@@ -166,10 +166,13 @@
     "cmux": {
       "appBuild": "passed",
       "cmuxUnitFocused": 45,
+      "reloadObserverFocused": 17,
       "cmuxFoundation": 27,
       "cmuxSidebar": 50,
-      "cmuxSwiftRenderUI": 26,
+      "cmuxSwiftRenderUI": 28,
       "testWiring": "passed",
+      "reviewThreadsResolved": true,
+      "finalBotChecks": "Cursor and Socket passed; Vercel and cubic were neutral or skipped; Codex was unavailable",
       "knownUnrelatedSidebarHiddenPresentationIssues": 6
     }
   },
