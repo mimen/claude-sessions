@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-08-07T08:12:25.427Z",
+  "finishedAt": "2026-08-07T08:12:32.970Z",
+  "productionSnapshot": {
+    "rows": 393,
+    "livenessReadable": true,
+    "indexReadable": true,
+    "catalogueReadable": true
+  },
+  "lifecycle": {
+    "sessionId": "c08808e8-560b-4b9b-8713-be415e7bba74",
+    "sessionName": "Claude Actions wrapper-test rules",
+    "transitions": [
+      {
+        "action": "complete",
+        "status": 200,
+        "body": {
+          "status": "ok",
+          "lifecycle": "completed"
+        }
+      },
+      {
+        "action": "uncomplete",
+        "status": 200,
+        "body": {
+          "status": "ok",
+          "lifecycle": "active"
+        }
+      },
+      {
+        "action": "archive",
+        "status": 200,
+        "body": {
+          "status": "ok",
+          "lifecycle": "archived"
+        }
+      },
+      {
+        "action": "unarchive",
+        "status": 200,
+        "body": {
+          "status": "ok",
+          "lifecycle": "active"
+        }
+      }
+    ],
+    "restoredActive": true
+  },
+  "writerContention": {
+    "holdMs": 2000,
+    "snapshotMs": 91.847,
+    "livenessReadable": true,
+    "indexReadable": true,
+    "catalogueReadable": true
+  },
+  "missingIndex": {
+    "livenessReadable": true,
+    "indexReadable": false,
+    "catalogueReadable": true,
+    "rows": 12
+  },
+  "missingCatalogue": {
+    "livenessReadable": true,
+    "indexReadable": true,
+    "catalogueReadable": false,
+    "rows": 2012
+  },
+  "socketFailure": {
+    "coldServerReadyMs": 437.015,
+    "warmSnapshotMs": 18.877,
+    "livenessReadable": false,
+    "indexReadable": true,
+    "catalogueReadable": true,
+    "rows": 0
+  },
+  "serverRestart": {
+    "before": {
+      "livenessReadable": true,
+      "indexReadable": true,
+      "catalogueReadable": true
+    },
+    "after": {
+      "livenessReadable": true,
+      "indexReadable": true,
+      "catalogueReadable": true
+    }
+  },
+  "liveResume": {
+    "sessionId": "3f62095b-84b8-4c4a-aebd-37572d1a2185",
+    "sessionName": "Six-model CLI speed benchmark",
+    "concurrentRequests": 8,
+    "concurrentOpenMs": 410.006,
+    "outcomes": [
+      {
+        "status": 200,
+        "body": {
+          "status": "resumed",
+          "workspaceRef": "workspace:5"
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "status": "focused",
+          "workspaceRef": "workspace:5"
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "status": "focused",
+          "workspaceRef": "workspace:5"
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "status": "focused",
+          "workspaceRef": "workspace:5"
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "status": "focused",
+          "workspaceRef": "workspace:5"
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "status": "focused",
+          "workspaceRef": "workspace:5"
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "status": "focused",
+          "workspaceRef": "workspace:5"
+        }
+      },
+      {
+        "status": 200,
+        "body": {
+          "status": "focused",
+          "workspaceRef": "workspace:5"
+        }
+      }
+    ],
+    "repeatOpen": {
+      "status": 200,
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:5"
+      }
+    },
+    "newWorkspaceObserved": true,
+    "createdWorkspaceCount": 1,
+    "taggedWorkspaceCountBefore": 4,
+    "taggedWorkspaceCountAfter": 5
+  }
+}

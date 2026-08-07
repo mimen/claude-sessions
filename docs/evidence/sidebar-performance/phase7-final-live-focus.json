@@ -1,0 +1,628 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-06T07:39:28.832Z",
+  "base": "http://127.0.0.1:8787",
+  "samples": 50,
+  "successfulSamples": 50,
+  "alternatedSessionIds": [
+    "e995627d-0db4-421d-8a7d-982250ef216f",
+    "45af22db-3fa8-4470-af7e-b6ea07416f1f"
+  ],
+  "restoredSessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+  "httpStatuses": [
+    200
+  ],
+  "outcomes": [
+    "focused"
+  ],
+  "successfulLatencyMs": {
+    "min": 66.13737500000002,
+    "p50": 402.9352920000001,
+    "p95": 589.0623749999977,
+    "max": 625.9309170000001
+  },
+  "failureCount": 0,
+  "failures": [],
+  "rawSamples": [
+    {
+      "index": 0,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 80.004959,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 1,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 446.258458,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 2,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 66.13737500000002,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 3,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 476.31925,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 4,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 186.55645800000002,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 5,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 465.0612080000001,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 6,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 278.9983339999999,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 7,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 625.9309170000001,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 8,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 490.11733300000014,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 9,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 565.1935000000003,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 10,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 402.9352920000001,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 11,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 278.14387500000066,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 12,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 372.7982089999996,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 13,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 433.75012499999957,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 14,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 476.22170800000094,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 15,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 383.85233400000106,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 16,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 390.26687499999935,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 17,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 541.1892090000001,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 18,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 350.9894999999997,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 19,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 230.58458299999984,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 20,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 386.3189999999995,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 21,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 446.30291699999907,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 22,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 366.8860000000004,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 23,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 500.01437500000065,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 24,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 433.1131669999995,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 25,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 448.75366700000086,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 26,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 363.0190419999999,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 27,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 561.4752499999995,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 28,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 404.30179099999805,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 29,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 531.0335830000004,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 30,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 343.87874999999985,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 31,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 329.8140000000021,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 32,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 252.70712500000081,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 33,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 384.5774170000004,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 34,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 383.8995000000032,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 35,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 524.0927499999998,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 36,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 378.51791700000103,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 37,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 460.3731669999979,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 38,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 340.81787500000064,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 39,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 496.3243330000005,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 40,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 469.5601659999993,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 41,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 561.9844159999993,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 42,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 350.6624580000025,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 43,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 531.3805829999983,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 44,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 307.17129099999875,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 45,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 449.1078750000015,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 46,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 340.6445419999982,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 47,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 589.0623749999977,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    },
+    {
+      "index": 48,
+      "sessionId": "e995627d-0db4-421d-8a7d-982250ef216f",
+      "status": 200,
+      "latencyMs": 396.2963749999981,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:59"
+      },
+      "error": null
+    },
+    {
+      "index": 49,
+      "sessionId": "45af22db-3fa8-4470-af7e-b6ea07416f1f",
+      "status": 200,
+      "latencyMs": 594.2845000000016,
+      "outcome": "focused",
+      "body": {
+        "status": "focused",
+        "workspaceRef": "workspace:37"
+      },
+      "error": null
+    }
+  ]
+}

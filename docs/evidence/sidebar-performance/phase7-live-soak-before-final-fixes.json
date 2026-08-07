@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-08-06T04:05:14.071Z",
+  "finishedAt": "2026-08-06T04:35:14.308Z",
+  "requestedDurationMs": 1800000,
+  "actualDurationMs": 1800237,
+  "url": "http://127.0.0.1:8787/api/snapshot?view=active&limit=10000",
+  "polls": 1471,
+  "statuses": {
+    "200": 504,
+    "304": 955
+  },
+  "fullResponses": 504,
+  "notModifiedResponses": 955,
+  "transferredBodyBytes": 293235804,
+  "latencyMs": {
+    "min": 32.080666000023484,
+    "p50": 59.304832999943756,
+    "p95": 200.04499999999825,
+    "max": 4688.07233299996
+  },
+  "failures": [
+    {
+      "atMs": 96825,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    },
+    {
+      "atMs": 103599,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    },
+    {
+      "atMs": 119956,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    },
+    {
+      "atMs": 125136,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    },
+    {
+      "atMs": 130555,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    },
+    {
+      "atMs": 146233,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    },
+    {
+      "atMs": 264347,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    },
+    {
+      "atMs": 307611,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    },
+    {
+      "atMs": 339650,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    },
+    {
+      "atMs": 349921,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    },
+    {
+      "atMs": 371555,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    },
+    {
+      "atMs": 406361,
+      "kind": "timeout",
+      "detail": "The operation was aborted."
+    }
+  ],
+  "degraded": [],
+  "finalSnapshot": {
+    "rows": 388,
+    "livenessReadable": true,
+    "indexReadable": true,
+    "catalogueReadable": true
+  }
+}

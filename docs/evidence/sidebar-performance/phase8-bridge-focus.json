@@ -1,0 +1,425 @@
+{
+  "benchmark": "native-sidebar-focus-bridge",
+  "samplesRequested": 50,
+  "targets": {
+    "a": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+    "b": "405C1430-1A24-4294-97AC-9292C60524A6"
+  },
+  "samples": [
+    {
+      "index": 0,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 5.000000000000455,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 1,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 5.999999999999545,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 2,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 3,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 3,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 3,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 4,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 3,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 5,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 3,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 6,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 3,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 7,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 8,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 3,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 9,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 2,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 10,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 3,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 11,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 7,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 12,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 13,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 14,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 5,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 15,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 16,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 17,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 18,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 5,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 19,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 20,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 21,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 22,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 5,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 23,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 24,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 5,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 25,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 26,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 5.000000000000455,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 27,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 28,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 29,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 30,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 31,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 32,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 8,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 33,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4.999999999999545,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 34,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 35,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 36,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 5,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 37,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 6,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 38,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 3,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 39,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 40,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 5,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 41,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 5,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 42,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 6,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 43,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 5,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 44,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 45,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4.000000000000455,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 46,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 47,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4.999999999999545,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 48,
+      "target": "a",
+      "workspaceId": "7227305A-A59D-4BA5-86DC-C50E5391CF87",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    },
+    {
+      "index": 49,
+      "target": "b",
+      "workspaceId": "405C1430-1A24-4294-97AC-9292C60524A6",
+      "outcome": "focused",
+      "latencyMs": 4,
+      "fallbackHttpInvocations": 0
+    }
+  ],
+  "focusedLatencyMs": {
+    "count": 50,
+    "min": 2,
+    "p50": 4,
+    "p95": 6,
+    "max": 8
+  },
+  "fallbackHttpThunkInvocations": 0,
+  "startedAt": "2026-08-06T10:16:09.082Z",
+  "completedAt": "2026-08-06T10:16:09.299Z",
+  "serverObservedActionPosts": {
+    "open": 0,
+    "workspaceFocus": 0,
+    "total": 0
+  }
+}

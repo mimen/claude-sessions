@@ -1,185 +1,186 @@
 {
-  "schemaVersion": 1,
-  "generatedAt": "2026-08-06T04:01:00.000Z",
-  "integrationCommit": "210ebf9",
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-07T08:55:00Z",
+  "integrationCommit": "5d9196f2f72c5cf03eda84621ba35f4a468b10f5",
+  "cmuxCommit": "626c1d1c97aa210cb9dec52aa60518bb48d74883",
   "commands": {
-    "snapshotRuns": "bun run benchmark:sidebar --samples 12 --idle-ms 10000 --contention-ms 1500 (three runs), plus --samples 30 --idle-ms 30000 --contention-ms 2000 (one extended run)",
-    "actionRuns": "bun run benchmark:sidebar:actions --samples 50 (three runs)",
+    "snapshot": "bun run benchmark:sidebar --samples 8 --idle-ms 60000 --contention-ms 5500 --output docs/evidence/sidebar-performance/phase8-final-synthetic.json",
+    "actions": "bun run benchmark:sidebar:actions --samples 50 --output docs/evidence/sidebar-performance/phase8-final-actions.json",
+    "liveScenarios": "bun /tmp/ccs-final-live-scenarios.ts",
+    "liveSoak": "bun /tmp/ccs-final-sidebar-soak.ts",
     "typecheck": "bun run typecheck",
     "fullTest": "bun test",
     "circularLint": "bun run lint:circular"
   },
   "rawEvidence": {
-    "snapshot": [
-      "final-integrated-snapshot-run1.json",
-      "final-integrated-snapshot-run2.json",
-      "final-integrated-snapshot-run3.json",
-      "final-integrated-snapshot-run4.json"
-    ],
-    "actions": [
-      "final-integrated-actions-run1.json",
-      "final-integrated-actions-run2.json",
-      "final-integrated-actions-run3.json"
-    ]
-  },
-  "safety": {
-    "generatedSqliteOnly": true,
-    "liveCatalogueRead": false,
-    "liveIndexRead": false,
-    "realCmuxFocusInvoked": false,
-    "databaseWitnessByteIdenticalEveryRun": true,
-    "logicalStateUnchangedEveryRun": true
+    "synthetic": "phase8-final-synthetic.json",
+    "actions": "phase8-final-actions.json",
+    "liveScenarios": "phase8-final-live-scenarios.json",
+    "liveSoak": "phase8-final-live-soak-30m.json",
+    "nativeBridge": "phase8-bridge-focus.json"
   },
   "phaseEffects": [
     {
       "phase": "baseline",
-      "effect": "Characterized the blocking architecture without changing behavior.",
-      "activeSnapshotP50Ms": 10.343,
-      "activeSnapshotP95Ms": 20.943,
-      "writerContentionMs": 5015.843,
-      "idlePollP50Ms": 6.84,
-      "idlePollP95Ms": 15.858,
-      "idleHeartbeatLongestDelayMs": 61.606,
-      "idlePayloadBytesPer60s": 18537060
+      "effect": "Characterized the blocking architecture before changing behavior.",
+      "warmFullSnapshotMs": "412-474",
+      "isolatedLiveFocusMs": "257-478",
+      "contendedOpen": "more than 20 seconds with no response bytes",
+      "unchangedTransferRate": "about 565 KiB/s"
     },
     {
       "phase": "1-readonly-catalogue",
-      "effect": "Removed writer initialization, migrations, and lock acquisition from snapshot GET.",
-      "activeSnapshotP50Ms": 4.801,
-      "activeSnapshotP95Ms": 6.097,
-      "writerContentionMs": 4.813,
-      "idlePollP50Ms": 5.279,
-      "idlePollP95Ms": 7.654
+      "effect": "Removed writer initialization, migrations, and reserved-lock acquisition from snapshot GET.",
+      "writerContentionBeforeMs": 5015.843,
+      "writerContentionAfterInitialMs": 4.813
     },
     {
-      "phase": "2-cache-etag",
-      "effect": "Added long-lived query-only readers, exact data_version invalidation, strong ETags, zero-body 304, typed browser transport, deadlines, and backoff.",
-      "activeSnapshotP50Ms": 0.874,
-      "activeSnapshotP95Ms": 1.098,
-      "writerContentionMs": 2.918,
-      "unchangedP50Ms": 1.298,
-      "unchangedP95Ms": 1.663,
-      "changedWarmP50Ms": 1.683,
-      "changedWarmP95Ms": 3.499,
-      "unchangedBodyBytes": 0
+      "phase": "2-durable-cache-etag",
+      "effect": "Added query-only SQLite readers, data_version and inode invalidation, strong ETags, zero-body 304 responses, typed browser transport, and deadlines.",
+      "unchangedP95Ms": 2.908,
+      "unchangedBodyBytes": 0,
+      "staleTriggerP95Ms": 2.967,
+      "changedVisibleP95Ms": 0.191
     },
     {
       "phase": "3-async-actions",
-      "effect": "Removed synchronous process work from open/resume, made Bridge reads single-pass, added single-flight resume, and deferred cosmetic paint.",
-      "syntheticFocusP95Ms": 0.014,
-      "resumeAcknowledgementMs": 6.823,
-      "concurrentSnapshotMs": 3.462
+      "effect": "Removed synchronous process work from open/resume, used one Bridge read per open, single-flighted duplicate resumes, and deferred cosmetic paint.",
+      "syntheticFocusP95Ms": 0.025,
+      "resumeAcknowledgementMs": 7.606,
+      "concurrentSnapshotMs": 3.883
     },
     {
       "phase": "4-command-mutations-errors",
-      "effect": "Moved sidebar writes behind sanctioned catalogue commands and replaced raw transport failures with stable public envelopes plus private diagnostics.",
-      "syntheticFocusP95Ms": 0.013,
-      "resumeAcknowledgementMs": 8.593,
-      "concurrentSnapshotMs": 3.95,
-      "writerContentionMs": 5.725
+      "effect": "Moved sidebar writes behind sanctioned catalogue commands and replaced raw transport failures with stable public envelopes plus private diagnostics."
     },
     {
       "phase": "5-consolidation",
-      "effect": "Centralized warm caches, canonical enrichment and disagreement logic, and staged projection internals while preserving the browser wire shape.",
-      "writerContentionMs": 9.519,
-      "unchangedP95Ms": 6.268,
-      "changedWarmP95Ms": 5.467,
-      "idlePollP95Ms": 8.194
+      "effect": "Centralized warm caches, enrichment and recommendation disagreement logic, and staged projection internals while preserving the browser wire shape."
     },
     {
       "phase": "6-catalogue-split",
-      "effect": "Physically separated schema, queries, and mutations; removed catalogue-owned cycles; and enforced exact mutation/import boundaries.",
-      "writerContentionMs": 3.828,
-      "unchangedP95Ms": 4.019,
-      "changedWarmP95Ms": 4.386,
-      "idlePollP95Ms": 4.382,
-      "remainingUnrelatedCycles": 3
+      "effect": "Separated schema, queries, and mutations; enforced mutation boundaries; and preserved three unrelated pre-existing circular dependencies."
+    },
+    {
+      "phase": "7-live-hardening",
+      "effect": "Added snapshot stale-while-revalidate, bounded retry, exact serialized representation caching, hard subprocess termination, async bounded favicon reads, atomic SQLite replacement detection, and bounded LRU caches.",
+      "finalWriterContentionMs": 91.847,
+      "socketFailureColdReadyMs": 437.015,
+      "socketFailureWarmSnapshotMs": 18.877,
+      "concurrentOpenRequests": 8,
+      "createdWorkspaces": 1,
+      "resumeOutcomes": {
+        "resumed": 1,
+        "focused": 7
+      }
+    },
+    {
+      "phase": "8-native-focus-bridge",
+      "effect": "Evidence above the 150 ms gate justified a fixed, typed, rail-only cmux workspace-focus bridge restricted to local files and literal loopback origins.",
+      "samples": 50,
+      "focused": 50,
+      "p50Ms": 4,
+      "p95Ms": 6,
+      "maxMs": 8,
+      "fallbackHttpInvocations": 0,
+      "serverActionPosts": 0
     }
   ],
-  "finalIntegrated": {
-    "snapshotRuns": 4,
-    "actionRuns": 3,
-    "unchanged": {
-      "samples": 264,
-      "statuses": [304],
-      "bodyBytes": 0,
-      "p50Ms": 1.805,
-      "p95Ms": 6.84,
-      "maxMs": 14.302,
-      "p95BudgetMs": 10,
-      "passed": true
-    },
-    "changedWarm": {
-      "samples": 80,
-      "statuses": [200],
-      "p50Ms": 2.156,
-      "p95Ms": 4.994,
-      "maxMs": 5.477,
-      "p50BudgetMs": 40,
-      "p95BudgetMs": 120,
-      "passed": true
-    },
+  "finalSynthetic": {
+    "writerContentionMs": 3.421,
     "idleProjection": {
-      "samples": 61,
-      "p50Ms": 1.504,
-      "p95Ms": 5.81,
-      "maxMs": 6.928
+      "p50Ms": 1.468,
+      "p95Ms": 2.656,
+      "maxMs": 5.815
     },
-    "writerContention": {
-      "runMs": [4.151, 10.51, 5.546, 2.964],
-      "maxMs": 10.51,
-      "budgetMs": 120,
+    "unchanged": {
+      "status": 304,
+      "bodyBytes": 0,
+      "p50Ms": 0.061,
+      "p95Ms": 2.908,
+      "maxMs": 2.994,
+      "budgetP95Ms": 10,
       "passed": true
     },
-    "eventLoopObservation": {
-      "heartbeatLongestDelayRunMs": [5.033, 56.465, 35.706, 50.28],
-      "maximumObservedRequestMs": 14.302,
-      "requestBlockBudgetMs": 50,
-      "requestExceededBudget": false,
-      "note": "Two scheduler heartbeat samples crossed 50ms while every measured request remained below 15ms; the delay was not correlated with request execution and is retained rather than normalized away."
-    },
-    "syntheticFocus": {
-      "samples": 150,
-      "p50Ms": 0.009,
-      "p95Ms": 0.101,
-      "maxMs": 0.876,
-      "budgetMs": 150,
+    "changedVisible": {
+      "status": 200,
+      "p50Ms": 0.106,
+      "p95Ms": 0.191,
+      "maxMs": 0.596,
+      "budgetP50Ms": 40,
+      "budgetP95Ms": 120,
       "passed": true
     },
-    "resumeAcknowledgement": {
-      "runMs": [14.639, 11.435, 10.027],
-      "maxMs": 14.639,
-      "budgetMs": 700,
-      "passed": true
+    "databaseWitnessByteIdentical": true,
+    "logicalStateUnchanged": true,
+    "performanceGatePassed": true
+  },
+  "finalLiveSoak": {
+    "durationMinutes": 30,
+    "polls": 1800,
+    "responses": {
+      "200": 40,
+      "304": 1760
     },
-    "concurrentSnapshotDuringResume": {
-      "runMs": [13.014, 8.527, 8.825],
-      "maxMs": 13.014,
-      "budgetMs": 50,
-      "passed": true
+    "transferredBodyBytes": 23555266,
+    "latencyMs": {
+      "min": 0.278,
+      "p50": 0.461,
+      "p95": 37.021,
+      "max": 116.537
     },
-    "allActionAssertionsPassed": true
+    "failures": 0,
+    "degradedSnapshots": 0,
+    "finalReadable": {
+      "liveness": true,
+      "index": true,
+      "catalogue": true
+    }
   },
   "validation": {
-    "mutationBoundary": { "passed": 15, "failed": 0, "assertions": 59 },
-    "catalogue": { "passed": 362, "failed": 0 },
-    "sidebar": { "passed": 202, "failed": 0 },
-    "resume": { "passed": 97, "failed": 0 },
     "typecheckPassed": true,
+    "mutationBoundary": {
+      "passed": 18,
+      "failed": 0
+    },
+    "livenessAndReadCache": {
+      "passed": 18,
+      "failed": 0
+    },
+    "cliAuxiliaryRerun": {
+      "passed": 2,
+      "failed": 0
+    },
     "fullRepository": {
-      "passed": 1670,
-      "failed": 4,
-      "knownUnrelatedFailureFile": "src/launcher/install.test.ts",
-      "taskDiffTouchesFailureFile": false
+      "passed": 1742,
+      "failed": 5,
+      "flakyFailure": "src/cli-auxiliary.test.ts timed out under the full-suite scheduler and passed 2/2 immediately in isolation",
+      "knownUnrelatedFailures": 4,
+      "knownUnrelatedFailureFile": "src/launcher/install.test.ts"
     },
     "circularDependencies": {
       "remaining": 3,
       "newCatalogueModuleCycles": 0,
       "remainingCyclesUnrelated": true
+    },
+    "cmux": {
+      "appBuild": "passed",
+      "cmuxUnitFocused": 45,
+      "cmuxFoundation": 27,
+      "cmuxSidebar": 50,
+      "cmuxSwiftRenderUI": 26,
+      "testWiring": "passed",
+      "knownUnrelatedSidebarHiddenPresentationIssues": 6
     }
   },
   "transportDecision": {
-    "sse": "not justified by synthetic measurements; unchanged polling is zero-body and combined p95 is 6.84ms",
-    "typedCmuxFocusBridge": "deferred pending live 50-click measurement; synthetic action path p95 is 0.101ms"
-  }
+    "sse": "not justified: the quiet live soak produced 1760 zero-body 304 responses, p50 0.461 ms, p95 37.021 ms across mixed changed and unchanged polls, zero failures, and zero degraded snapshots",
+    "typedCmuxFocusBridge": "shipped after optimized HTTP focus still exceeded the 150 ms evidence gate; 50 live native focuses completed at p95 6 ms with zero HTTP fallback"
+  },
+  "acceptedResiduals": [
+    "The focus capability is intentionally narrow but is not rate-limited; a hostile service on a user-selected loopback URL could cause focus churn. The source scope, dispatch-time checks, and fixed verb keep exposure local and bounded.",
+    "The four MiB serialized-representation byte cap binds before the 16-entry cap at the current roughly 573 KiB body size, causing safe rebuilds under broad query-shape cycling rather than unbounded retention.",
+    "Catalogue retained-byte accounting costs about 4.1 ms on a live invalidation; cache hits and 304 responses do not pay it.",
+    "The final full repository suite retains four unrelated launcher fixture failures and one scheduler-only CLI auxiliary timeout that passed immediately in isolation."
+  ]
 }

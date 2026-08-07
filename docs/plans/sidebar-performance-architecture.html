@@ -145,16 +145,16 @@
     <h1>Make the sidebar fast by removing work, not hiding rows.</h1>
     <p class="lede">The product remains intact: every ordinary session loads, liveness remains exact, resume fails closed, and CCS continues to own session lifecycle. The architecture changes underneath it so read traffic cannot acquire write locks, unchanged data is not recomputed or retransmitted, and session actions stop blocking the server.</p>
     <div class="status">
-      <strong>Status: awaiting implementation authorization.</strong>
-      <span>No implementation has started. The first wave is CCS-only. Fable, the independent second-opinion architecture reviewer, reviewed the diagnosis. The plan deliberately defers SSE and any HTML-to-cmux action bridge until the cheaper fixes are measured.</span>
+      <strong>Status: implementation complete and verified.</strong>
+      <span>The full CCS architecture wave landed and passed its final quiet soak. Measurements rejected SSE and justified the narrower typed cmux focus bridge. Independent primary and Fable reviews closed the blocking findings before delivery.</span>
     </div>
     <p class="artifact"><span class="artifact-label">Artifact</span> /Users/mimen/Programming/Repos/claude-sessions/.claude/worktrees/sidebar-performance-plan/docs/plans/sidebar-performance-architecture.html</p>
     <p class="meta-line">This page reloads itself every 30 seconds and restores your scroll position, so edits to the plan appear in place.</p>
     <div class="metrics">
-      <div class="metric paper"><b>412-474ms</b><span>current warm full snapshot</span></div>
-      <div class="metric paper"><b>257-478ms</b><span>current isolated live-session focus</span></div>
-      <div class="metric paper"><b>20s+</b><span>live <code>/api/open</code> request timed out with zero response bytes while the installed server was contended</span></div>
-      <div class="metric paper"><b>~565KB/s</b><span>unchanged full response at one-second polling</span></div>
+      <div class="metric paper"><b>0.46ms</b><span>final live-soak p50 across changed and unchanged polls, down from 412-474ms warm full snapshots</span></div>
+      <div class="metric paper"><b>6ms</b><span>final native-focus p95, down from 257-478ms isolated HTTP focus</span></div>
+      <div class="metric paper"><b>7.6ms</b><span>synthetic resume acknowledgement; eight simultaneous live opens created exactly one workspace</span></div>
+      <div class="metric paper"><b>97.8%</b><span>quiet-soak polls returned zero-body 304; 1,760 of 1,800 requests transferred no JSON</span></div>
     </div>
     <nav aria-label="Sections">
       <ul class="toc">
@@ -165,6 +165,7 @@
         <li><a href="#tests">Regression strategy</a></li>
         <li><a href="#rollout">Rollout and rollback</a></li>
         <li><a href="#excluded">Excluded until evidence changes</a></li>
+        <li><a href="#shipped">What shipped</a></li>
         <li><a href="#references">References</a></li>
       </ul>
     </nav>
@@ -334,10 +335,29 @@ interface SessionActionCoordinator {
     </ul>
   </section>
 
-  <section class="closing paper">
-    <p class="eyebrow" style="color:#9db7ff">Authorization gate</p>
-    <h2>Ready for approval, not implementation.</h2>
-    <p>The no-brainer package is deliberately conservative: query-only catalogue reads, exact durable-data caching, ETags, one liveness read per action, asynchronous subprocesses, deferred cosmetic paint, command-layer mutations, typed errors, and enforced module seams. SSE, worker isolation, and a cmux web bridge remain evidence-gated follow-ups.</p>
+  <section class="closing paper" id="shipped">
+    <p class="eyebrow" style="color:#9db7ff">Shipped record</p>
+    <h2>The architecture changed as planned. The evidence changed one platform decision.</h2>
+    <p>CCS shipped the query-only read lane, exact durable invalidation, serialized response cache, strong ETags, stale-while-revalidate liveness, asynchronous actions, command-only mutations, typed failures, the physical catalogue split, bounded caches, hard subprocess termination, and single-flight resume. The final code of record is <code>5d9196f2f72c5cf03eda84621ba35f4a468b10f5</code>.</p>
+    <div class="preserve">
+      <div class="paper"><h3>Measured outcome</h3><ul><li>The isolated unchanged-response p95 is 2.908ms with HTTP 304 and zero body bytes.</li><li>The isolated changed-visible p95 is 0.191ms.</li><li>The 30-minute live soak completed 1,800 polls at p50 0.461ms and p95 37.021ms, with zero failures and zero degraded snapshots.</li><li>Real writer contention completed in 91.847ms, below the 120ms contract.</li><li>Eight simultaneous live opens produced one resume, seven focused followers, and exactly one workspace.</li></ul></div>
+      <div class="paper"><h3>Evidence-gated cmux follow-through</h3><ul><li>Optimized HTTP focus still missed the 150ms gate, so the conditional typed bridge was reopened.</li><li>cmux shipped one fixed rail-only workspace-focus verb, available only to local files and exact literal-loopback origins.</li><li>Fifty live native focuses completed at p50 4ms and p95 6ms with zero HTTP fallback.</li><li>Final review also moved custom-sidebar resolution and <code>.url</code> parsing off the main thread and made exact-case lookup independent of directory size.</li><li>The final cmux code of record is <code>626c1d1c97aa210cb9dec52aa60518bb48d74883</code>.</li></ul></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Decision</th><th>What reality showed</th><th>Final disposition</th></tr></thead>
+        <tbody>
+          <tr><td>SSE</td><td>1,760 of 1,800 quiet-soak polls were zero-body 304 responses; no failures or false degradation occurred.</td><td class="no">Not added. It would duplicate a freshness path without addressing projection rebuild cost.</td></tr>
+          <tr><td>Typed cmux bridge</td><td>HTTP focus remained above the 150ms evidence gate while native selection completed at p95 6ms.</td><td class="yes">Added with a fixed request/reply protocol, source-derived scope, navigation lock, and dispatch-time origin checks.</td></tr>
+          <tr><td>Duplicate resume</td><td>Eight real concurrent requests initially created eight workspaces during implementation.</td><td class="yes">Single-flight ownership moved before Bridge and index work; the final live run created one workspace.</td></tr>
+          <tr><td>Live liveness errors</td><td>Transient unreadable snapshots occurred outside startup, and timeout races could strand SIGTERM-resistant probes.</td><td class="yes">One bounded retry plus SIGKILL escalation closed both failure modes.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout"><strong>Plan divergence.</strong> The plan initially kept cmux out of the first wave. Measured focus latency earned a narrow exception, not a generic web-to-cmux dispatcher. The bridge exposes only workspace focus and reuses cmux's existing selection path.</div>
+    <div class="callout warn"><strong>Risks that became real.</strong> Transient liveness reads, atomic SQLite replacement, duplicate concurrent resume, remote reload caching, invalid <code>.url</code> interpreter fallback, and custom-sidebar main-thread filesystem work all reproduced and received behavior-level regression coverage.</div>
+    <div class="callout"><strong>Accepted residuals.</strong> A hostile user-selected loopback page can still create focus churn because the fixed focus verb is not rate-limited. The four MiB response-cache byte cap retains about seven current-size full representations rather than sixteen. Catalogue byte accounting adds about 4.1ms on invalidation, but not on cache hits or 304 responses. The repository still has four unrelated launcher fixture failures, three unrelated circular dependencies, and one scheduler-only CLI auxiliary timeout that passed immediately in isolation.</div>
+    <p class="artifact"><span class="artifact-label">Evidence</span> <a href="file:///Users/mimen/Programming/Repos/claude-sessions/docs/evidence/sidebar-performance/final-integrated-summary.json" target="_blank" rel="noopener">final-integrated-summary.json</a></p>
   </section>
 </main>
 </body>

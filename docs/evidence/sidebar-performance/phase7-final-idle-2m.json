@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-08-06T07:36:39.661Z",
+  "finishedAt": "2026-08-06T07:38:39.872Z",
+  "requestedDurationMs": 120000,
+  "actualDurationMs": 120211,
+  "url": "http://127.0.0.1:8787/api/snapshot?view=active&limit=10000",
+  "polls": 120,
+  "statuses": {
+    "200": 3,
+    "304": 117
+  },
+  "fullResponses": 3,
+  "notModifiedResponses": 117,
+  "transferredBodyBytes": 1745403,
+  "latencyMs": {
+    "min": 7.95537499999773,
+    "p50": 17.716583000001265,
+    "p95": 35.5008339999913,
+    "max": 102.46516699998756
+  },
+  "failures": [],
+  "degraded": [],
+  "finalSnapshot": {
+    "rows": 388,
+    "livenessReadable": true,
+    "indexReadable": true,
+    "catalogueReadable": true
+  }
+}
