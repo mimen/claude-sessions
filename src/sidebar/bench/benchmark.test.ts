@@ -91,15 +91,19 @@ describe("sidebar performance characterization", () => {
   });
 });
 
-test("Phase 2 gate: loopback unchanged polls return fast, empty 304 responses", async () => {
+test("Phase 2 gate: stale polls stay fast while the next request exposes changed bytes", async () => {
   await withFixture({ sessionCount: 120, liveSessionCount: 8 }, async (fixture) => {
     const result = await measureEtagLoopback(fixture, 20);
 
     expect(new Set(result.unchanged.statuses)).toEqual(new Set([304]));
     expect(result.unchanged.bodyBytes).toBe(0);
     expect(result.unchanged.latencyMs.p95).toBeLessThan(10);
-    expect(new Set(result.changedWarm.statuses)).toEqual(new Set([200]));
-    expect(result.changedWarm.bodyBytes.min).toBeGreaterThan(0);
+    expect(new Set(result.staleTrigger.statuses)).toEqual(new Set([304]));
+    expect(result.staleTrigger.bodyBytes).toBe(0);
+    expect(result.staleTrigger.latencyMs.p95).toBeLessThan(10);
+    expect(new Set(result.changedVisible.statuses)).toEqual(new Set([200]));
+    expect(result.changedVisible.bodyBytes.min).toBeGreaterThan(0);
+    expect(result.changedVisible.latencyMs.p95).toBeLessThan(120);
   });
 });
 

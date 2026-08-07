@@ -77,7 +77,12 @@ export interface EtagLoopbackResult {
     readonly bodyBytes: number;
     readonly latencyMs: Distribution;
   };
-  readonly changedWarm: {
+  readonly staleTrigger: {
+    readonly statuses: readonly number[];
+    readonly bodyBytes: number;
+    readonly latencyMs: Distribution;
+  };
+  readonly changedVisible: {
     readonly statuses: readonly number[];
     readonly bodyBytes: Distribution;
     readonly latencyMs: Distribution;
@@ -508,8 +513,34 @@ export async function measureEtagLoopback(
   fixture: SidebarFixture,
   sampleCount = 50,
 ): Promise<EtagLoopbackResult> {
-  const source = sourceFor(fixture, []);
-  const server = createSidebarServer({ source, assets: new Map(), port: 0 });
+  const fixtureSource = sourceFor(fixture, []);
+  let completedSnapshots = 0;
+  let snapshotsInFlight = 0;
+  const source: SidebarSource = {
+    ...fixtureSource,
+    async snapshot(view, rowLimit, include): Promise<SidebarSnapshot> {
+      snapshotsInFlight += 1;
+      try {
+        return await fixtureSource.snapshot(view, rowLimit, include);
+      } finally {
+        snapshotsInFlight -= 1;
+        completedSnapshots += 1;
+      }
+    },
+  };
+  const waitFor = async (predicate: () => boolean, label: string): Promise<void> => {
+    const deadline = performance.now() + 2_000;
+    while (!predicate()) {
+      if (performance.now() >= deadline) throw new Error(`ETag benchmark timed out waiting for ${label}`);
+      await Bun.sleep(1);
+    }
+  };
+  const server = createSidebarServer({
+    source,
+    assets: new Map(),
+    port: 0,
+    snapshotRepresentationTtlMs: 1,
+  });
   const url = `${server.url.origin}/api/snapshot?scope=active&limit=500&include=completed,archived`;
   try {
     const initial = await fetch(url);
@@ -528,24 +559,44 @@ export async function measureEtagLoopback(
       unchangedStatuses.push(response.status);
       unchangedBodyBytes += (await response.arrayBuffer()).byteLength;
     }
+    await waitFor(() => snapshotsInFlight === 0, "unchanged refresh completion");
 
     const writer = new Database(fixture.cataloguePath);
-    const changedLatencies: number[] = [];
-    const changedStatuses: number[] = [];
-    const changedBodyBytes: number[] = [];
+    const staleTriggerLatencies: number[] = [];
+    const staleTriggerStatuses: number[] = [];
+    let staleTriggerBodyBytes = 0;
+    const changedVisibleLatencies: number[] = [];
+    const changedVisibleStatuses: number[] = [];
+    const changedVisibleBodyBytes: number[] = [];
     try {
       for (let sample = 0; sample < Math.max(8, Math.min(sampleCount, 20)); sample += 1) {
+        await Bun.sleep(2);
         writer.query(
           `UPDATE catalogue
               SET custom_title = COALESCE(custom_title, session_id) || $suffix
             WHERE session_id = (SELECT session_id FROM catalogue ORDER BY session_id LIMIT 1)`,
         ).run({ $suffix: `-${sample}` });
-        const startedAt = performance.now();
-        const response = await fetch(url, { headers: { "if-none-match": etag } });
-        changedLatencies.push(performance.now() - startedAt);
-        changedStatuses.push(response.status);
-        changedBodyBytes.push((await response.arrayBuffer()).byteLength);
-        etag = response.headers.get("etag") ?? etag;
+
+        const completedBeforeTrigger = completedSnapshots;
+        const staleStartedAt = performance.now();
+        const stale = await fetch(url, { headers: { "if-none-match": etag } });
+        staleTriggerLatencies.push(performance.now() - staleStartedAt);
+        staleTriggerStatuses.push(stale.status);
+        staleTriggerBodyBytes += (await stale.arrayBuffer()).byteLength;
+        await waitFor(
+          () => completedSnapshots > completedBeforeTrigger && snapshotsInFlight === 0,
+          "stale refresh completion",
+        );
+        // The source completion precedes the server's synchronous serialization and cache swap.
+        await Bun.sleep(0);
+
+        const changedStartedAt = performance.now();
+        const changed = await fetch(url, { headers: { "if-none-match": etag } });
+        changedVisibleLatencies.push(performance.now() - changedStartedAt);
+        changedVisibleStatuses.push(changed.status);
+        changedVisibleBodyBytes.push((await changed.arrayBuffer()).byteLength);
+        etag = changed.headers.get("etag") ?? etag;
+        await waitFor(() => snapshotsInFlight === 0, "changed-visible trailing refresh");
       }
     } finally {
       writer.close();
@@ -558,10 +609,15 @@ export async function measureEtagLoopback(
         bodyBytes: unchangedBodyBytes,
         latencyMs: distribution(unchangedLatencies),
       },
-      changedWarm: {
-        statuses: changedStatuses,
-        bodyBytes: distribution(changedBodyBytes),
-        latencyMs: distribution(changedLatencies),
+      staleTrigger: {
+        statuses: staleTriggerStatuses,
+        bodyBytes: staleTriggerBodyBytes,
+        latencyMs: distribution(staleTriggerLatencies),
+      },
+      changedVisible: {
+        statuses: changedVisibleStatuses,
+        bodyBytes: distribution(changedVisibleBodyBytes),
+        latencyMs: distribution(changedVisibleLatencies),
       },
     };
   } finally {
