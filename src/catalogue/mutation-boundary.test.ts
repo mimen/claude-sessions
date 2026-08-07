@@ -64,20 +64,26 @@ function filesUnder(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-function bunEntrypointsUnder(dir: string, out: string[] = []): string[] {
+function typescriptEntrypointsUnder(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) {
-      bunEntrypointsUnder(full, out);
+      typescriptEntrypointsUnder(full, out);
       continue;
     }
-    if (readFileSync(full, "utf8").startsWith("#!/usr/bin/env bun\n")) out.push(full);
+    const source = readFileSync(full, "utf8");
+    if (
+      source.startsWith("#!/usr/bin/env bun\n")
+      || (source.startsWith("#!/bin/zsh -f\n':' //; exec ") && source.includes("\nimport "))
+    ) {
+      out.push(full);
+    }
   }
   return out;
 }
 
 function repositoryFiles(): string[] {
-  return [...filesUnder(SRC), ...filesUnder(SCRIPTS), ...bunEntrypointsUnder(BIN)];
+  return [...filesUnder(SRC), ...filesUnder(SCRIPTS), ...typescriptEntrypointsUnder(BIN)];
 }
 
 function repoPath(file: string): string {
@@ -328,7 +334,7 @@ test("writer bindings respect lexical shadowing", () => {
   `, sidebarFile, writerTargets)).toBeFalse();
 });
 
-test("repository scan includes Bun TypeScript entrypoints and excludes shell binaries", () => {
+test("repository scan includes TypeScript entrypoints and excludes shell binaries", () => {
   const files = repositoryFiles().map(repoPath);
   expect(files).toContain("bin/ccs");
   expect(files).not.toContain("bin/ccs-claude-shim");
