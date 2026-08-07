@@ -31,6 +31,7 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 
 const MAX_FAVICON_BYTES = 256 * 1024;
 const MAX_CACHED_FAVICONS = 64;
+const MAX_CACHED_FAVICON_BYTES = 2 * 1024 * 1024;
 
 interface CachedFavicon {
   readonly body: ArrayBuffer;
@@ -39,6 +40,8 @@ interface CachedFavicon {
 }
 
 const faviconCache = new Map<string, CachedFavicon>();
+let cachedFaviconBytes = 0;
+let faviconCacheHits = 0;
 
 export interface FaviconAsset {
   readonly body: ArrayBuffer;
@@ -110,22 +113,56 @@ async function realPathIsContainedAsync(directory: string, path: string): Promis
   }
 }
 
+function deleteCachedFavicon(path: string): void {
+  const cached = faviconCache.get(path);
+  if (!cached) return;
+  cachedFaviconBytes -= cached.body.byteLength;
+  faviconCache.delete(path);
+}
+
 function cachedFavicon(path: string, stats: BigIntStats, type: string): FaviconAsset | null {
   const cached = faviconCache.get(path);
-  if (!cached || cached.type !== type || !sameFileVersion(cached.stats, stats)) return null;
+  if (!cached) return null;
+  if (cached.type !== type || !sameFileVersion(cached.stats, stats)) {
+    deleteCachedFavicon(path);
+    return null;
+  }
   faviconCache.delete(path);
   faviconCache.set(path, cached);
+  faviconCacheHits += 1;
   return { body: cached.body.slice(0), type };
 }
 
 function cacheFavicon(path: string, stats: BigIntStats, type: string, body: ArrayBuffer): void {
-  faviconCache.delete(path);
-  faviconCache.set(path, { body: body.slice(0), stats, type });
-  while (faviconCache.size > MAX_CACHED_FAVICONS) {
+  deleteCachedFavicon(path);
+  const cachedBody = body.slice(0);
+  faviconCache.set(path, { body: cachedBody, stats, type });
+  cachedFaviconBytes += cachedBody.byteLength;
+  while (faviconCache.size > MAX_CACHED_FAVICONS
+    || cachedFaviconBytes > MAX_CACHED_FAVICON_BYTES) {
     const oldest = faviconCache.keys().next().value;
     if (typeof oldest !== "string") break;
-    faviconCache.delete(oldest);
+    deleteCachedFavicon(oldest);
   }
+}
+
+/** Reset and inspect the process cache in focused tests. */
+export function _resetFaviconCache(): void {
+  faviconCache.clear();
+  cachedFaviconBytes = 0;
+  faviconCacheHits = 0;
+}
+
+export function _faviconCacheSnapshot(): {
+  readonly hits: number;
+  readonly paths: readonly string[];
+  readonly totalBytes: number;
+} {
+  return {
+    hits: faviconCacheHits,
+    paths: [...faviconCache.keys()],
+    totalBytes: cachedFaviconBytes,
+  };
 }
 
 async function readExact(handle: FileHandle, size: number): Promise<ArrayBuffer | null> {
