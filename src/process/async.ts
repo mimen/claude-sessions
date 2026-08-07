@@ -18,6 +18,8 @@ export interface AsyncProcessAdapter {
   ): Promise<AsyncProcessResult>;
 }
 
+const SIGTERM_GRACE_MS = 100;
+
 /** Bun subprocess adapter that never blocks the caller's event loop while a command is in flight. */
 export const bunAsyncProcessAdapter: AsyncProcessAdapter = {
   async run(
@@ -43,9 +45,13 @@ export const bunAsyncProcessAdapter: AsyncProcessAdapter = {
     }
 
     let timedOut = false;
+    let forceKillTimeout: ReturnType<typeof setTimeout> | undefined;
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      child.kill("SIGTERM");
+      forceKillTimeout = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, SIGTERM_GRACE_MS);
     }, options.timeoutMs);
 
     try {
@@ -70,6 +76,7 @@ export const bunAsyncProcessAdapter: AsyncProcessAdapter = {
       };
     } finally {
       clearTimeout(timeout);
+      if (forceKillTimeout !== undefined) clearTimeout(forceKillTimeout);
     }
   },
 };
