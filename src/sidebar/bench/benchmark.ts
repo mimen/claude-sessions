@@ -99,6 +99,83 @@ export interface LivenessCacheResult {
   readonly refreshPendingWhenFirstResponseCompleted: boolean;
 }
 
+export const SIDEBAR_PERFORMANCE_BUDGETS = {
+  contentionSnapshotMs: 120,
+  eventLoopMaximumBlockMs: 50,
+  unchangedPollP95Ms: 10,
+  staleTriggerP95Ms: 10,
+  changedVisibleP50Ms: 40,
+  changedVisibleP95Ms: 120,
+} as const;
+
+export interface SidebarPerformanceBudgetInput {
+  readonly contention: ContentionResult;
+  readonly etagLoopback: EtagLoopbackResult;
+  readonly readPathByteIdentical: boolean;
+  readonly logicalStateUnchanged: boolean;
+}
+
+function allStatusesAre(statuses: readonly number[], expected: number): boolean {
+  return statuses.length > 0 && statuses.every((status) => status === expected);
+}
+
+/**
+ * Pure evaluator used by the isolated benchmark command; unit suites do not enforce wall-clock
+ * budgets because their scheduler contention is unrelated to sidebar performance.
+ */
+export function sidebarPerformanceBudgetFailures(input: SidebarPerformanceBudgetInput): string[] {
+  const failures: string[] = [];
+  const { contention, etagLoopback } = input;
+  if (contention.snapshotMs >= SIDEBAR_PERFORMANCE_BUDGETS.contentionSnapshotMs) {
+    failures.push(
+      `contention snapshot ${contention.snapshotMs}ms >= ${SIDEBAR_PERFORMANCE_BUDGETS.contentionSnapshotMs}ms`,
+    );
+  }
+  if (contention.heartbeatLongestDelayMs >= SIDEBAR_PERFORMANCE_BUDGETS.eventLoopMaximumBlockMs) {
+    failures.push(
+      `event-loop delay ${contention.heartbeatLongestDelayMs}ms >= ${SIDEBAR_PERFORMANCE_BUDGETS.eventLoopMaximumBlockMs}ms`,
+    );
+  }
+  if (!contention.catalogueReadable) failures.push("contention snapshot reported an unreadable catalogue");
+  if (etagLoopback.unchanged.latencyMs.p95 >= SIDEBAR_PERFORMANCE_BUDGETS.unchangedPollP95Ms) {
+    failures.push(
+      `unchanged p95 ${etagLoopback.unchanged.latencyMs.p95}ms >= ${SIDEBAR_PERFORMANCE_BUDGETS.unchangedPollP95Ms}ms`,
+    );
+  }
+  if (!allStatusesAre(etagLoopback.unchanged.statuses, 304)) {
+    failures.push("unchanged requests did not all return 304");
+  }
+  if (etagLoopback.unchanged.bodyBytes !== 0) failures.push("unchanged requests returned body bytes");
+  if (etagLoopback.staleTrigger.latencyMs.p95 >= SIDEBAR_PERFORMANCE_BUDGETS.staleTriggerP95Ms) {
+    failures.push(
+      `stale-trigger p95 ${etagLoopback.staleTrigger.latencyMs.p95}ms >= ${SIDEBAR_PERFORMANCE_BUDGETS.staleTriggerP95Ms}ms`,
+    );
+  }
+  if (!allStatusesAre(etagLoopback.staleTrigger.statuses, 304)) {
+    failures.push("stale-trigger requests did not all return 304");
+  }
+  if (etagLoopback.staleTrigger.bodyBytes !== 0) failures.push("stale-trigger requests returned body bytes");
+  if (etagLoopback.changedVisible.latencyMs.p50 >= SIDEBAR_PERFORMANCE_BUDGETS.changedVisibleP50Ms) {
+    failures.push(
+      `changed-visible p50 ${etagLoopback.changedVisible.latencyMs.p50}ms >= ${SIDEBAR_PERFORMANCE_BUDGETS.changedVisibleP50Ms}ms`,
+    );
+  }
+  if (etagLoopback.changedVisible.latencyMs.p95 >= SIDEBAR_PERFORMANCE_BUDGETS.changedVisibleP95Ms) {
+    failures.push(
+      `changed-visible p95 ${etagLoopback.changedVisible.latencyMs.p95}ms >= ${SIDEBAR_PERFORMANCE_BUDGETS.changedVisibleP95Ms}ms`,
+    );
+  }
+  if (!allStatusesAre(etagLoopback.changedVisible.statuses, 200)) {
+    failures.push("changed-visible requests did not all return 200");
+  }
+  if (etagLoopback.changedVisible.bodyBytes.min <= 0) {
+    failures.push("changed-visible requests returned no representation bytes");
+  }
+  if (!input.readPathByteIdentical) failures.push("read-path database witnesses changed");
+  if (!input.logicalStateUnchanged) failures.push("benchmark fixture logical state changed");
+  return failures;
+}
+
 function rounded(value: number): number {
   return Math.round(value * 1_000) / 1_000;
 }

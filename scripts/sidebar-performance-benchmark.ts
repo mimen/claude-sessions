@@ -7,6 +7,8 @@ import {
   measureEtagLoopback,
   measureIdleProfile,
   measureSnapshotLivenessCache,
+  SIDEBAR_PERFORMANCE_BUDGETS,
+  sidebarPerformanceBudgetFailures,
   witnessDatabase,
 } from "../src/sidebar/bench/benchmark.ts";
 import {
@@ -74,6 +76,20 @@ try {
   };
   const etagLoopback = await measureEtagLoopback(fleet, Math.max(20, samples * 4));
   const livenessCache = await measureSnapshotLivenessCache(fleet, Math.max(20, samples * 4));
+  const readPathByteIdentical = JSON.stringify(before) === JSON.stringify(afterCharacterization);
+  const logicalStateUnchanged = JSON.stringify({
+    catalogueState: before.catalogueState,
+    indexState: before.indexState,
+  }) === JSON.stringify({
+    catalogueState: after.catalogueState,
+    indexState: after.indexState,
+  });
+  const budgetFailures = sidebarPerformanceBudgetFailures({
+    contention,
+    etagLoopback,
+    readPathByteIdentical,
+    logicalStateUnchanged,
+  });
 
   const baseline = {
     schemaVersion: 2,
@@ -98,14 +114,8 @@ try {
       before,
       afterCharacterization,
       after,
-      readPathByteIdentical: JSON.stringify(before) === JSON.stringify(afterCharacterization),
-      logicalStateUnchanged: JSON.stringify({
-        catalogueState: before.catalogueState,
-        indexState: before.indexState,
-      }) === JSON.stringify({
-        catalogueState: after.catalogueState,
-        indexState: after.indexState,
-      }),
+      readPathByteIdentical,
+      logicalStateUnchanged,
     },
     golden: goldenCharacterization,
     fleet: fleetCharacterization,
@@ -113,18 +123,22 @@ try {
     idleProfile,
     etagLoopback,
     livenessCache,
+    performanceGate: {
+      passed: budgetFailures.length === 0,
+      failures: budgetFailures,
+    },
     expectedPhase1Gates: {
-      writerLockSnapshotMs: 120,
-      eventLoopMaximumBlockMs: 50,
-      changedVisibleSnapshotP50Ms: 40,
-      changedVisibleSnapshotP95Ms: 120,
+      writerLockSnapshotMs: SIDEBAR_PERFORMANCE_BUDGETS.contentionSnapshotMs,
+      eventLoopMaximumBlockMs: SIDEBAR_PERFORMANCE_BUDGETS.eventLoopMaximumBlockMs,
+      changedVisibleSnapshotP50Ms: SIDEBAR_PERFORMANCE_BUDGETS.changedVisibleP50Ms,
+      changedVisibleSnapshotP95Ms: SIDEBAR_PERFORMANCE_BUDGETS.changedVisibleP95Ms,
       liveFocusP95Ms: 150,
     },
     expectedPhase2Gates: {
-      unchangedPollP95Ms: 10,
+      unchangedPollP95Ms: SIDEBAR_PERFORMANCE_BUDGETS.unchangedPollP95Ms,
       unchangedBodyBytes: 0,
       unchangedStatus: 304,
-      staleTriggerP95Ms: 10,
+      staleTriggerP95Ms: SIDEBAR_PERFORMANCE_BUDGETS.staleTriggerP95Ms,
       staleTriggerBodyBytes: 0,
       staleTriggerStatus: 304,
       changedVisibleStatus: 200,
@@ -148,9 +162,13 @@ try {
     idleProfile,
     etagLoopback,
     livenessCache,
+    performanceGate: baseline.performanceGate,
     readPathByteIdentical: baseline.databaseWitness.readPathByteIdentical,
     logicalStateUnchanged: baseline.databaseWitness.logicalStateUnchanged,
   }, null, 2)}\n`);
+  if (budgetFailures.length > 0) {
+    throw new Error(`sidebar performance budgets failed:\n- ${budgetFailures.join("\n- ")}`);
+  }
 } finally {
   if (previousRoot === undefined) delete process.env.CCS_ROOT;
   else process.env.CCS_ROOT = previousRoot;

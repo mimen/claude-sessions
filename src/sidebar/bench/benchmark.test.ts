@@ -8,9 +8,14 @@ import {
   measureContention,
   measureEtagLoopback,
   normalizeRecommendationAlignment,
+  sidebarPerformanceBudgetFailures,
   witnessDatabase,
 } from "./benchmark.ts";
 import { createSidebarFixture } from "./fixtures.ts";
+
+function benchmarkDistribution(value: number, min = value) {
+  return { samples: [value], min, p50: value, p95: value, max: value, mean: value };
+}
 
 async function withFixture<T>(
   options: { readonly sessionCount: number; readonly liveSessionCount: number },
@@ -91,31 +96,88 @@ describe("sidebar performance characterization", () => {
   });
 });
 
-test("Phase 2 gate: stale polls stay fast while the next request exposes changed bytes", async () => {
+test("isolated benchmark budgets reject latency, semantics, contention, and witness regressions", () => {
+  const healthy = {
+    contention: {
+      snapshotMs: 10,
+      heartbeatTicks: 5,
+      heartbeatLongestDelayMs: 2,
+      catalogueReadable: true,
+    },
+    etagLoopback: {
+      initialBodyBytes: 100,
+      unchanged: { statuses: [304], bodyBytes: 0, latencyMs: benchmarkDistribution(2) },
+      staleTrigger: { statuses: [304], bodyBytes: 0, latencyMs: benchmarkDistribution(3) },
+      changedVisible: {
+        statuses: [200],
+        bodyBytes: benchmarkDistribution(100),
+        latencyMs: benchmarkDistribution(20),
+      },
+    },
+    readPathByteIdentical: true,
+    logicalStateUnchanged: true,
+  } as const;
+  expect(sidebarPerformanceBudgetFailures(healthy)).toEqual([]);
+
+  const failures = sidebarPerformanceBudgetFailures({
+    ...healthy,
+    contention: {
+      ...healthy.contention,
+      snapshotMs: 120,
+      heartbeatLongestDelayMs: 50,
+      catalogueReadable: false,
+    },
+    etagLoopback: {
+      ...healthy.etagLoopback,
+      unchanged: { statuses: [200], bodyBytes: 1, latencyMs: benchmarkDistribution(10) },
+      staleTrigger: { statuses: [200], bodyBytes: 1, latencyMs: benchmarkDistribution(10) },
+      changedVisible: {
+        statuses: [304],
+        bodyBytes: benchmarkDistribution(0),
+        latencyMs: benchmarkDistribution(120),
+      },
+    },
+    readPathByteIdentical: false,
+    logicalStateUnchanged: false,
+  });
+  expect(failures).toContain("unchanged requests did not all return 304");
+  expect(failures).toContain("stale-trigger requests did not all return 304");
+  expect(failures).toContain("changed-visible requests did not all return 200");
+  expect(failures).toContain("contention snapshot reported an unreadable catalogue");
+  expect(failures).toContain("read-path database witnesses changed");
+  expect(failures).toContain("benchmark fixture logical state changed");
+  expect(failures.length).toBeGreaterThan(6);
+});
+
+test("Phase 2 semantics: stale polls stay fast while the next request exposes changed bytes", async () => {
   await withFixture({ sessionCount: 120, liveSessionCount: 8 }, async (fixture) => {
     const result = await measureEtagLoopback(fixture, 20);
 
     expect(new Set(result.unchanged.statuses)).toEqual(new Set([304]));
     expect(result.unchanged.bodyBytes).toBe(0);
-    expect(result.unchanged.latencyMs.p95).toBeLessThan(10);
     expect(new Set(result.staleTrigger.statuses)).toEqual(new Set([304]));
     expect(result.staleTrigger.bodyBytes).toBe(0);
-    expect(result.staleTrigger.latencyMs.p95).toBeLessThan(10);
     expect(new Set(result.changedVisible.statuses)).toEqual(new Set([200]));
     expect(result.changedVisible.bodyBytes.min).toBeGreaterThan(0);
-    expect(result.changedVisible.latencyMs.p95).toBeLessThan(120);
+    // Parallel unit runs are scheduler-loaded semantic checks, not the isolated measurement gate.
+    expect(Math.max(
+      result.unchanged.latencyMs.p95,
+      result.staleTrigger.latencyMs.p95,
+      result.changedVisible.latencyMs.p95,
+    )).toBeLessThan(500);
   });
 });
 
 test(
-  "Phase 1 gate: held catalogue writer does not block snapshot",
+  "Phase 1 semantics: held catalogue writer remains readable and nonblocking",
   async () => {
     await withFixture({ sessionCount: 12, liveSessionCount: 2 }, async (fixture) => {
       const result = await measureContention(fixture, 350);
 
-      expect(result.snapshotMs).toBeLessThan(120);
-      expect(result.heartbeatLongestDelayMs).toBeLessThan(50);
       expect(result.catalogueReadable).toBeTrue();
+      // The dedicated benchmark command owns strict contention and event-loop budgets.
+      expect(result.snapshotMs).toBeLessThan(1_000);
+      expect(result.heartbeatLongestDelayMs).toBeLessThan(500);
     });
   },
 );
