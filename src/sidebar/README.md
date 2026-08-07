@@ -120,9 +120,9 @@ Three endpoints, and nothing else:
 | `status.ts` | Parsing and bounded reading of cmux's `claude_code` status. |
 | `worktree.ts` | Resolving a directory to its project and, if linked, its worktree. |
 | `favicon.ts` | Finding a project's icon in conventional locations. |
-| `snapshot.ts` | Builds normalized snapshots and exact ETags over the adapters above. |
+| `snapshot.ts` | Builds normalized snapshots over the adapters above. |
 | `session-action-coordinator.ts` | Runs focus/resume and mutation actions outside snapshot construction. |
-| `server.ts` | The loopback host and conditional-GET transport. |
+| `server.ts` | The loopback host, exact-byte ETags, and bounded per-query stale-while-revalidate representations. |
 | `bundle.ts` | Builds the browser bundle at startup, so the served page always matches source. |
 | `web/focus-bridge.ts` | The optional native focus handler, and the single fall-through to HTTP when it does not focus. |
 | `web/` | The React app. Typechecked by its own project (`bun run typecheck:web`). |
@@ -133,8 +133,10 @@ catalogue mutation SQL. `catalogue/mutation-boundary.test.ts` enforces this.
 
 ## Limits
 
-The page polls every four seconds. Unchanged polls use the snapshot ETag and return an empty `304`; changed
-snapshots are built asynchronously and served from the centralized warm cache. There is no push transport;
+The page polls every four seconds. The server keeps a bounded, exact-query cache of serialized snapshots
+for 2.5 seconds: warm polls compare the cached exact-byte ETag without rebuilding, and stale polls serve the
+last complete representation while one background rebuild runs. A successful action invalidates these
+representations so the browser's forced follow-up load waits for a fresh build. There is no push transport;
 the UI shows what the last complete snapshot said and labels unreadable sources rather than implying
 freshness it does not have.
 

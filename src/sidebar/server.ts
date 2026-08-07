@@ -22,6 +22,10 @@ import { sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
  */
 const MIN_ROW_LIMIT = 20;
 const MAX_ROW_LIMIT = 2_000;
+/** Match the source's live-tree freshness so polls never wait on repeated full projections. */
+const SNAPSHOT_REPRESENTATION_TTL_MS = 2_500;
+/** The browser uses only a handful of query shapes; keep hand-written requests from growing forever. */
+const MAX_SNAPSHOT_REPRESENTATIONS = 16;
 
 /** cmux's Dock needs a stable origin, so the port is fixed unless deliberately overridden. */
 export const DEFAULT_SIDEBAR_PORT = 8787;
@@ -39,6 +43,8 @@ export interface SidebarServerOptions {
   readonly hostname?: string;
   /** Injectable so action diagnostics can be asserted without scraping source or stderr. */
   readonly logger?: SidebarServerLogger;
+  /** Test seam; production uses the source-aligned 2.5-second representation freshness. */
+  readonly snapshotRepresentationTtlMs?: number;
 }
 
 type JsonValue = string | number | boolean | null | JsonObject | readonly JsonValue[];
@@ -139,6 +145,40 @@ function etagMatches(header: string | null, etag: string): boolean {
   });
 }
 
+interface SnapshotQuery {
+  readonly scope: SidebarView;
+  readonly limit: number | undefined;
+  readonly include: readonly SidebarLifecycle[];
+}
+
+interface SnapshotRepresentation {
+  readonly body: string;
+  readonly etag: string;
+  readonly completedAt: number;
+}
+
+interface SnapshotRepresentationEntry {
+  representation?: SnapshotRepresentation;
+  rebuild?: Promise<SnapshotRepresentation>;
+}
+
+function snapshotQueryKey(query: SnapshotQuery): string {
+  return JSON.stringify([query.scope, query.limit ?? null, query.include]);
+}
+
+function snapshotResponse(request: Request, representation: SnapshotRepresentation): Response {
+  if (etagMatches(request.headers.get("if-none-match"), representation.etag)) {
+    return new Response(null, {
+      status: 304,
+      headers: { etag: representation.etag, "cache-control": "no-cache" },
+    });
+  }
+  return jsonText(representation.body, 200, {
+    etag: representation.etag,
+    "cache-control": "no-cache",
+  });
+}
+
 function json(body: object, status = 200): Response {
   return jsonText(JSON.stringify(body), status);
 }
@@ -185,9 +225,13 @@ function actionJson(
   operation: string,
   outcome: object & { readonly status?: string; readonly reason?: string },
   details: JsonObject,
+  invalidateSnapshots: () => void,
 ): Response {
   const code = actionFailureCode(outcome.status);
-  if (code === null) return json(outcome);
+  if (code === null) {
+    invalidateSnapshots();
+    return json(outcome);
+  }
 
   logger.warn("sidebar action failed", {
     operation,
@@ -245,6 +289,75 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
   const hostname = options.hostname ?? DEFAULT_SIDEBAR_HOST;
   const { source, assets } = options;
   const logger = options.logger ?? log;
+  const snapshotRepresentationTtlMs = options.snapshotRepresentationTtlMs
+    ?? SNAPSHOT_REPRESENTATION_TTL_MS;
+  const snapshotRepresentations = new Map<string, SnapshotRepresentationEntry>();
+
+  function invalidateSnapshots(): void {
+    snapshotRepresentations.clear();
+  }
+
+  function cachedEntry(key: string): SnapshotRepresentationEntry | undefined {
+    const entry = snapshotRepresentations.get(key);
+    if (entry === undefined) return undefined;
+    // Map insertion order doubles as a tiny LRU, including cold entries currently rebuilding.
+    snapshotRepresentations.delete(key);
+    snapshotRepresentations.set(key, entry);
+    return entry;
+  }
+
+  function createCachedEntry(key: string): SnapshotRepresentationEntry {
+    while (snapshotRepresentations.size >= MAX_SNAPSHOT_REPRESENTATIONS) {
+      const oldest = snapshotRepresentations.keys().next().value;
+      if (oldest === undefined) break;
+      snapshotRepresentations.delete(oldest);
+    }
+    const entry: SnapshotRepresentationEntry = {};
+    snapshotRepresentations.set(key, entry);
+    return entry;
+  }
+
+  function rebuildSnapshot(
+    key: string,
+    entry: SnapshotRepresentationEntry,
+    query: SnapshotQuery,
+  ): Promise<SnapshotRepresentation> {
+    if (entry.rebuild !== undefined) return entry.rebuild;
+
+    const rebuild = (async (): Promise<SnapshotRepresentation> => {
+      const startedAt = performance.now();
+      const snapshot = await source.snapshot(query.scope, query.limit, query.include);
+      const serializationStartedAt = performance.now();
+      const body = JSON.stringify(snapshot);
+      const serializationMs = performance.now() - serializationStartedAt;
+      const representation = {
+        body,
+        etag: snapshotEtag(body),
+        completedAt: performance.now(),
+      };
+      const totalMs = representation.completedAt - startedAt;
+      if (totalMs >= 100) {
+        logger.warn("slow sidebar snapshot request", {
+          view: query.scope,
+          rowCount: snapshot.rows.length,
+          payloadBytes: Buffer.byteLength(body),
+          totalMs,
+          serializationMs,
+          livenessReadable: snapshot.livenessReadable,
+          catalogueReadable: snapshot.catalogueReadable,
+          indexReadable: snapshot.indexReadable,
+        });
+      }
+      // An action may have invalidated this entry while its source read was in flight.
+      if (snapshotRepresentations.get(key) === entry) entry.representation = representation;
+      return representation;
+    })();
+    entry.rebuild = rebuild;
+    void rebuild.finally(() => {
+      if (entry.rebuild === rebuild) delete entry.rebuild;
+    }).catch(() => {});
+    return rebuild;
+  }
 
   if (!isLoopbackSidebarHost(hostname)) {
     const renderedHostname = JSON.stringify(hostname);
@@ -283,36 +396,28 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           .map((value) => value.trim())
           .filter((value): value is SidebarLifecycle =>
             value === "completed" || value === "archived");
-        const startedAt = performance.now();
+        const query: SnapshotQuery = { scope, limit, include };
+        const key = snapshotQueryKey(query);
         try {
           if (request.headers.get("x-ccs-refresh-liveness") === "1") {
             source.refreshSnapshotLiveness?.();
           }
-          const snapshot = await source.snapshot(scope, limit, include);
-          const serializationStartedAt = performance.now();
-          const body = JSON.stringify(snapshot);
-          const serializationMs = performance.now() - serializationStartedAt;
-          const etag = snapshotEtag(body);
-          const totalMs = performance.now() - startedAt;
-          if (totalMs >= 100) {
-            logger.warn("slow sidebar snapshot request", {
-              view: scope,
-              rowCount: snapshot.rows.length,
-              payloadBytes: Buffer.byteLength(body),
-              totalMs,
-              serializationMs,
-              livenessReadable: snapshot.livenessReadable,
-              catalogueReadable: snapshot.catalogueReadable,
-              indexReadable: snapshot.indexReadable,
+          const entry = cachedEntry(key) ?? createCachedEntry(key);
+          const cached = entry.representation;
+          if (cached === undefined) {
+            return snapshotResponse(request, await rebuildSnapshot(key, entry, query));
+          }
+
+          if (performance.now() - cached.completedAt >= snapshotRepresentationTtlMs) {
+            const refresh = rebuildSnapshot(key, entry, query);
+            void refresh.catch((error: unknown) => {
+              logger.warn("sidebar snapshot background refresh failed", {
+                view: scope,
+                error: error instanceof Error ? error.message : String(error),
+              });
             });
           }
-          if (etagMatches(request.headers.get("if-none-match"), etag)) {
-            return new Response(null, {
-              status: 304,
-              headers: { etag, "cache-control": "no-cache" },
-            });
-          }
-          return jsonText(body, 200, { etag, "cache-control": "no-cache" });
+          return snapshotResponse(request, cached);
         } catch (error) {
           logger.warn("sidebar snapshot request failed", {
             view: scope,
@@ -336,7 +441,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           return errorJson("bad_request");
         }
         try {
-          return actionJson(logger, "open", await source.open(sessionId), { sessionId });
+          return actionJson(logger, "open", await source.open(sessionId), { sessionId }, invalidateSnapshots);
         } catch (error) {
           logUnexpected(logger, "sidebar open request failed", error, { sessionId });
           return errorJson("internal_failure");
@@ -363,7 +468,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           ), {
             action: parsedBody.value.action,
             sessionId: parsedBody.value.sessionId,
-          });
+          }, invalidateSnapshots);
         } catch (error) {
           logUnexpected(logger, "sidebar lifecycle request failed", error, {
             action: parsedBody.value.action,
@@ -392,6 +497,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
             "decline",
             await source.declineSuggestion(parsed.value.sessionId, parsed.value.verb),
             { sessionId: parsed.value.sessionId, verb: parsed.value.verb },
+            invalidateSnapshots,
           );
         } catch (error) {
           logUnexpected(logger, "sidebar decline request failed", error, {
@@ -420,7 +526,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         try {
           return actionJson(logger, "workspace-focus", await source.focusWorkspace(workspaceId), {
             workspaceId,
-          });
+          }, invalidateSnapshots);
         } catch (error) {
           logUnexpected(logger, "sidebar workspace focus request failed", error, { workspaceId });
           return errorJson("internal_failure");
@@ -447,7 +553,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           return actionJson(logger, "workspace-pin", await source.setPinned(
             body.workspaceId,
             body.pinned,
-          ), { workspaceId: body.workspaceId, pinned: body.pinned });
+          ), { workspaceId: body.workspaceId, pinned: body.pinned }, invalidateSnapshots);
         } catch (error) {
           logUnexpected(logger, "sidebar workspace pin request failed", error, {
             workspaceId: body.workspaceId,
@@ -475,7 +581,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         try {
           return actionJson(logger, "workspace-close", await source.closeLooseWorkspace(workspaceId), {
             workspaceId,
-          });
+          }, invalidateSnapshots);
         } catch (error) {
           logUnexpected(logger, "sidebar loose workspace close request failed", error, { workspaceId });
           return errorJson("internal_failure");
@@ -496,7 +602,13 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           return errorJson("bad_request");
         }
         try {
-          return actionJson(logger, "session-close", await source.closeWorkspace(sessionId), { sessionId });
+          return actionJson(
+            logger,
+            "session-close",
+            await source.closeWorkspace(sessionId),
+            { sessionId },
+            invalidateSnapshots,
+          );
         } catch (error) {
           logUnexpected(logger, "sidebar session close request failed", error, { sessionId });
           return errorJson("internal_failure");

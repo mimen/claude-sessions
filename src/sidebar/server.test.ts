@@ -16,7 +16,12 @@ import type {
   FocusWorkspaceOutcome,
   PinWorkspaceOutcome,
 } from "./snapshot.ts";
-import { projectSidebar, type SidebarSnapshot, type SidebarView } from "./projection.ts";
+import {
+  projectSidebar,
+  type SidebarLifecycle,
+  type SidebarSnapshot,
+  type SidebarView,
+} from "./projection.ts";
 
 const EMPTY_SNAPSHOT: SidebarSnapshot = {
   rows: [],
@@ -70,7 +75,10 @@ function deferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void;
   };
 }
 
-function harness(overrides: Partial<SidebarSource> = {}): Harness {
+function harness(
+  overrides: Partial<SidebarSource> = {},
+  snapshotRepresentationTtlMs?: number,
+): Harness {
   // Built below from the base source, so a test overriding setLifecycle still drives retire.
   const opened: string[] = [];
   const diagnostics: Array<{
@@ -126,6 +134,7 @@ function harness(overrides: Partial<SidebarSource> = {}): Harness {
         diagnostics.push({ message, ...(context === undefined ? {} : { context }) });
       },
     },
+    ...(snapshotRepresentationTtlMs === undefined ? {} : { snapshotRepresentationTtlMs }),
   });
   running.push(server);
   return {
@@ -211,8 +220,14 @@ describe("sidebar server", () => {
     expect(app.snapshotScopes).toEqual(["active"]);
   });
 
-  test("returns a strong ETag, then 304 with a zero-byte body when unchanged", async () => {
-    const app = harness();
+  test("returns a strong ETag, then answers a warm 304 without rebuilding the snapshot", async () => {
+    let snapshotCalls = 0;
+    const app = harness({
+      snapshot: async () => {
+        snapshotCalls += 1;
+        return EMPTY_SNAPSHOT;
+      },
+    });
     const first = await fetch(`${app.url}/api/snapshot`);
     const etag = first.headers.get("etag");
     expect(etag).toMatch(/^"[A-Za-z0-9_-]+"$/);
@@ -223,6 +238,7 @@ describe("sidebar server", () => {
     });
     expect(unchanged.status).toBe(304);
     expect((await unchanged.arrayBuffer()).byteLength).toBe(0);
+    expect(snapshotCalls).toBe(1);
   });
 
   test("returns 304 promptly while a requested liveness refresh is pending", async () => {
@@ -287,32 +303,143 @@ describe("sidebar server", () => {
     expect((await second.arrayBuffer()).byteLength).toBe(0);
   });
 
-  test("equal source refreshes stay 304 while browser-visible changes return 200", async () => {
-    let refreshes = 0;
-    let contentVersion = 0;
+  test("coalesces one stale refresh and serves its changed representation on the next request", async () => {
+    const pending = deferred<SidebarSnapshot>();
+    let snapshotCalls = 0;
     const app = harness({
       snapshot: async () => {
-        refreshes += 1;
+        snapshotCalls += 1;
+        if (snapshotCalls === 1) return EMPTY_SNAPSHOT;
+        return pending.promise;
+      },
+    }, 0);
+    const first = await fetch(`${app.url}/api/snapshot`);
+    const etag = first.headers.get("etag") ?? "";
+    await first.arrayBuffer();
+
+    const [staleOne, staleTwo] = await Promise.all([
+      fetch(`${app.url}/api/snapshot`, { headers: { "if-none-match": etag } }),
+      fetch(`${app.url}/api/snapshot`, { headers: { "if-none-match": etag } }),
+    ]);
+    expect(staleOne.status).toBe(304);
+    expect(staleTwo.status).toBe(304);
+    expect(snapshotCalls).toBe(2);
+
+    pending.resolve({
+      ...EMPTY_SNAPSHOT,
+      lifecycleCounts: { ...EMPTY_SNAPSHOT.lifecycleCounts, active: 1 },
+    });
+    await Bun.sleep(1);
+
+    const changed = await fetch(`${app.url}/api/snapshot`, {
+      headers: { "if-none-match": etag },
+    });
+    expect(changed.status).toBe(200);
+    expect(changed.headers.get("etag")).not.toBe(etag);
+    expect(await changed.json()).toMatchObject({ lifecycleCounts: { active: 1 } });
+  });
+
+  test("a failed stale rebuild leaves the previous valid representation usable", async () => {
+    let snapshotCalls = 0;
+    const app = harness({
+      snapshot: async () => {
+        snapshotCalls += 1;
+        if (snapshotCalls > 1) throw new Error("transient snapshot failure");
+        return EMPTY_SNAPSHOT;
+      },
+    }, 0);
+    const first = await fetch(`${app.url}/api/snapshot`);
+    const etag = first.headers.get("etag") ?? "";
+    await first.arrayBuffer();
+
+    const stale = await fetch(`${app.url}/api/snapshot`, {
+      headers: { "if-none-match": etag },
+    });
+    expect(stale.status).toBe(304);
+    await Bun.sleep(1);
+
+    const retained = await fetch(`${app.url}/api/snapshot`, {
+      headers: { "if-none-match": etag },
+    });
+    expect(retained.status).toBe(304);
+    expect((await retained.arrayBuffer()).byteLength).toBe(0);
+  });
+
+  test("successful actions invalidate cached representations before the forced load", async () => {
+    let snapshotCalls = 0;
+    let activeCount = 0;
+    const app = harness({
+      snapshot: async () => {
+        snapshotCalls += 1;
         return {
           ...EMPTY_SNAPSHOT,
-          lifecycleCounts: { ...EMPTY_SNAPSHOT.lifecycleCounts, active: contentVersion },
+          lifecycleCounts: { ...EMPTY_SNAPSHOT.lifecycleCounts, active: activeCount },
         };
       },
+      setLifecycle: async () => {
+        activeCount = 1;
+        return { status: "ok", lifecycle: "completed" };
+      },
     });
-    let response = await fetch(`${app.url}/api/snapshot`);
-    let etag = response.headers.get("etag") ?? "";
-    await response.arrayBuffer();
+    const first = await fetch(`${app.url}/api/snapshot`);
+    const etag = first.headers.get("etag") ?? "";
+    await first.arrayBuffer();
 
-    response = await fetch(`${app.url}/api/snapshot`, { headers: { "if-none-match": etag } });
-    expect(response.status).toBe(304);
-    expect(refreshes).toBe(2);
-    expect((await response.arrayBuffer()).byteLength).toBe(0);
+    expect((await postLifecycle(app, app.url)).status).toBe(200);
+    const forced = await fetch(`${app.url}/api/snapshot`, {
+      headers: {
+        "if-none-match": etag,
+        "x-ccs-refresh-liveness": "1",
+      },
+    });
+    expect(forced.status).toBe(200);
+    expect(snapshotCalls).toBe(2);
+    expect(await forced.json()).toMatchObject({ lifecycleCounts: { active: 1 } });
+  });
 
-    contentVersion += 1;
-    response = await fetch(`${app.url}/api/snapshot`, { headers: { "if-none-match": etag } });
-    expect(response.status).toBe(200);
-    expect(response.headers.get("etag")).not.toBe(etag);
-    await response.arrayBuffer();
+  test("keeps snapshot representations isolated by exact query", async () => {
+    const calls: Array<{
+      readonly scope: SidebarView;
+      readonly limit: number | undefined;
+      readonly include: readonly SidebarLifecycle[];
+    }> = [];
+    const app = harness({
+      snapshot: async (scope = "active", limit, include = []) => {
+        calls.push({ scope, limit, include });
+        return EMPTY_SNAPSHOT;
+      },
+    });
+
+    await (await fetch(`${app.url}/api/snapshot?scope=active&limit=20`)).arrayBuffer();
+    await (await fetch(`${app.url}/api/snapshot?scope=active&limit=20`)).arrayBuffer();
+    await (await fetch(`${app.url}/api/snapshot?scope=completed&limit=20`)).arrayBuffer();
+    await (await fetch(`${app.url}/api/snapshot?scope=active&limit=21`)).arrayBuffer();
+    await (await fetch(`${app.url}/api/snapshot?scope=active&limit=20&include=completed`)).arrayBuffer();
+
+    expect(calls).toEqual([
+      { scope: "active", limit: 20, include: [] },
+      { scope: "completed", limit: 20, include: [] },
+      { scope: "active", limit: 21, include: [] },
+      { scope: "active", limit: 20, include: ["completed"] },
+    ]);
+  });
+
+  test("bounds exact-query representations and evicts the least recently used", async () => {
+    let snapshotCalls = 0;
+    const app = harness({
+      snapshot: async () => {
+        snapshotCalls += 1;
+        return EMPTY_SNAPSHOT;
+      },
+    });
+
+    for (let limit = 20; limit <= 36; limit += 1) {
+      await (await fetch(`${app.url}/api/snapshot?limit=${limit}`)).arrayBuffer();
+    }
+    expect(snapshotCalls).toBe(17);
+
+    await (await fetch(`${app.url}/api/snapshot?limit=20`)).arrayBuffer();
+    expect(snapshotCalls).toBe(18);
   });
 
   test("byte-identical projections share a strong ETag across query shapes", async () => {
