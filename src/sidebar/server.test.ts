@@ -6,6 +6,8 @@ import { createSidebarServer, isLoopbackSidebarHost } from "./server.ts";
 import { sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
 import { createSidebarSource } from "./snapshot.ts";
 import { buildBridge, type Bridge } from "../cmux/bridge.ts";
+import type { Launcher } from "../resume/launchers.ts";
+import type { ResumeSessionResult } from "../resume/resume-session.ts";
 import { createSnapshotLivenessReader } from "./liveness-cache.ts";
 import type {
   OpenSessionOutcome,
@@ -18,6 +20,7 @@ import type {
 } from "./snapshot.ts";
 import {
   projectSidebar,
+  type IndexedSessionInput,
   type SidebarLifecycle,
   type SidebarSnapshot,
   type SidebarView,
@@ -54,6 +57,14 @@ interface Harness {
 }
 
 const running: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
+
+async function waitFor(check: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (check()) return;
+    await Bun.sleep(1);
+  }
+  throw new Error("condition was not reached");
+}
 
 function deferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void; reject(error: Error): void } {
   let resolvePromise: ((value: T) => void) | null = null;
@@ -493,6 +504,83 @@ describe("sidebar server", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ status: "focused" });
     expect(app.opened).toEqual(["abc"]);
+  });
+
+  test("single-flights simultaneous open requests through the server and action coordinator", async () => {
+    const session: IndexedSessionInput = {
+      sessionId: "file-id",
+      resumeId: "resume-id",
+      title: "Indexed session",
+      cwd: "/repo/default",
+      lastTs: "2026-08-05T20:00:00.000Z",
+      models: ["gpt-5.6-sol"],
+      costByModel: {},
+    };
+    const launchers: Launcher[] = [
+      { name: "gateway", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] },
+    ];
+    const resumeResult = deferred<ResumeSessionResult>();
+    let bridgeReads = 0;
+    let resumeCalls = 0;
+    const processCalls: string[][] = [];
+    const source = createSidebarSource({
+      cmuxBin: "never-run-cmux",
+      readBridge: async () => {
+        bridgeReads += 1;
+        return buildBridge({ windows: [] }, {}, true);
+      },
+      indexedSessions: () => [session],
+      loadLaunchers: () => ({ ok: true, value: launchers }),
+      resumeAction: async () => {
+        resumeCalls += 1;
+        return { status: "ok", result: await resumeResult.promise, paintRow: null };
+      },
+      processAdapter: {
+        run: async (_file, args) => {
+          processCalls.push([...args]);
+          return { ok: true, stdout: "", stderr: "", timedOut: false };
+        },
+      },
+    });
+    const server = createSidebarServer({ source, assets: ASSETS, port: 0 });
+    running.push(server);
+    const url = server.url.origin;
+    const requests = Array.from({ length: 8 }, () => fetch(`${url}/api/open`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: url },
+      body: JSON.stringify({ sessionId: session.sessionId }),
+    }));
+
+    await waitFor(() => resumeCalls === 1);
+    // Keep the primitive pending long enough for every simultaneous HTTP request to enter the
+    // server. The old resume-only guard performed eight Bridge reads here before coalescing late.
+    await Bun.sleep(25);
+    expect(bridgeReads).toBe(1);
+    expect(resumeCalls).toBe(1);
+
+    resumeResult.resolve({ status: "resumed", note: null, workspaceRef: "workspace:42" });
+    const responses = await Promise.all(requests);
+    const bodies = await Promise.all(responses.map(async (response) =>
+      (await response.json()) as { readonly status: string; readonly workspaceRef: string }
+    ));
+
+    expect(responses.every((response) => response.status === 200)).toBeTrue();
+    expect(bodies.filter((body) => body.status === "resumed")).toHaveLength(1);
+    expect(bodies.filter((body) => body.status === "focused")).toHaveLength(7);
+    expect(bodies.every((body) => body.workspaceRef === "workspace:42")).toBeTrue();
+    expect(resumeCalls).toBe(1);
+    expect(bridgeReads).toBe(1);
+    expect(processCalls).toHaveLength(7);
+
+    const repeat = await fetch(`${url}/api/open`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: url },
+      body: JSON.stringify({ sessionId: session.sessionId }),
+    });
+    expect(await repeat.json()).toEqual({ status: "focused", workspaceRef: "workspace:42" });
+    expect(resumeCalls).toBe(1);
+    expect(bridgeReads).toBe(2);
+    expect(processCalls).toHaveLength(8);
   });
 
   test("does not expose source error details from an open failure", async () => {
