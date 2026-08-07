@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/zsh -f
 # claudex — ONE Claude Code harness serving both vendors through the local CLIProxyAPI gateway
 # (127.0.0.1:8317). Claude models bill the Max sub, GPT models bill the ChatGPT/Codex sub,
 # despite the "API Usage Billing" header.

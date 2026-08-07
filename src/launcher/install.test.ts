@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installClaudeShim, updateZshrc } from "./install.ts";
@@ -28,11 +28,13 @@ function root(): string {
  */
 function config(fixture: string, toml: string): Config {
   const path = join(fixture, "config.toml");
-  const registryPinned = toml.includes("registry =");
-  writeFileSync(
-    path,
-    registryPinned ? toml : `${toml}\n[routing]\nregistry = "${join(fixture, "absent.toml")}"\n`,
-  );
+  const routing: string[] = [];
+  if (!toml.includes("registry =")) routing.push(`registry = "${join(fixture, "absent-locations.toml")}"`);
+  if (!toml.includes("launchers =")) routing.push(`launchers = "${join(fixture, "absent-launchers.toml")}"`);
+  const content = toml.includes("[routing]")
+    ? toml.replace("[routing]", `[routing]\n${routing.join("\n")}`)
+    : `${toml}\n[routing]\n${routing.join("\n")}\n`;
+  writeFileSync(path, content);
   const loaded = loadConfig(path);
   if (!loaded.ok) throw loaded.error;
   return loaded.value;
@@ -108,7 +110,7 @@ env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@f
 name = "claude-native"
 binary = "claude-native"
 serves = ["claude-*"]
-clears = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]
+clears = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
 `;
 
 function install(fixture: string, toml: string): ReturnType<typeof installClaudeShim> {
@@ -123,6 +125,120 @@ function install(fixture: string, toml: string): ReturnType<typeof installClaude
 }
 
 describe("launcher environment materialization", () => {
+  test("installs configured bundled wrappers beside the PATH-precedent shim", () => {
+    const fixture = root();
+    const source = join(fixture, "source-shim");
+    const wrapperSourceDir = join(fixture, "wrappers");
+    const runtime = join(fixture, "runtime");
+    writeFileSync(source, "#!/bin/sh\nexit 0\n");
+    mkdirSync(wrapperSourceDir);
+    writeFileSync(join(wrapperSourceDir, "claudex"), "#!/bin/sh\nexit 0\n");
+    writeFileSync(join(wrapperSourceDir, "claude-native"), "#!/bin/sh\nexit 0\n");
+    writeFileSync(join(wrapperSourceDir, "claude-gpt"), "#!/bin/sh\nexit 0\n");
+
+    const first = installClaudeShim({
+      sourcePath: source,
+      wrapperSourceDir,
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(fixture, FLEET_TOML),
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.wrappers).toEqual(["claude-native", "claudex"]);
+    expect(statSync(join(runtime, "bin", "claudex")).mode & 0o111).not.toBe(0);
+    expect(statSync(join(runtime, "bin", "claude-native")).mode & 0o111).not.toBe(0);
+    expect(existsSync(join(runtime, "bin", "claude-gpt"))).toBe(false);
+
+    const second = installClaudeShim({
+      sourcePath: source,
+      wrapperSourceDir,
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(fixture, '[[launcher]]\nname = "claudex"\nbinary = "claudex"\nserves = ["*"]\n'),
+    });
+    expect(second.ok).toBe(true);
+    expect(existsSync(join(runtime, "bin", "claude-native"))).toBe(false);
+  });
+
+  test("installed wrappers name themselves and the shim isolates each launcher environment", () => {
+    const fixture = root();
+    const runtime = join(fixture, "runtime");
+    const key = join(fixture, "gateway-key");
+    const rawClaude = join(fixture, "raw-claude");
+    writeFileSync(key, "test-gateway-token\n");
+    writeFileSync(
+      rawClaude,
+      [
+        "#!/bin/sh",
+        "printf 'base=%s\\nauth=%s\\napi=%s\\nforce=%s\\nargs=%s\\n' \\",
+        "  \"${ANTHROPIC_BASE_URL-}\" \"${ANTHROPIC_AUTH_TOKEN-}\" \"${ANTHROPIC_API_KEY-}\" \\",
+        "  \"${CCS_FORCE_HARNESS-}\" \"$*\"",
+        "",
+      ].join("\n"),
+    );
+    chmodSync(rawClaude, 0o755);
+
+    const fleet = `${FLEET_TOML.replace("/tmp/key", key)}
+[[launcher]]
+name = "claude-gpt"
+binary = "claude-gpt"
+serves = ["gpt-*"]
+env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@file:${key}" }
+`;
+    const installed = installClaudeShim({
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(fixture, fleet),
+    });
+    expect(installed.ok).toBe(true);
+    if (!installed.ok) return;
+    expect(installed.value.wrappers).toEqual(["claude-gpt", "claude-native", "claudex"]);
+
+    for (const name of installed.value.wrappers) {
+      const wrapper = readFileSync(join(runtime, "bin", name), "utf8");
+      expect(wrapper).toStartWith("#!/bin/zsh -f\n");
+      expect(wrapper).toContain(`export CCS_FORCE_HARNESS=${name}`);
+    }
+
+    const run = (name: string): string => {
+      const env: Record<string, string | undefined> = {
+        ...process.env,
+        PATH: `${join(runtime, "bin")}:/usr/bin:/bin`,
+        CCS_RAW_CLAUDE_PATH: rawClaude,
+        CCS_LAUNCHER_ENV_DIR: installed.value.launcherEnvDir,
+        CCS_FORCE_HARNESS: name,
+        CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1",
+        ANTHROPIC_BASE_URL: "http://wrong-gateway",
+        ANTHROPIC_AUTH_TOKEN: "wrong-token",
+        ANTHROPIC_API_KEY: "wrong-api-key",
+      };
+      delete env.CMUX_SURFACE_ID;
+      delete env.CCS_CLAUDE_SHIM_AFTER_CMUX;
+      delete env.CCS_CARRIED_ANTHROPIC_API_KEY;
+      delete env.CCS_CARRIED_ANTHROPIC_BASE_URL;
+      const result = Bun.spawnSync([join(runtime, "bin", "claude"), "--version"], { env });
+      expect(result.exitCode).toBe(0);
+      return new TextDecoder().decode(result.stdout);
+    };
+
+    const native = run("claude-native");
+    expect(native).toContain("base=\nauth=\napi=\nforce=\n");
+    expect(native).toContain("args=--version");
+
+    const mixed = run("claudex");
+    expect(mixed).toContain("base=http://127.0.0.1:8317");
+    expect(mixed).toContain("auth=test-gateway-token");
+    expect(mixed).toContain("force=\n");
+    expect(mixed).toContain("args=--version");
+
+    const gpt = run("claude-gpt");
+    expect(gpt).toContain("base=http://127.0.0.1:8317");
+    expect(gpt).toContain("auth=test-gateway-token");
+    expect(gpt).toContain("force=\n");
+    expect(gpt).toContain("args=--version");
+  });
+
   test("writes one spec per configured launcher", () => {
     const fixture = root();
     const result = install(fixture, FLEET_TOML);

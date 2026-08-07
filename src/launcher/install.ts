@@ -23,6 +23,7 @@ const END_MARKER = "# <<< CCS managed Claude launcher <<<";
 
 /** Filename holding the default launcher name the shim reads when CCS_FORCE_HARNESS is unset. */
 const DEFAULT_LAUNCHER_FILE = "default";
+const WRAPPER_MANIFEST_FILE = ".launcher-wrappers";
 
 export interface ClaudeShimInstallation {
   readonly shimPath: string;
@@ -31,12 +32,15 @@ export interface ClaudeShimInstallation {
   readonly launcherEnvDir: string;
   /** Launcher names whose specs were materialized, in config order. */
   readonly launchers: readonly string[];
+  /** Bundled launcher wrappers installed beside the PATH-precedent shim. */
+  readonly wrappers: readonly string[];
   /** The launcher `claude` resolves to with no CCS_FORCE_HARNESS; null when undeclared. */
   readonly defaultLauncher: string | null;
 }
 
 export interface ClaudeShimInstallOptions {
   readonly sourcePath?: string;
+  readonly wrapperSourceDir?: string;
   readonly root?: string;
   readonly zshrcPath?: string;
   /** Injected for tests; production reads ~/.ccs/config.toml. */
@@ -102,6 +106,57 @@ function resolveDefaultLauncher(
 }
 
 /**
+ * Install bundled wrappers for configured launchers beside the PATH-precedent shim. The manifest
+ * makes stale cleanup ownership-safe: only files a previous install recorded are ever removed.
+ */
+function materializeBundledWrappers(
+  binDirectory: string,
+  sourceDirectory: string,
+  launchers: readonly Launcher[],
+): Result<readonly string[]> {
+  try {
+    if (!existsSync(sourceDirectory)) {
+      return err(new Error(`bundled launcher wrapper directory is missing: ${sourceDirectory}`));
+    }
+
+    const manifestPath = join(binDirectory, WRAPPER_MANIFEST_FILE);
+    const previous = existsSync(manifestPath)
+      ? readFileSync(manifestPath, "utf8").split(/\r?\n/).filter(Boolean)
+      : [];
+    const installed: string[] = [];
+
+    for (const launcher of launchers) {
+      const validated = launcherEnvSpecFilename(launcher.name);
+      if (!validated.ok) return validated;
+      const name = launcher.name;
+      const source = join(sourceDirectory, name);
+      if (!existsSync(source)) continue;
+      if (name === "claude") return err(new Error('bundled launcher wrapper must not be named "claude"'));
+
+      const destination = join(binDirectory, name);
+      copyFileSync(source, destination);
+      chmodSync(destination, 0o755);
+      installed.push(name);
+    }
+    installed.sort((left, right) => left.localeCompare(right));
+
+    const current = new Set(installed);
+    for (const name of previous) {
+      const validated = launcherEnvSpecFilename(name);
+      if (!validated.ok) return validated;
+      if (!current.has(name)) rmSync(join(binDirectory, name), { force: true });
+    }
+    writeFileSync(manifestPath, installed.length > 0 ? `${installed.join("\n")}\n` : "", {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    return ok(installed);
+  } catch (error) {
+    return err(error instanceof Error ? error : new Error(String(error)));
+  }
+}
+
+/**
  * Write every launcher's spec, then remove specs for launchers config no longer declares. Stale
  * files are deleted rather than left: a removed launcher must stop resolving, not keep working
  * from a file nothing regenerates.
@@ -150,6 +205,7 @@ export function installClaudeShim(
 ): Result<ClaudeShimInstallation> {
   const root = options.root ?? runtimeRoot();
   const sourcePath = options.sourcePath ?? resolve(import.meta.dir, "../../bin/ccs-claude-shim");
+  const wrapperSourceDir = options.wrapperSourceDir ?? resolve(import.meta.dir, "../../bin/wrappers");
   const shimPath = join(root, "bin", "claude");
   const shellInitPath = join(root, "shell", "launcher.zsh");
   const launcherEnvDir = join(root, "launcher-env");
@@ -173,6 +229,9 @@ export function installClaudeShim(
     mkdirSync(dirname(shellInitPath), { recursive: true });
     copyFileSync(sourcePath, shimPath);
     chmodSync(shimPath, 0o755);
+
+    const wrappers = materializeBundledWrappers(dirname(shimPath), wrapperSourceDir, launchers.value);
+    if (!wrappers.ok) return wrappers;
 
     const materialized = materializeLauncherEnv(
       launcherEnvDir,
@@ -206,6 +265,7 @@ export function installClaudeShim(
       zshrcPath,
       launcherEnvDir,
       launchers: launchers.value.map((launcher) => launcher.name),
+      wrappers: wrappers.value,
       defaultLauncher: defaultLauncher.value,
     });
   } catch (error) {

@@ -73,7 +73,7 @@ Usage:
   ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
                          Reserve and synchronously run an auxiliary seat (fallback is explicit; never automatic)
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
-  ccs launcher install  Install the stable CCS Claude shim and shell initialization
+  ccs launcher install  Install the CCS shim, named wrappers, and shell initialization
   ccs doctor sessions [--json]  Report post-rollout unclassified or provenance-missing sessions
   ccs doctor launcher [--json]  Report deployed-vs-origin and installed-vs-config launcher drift
 

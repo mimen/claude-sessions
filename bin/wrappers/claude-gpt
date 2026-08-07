@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/zsh -f
 # claude-gpt — Claude Code harness on GPT models via the local CLIProxyAPI gateway (billed to
 # the ChatGPT/Codex subscription despite the "API Usage Billing" header). Normal `claude` is
 # untouched.

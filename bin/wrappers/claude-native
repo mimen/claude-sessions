@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/zsh -f
 # claude-native — force a real Anthropic-backed claude, stripping any gateway env. Needed when
 # delegating to Claude models from inside a gateway session, where plain `claude` would inherit
 # ANTHROPIC_BASE_URL and route to the gateway. The only launcher with claude.ai connectors and

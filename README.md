@@ -285,9 +285,10 @@ serves = ["claude-*", "anthropic.*"]
 clears = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
 ```
 
-`ccs launcher install` materializes each launcher's `env`/`clears` into `~/.ccs/launcher-env/`,
-and the `~/.ccs/bin/claude` shim applies exactly one of them immediately before exec'ing the raw
-binary. **`claude` is therefore an indirection**: which launcher it resolves to is the location
+`ccs launcher install` materializes each launcher's `env`/`clears` into `~/.ccs/launcher-env/`
+and installs the configured bundled wrappers beside the PATH-precedent `~/.ccs/bin/claude` shim.
+Each named wrapper forces its own launcher environment before the shim execs the raw binary, while
+plain **`claude` remains an indirection**: which launcher it resolves to is the location
 registry's `default_harness`, the same value that decides where a managed birth lands, so the
 fleet moves — or falls back to `claude-native` — in one edit. A wrapper names itself by exporting
 `CCS_FORCE_HARNESS=<name>` and then `exec claude`; that bounce back through the shim is what
