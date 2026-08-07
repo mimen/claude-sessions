@@ -7,8 +7,8 @@
 # live in the `claude-gpt` [[launcher]] entry's `env` in ~/.ccs/config.toml, materialized by
 # `ccs launcher install` and applied by the ~/.ccs/bin/claude shim.
 #
-# CCS_FORCE_HARNESS tells the shim which launcher's environment to apply. The `exec claude`
-# bounce back into the shim is DELIBERATE — it is what registers the session birth.
+# CCS_FORCE_HARNESS tells the sibling shim which launcher environment to apply. Executing that
+# exact shim registers the session birth without depending on shell startup files or PATH.
 #
 # Usage:
 #   claude-gpt                                  # default: gpt-5.6-sol, effort via arrows//effort
@@ -32,4 +32,4 @@ for a in "$@"; do [[ "$a" == "--model" ]] && MODEL=""; done   # explicit --model
 
 margs=()
 [[ -n "$MODEL" ]] && margs=(--model "$MODEL")
-exec claude --dangerously-skip-permissions "${margs[@]}" "$@"
+exec "${0:A:h}/claude" --dangerously-skip-permissions "${margs[@]}" "$@"

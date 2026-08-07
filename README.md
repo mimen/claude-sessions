@@ -291,10 +291,10 @@ Each named wrapper forces its own launcher environment before the shim execs the
 plain **`claude` remains an indirection**: which launcher it resolves to is the location
 registry's `default_harness`, the same value that decides where a managed birth lands, so the
 fleet moves — or falls back to `claude-native` — in one edit. A wrapper names itself by exporting
-`CCS_FORCE_HARNESS=<name>` and then `exec claude`; that bounce back through the shim is what
-registers the session birth, and is why a wrapper must never exec the raw binary directly.
+`CCS_FORCE_HARNESS=<name>` and executes the sibling `~/.ccs/bin/claude` shim by absolute path. That
+bounce through the shim registers the session birth without depending on PATH or shell startup.
 
-Re-run `ccs launcher install` after editing `env`, `clears`, or `default_harness`.
+Re-run `ccs launcher install` after editing a launcher's name, binary, `env`, `clears`, or `default_harness`.
 
 `clears` is applied by EVERY path that starts a process on an explicitly chosen launcher — the
 shim, `ccs resume --via`, a managed birth, `ccs swap-harness`, `ccs restart` — all from one

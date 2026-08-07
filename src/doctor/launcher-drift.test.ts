@@ -22,6 +22,7 @@ function input(overrides: Partial<LauncherDriftInput> = {}): LauncherDriftInput 
     deployed: MATCHING_DEPLOY,
     artifacts: [],
     missingSpecs: [],
+    unexpectedArtifacts: [],
     fleetError: null,
     ...overrides,
   };
@@ -120,6 +121,14 @@ describe("buildLauncherDriftReport", () => {
     );
     expect(checks(report)).toContain("installed:/ccs/launcher-env/claudex.env");
     expect(report.findings.at(-1)?.remedy).toBe("ccs launcher install");
+  });
+
+  test("an undeclared known wrapper is reported as unexpected drift", () => {
+    const path = "/ccs/bin/claude-gpt";
+    const report = buildLauncherDriftReport(input({ unexpectedArtifacts: [path] }));
+    expect(checks(report)).toContain(`unexpected:${path}`);
+    expect(report.findings.find((finding) => finding.check === `unexpected:${path}`)?.remedy)
+      .toBeNull();
   });
 
   test("a MISSING launcher env spec is reported — the shim would inherit the environment", () => {

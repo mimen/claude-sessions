@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installClaudeShim, updateZshrc } from "./install.ts";
@@ -132,9 +142,9 @@ describe("launcher environment materialization", () => {
     const runtime = join(fixture, "runtime");
     writeFileSync(source, "#!/bin/sh\nexit 0\n");
     mkdirSync(wrapperSourceDir);
-    writeFileSync(join(wrapperSourceDir, "claudex"), "#!/bin/sh\nexit 0\n");
-    writeFileSync(join(wrapperSourceDir, "claude-native"), "#!/bin/sh\nexit 0\n");
-    writeFileSync(join(wrapperSourceDir, "claude-gpt"), "#!/bin/sh\nexit 0\n");
+    writeFileSync(join(wrapperSourceDir, "claudex"), "#!/bin/sh\nexport CCS_FORCE_HARNESS=claudex\nexit 0\n");
+    writeFileSync(join(wrapperSourceDir, "claude-native"), "#!/bin/sh\nexport CCS_FORCE_HARNESS=claude-native\nexit 0\n");
+    writeFileSync(join(wrapperSourceDir, "claude-gpt"), "#!/bin/sh\nexport CCS_FORCE_HARNESS=claude-gpt\nexit 0\n");
 
     const first = installClaudeShim({
       sourcePath: source,
@@ -159,6 +169,272 @@ describe("launcher environment materialization", () => {
     });
     expect(second.ok).toBe(true);
     expect(existsSync(join(runtime, "bin", "claude-native"))).toBe(false);
+  });
+
+  test("uses launcher.binary for the installed command and rewrites its selector", () => {
+    const fixture = root();
+    const source = join(fixture, "source-shim");
+    const wrapperSourceDir = join(fixture, "wrappers");
+    const runtime = join(fixture, "runtime");
+    writeFileSync(source, "#!/bin/sh\nexit 0\n");
+    mkdirSync(wrapperSourceDir);
+    writeFileSync(
+      join(wrapperSourceDir, "claude-native"),
+      "#!/bin/sh\nexport CCS_FORCE_HARNESS=claude-native\nexit 0\n",
+    );
+
+    const result = installClaudeShim({
+      sourcePath: source,
+      wrapperSourceDir,
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(
+        fixture,
+        `[[launcher]]\nname = "native"\nbinary = "${join(runtime, "bin", "claude-native")}"\nserves = ["claude-*"]\n`,
+      ),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.wrappers).toEqual(["claude-native"]);
+    expect(readFileSync(join(runtime, "bin", "claude-native"), "utf8"))
+      .toContain("export CCS_FORCE_HARNESS=native");
+  });
+
+  test("refuses to overwrite unowned wrapper files or follow destination symlinks", () => {
+    for (const kind of ["file", "symlink"] as const) {
+      const fixture = root();
+      const source = join(fixture, "source-shim");
+      const wrapperSourceDir = join(fixture, "wrappers");
+      const runtime = join(fixture, "runtime");
+      const bin = join(runtime, "bin");
+      const destination = join(bin, "claudex");
+      const external = join(fixture, "external");
+      writeFileSync(source, "#!/bin/sh\nexit 0\n");
+      mkdirSync(wrapperSourceDir);
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(
+        join(wrapperSourceDir, "claudex"),
+        "#!/bin/sh\nexport CCS_FORCE_HARNESS=claudex\nexit 0\n",
+      );
+      writeFileSync(external, "external-sentinel\n");
+      if (kind === "file") writeFileSync(destination, "custom-sentinel\n");
+      else symlinkSync(external, destination);
+
+      const result = installClaudeShim({
+        sourcePath: source,
+        wrapperSourceDir,
+        root: runtime,
+        zshrcPath: join(fixture, ".zshrc"),
+        config: config(fixture, '[[launcher]]\nname = "claudex"\nbinary = "claudex"\nserves = ["*"]\n'),
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.error.message).toContain("refusing to overwrite unowned launcher wrapper");
+      expect(readFileSync(external, "utf8")).toBe("external-sentinel\n");
+      expect(existsSync(join(runtime, "launcher-env"))).toBe(false);
+    }
+  });
+
+  test("refuses symlinked managed directories before touching their targets", () => {
+    const fixture = root();
+    const runtime = join(fixture, "runtime");
+    const external = join(fixture, "external-env");
+    mkdirSync(runtime);
+    mkdirSync(external);
+    writeFileSync(join(external, "sentinel"), "keep\n");
+    symlinkSync(external, join(runtime, "launcher-env"));
+
+    const result = install(fixture, FLEET_TOML);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("managed launcher path is not a real directory");
+    expect(readFileSync(join(external, "sentinel"), "utf8")).toBe("keep\n");
+  });
+
+  test("serializes launcher installations with a live process lock", () => {
+    const fixture = root();
+    const runtime = join(fixture, "runtime");
+    mkdirSync(runtime);
+    writeFileSync(join(runtime, "launcher-install.lock"), `${process.pid}\n`);
+
+    const result = install(fixture, FLEET_TOML);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("another launcher installation holds");
+    expect(existsSync(join(runtime, "bin"))).toBe(false);
+  });
+
+  test("fails before runtime mutation when zshrc exists but cannot be read", () => {
+    const fixture = root();
+    const source = join(fixture, "source-shim");
+    const runtime = join(fixture, "runtime");
+    const zshrc = join(fixture, ".zshrc");
+    writeFileSync(source, "#!/bin/sh\nexit 0\n");
+    writeFileSync(zshrc, "preserve me\n");
+    chmodSync(zshrc, 0o200);
+
+    const result = installClaudeShim({
+      sourcePath: source,
+      root: runtime,
+      zshrcPath: zshrc,
+      config: config(fixture, FLEET_TOML),
+    });
+    expect(result.ok).toBe(false);
+    expect(existsSync(join(runtime, "bin"))).toBe(false);
+  });
+
+  test("prevalidates stale wrapper removal before publishing a new generation", () => {
+    const fixture = root();
+    const source = join(fixture, "source-shim");
+    const wrapperSourceDir = join(fixture, "wrappers");
+    const runtime = join(fixture, "runtime");
+    writeFileSync(source, "#!/bin/sh\nexit 0\n");
+    mkdirSync(wrapperSourceDir);
+    writeFileSync(join(wrapperSourceDir, "claudex"), "#!/bin/sh\nexport CCS_FORCE_HARNESS=claudex\n");
+    writeFileSync(
+      join(wrapperSourceDir, "claude-native"),
+      "#!/bin/sh\nexport CCS_FORCE_HARNESS=claude-native\n",
+    );
+    const first = installClaudeShim({
+      sourcePath: source,
+      wrapperSourceDir,
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(fixture, FLEET_TOML),
+    });
+    expect(first.ok).toBe(true);
+    const claudexPath = join(runtime, "bin", "claudex");
+    const before = readFileSync(claudexPath, "utf8");
+    const stalePath = join(runtime, "bin", "claude-native");
+    rmSync(stalePath);
+    mkdirSync(stalePath);
+
+    const second = installClaudeShim({
+      sourcePath: source,
+      wrapperSourceDir,
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(fixture, '[[launcher]]\nname = "claudex"\nbinary = "claudex"\nserves = ["*"]\n'),
+    });
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.error.message).toContain("stale managed launcher wrapper is not removable");
+    expect(readFileSync(claudexPath, "utf8")).toBe(before);
+  });
+
+  test("validates all environment specs before changing installed wrappers", () => {
+    const fixture = root();
+    const source = join(fixture, "source-shim");
+    const wrapperSourceDir = join(fixture, "wrappers");
+    const runtime = join(fixture, "runtime");
+    const wrapperSource = join(wrapperSourceDir, "claudex");
+    writeFileSync(source, "#!/bin/sh\nexit 0\n");
+    mkdirSync(wrapperSourceDir);
+    writeFileSync(wrapperSource, "#!/bin/sh\nexport CCS_FORCE_HARNESS=claudex\nexit 0\n");
+
+    const first = installClaudeShim({
+      sourcePath: source,
+      wrapperSourceDir,
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(fixture, '[[launcher]]\nname = "claudex"\nbinary = "claudex"\nserves = ["*"]\n'),
+    });
+    expect(first.ok).toBe(true);
+    const installedPath = join(runtime, "bin", "claudex");
+    const manifestPath = join(runtime, "bin", ".launcher-wrappers");
+    const beforeWrapper = readFileSync(installedPath, "utf8");
+    const beforeManifest = readFileSync(manifestPath, "utf8");
+    writeFileSync(wrapperSource, `${beforeWrapper}# changed source\n`);
+
+    const second = installClaudeShim({
+      sourcePath: source,
+      wrapperSourceDir,
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(
+        fixture,
+        '[[launcher]]\nname = "claudex"\nbinary = "claudex"\nserves = ["*"]\nenv = { "BAD-KEY" = "x" }\n',
+      ),
+    });
+    expect(second.ok).toBe(false);
+    expect(readFileSync(installedPath, "utf8")).toBe(beforeWrapper);
+    expect(readFileSync(manifestPath, "utf8")).toBe(beforeManifest);
+  });
+
+  test("a missing configured bundled source preserves the installed wrapper", () => {
+    const fixture = root();
+    const source = join(fixture, "source-shim");
+    const wrapperSourceDir = join(fixture, "wrappers");
+    const runtime = join(fixture, "runtime");
+    const wrapperSource = join(wrapperSourceDir, "claudex");
+    writeFileSync(source, "#!/bin/sh\nexit 0\n");
+    mkdirSync(wrapperSourceDir);
+    writeFileSync(wrapperSource, "#!/bin/sh\nexport CCS_FORCE_HARNESS=claudex\nexit 0\n");
+    const fleet = '[[launcher]]\nname = "claudex"\nbinary = "claudex"\nserves = ["*"]\n';
+
+    const first = installClaudeShim({
+      sourcePath: source,
+      wrapperSourceDir,
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(fixture, fleet),
+    });
+    expect(first.ok).toBe(true);
+    const installedPath = join(runtime, "bin", "claudex");
+    const manifestPath = join(runtime, "bin", ".launcher-wrappers");
+    const beforeWrapper = readFileSync(installedPath, "utf8");
+    const beforeManifest = readFileSync(manifestPath, "utf8");
+    rmSync(wrapperSource);
+
+    const second = installClaudeShim({
+      sourcePath: source,
+      wrapperSourceDir,
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(fixture, fleet),
+    });
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.error.message).toContain("configured bundled launcher wrapper is missing");
+    expect(readFileSync(installedPath, "utf8")).toBe(beforeWrapper);
+    expect(readFileSync(manifestPath, "utf8")).toBe(beforeManifest);
+  });
+
+  test("rejects manifest entries that could target non-wrapper runtime files", () => {
+    const fixture = root();
+    const source = join(fixture, "source-shim");
+    const wrapperSourceDir = join(fixture, "wrappers");
+    const runtime = join(fixture, "runtime");
+    writeFileSync(source, "#!/bin/sh\nexit 0\n");
+    mkdirSync(wrapperSourceDir);
+    writeFileSync(
+      join(wrapperSourceDir, "claudex"),
+      "#!/bin/sh\nexport CCS_FORCE_HARNESS=claudex\nexit 0\n",
+    );
+    const fleet = '[[launcher]]\nname = "claudex"\nbinary = "claudex"\nserves = ["*"]\n';
+    const first = installClaudeShim({
+      sourcePath: source,
+      wrapperSourceDir,
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(fixture, fleet),
+    });
+    expect(first.ok).toBe(true);
+    const shimPath = join(runtime, "bin", "claude");
+    const beforeShim = readFileSync(shimPath, "utf8");
+    writeFileSync(join(runtime, "bin", ".launcher-wrappers"), "claude\n");
+
+    const second = installClaudeShim({
+      sourcePath: source,
+      wrapperSourceDir,
+      root: runtime,
+      zshrcPath: join(fixture, ".zshrc"),
+      config: config(fixture, fleet),
+    });
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.error.message).toContain("manifest contains an unknown binary");
+    expect(readFileSync(shimPath, "utf8")).toBe(beforeShim);
   });
 
   test("installed wrappers name themselves and the shim isolates each launcher environment", () => {
@@ -204,10 +480,9 @@ env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@f
     const run = (name: string): string => {
       const env: Record<string, string | undefined> = {
         ...process.env,
-        PATH: `${join(runtime, "bin")}:/usr/bin:/bin`,
+        PATH: "/usr/bin:/bin",
         CCS_RAW_CLAUDE_PATH: rawClaude,
         CCS_LAUNCHER_ENV_DIR: installed.value.launcherEnvDir,
-        CCS_FORCE_HARNESS: name,
         CLAUDE_CODE_SKIP_PROMPT_HISTORY: "1",
         ANTHROPIC_BASE_URL: "http://wrong-gateway",
         ANTHROPIC_AUTH_TOKEN: "wrong-token",
@@ -217,7 +492,7 @@ env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@f
       delete env.CCS_CLAUDE_SHIM_AFTER_CMUX;
       delete env.CCS_CARRIED_ANTHROPIC_API_KEY;
       delete env.CCS_CARRIED_ANTHROPIC_BASE_URL;
-      const result = Bun.spawnSync([join(runtime, "bin", "claude"), "--version"], { env });
+      const result = Bun.spawnSync([join(runtime, "bin", name), "--version"], { env });
       expect(result.exitCode).toBe(0);
       return new TextDecoder().decode(result.stdout);
     };
@@ -230,13 +505,13 @@ env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@f
     expect(mixed).toContain("base=http://127.0.0.1:8317");
     expect(mixed).toContain("auth=test-gateway-token");
     expect(mixed).toContain("force=\n");
-    expect(mixed).toContain("args=--version");
+    expect(mixed).toContain("args=--dangerously-skip-permissions --model opus --version");
 
     const gpt = run("claude-gpt");
     expect(gpt).toContain("base=http://127.0.0.1:8317");
     expect(gpt).toContain("auth=test-gateway-token");
     expect(gpt).toContain("force=\n");
-    expect(gpt).toContain("args=--version");
+    expect(gpt).toContain("args=--dangerously-skip-permissions --model fable --version");
   });
 
   test("writes one spec per configured launcher", () => {

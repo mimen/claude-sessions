@@ -10,7 +10,7 @@
 # `env -u` here would be undone by anything the shim applied afterwards, whereas `clears` runs
 # inside the same step that installs a launcher's environment.
 #
-# CCS_FORCE_HARNESS tells the shim which launcher to apply. The `exec claude` bounce back into
-# the shim is DELIBERATE — it is what registers the session birth.
+# CCS_FORCE_HARNESS tells the sibling shim which launcher to apply. Executing that exact shim is
+# deliberate: it registers the session birth without depending on shell startup files or PATH.
 export CCS_FORCE_HARNESS=claude-native
-exec claude "$@"
+exec "${0:A:h}/claude" "$@"

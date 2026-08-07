@@ -2,7 +2,7 @@
  * `ccs doctor launcher` — does what is DEPLOYED match what is declared?
  *
  * WHY. Nothing verified that the ccs actually running matched master, or that the installed shim
- * and launcher env-specs matched the config they were generated from. On 2026-07-30 the deployment
+ * named wrappers, and launcher env-specs matched the sources and config that generated them. The deployment
  * was three commits behind with a local master 75 behind origin, and no surface said so. Since the
  * launcher indirection now decides which backend EVERY interactive `claude` reaches, a stale
  * deployment or a stale spec is a silent routing fault, not a cosmetic one.
@@ -51,20 +51,26 @@ export interface DeployedRevision {
 /** One installed artifact compared against what the current config would generate. */
 export interface InstalledArtifact {
   readonly path: string;
-  /** Contents on disk; null when the file is missing or unreadable. */
+  /** Contents on disk; null when the file is missing, unreadable, or not a regular file. */
   readonly actual: string | null;
-  /** Contents `ccs launcher install` would write now. */
+  /** Contents `ccs launcher install` would write now, or the required fragment for contains mode. */
   readonly expected: string;
+  readonly match?: "exact" | "contains";
+  readonly expectedMode?: number | null;
+  readonly actualMode?: number | null;
+  readonly fileType?: "file" | "symlink" | "other" | null;
   /** Set when the file exists but could not be read (a permissions fault is not "missing"). */
   readonly unreadable: boolean;
 }
 
 export interface LauncherDriftInput {
   readonly deployed: DeployedRevision;
-  /** The shim binary + one entry per launcher env-spec + the `default` selector file. */
+  /** The shim, named wrappers, wrapper manifest, launcher env specs, and default selector. */
   readonly artifacts: readonly InstalledArtifact[];
   /** Launchers the fleet declares but which have NO spec file at all. */
   readonly missingSpecs: readonly string[];
+  /** Known wrapper binaries present on disk but not declared by the current fleet. */
+  readonly unexpectedArtifacts: readonly string[];
   /** Set when the fleet itself could not be resolved (bad config or shared registry). */
   readonly fleetError: string | null;
 }
@@ -102,7 +108,25 @@ export function buildLauncherDriftReport(input: LauncherDriftInput): LauncherDri
     });
   }
 
+  for (const path of input.unexpectedArtifacts) {
+    findings.push({
+      check: `unexpected:${path}`,
+      severity: "drift",
+      detail: `${path} exists but is not declared by the current launcher installation`,
+      remedy: null,
+    });
+  }
+
   for (const artifact of input.artifacts) {
+    if (artifact.fileType !== undefined && artifact.fileType !== null && artifact.fileType !== "file") {
+      findings.push({
+        check: `installed:${artifact.path}`,
+        severity: "drift",
+        detail: `${artifact.path} is a ${artifact.fileType}, not a regular file`,
+        remedy: REINSTALL,
+      });
+      continue;
+    }
     if (artifact.unreadable) {
       findings.push({
         check: `installed:${artifact.path}`,
@@ -121,7 +145,24 @@ export function buildLauncherDriftReport(input: LauncherDriftInput): LauncherDri
       });
       continue;
     }
-    if (artifact.actual !== artifact.expected) {
+    if (
+      artifact.expectedMode !== undefined &&
+      artifact.expectedMode !== null &&
+      artifact.actualMode !== artifact.expectedMode
+    ) {
+      findings.push({
+        check: `installed:${artifact.path}`,
+        severity: "drift",
+        detail: `${artifact.path} has mode ${artifact.actualMode?.toString(8) ?? "unknown"}; ` +
+          `expected ${artifact.expectedMode.toString(8)}`,
+        remedy: REINSTALL,
+      });
+      continue;
+    }
+    const contentsMatch = artifact.match === "contains"
+      ? artifact.actual.includes(artifact.expected)
+      : artifact.actual === artifact.expected;
+    if (!contentsMatch) {
       findings.push({
         check: `installed:${artifact.path}`,
         severity: "drift",
@@ -135,7 +176,7 @@ export function buildLauncherDriftReport(input: LauncherDriftInput): LauncherDri
     findings.push({
       check: "installed",
       severity: "ok",
-      detail: "installed shim and launcher env specs match the current config",
+      detail: "installed shim, wrappers, shell activation, and launcher env specs match the current config",
       remedy: null,
     });
   }
