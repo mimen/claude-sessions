@@ -177,7 +177,7 @@ describe("snapshot liveness cache", () => {
     expect(reads).toBe(2);
   }, 5_000);
 
-  test("warm reads serve cached state immediately while both bounded attempts time out", async () => {
+  test("warm reads retain cached state after both bounded attempts time out", async () => {
     let reads = 0;
     const never = new Promise<Bridge>(() => {});
     const reader = createSnapshotLivenessReader({
@@ -205,29 +205,44 @@ describe("snapshot liveness cache", () => {
     await Bun.sleep(15);
     expect(reads).toBe(3);
     await Bun.sleep(15);
-    expect((await reader.read()).readable).toBeFalse();
+    expect((await reader.read()).workspaceIds()).toEqual(["cached"]);
     expect(reads).toBe(3);
   });
 
-  test("publishes fail-closed unreadability only after both refresh attempts fail", async () => {
+  test("warm refresh failures retain readable data until a later refresh succeeds", async () => {
+    let clock = 0;
     let reads = 0;
     const reader = createSnapshotLivenessReader({
-      ttlMs: 60_000,
+      ttlMs: 10,
+      now: () => clock,
       readBridge: async () => {
         reads += 1;
-        if (reads === 1) return readableBridge();
+        if (reads === 1) return workspaceBridge("initial");
         if (reads === 2) return buildBridge({ windows: [] }, {}, false);
-        throw new Error("cmux socket unavailable");
+        if (reads === 3) throw new Error("cmux socket unavailable");
+        return workspaceBridge("recovered");
       },
     });
 
-    expect((await reader.read()).readable).toBeTrue();
-    reader.refresh();
+    expect((await reader.read()).workspaceIds()).toEqual(["initial"]);
+    clock = 10;
+    expect((await reader.read()).workspaceIds()).toEqual(["initial"]);
     await waitFor(() => reads === 3);
     await settle();
 
-    expect((await reader.read()).readable).toBeFalse();
+    expect((await reader.read()).workspaceIds()).toEqual(["initial"]);
+    clock = 19;
+    expect((await reader.read()).workspaceIds()).toEqual(["initial"]);
+    await Bun.sleep(0);
     expect(reads).toBe(3);
+
+    clock = 20;
+    expect((await reader.read()).workspaceIds()).toEqual(["initial"]);
+    await waitFor(() => reads === 4);
+    await settle();
+
+    expect((await reader.read()).workspaceIds()).toEqual(["recovered"]);
+    expect(reads).toBe(4);
   });
 
   test("queues one forced trailing refresh behind both attempts of the current refresh", async () => {

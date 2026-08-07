@@ -23,10 +23,11 @@ function unreadableBridge(): Bridge {
 /**
  * Keep the snapshot's cmux tree warm without weakening action safety.
  *
- * The first snapshot waits for a truthful read. Later snapshots serve the last completed Bridge
- * immediately while one stale refresh runs in the background. A refresh retries one unreadable,
- * rejected, or timed-out read immediately, then replaces the cache with an unreadable Bridge only if
- * both bounded attempts fail. Actions do not use this reader and continue to call the live seam directly.
+ * The first snapshot waits for a truthful read. Later snapshots serve the last completed readable
+ * Bridge immediately while one stale refresh runs in the background. A refresh retries one unreadable,
+ * rejected, or timed-out read immediately. If both bounded attempts fail, a cold cache remains
+ * fail-closed while a warm cache retains its last readable Bridge. Actions do not use this reader and
+ * continue to call the live seam directly.
  */
 export function createSnapshotLivenessReader(
   options: SnapshotLivenessReaderOptions,
@@ -56,11 +57,17 @@ export function createSnapshotLivenessReader(
     }
   }
 
-  async function readBridgeWithRetry(): Promise<Bridge> {
+  async function readBridgeWithRetry(): Promise<Bridge | null> {
     const first = await readBridgeAttempt();
     if (first !== null) return first;
 
-    return (await readBridgeAttempt()) ?? unreadableBridge();
+    return readBridgeAttempt();
+  }
+
+  function completeRefresh(bridge: Bridge | null): void {
+    if (bridge !== null) cached = bridge;
+    else if (cached === null || !cached.readable) cached = unreadableBridge();
+    refreshedAt = now();
   }
 
   function startRefresh(): Promise<void> {
@@ -69,14 +76,8 @@ export function createSnapshotLivenessReader(
     let flight: Promise<void>;
     flight = Promise.resolve()
       .then(readBridgeWithRetry)
-      .then((bridge) => {
-        cached = bridge;
-        refreshedAt = now();
-      })
-      .catch(() => {
-        cached = unreadableBridge();
-        refreshedAt = now();
-      })
+      .then(completeRefresh)
+      .catch(() => completeRefresh(null))
       .finally(() => {
         if (inFlight !== flight) return;
         inFlight = null;
