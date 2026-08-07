@@ -98,6 +98,11 @@ The list re-reads afterwards either way. The bridge is therefore pure latency: i
 reason a click fails, and it changes nothing about what the page can reach or what the server
 believes.
 
+The server treats the installed cmux version as a short-lived observation, not a process-lifetime
+fact. A successful version probe is reused for 60 seconds while each bridge read still refreshes the
+tree and hook store. Failed or unparseable probes are shared only while in flight, retried on the next
+read, and remain fail-closed so an unknown compatibility state cannot authorize resume.
+
 ## What the browser can reach
 
 Three endpoints, and nothing else:
@@ -133,12 +138,18 @@ catalogue mutation SQL. `catalogue/mutation-boundary.test.ts` enforces this.
 
 ## Limits
 
-The page polls every four seconds. The server keeps a bounded, exact-query cache of serialized snapshots
-for 2.5 seconds: warm polls compare the cached exact-byte ETag without rebuilding, and stale polls serve the
-last complete representation while one background rebuild runs. A successful action invalidates these
-representations so the browser's forced follow-up load waits for a fresh build. There is no push transport;
-the UI shows what the last complete snapshot said and labels unreadable sources rather than implying
-freshness it does not have.
+The page polls every four seconds. The server keeps at most 16 exact-query serialized snapshots and four
+MiB of their bodies for 2.5 seconds: warm polls compare the cached exact-byte ETag without rebuilding, and
+stale polls serve the last complete representation while one background rebuild runs. A successful action
+invalidates all representations; a bridge-style forced liveness load invalidates only its exact query, so
+that request waits for a fresh build without discarding other views.
+
+Server-sent events remain unjustified by the measured transport rather than by synthetic timing alone. Live
+soaks distinguish unchanged polls as zero-body `304` responses and actual changes as `200` responses carrying
+new representation bytes. The serialized cache removes repeat build work from the unchanged path; a push
+connection would still need the same source observation to discover changes while adding reconnect and
+connection-lifecycle machinery. The UI therefore shows the last complete snapshot and labels unreadable
+sources rather than implying freshness it does not have.
 
 This is separate from the interpreted Swift sidebar in `integrations/cmux/`, which remains the
 compact left-sidebar navigator.

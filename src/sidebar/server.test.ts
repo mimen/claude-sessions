@@ -89,6 +89,7 @@ function deferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void;
 function harness(
   overrides: Partial<SidebarSource> = {},
   snapshotRepresentationTtlMs?: number,
+  snapshotRepresentationMaxBytes?: number,
 ): Harness {
   // Built below from the base source, so a test overriding setLifecycle still drives retire.
   const opened: string[] = [];
@@ -146,6 +147,7 @@ function harness(
       },
     },
     ...(snapshotRepresentationTtlMs === undefined ? {} : { snapshotRepresentationTtlMs }),
+    ...(snapshotRepresentationMaxBytes === undefined ? {} : { snapshotRepresentationMaxBytes }),
   });
   running.push(server);
   return {
@@ -289,6 +291,51 @@ describe("sidebar server", () => {
     expect(elapsedMs).toBeLessThan(50);
     expect(bridgeReads).toBe(2);
     pending.resolve(buildBridge({ windows: [] }, {}, true));
+  });
+
+  test("bridge-style refresh drops only its exact cached query and awaits a fresh snapshot", async () => {
+    let activeCount = 0;
+    let snapshotCalls = 0;
+    let livenessRefreshes = 0;
+    const app = harness({
+      refreshSnapshotLiveness: () => {
+        livenessRefreshes += 1;
+      },
+      snapshot: async (scope = "active") => {
+        snapshotCalls += 1;
+        return {
+          ...EMPTY_SNAPSHOT,
+          lifecycleCounts: {
+            ...EMPTY_SNAPSHOT.lifecycleCounts,
+            active: scope === "active" ? activeCount : 0,
+          },
+        };
+      },
+    });
+    const active = await fetch(`${app.url}/api/snapshot?scope=active`);
+    const activeEtag = active.headers.get("etag") ?? "";
+    await active.arrayBuffer();
+    const completed = await fetch(`${app.url}/api/snapshot?scope=completed`);
+    const completedEtag = completed.headers.get("etag") ?? "";
+    await completed.arrayBuffer();
+
+    activeCount = 1;
+    const refreshed = await fetch(`${app.url}/api/snapshot?scope=active`, {
+      headers: {
+        "if-none-match": activeEtag,
+        "x-ccs-refresh-liveness": "1",
+      },
+    });
+    expect(refreshed.status).toBe(200);
+    expect(await refreshed.json()).toMatchObject({ lifecycleCounts: { active: 1 } });
+    expect(livenessRefreshes).toBe(1);
+    expect(snapshotCalls).toBe(3);
+
+    const completedStillWarm = await fetch(`${app.url}/api/snapshot?scope=completed`, {
+      headers: { "if-none-match": completedEtag },
+    });
+    expect(completedStillWarm.status).toBe(304);
+    expect(snapshotCalls).toBe(3);
   });
 
   test("an advancing production clock does not turn an unchanged projection into 200", async () => {
@@ -451,6 +498,30 @@ describe("sidebar server", () => {
 
     await (await fetch(`${app.url}/api/snapshot?limit=20`)).arrayBuffer();
     expect(snapshotCalls).toBe(18);
+  });
+
+  test("bounds total serialized representation bytes with deterministic LRU eviction", async () => {
+    const cacheTestPayload = "x".repeat(256);
+    const snapshot = { ...EMPTY_SNAPSHOT, cacheTestPayload };
+    const oneRepresentationBytes = Buffer.byteLength(JSON.stringify(snapshot));
+    let snapshotCalls = 0;
+    const app = harness({
+      snapshot: async () => {
+        snapshotCalls += 1;
+        return snapshot;
+      },
+    }, undefined, (oneRepresentationBytes * 2) - 1);
+
+    await (await fetch(`${app.url}/api/snapshot?limit=20`)).arrayBuffer();
+    await (await fetch(`${app.url}/api/snapshot?limit=21`)).arrayBuffer();
+    expect(snapshotCalls).toBe(2);
+
+    // The second body crossed the byte budget and evicted the least-recently-used first query.
+    await (await fetch(`${app.url}/api/snapshot?limit=20`)).arrayBuffer();
+    expect(snapshotCalls).toBe(3);
+    // The just-rebuilt first query evicted the second in turn, proving deterministic byte LRU.
+    await (await fetch(`${app.url}/api/snapshot?limit=21`)).arrayBuffer();
+    expect(snapshotCalls).toBe(4);
   });
 
   test("byte-identical projections share a strong ETag across query shapes", async () => {

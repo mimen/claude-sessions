@@ -26,6 +26,8 @@ const MAX_ROW_LIMIT = 2_000;
 const SNAPSHOT_REPRESENTATION_TTL_MS = 2_500;
 /** The browser uses only a handful of query shapes; keep hand-written requests from growing forever. */
 const MAX_SNAPSHOT_REPRESENTATIONS = 16;
+/** Bound retained serialized bodies even when several queries project the maximum row count. */
+const MAX_SNAPSHOT_REPRESENTATION_BYTES = 4 * 1024 * 1024;
 
 /** cmux's Dock needs a stable origin, so the port is fixed unless deliberately overridden. */
 export const DEFAULT_SIDEBAR_PORT = 8787;
@@ -45,6 +47,8 @@ export interface SidebarServerOptions {
   readonly logger?: SidebarServerLogger;
   /** Test seam; production uses the source-aligned 2.5-second representation freshness. */
   readonly snapshotRepresentationTtlMs?: number;
+  /** Test seam; production retains at most four MiB of serialized snapshot bodies. */
+  readonly snapshotRepresentationMaxBytes?: number;
 }
 
 type JsonValue = string | number | boolean | null | JsonObject | readonly JsonValue[];
@@ -153,6 +157,7 @@ interface SnapshotQuery {
 
 interface SnapshotRepresentation {
   readonly body: string;
+  readonly byteLength: number;
   readonly etag: string;
   readonly completedAt: number;
 }
@@ -291,10 +296,23 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
   const logger = options.logger ?? log;
   const snapshotRepresentationTtlMs = options.snapshotRepresentationTtlMs
     ?? SNAPSHOT_REPRESENTATION_TTL_MS;
+  const snapshotRepresentationMaxBytes = Math.max(
+    0,
+    options.snapshotRepresentationMaxBytes ?? MAX_SNAPSHOT_REPRESENTATION_BYTES,
+  );
   const snapshotRepresentations = new Map<string, SnapshotRepresentationEntry>();
+  let snapshotRepresentationBytes = 0;
+
+  function removeCachedEntry(key: string): void {
+    const entry = snapshotRepresentations.get(key);
+    if (entry === undefined) return;
+    snapshotRepresentationBytes -= entry.representation?.byteLength ?? 0;
+    snapshotRepresentations.delete(key);
+  }
 
   function invalidateSnapshots(): void {
     snapshotRepresentations.clear();
+    snapshotRepresentationBytes = 0;
   }
 
   function cachedEntry(key: string): SnapshotRepresentationEntry | undefined {
@@ -310,11 +328,35 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
     while (snapshotRepresentations.size >= MAX_SNAPSHOT_REPRESENTATIONS) {
       const oldest = snapshotRepresentations.keys().next().value;
       if (oldest === undefined) break;
-      snapshotRepresentations.delete(oldest);
+      removeCachedEntry(oldest);
     }
     const entry: SnapshotRepresentationEntry = {};
     snapshotRepresentations.set(key, entry);
     return entry;
+  }
+
+  function publishRepresentation(
+    key: string,
+    entry: SnapshotRepresentationEntry,
+    representation: SnapshotRepresentation,
+  ): void {
+    if (snapshotRepresentations.get(key) !== entry) return;
+
+    snapshotRepresentationBytes -= entry.representation?.byteLength ?? 0;
+    delete entry.representation;
+    if (representation.byteLength > snapshotRepresentationMaxBytes) {
+      removeCachedEntry(key);
+      return;
+    }
+
+    while (snapshotRepresentationBytes + representation.byteLength > snapshotRepresentationMaxBytes) {
+      const oldest = [...snapshotRepresentations.keys()].find((candidate) => candidate !== key);
+      if (oldest === undefined) break;
+      removeCachedEntry(oldest);
+    }
+    if (snapshotRepresentations.get(key) !== entry) return;
+    entry.representation = representation;
+    snapshotRepresentationBytes += representation.byteLength;
   }
 
   function rebuildSnapshot(
@@ -330,8 +372,10 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       const serializationStartedAt = performance.now();
       const body = JSON.stringify(snapshot);
       const serializationMs = performance.now() - serializationStartedAt;
+      const byteLength = Buffer.byteLength(body);
       const representation = {
         body,
+        byteLength,
         etag: snapshotEtag(body),
         completedAt: performance.now(),
       };
@@ -340,7 +384,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         logger.warn("slow sidebar snapshot request", {
           view: query.scope,
           rowCount: snapshot.rows.length,
-          payloadBytes: Buffer.byteLength(body),
+          payloadBytes: byteLength,
           totalMs,
           serializationMs,
           livenessReadable: snapshot.livenessReadable,
@@ -348,8 +392,8 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           indexReadable: snapshot.indexReadable,
         });
       }
-      // An action may have invalidated this entry while its source read was in flight.
-      if (snapshotRepresentations.get(key) === entry) entry.representation = representation;
+      // An action or byte/count eviction may have removed this entry while its read was in flight.
+      publishRepresentation(key, entry, representation);
       return representation;
     })();
     entry.rebuild = rebuild;
@@ -400,6 +444,9 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         const key = snapshotQueryKey(query);
         try {
           if (request.headers.get("x-ccs-refresh-liveness") === "1") {
+            // A native bridge focus changed state outside HTTP. Drop only this query so load(true)
+            // waits for a completed projection instead of accepting its previous representation.
+            removeCachedEntry(key);
             source.refreshSnapshotLiveness?.();
           }
           const entry = cachedEntry(key) ?? createCachedEntry(key);
