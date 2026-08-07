@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { existsSync, statSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import {
@@ -14,6 +15,17 @@ interface DurableReader<T> {
   read(key: string, load: (db: Database) => T): T;
   revision(): number;
   close(): void;
+}
+
+interface DurableReaderCacheOptions<T> {
+  readonly maxEntries: number;
+  readonly maxBytes: number;
+  retainedBytes(value: T): number;
+}
+
+interface CachedValue<T> {
+  readonly value: T;
+  readonly retainedBytes: number;
 }
 
 interface FileIdentity {
@@ -41,19 +53,35 @@ function dataVersion(db: Database): number {
  * an atomic rename that replaced the path with a different database. Either change clears all
  * derived facts once, on the next read.
  */
-function durableReader<T>(path: string): DurableReader<T> {
+function durableReader<T>(
+  path: string,
+  cacheOptions: DurableReaderCacheOptions<T>,
+): DurableReader<T> {
   let db: Database | null = null;
   let openedIdentity: FileIdentity | null = null;
   let observedVersion: number | null = null;
   let revisionNumber = 0;
-  const values = new Map<string, T>();
+  let retainedBytes = 0;
+  const values = new Map<string, CachedValue<T>>();
+
+  function clearValues(): void {
+    values.clear();
+    retainedBytes = 0;
+  }
+
+  function removeValue(key: string): void {
+    const entry = values.get(key);
+    if (entry === undefined) return;
+    retainedBytes -= entry.retainedBytes;
+    values.delete(key);
+  }
 
   function closeConnection(): void {
     db?.close();
     db = null;
     openedIdentity = null;
     observedVersion = null;
-    values.clear();
+    clearValues();
   }
 
   function openConnection(): Database {
@@ -100,7 +128,7 @@ function durableReader<T>(path: string): DurableReader<T> {
         if (observedVersion !== next) {
           observedVersion = next;
           revisionNumber += 1;
-          values.clear();
+          clearValues();
         }
         return current;
       } catch (error) {
@@ -114,9 +142,31 @@ function durableReader<T>(path: string): DurableReader<T> {
     read(key: string, load: (database: Database) => T): T {
       const current = observe();
       const cached = values.get(key);
-      if (cached !== undefined) return cached;
+      if (cached !== undefined) {
+        values.delete(key);
+        values.set(key, cached);
+        return cached.value;
+      }
+
       const value = load(current);
-      values.set(key, value);
+      const valueBytes = Buffer.byteLength(key) + cacheOptions.retainedBytes(value);
+      if (
+        cacheOptions.maxEntries === 0
+        || valueBytes > cacheOptions.maxBytes
+      ) {
+        return value;
+      }
+
+      while (
+        values.size >= cacheOptions.maxEntries
+        || retainedBytes + valueBytes > cacheOptions.maxBytes
+      ) {
+        const oldest = values.keys().next().value;
+        if (oldest === undefined) break;
+        removeValue(oldest);
+      }
+      values.set(key, { value, retainedBytes: valueBytes });
+      retainedBytes += valueBytes;
       return value;
     },
     revision: () => revisionNumber,
@@ -137,6 +187,51 @@ export interface SidebarReadCache {
   close(): void;
 }
 
+export interface SidebarReadCacheOptions {
+  /** Test seam; production matches the serialized response cache's entry bound. */
+  readonly maxEntries?: number;
+  /** Test seam; production matches the serialized response cache's four MiB bound. */
+  readonly maxBytes?: number;
+}
+
+const MAX_DERIVED_VALUES = 16;
+const MAX_DERIVED_VALUE_BYTES = 4 * 1024 * 1024;
+
+function boundedLimit(value: number | undefined, fallback: number): number {
+  return value === undefined || !Number.isFinite(value)
+    ? fallback
+    : Math.max(0, Math.floor(value));
+}
+
+function serializedBytes(value: object): number {
+  return Buffer.byteLength(JSON.stringify(value));
+}
+
+function catalogueRetainedBytes(outcome: CatalogueReadOutcome): number {
+  if (outcome.status !== "ok") {
+    return serializedBytes(
+      outcome.status === "unreadable"
+        ? { status: outcome.status, error: outcome.error.message }
+        : outcome,
+    );
+  }
+  const facts = outcome.facts;
+  return serializedBytes({
+    lifecycles: [...facts.lifecycles],
+    catalogueLifecycles: [...facts.catalogueLifecycles],
+    canonicalSessionIds: [...facts.canonicalSessionIds],
+    preferredTitles: [...facts.preferredTitles],
+    memberships: [...facts.memberships],
+    sessionIds: [...facts.sessionIds],
+    auxiliary: [...facts.auxiliary],
+    summaries: [...facts.summaries],
+  });
+}
+
+function indexRetainedBytes(value: readonly IndexedSessionInput[]): number {
+  return serializedBytes(value);
+}
+
 function indexKey(options: ReadIndexOptions): string {
   return JSON.stringify({
     limit: options.limit,
@@ -148,9 +243,22 @@ function indexKey(options: ReadIndexOptions): string {
 export function createSidebarReadCache(
   cataloguePath: string,
   indexPath: string,
+  options: SidebarReadCacheOptions = {},
 ): SidebarReadCache {
-  let catalogue = durableReader<CatalogueReadOutcome>(cataloguePath);
-  let index = durableReader<readonly IndexedSessionInput[]>(indexPath);
+  const maxEntries = boundedLimit(options.maxEntries, MAX_DERIVED_VALUES);
+  const maxBytes = boundedLimit(options.maxBytes, MAX_DERIVED_VALUE_BYTES);
+  const catalogueOptions: DurableReaderCacheOptions<CatalogueReadOutcome> = {
+    maxEntries,
+    maxBytes,
+    retainedBytes: catalogueRetainedBytes,
+  };
+  const indexOptions: DurableReaderCacheOptions<readonly IndexedSessionInput[]> = {
+    maxEntries,
+    maxBytes,
+    retainedBytes: indexRetainedBytes,
+  };
+  let catalogue = durableReader(cataloguePath, catalogueOptions);
+  let index = durableReader(indexPath, indexOptions);
 
   return {
     readCatalogue(): CatalogueReadOutcome {
@@ -180,8 +288,8 @@ export function createSidebarReadCache(
     invalidate(): void {
       catalogue.close();
       index.close();
-      catalogue = durableReader<CatalogueReadOutcome>(cataloguePath);
-      index = durableReader<readonly IndexedSessionInput[]>(indexPath);
+      catalogue = durableReader(cataloguePath, catalogueOptions);
+      index = durableReader(indexPath, indexOptions);
     },
     close(): void {
       catalogue.close();

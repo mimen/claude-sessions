@@ -23,6 +23,8 @@ const VERSION_TIMEOUT_MS = 2_000;
 const VERSION_CACHE_TTL_MS = 60_000;
 const TREE_TIMEOUT_MS = 3_000;
 const HOOK_STORE_TIMEOUT_MS = 2_000;
+const PROCESS_KILL_GRACE_MS = 100;
+const PROCESS_COMPLETION_SLACK_MS = 100;
 
 /** Parsed cmux version. */
 export interface CmuxVersion {
@@ -128,10 +130,22 @@ export function liveBridge(cmuxBin = "cmux"): Bridge {
 
 function execFileAsync(file: string, args: readonly string[], timeoutMs: number): Promise<AsyncCmuxCommandResult> {
   return new Promise((resolve) => {
-    execFile(file, [...args], { encoding: "utf8", timeout: timeoutMs, windowsHide: true }, (error, stdout) => {
+    let termTimer: ReturnType<typeof setTimeout> | undefined;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const child = execFile(file, [...args], { encoding: "utf8", windowsHide: true }, (error, stdout) => {
+      if (termTimer) clearTimeout(termTimer);
+      if (killTimer) clearTimeout(killTimer);
       resolve({ ok: error === null, stdout: typeof stdout === "string" ? stdout : "" });
     });
+    termTimer = setTimeout(() => {
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => child.kill("SIGKILL"), PROCESS_KILL_GRACE_MS);
+    }, timeoutMs);
   });
+}
+
+function processBoundMs(timeoutMs: number): number {
+  return timeoutMs + PROCESS_KILL_GRACE_MS + PROCESS_COMPLETION_SLACK_MS;
 }
 
 const productionAsyncIo: AsyncCmuxIo = {
@@ -164,7 +178,7 @@ async function boundedAsync<T>(work: Promise<T>, timeoutMs: number): Promise<T |
 async function readTreeAsync(io: AsyncCmuxIo, cmuxBin: string): Promise<TreeResult> {
   const result = await boundedAsync(
     io.execFile(cmuxBin, ["tree", "--all", "--json", "--id-format", "both"], TREE_TIMEOUT_MS),
-    TREE_TIMEOUT_MS,
+    processBoundMs(TREE_TIMEOUT_MS),
   );
   if (!result || !result.ok) return { tree: { windows: [] }, ok: false };
   try {
@@ -197,7 +211,7 @@ async function readVersionAsync(io: AsyncCmuxIo, cmuxBin: string): Promise<CmuxV
   try {
     const result = await boundedAsync(
       io.execFile(cmuxBin, ["--version"], VERSION_TIMEOUT_MS),
-      VERSION_TIMEOUT_MS,
+      processBoundMs(VERSION_TIMEOUT_MS),
     );
     return result?.ok ? parseVersion(result.stdout) : null;
   } catch {

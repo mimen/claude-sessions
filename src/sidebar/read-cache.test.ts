@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, renameSync, rmSync } from "node:fs";
@@ -60,6 +61,80 @@ function catalogueTitle(cache: ReturnType<typeof createSidebarReadCache>): strin
 }
 
 describe("SidebarReadCache", () => {
+  test("bounds query variants and refreshes recency on cache hits", () => {
+    const root = mkdtempSync(join(tmpdir(), "sidebar-read-cache-"));
+    try {
+      const paths = createDatabases(root);
+      const cache = createSidebarReadCache(paths.cataloguePath, paths.indexPath, {
+        maxEntries: 2,
+      });
+      const first = cache.readIndex({ limit: 20 });
+      const second = cache.readIndex({ limit: 21 });
+
+      expect(cache.readIndex({ limit: 20 })).toBe(first);
+      cache.readIndex({ limit: 22 });
+      expect(cache.readIndex({ limit: 20 })).toBe(first);
+      expect(cache.readIndex({ limit: 21 })).not.toBe(second);
+      cache.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("bounds aggregate retained bytes with deterministic LRU eviction", () => {
+    const root = mkdtempSync(join(tmpdir(), "sidebar-read-cache-"));
+    try {
+      const paths = createDatabases(root);
+      const measuringCache = createSidebarReadCache(paths.cataloguePath, paths.indexPath);
+      const measured = measuringCache.readIndex({ limit: 20 });
+      const oneEntryBytes = Buffer.byteLength(JSON.stringify({ limit: 20, sessionIds: null }))
+        + Buffer.byteLength(JSON.stringify(measured));
+      measuringCache.close();
+
+      const cache = createSidebarReadCache(paths.cataloguePath, paths.indexPath, {
+        maxBytes: (oneEntryBytes * 2) - 1,
+      });
+      const first = cache.readIndex({ limit: 20 });
+      const second = cache.readIndex({ limit: 21 });
+
+      expect(cache.readIndex({ limit: 20 })).not.toBe(first);
+      expect(cache.readIndex({ limit: 21 })).not.toBe(second);
+      cache.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("does not retain a derived value larger than the byte budget", () => {
+    const root = mkdtempSync(join(tmpdir(), "sidebar-read-cache-"));
+    try {
+      const paths = createDatabases(root);
+      const cache = createSidebarReadCache(paths.cataloguePath, paths.indexPath, { maxBytes: 1 });
+      const first = cache.readIndex({ limit: 20 });
+
+      expect(cache.readIndex({ limit: 20 })).not.toBe(first);
+      cache.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit invalidation clears retained derived values", () => {
+    const root = mkdtempSync(join(tmpdir(), "sidebar-read-cache-"));
+    try {
+      const paths = createDatabases(root);
+      const cache = createSidebarReadCache(paths.cataloguePath, paths.indexPath);
+      const first = cache.readIndex({ limit: 20 });
+
+      cache.invalidate();
+
+      expect(cache.readIndex({ limit: 20 })).not.toBe(first);
+      cache.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("a second connection invalidates each durable cache exactly once on the next read", () => {
     const root = mkdtempSync(join(tmpdir(), "sidebar-read-cache-"));
     try {

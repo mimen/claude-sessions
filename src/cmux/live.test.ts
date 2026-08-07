@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   cmuxVersion,
@@ -105,6 +107,49 @@ describe("liveBridgeAsync", () => {
     await liveBridgeAsync(io);
     expect(io.calls).toContainEqual(["tree", "--all", "--json", "--id-format", "both"]);
   });
+
+  test("kills production probes that resist SIGTERM", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "ccs-cmux-probe-"));
+    const executable = join(directory, "cmux-probe");
+    const pidFile = join(directory, "pids");
+    let pids: number[] = [];
+
+    try {
+      await writeFile(executable, [
+        "#!/usr/bin/env node",
+        "const { appendFileSync } = require('node:fs');",
+        `appendFileSync(${JSON.stringify(pidFile)}, process.pid + "\\n");`,
+        "process.on('SIGTERM', () => {});",
+        "setInterval(() => {}, 1_000);",
+        "",
+      ].join("\n"));
+      await chmod(executable, 0o755);
+
+      const bridge = await liveBridgeAsync({
+        cmuxBin: executable,
+        hookStorePath: join(directory, "missing-store.json"),
+      });
+      pids = (await readFile(pidFile, "utf8"))
+        .trim()
+        .split("\n")
+        .map((value) => Number.parseInt(value, 10));
+
+      expect(bridge.readable).toBe(false);
+      expect(pids).toHaveLength(2);
+      for (const pid of pids) {
+        expect(() => process.kill(pid, 0)).toThrow();
+      }
+    } finally {
+      for (const pid of pids) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // The production timeout already reaped the probe.
+        }
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 6_000);
 
   test("retries a rejected version probe on the next read", async () => {
     const io = scriptedVersionIo([
