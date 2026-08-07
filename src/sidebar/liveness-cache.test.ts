@@ -158,6 +158,57 @@ describe("snapshot liveness cache", () => {
     expect(reads).toBe(2);
   });
 
+  test("a cold double-timeout resolves fail-closed before the browser snapshot deadline", async () => {
+    let reads = 0;
+    const never = new Promise<Bridge>(() => {});
+    const reader = createSnapshotLivenessReader({
+      ttlMs: 10,
+      readBridge: () => {
+        reads += 1;
+        return never;
+      },
+    });
+
+    const startedAt = performance.now();
+    expect((await reader.read()).readable).toBeFalse();
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(elapsedMs).toBeLessThan(4_000);
+    expect(reads).toBe(2);
+  }, 5_000);
+
+  test("warm reads serve cached state immediately while both bounded attempts time out", async () => {
+    let reads = 0;
+    const never = new Promise<Bridge>(() => {});
+    const reader = createSnapshotLivenessReader({
+      ttlMs: 60_000,
+      attemptTimeoutMs: 10,
+      readBridge: async () => {
+        reads += 1;
+        return reads === 1 ? workspaceBridge("cached") : never;
+      },
+    });
+
+    expect((await reader.read()).workspaceIds()).toEqual(["cached"]);
+    reader.refresh();
+    await waitFor(() => reads === 2);
+
+    let completed = false;
+    const warmRead = reader.read().then((bridge) => {
+      completed = true;
+      return bridge;
+    });
+    await Promise.resolve();
+    expect(completed).toBeTrue();
+    expect((await warmRead).workspaceIds()).toEqual(["cached"]);
+
+    await Bun.sleep(15);
+    expect(reads).toBe(3);
+    await Bun.sleep(15);
+    expect((await reader.read()).readable).toBeFalse();
+    expect(reads).toBe(3);
+  });
+
   test("publishes fail-closed unreadability only after both refresh attempts fail", async () => {
     let reads = 0;
     const reader = createSnapshotLivenessReader({
