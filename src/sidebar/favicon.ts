@@ -7,16 +7,8 @@
  * top-level navigation would treat it as an active same-origin document rather than a passive
  * image.
  */
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  lstatSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  type Stats,
-} from "node:fs";
+import { constants, lstatSync, realpathSync, type BigIntStats, type Stats } from "node:fs";
+import { lstat, open, realpath, type FileHandle } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /** Conventional passive favicon locations, most specific first. */
@@ -36,6 +28,17 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ico: "image/x-icon",
   png: "image/png",
 };
+
+const MAX_FAVICON_BYTES = 256 * 1024;
+const MAX_CACHED_FAVICONS = 64;
+
+interface CachedFavicon {
+  readonly body: ArrayBuffer;
+  readonly stats: BigIntStats;
+  readonly type: string;
+}
+
+const faviconCache = new Map<string, CachedFavicon>();
 
 export interface FaviconAsset {
   readonly body: ArrayBuffer;
@@ -79,8 +82,61 @@ function realPathIsContained(directory: string, path: string): boolean {
   }
 }
 
-function sameFile(left: Stats, right: Stats): boolean {
+function sameFile(left: BigIntStats, right: BigIntStats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameFileVersion(left: BigIntStats, right: BigIntStats): boolean {
+  return sameFile(left, right)
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs;
+}
+
+async function regularFileStatsAsync(path: string): Promise<BigIntStats | null> {
+  try {
+    const stats = await lstat(path, { bigint: true });
+    return !stats.isSymbolicLink() && stats.isFile() && stats.nlink === 1n ? stats : null;
+  } catch {
+    return null;
+  }
+}
+
+async function realPathIsContainedAsync(directory: string, path: string): Promise<boolean> {
+  try {
+    return isContainedPath(await realpath(directory), await realpath(path));
+  } catch {
+    return false;
+  }
+}
+
+function cachedFavicon(path: string, stats: BigIntStats, type: string): FaviconAsset | null {
+  const cached = faviconCache.get(path);
+  if (!cached || cached.type !== type || !sameFileVersion(cached.stats, stats)) return null;
+  faviconCache.delete(path);
+  faviconCache.set(path, cached);
+  return { body: cached.body.slice(0), type };
+}
+
+function cacheFavicon(path: string, stats: BigIntStats, type: string, body: ArrayBuffer): void {
+  faviconCache.delete(path);
+  faviconCache.set(path, { body: body.slice(0), stats, type });
+  while (faviconCache.size > MAX_CACHED_FAVICONS) {
+    const oldest = faviconCache.keys().next().value;
+    if (typeof oldest !== "string") break;
+    faviconCache.delete(oldest);
+  }
+}
+
+async function readExact(handle: FileHandle, size: number): Promise<ArrayBuffer | null> {
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  while (offset < size) {
+    const result = await handle.read(bytes, offset, size - offset, offset);
+    if (result.bytesRead === 0) return null;
+    offset += result.bytesRead;
+  }
+  return bytes.buffer;
 }
 
 /** The favicon a directory publishes, or null when it has no safe passive icon. */
@@ -110,34 +166,40 @@ export function findFavicons(directories: readonly string[]): Map<string, string
  * the open, and read directly. A path replacement after the open cannot redirect that descriptor
  * to a different file.
  */
-export function loadFavicon(directory: string, path: string): FaviconAsset | null {
+export async function loadFavicon(directory: string, path: string): Promise<FaviconAsset | null> {
   if (!isAbsolute(directory) || !isAbsolute(path) || !isCandidatePath(directory, path)) {
     return null;
   }
   const type = faviconContentType(path);
-  const beforeOpen = regularFileStats(path);
-  if (!type || !beforeOpen || !realPathIsContained(directory, path)) return null;
+  const beforeOpen = await regularFileStatsAsync(path);
+  if (!type || !beforeOpen || !await realPathIsContainedAsync(directory, path)) return null;
 
-  let descriptor: number | null = null;
+  let handle: FileHandle | null = null;
   try {
-    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const opened = fstatSync(descriptor);
-    if (!opened.isFile() || !sameFile(beforeOpen, opened)) return null;
-
-    // Confirm the pathname still names the opened regular file. The response is read from the
-    // descriptor, so a later rename or symlink swap cannot change the bytes being served.
-    const afterOpen = regularFileStats(path);
-    if (!afterOpen || !sameFile(opened, afterOpen) || !realPathIsContained(directory, path)) {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isFile() || !sameFile(beforeOpen, opened) || opened.size > BigInt(MAX_FAVICON_BYTES)) {
       return null;
     }
 
-    const fileBytes = readFileSync(descriptor);
-    const body = new Uint8Array(fileBytes.byteLength);
-    body.set(fileBytes);
-    return { body: body.buffer, type };
+    // Confirm the pathname still names the opened regular file. The response is read from the
+    // descriptor, so a later rename or symlink swap cannot change the bytes being served.
+    const afterOpen = await regularFileStatsAsync(path);
+    if (!afterOpen || !sameFile(opened, afterOpen)
+      || !await realPathIsContainedAsync(directory, path)) {
+      return null;
+    }
+
+    const cached = cachedFavicon(path, opened, type);
+    if (cached) return cached;
+
+    const body = await readExact(handle, Number(opened.size));
+    if (!body || !sameFileVersion(opened, await handle.stat({ bigint: true }))) return null;
+    cacheFavicon(path, opened, type, body);
+    return { body, type };
   } catch {
     return null;
   } finally {
-    if (descriptor !== null) closeSync(descriptor);
+    await handle?.close().catch(() => undefined);
   }
 }

@@ -508,7 +508,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         // The browser names a directory, never a file. The source decides whether that directory
         // is one it published; the selected path is then securely re-opened and re-validated.
         const file = directory ? source.faviconFor(directory) : null;
-        const favicon = file && directory ? loadFavicon(directory, file) : null;
+        const favicon = file && directory ? await loadFavicon(directory, file) : null;
         if (!favicon) return new Response("Not found", { status: 404 });
         return new Response(favicon.body, {
           headers: {
