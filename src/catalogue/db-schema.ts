@@ -1034,6 +1034,23 @@ function applyMigrations(db: Database): void {
   if (!hasColumn(db, "catalogue", "enrichment_declined")) {
     db.exec("ALTER TABLE catalogue ADD COLUMN enrichment_declined TEXT;");
   }
+  // Life-domain provenance is separate from the domain:* tag: tags remain the interoperable
+  // assignment representation while this row records why it exists and whether automation may
+  // replace it. Presence-guarded and additive so older binaries can share the catalogue.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_category_assignments (
+      session_id TEXT PRIMARY KEY,
+      slug TEXT NOT NULL,
+      source TEXT NOT NULL,
+      confidence REAL,
+      classifier_version TEXT NOT NULL,
+      classified_at TEXT NOT NULL,
+      manual_lock INTEGER NOT NULL DEFAULT 0,
+      evidence TEXT,
+      failed_write TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_category_slug ON session_category_assignments(slug);
+  `);
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }
 

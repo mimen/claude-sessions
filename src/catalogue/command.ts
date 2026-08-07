@@ -3,6 +3,9 @@ import type { Database } from "bun:sqlite";
 import type { InferenceEngine } from "../inference/engine.ts";
 import { type Kind } from "./db-schema.ts";
 import { setKey, setParent, setProject, setCompleted, setArchived, setCustomTitle, addTag, removeTag } from "./db-mutations.ts";
+import { CATEGORY_REGISTRY_PATH } from "../paths.ts";
+import { categoryBySlug, loadCategoryRegistry, slugFromDomainTag } from "../categories/registry.ts";
+import { getCategoryAssignment, setCategory } from "../categories/assignment.ts";
 
 /**
  * Natural-language editor for session ORGANIZATION METADATA, backed by an inference engine. The
@@ -21,14 +24,16 @@ export interface SessionMeta {
   readonly archived: boolean;
   /** User-assigned project label (catalogue), if any. */
   readonly project: string | null;
+  /** Stored primary category slug. Effective inheritance is resolved by catalogue readers. */
+  readonly category?: string | null;
   /** Git repo the session ran in (for context / disambiguation). */
   readonly repo: string;
 }
 
 export interface Mutation {
   readonly sessionId: string;
-  readonly op: "key" | "event" | "skill" | "parent" | "project" | "completed" | "archived" | "title" | "tag" | "untag";
-  /** Resolved value: for `parent`, a target sessionId or null; booleans as "true"/"false". */
+  readonly op: "key" | "event" | "skill" | "parent" | "project" | "completed" | "archived" | "title" | "category" | "tag" | "untag";
+  /** Resolved value: parent sessionId, canonical category slug, or null; booleans as strings. */
   readonly value: string | null;
 }
 
@@ -43,7 +48,8 @@ const PROMPT =
   "for a parent). Ops and their value: event→a slug or 'none'; skill→a " +
   "name or 'none'; project→a project/initiative name (lowercase slug) or 'none'; parent→the " +
   "target session NUMBER or 'none'; completed/archived→'true'|'false'; title→a short custom " +
-  "title; tag/untag→an entity name. Respond using the provided JSON schema.";
+  "title; category→a canonical category slug or 'none'; tag/untag→a non-domain entity name. " +
+  "Never represent a category as a tag. Respond using the provided JSON schema.";
 
 interface RawMutation {
   n?: number;
@@ -61,6 +67,7 @@ function renderSessions(sessions: readonly SessionMeta[]): string {
         `kind=${s.kind}`,
         `key=${s.key ?? "none"}`,
         `project=${s.project ?? "none"}`,
+        `category=${s.category ?? "none"}`,
         `parent=${parent}`,
         s.completed ? "done" : "",
         s.archived ? "archived" : "",
@@ -115,6 +122,7 @@ export async function runMetadataCommand(
         case "skill":
         case "title":
         case "project":
+        case "category":
           value = cleared ? null : v;
           break;
         case "completed":
@@ -161,11 +169,48 @@ export function applyMutations(catalogue: Database, mutations: readonly Mutation
       case "title":
         setCustomTitle(catalogue, m.sessionId, m.value, now);
         break;
+      case "category": {
+        const registry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
+        if (!registry.ok) throw registry.error;
+        setCategory(catalogue, registry.value, {
+          sessionId: m.sessionId,
+          slug: m.value,
+          source: "manual",
+          manualLock: m.value !== null,
+          classifiedAt: now,
+          allowLockedOverride: true,
+        });
+        break;
+      }
       case "tag":
-        if (m.value) addTag(catalogue, m.sessionId, m.value);
+        if (m.value) {
+          const slug = slugFromDomainTag(m.value);
+          if (slug) {
+            const registry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
+            if (!registry.ok) throw registry.error;
+            setCategory(catalogue, registry.value, {
+              sessionId: m.sessionId, slug, source: "manual", manualLock: true,
+              classifiedAt: now, allowLockedOverride: true,
+            });
+          } else addTag(catalogue, m.sessionId, m.value);
+        }
         break;
       case "untag":
-        if (m.value) removeTag(catalogue, m.sessionId, m.value);
+        if (m.value) {
+          const slug = slugFromDomainTag(m.value);
+          if (slug) {
+            const registry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
+            if (!registry.ok) throw registry.error;
+            if (!categoryBySlug(registry.value, slug)) throw new Error(`unknown category "${slug}"`);
+            if (getCategoryAssignment(catalogue, m.sessionId)?.slug !== slug) {
+              throw new Error(`session is not assigned to category "${slug}"`);
+            }
+            setCategory(catalogue, registry.value, {
+              sessionId: m.sessionId, slug: null, source: "manual", classifiedAt: now,
+              allowLockedOverride: true,
+            });
+          } else removeTag(catalogue, m.sessionId, m.value);
+        }
         break;
     }
     counts.set(m.op, (counts.get(m.op) ?? 0) + 1);

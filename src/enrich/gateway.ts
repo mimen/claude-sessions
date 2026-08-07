@@ -83,6 +83,10 @@ export interface EnrichmentRequest {
 }
 
 export interface EnrichOptions {
+  /** Closed category choices supplied only when deterministic classification could not decide. */
+  readonly categoryChoices?: readonly { readonly slug: string; readonly name: string }[];
+  /** Internal sweep optimization: category repair may finish without regenerating fresh prose. */
+  readonly categoryOnly?: boolean;
   readonly endpoint?: string;
   readonly model?: string;
   readonly keyPath?: string;
@@ -110,7 +114,11 @@ const SYSTEM_PROMPT = [
   "Return only the forced answer tool call.",
 ].join(" ");
 
-function buildPrompt(request: EnrichmentRequest, locations: readonly EnrichmentLocation[]): string {
+function buildPrompt(
+  request: EnrichmentRequest,
+  locations: readonly EnrichmentLocation[],
+  categoryChoices: readonly { readonly slug: string; readonly name: string }[] = [],
+): string {
   const lines: string[] = [
     "Describe this Claude Code session so someone picking it up cold weeks later knows where it",
     "stands and what to do next. Be concrete and specific to THIS session — never generic.",
@@ -130,6 +138,15 @@ function buildPrompt(request: EnrichmentRequest, locations: readonly EnrichmentL
       "<locations>",
       renderLocationCatalogue(locations),
       "</locations>",
+      "",
+    );
+  }
+
+  if (categoryChoices.length > 0) {
+    lines.push(
+      "Deterministic location/project/path evidence could not resolve this ROOT session's life domain.",
+      "Choose exactly one category slug from this closed registry:",
+      ...categoryChoices.map((category) => `${category.slug}\t${category.name}`),
       "",
     );
   }
@@ -190,10 +207,13 @@ export async function requestEnrichment(
     tools: [{
       name: "answer",
       description: "Return the structured description of this session.",
-      input_schema: enrichmentJsonSchema(locations.length > 0),
+      input_schema: enrichmentJsonSchema(
+        locations.length > 0,
+        options.categoryChoices?.map((category) => category.slug) ?? [],
+      ),
     }],
     tool_choice: { type: "tool", name: "answer" },
-    messages: [{ role: "user", content: buildPrompt(request, locations) }],
+    messages: [{ role: "user", content: buildPrompt(request, locations, options.categoryChoices ?? []) }],
   };
 
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -247,13 +267,19 @@ export async function requestEnrichment(
   }
 
   const known = locationKeySet(locations);
+  const categorySlugs = new Set(options.categoryChoices?.map((category) => category.slug) ?? []);
+  const categoryProblem = (payload: EnrichmentPayload): string | null => {
+    if (categorySlugs.size === 0) return payload.categorySlug ? "categorySlug was returned without category fallback" : null;
+    if (!payload.categorySlug) return "categorySlug is required for category fallback";
+    return categorySlugs.has(payload.categorySlug) ? null : `categorySlug "${payload.categorySlug}" is not registered`;
+  };
   for (const block of envelope.data.content) {
     if (block.type !== "tool_use") continue;
     const parsed = EnrichmentPayloadSchema.safeParse(block.input);
     if (!parsed.success) {
       return err(new Error(`enrichment was invalid: ${z.prettifyError(parsed.error)}`));
     }
-    const problem = validateEnrichment(parsed.data, known);
+    const problem = categoryProblem(parsed.data) ?? validateEnrichment(parsed.data, known);
     if (problem) return err(new Error(`enrichment was incoherent: ${problem}`));
     return ok(parsed.data);
   }

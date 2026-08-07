@@ -130,6 +130,86 @@ describe("enrichCandidates", () => {
       teardown(f);
     }
   });
+
+  test("category staleness is ORed with fresh prose and deterministic repair skips the gateway", async () => {
+    const f = await fixture([{ id: "a", messages: 4 }]);
+    const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
+    const registryPath = join(f.dir, "categories.json");
+    writeFileSync(registryPath, JSON.stringify({
+      version: 1,
+      classifier_version: "v1",
+      categories: [{ slug: "ai-systems", name: "AI Systems", compact_name: "AI", color: "#2A67E2" }],
+      project_mappings: {},
+      path_mappings: { "/Users/mimen": "ai-systems" },
+    }));
+    process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
+    try {
+      setEnrichment(f.catalogue, "a", storedEnrichment({ atMessages: 4, at: NOW }), NOW);
+      const candidates = enrichCandidates(f.index, f.catalogue, new Date(NOW));
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]?.categoryReasons).toEqual(["category-missing"]);
+      let calls = 0;
+      const stats = await sweep(f.index, f.catalogue, {
+        locations: LOCATIONS,
+        keyPath: f.keyPath,
+        fetchImpl: async () => { calls++; return okFetch(); },
+        now: () => new Date(NOW),
+      });
+      expect(stats).toEqual({ enriched: 1, failed: 0, remaining: 0 });
+      expect(calls).toBe(0);
+      expect(f.catalogue.query("SELECT entity FROM session_tags WHERE session_id='a'").all()).toEqual([
+        { entity: "domain:ai-systems" },
+      ]);
+    } finally {
+      if (previous === undefined) delete process.env.CCS_CATEGORY_REGISTRY_PATH;
+      else process.env.CCS_CATEGORY_REGISTRY_PATH = previous;
+      teardown(f);
+    }
+  });
+
+  test("unresolved category fallback uses the closed registry and preserves fresh prose", async () => {
+    const f = await fixture([{ id: "a", messages: 4 }]);
+    const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
+    const registryPath = join(f.dir, "categories.json");
+    writeFileSync(registryPath, JSON.stringify({
+      version: 1,
+      classifier_version: "v1",
+      categories: [{ slug: "ai-systems", name: "AI Systems", compact_name: "AI", color: "#2A67E2" }],
+      project_mappings: {},
+      path_mappings: {},
+    }));
+    process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
+    try {
+      setEnrichment(f.catalogue, "a", storedEnrichment({ state: "Keep this fresh prose.", atMessages: 4, at: NOW }), NOW);
+      let requestBodyText = "";
+      const categoryFetch = async (_input: string | URL | Request, init?: RequestInit) => {
+        requestBodyText = String(init?.body ?? "");
+        return new Response(JSON.stringify({
+          content: [{ type: "tool_use", name: "answer", input: { ...ANSWER, state: "Do not store this replacement.", categorySlug: "ai-systems" } }],
+        }), { status: 200 });
+      };
+      const stats = await sweep(f.index, f.catalogue, {
+        locations: LOCATIONS,
+        keyPath: f.keyPath,
+        fetchImpl: categoryFetch,
+        now: () => new Date(NOW),
+      });
+      expect(stats).toEqual({ enriched: 1, failed: 0, remaining: 0 });
+      const requestBody = JSON.parse(requestBodyText) as {
+        tools: Array<{ input_schema: { required: string[]; properties: Record<string, { enum?: string[] }> } }>;
+      };
+      const tool = requestBody.tools[0]!;
+      expect(tool.input_schema.required).toContain("categorySlug");
+      expect(tool.input_schema.properties.categorySlug?.enum).toEqual(["ai-systems"]);
+      expect(getRow(f.catalogue, "a")?.enrichment?.state).toBe("Keep this fresh prose.");
+      expect(f.catalogue.query("SELECT slug, source FROM session_category_assignments WHERE session_id='a'").get())
+        .toEqual({ slug: "ai-systems", source: "model" });
+    } finally {
+      if (previous === undefined) delete process.env.CCS_CATEGORY_REGISTRY_PATH;
+      else process.env.CCS_CATEGORY_REGISTRY_PATH = previous;
+      teardown(f);
+    }
+  });
 });
 
 describe("sweep", () => {

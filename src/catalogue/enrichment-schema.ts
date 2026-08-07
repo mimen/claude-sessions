@@ -114,6 +114,8 @@ export const EnrichmentPayloadSchema = z.object({
   cwdCorrect: z.boolean().optional(),
   suggestedLocation: z.string().trim().max(120).optional(),
   suggestedCwd: z.string().trim().max(400).optional(),
+  /** Present only when deterministic category evidence was unresolved or conflicting. */
+  categorySlug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).optional(),
 }).strict();
 
 export type EnrichmentPayload = z.infer<typeof EnrichmentPayloadSchema>;
@@ -240,6 +242,7 @@ type JsonSchemaValue = string | number | boolean | readonly string[] | { readonl
 
 export function enrichmentJsonSchema(
   withLocations: boolean,
+  categorySlugs: readonly string[] = [],
 ): { readonly [key: string]: JsonSchemaValue } {
   const required = [
     "title", "state", "history", "next", "remaining", "recommendation", "reason", "junk",
@@ -322,6 +325,15 @@ export function enrichmentJsonSchema(
         "When true, recommendation must be archive.",
     },
   };
+
+  if (categorySlugs.length > 0) {
+    required.push("categorySlug");
+    properties.categorySlug = {
+      type: "string",
+      enum: categorySlugs,
+      description: "The single best life-domain category for this root session. Choose exactly one supplied slug.",
+    };
+  }
 
   if (withLocations) {
     required.push("cwdCorrect", "suggestedLocation", "suggestedCwd");

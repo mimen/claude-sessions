@@ -150,6 +150,8 @@ function listStale(
         sessionId: c.row.sessionId,
         title: c.row.title,
         reason: c.reason,
+        proseReason: c.proseReason,
+        categoryReasons: c.categoryReasons,
         messagesSince: c.messagesSince,
       })),
       null,
@@ -163,7 +165,9 @@ function listStale(
   }
   console.log(`${all.length} stale session${all.length === 1 ? "" : "s"}${limit && all.length > shown.length ? ` (showing ${shown.length})` : ""}:`);
   for (const candidate of shown) {
-    const since = candidate.reason === "never-enriched"
+    const since = candidate.categoryReasons.length > 0 && !candidate.proseStale
+      ? candidate.categoryReasons.join(", ")
+      : candidate.reason === "never-enriched"
       ? "never enriched"
       : stalenessLabel(candidate.messagesSince) ?? candidate.reason;
     console.log(`  ${candidate.row.sessionId.slice(0, 8)}…  ${since.padEnd(24)}  ${candidate.row.title}`);

@@ -365,6 +365,9 @@ test("repo locations must resolve to an actual Git repository root", () => {
     preferredHost: LAPTOP_HOST,
     defaultHarness: null,
     defaultModel: null,
+    category: null,
+    categoryNeutral: false,
+    categoryAmbiguous: false,
     status: "active",
   };
   expect(resolveLocationForHost(base, LAPTOP_HOST).ok).toBe(true);

@@ -31,6 +31,12 @@ export interface LaunchLocation {
   readonly preferredHost: string;
   readonly defaultHarness: string | null;
   readonly defaultModel: string | null;
+  /** Optional life-domain hint. Absent registries retain their current behavior. */
+  readonly category: string | null;
+  /** True when this location intentionally provides no strategic category evidence. */
+  readonly categoryNeutral: boolean;
+  /** True when this location spans several roots and must not decide category alone. */
+  readonly categoryAmbiguous: boolean;
   readonly status: LocationStatus;
 }
 
@@ -86,6 +92,9 @@ const RawLocationSchema = z.object({
   preferred_host: z.string().trim().min(1),
   default_harness: z.string().trim().min(1).optional(),
   default_model: z.string().trim().min(1).optional(),
+  category: KeySchema.optional(),
+  category_neutral: z.boolean().default(false),
+  category_ambiguous: z.boolean().default(false),
   status: z.enum(["active", "retired"]).default("active"),
 }).strict();
 const RawRegistrySchema = z.object({
@@ -117,6 +126,9 @@ function toLocation(raw: RawLocation): LaunchLocation {
     preferredHost: raw.preferred_host,
     defaultHarness: raw.default_harness ?? null,
     defaultModel: raw.default_model ?? null,
+    category: raw.category ?? null,
+    categoryNeutral: raw.category_neutral,
+    categoryAmbiguous: raw.category_ambiguous,
     status: raw.status,
   };
 }
@@ -132,6 +144,9 @@ function toRawLocation(location: LaunchLocation): RawLocation {
     preferred_host: location.preferredHost,
     ...(location.defaultHarness ? { default_harness: location.defaultHarness } : {}),
     ...(location.defaultModel ? { default_model: location.defaultModel } : {}),
+    ...(location.category ? { category: location.category } : {}),
+    category_neutral: location.categoryNeutral,
+    category_ambiguous: location.categoryAmbiguous,
     status: location.status,
   };
 }
@@ -184,6 +199,12 @@ function validateRegistry(registry: LocationRegistry): Result<void> {
     if (Boolean(location.defaultHarness) !== Boolean(location.defaultModel)) {
       return err(new Error(
         `location "${location.key}" must declare default_harness and default_model together, or omit both`,
+      ));
+    }
+    const categoryModes = Number(Boolean(location.category)) + Number(location.categoryNeutral) + Number(location.categoryAmbiguous);
+    if (categoryModes > 1) {
+      return err(new Error(
+        `location "${location.key}" may declare only one of category, category_neutral, or category_ambiguous`,
       ));
     }
 
@@ -505,6 +526,9 @@ export function registerLocation(
     preferredHost,
     defaultHarness: input.defaultHarness?.trim() || null,
     defaultModel: input.defaultModel?.trim() || null,
+    category: null,
+    categoryNeutral: false,
+    categoryAmbiguous: false,
     status: "active",
   };
   if (!location.name) return err(new Error("registration name must not be empty"));

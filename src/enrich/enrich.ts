@@ -10,6 +10,12 @@ import { requestEnrichment, TransientGatewayError, type EnrichOptions } from "./
 import { readWorldState, renderWorldBlock } from "./world.ts";
 import { recordSweepFailure, recordSweepSuccess } from "./health.ts";
 import { enrichmentStaleness, type StaleReason } from "./staleness.ts";
+import { CATEGORY_REGISTRY_PATH, LOCATION_REGISTRY_PATH } from "../paths.ts";
+import { loadCategoryRegistry } from "../categories/registry.ts";
+import { categoryStaleness, type CategoryStaleReason } from "../categories/staleness.ts";
+import { classifyCategory } from "../categories/classify.ts";
+import { getAllCategoryAssignments, getCategoryAssignment, setCategory } from "../categories/assignment.ts";
+import { loadLocationRegistry } from "../locations/registry.ts";
 
 /**
  * Enrichment orchestration: turn one session into a stored enrichment, and sweep the ones that
@@ -23,7 +29,10 @@ import { enrichmentStaleness, type StaleReason } from "./staleness.ts";
 
 export interface EnrichCandidate {
   readonly row: SessionRow;
-  readonly reason: StaleReason;
+  readonly reason: StaleReason | CategoryStaleReason;
+  readonly proseReason: StaleReason;
+  readonly proseStale: boolean;
+  readonly categoryReasons: readonly CategoryStaleReason[];
   readonly messagesSince: number;
 }
 
@@ -80,19 +89,44 @@ export function enrichCandidates(
   now: Date = new Date(),
 ): EnrichCandidate[] {
   const catalogueRows = getAll(catalogue);
+  const registry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
+  const assignments = registry.ok ? getAllCategoryAssignments(catalogue) : new Map();
+  const tagsBySession = new Map<string, string[]>();
+  if (registry.ok) {
+    for (const tag of catalogue.query("SELECT session_id, entity FROM session_tags WHERE entity LIKE 'domain:%'").all() as Array<{ session_id: string; entity: string }>) {
+      const tags = tagsBySession.get(tag.session_id) ?? [];
+      tags.push(tag.entity);
+      tagsBySession.set(tag.session_id, tags);
+    }
+  }
   const candidates: EnrichCandidate[] = [];
   for (const row of listByRecency(index, false)) {
     if (row.isSubagent) continue;
     const catalogueRow = catalogueRows.get(row.sessionId);
     if (catalogueRow?.sessionClass === "auxiliary") continue;
+    if (catalogueRow?.meta.workflowJournal === true || catalogueRow?.meta.workflow_journal === true || catalogueRow?.meta.journal === true) continue;
     const verdict = enrichmentStaleness({
       messageCount: row.msgCount,
       enrichment: catalogueRow?.enrichment,
       attempts: catalogueRow?.enrichmentAttempts ?? 0,
       now,
     });
-    if (!verdict.stale) continue;
-    candidates.push({ row, reason: verdict.reason, messagesSince: verdict.messagesSince });
+    const categoryVerdict = registry.ok
+      ? categoryStaleness({
+          assignment: assignments.get(row.sessionId),
+          tags: tagsBySession.get(row.sessionId) ?? [],
+          registry: registry.value,
+        })
+      : { stale: false, reasons: [] as readonly CategoryStaleReason[] };
+    if (!verdict.stale && !categoryVerdict.stale) continue;
+    candidates.push({
+      row,
+      reason: verdict.stale ? verdict.reason : categoryVerdict.reasons[0]!,
+      proseReason: verdict.reason,
+      proseStale: verdict.stale,
+      categoryReasons: categoryVerdict.reasons,
+      messagesSince: verdict.messagesSince,
+    });
   }
   return candidates;
 }
@@ -105,6 +139,85 @@ export async function enrichOne(
   locations: readonly EnrichmentLocation[],
   options: EnrichOptions = {},
 ): Promise<Result<Enrichment>> {
+  const categoryRegistry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
+  let categoryChoices: EnrichOptions["categoryChoices"] = undefined;
+  if (categoryRegistry.ok) {
+    const catalogueRow = getAll(catalogue).get(row.sessionId);
+    const existingCategory = getCategoryAssignment(catalogue, row.sessionId);
+    if (existingCategory?.manualLock) {
+      setCategory(catalogue, categoryRegistry.value, {
+        sessionId: row.sessionId,
+        slug: existingCategory.slug,
+        source: existingCategory.source,
+        confidence: existingCategory.confidence,
+        manualLock: true,
+        evidence: existingCategory.evidence,
+        classifiedAt: existingCategory.classifiedAt,
+        allowLockedOverride: true,
+      });
+      if (options.categoryOnly && catalogueRow?.enrichment?.recommendation) {
+        const stored = catalogueRow.enrichment;
+        const recommendation = stored.recommendation!;
+        return ok({
+          title: stored.title ?? row.title,
+          state: stored.state ?? "Category updated without regenerating prose.",
+          history: stored.history ?? "",
+          next: stored.next ?? "",
+          remaining: stored.remaining ?? "",
+          recommendation,
+          reason: stored.reason ?? "",
+          junk: stored.junk,
+          ...(stored.cwdCorrect === null ? {} : { cwdCorrect: stored.cwdCorrect }),
+          ...(stored.suggestedLocation ? { suggestedLocation: stored.suggestedLocation } : {}),
+          ...(stored.suggestedCwd ? { suggestedCwd: stored.suggestedCwd } : {}),
+          atMessages: stored.atMessages ?? row.msgCount,
+          at: stored.at ?? new Date().toISOString(),
+        });
+      }
+    }
+    const locationRegistry = loadLocationRegistry(LOCATION_REGISTRY_PATH());
+    const classified = classifyCategory({
+      registry: categoryRegistry.value,
+      locations: locationRegistry.ok ? locationRegistry.value : null,
+      locationKey: typeof catalogueRow?.meta.launch_location === "string" ? catalogueRow.meta.launch_location : null,
+      project: catalogueRow?.project ?? row.projectName,
+      cwd: row.cwd,
+      parentSessionId: catalogueRow?.parentSessionId,
+      catalogue,
+    });
+    if (classified.status === "resolved") {
+      setCategory(catalogue, categoryRegistry.value, {
+        sessionId: row.sessionId,
+        slug: classified.value.slug,
+        source: classified.value.source,
+        confidence: classified.value.confidence,
+        evidence: classified.value.evidence,
+        classifiedAt: new Date().toISOString(),
+      });
+      if (options.categoryOnly && catalogueRow?.enrichment?.recommendation) {
+        const stored = catalogueRow.enrichment;
+        const recommendation = stored.recommendation!;
+        return ok({
+          title: stored.title ?? row.title,
+          state: stored.state ?? "Category updated without regenerating prose.",
+          history: stored.history ?? "",
+          next: stored.next ?? "",
+          remaining: stored.remaining ?? "",
+          recommendation,
+          reason: stored.reason ?? "",
+          junk: stored.junk,
+          ...(stored.cwdCorrect === null ? {} : { cwdCorrect: stored.cwdCorrect }),
+          ...(stored.suggestedLocation ? { suggestedLocation: stored.suggestedLocation } : {}),
+          ...(stored.suggestedCwd ? { suggestedCwd: stored.suggestedCwd } : {}),
+          atMessages: stored.atMessages ?? row.msgCount,
+          at: stored.at ?? new Date().toISOString(),
+        });
+      }
+    } else if (!getCategoryAssignment(catalogue, row.sessionId)?.manualLock) {
+      categoryChoices = categoryRegistry.value.categories.map((category) => ({ slug: category.slug, name: category.name }));
+    }
+  }
+
   let tail: { text: string; truncated: boolean };
   try {
     tail = await readTranscriptTail(row.path);
@@ -136,7 +249,7 @@ export async function enrichOne(
       world: renderWorldBlock(world),
     },
     locations,
-    options,
+    { ...options, categoryChoices },
   );
 
   const nowIso = new Date().toISOString();
@@ -157,6 +270,37 @@ export async function enrichOne(
     atMessages: row.msgCount,
     at: nowIso,
   };
+  if (categoryRegistry.ok && response.value.categorySlug) {
+    setCategory(catalogue, categoryRegistry.value, {
+      sessionId: row.sessionId,
+      slug: response.value.categorySlug,
+      source: "model",
+      confidence: 0.6,
+      evidence: "forced-schema enrichment fallback",
+      classifiedAt: nowIso,
+    });
+  }
+  if (options.categoryOnly) {
+    const stored = getAll(catalogue).get(row.sessionId)?.enrichment;
+    if (stored?.recommendation) {
+      const recommendation = stored.recommendation;
+      return ok({
+        title: stored.title ?? row.title,
+        state: stored.state ?? "Category updated without regenerating prose.",
+        history: stored.history ?? "",
+        next: stored.next ?? "",
+        remaining: stored.remaining ?? "",
+        recommendation,
+        reason: stored.reason ?? "",
+        junk: stored.junk,
+        ...(stored.cwdCorrect === null ? {} : { cwdCorrect: stored.cwdCorrect }),
+        ...(stored.suggestedLocation ? { suggestedLocation: stored.suggestedLocation } : {}),
+        ...(stored.suggestedCwd ? { suggestedCwd: stored.suggestedCwd } : {}),
+        atMessages: stored.atMessages ?? row.msgCount,
+        at: stored.at ?? nowIso,
+      });
+    }
+  }
   setEnrichment(catalogue, row.sessionId, enrichment, nowIso);
   return ok(enrichment);
 }
@@ -192,7 +336,10 @@ export async function sweep(
       const next = cursor++;
       if (next >= candidates.length) return;
       const candidate = candidates[next]!;
-      const result = await enrichOne(catalogue, index, candidate.row, locations, options);
+      const result = await enrichOne(catalogue, index, candidate.row, locations, {
+        ...options,
+        categoryOnly: candidate.categoryReasons.length > 0 && !candidate.proseStale,
+      });
       // Re-check cancellation before touching stats/progress: a caller that cancelled mid-call is
       // usually about to close the database this loop would otherwise keep reporting against.
       if (options.isCancelled?.()) return;

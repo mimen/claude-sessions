@@ -7,6 +7,7 @@ import { openCatalogue } from "../catalogue/db-schema.ts";
 import { getRow, lifecycleOf, identityKeyOf, getMeta, _resetRoleResumeCache } from "../catalogue/db-queries.ts";
 import { setCluster, stampPrFacts, setWorkUnitId } from "../catalogue/db-mutations.ts";
 import { getIdentity } from "../catalogue/identities.ts";
+import { getCategoryAssignment } from "../categories/assignment.ts";
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import {
   applyLocationDefaults,
@@ -34,6 +35,7 @@ afterEach(() => {
   delete process.env.CCS_CREATOR_KIND; delete process.env.CCS_CREATOR_REF;
   delete process.env.CCS_LAUNCH_CREATOR_KIND; delete process.env.CCS_LAUNCH_CREATOR_REF;
   delete process.env.CCS_LAUNCH_PARENT_SESSION_ID;
+  delete process.env.CCS_CATEGORY_REGISTRY_PATH;
   delete process.env.CMUX_BIN;
 });
 /** Temp config+runtime roots with a pr-anchored role, for the work-unit spawn path. */
@@ -510,6 +512,42 @@ test("managed launch environments force the shim and consume one-birth creator d
   expect(inline.CCS_LAUNCH_CREATOR_KIND).toBe("automation");
   expect(inline.CCS_LAUNCH_CREATOR_REF).toBe("imsg-server");
   expect(inline.CCS_LAUNCH_PARENT_SESSION_ID).toBe(opts.parent);
+});
+
+test("writeSessionMetadata: a managed root is categorized at birth when the optional registry is installed", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-birth-category-"));
+  roots.push(root);
+  const registryPath = join(root, "categories.json");
+  writeFileSync(registryPath, JSON.stringify({
+    version: 1,
+    classifier_version: "v1",
+    categories: [{ slug: "events", name: "Events", compact_name: "Events", color: "#692EC2" }],
+    path_mappings: { "/work/events": "events" },
+  }));
+  process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
+  const db = openCatalogue(":memory:");
+  try {
+    const id = "10101010-1010-4010-8010-101010101010";
+    writeSessionMetadata(db, id, parsedOpts(["--top-level", "--cwd=/work/events/project"]), NOW);
+    expect(getCategoryAssignment(db, id)).toMatchObject({ slug: "events", source: "path", manualLock: false });
+    expect(db.query("SELECT entity FROM session_tags WHERE session_id = $id").all({ $id: id }))
+      .toEqual([{ entity: "domain:events" }]);
+  } finally {
+    db.close();
+  }
+});
+
+test("writeSessionMetadata: absent category registry preserves existing birth behavior", () => {
+  process.env.CCS_CATEGORY_REGISTRY_PATH = join(tmpdir(), "ccs-category-registry-not-installed.json");
+  const db = openCatalogue(":memory:");
+  try {
+    const id = "20202020-2020-4020-8020-202020202020";
+    writeSessionMetadata(db, id, parsedOpts(["--top-level", "--cwd=/work/events/project"]), NOW);
+    expect(getRow(db, id)).not.toBeNull();
+    expect(getCategoryAssignment(db, id)).toBeNull();
+  } finally {
+    db.close();
+  }
 });
 
 test("writeSessionMetadata: explicit identity attaches without minting or inferring work", () => {

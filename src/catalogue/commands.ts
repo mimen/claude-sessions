@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
-import { ensureDataDir, CATALOGUE_PATH, DB_PATH } from "../paths.ts";
+import { ensureDataDir, CATALOGUE_PATH, DB_PATH, CATEGORY_REGISTRY_PATH } from "../paths.ts";
+import { categoryBySlug, loadCategoryRegistry, slugFromDomainTag } from "../categories/registry.ts";
+import { getCategoryAssignment, setCategory } from "../categories/assignment.ts";
 import { openCatalogue } from "./db-schema.ts";
 import { childrenOf, getRow, getTags, lifecycleOf, identityKeyOf, parentEdges } from "./db-queries.ts";
 import { ensureRow, setCustomTitle, setCompleted, setArchived, setKey, setParent, setResumeId, setSessionClass, setCreatorKind, setLaunchChannel, setLauncherIdentity, setRole, setGusWork, setSessionEpic, setStage, setStatusLine, setMeta, setProject, setCluster, addTag, removeTag } from "./db-mutations.ts";
@@ -367,7 +369,35 @@ export function tag(sessionArg: string | undefined, entity: string | undefined, 
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
-    if (flags.includes("--remove")) {
+    const domainSlug = slugFromDomainTag(entity);
+    if (domainSlug || entity.startsWith("domain:")) {
+      if (!domainSlug) {
+        console.error(`ccs tag: invalid domain tag "${entity}"`);
+        return 1;
+      }
+      const registry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
+      if (!registry.ok) {
+        console.error(`ccs tag: ${registry.error.message}`);
+        return 1;
+      }
+      if (!categoryBySlug(registry.value, domainSlug)) {
+        console.error(`ccs tag: unknown category "${domainSlug}"`);
+        return 1;
+      }
+      if (flags.includes("--remove") && getCategoryAssignment(db, id)?.slug !== domainSlug) {
+        console.error(`ccs tag: session is not assigned to category "${domainSlug}"`);
+        return 1;
+      }
+      const result = setCategory(db, registry.value, {
+        sessionId: id,
+        slug: flags.includes("--remove") ? null : domainSlug,
+        source: "manual",
+        manualLock: !flags.includes("--remove"),
+        classifiedAt: now(),
+        allowLockedOverride: true,
+      });
+      console.log(result.status === "cleared" ? `untagged ${entity}` : `tagged ${entity} · manually locked`);
+    } else if (flags.includes("--remove")) {
       removeTag(db, id, entity);
       console.log(`untagged ${entity}`);
     } else {

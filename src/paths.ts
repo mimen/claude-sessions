@@ -19,6 +19,9 @@ const DATA_DIR = () => join(runtimeRoot(), "cache");
 export const CONFIG_PATH = () => join(runtimeRoot(), "config.toml");
 /** Validated launch-location registry, normally a machine-adapter-managed link to shared config. */
 export const LOCATION_REGISTRY_PATH = () => join(runtimeRoot(), "locations.toml");
+/** Canonical life-domain registry, normally a machine-adapter-managed link to shared config. */
+export const CATEGORY_REGISTRY_PATH = () =>
+  process.env.CCS_CATEGORY_REGISTRY_PATH ?? join(runtimeRoot(), "categories.json");
 /** Validated remote-host registry, normally a machine-adapter-managed link to shared config. */
 export const HOST_REGISTRY_PATH = () => join(runtimeRoot(), "hosts.toml");
 /**

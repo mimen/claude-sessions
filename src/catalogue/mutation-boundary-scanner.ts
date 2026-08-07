@@ -407,7 +407,7 @@ function parentConstantConcatenation(
     && constantString(parent, lexical) !== null;
 }
 
-const CATALOGUE_TABLE = "(?:catalogue|dispositions|epics|groupings|historical_detached_child_backfills|identities|identity_[a-z_]+|inboxes|roles|schema_migrations|session_tags)";
+const CATALOGUE_TABLE = "(?:catalogue|dispositions|epics|groupings|historical_detached_child_backfills|identities|identity_[a-z_]+|inboxes|roles|schema_migrations|session_category_assignments|session_tags)";
 const DYNAMIC_IDENTITY_TABLE = "(?:\\$\\{[^}]*\\btableName\\b[^}]*\\})";
 const TABLE_TARGET = `(?:["\`\\[]?(?:${CATALOGUE_TABLE})\\b|${DYNAMIC_IDENTITY_TABLE})`;
 const PROTECTED_TABLE_MUTATION_SQL = new RegExp(

@@ -54,6 +54,11 @@ func Load(options LoadOptions) (Snapshot, error) {
 	roleKinds := loadRoleKinds(home)
 	tasks := loadTaskSummaries(home)
 	rollups, subagentCounts := buildRollups(indexed, catalogue)
+	categories, categoryErr := loadCategoryRegistry(categoryRegistryPath(runtimeRoot))
+	if categoryErr != nil {
+		warnings = append(warnings, categoryErr.Error())
+		categories = categoryRegistry{}
+	}
 
 	visible := make([]Session, 0, len(indexed))
 	byID := make(map[string]int)
@@ -73,48 +78,63 @@ func Load(options LoadOptions) (Snapshot, error) {
 		if task.Total == 0 && row.ResumeID != row.ID {
 			task = tasks[row.ResumeID]
 		}
+		resolvedCategory := resolveEffectiveCategory(row.ID, catalogue, 32)
+		categoryName := "Uncategorized"
+		categoryCompact := "Uncategorized"
+		categoryColor := ""
+		if category, exists := categories[resolvedCategory.Slug]; exists {
+			categoryName = category.Name
+			categoryCompact = category.CompactName
+			categoryColor = category.Color
+		}
 		session := Session{
-			ID:               row.ID,
-			ResumeID:         row.ResumeID,
-			Path:             row.Path,
-			Title:            title,
-			TitleSource:      titleSource,
-			State:            state,
-			Class:            class,
-			SessionClass:     meta.SessionClass,
-			IdentityKey:      meta.IdentityKey,
-			IdentityKind:     meta.IdentityKind,
-			Role:             meta.Role,
-			Cluster:          meta.Cluster,
-			Stage:            meta.Stage,
-			PRNumber:         meta.PRNumber,
-			PRState:          meta.PRState,
-			Enrichment:       meta.Enrichment,
-			Project:          row.ProjectName,
-			ProjectRoot:      row.ProjectRoot,
-			CWD:              row.CWD,
-			Branch:           row.Branch,
-			Skeleton:         row.Skeleton,
-			FirstAt:          row.FirstAt,
-			LastAt:           row.LastAt,
-			Messages:         row.Messages,
-			Models:           append([]string(nil), row.Models...),
-			LastModel:        row.LastModel,
-			Model:            model,
-			SelfCost:         rollup.Self,
-			TotalCost:        rollup.Total,
-			ProviderCost:     rollup.Providers,
-			Duration:         FormatSpan(row.FirstAt, row.LastAt),
-			Subagents:        subagentCounts[row.ID],
-			ParentID:         meta.ParentSessionID,
-			TaskSubjects:     append([]string(nil), task.Subjects...),
-			TasksDone:        task.Done,
-			TasksInProgress:  task.InProgress,
-			TasksTotal:       task.Total,
-			LiveWindowRef:    liveInfo.WindowRef,
-			LiveWorkspaceRef: liveInfo.WorkspaceRef,
-			IsLoop:           isLoop,
-			IsSubagent:       row.IsSubagent,
+			ID:                row.ID,
+			ResumeID:          row.ResumeID,
+			Path:              row.Path,
+			Title:             title,
+			TitleSource:       titleSource,
+			State:             state,
+			Class:             class,
+			SessionClass:      meta.SessionClass,
+			IdentityKey:       meta.IdentityKey,
+			IdentityKind:      meta.IdentityKind,
+			Role:              meta.Role,
+			Cluster:           meta.Cluster,
+			Stage:             meta.Stage,
+			StoredCategory:    resolvedCategory.StoredSlug,
+			EffectiveCategory: resolvedCategory.Slug,
+			CategoryName:      categoryName,
+			CategoryCompact:   categoryCompact,
+			CategoryColor:     categoryColor,
+			CategoryFinding:   resolvedCategory.Finding,
+			PRNumber:          meta.PRNumber,
+			PRState:           meta.PRState,
+			Enrichment:        meta.Enrichment,
+			Project:           row.ProjectName,
+			ProjectRoot:       row.ProjectRoot,
+			CWD:               row.CWD,
+			Branch:            row.Branch,
+			Skeleton:          row.Skeleton,
+			FirstAt:           row.FirstAt,
+			LastAt:            row.LastAt,
+			Messages:          row.Messages,
+			Models:            append([]string(nil), row.Models...),
+			LastModel:         row.LastModel,
+			Model:             model,
+			SelfCost:          rollup.Self,
+			TotalCost:         rollup.Total,
+			ProviderCost:      rollup.Providers,
+			Duration:          FormatSpan(row.FirstAt, row.LastAt),
+			Subagents:         subagentCounts[row.ID],
+			ParentID:          meta.ParentSessionID,
+			TaskSubjects:      append([]string(nil), task.Subjects...),
+			TasksDone:         task.Done,
+			TasksInProgress:   task.InProgress,
+			TasksTotal:        task.Total,
+			LiveWindowRef:     liveInfo.WindowRef,
+			LiveWorkspaceRef:  liveInfo.WorkspaceRef,
+			IsLoop:            isLoop,
+			IsSubagent:        row.IsSubagent,
 		}
 		byID[session.ID] = len(visible)
 		visible = append(visible, session)

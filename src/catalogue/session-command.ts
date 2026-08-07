@@ -19,7 +19,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { openCatalogue } from "./db-schema.ts";
-import { getRow } from "./db-queries.ts";
+import { getAll, getRow } from "./db-queries.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { existsSync } from "node:fs";
 import { openIndex } from "../index/schema.ts";
@@ -29,6 +29,7 @@ import { getIdentity } from "./identities.ts";
 import { registerShimBirth, rename, mark } from "./commands.ts";
 import { newSession, preflightNewSession } from "../resume/new-session.ts";
 import { pushCmuxRename } from "../cmux/liveness.ts";
+import { getAllCategoryAssignments, resolveEffectiveCategory } from "../categories/assignment.ts";
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -118,14 +119,27 @@ function doRead(idArg: string, rest: string[]): number {
         .query("SELECT identity_key FROM catalogue WHERE session_id = $sid")
         .get({ $sid: sid }) as { identity_key: string | null } | null)?.identity_key ?? null;
       const identity = identityKey ? getIdentity(db, identityKey) : null;
+      const catalogueRows = getAll(db);
+      const parents = new Map<string, string>();
+      for (const candidate of catalogueRows.values()) {
+        if (candidate.parentSessionId) parents.set(candidate.sessionId, candidate.parentSessionId);
+      }
+      const category = resolveEffectiveCategory(
+        sid,
+        getAllCategoryAssignments(db),
+        parents,
+        new Set(catalogueRows.keys()),
+      );
       if (bools.has("json")) {
-        console.log(JSON.stringify({ state: "catalogued", session: row, identity_key: identityKey, identity }, null, 2));
+        console.log(JSON.stringify({ state: "catalogued", session: row, category, identity_key: identityKey, identity }, null, 2));
         return 0;
       }
       console.log(`session ${sid}`);
       console.log(`  state:        catalogued`);
       console.log(`  title:        ${row.customTitle ?? "-"}`);
       console.log(`  parent:       ${row.parentSessionId ?? "-"}`);
+      console.log(`  category:     ${category.slug ?? "uncategorized"} (${category.finding})`);
+      console.log(`  stored:       ${category.storedSlug ?? "-"}`);
       console.log(`  parked:       ${row.parkedTaskId ?? "-"}`);
       console.log(`  identity_key: ${identityKey ?? "(loose)"}`);
       if (identity) {

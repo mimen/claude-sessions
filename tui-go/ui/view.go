@@ -238,6 +238,9 @@ func (m Model) renderListHeader(width int) string {
 	if width >= 70 {
 		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("STAGE", 10)))
 	}
+	if width >= 82 {
+		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("CATEGORY", 12)))
+	}
 	if width >= 48 {
 		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("MODEL", 7)))
 	}
@@ -346,6 +349,13 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 			stage = "—"
 		}
 		rightParts = append(rightParts, column(theme.StageColor(session.Stage)).Render(pad(stage, 10)))
+	}
+	if width >= 82 {
+		label := session.CategoryCompact
+		if label == "" {
+			label = "Uncategorized"
+		}
+		rightParts = append(rightParts, column(theme.CategoryColor(session.CategoryColor)).Render(pad(truncate(label, 12), 12)))
 	}
 	if width >= 48 {
 		badge := theme.Model(session.Model)
@@ -557,6 +567,11 @@ func (m Model) renderPreview(width int, height int) string {
 		}
 	}
 	lines = append(lines, "", sect("Meta"))
+	categoryName := nonEmpty(session.CategoryName, "Uncategorized")
+	lines = append(lines,
+		fg(theme.FgMostSubtle).Render(pad("category", 10))+
+			fg(theme.CategoryColor(session.CategoryColor)).Render(truncate(categoryName, max(1, contentWidth-11))),
+	)
 	metadata := [][2]string{
 		{"cwd", compactHome(session.CWD)},
 		{"duration", session.Duration + " wall"},

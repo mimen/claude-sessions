@@ -42,6 +42,35 @@ func TestLoadCatalogueReadsIdentityStageAndPRFacts(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogueReadsCategoryAssignmentWhenPresent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalogue.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`CREATE TABLE catalogue (session_id TEXT PRIMARY KEY)`,
+		`CREATE TABLE session_category_assignments (session_id TEXT PRIMARY KEY, slug TEXT, source TEXT)`,
+		`INSERT INTO catalogue (session_id) VALUES ('session-1')`,
+		`INSERT INTO session_category_assignments (session_id, slug, source) VALUES ('session-1', 'events', 'manual')`,
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	catalogue, err := loadCatalogue(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := catalogue["session-1"].StoredCategory; got != "events" {
+		t.Fatalf("stored category = %q", got)
+	}
+}
+
 func TestLoadCatalogueFallsBackToLegacySessionStage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalogue.db")
 	db, err := sql.Open("sqlite", path)

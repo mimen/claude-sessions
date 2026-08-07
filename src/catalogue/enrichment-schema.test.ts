@@ -221,14 +221,22 @@ describe("validateEnrichment · cwd is registry-gated", () => {
 });
 
 describe("enrichmentJsonSchema", () => {
-  test("with a registry, the wire contract and the parser agree on the field set", () => {
-    // These are written independently (hand-authored JSON Schema, zod parser), so nothing but a
-    // test stops them drifting — and a drifted required-field list fails at runtime, per session.
+  test("with a location registry, the wire contract includes every question actually asked", () => {
+    // Category is a second, independently gated question. Without fallback choices it must remain
+    // absent even though the parser can validate it when another call includes it.
     const schema = enrichmentJsonSchema(true);
     const wireFields = Object.keys(schema.properties as Record<string, unknown>).sort();
-    const parserFields = Object.keys(EnrichmentPayloadSchema.shape).sort();
+    const parserFields = Object.keys(EnrichmentPayloadSchema.shape).filter((field) => field !== "categorySlug").sort();
     expect(wireFields).toEqual(parserFields);
     expect((schema.required as readonly string[]).slice().sort()).toEqual(parserFields);
+  });
+
+  test("category fallback is a required closed enum only when requested", () => {
+    const schema = enrichmentJsonSchema(false, ["ai-systems", "events"]);
+    const properties = schema.properties as Record<string, { enum?: readonly string[] }>;
+    expect(properties.categorySlug?.enum).toEqual(["ai-systems", "events"]);
+    expect(schema.required as readonly string[]).toContain("categorySlug");
+    expect(Object.keys(enrichmentJsonSchema(false).properties as Record<string, unknown>)).not.toContain("categorySlug");
   });
 
   test("without a registry, the cwd properties are absent, not merely optional", () => {

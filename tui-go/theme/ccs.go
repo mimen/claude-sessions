@@ -71,6 +71,15 @@ func Model(id string) ModelBadge {
 	return ModelBadge{"·", FgMostSubtle}
 }
 
+// CategoryColor uses the canonical registry color resolved at load time. An empty color is the
+// explicit Uncategorized state and stays neutral; the palette is never copied into the TUI.
+func CategoryColor(registryColor string) lipgloss.Color {
+	if len(registryColor) == 7 && registryColor[0] == '#' {
+		return lipgloss.Color(registryColor)
+	}
+	return FgMostSubtle
+}
+
 // StateColor maps a session lifecycle/open-state to a dot color.
 func StateColor(state string) lipgloss.Color {
 	switch state {

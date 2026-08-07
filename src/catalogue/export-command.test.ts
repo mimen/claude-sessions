@@ -12,8 +12,17 @@ import { openCatalogue } from "./db-schema.ts";
 import { setCustomTitle } from "./db-mutations.ts";
 import { mintIdentity, setIdentityFields } from "./identities.ts";
 import { catalogueExport, buildExport, EXPORT_SCHEMA_VERSION } from "./export-command.ts";
+import { setCategory } from "../categories/assignment.ts";
+import type { CategoryRegistry } from "../categories/registry.ts";
 
 const NOW = "2026-06-20T00:00:00Z";
+const CATEGORY_REGISTRY: CategoryRegistry = {
+  version: "1",
+  classifierVersion: "v1",
+  categories: [{ slug: "ai-systems", name: "AI Systems", compactName: "AI", color: "#2A67E2", aliases: [] }],
+  projectMappings: {},
+  pathMappings: {},
+};
 
 /** Seed a session + identity + optional per-role attrs. Post-v33 pattern. */
 function seed(
@@ -79,6 +88,38 @@ test("export: identity_key is the structured key", () => {
   const out = catalogueExport(db, { cluster: "pr-watch", role: null });
   // key is a legacy alias for identityKey now — both mirror the new structured form.
   expect(out.rows[0]!.identityKey).toBe("pr-watch:pr-agent:heroku/dashboard#42");
+});
+
+test("export: exposes stored and inherited effective categories and filters by effective category", () => {
+  const db = openCatalogue(":memory:");
+  try {
+    seed(db, "parent", "category-test", "root");
+    seed(db, "child", "category-test", "child");
+    db.query("UPDATE catalogue SET parent_session_id = 'parent' WHERE session_id = 'child'").run();
+    setCategory(db, CATEGORY_REGISTRY, {
+      sessionId: "parent",
+      slug: "ai-systems",
+      source: "manual",
+      manualLock: true,
+      classifiedAt: NOW,
+    });
+
+    const out = catalogueExport(db, { cluster: null, role: null, category: "ai-systems" });
+    expect(out.count).toBe(2);
+    expect(out.category).toBe("ai-systems");
+    expect(out.rows.find((row) => row.sessionId === "parent")).toMatchObject({
+      storedCategory: "ai-systems",
+      effectiveCategory: "ai-systems",
+      categoryFinding: "stored",
+    });
+    expect(out.rows.find((row) => row.sessionId === "child")).toMatchObject({
+      storedCategory: null,
+      effectiveCategory: "ai-systems",
+      categoryFinding: "inherited",
+    });
+  } finally {
+    db.close();
+  }
 });
 
 test("buildExport: pure — same inputs, deterministic output shape", () => {

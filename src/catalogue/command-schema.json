@@ -13,11 +13,11 @@
           "n": { "type": "integer", "description": "1-based number of the target session from the list" },
           "op": {
             "type": "string",
-            "enum": ["kind", "key", "event", "skill", "parent", "project", "completed", "archived", "title", "tag", "untag"]
+            "enum": ["kind", "key", "event", "skill", "parent", "project", "completed", "archived", "title", "category", "tag", "untag"]
           },
           "value": {
             "type": ["string", "null"],
-            "description": "kind: loop|session; event/skill/title: text or none; parent: target session number or none; completed/archived: true|false; tag/untag: entity name"
+            "description": "kind: loop|session; event/skill/title: text or none; parent: target session number or none; completed/archived: true|false; category: canonical category slug or none; tag/untag: non-domain entity name"
           }
         }
       }

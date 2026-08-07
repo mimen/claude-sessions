@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,16 @@ import { setCreatorKind, setCreatorRef, setLaunchChannel, setParent, setSessionC
 import { openIndex } from "../index/schema.ts";
 import { mintIdentity } from "./identities.ts";
 import { sessionCommand } from "./session-command.ts";
+import { setCategory } from "../categories/assignment.ts";
+import type { CategoryRegistry } from "../categories/registry.ts";
+
+const CATEGORY_REGISTRY: CategoryRegistry = {
+  version: "1",
+  classifierVersion: "v1",
+  categories: [{ slug: "ai-systems", name: "AI Systems", compactName: "AI", color: "#2A67E2", aliases: [] }],
+  projectMappings: {},
+  pathMappings: {},
+};
 
 const NOW = "2026-07-14T12:00:00Z";
 
@@ -160,6 +170,34 @@ describe("session read", () => {
       seedSession(root, "sess-1", "pr-watch:pr-agent:owner/repo#12345");
       const rc = await sessionCommand(["sess-1", "--json"]);
       expect(rc).toBe(0);
+    });
+  });
+
+  test("JSON exposes stored and effective inherited category", async () => {
+    await withRoot(async (root) => {
+      seedSession(root, "parent");
+      seedSession(root, "child");
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      setParent(db, "child", "parent", NOW);
+      setCategory(db, CATEGORY_REGISTRY, {
+        sessionId: "parent",
+        slug: "ai-systems",
+        source: "manual",
+        manualLock: true,
+        classifiedAt: NOW,
+      });
+      db.close();
+      const lines: string[] = [];
+      const log = spyOn(console, "log").mockImplementation((value: object) => lines.push(String(value)));
+      try {
+        expect(await sessionCommand(["child", "--json"])).toBe(0);
+      } finally {
+        log.mockRestore();
+      }
+      const output = JSON.parse(lines.join("\n")) as {
+        category: { slug: string | null; storedSlug: string | null; finding: string };
+      };
+      expect(output.category).toMatchObject({ slug: "ai-systems", storedSlug: null, finding: "inherited" });
     });
   });
 

@@ -3,7 +3,10 @@ import { existsSync } from "node:fs";
 import { constants, homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { ensureDataDir, CATALOGUE_PATH } from "../paths.ts";
+import { ensureDataDir, CATALOGUE_PATH, CATEGORY_REGISTRY_PATH, LOCATION_REGISTRY_PATH } from "../paths.ts";
+import { loadCategoryRegistry } from "../categories/registry.ts";
+import { classifyCategory } from "../categories/classify.ts";
+import { setCategory } from "../categories/assignment.ts";
 import { openCatalogue, type CreatorKind, type LaunchChannel, type RoleDef } from "../catalogue/db-schema.ts";
 import { getRow, lifecycleOf, sessionsForWorkUnit } from "../catalogue/db-queries.ts";
 import { setCustomTitle, setKey, setParent, setSessionClass, setCreatorKind, setCreatorRef, setLaunchChannel, setForkedFromSessionId, setLauncherIdentity, setRole, setProject, setCluster, setResumeId, setGusWork, setWorkUnitId, setArchived, setMeta, stampPrFacts } from "../catalogue/db-mutations.ts";
@@ -628,6 +631,33 @@ function writeSessionMetadataTransaction(db: Database, id: string, opts: NewSess
   if (opts.locationDefaultModel) setMeta(db, id, "launch_location_model", opts.locationDefaultModel, now);
   if (opts.parent) setParent(db, id, opts.parent, now);
   setSessionClass(db, id, opts.topLevel ? "work_body" : opts.parent ? "auxiliary" : null, now);
+  // Optional until the machine adapter installs the canonical registry. An absent or invalid file
+  // leaves birth behavior unchanged; auxiliary children consume effective inheritance on reads.
+  if (opts.topLevel) {
+    const categories = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
+    if (categories.ok) {
+      const locations = loadLocationRegistry(LOCATION_REGISTRY_PATH());
+      const classified = classifyCategory({
+        registry: categories.value,
+        locations: locations.ok ? locations.value : null,
+        locationKey: opts.locationKey,
+        project: opts.project,
+        cwd: opts.cwd,
+        parentSessionId: opts.parent,
+        catalogue: db,
+      });
+      if (classified.status === "resolved") {
+        setCategory(db, categories.value, {
+          sessionId: id,
+          slug: classified.value.slug,
+          source: classified.value.source,
+          confidence: classified.value.confidence,
+          evidence: classified.value.evidence,
+          classifiedAt: now,
+        });
+      }
+    }
+  }
   if (opts.creatorKind) setCreatorKind(db, id, opts.creatorKind, now);
   if (opts.creatorRef) setCreatorRef(db, id, opts.creatorRef, now);
   if (opts.launchChannel) setLaunchChannel(db, id, opts.launchChannel, now);

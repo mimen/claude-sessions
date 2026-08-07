@@ -50,6 +50,7 @@ import { historicalDetachedChildBackfillCommand } from "./catalogue/historical-d
 import { getCrashReporter, installCrashLog, summarizeArgv } from "./crashlog.ts";
 import { SESSION_CLASS_ROLLOUT_AT } from "./session-class.ts";
 import { launchGoTui } from "./tui-go/launch.ts";
+import { getAllCategoryAssignments, resolveEffectiveCategory } from "./categories/assignment.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -68,7 +69,7 @@ Usage:
   ccs enrich --list [--limit N] [--json]          Show what the sweep would do, without calling the model
   ccs triage [--list] [--json]                    Close out sessions whose verdict contradicts their lifecycle
   ccs next [--json]                               What you're mid-flight on, and the next action for each
-  ccs ls [--auxiliary]    Print indexed sessions (with catalogue badges)
+  ccs ls [--auxiliary] [--category <slug>]  Print and filter indexed sessions with effective category
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
   ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
                          Reserve and synchronously run an auxiliary seat (fallback is explicit; never automatic)
@@ -115,7 +116,7 @@ Legacy per-session verbs (still work; will migrate to \`ccs session …\` in a l
   ccs meta [<id>|.] <key> <value> [--off]         Set meta.<key> (mirrors to identity meta)
   ccs rename [<id>|.] "<name>"                    Alias for \`ccs session title\`
   ccs mark [<id>|.] --completed|--archived [--off]   Per-session lifecycle (core-identity safe)
-  ccs tag [<id>|.] "<Entity>" [--remove]          Add/remove an entity tag
+  ccs tag [<id>|.] "<Entity>" [--remove]          Add/remove a tag; domain:<slug> is validated and locked
   ccs parent [<id>|.] <parent-id|.> [--off]       Set/clear the spawning parent
   ccs status [<id>|.] "<line>" [--off]            Freeform status pill (mirrors to identity.status_line)
   ccs name [<id>|.] "<short name>" [--off]        Short tab name (<=35 chars)
@@ -131,7 +132,7 @@ Clusters & board:
   ccs board <c> --identity <key> [--text]         Read one row by identity
   ccs board <c> --session <sid> [--text]          Read via session → identity resolve
   ccs board <c> --recompose <key> | --recompose-all   Sync recompose
-  ccs catalogue export --cluster <c> [--role <r>] [--json]   Machine-readable projection (ADR-D1)
+  ccs catalogue export --cluster <c> [--role <r>] [--category <slug>] [--json]   Machine-readable projection
   ccs grouping upsert <id> --cluster=<c> --role=<r> [--label="..."] [--url=...]
   ccs decide <c> record|reopen|check|list ...     Decision ledger (dispositions)
 
@@ -226,8 +227,20 @@ export async function main(argv: string[]): Promise<number> {
       const { nextCommand } = await import("./enrich/triage-command.ts");
       return nextCommand(args.slice(1));
     }
-    case "ls":
-      return ls({ all: args.includes("--all"), loops: args.includes("--loops"), auxiliary: args.includes("--auxiliary") });
+    case "ls": {
+      const categoryIndex = args.indexOf("--category");
+      const category = categoryIndex >= 0 ? args[categoryIndex + 1] : undefined;
+      if (categoryIndex >= 0 && (!category || category.startsWith("--"))) {
+        console.error("--category requires a slug");
+        return 1;
+      }
+      return ls({
+        all: args.includes("--all"),
+        loops: args.includes("--loops"),
+        auxiliary: args.includes("--auxiliary"),
+        category,
+      });
+    }
     case "tree":
       return tree({ all: args.includes("--all"), auxiliary: args.includes("--auxiliary") });
     case "location":
@@ -517,7 +530,7 @@ async function reindex(opts: { titles: boolean }): Promise<number> {
 
 
 /** Table of indexed sessions, joined with catalogue metadata + live open-state. */
-function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number {
+function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean; category?: string }): number {
   ensureDataDir();
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
@@ -529,12 +542,24 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number 
       return 0;
     }
     const catalogue = getAll(cat);
+    const categoryAssignments = getAllCategoryAssignments(cat);
+    const categoryEdges = parentEdges(cat);
+    const categoryParents = new Map(categoryEdges.map((edge) => [edge.sessionId, edge.parentId]));
+    const knownCategorySessions = new Set([...catalogue.keys(), ...rows.map((row) => row.sessionId)]);
     const open = openSessionIds();
-    const rollup = buildCostRollup(indexedRows, parentEdges(cat));
+    const rollup = buildCostRollup(indexedRows, categoryEdges);
     const srcMark = { native: "★", codex: "✎", fallback: " " } as const;
     let shown = 0;
+    let shownSpend = 0;
     for (const r of rows) {
       const c = catalogue.get(r.sessionId) ?? null;
+      const category = resolveEffectiveCategory(
+        r.sessionId,
+        categoryAssignments,
+        categoryParents,
+        knownCategorySessions,
+      );
+      if (opts.category && category.slug !== opts.category) continue;
       const lifecycle = lifecycleOf(c);
       const keyValue = identityKeyOf(c);
       if (!opts.all && lifecycle === "archived") continue;
@@ -551,14 +576,19 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean }): number 
       const sk = pad(c?.role ? `⚙${c.role}` : "", 14);
       const key = pad(keyValue ? `⊞${keyValue}` : "", 18);
       const project = pad(r.projectName, 16);
+      const categoryLabel = pad(category.slug ? `domain:${category.slug}` : "uncategorized", 24);
       const age = pad(formatAge(r.lastTs), 5);
-      const cost = pad(formatCost(rollup.bySessionId.get(r.sessionId)?.totalCost ?? r.costUSD), 7);
-      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${key}${project} ${age} ${cost} ${r.msgCount}m`);
+      const totalCost = rollup.bySessionId.get(r.sessionId)?.totalCost ?? r.costUSD;
+      const cost = pad(formatCost(totalCost), 7);
+      console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${key}${project} ${categoryLabel} ${age} ${cost} ${r.msgCount}m`);
+      shownSpend += totalCost;
       shown++;
     }
     const hidden = rows.length - shown;
     console.log(
-      `\n${shown} sessions  (★ native ✎ codex · LOOP=loop · ⚙=role · ↳=child · ⊞=key · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
+      `\n${shown} sessions · ${formatCost(shownSpend) || "$0"} shown spend  ` +
+        `(★ native ✎ codex · LOOP=loop · ⚙=role · ↳=child · ⊞=key · domain:=effective category · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
+        (opts.category ? ` · category=${opts.category}` : "") +
         (hidden > 0 && !opts.all ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
     );
   } finally {

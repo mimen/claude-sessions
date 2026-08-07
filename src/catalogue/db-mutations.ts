@@ -336,11 +336,17 @@ export function stampPrFacts(
 // ---- tags ----
 
 export function addTag(db: Database, sessionId: string, entity: string): void {
+  if (entity.startsWith("domain:")) {
+    throw new Error("domain tags must be written through setCategory");
+  }
   db.query(
     "INSERT INTO session_tags (session_id, entity) VALUES ($id, $e) ON CONFLICT DO NOTHING",
   ).run({ $id: sessionId, $e: entity });
 }
 export function removeTag(db: Database, sessionId: string, entity: string): void {
+  if (entity.startsWith("domain:")) {
+    throw new Error("domain tags must be removed through setCategory");
+  }
   db.query("DELETE FROM session_tags WHERE session_id = $id AND entity = $e").run({
     $id: sessionId,
     $e: entity,

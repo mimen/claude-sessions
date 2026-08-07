@@ -56,6 +56,8 @@ type catalogueMeta struct {
 	PRNumber        int
 	PRState         string
 	Enrichment      Enrichment
+	StoredCategory  string
+	CategorySource  string
 }
 
 func openReadOnlySQLite(path string) (*sql.DB, error) {
@@ -486,18 +488,43 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 				Reason:         normalizeInline(enrichReason.String),
 				Junk:           enrichJunk.Int64 != 0,
 				// Valid means the column was non-NULL, i.e. the question was actually asked.
-				CWDJudged:  enrichCWDCorrect.Valid,
-				CWDCorrect: enrichCWDCorrect.Int64 != 0,
-				SuggestedLoc:   normalizeInline(enrichSuggestedLoc.String),
-				SuggestedCWD:   normalizeInline(enrichSuggestedCWD.String),
-				AtMessages:     int(enrichAtMessages.Int64),
-				At:             parseTime(enrichAt.String),
+				CWDJudged:    enrichCWDCorrect.Valid,
+				CWDCorrect:   enrichCWDCorrect.Int64 != 0,
+				SuggestedLoc: normalizeInline(enrichSuggestedLoc.String),
+				SuggestedCWD: normalizeInline(enrichSuggestedCWD.String),
+				AtMessages:   int(enrichAtMessages.Int64),
+				At:           parseTime(enrichAt.String),
 			}
 		}
 		out[row.SessionID] = row
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read catalogue rows: %w", err)
+	}
+	categoryExists, err := hasTable(db, "session_category_assignments")
+	if err != nil {
+		return nil, fmt.Errorf("inspect category assignments: %w", err)
+	}
+	if categoryExists {
+		categoryRows, queryErr := db.Query("SELECT session_id, slug, source FROM session_category_assignments")
+		if queryErr != nil {
+			return nil, fmt.Errorf("query category assignments: %w", queryErr)
+		}
+		defer categoryRows.Close()
+		for categoryRows.Next() {
+			var sessionID, slug, source string
+			if scanErr := categoryRows.Scan(&sessionID, &slug, &source); scanErr != nil {
+				return nil, fmt.Errorf("scan category assignment: %w", scanErr)
+			}
+			meta := out[sessionID]
+			meta.SessionID = sessionID
+			meta.StoredCategory = normalizeInline(slug)
+			meta.CategorySource = normalizeInline(source)
+			out[sessionID] = meta
+		}
+		if rowsErr := categoryRows.Err(); rowsErr != nil {
+			return nil, fmt.Errorf("read category assignments: %w", rowsErr)
+		}
 	}
 	return out, nil
 }

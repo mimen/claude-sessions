@@ -7,6 +7,16 @@ import { setParent, setSessionClass } from "./catalogue/db-mutations.ts";
 import { main } from "./cli.ts";
 import { openIndex } from "./index/schema.ts";
 import { CATALOGUE_PATH, DB_PATH } from "./paths.ts";
+import { setCategory } from "./categories/assignment.ts";
+import type { CategoryRegistry } from "./categories/registry.ts";
+
+const CATEGORY_REGISTRY: CategoryRegistry = {
+  version: "1",
+  classifierVersion: "v1",
+  categories: [{ slug: "ai-systems", name: "AI Systems", compactName: "AI", color: "#2A67E2", aliases: [] }],
+  projectMappings: {},
+  pathMappings: {},
+};
 
 const roots: string[] = [];
 const priorRoot = process.env.CCS_ROOT;
@@ -41,6 +51,13 @@ function seed(): void {
   setSessionClass(catalogue, "parent", "work_body", "2026-07-20T00:00:00Z");
   setSessionClass(catalogue, "child", "auxiliary", "2026-07-20T00:00:00Z");
   setParent(catalogue, "child", "parent", "2026-07-20T00:00:00Z");
+  setCategory(catalogue, CATEGORY_REGISTRY, {
+    sessionId: "parent",
+    slug: "ai-systems",
+    source: "manual",
+    manualLock: true,
+    classifiedAt: "2026-07-20T00:00:00Z",
+  });
   catalogue.close();
 }
 
@@ -70,6 +87,22 @@ describe("CLI auxiliary visibility", () => {
     const revealed = await outputFor(["ls", "--auxiliary"]);
     expect(revealed).toContain("Auxiliary Child");
     expect(revealed).toContain("AUX");
+  });
+
+  test("ls exposes effective category, filters by it, and reports category spend", async () => {
+    seed();
+    const filtered = await outputFor(["ls", "--category", "ai-systems"]);
+    expect(filtered).toContain("domain:ai-systems");
+    expect(filtered).toContain("$5.00 shown spend");
+    expect(filtered).toContain("Parent Session");
+
+    const inherited = await outputFor(["ls", "--category", "ai-systems", "--auxiliary"]);
+    expect(inherited).toContain("Auxiliary Child");
+    expect(inherited.match(/domain:ai-systems/g)).toHaveLength(2);
+
+    const empty = await outputFor(["ls", "--category", "events"]);
+    expect(empty).not.toContain("Parent Session");
+    expect(empty).toContain("0 sessions");
   });
 
   test("tree keeps the parent and total while hiding auxiliary descendants", async () => {
