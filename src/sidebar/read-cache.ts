@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import {
   readCatalogueDatabase,
@@ -16,6 +16,20 @@ interface DurableReader<T> {
   close(): void;
 }
 
+interface FileIdentity {
+  readonly device: bigint;
+  readonly inode: bigint;
+}
+
+function fileIdentity(path: string): FileIdentity {
+  const stats = statSync(path, { bigint: true });
+  return { device: stats.dev, inode: stats.ino };
+}
+
+function sameFile(left: FileIdentity, right: FileIdentity): boolean {
+  return left.device === right.device && left.inode === right.inode;
+}
+
 function dataVersion(db: Database): number {
   const row = db.query("PRAGMA data_version").get() as { readonly data_version: number };
   return row.data_version;
@@ -23,36 +37,82 @@ function dataVersion(db: Database): number {
 
 /**
  * One long-lived query-only SQLite connection and the durable facts derived from its current commit.
- * `data_version` changes only for commits made by another connection, exactly the writer pattern the
- * sidebar must observe. A changed version clears all derived facts once, on the next read.
+ * `data_version` efficiently detects commits to the opened file, while device/inode identity detects
+ * an atomic rename that replaced the path with a different database. Either change clears all
+ * derived facts once, on the next read.
  */
 function durableReader<T>(path: string): DurableReader<T> {
   let db: Database | null = null;
+  let openedIdentity: FileIdentity | null = null;
   let observedVersion: number | null = null;
   let revisionNumber = 0;
   const values = new Map<string, T>();
 
-  function connection(): Database {
-    if (db !== null) return db;
-    db = new Database(path, { readonly: true });
-    db.exec("PRAGMA query_only = ON;");
-    observedVersion = dataVersion(db);
-    revisionNumber += 1;
-    return db;
+  function closeConnection(): void {
+    db?.close();
+    db = null;
+    openedIdentity = null;
+    observedVersion = null;
+    values.clear();
   }
 
-  function observe(current: Database): void {
-    const next = dataVersion(current);
-    if (observedVersion === next) return;
-    observedVersion = next;
-    revisionNumber += 1;
-    values.clear();
+  function openConnection(): Database {
+    while (true) {
+      const beforeOpen = fileIdentity(path);
+      const candidate = new Database(path, { readonly: true });
+      try {
+        candidate.exec("PRAGMA query_only = ON;");
+        const version = dataVersion(candidate);
+        const afterOpen = fileIdentity(path);
+        if (!sameFile(beforeOpen, afterOpen)) {
+          candidate.close();
+          continue;
+        }
+        db = candidate;
+        openedIdentity = afterOpen;
+        observedVersion = version;
+        revisionNumber += 1;
+        return candidate;
+      } catch (error) {
+        candidate.close();
+        throw error;
+      }
+    }
+  }
+
+  function observe(): Database {
+    while (true) {
+      const current = db ?? openConnection();
+      const identity = openedIdentity;
+      if (identity === null) continue;
+      try {
+        const beforeVersion = fileIdentity(path);
+        if (!sameFile(identity, beforeVersion)) {
+          closeConnection();
+          continue;
+        }
+        const next = dataVersion(current);
+        const afterVersion = fileIdentity(path);
+        if (!sameFile(identity, afterVersion)) {
+          closeConnection();
+          continue;
+        }
+        if (observedVersion !== next) {
+          observedVersion = next;
+          revisionNumber += 1;
+          values.clear();
+        }
+        return current;
+      } catch (error) {
+        closeConnection();
+        throw error;
+      }
+    }
   }
 
   return {
     read(key: string, load: (database: Database) => T): T {
-      const current = connection();
-      observe(current);
+      const current = observe();
       const cached = values.get(key);
       if (cached !== undefined) return cached;
       const value = load(current);
@@ -60,12 +120,7 @@ function durableReader<T>(path: string): DurableReader<T> {
       return value;
     },
     revision: () => revisionNumber,
-    close(): void {
-      db?.close();
-      db = null;
-      observedVersion = null;
-      values.clear();
-    },
+    close: closeConnection,
   };
 }
 
