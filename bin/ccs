@@ -1,4 +1,5 @@
-#!/usr/bin/env bun
+#!/bin/zsh -f
+':' //; exec "${0:A:h}/ccs-launch" "$@"
 import { main } from "../src/cli.ts";
 
 process.exit(await main(process.argv));

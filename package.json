@@ -7,7 +7,7 @@
     "ccs": "bin/ccs"
   },
   "scripts": {
-    "ccs": "bun run bin/ccs",
+    "ccs": "./bin/ccs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/sidebar/web",
     "typecheck:web": "tsc --noEmit -p src/sidebar/web",
     "test": "bun test",

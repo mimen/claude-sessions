@@ -1,0 +1,17 @@
+#!/bin/zsh -f
+set -e
+
+script_dir=${0:A:h}
+if ! bun_path=$(command -v bun 2>/dev/null); then
+  print -u2 -r -- "ccs: bun not found in PATH"
+  exit 127
+fi
+
+if [[ ${PROCID_OFF:-0} == 1 ]]; then
+  unset PROCID PROCID_REF PROCID_OFF
+  exec "$bun_path" "$script_dir/ccs" "$@"
+fi
+
+identity=$("$script_dir/ccs-process-identity" "$@")
+unset PROCID PROCID_REF PROCID_OFF
+exec -a "$identity" "$bun_path" "$script_dir/ccs" "$@"

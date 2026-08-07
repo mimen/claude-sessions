@@ -1,0 +1,109 @@
+#!/bin/zsh -f
+set -e
+
+sanitize_segment() {
+  print -rn -- "$1" \
+    | LC_ALL=C tr 'A-Z' 'a-z' \
+    | LC_ALL=C tr -cs 'a-z0-9-' '-' \
+    | LC_ALL=C tr -s '-' \
+    | LC_ALL=C sed -E 's/^-//; s/-$//'
+}
+
+resolve_role() {
+  local candidate=${1:-}
+  if [[ -z $candidate || $candidate == -* ]]; then
+    print -r -- "main"
+    return
+  fi
+
+  local role
+  role=$(sanitize_segment "$candidate")
+  print -r -- "${role:-main}"
+}
+
+resolve_default_branch() {
+  local remote_head
+  remote_head=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  if [[ -n $remote_head ]]; then
+    print -r -- "${remote_head#origin/}"
+    return
+  fi
+
+  local configured
+  configured=$(git config --get init.defaultBranch 2>/dev/null || true)
+  if [[ -n $configured ]] && git show-ref --verify --quiet "refs/heads/$configured"; then
+    print -r -- "$configured"
+    return
+  fi
+
+  local candidate
+  for candidate in main master; do
+    if git show-ref --verify --quiet "refs/heads/$candidate"; then
+      print -r -- "$candidate"
+      return
+    fi
+  done
+
+  local -a local_branches
+  local_branches=(${(f)"$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)"})
+  if (( ${#local_branches} == 1 )); then
+    print -r -- "$local_branches[1]"
+  fi
+}
+
+resolve_git_ref() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+  local git_dir common_dir top_level
+  git_dir=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null) || return 0
+  common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
+  top_level=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
+
+  if [[ $git_dir != $common_dir ]]; then
+    local worktree_slug repo_slug prefix
+    worktree_slug=$(sanitize_segment "${top_level:t}")
+    repo_slug=$(sanitize_segment "${common_dir:h:t}")
+    prefix="${repo_slug}-"
+    if [[ $worktree_slug == ${prefix}* && $worktree_slug != $prefix ]]; then
+      worktree_slug=${worktree_slug:${#prefix}}
+    fi
+    print -r -- "$worktree_slug"
+    return
+  fi
+
+  local branch default_branch
+  branch=$(git branch --show-current 2>/dev/null || true)
+  [[ -n $branch ]] || return 0
+  default_branch=$(resolve_default_branch)
+
+  if [[ -z $default_branch || $branch != $default_branch ]]; then
+    print -r -- "$branch"
+  fi
+}
+
+if [[ -n ${PROCID:-} ]]; then
+  if [[ ! $PROCID =~ '^ccs:[a-z0-9]+(-[a-z0-9]+)*(@[a-z0-9]+(-[a-z0-9]+)*)?$' ]]; then
+    print -u2 -r -- "ccs: invalid PROCID '$PROCID' (expected ccs:<role>[@<ref>] with segments matching [a-z0-9]+(-[a-z0-9]+)*)"
+    exit 2
+  fi
+  print -r -- "$PROCID"
+  exit 0
+fi
+
+role=$(resolve_role "${1:-}")
+if [[ -v PROCID_REF ]]; then
+  ref=$(sanitize_segment "$PROCID_REF")
+  if [[ -z $ref ]]; then
+    print -u2 -r -- "ccs: PROCID_REF '$PROCID_REF' does not contain an ASCII alphanumeric character"
+    exit 2
+  fi
+else
+  raw_ref=$(resolve_git_ref)
+  ref=$(sanitize_segment "$raw_ref")
+fi
+
+identity="ccs:$role"
+if [[ -n $ref ]]; then
+  identity+="@$ref"
+fi
+print -r -- "$identity"
