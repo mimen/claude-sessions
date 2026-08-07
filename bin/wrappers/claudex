@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/zsh -f
 # claudex — ONE Claude Code harness serving both vendors through the local CLIProxyAPI gateway
 # (127.0.0.1:8317). Claude models bill the Max sub, GPT models bill the ChatGPT/Codex sub,
 # despite the "API Usage Billing" header.
@@ -12,9 +12,8 @@
 # What is left here is the ARGUMENT handling that is genuinely this wrapper's own: the default
 # model, the model-as-first-arg shortcut, and [1m] suffixing.
 #
-# CCS_FORCE_HARNESS is how the shim knows which launcher's environment to apply. The
-# `exec claude` bounce back into the shim is DELIBERATE and load-bearing — it is what registers
-# the session birth. Do not make this exec the raw binary directly.
+# CCS_FORCE_HARNESS tells the sibling shim which launcher environment to apply. Executing that
+# exact shim registers the session birth without depending on shell startup files or PATH.
 #
 # /model picker slots and hot-swap levers: see the `env` block of the claudex launcher in
 # ~/.ccs/config.toml.
@@ -46,4 +45,4 @@ fi
 
 margs=()
 [[ -n "$MODEL" ]] && margs=(--model "$MODEL")
-exec claude --dangerously-skip-permissions "${margs[@]}" "$@"
+exec "${0:A:h}/claude" --dangerously-skip-permissions "${margs[@]}" "$@"

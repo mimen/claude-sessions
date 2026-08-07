@@ -12,10 +12,13 @@ const SHIM = resolve(import.meta.dir, "../../bin/ccs-claude-shim");
 const CCS_BIN = resolve(import.meta.dir, "../../bin/ccs");
 const roots: string[] = [];
 const savedCcsRoot = process.env.CCS_ROOT;
+const savedHome = process.env.HOME;
 
 afterEach(() => {
   if (savedCcsRoot === undefined) delete process.env.CCS_ROOT;
   else process.env.CCS_ROOT = savedCcsRoot;
+  if (savedHome === undefined) delete process.env.HOME;
+  else process.env.HOME = savedHome;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -64,6 +67,11 @@ process.exit(${exitCode});
 `,
   );
   chmodSync(executable, 0o755);
+  const home = join(root, "home");
+  const managedBin = join(home, ".ccs", "bin");
+  mkdirSync(managedBin, { recursive: true });
+  symlinkSync(executable, join(managedBin, "claudex"));
+  process.env.HOME = home;
   return { root, agentsRoot, bin, observation };
 }
 
@@ -319,7 +327,7 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
     seedParent(f.root);
     const code = delegateCommand(
       ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
-      { ...process.env, PATH: "/definitely/missing" },
+      { ...process.env, HOME: join(f.root, "missing-home"), PATH: "/definitely/missing" },
     );
 
     expect(code).toBe(1);
