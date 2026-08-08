@@ -9,7 +9,7 @@ import { categoryBySlug, loadCategoryRegistry, slugFromDomainTag } from "../cate
 import { openCatalogue } from "./db-schema.ts";
 
 const DEFAULT_MANIFEST_PATH = resolve(import.meta.dir, "../../docs/category-backfill-manifest-v1.json");
-const ManifestSchema = z.object({
+const NormalizeManifestSchema = z.object({
   schema: z.literal(1),
   operation: z.literal("normalize-domain-tags"),
   registryVersion: z.string(),
@@ -17,6 +17,49 @@ const ManifestSchema = z.object({
   conflictPolicy: z.literal("use-existing-valid-assignment-or-report"),
   invalidPolicy: z.literal("discard-invalid-only-when-one-valid-category-remains"),
 }).strict();
+
+const ClassificationSchema = z.object({
+  proposedSlug: z.string(),
+  confidence: z.number().min(0).max(1),
+  evidenceKinds: z.array(z.string()),
+  sourceFields: z.array(z.string()),
+  reasonCodes: z.array(z.string()),
+  requiresReview: z.boolean(),
+  flags: z.array(z.string()),
+}).strict();
+
+const AssignmentManifestSchema = z.object({
+  $schema: z.literal("./session-category-manifest.schema.json"),
+  artifactType: z.literal("ccs-session-life-domain-dry-run"),
+  version: z.string(),
+  capturedAt: z.string(),
+  mutationsPerformed: z.literal(false),
+  backfillActivated: z.literal(false),
+  registry: z.object({
+    version: z.string(),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    slugs: z.array(z.string()),
+  }).strict(),
+  sourceManifestSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  classifier: z.object({
+    version: z.string(),
+    purposeFields: z.array(z.string()),
+    evidenceKinds: z.array(z.string()),
+  }).strict(),
+  roots: z.array(z.object({
+    sessionId: z.string().min(1),
+    classification: ClassificationSchema,
+    descendants: z.object({
+      retainedSessionIds: z.array(z.string()),
+      hiddenAuxiliarySessionIds: z.array(z.string()),
+      workflowJournalSessionIds: z.array(z.string()),
+    }).strict(),
+    metrics: z.record(z.string(), z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))),
+  }).strict()),
+}).strict();
+
+const ManifestSchema = z.union([NormalizeManifestSchema, AssignmentManifestSchema]);
+type AssignmentManifest = z.infer<typeof AssignmentManifestSchema>;
 
 type JsonAssignment = Omit<CategoryAssignment, "source"> & { readonly source: CategoryAssignment["source"] };
 interface JsonCategoryAttempt {
@@ -44,6 +87,23 @@ interface PlannedRoot {
   readonly sourceIds: readonly string[];
   readonly slug: string;
   readonly preserveManualLock: boolean;
+}
+
+interface PlannedManifestRoot {
+  readonly rootId: string;
+  readonly slug: string;
+  readonly confidence: number;
+  readonly classifierVersion: string;
+  readonly classifiedAt: string;
+  readonly evidence: string;
+  readonly preserveManualLock: boolean;
+}
+
+interface ManifestPlan {
+  readonly roots: readonly PlannedManifestRoot[];
+  readonly alreadyExact: number;
+  readonly uncategorized: number;
+  readonly issues: readonly string[];
 }
 
 function digest(bytes: Uint8Array): string {
@@ -125,6 +185,82 @@ function plan(db: Database, registryPath: string): { readonly roots: readonly Pl
   return { roots: roots.sort((a, b) => a.rootId.localeCompare(b.rootId)), issues: issues.sort() };
 }
 
+function planAssignmentManifest(
+  db: Database,
+  manifest: AssignmentManifest,
+  registryPath: string,
+  manifestSha256: string,
+): ManifestPlan {
+  const registry = loadCategoryRegistry(registryPath);
+  if (!registry.ok) throw registry.error;
+  const roots: PlannedManifestRoot[] = [];
+  const issues: string[] = [];
+  const seen = new Set<string>();
+  let alreadyExact = 0;
+  let uncategorized = 0;
+  for (const row of manifest.roots) {
+    if (seen.has(row.sessionId)) {
+      issues.push(`${row.sessionId}: duplicate manifest root`);
+      continue;
+    }
+    seen.add(row.sessionId);
+    const classification = row.classification;
+    if (classification.proposedSlug === "uncategorized") {
+      uncategorized++;
+      continue;
+    }
+    if (!categoryBySlug(registry.value, classification.proposedSlug)) {
+      issues.push(`${row.sessionId}: unknown category ${classification.proposedSlug}`);
+      continue;
+    }
+    try {
+      const target = resolveCategoryWriteTarget(db, row.sessionId, "reject");
+      if (target.sessionId !== row.sessionId) issues.push(`${row.sessionId}: resolved to unexpected root ${target.sessionId}`);
+    } catch (cause) {
+      issues.push(`${row.sessionId}: ${cause instanceof Error ? cause.message : String(cause)}`);
+      continue;
+    }
+    const existing = getCategoryAssignment(db, row.sessionId);
+    if (existing?.manualLock && existing.slug !== classification.proposedSlug) {
+      issues.push(`${row.sessionId}: manual lock ${existing.slug} conflicts with ${classification.proposedSlug}`);
+      continue;
+    }
+    const preserveManualLock = existing?.manualLock === true;
+    const evidence = JSON.stringify({
+      manifestSha256,
+      reasonCodes: classification.reasonCodes,
+      flags: classification.flags,
+      requiresReview: classification.requiresReview,
+    });
+    const exactTags = JSON.stringify(tagsFor(db, row.sessionId)) === JSON.stringify([`domain:${classification.proposedSlug}`]);
+    const exactAssignment = preserveManualLock
+      ? exactTags
+      : existing?.slug === classification.proposedSlug
+        && existing.source === "backfill"
+        && existing.confidence === classification.confidence
+        && existing.classifierVersion === manifest.classifier.version
+        && existing.classifiedAt === manifest.capturedAt
+        && existing.evidence === evidence
+        && existing.failedWrite === null
+        && exactTags
+        && attemptJson(db, row.sessionId) === null;
+    if (exactAssignment) {
+      alreadyExact++;
+      continue;
+    }
+    roots.push({
+      rootId: row.sessionId,
+      slug: classification.proposedSlug,
+      confidence: classification.confidence,
+      classifierVersion: manifest.classifier.version,
+      classifiedAt: manifest.capturedAt,
+      evidence,
+      preserveManualLock,
+    });
+  }
+  return { roots: roots.sort((a, b) => a.rootId.localeCompare(b.rootId)), alreadyExact, uncategorized, issues: issues.sort() };
+}
+
 function parseArgs(args: readonly string[]): {
   readonly action: "apply" | "rollback";
   readonly apply: boolean;
@@ -189,9 +325,28 @@ export function categoryBackfillCommand(args: readonly string[]): number {
     console.error(`ccs category-backfill: ${registry.error.message}`);
     return 1;
   }
-  if (manifest.data.registryVersion !== registry.value.version) {
-    console.error(`ccs category-backfill: manifest targets registry ${manifest.data.registryVersion}, installed registry is ${registry.value.version}`);
-    return 1;
+  if ("operation" in manifest.data) {
+    if (manifest.data.registryVersion !== registry.value.version) {
+      console.error(`ccs category-backfill: manifest targets registry ${manifest.data.registryVersion}, installed registry is ${registry.value.version}`);
+      return 1;
+    }
+  } else {
+    const installedSlugs = registry.value.categories.map((category) => category.slug);
+    const installedRegistrySha256 = digest(readFileSync(parsed.registryPath));
+    if (manifest.data.registry.version !== registry.value.version
+      || manifest.data.registry.sha256 !== installedRegistrySha256
+      || JSON.stringify(manifest.data.registry.slugs) !== JSON.stringify(installedSlugs)) {
+      console.error("ccs category-backfill: assignment manifest registry metadata does not match the installed registry");
+      return 1;
+    }
+    return applyAssignmentManifest({
+      manifest: manifest.data,
+      manifestSha256: actual,
+      manifestPath: parsed.manifestPath,
+      cataloguePath: parsed.cataloguePath,
+      registryPath: parsed.registryPath,
+      apply: parsed.apply,
+    });
   }
   const readonly = new Database(parsed.cataloguePath, { readonly: true });
   let planned;
@@ -285,6 +440,109 @@ export function categoryBackfillCommand(args: readonly string[]): number {
   db.close();
   const locked = planned.roots.filter((root) => root.preserveManualLock).length;
   console.log(`applied ${planned.roots.length - locked} category roots; preserved ${locked} matching manual locks; audit operation ${operationId}`);
+  return 0;
+}
+
+function applyAssignmentManifest(args: {
+  readonly manifest: AssignmentManifest;
+  readonly manifestSha256: string;
+  readonly manifestPath: string;
+  readonly cataloguePath: string;
+  readonly registryPath: string;
+  readonly apply: boolean;
+}): number {
+  const readonly = new Database(args.cataloguePath, { readonly: true });
+  let planned: ManifestPlan;
+  try {
+    planned = planAssignmentManifest(readonly, args.manifest, args.registryPath, args.manifestSha256);
+  } catch (cause) {
+    readonly.close();
+    console.error(`ccs category-backfill: ${cause instanceof Error ? cause.message : String(cause)}`);
+    return 1;
+  }
+  readonly.close();
+  console.log(
+    `category assignment backfill (${args.apply ? "APPLY" : "DRY-RUN"}): ${planned.roots.length} roots ready, `
+      + `${planned.alreadyExact} already exact, ${planned.uncategorized} uncategorized skipped, ${planned.issues.length} unresolved`,
+  );
+  for (const issue of planned.issues) console.error(`  unresolved: ${issue}`);
+  if (!args.apply) return 0;
+  if (planned.issues.length > 0) {
+    console.error("ccs category-backfill: unresolved rows make apply fail closed");
+    return 1;
+  }
+  if (planned.roots.length === 0) return 0;
+  const registry = loadCategoryRegistry(args.registryPath);
+  if (!registry.ok) {
+    console.error(`ccs category-backfill: ${registry.error.message}`);
+    return 1;
+  }
+  const db = openCatalogue(args.cataloguePath, { materialize: false });
+  const operationId = randomUUID();
+  const appliedAt = new Date().toISOString();
+  try {
+    db.transaction(() => {
+      const live = planAssignmentManifest(db, args.manifest, args.registryPath, args.manifestSha256);
+      if (JSON.stringify(live) !== JSON.stringify(planned)) throw new Error("catalogue changed after dry-run");
+      const before = new Map<string, { tags: string[]; assignment: JsonAssignment | null; attempt: JsonCategoryAttempt | null }>();
+      for (const root of live.roots) {
+        before.set(root.rootId, {
+          tags: tagsFor(db, root.rootId),
+          assignment: assignmentJson(getCategoryAssignment(db, root.rootId)),
+          attempt: attemptJson(db, root.rootId),
+        });
+        if (root.preserveManualLock) {
+          db.query("DELETE FROM session_tags WHERE session_id=$id AND entity LIKE 'domain:%'").run({ $id: root.rootId });
+          db.query("INSERT INTO session_tags(session_id,entity) VALUES ($id,$tag)").run({
+            $id: root.rootId,
+            $tag: `domain:${root.slug}`,
+          });
+        } else {
+          setCategory(db, registry.value, {
+            sessionId: root.rootId,
+            auxiliaryPolicy: "reject",
+            slug: root.slug,
+            source: "backfill",
+            confidence: root.confidence,
+            classifierVersion: root.classifierVersion,
+            evidence: root.evidence,
+            classifiedAt: root.classifiedAt,
+            allowLockedOverride: false,
+          });
+        }
+      }
+      const snapshot: BackfillSnapshot = {
+        schema: 2,
+        operationId,
+        entries: [...before].map(([sessionId, state]) => ({
+          sessionId,
+          beforeTags: state.tags,
+          beforeAssignment: state.assignment,
+          beforeAttempt: state.attempt,
+          afterTags: tagsFor(db, sessionId),
+          afterAssignment: assignmentJson(getCategoryAssignment(db, sessionId)),
+          afterAttempt: attemptJson(db, sessionId),
+        })),
+      };
+      db.query("INSERT INTO category_backfill_audits(operation_id, manifest_sha256, manifest_path, applied_at, snapshot_json) VALUES ($id,$sha,$path,$at,$snapshot)").run({
+        $id: operationId,
+        $sha: args.manifestSha256,
+        $path: args.manifestPath,
+        $at: appliedAt,
+        $snapshot: JSON.stringify(snapshot),
+      });
+    })();
+  } catch (cause) {
+    db.close();
+    console.error(`ccs category-backfill: apply rolled back: ${cause instanceof Error ? cause.message : String(cause)}`);
+    return 1;
+  }
+  db.close();
+  const locked = planned.roots.filter((root) => root.preserveManualLock).length;
+  console.log(
+    `applied ${planned.roots.length - locked} session category assignments; preserved ${locked} matching manual locks; `
+      + `skipped ${planned.uncategorized} uncategorized roots; audit operation ${operationId}`,
+  );
   return 0;
 }
 

@@ -32,6 +32,7 @@ export interface SetCategoryInput {
   readonly confidence?: number | null;
   readonly manualLock?: boolean;
   readonly evidence?: string | null;
+  readonly classifierVersion?: string;
   readonly classifiedAt: string;
   readonly allowLockedOverride?: boolean;
 }
@@ -176,7 +177,7 @@ export function setCategory(
         $slug: input.slug,
         $source: input.source,
         $confidence: input.confidence ?? null,
-        $version: registry.classifierVersion,
+        $version: input.classifierVersion ?? registry.classifierVersion,
         $at: input.classifiedAt,
         $lock: input.manualLock ? 1 : 0,
         $evidence: input.evidence ?? null,
