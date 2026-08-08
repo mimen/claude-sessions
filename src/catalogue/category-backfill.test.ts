@@ -145,3 +145,77 @@ test("category backfill preserves matching manual-lock metadata while cleaning c
   expect(check.query("SELECT entity FROM session_tags WHERE session_id='child'").all()).toEqual([]);
   check.close();
 });
+
+test("category backfill applies sanitized classification manifests and skips uncategorized roots", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-category-assignment-backfill-"));
+  roots.push(root);
+  const cataloguePath = join(root, "catalogue.db");
+  const registryPath = join(root, "ClaudeConfig", "categories", "registry.json");
+  const manifestPath = join(root, "session-category-manifest.json");
+  mkdirSync(join(root, "ClaudeConfig", "categories"), { recursive: true });
+  const registryBytes = Buffer.from(JSON.stringify({
+    $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+    categories: [
+      { slug: "events", name: "Events", compactLabel: "Events", order: 1,
+        todoistColorName: "Purple", todoistColor: "grape", hex: "#692EC2", scope: "Events", googleLabelName: "Events", workspaceRoot: "Workspaces/Events" },
+      { slug: "ai-systems", name: "AI Systems", compactLabel: "AI Systems", order: 2,
+        todoistColorName: "Blue", todoistColor: "blue", hex: "#2A67E2", scope: "AI", googleLabelName: "AI Systems", workspaceRoot: "Workspaces/AI Systems" },
+    ],
+  }));
+  writeFileSync(registryPath, registryBytes);
+  const registrySha = createHash("sha256").update(registryBytes).digest("hex");
+  const classification = (proposedSlug: string, confidence: number, requiresReview: boolean) => ({
+    proposedSlug, confidence,
+    evidenceKinds: proposedSlug === "uncategorized" ? [] : ["opening-purpose"],
+    sourceFields: proposedSlug === "uncategorized" ? [] : ["transcript.user.opening"],
+    reasonCodes: [proposedSlug === "uncategorized" ? "insufficient-purpose-evidence" : "single-domain-purpose"],
+    requiresReview,
+    flags: requiresReview ? ["requires-review"] : [],
+  });
+  const row = (sessionId: string, proposedSlug: string, confidence: number, requiresReview: boolean) => ({
+    sessionId,
+    classification: classification(proposedSlug, confidence, requiresReview),
+    descendants: { retainedSessionIds: [], hiddenAuxiliarySessionIds: [], workflowJournalSessionIds: [] },
+    metrics: {},
+  });
+  writeFileSync(manifestPath, JSON.stringify({
+    $schema: "./session-category-manifest.schema.json",
+    artifactType: "ccs-session-life-domain-dry-run",
+    version: "2.0.0",
+    capturedAt: "2026-08-08T06:02:54Z",
+    mutationsPerformed: false,
+    backfillActivated: false,
+    registry: { version: "1.0.0", sha256: registrySha, slugs: ["events", "ai-systems"] },
+    sourceManifestSha256: "1".repeat(64),
+    classifier: { version: "2.0.0", purposeFields: ["transcript.user.opening"], evidenceKinds: ["opening-purpose"] },
+    roots: [
+      row("root-events", "events", 0.93, false),
+      row("root-review", "ai-systems", 0.61, true),
+      row("root-unknown", "uncategorized", 0, true),
+    ],
+  }));
+  const manifestSha = createHash("sha256").update(readFileSync(manifestPath)).digest("hex");
+  const db = openCatalogue(cataloguePath, { materialize: false });
+  setSessionClass(db, "root-events", "work_body", "2026-08-08T00:00:00Z");
+  setSessionClass(db, "root-review", "work_body", "2026-08-08T00:00:00Z");
+  setSessionClass(db, "root-unknown", "work_body", "2026-08-08T00:00:00Z");
+  db.close();
+
+  const args = ["apply", "--manifest", manifestPath, "--expect-sha256", manifestSha, "--catalogue", cataloguePath, "--registry", registryPath];
+  expect(categoryBackfillCommand(args)).toBe(0);
+  expect(categoryBackfillCommand([...args, "--apply"])).toBe(0);
+  const check = openCatalogue(cataloguePath, { materialize: false });
+  expect(getCategoryAssignment(check, "root-events")).toMatchObject({
+    slug: "events", source: "backfill", confidence: 0.93, classifierVersion: "2.0.0", classifiedAt: "2026-08-08T06:02:54Z",
+  });
+  expect(getCategoryAssignment(check, "root-review")).toMatchObject({
+    slug: "ai-systems", source: "backfill", confidence: 0.61, classifierVersion: "2.0.0",
+  });
+  expect(getCategoryAssignment(check, "root-unknown")).toBeNull();
+  expect(check.query("SELECT session_id, entity FROM session_tags ORDER BY session_id").all()).toEqual([
+    { session_id: "root-events", entity: "domain:events" },
+    { session_id: "root-review", entity: "domain:ai-systems" },
+  ]);
+  check.close();
+  expect(categoryBackfillCommand([...args, "--apply"])).toBe(0);
+});
