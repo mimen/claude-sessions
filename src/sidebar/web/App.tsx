@@ -705,6 +705,7 @@ export function App(): React.ReactElement {
                 state={state}
                 filterable={filterable}
                 color={group.color}
+                outlineMark={group.outlineMark}
                 label={group.label}
                 onToggleShelved={() => updateShelf(group.key, toggleShelved)}
                 onToggleLiveOnly={() => updateShelf(group.key, toggleLiveOnly)}
@@ -772,7 +773,10 @@ export function App(): React.ReactElement {
       </div>
 
       {/* One card for the whole list, rendered outside it so scrolling the list cannot clip it. */}
-      <HoverSummary target={hoverTarget} />
+      <HoverSummary
+        categoryProjectionError={snapshot?.categoryProjectionError ?? null}
+        target={hoverTarget}
+      />
 
       <Toasts onDismiss={() => setActionError(null)} toasts={toasts} />
     </div>

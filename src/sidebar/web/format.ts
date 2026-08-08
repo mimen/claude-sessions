@@ -1,4 +1,5 @@
 /** Display helpers for the sidebar rows. Pure, so they are tested without a DOM. */
+import type { SidebarCategoryProjection } from "../category-projection.ts";
 import type {
   SidebarDensity,
   SidebarMembership,
@@ -78,13 +79,14 @@ export function shortenPath(path: string | null, maxLength = 34): string {
 }
 
 /** How the queue is arranged. One control cycles these; the choice is remembered. */
-export type GroupingMode = "status" | "project" | "recent";
+export type GroupingMode = "status" | "project" | "category" | "recent";
 
-export const GROUPING_MODES: readonly GroupingMode[] = ["status", "project", "recent"];
+export const GROUPING_MODES: readonly GroupingMode[] = ["status", "project", "category", "recent"];
 
 export const GROUPING_LABELS: Readonly<Record<GroupingMode, string>> = {
   status: "By status",
   project: "By project",
+  category: "By category",
   recent: "Most recent",
 };
 
@@ -123,8 +125,10 @@ export function recencyBand(lastActivityAt: number | null, now: number): string 
 
 export interface SessionGroup<Row> {
   readonly key: string;
-  /** A colour the group claims, when it has one. Clusters do; time bands do not. */
+  /** A colour the group claims, when it has one. Clusters and categories do; time bands do not. */
   readonly color?: string;
+  /** Keep an intentional mark for a category state that has no registry colour. */
+  readonly outlineMark?: boolean;
   /** Absent when the arrangement is one flat list that needs no heading. */
   readonly label: string | null;
   readonly rows: readonly Row[];
@@ -139,6 +143,8 @@ interface GroupableRow {
   readonly density: SidebarDensity;
   /** Present when the session belongs to a cluster. */
   readonly membership?: SidebarMembership | null;
+  /** Absent for sessionless tabs; null when the category projection itself was unavailable. */
+  readonly category?: SidebarCategoryProjection | null;
 }
 
 /**
@@ -259,6 +265,51 @@ export function groupSessions<Row extends GroupableRow>(
   return [...lifted.groups, ...pinnedGroup, ...groupUnpinned(rest, mode, now)];
 }
 
+interface CategoryBucket<Row> extends SessionGroup<Row> {
+  readonly order: number;
+  readonly rows: Row[];
+}
+
+/**
+ * Registry order reaches this function on each projected row, so category shelving follows the
+ * canonical hue wheel without a web-owned slug list that could drift from it.
+ */
+function categoryGroups<Row extends GroupableRow>(rows: readonly Row[]): Array<SessionGroup<Row>> {
+  const buckets = new Map<string, CategoryBucket<Row>>();
+  for (const row of rows) {
+    const category = row.category;
+    let seed: Omit<CategoryBucket<Row>, "rows">;
+    if (category === undefined) {
+      seed = { key: "category:not-applicable", label: "Other tabs", order: Number.MAX_SAFE_INTEGER - 2 };
+    } else if (category === null) {
+      seed = { key: "category:unavailable", label: "Category unavailable", order: Number.MAX_SAFE_INTEGER - 1 };
+    } else if (category.effectiveSlug === null) {
+      seed = {
+        key: "category:uncategorized",
+        label: "Uncategorized",
+        order: Number.MAX_SAFE_INTEGER,
+        outlineMark: true,
+      };
+    } else {
+      seed = {
+        key: `category:${category.effectiveSlug}`,
+        label: category.compactLabel ?? category.fullLabel ?? category.effectiveSlug,
+        order: category.order ?? Number.MAX_SAFE_INTEGER - 3,
+        color: category.hex ?? undefined,
+      };
+    }
+    const bucket = buckets.get(seed.key);
+    if (bucket) bucket.rows.push(row);
+    else buckets.set(seed.key, { ...seed, rows: [row] });
+  }
+  return [...buckets.values()]
+    .sort((left, right) => left.order - right.order || left.key.localeCompare(right.key))
+    .map(({ order: _order, ...group }) => ({
+      ...group,
+      rows: [...group.rows].sort(pinnedFirst(openFirst(byRecency))),
+    }));
+}
+
 function groupUnpinned<Row extends GroupableRow>(
   rows: readonly Row[],
   mode: GroupingMode,
@@ -278,6 +329,8 @@ function groupUnpinned<Row extends GroupableRow>(
       .filter((band) => buckets.has(band))
       .map((band) => ({ key: band, label: band, rows: buckets.get(band) ?? [] }));
   }
+
+  if (mode === "category") return categoryGroups(rows);
 
   if (mode === "project") {
     const byProject = new Map<string, Row[]>();

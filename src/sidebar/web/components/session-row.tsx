@@ -32,6 +32,7 @@ import {
 import { StatusIcon } from "./status-icon.tsx";
 import { RowAction } from "./row-action.tsx";
 import { summaryAsText } from "./summary-card.tsx";
+import { CategoryAccessibleText, CategoryMark } from "./category-mark.tsx";
 
 /**
  * cmux's status words mapped onto the vendored component's four states. cmux owns the label;
@@ -186,8 +187,10 @@ export function SessionRow({
           {/* The project line needs air under it: at 10px directly above a 13px title the two read
             * as one wrapped string rather than as label-then-thing. */}
           <span className="mb-[2px] flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <CategoryMark category={session?.category ?? null} className="mr-0.5" />
             <ProjectIcon source={row.faviconUrl} />
             <span className="truncate">{row.directory ?? shortenPath(row.directoryPath)}</span>
+            <CategoryAccessibleText category={session?.category ?? null} />
             {/*
               * Pinned rows only. cmux keeps pins at the top of its own order, so their number is
               * stable; every other row's position shifts as workspaces come and go, and a badge

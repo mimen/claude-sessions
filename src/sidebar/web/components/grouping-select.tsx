@@ -1,7 +1,7 @@
 /**
  * How the queue is arranged.
  *
- * A native select rather than a vendored menu: it is three options in a 400px drawer, and the
+ * A native select rather than a vendored menu: it is four options in a 400px drawer, and the
  * platform control brings its own keyboard handling, its own popover and no dependency. The
  * visible face is styled to match the buttons beside it; the real select sits transparently on
  * top so it stays a proper control.

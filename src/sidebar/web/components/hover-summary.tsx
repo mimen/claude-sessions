@@ -15,7 +15,7 @@
 import type React from "react";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { SidebarSessionRow } from "../../projection.ts";
-import { EmptySummaryCard, SummaryCard } from "./summary-card.tsx";
+import { CategorySummary, EmptySummaryCard, SummaryCard } from "./summary-card.tsx";
 
 /** Which row the pointer is resting on, and where that row is on screen. */
 export interface HoverTarget {
@@ -41,7 +41,13 @@ interface Placement {
   readonly left: number;
 }
 
-export function HoverSummary({ target }: { target: HoverTarget | null }): React.ReactElement | null {
+export function HoverSummary({
+  target,
+  categoryProjectionError,
+}: {
+  readonly target: HoverTarget | null;
+  readonly categoryProjectionError: string | null;
+}): React.ReactElement | null {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [placement, setPlacement] = useState<Placement | null>(null);
 
@@ -91,6 +97,7 @@ export function HoverSummary({ target }: { target: HoverTarget | null }): React.
         visibility: placement ? "visible" : "hidden",
       }}
     >
+      <CategorySummary category={target.row.category} error={categoryProjectionError} />
       {target.row.summary
         ? <SummaryCard summary={target.row.summary} />
         : <EmptySummaryCard />}

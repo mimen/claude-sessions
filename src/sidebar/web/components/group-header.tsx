@@ -38,6 +38,8 @@ export interface GroupHeaderProps {
    * bar rather than tinted text, so the label keeps its contrast whatever the hue.
    */
   readonly color?: string | null;
+  /** An unfilled mark for a deliberate state, such as Uncategorized, that owns no registry colour. */
+  readonly outlineMark?: boolean;
 }
 
 /**
@@ -58,6 +60,7 @@ export function GroupHeader({
   onToggleShelved,
   onToggleLiveOnly,
   color,
+  outlineMark = false,
 }: GroupHeaderProps): React.ReactElement {
   // Shelved, the count would read "0 of 10", which says a filter emptied the group when the
   // chevron already says you closed it. The total alone is the honest thing to show.
@@ -78,11 +81,14 @@ export function GroupHeader({
         title={state.shelved ? "Show this group" : "Hide this group"}
         type="button"
       >
-        {color ? (
+        {color || outlineMark ? (
           <span
             aria-hidden="true"
-            className="mr-0.5 h-2.5 w-[3px] shrink-0 rounded-full"
-            style={{ background: color }}
+            className={cn(
+              "mr-0.5 h-2.5 w-[3px] shrink-0 rounded-full",
+              outlineMark && "border border-muted-foreground/70",
+            )}
+            style={color ? { backgroundColor: color } : undefined}
           />
         ) : null}
         <span className="truncate">{label}</span>

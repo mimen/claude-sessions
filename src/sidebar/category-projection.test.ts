@@ -38,7 +38,7 @@ test("sidebar category projection exposes inherited labels, exact registry color
   if (outcome.status !== "ok") return;
   expect(outcome.categories.get("resume-child")).toMatchObject({
     schema: 1, effectiveSlug: "events", compactLabel: "Events", fullLabel: "Events, Booking & Live Production",
-    hex: "#692EC2", source: "manual", manualLock: true, finding: "inherited", registryVersion: "1.0.0",
+    hex: "#692EC2", order: 1, source: "manual", manualLock: true, finding: "inherited", registryVersion: "1.0.0",
   });
 });
 

@@ -17,6 +17,8 @@ export interface SidebarCategoryProjection {
   readonly compactLabel: string | null;
   readonly fullLabel: string | null;
   readonly hex: string | null;
+  /** Canonical registry position; null only when there is no effective category. */
+  readonly order: number | null;
   readonly source: CategoryAssignment["source"] | null;
   readonly manualLock: boolean;
   readonly finding: EffectiveCategoryFinding | "category-invalid";
@@ -91,6 +93,7 @@ export function readSidebarCategoryProjection(
         compactLabel: definition?.compactName ?? null,
         fullLabel: definition?.name ?? null,
         hex: definition?.color ?? null,
+        order: definition?.order ?? null,
         source: storedAssignment?.source ?? null,
         manualLock: storedAssignment?.manualLock ?? false,
         finding: effective.slug !== null && definition === null ? "category-invalid" : effective.finding,

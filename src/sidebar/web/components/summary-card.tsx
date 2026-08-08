@@ -12,7 +12,9 @@
  * verdict.
  */
 import type React from "react";
+import type { SidebarCategoryProjection } from "../../category-projection.ts";
 import type { SidebarSummary } from "../../projection.ts";
+import { CategoryMark, categoryAccessibleLabel } from "./category-mark.tsx";
 
 const RECOMMENDATION_TONES: Readonly<Record<string, string>> = {
   complete: "var(--action-confirm)",
@@ -46,6 +48,32 @@ export function summaryAsText(summary: SidebarSummary, name: string): string {
   if (summary.remaining) parts.push("", `Remaining: ${summary.remaining}`);
   if (summary.history) parts.push("", `History: ${summary.history}`);
   return parts.join("\n");
+}
+
+/** Category context shared by cards with and without enrichment prose. */
+export function CategorySummary({
+  category,
+  error,
+}: {
+  readonly category: SidebarCategoryProjection | null;
+  readonly error: string | null;
+}): React.ReactElement {
+  if (category === null) {
+    return (
+      <span className="text-[10px] leading-[1.35] text-[color:var(--action-destroy)]">
+        Category unavailable{error ? `: ${error}` : "."}
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-start gap-1.5 text-[10px] leading-[1.35] text-muted-foreground">
+      <CategoryMark category={category} className="mt-[3px]" />
+      <span>
+        <span className="text-foreground">Category </span>
+        {categoryAccessibleLabel(category)}
+      </span>
+    </span>
+  );
 }
 
 /**

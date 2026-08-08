@@ -28,6 +28,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { summaryAsText } from "./summary-card.tsx";
+import { CategoryAccessibleText, CategoryMark } from "./category-mark.tsx";
 
 export interface CompactRowProps {
   readonly row: SidebarSessionRow;
@@ -94,7 +95,9 @@ export function CompactRow({
       ref={(element) => registerRef?.(row.id, element)}
       type="button"
     >
+      <CategoryMark category={row.category} className="mr-0.5" />
       <ProjectMark faviconUrl={row.faviconUrl} muted />
+      <CategoryAccessibleText category={row.category} />
       <span className="min-w-0 flex-1 truncate text-[12px] leading-[18px] font-normal text-muted-foreground group-hover:text-foreground">
         {row.name}
       </span>
