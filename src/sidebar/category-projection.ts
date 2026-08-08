@@ -78,7 +78,12 @@ export function readSidebarCategoryProjection(
     for (const row of rows) {
       const effective = resolveEffectiveCategory(row.session_id, assignments, parents, known, classes);
       const definition = effective.slug ? categoryBySlug(registry.value, effective.slug) : null;
-      const storedAssignment = assignments.get(effective.inheritedFrom ?? row.session_id) ?? null;
+      const acceptedAssignmentId = effective.finding === "stored"
+        ? row.session_id
+        : effective.finding === "inherited"
+        ? effective.inheritedFrom
+        : null;
+      const storedAssignment = acceptedAssignmentId ? assignments.get(acceptedAssignmentId) ?? null : null;
       const value: SidebarCategoryProjection = {
         schema: SIDEBAR_CATEGORY_PROJECTION_VERSION,
         effectiveSlug: effective.slug,

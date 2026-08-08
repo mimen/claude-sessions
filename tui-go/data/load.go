@@ -107,7 +107,7 @@ func Load(options LoadOptions) (Snapshot, error) {
 			categoryName = "Invalid category: " + resolvedCategory.Slug
 			categoryCompact = "Bad category"
 		}
-		if resolvedCategory.Finding != "stored" && resolvedCategory.Finding != "inherited" && resolvedCategory.Finding != "uncategorized" {
+		if shouldAggregateCategoryFinding(resolvedCategory.Finding) {
 			categoryFindings[resolvedCategory.Finding]++
 		}
 		session := Session{
@@ -185,6 +185,10 @@ func Load(options LoadOptions) (Snapshot, error) {
 	snapshot.Tree = buildTree(snapshot, indexed, catalogue, rollups)
 	snapshot.Stats = buildStats(home, runtimeRoot, snapshot.Sessions, indexed, catalogue, rollups)
 	return snapshot, nil
+}
+
+func shouldAggregateCategoryFinding(finding string) bool {
+	return finding != "stored" && finding != "inherited" && finding != "uncategorized" && finding != "registry-unavailable"
 }
 
 func categoryRepairDisplay(finding string) (string, string, bool) {

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { openCatalogue } from "../catalogue/db-schema.ts";
 import { ensureRow, setParent, setSessionClass } from "../catalogue/db-mutations.ts";
 import { loadLocationRegistry } from "../locations/registry.ts";
@@ -15,7 +15,7 @@ import {
   setCategory,
 } from "./assignment.ts";
 import { classifyCategory } from "./classify.ts";
-import { loadCategoryRegistry, type CategoryRegistry } from "./registry.ts";
+import { loadCategoryRegistry, validateCategoryDeployment, type CategoryRegistry } from "./registry.ts";
 import { categoryStaleness } from "./staleness.ts";
 
 const roots: string[] = [];
@@ -91,6 +91,26 @@ describe("category registry", () => {
       ]);
       expect(loaded.value.categories[0]).toMatchObject({ compactName: "Music", color: "#DC4C3E", workspaceRoot: "Workspaces/Music" });
     }
+  });
+
+  test("deployment validation reports absent roots while active location mappings keep rollout ready", () => {
+    const result = validateCategoryDeployment(registry(), {
+      version: 1,
+      defaultHost: "mac",
+      defaultHarness: null,
+      defaultModel: null,
+      locations: [{
+        key: "events-live", name: "Events live", cwd: "/active/events", kind: "workspace",
+        eligibleHosts: ["mac"], preferredHost: "mac", defaultHarness: null, defaultModel: null,
+        status: "active", aliases: [], category: "events", categoryNeutral: false, categoryAmbiguous: false,
+      }],
+    }, (path) => path.endsWith("Workspaces/Assistant"));
+    expect(result.ready).toBeTrue();
+    expect(result.diagnostics.find((item) => item.slug === "events")).toMatchObject({
+      exists: false,
+      ready: true,
+      activeLocationKeys: ["events-live"],
+    });
   });
 
   test("location parsing remains compatible and accepts future category hints", () => {
@@ -188,6 +208,31 @@ test("plain cwd uses the most-specific registered location before workspace ance
   expect(classifyCategory({ registry: registry(), locations: locations.value, cwd: "/vault/Workspaces/Events/project" })).toMatchObject({
     status: "resolved", value: { slug: "events", source: "location" },
   });
+});
+
+test("home-relative registered locations match absolute cwd before broader evidence", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-home-location-"));
+  roots.push(root);
+  const path = join(root, "locations.toml");
+  writeFileSync(path, `version = 1\ndefault_host = "mac"\n\n[[location]]\nkey = "home-repo"\nname = "Home repo"\ncwd = "~/Projects/events"\nkind = "repo"\neligible_hosts = ["mac"]\npreferred_host = "mac"\ncategory = "events"\n`);
+  const locations = loadLocationRegistry(path);
+  expect(locations.ok).toBeTrue();
+  if (!locations.ok) return;
+  expect(classifyCategory({ registry: registry(), locations: locations.value, cwd: join(homedir(), "Projects", "events", "app") })).toMatchObject({
+    status: "resolved", value: { slug: "events", source: "location" },
+  });
+});
+
+test("category-ambiguous location is terminal for explicit key and most-specific cwd", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-ambiguous-location-"));
+  roots.push(root);
+  const path = join(root, "locations.toml");
+  writeFileSync(path, `version = 1\ndefault_host = "mac"\n\n[[location]]\nkey = "broad"\nname = "Broad"\ncwd = "/vault"\nkind = "workspace"\neligible_hosts = ["mac"]\npreferred_host = "mac"\ncategory = "ai-systems"\n\n[[location]]\nkey = "mixed"\nname = "Mixed"\ncwd = "/vault/Workspaces/Events"\nkind = "workspace"\neligible_hosts = ["mac"]\npreferred_host = "mac"\ncategory_ambiguous = true\n`);
+  const locations = loadLocationRegistry(path);
+  expect(locations.ok).toBeTrue();
+  if (!locations.ok) return;
+  expect(classifyCategory({ registry: registry(), locations: locations.value, locationKey: "mixed", cwd: "/vault/Workspaces/Events/app" })).toEqual({ status: "unresolved", reason: "ambiguous" });
+  expect(classifyCategory({ registry: registry(), locations: locations.value, cwd: "/vault/Workspaces/Events/app" })).toEqual({ status: "unresolved", reason: "ambiguous" });
 });
 
 test("category-neutral location permits lower-precedence workspace classification", () => {

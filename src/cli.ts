@@ -2,7 +2,7 @@ import pkg from "../package.json" with { type: "json" };
 import { loadConfig, type Config } from "./config.ts";
 import { formatBytes, formatAge } from "./store.ts";
 import { existsSync } from "node:fs";
-import { ensureDataDir, DB_PATH, CATALOGUE_PATH } from "./paths.ts";
+import { ensureDataDir, DB_PATH, CATALOGUE_PATH, CATEGORY_REGISTRY_PATH } from "./paths.ts";
 import { openIndex } from "./index/schema.ts";
 import type { Database } from "bun:sqlite";
 import { listByRecency, sessionById, titleOf } from "./index/index.ts";
@@ -52,7 +52,8 @@ import { getCrashReporter, installCrashLog, summarizeArgv } from "./crashlog.ts"
 import { SESSION_CLASS_ROLLOUT_AT } from "./session-class.ts";
 import { launchGoTui } from "./tui-go/launch.ts";
 import { getAllCategoryAssignments, resolveEffectiveCategory } from "./categories/assignment.ts";
-import { categoryAnalyticsCommand } from "./categories/analytics.ts";
+import { categoryCommand } from "./categories/command.ts";
+import { categoryBySlug, loadCategoryRegistry } from "./categories/registry.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -73,6 +74,7 @@ Usage:
   ccs next [--json]                               What you're mid-flight on, and the next action for each
   ccs ls [--auxiliary] [--category <slug>]  Print and filter indexed sessions with effective category
   ccs category analytics [--json]             Group retained-root activity, tokens, lifecycle, and spend by category
+  ccs category validate [--json]              Check workspace-root deployment and active location mappings
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
   ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
                          Reserve and synchronously run an auxiliary seat (fallback is explicit; never automatic)
@@ -248,7 +250,7 @@ export async function main(argv: string[]): Promise<number> {
       });
     }
     case "category":
-      return categoryAnalyticsCommand(args.slice(1));
+      return categoryCommand(args.slice(1));
     case "tree":
       return tree({ all: args.includes("--all"), auxiliary: args.includes("--auxiliary") });
     case "location":
@@ -553,6 +555,8 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean; category?:
     }
     const catalogue = getAll(cat);
     const categoryAssignments = getAllCategoryAssignments(cat);
+    const categoryRegistry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
+    if (!categoryRegistry.ok) console.warn(`ccs ls: ${categoryRegistry.error.message}`);
     const categoryEdges = parentEdges(cat);
     const categoryParents = new Map(categoryEdges.map((edge) => [edge.sessionId, edge.parentId]));
     const knownCategorySessions = new Set([...catalogue.keys(), ...rows.map((row) => row.sessionId)]);
@@ -588,7 +592,17 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean; category?:
       const sk = pad(c?.role ? `⚙${c.role}` : "", 14);
       const key = pad(keyValue ? `⊞${keyValue}` : "", 18);
       const project = pad(r.projectName, 16);
-      const categoryLabel = pad(category.slug ? `domain:${category.slug}` : "uncategorized", 24);
+      const categoryDefinition = category.slug && categoryRegistry.ok
+        ? categoryBySlug(categoryRegistry.value, category.slug)
+        : null;
+      const categoryLabel = pad(
+        category.slug
+          ? categoryRegistry.ok && !categoryDefinition
+            ? `invalid:domain:${category.slug}`
+            : `domain:${category.slug}`
+          : "uncategorized",
+        24,
+      );
       const age = pad(formatAge(r.lastTs), 5);
       const totalCost = rollup.bySessionId.get(r.sessionId)?.totalCost ?? r.costUSD;
       const cost = pad(formatCost(totalCost), 7);

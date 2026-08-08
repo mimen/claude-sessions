@@ -129,6 +129,8 @@ test("exact allowlists reject both unexpected importers and stale pre-authorizat
 test("SQL scanner catches every catalogue-owned table and dynamic identity tables", () => {
   const catalogueTables = [
     "catalogue",
+    "category_backfill_audits",
+    "category_schema_migrations",
     "dispositions",
     "epics",
     "groupings",
@@ -140,6 +142,7 @@ test("SQL scanner catches every catalogue-owned table and dynamic identity table
     "roles",
     "schema_migrations",
     "session_category_assignments",
+    "session_category_attempts",
     "session_tags",
   ];
   for (const table of catalogueTables) {

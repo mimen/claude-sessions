@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
 import { type Result, err, ok } from "../result.ts";
+import type { LocationRegistry } from "../locations/registry.ts";
 
 const SlugSchema = z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, "expected kebab-case slug");
 const ColorSchema = z.string().regex(/^#[0-9A-F]{6}$/, "expected #RRGGBB color");
@@ -114,6 +115,46 @@ export function loadCategoryRegistry(path: string): Result<CategoryRegistry> {
   } catch (cause) {
     return err(new Error(`Failed to read category registry at ${path}: ${(cause as Error).message}`));
   }
+}
+
+export interface CategoryWorkspaceDiagnostic {
+  readonly slug: string;
+  readonly workspaceRoot: string;
+  readonly workspacePath: string;
+  readonly exists: boolean;
+  readonly activeLocationKeys: readonly string[];
+  readonly ready: boolean;
+}
+
+export interface CategoryDeploymentValidation {
+  readonly ready: boolean;
+  readonly diagnostics: readonly CategoryWorkspaceDiagnostic[];
+  readonly blockedSlugs: readonly string[];
+}
+
+/** Report future workspace roots without rewriting the canonical registry or hiding active mappings. */
+export function validateCategoryDeployment(
+  registry: CategoryRegistry,
+  locations: LocationRegistry | null,
+  pathExists: (path: string) => boolean = existsSync,
+): CategoryDeploymentValidation {
+  const diagnostics = registry.categories.map((category) => {
+    const activeLocationKeys = (locations?.locations ?? [])
+      .filter((location) => location.status === "active" && location.category === category.slug)
+      .map((location) => location.key)
+      .sort();
+    const exists = pathExists(category.workspacePath);
+    return {
+      slug: category.slug,
+      workspaceRoot: category.workspaceRoot,
+      workspacePath: category.workspacePath,
+      exists,
+      activeLocationKeys,
+      ready: exists || activeLocationKeys.length > 0,
+    };
+  });
+  const blockedSlugs = diagnostics.filter((diagnostic) => !diagnostic.ready).map((diagnostic) => diagnostic.slug);
+  return { ready: blockedSlugs.length === 0, diagnostics, blockedSlugs };
 }
 
 export function resolveCategorySelector(registry: CategoryRegistry, selector: string): CategoryDefinition | null {

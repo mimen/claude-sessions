@@ -89,6 +89,8 @@ export interface EnrichOptions {
   readonly needsModelFallback?: boolean;
   /** Internal sweep optimization: category repair may finish without regenerating fresh prose. */
   readonly categoryOnly?: boolean;
+  /** Internal scheduler signal: category retries are eligible independently from prose work. */
+  readonly categoryWork?: boolean;
   readonly endpoint?: string;
   readonly model?: string;
   readonly keyPath?: string;

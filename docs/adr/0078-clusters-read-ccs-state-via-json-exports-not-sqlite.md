@@ -35,7 +35,7 @@ Concretely:
    The stored `key` column is thereafter authoritative; `identityKeyOf()` just reads it. A
    backfill in migration `v31` populates the column for existing rows.
 2. **`ccs catalogue export --cluster <c> [--role <r>] [--json]`** — the ONE authorized read path
-   for cluster engines. Returns a versioned envelope (`schema: 1`) with a stable per-row shape.
+   for cluster engines. Returns a versioned envelope (`schema: 2`) with a stable per-row shape.
 3. **`ccs identity resolve --session <sid> [--json]`** — resolve one session to its identity key
    plus the columns it was derived from. Same envelope discipline (`schema: 1`).
 4. **`ccs cluster <name> --json`** already existed (roster projection); its role expands to be

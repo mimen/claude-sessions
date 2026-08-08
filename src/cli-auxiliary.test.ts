@@ -117,6 +117,17 @@ describe("CLI auxiliary visibility", () => {
     expect(empty).toContain("0 sessions");
   });
 
+  test("ls labels effective slugs absent from the registry as invalid", async () => {
+    seed();
+    const catalogue = openCatalogue(CATALOGUE_PATH());
+    catalogue.query("UPDATE session_category_assignments SET slug='removed' WHERE session_id='parent'").run();
+    catalogue.query("UPDATE session_tags SET entity='domain:removed' WHERE session_id='parent'").run();
+    catalogue.close();
+    const output = await outputFor(["ls"]);
+    expect(output).toContain("invalid:domain:removed");
+    expect(output).not.toMatch(/\sdomain:removed\s/);
+  });
+
   test("explicit tag removal can clear a locked slug removed from the registry", async () => {
     seed();
     const catalogue = openCatalogue(CATALOGUE_PATH());

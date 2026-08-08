@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { expandHome } from "../paths.ts";
 import type { Database } from "bun:sqlite";
 import type { LocationRegistry, LaunchLocation } from "../locations/registry.ts";
 import { getCategoryAssignment, type CategorySource } from "./assignment.ts";
@@ -15,8 +16,8 @@ export type CategoryClassification =
   | { readonly status: "unresolved"; readonly reason: "no-evidence" | "ambiguous" | "invalid-location-category" };
 
 function pathContains(parent: string, child: string): boolean {
-  const prefix = resolve(parent).replace(/\/$/, "") + "/";
-  const target = resolve(child);
+  const prefix = resolve(expandHome(parent)).replace(/\/$/, "") + "/";
+  const target = resolve(expandHome(child));
   return target === prefix.slice(0, -1) || target.startsWith(prefix);
 }
 
@@ -34,13 +35,13 @@ function locationEvidence(
   } else if (cwd) {
     candidates = locations.locations
       .filter((candidate) => candidate.status === "active" && pathContains(candidate.cwd, cwd))
-      .sort((left, right) => resolve(right.cwd).length - resolve(left.cwd).length);
+      .sort((left, right) => resolve(expandHome(right.cwd)).length - resolve(expandHome(left.cwd)).length);
   } else {
     candidates = [];
   }
   for (const location of candidates) {
     if (location.categoryNeutral) return null;
-    if (location.categoryAmbiguous) continue;
+    if (location.categoryAmbiguous) return { status: "unresolved", reason: "ambiguous" };
     if (!location.category) continue;
     if (!categoryBySlug(registry, location.category)) {
       return { status: "unresolved", reason: "invalid-location-category" };

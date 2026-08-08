@@ -19,15 +19,23 @@ const ManifestSchema = z.object({
 }).strict();
 
 type JsonAssignment = Omit<CategoryAssignment, "source"> & { readonly source: CategoryAssignment["source"] };
+interface JsonCategoryAttempt {
+  readonly sessionId: string;
+  readonly attempts: number;
+  readonly nextAttemptAt: string | null;
+  readonly lastError: string | null;
+}
 interface SnapshotEntry {
   readonly sessionId: string;
   readonly beforeTags: readonly string[];
   readonly beforeAssignment: JsonAssignment | null;
+  readonly beforeAttempt: JsonCategoryAttempt | null;
   readonly afterTags: readonly string[];
   readonly afterAssignment: JsonAssignment | null;
+  readonly afterAttempt: JsonCategoryAttempt | null;
 }
 interface BackfillSnapshot {
-  readonly schema: 1;
+  readonly schema: 2;
   readonly operationId: string;
   readonly entries: readonly SnapshotEntry[];
 }
@@ -35,6 +43,7 @@ interface PlannedRoot {
   readonly rootId: string;
   readonly sourceIds: readonly string[];
   readonly slug: string;
+  readonly preserveManualLock: boolean;
 }
 
 function digest(bytes: Uint8Array): string {
@@ -47,6 +56,23 @@ function tagsFor(db: Database, sessionId: string): string[] {
 
 function assignmentJson(value: CategoryAssignment | null): JsonAssignment | null {
   return value ? { ...value } : null;
+}
+
+function attemptJson(db: Database, sessionId: string): JsonCategoryAttempt | null {
+  const row = db.query(
+    "SELECT session_id, attempts, next_attempt_at, last_error FROM session_category_attempts WHERE session_id=$id",
+  ).get({ $id: sessionId }) as {
+    readonly session_id: string;
+    readonly attempts: number;
+    readonly next_attempt_at: string | null;
+    readonly last_error: string | null;
+  } | null;
+  return row ? {
+    sessionId: row.session_id,
+    attempts: row.attempts,
+    nextAttemptAt: row.next_attempt_at,
+    lastError: row.last_error,
+  } : null;
 }
 
 function plan(db: Database, registryPath: string): { readonly roots: readonly PlannedRoot[]; readonly issues: readonly string[] } {
@@ -89,11 +115,12 @@ function plan(db: Database, registryPath: string): { readonly roots: readonly Pl
       continue;
     }
     const sources = [...sourceIds.get(rootId)!].sort();
+    const preserveManualLock = existing?.manualLock === true && existing.slug === slug;
     const alreadyNormalized = existing?.slug === slug
-      && existing.classifierVersion === registry.value.classifierVersion
-      && existing.failedWrite === null
-      && sources.every((id) => JSON.stringify(tagsFor(db, id)) === JSON.stringify(id === rootId ? [`domain:${slug}`] : []));
-    if (!alreadyNormalized) roots.push({ rootId, sourceIds: sources, slug });
+      && (preserveManualLock || (existing.classifierVersion === registry.value.classifierVersion && existing.failedWrite === null))
+      && sources.every((id) => JSON.stringify(tagsFor(db, id)) === JSON.stringify(id === rootId ? [`domain:${slug}`] : []))
+      && sources.every((id) => id === rootId || attemptJson(db, id) === null);
+    if (!alreadyNormalized) roots.push({ rootId, sourceIds: sources, slug, preserveManualLock });
   }
   return { roots: roots.sort((a, b) => a.rootId.localeCompare(b.rootId)), issues: issues.sort() };
 }
@@ -191,35 +218,59 @@ export function categoryBackfillCommand(args: readonly string[]): number {
     db.transaction(() => {
       const live = plan(db, parsed.registryPath);
       if (JSON.stringify(live) !== JSON.stringify(planned)) throw new Error("catalogue changed after dry-run");
-      const before = new Map<string, { tags: string[]; assignment: JsonAssignment | null }>();
+      const before = new Map<string, { tags: string[]; assignment: JsonAssignment | null; attempt: JsonCategoryAttempt | null }>();
       for (const root of live.roots) for (const id of root.sourceIds) {
-        before.set(id, { tags: tagsFor(db, id), assignment: assignmentJson(getCategoryAssignment(db, id)) });
+        before.set(id, {
+          tags: tagsFor(db, id),
+          assignment: assignmentJson(getCategoryAssignment(db, id)),
+          attempt: attemptJson(db, id),
+        });
       }
       for (const root of live.roots) {
-        setCategory(db, registry.value, {
-          sessionId: root.rootId,
-          auxiliaryPolicy: "reject",
-          slug: root.slug,
-          source: "backfill",
-          confidence: 1,
-          evidence: `category-backfill manifest ${actual}`,
-          classifiedAt: appliedAt,
-          allowLockedOverride: false,
-        });
+        if (root.preserveManualLock) {
+          db.query("DELETE FROM session_tags WHERE session_id=$id AND entity LIKE 'domain:%'").run({ $id: root.rootId });
+          db.query("INSERT INTO session_tags(session_id,entity) VALUES ($id,$tag)").run({
+            $id: root.rootId,
+            $tag: `domain:${root.slug}`,
+          });
+        } else {
+          setCategory(db, registry.value, {
+            sessionId: root.rootId,
+            auxiliaryPolicy: "reject",
+            slug: root.slug,
+            source: "backfill",
+            confidence: 1,
+            evidence: `category-backfill manifest ${actual}`,
+            classifiedAt: appliedAt,
+            allowLockedOverride: false,
+          });
+          const priorAttempt = before.get(root.rootId)?.attempt ?? null;
+          if (priorAttempt) {
+            db.query("INSERT INTO session_category_attempts(session_id,attempts,next_attempt_at,last_error) VALUES ($id,$attempts,$next,$error)").run({
+              $id: priorAttempt.sessionId,
+              $attempts: priorAttempt.attempts,
+              $next: priorAttempt.nextAttemptAt,
+              $error: priorAttempt.lastError,
+            });
+          }
+        }
         for (const id of root.sourceIds) if (id !== root.rootId) {
           db.query("DELETE FROM session_tags WHERE session_id=$id AND entity LIKE 'domain:%'").run({ $id: id });
           db.query("DELETE FROM session_category_assignments WHERE session_id=$id").run({ $id: id });
+          db.query("DELETE FROM session_category_attempts WHERE session_id=$id").run({ $id: id });
         }
       }
       const snapshot: BackfillSnapshot = {
-        schema: 1,
+        schema: 2,
         operationId,
         entries: [...before].map(([sessionId, state]) => ({
           sessionId,
           beforeTags: state.tags,
           beforeAssignment: state.assignment,
+          beforeAttempt: state.attempt,
           afterTags: tagsFor(db, sessionId),
           afterAssignment: assignmentJson(getCategoryAssignment(db, sessionId)),
+          afterAttempt: attemptJson(db, sessionId),
         })),
       };
       db.query("INSERT INTO category_backfill_audits(operation_id, manifest_sha256, manifest_path, applied_at, snapshot_json) VALUES ($id,$sha,$path,$at,$snapshot)").run({
@@ -232,7 +283,8 @@ export function categoryBackfillCommand(args: readonly string[]): number {
     return 1;
   }
   db.close();
-  console.log(`applied ${planned.roots.length} category roots; audit operation ${operationId}`);
+  const locked = planned.roots.filter((root) => root.preserveManualLock).length;
+  console.log(`applied ${planned.roots.length - locked} category roots; preserved ${locked} matching manual locks; audit operation ${operationId}`);
   return 0;
 }
 
@@ -248,10 +300,23 @@ function rollback(args: NonNullable<ReturnType<typeof parseArgs>>): number {
     console.error(`ccs category-backfill: audit ${args.operationId} is missing or already reverted`);
     return 1;
   }
-  const snapshot = JSON.parse(audit.snapshot_json) as BackfillSnapshot;
+  let snapshot: BackfillSnapshot;
+  try {
+    snapshot = JSON.parse(audit.snapshot_json) as BackfillSnapshot;
+  } catch (cause) {
+    db.close();
+    console.error(`ccs category-backfill: audit ${args.operationId} has invalid snapshot JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
+    return 1;
+  }
+  if (snapshot.schema !== 2 || !Array.isArray(snapshot.entries)) {
+    db.close();
+    console.error(`ccs category-backfill: audit ${args.operationId} uses unsupported snapshot schema`);
+    return 1;
+  }
   const conflicts = snapshot.entries.filter((entry) =>
     JSON.stringify(tagsFor(db, entry.sessionId)) !== JSON.stringify(entry.afterTags)
-    || JSON.stringify(assignmentJson(getCategoryAssignment(db, entry.sessionId))) !== JSON.stringify(entry.afterAssignment));
+    || JSON.stringify(assignmentJson(getCategoryAssignment(db, entry.sessionId))) !== JSON.stringify(entry.afterAssignment)
+    || JSON.stringify(attemptJson(db, entry.sessionId)) !== JSON.stringify(entry.afterAttempt));
   console.log(`category backfill rollback (${args.apply ? "APPLY" : "DRY-RUN"}): ${snapshot.entries.length} sessions, ${conflicts.length} conflicts`);
   if (conflicts.length > 0 || !args.apply) {
     db.close();
@@ -269,6 +334,16 @@ function rollback(args: NonNullable<ReturnType<typeof parseArgs>>): number {
             $id: a.sessionId, $slug: a.slug, $source: a.source, $confidence: a.confidence, $version: a.classifierVersion,
             $at: a.classifiedAt, $lock: a.manualLock ? 1 : 0, $evidence: a.evidence, $failed: a.failedWrite,
             $attempts: a.attempts, $next: a.nextAttemptAt,
+          });
+        }
+        db.query("DELETE FROM session_category_attempts WHERE session_id=$id").run({ $id: entry.sessionId });
+        if (entry.beforeAttempt) {
+          const attempt = entry.beforeAttempt;
+          db.query("INSERT INTO session_category_attempts(session_id,attempts,next_attempt_at,last_error) VALUES ($id,$attempts,$next,$error)").run({
+            $id: attempt.sessionId,
+            $attempts: attempt.attempts,
+            $next: attempt.nextAttemptAt,
+            $error: attempt.lastError,
           });
         }
       }

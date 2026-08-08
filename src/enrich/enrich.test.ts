@@ -169,6 +169,69 @@ describe("enrichCandidates", () => {
     }
   });
 
+  test("exhausted category retries remain reportable and do not starve stale prose", async () => {
+    const f = await fixture([{ id: "locked", messages: 4 }]);
+    const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
+    const registryPath = join(f.dir, "ClaudeConfig", "categories", "registry.json");
+    mkdirSync(join(f.dir, "ClaudeConfig", "categories"), { recursive: true });
+    writeFileSync(registryPath, JSON.stringify({
+      $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+      categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,
+        todoistColorName: "Blue", todoistColor: "blue", hex: "#2A67E2", scope: "AI", googleLabelName: "AI", workspaceRoot: "Workspaces/Assistant" }],
+    }));
+    process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
+    try {
+      f.catalogue.query("INSERT INTO catalogue(session_id,updated_at) VALUES ('locked',$at)").run({ $at: NOW });
+      f.catalogue.query("INSERT INTO session_category_assignments(session_id,slug,source,classifier_version,classified_at,manual_lock) VALUES ('locked','removed','manual','0.9.0',$at,1)").run({ $at: NOW });
+      f.catalogue.query("INSERT INTO session_tags(session_id,entity) VALUES ('locked','domain:removed')").run();
+      f.catalogue.query("INSERT INTO session_category_attempts(session_id,attempts,next_attempt_at,last_error) VALUES ('locked',5,NULL,'exhausted')").run();
+      const candidates = enrichCandidates(f.index, f.catalogue, new Date(NOW));
+      expect(candidates[0]).toMatchObject({
+        proseStale: true,
+        categoryEligible: false,
+        categoryReasons: ["category-locked-invalid"],
+      });
+      let calls = 0;
+      const stats = await sweep(f.index, f.catalogue, {
+        locations: LOCATIONS, keyPath: f.keyPath, fetchImpl: async () => { calls++; return okFetch(); }, now: () => new Date(NOW),
+      });
+      expect(stats).toEqual({ enriched: 1, failed: 0, remaining: 0 });
+      expect(calls).toBe(1);
+      expect(getRow(f.catalogue, "locked")?.enrichment?.state).toBe(ANSWER.state);
+      expect(getCategoryAssignment(f.catalogue, "locked")?.slug).toBe("removed");
+    } finally {
+      if (previous === undefined) delete process.env.CCS_CATEGORY_REGISTRY_PATH;
+      else process.env.CCS_CATEGORY_REGISTRY_PATH = previous;
+      teardown(f);
+    }
+  });
+
+  test("rowless indexed sessions create a retained catalogue row before category mutation", async () => {
+    const f = await fixture([{ id: "external", messages: 4 }], "Workspaces/Assistant/project");
+    const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
+    const registryPath = join(f.dir, "ClaudeConfig", "categories", "registry.json");
+    mkdirSync(join(f.dir, "ClaudeConfig", "categories"), { recursive: true });
+    writeFileSync(registryPath, JSON.stringify({
+      $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+      categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,
+        todoistColorName: "Blue", todoistColor: "blue", hex: "#2A67E2", scope: "AI", googleLabelName: "AI", workspaceRoot: "Workspaces/Assistant" }],
+    }));
+    process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
+    try {
+      expect(getRow(f.catalogue, "external")).toBeNull();
+      const stats = await sweep(f.index, f.catalogue, {
+        locations: LOCATIONS, keyPath: f.keyPath, fetchImpl: okFetch, now: () => new Date(NOW),
+      });
+      expect(stats).toEqual({ enriched: 1, failed: 0, remaining: 0 });
+      expect(getRow(f.catalogue, "external")).not.toBeNull();
+      expect(getCategoryAssignment(f.catalogue, "external")?.slug).toBe("ai-systems");
+    } finally {
+      if (previous === undefined) delete process.env.CCS_CATEGORY_REGISTRY_PATH;
+      else process.env.CCS_CATEGORY_REGISTRY_PATH = previous;
+      teardown(f);
+    }
+  });
+
   test("a removed locked slug fails only its candidate and does not abort the sweep", async () => {
     const f = await fixture([{ id: "locked", messages: 4 }, { id: "healthy", messages: 4 }], "Workspaces/Assistant/project");
     const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;

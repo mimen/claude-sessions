@@ -95,6 +95,15 @@ func TestEffectiveCategoryValidatesCompleteAncestry(t *testing.T) {
 	}
 }
 
+func TestRegistryUnavailableIsWarnedGloballyWithoutPerSessionAggregation(t *testing.T) {
+	if shouldAggregateCategoryFinding("registry-unavailable") {
+		t.Fatal("registry unavailability must not be counted once per visible session")
+	}
+	if !shouldAggregateCategoryFinding("cycle") {
+		t.Fatal("session-specific category repairs must remain aggregated")
+	}
+}
+
 func TestCategoryRepairDisplayDistinguishesAncestryFailures(t *testing.T) {
 	cases := map[string]string{
 		"cycle":                "Cycle",
