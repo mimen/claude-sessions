@@ -1,4 +1,4 @@
-import { expect, test, describe } from "bun:test";
+import { expect, test, describe, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +18,23 @@ const NOW = "2026-07-24T12:00:00.000Z";
 const LOCATIONS: readonly EnrichmentLocation[] = [
   { key: "repos-ccs", name: "CCS", aliases: [], cwd: "~/Programming/Repos/claude-sessions", kind: "repo" },
 ];
+
+// The category seam resolves a registry path from the environment, falling back to the real vault.
+// Without an explicit override these tests would read whatever registry the developer's machine
+// happens to have, so a file appearing in the vault silently changes what they assert. Point the
+// whole file at a path that cannot exist; the cases that need a registry set their own.
+let registryOverrideRoot = "";
+let priorRegistryPath: string | undefined;
+beforeAll(() => {
+  registryOverrideRoot = mkdtempSync(join(tmpdir(), "ccs-enrich-noregistry-"));
+  priorRegistryPath = process.env.CCS_CATEGORY_REGISTRY_PATH;
+  process.env.CCS_CATEGORY_REGISTRY_PATH = join(registryOverrideRoot, "absent-registry.json");
+});
+afterAll(() => {
+  if (priorRegistryPath === undefined) delete process.env.CCS_CATEGORY_REGISTRY_PATH;
+  else process.env.CCS_CATEGORY_REGISTRY_PATH = priorRegistryPath;
+  rmSync(registryOverrideRoot, { recursive: true, force: true });
+});
 
 const ANSWER = {
   title: "Enrichment sweep",
