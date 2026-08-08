@@ -10,6 +10,12 @@ Every **persistent Claude Code process** must be born through a CCS-managed path
 
 Non-persistent API/inference calls are not sessions and remain outside this contract.
 
+For probes and tests, use three lanes:
+
+- Disposable print-mode probes use `--no-session-persistence`; they create no Session.
+- Tests of persistence isolate both the Store and Catalogue with temporary `HOME`, `CLAUDE_CONFIG_DIR`, and `CCS_ROOT`, then exercise normal persistence semantics inside that temporary state.
+- Real delegated work uses auxiliary managed Sessions through the native `Agent` tool, `ccs delegate`, or `ccs session new --child-of` as appropriate.
+
 CCS stores two independent facts:
 
 - `session_class`: `work_body` or `auxiliary` — whether the session is independently managed and visible by default.
