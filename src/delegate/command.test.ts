@@ -12,11 +12,14 @@ const SHIM = resolve(import.meta.dir, "../../bin/ccs-claude-shim");
 const CCS_BIN = resolve(import.meta.dir, "../../bin/ccs");
 const roots: string[] = [];
 const savedCcsRoot = process.env.CCS_ROOT;
+const savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
 const savedHome = process.env.HOME;
 
 afterEach(() => {
   if (savedCcsRoot === undefined) delete process.env.CCS_ROOT;
   else process.env.CCS_ROOT = savedCcsRoot;
+  if (savedClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+  else process.env.CLAUDE_CONFIG_DIR = savedClaudeConfigDir;
   if (savedHome === undefined) delete process.env.HOME;
   else process.env.HOME = savedHome;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -27,6 +30,9 @@ function fixture(exitCode = 0, withFallback = true): {
   readonly agentsRoot: string;
   readonly bin: string;
   readonly observation: string;
+  readonly home: string;
+  readonly claudeConfigDir: string;
+  readonly ccsRoot: string;
 } {
   const root = mkdtempSync(join(tmpdir(), "ccs-delegate-command-"));
   roots.push(root);
@@ -61,18 +67,23 @@ const argv = process.argv.slice(2);
 const id = argv[argv.indexOf("--session-id") + 1];
 const db = new Database(join(process.env.CCS_ROOT, "cache", "catalogue.db"), { readonly: true });
 const row = db.query("SELECT session_class, parent_session_id, creator_kind, creator_ref, launch_channel, meta FROM catalogue WHERE session_id = $id").get({ $id: id });
-writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({ argv, cwd: process.cwd(), forbidden: process.env.CLAUDE_CODE_SUBAGENT_MODEL ?? null, creatorKind: process.env.CCS_CREATOR_KIND ?? null, creatorRef: process.env.CCS_CREATOR_REF ?? null, launchCreatorKind: process.env.CCS_LAUNCH_CREATOR_KIND ?? null, launchCreatorRef: process.env.CCS_LAUNCH_CREATOR_REF ?? null, launchParent: process.env.CCS_LAUNCH_PARENT_SESSION_ID ?? null, row }));
+writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({ argv, cwd: process.cwd(), home: process.env.HOME, claudeConfigDir: process.env.CLAUDE_CONFIG_DIR, ccsRoot: process.env.CCS_ROOT, forbidden: process.env.CLAUDE_CODE_SUBAGENT_MODEL ?? null, creatorKind: process.env.CCS_CREATOR_KIND ?? null, creatorRef: process.env.CCS_CREATOR_REF ?? null, launchCreatorKind: process.env.CCS_LAUNCH_CREATOR_KIND ?? null, launchCreatorRef: process.env.CCS_LAUNCH_CREATOR_REF ?? null, launchParent: process.env.CCS_LAUNCH_PARENT_SESSION_ID ?? null, row }));
 db.close();
 process.exit(${exitCode});
 `,
   );
   chmodSync(executable, 0o755);
   const home = join(root, "home");
+  const claudeConfigDir = join(root, "claude-config");
+  const ccsRoot = join(root, "runtime");
   const managedBin = join(home, ".ccs", "bin");
   mkdirSync(managedBin, { recursive: true });
+  mkdirSync(join(claudeConfigDir, "projects"), { recursive: true });
   symlinkSync(executable, join(managedBin, "claudex"));
   process.env.HOME = home;
-  return { root, agentsRoot, bin, observation };
+  process.env.CLAUDE_CONFIG_DIR = claudeConfigDir;
+  process.env.CCS_ROOT = ccsRoot;
+  return { root, agentsRoot, bin, observation, home, claudeConfigDir, ccsRoot };
 }
 
 function seedParent(root: string): void {
@@ -99,7 +110,6 @@ function childRows(root: string): Array<{ session_id: string; session_class: str
 describe("delegateCommand", () => {
   test("reserves primary auxiliary metadata before launch and preserves argv/cwd/exit status", () => {
     const f = fixture(7);
-    process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
     const prompt = "Review this diff.\nKeep 'quotes' literal.";
     const code = delegateCommand(
@@ -119,6 +129,9 @@ describe("delegateCommand", () => {
     const observation = JSON.parse(readFileSync(f.observation, "utf8")) as {
       argv: string[];
       cwd: string;
+      home: string;
+      claudeConfigDir: string;
+      ccsRoot: string;
       forbidden: string | null;
       launchCreatorKind: string | null;
       launchCreatorRef: string | null;
@@ -133,6 +146,11 @@ describe("delegateCommand", () => {
       };
     };
     expect(observation.cwd).toBe(realpathSync(f.root));
+    expect(observation.home).toBe(f.home);
+    expect(observation.claudeConfigDir).toBe(f.claudeConfigDir);
+    expect(join(observation.claudeConfigDir, "projects")).toBe(join(f.root, "claude-config", "projects"));
+    expect(observation.ccsRoot).toBe(f.ccsRoot);
+    expect(join(observation.ccsRoot, "cache", "catalogue.db")).toBe(join(f.root, "runtime", "cache", "catalogue.db"));
     expect(observation.forbidden).toBeNull();
     expect(observation.launchCreatorKind).toBe("agent");
     expect(observation.launchCreatorRef).toBe(PARENT);
@@ -163,7 +181,6 @@ describe("delegateCommand", () => {
 
   test("records automation creator separately from the causal parent", () => {
     const f = fixture();
-    process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
     const code = delegateCommand(
       ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
@@ -205,7 +222,6 @@ describe("delegateCommand", () => {
 
   test("automation delegation traverses the stable shim and strips all birth provenance", () => {
     const f = fixture();
-    process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
 
     const home = join(f.root, "home");
@@ -273,7 +289,6 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
 
   test("rejects automation delegation without a stable creator ref before reservation", () => {
     const f = fixture();
-    process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
     const code = delegateCommand(
       ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
@@ -290,7 +305,6 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
 
   test("runs an explicit fallback as a separate Terra xhigh child", () => {
     const f = fixture();
-    process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
     const code = delegateCommand(
       ["primary-review", "--fallback", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
@@ -311,7 +325,6 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
 
   test("rejects explicit fallback for a seat without one before reservation", () => {
     const f = fixture(0, false);
-    process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
     const code = delegateCommand(
       ["primary-review", "--fallback", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
@@ -323,7 +336,6 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
 
   test("keeps one failed reservation when the selected launcher cannot start", () => {
     const f = fixture();
-    process.env.CCS_ROOT = join(f.root, "runtime");
     seedParent(f.root);
     const code = delegateCommand(
       ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
@@ -342,7 +354,6 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
 
   test("rejects a nonexistent explicit parent without creating a stub", () => {
     const f = fixture();
-    process.env.CCS_ROOT = join(f.root, "runtime");
     const code = delegateCommand(
       ["primary-review", "--child-of", PARENT, "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
       { ...process.env, PATH: `${f.bin}:${process.env.PATH ?? ""}` },
@@ -353,7 +364,6 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
 
   test("resolves child-of dot without parent provider inference", () => {
     const f = fixture();
-    process.env.CCS_ROOT = join(f.root, "runtime");
     const code = delegateCommand(
       ["primary-review", "--child-of", ".", "--cwd", f.root, "--prompt", "Review.", "--agents-root", f.agentsRoot],
       { ...process.env, CLAUDE_CODE_SESSION_ID: PARENT, PATH: `${f.bin}:${process.env.PATH ?? ""}`, OBSERVATION_PATH: f.observation },
