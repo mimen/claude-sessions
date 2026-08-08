@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
@@ -10,6 +10,7 @@ import { getRow } from "../catalogue/db-queries.ts";
 import { setEnrichment, recordEnrichmentFailure } from "../catalogue/db-mutations.ts";
 import { enrichCandidates, sweep } from "./enrich.ts";
 import { MAX_ENRICHMENT_ATTEMPTS } from "./staleness.ts";
+import { getCategoryAssignment } from "../categories/assignment.ts";
 import type { EnrichmentLocation } from "./locations.ts";
 import type { Enrichment } from "../catalogue/enrichment-schema.ts";
 
@@ -47,13 +48,15 @@ interface Fixture {
 /** Build a real index from real transcript files — the sweep reads both the DB and the files. */
 async function fixture(
   sessions: { id: string; messages: number; sidechain?: boolean }[],
+  workspaceRelative?: string,
 ): Promise<Fixture> {
   const dir = mkdtempSync(join(tmpdir(), "ccs-enrich-sweep-"));
+  const cwd = workspaceRelative ? join(dir, workspaceRelative) : "/Users/mimen";
   const files = sessions.map((session) => {
     const path = join(dir, `${session.id}.jsonl`);
     const lines = Array.from({ length: session.messages }, (_, i) => JSON.stringify({
       type: i % 2 === 0 ? "user" : "assistant",
-      cwd: "/Users/mimen",
+      cwd,
       isSidechain: session.sidechain ?? false,
       message: { role: i % 2 === 0 ? "user" : "assistant", content: [{ type: "text", text: `turn ${i}` }] },
     }));
@@ -132,15 +135,14 @@ describe("enrichCandidates", () => {
   });
 
   test("category staleness is ORed with fresh prose and deterministic repair skips the gateway", async () => {
-    const f = await fixture([{ id: "a", messages: 4 }]);
+    const f = await fixture([{ id: "a", messages: 4 }], "Workspaces/Assistant/project");
     const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
-    const registryPath = join(f.dir, "categories.json");
+    const registryPath = join(f.dir, "ClaudeConfig", "categories", "registry.json");
+    mkdirSync(join(f.dir, "ClaudeConfig", "categories"), { recursive: true });
     writeFileSync(registryPath, JSON.stringify({
-      version: 1,
-      classifier_version: "v1",
-      categories: [{ slug: "ai-systems", name: "AI Systems", compact_name: "AI", color: "#2A67E2" }],
-      project_mappings: {},
-      path_mappings: { "/Users/mimen": "ai-systems" },
+      $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+      categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,
+        todoistColorName: "Blue", todoistColor: "blue", hex: "#2A67E2", scope: "AI", googleLabelName: "AI", workspaceRoot: "Workspaces/Assistant" }],
     }));
     process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
     try {
@@ -167,16 +169,47 @@ describe("enrichCandidates", () => {
     }
   });
 
+  test("a removed locked slug fails only its candidate and does not abort the sweep", async () => {
+    const f = await fixture([{ id: "locked", messages: 4 }, { id: "healthy", messages: 4 }], "Workspaces/Assistant/project");
+    const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
+    const registryPath = join(f.dir, "ClaudeConfig", "categories", "registry.json");
+    mkdirSync(join(f.dir, "ClaudeConfig", "categories"), { recursive: true });
+    writeFileSync(registryPath, JSON.stringify({
+      $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+      categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,
+        todoistColorName: "Blue", todoistColor: "blue", hex: "#2A67E2", scope: "AI", googleLabelName: "AI", workspaceRoot: "Workspaces/Assistant" }],
+    }));
+    process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
+    try {
+      setEnrichment(f.catalogue, "locked", storedEnrichment({ atMessages: 4, at: NOW }), NOW);
+      setEnrichment(f.catalogue, "healthy", storedEnrichment({ atMessages: 4, at: NOW }), NOW);
+      f.catalogue.query(`INSERT INTO session_category_assignments(session_id,slug,source,classifier_version,classified_at,manual_lock,category_attempts) VALUES ('locked','removed','manual','0.9.0',$at,1,0)`).run({ $at: NOW });
+      f.catalogue.query("INSERT INTO session_tags(session_id,entity) VALUES ('locked','domain:removed')").run();
+      const failures: string[] = [];
+      const stats = await sweep(f.index, f.catalogue, {
+        locations: LOCATIONS, keyPath: f.keyPath, fetchImpl: okFetch, now: () => new Date(NOW),
+        concurrency: 2, onFailure: (id) => failures.push(id),
+      });
+      expect(stats).toEqual({ enriched: 1, failed: 1, remaining: 0 });
+      expect(failures).toEqual(["locked"]);
+      expect(getCategoryAssignment(f.catalogue, "locked")).toMatchObject({ slug: "removed", manualLock: true, failedWrite: null });
+      expect(getCategoryAssignment(f.catalogue, "healthy")?.slug).toBe("ai-systems");
+    } finally {
+      if (previous === undefined) delete process.env.CCS_CATEGORY_REGISTRY_PATH;
+      else process.env.CCS_CATEGORY_REGISTRY_PATH = previous;
+      teardown(f);
+    }
+  });
+
   test("unresolved category fallback uses the closed registry and preserves fresh prose", async () => {
     const f = await fixture([{ id: "a", messages: 4 }]);
     const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
-    const registryPath = join(f.dir, "categories.json");
+    const registryPath = join(f.dir, "ClaudeConfig", "categories", "registry.json");
+    mkdirSync(join(f.dir, "ClaudeConfig", "categories"), { recursive: true });
     writeFileSync(registryPath, JSON.stringify({
-      version: 1,
-      classifier_version: "v1",
-      categories: [{ slug: "ai-systems", name: "AI Systems", compact_name: "AI", color: "#2A67E2" }],
-      project_mappings: {},
-      path_mappings: {},
+      $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+      categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,
+        todoistColorName: "Blue", todoistColor: "blue", hex: "#2A67E2", scope: "AI", googleLabelName: "AI", workspaceRoot: "Workspaces/Assistant" }],
     }));
     process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
     try {

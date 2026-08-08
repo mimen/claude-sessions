@@ -749,7 +749,7 @@ describe("projectSidebar", () => {
       projectSidebar(mixedProjectionInput({ scope: "completed", livenessReadable: false })),
     ]);
 
-    expect(createHash("sha256").update(serialized).digest("hex")).toBe("5e895d3a155745ea6a474ddf6e0613ca2709ad772d821a7510d485fbf675e2fe");
+    expect(createHash("sha256").update(serialized).digest("hex")).toBe("3dbb6b28fe5866306fc189d704f9885ccbd33414841891e3f49e1b1259ad4eb7");
   });
 });
 

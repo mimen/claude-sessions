@@ -1034,22 +1034,75 @@ function applyMigrations(db: Database): void {
   if (!hasColumn(db, "catalogue", "enrichment_declined")) {
     db.exec("ALTER TABLE catalogue ADD COLUMN enrichment_declined TEXT;");
   }
-  // Life-domain provenance is separate from the domain:* tag: tags remain the interoperable
-  // assignment representation while this row records why it exists and whether automation may
-  // replace it. Presence-guarded and additive so older binaries can share the catalogue.
+  // Life-domain storage has its own numbered migration line because catalogue user_version 41 is
+  // already reserved by the enrichment-column retirement. This keeps category DDL idempotent and
+  // observable without skipping that independent migration when it lands.
   db.exec(`
-    CREATE TABLE IF NOT EXISTS session_category_assignments (
-      session_id TEXT PRIMARY KEY,
-      slug TEXT NOT NULL,
-      source TEXT NOT NULL,
-      confidence REAL,
-      classifier_version TEXT NOT NULL,
-      classified_at TEXT NOT NULL,
-      manual_lock INTEGER NOT NULL DEFAULT 0,
-      evidence TEXT,
-      failed_write TEXT
+    CREATE TABLE IF NOT EXISTS category_schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
     );
+  `);
+  const categorySchemaVersion = (db.query(
+    "SELECT COALESCE(MAX(version), 0) AS version FROM category_schema_migrations",
+  ).get() as { version: number }).version;
+  if (categorySchemaVersion < 1) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session_category_assignments (
+        session_id TEXT PRIMARY KEY,
+        slug TEXT NOT NULL,
+        source TEXT NOT NULL,
+        confidence REAL,
+        classifier_version TEXT NOT NULL,
+        classified_at TEXT NOT NULL,
+        manual_lock INTEGER NOT NULL DEFAULT 0,
+        evidence TEXT,
+        failed_write TEXT,
+        category_attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_category_slug ON session_category_assignments(slug);
+      CREATE TABLE IF NOT EXISTS session_category_attempts (
+        session_id TEXT PRIMARY KEY,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT,
+        last_error TEXT
+      );
+      CREATE TABLE IF NOT EXISTS category_backfill_audits (
+        operation_id TEXT PRIMARY KEY,
+        manifest_sha256 TEXT NOT NULL,
+        manifest_path TEXT NOT NULL,
+        applied_at TEXT NOT NULL,
+        reverted_at TEXT,
+        snapshot_json TEXT NOT NULL
+      );
+      INSERT OR IGNORE INTO category_schema_migrations(version, applied_at)
+      VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+    `);
+  }
+  // Heal the first unnumbered preview schema without treating its presence as a completed migration.
+  if (!hasColumn(db, "session_category_assignments", "category_attempts")) {
+    db.exec("ALTER TABLE session_category_assignments ADD COLUMN category_attempts INTEGER NOT NULL DEFAULT 0;");
+  }
+  if (!hasColumn(db, "session_category_assignments", "next_attempt_at")) {
+    db.exec("ALTER TABLE session_category_assignments ADD COLUMN next_attempt_at TEXT;");
+  }
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_session_category_slug ON session_category_assignments(slug);
+    CREATE TABLE IF NOT EXISTS session_category_attempts (
+      session_id TEXT PRIMARY KEY,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT,
+      last_error TEXT
+    );
+    CREATE TABLE IF NOT EXISTS category_backfill_audits (
+      operation_id TEXT PRIMARY KEY,
+      manifest_sha256 TEXT NOT NULL,
+      manifest_path TEXT NOT NULL,
+      applied_at TEXT NOT NULL,
+      reverted_at TEXT,
+      snapshot_json TEXT NOT NULL
+    );
   `);
   if (v !== CATALOGUE_VERSION) db.exec(`PRAGMA user_version = ${CATALOGUE_VERSION};`);
 }

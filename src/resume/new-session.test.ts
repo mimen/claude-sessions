@@ -517,21 +517,45 @@ test("managed launch environments force the shim and consume one-birth creator d
 test("writeSessionMetadata: a managed root is categorized at birth when the optional registry is installed", () => {
   const root = mkdtempSync(join(tmpdir(), "ccs-birth-category-"));
   roots.push(root);
-  const registryPath = join(root, "categories.json");
+  const registryPath = join(root, "ClaudeConfig", "categories", "registry.json");
+  mkdirSync(join(root, "ClaudeConfig", "categories"), { recursive: true });
   writeFileSync(registryPath, JSON.stringify({
-    version: 1,
-    classifier_version: "v1",
-    categories: [{ slug: "events", name: "Events", compact_name: "Events", color: "#692EC2" }],
-    path_mappings: { "/work/events": "events" },
+    $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+    categories: [{ slug: "events", name: "Events", compactLabel: "Events", order: 1,
+      todoistColorName: "Purple", todoistColor: "grape", hex: "#692EC2", scope: "Events", googleLabelName: "Events", workspaceRoot: "Workspaces/Events" }],
   }));
   process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
   const db = openCatalogue(":memory:");
   try {
     const id = "10101010-1010-4010-8010-101010101010";
-    writeSessionMetadata(db, id, parsedOpts(["--top-level", "--cwd=/work/events/project"]), NOW);
+    writeSessionMetadata(db, id, parsedOpts(["--top-level", `--cwd=${join(root, "Workspaces", "Events", "project")}`]), NOW);
     expect(getCategoryAssignment(db, id)).toMatchObject({ slug: "events", source: "path", manualLock: false });
     expect(db.query("SELECT entity FROM session_tags WHERE session_id = $id").all({ $id: id }))
       .toEqual([{ entity: "domain:events" }]);
+  } finally {
+    db.close();
+  }
+});
+
+test("writeSessionMetadata: explicit category override is locked and invalid overrides roll back birth", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-birth-category-override-"));
+  roots.push(root);
+  const registryPath = join(root, "ClaudeConfig", "categories", "registry.json");
+  mkdirSync(join(root, "ClaudeConfig", "categories"), { recursive: true });
+  writeFileSync(registryPath, JSON.stringify({
+    $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+    categories: [{ slug: "events", name: "Events", compactLabel: "Events", order: 1,
+      todoistColorName: "Purple", todoistColor: "grape", hex: "#692EC2", scope: "Events", googleLabelName: "Events", workspaceRoot: "Workspaces/Events" }],
+  }));
+  process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
+  const db = openCatalogue(":memory:");
+  try {
+    const id = "30303030-3030-4030-8030-303030303030";
+    writeSessionMetadata(db, id, parsedOpts(["--top-level", "--cwd=/unrelated", "--category=events"]), NOW);
+    expect(getCategoryAssignment(db, id)).toMatchObject({ slug: "events", source: "manual", manualLock: true });
+    const invalidId = "40404040-4040-4040-8040-404040404040";
+    expect(() => writeSessionMetadata(db, invalidId, parsedOpts(["--top-level", "--cwd=/unrelated", "--category=typo"]), NOW)).toThrow("unknown category");
+    expect(getRow(db, invalidId)).toBeNull();
   } finally {
     db.close();
   }

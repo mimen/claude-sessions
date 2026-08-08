@@ -96,6 +96,8 @@ export interface NewSessionOpts {
    * never stored (kind/resume_command columns dropped v29). */
   resumeCommand?: string;
   project?: string;
+  /** Validated canonical life-domain slug for an explicit top-level birth override. */
+  category?: string;
   key?: string;
   title?: string;
   parent?: string;
@@ -157,7 +159,7 @@ function prNumberFrom(raw: string | undefined): number | undefined {
 }
 
 const VALUE_FLAGS = new Set([
-  "--cluster", "--identity", "--role", "--skill", "--project", "--key", "--title", "--parent", "--child-of",
+  "--cluster", "--identity", "--role", "--skill", "--project", "--category", "--key", "--title", "--parent", "--child-of",
   "--gus-work", "--pr-number", "--pr-repo", "--cwd", "--location", "--host", "--prompt", "--permission-mode", "--via", "--model", "--require-capability",
 ]);
 const BOOLEAN_FLAGS = new Set(["--print-id", "--top-level", "--inline", "--json"]);
@@ -223,6 +225,7 @@ export function parseOpts(args: string[]): Result<NewSessionOpts> {
     // role.toml now (a role with a resume_command IS a loop), not per-session flags/columns.
     role: values.get("--role") ?? values.get("--skill"),
     project: values.get("--project"),
+    category: values.get("--category"),
     key: values.get("--key"),
     title: values.get("--title"),
     parent: values.get("--parent"),
@@ -635,23 +638,29 @@ function writeSessionMetadataTransaction(db: Database, id: string, opts: NewSess
   // leaves birth behavior unchanged; auxiliary children consume effective inheritance on reads.
   if (opts.topLevel) {
     const categories = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
+    if (!categories.ok && opts.category) throw categories.error;
     if (categories.ok) {
       const locations = loadLocationRegistry(LOCATION_REGISTRY_PATH());
       const classified = classifyCategory({
         registry: categories.value,
+        explicitSlug: opts.category,
         locations: locations.ok ? locations.value : null,
         locationKey: opts.locationKey,
-        project: opts.project,
         cwd: opts.cwd,
         parentSessionId: opts.parent,
         catalogue: db,
       });
+      if (classified.status === "unresolved" && opts.category) {
+        throw new Error(`unknown category "${opts.category}" in registry version ${categories.value.version}`);
+      }
       if (classified.status === "resolved") {
         setCategory(db, categories.value, {
           sessionId: id,
+          auxiliaryPolicy: "reject",
           slug: classified.value.slug,
           source: classified.value.source,
           confidence: classified.value.confidence,
+          manualLock: Boolean(opts.category),
           evidence: classified.value.evidence,
           classifiedAt: now,
         });

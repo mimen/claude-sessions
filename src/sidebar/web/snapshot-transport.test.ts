@@ -7,6 +7,8 @@ const SNAPSHOT: SidebarSnapshot = {
   livenessReadable: true,
   indexReadable: true,
   catalogueReadable: true,
+  categoryProjectionVersion: 1,
+  categoryProjectionError: null,
   lifecycleCounts: { active: 0, completed: 0, archived: 0 },
   hasMoreRows: false,
   generatedAt: 0,

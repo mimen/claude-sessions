@@ -13,7 +13,7 @@ import {
   setExistingSessionLifecycle,
   type CatalogueCommandOptions,
 } from "../catalogue/commands.ts";
-import { DB_PATH, CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
+import { DB_PATH, CATALOGUE_PATH, CATEGORY_REGISTRY_PATH, ensureDataDir } from "../paths.ts";
 import { createLiveBridgeReader } from "../cmux/live.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import {
@@ -82,6 +82,7 @@ import {
 } from "./projection.ts";
 import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 import { createSessionActionCoordinator } from "./session-action-coordinator.ts";
+import { readSidebarCategoryProjection } from "./category-projection.ts";
 import type { OpenSessionOutcome } from "./session-action-coordinator.ts";
 import { paintResumedWorkspace } from "./cosmetic-paint.ts";
 import { createSnapshotLivenessReader } from "./liveness-cache.ts";
@@ -408,6 +409,8 @@ export interface SidebarSourceOptions {
   readonly deferActionTask?: (task: () => void) => void;
   readonly indexPath?: string;
   readonly cataloguePath?: string;
+  readonly categoryRegistryPath?: string;
+  readonly readCategories?: typeof readSidebarCategoryProjection;
   readonly lifecycleCommand?: typeof setExistingSessionLifecycle;
   readonly declineCommand?: typeof declineExistingSessionRecommendation;
   readonly ensureDataDir?: typeof ensureDataDir;
@@ -426,6 +429,8 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const now = options.now ?? (() => Date.now());
   const indexPath = options.indexPath ?? DB_PATH();
   const cataloguePath = options.cataloguePath ?? CATALOGUE_PATH();
+  const categoryRegistryPath = options.categoryRegistryPath ?? CATEGORY_REGISTRY_PATH();
+  const readCategories = options.readCategories ?? readSidebarCategoryProjection;
   const recentlyResumedMs = options.recentlyResumedMs ?? RECENTLY_RESUMED_MS;
   const readBridge = options.readBridge ?? createLiveBridgeReader({ cmuxBin });
   const snapshotLiveness = createSnapshotLivenessReader({
@@ -758,6 +763,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         : null;
       const statusMs = performance.now() - phaseStartedAt;
       phaseStartedAt = performance.now();
+      const categoryProjection = readCategories(cataloguePath, categoryRegistryPath);
       const snapshot = projectSidebar({
         live,
         workspaces,
@@ -773,6 +779,8 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         summaries: catalogue.summaries,
         preferredTitles: catalogue.preferredTitles,
         memberships: catalogue.memberships,
+        categories: categoryProjection.status === "ok" ? categoryProjection.categories : new Map(),
+        categoryProjectionError: categoryProjection.status === "unavailable" ? categoryProjection.error : null,
         triageOnly,
         includeLifecycles: lifecycles.filter((lifecycle) => lifecycle !== "active"),
         lifecycleCounts: {

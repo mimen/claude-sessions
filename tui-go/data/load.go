@@ -57,11 +57,19 @@ func Load(options LoadOptions) (Snapshot, error) {
 	categories, categoryErr := loadCategoryRegistry(categoryRegistryPath(runtimeRoot))
 	if categoryErr != nil {
 		warnings = append(warnings, categoryErr.Error())
-		categories = categoryRegistry{}
+		categories = categoryRegistry{Categories: map[string]CategoryDefinition{}}
 	}
 
 	visible := make([]Session, 0, len(indexed))
 	byID := make(map[string]int)
+	categoryFindings := make(map[string]int)
+	knownSessions := make(map[string]bool, len(indexed)+len(catalogue))
+	for _, row := range indexed {
+		knownSessions[row.ID] = true
+	}
+	for id := range catalogue {
+		knownSessions[id] = true
+	}
 	for _, row := range indexed {
 		meta := catalogue[row.ID]
 		if !includeSession(row, meta, options) {
@@ -78,14 +86,25 @@ func Load(options LoadOptions) (Snapshot, error) {
 		if task.Total == 0 && row.ResumeID != row.ID {
 			task = tasks[row.ResumeID]
 		}
-		resolvedCategory := resolveEffectiveCategory(row.ID, catalogue, 32)
+		resolvedCategory := resolveEffectiveCategory(row.ID, catalogue, knownSessions, 32)
 		categoryName := "Uncategorized"
 		categoryCompact := "Uncategorized"
 		categoryColor := ""
-		if category, exists := categories[resolvedCategory.Slug]; exists {
+		if categoryErr != nil {
+			resolvedCategory.Finding = "registry-unavailable"
+			categoryName = "Registry unavailable"
+			categoryCompact = "Registry error"
+		} else if category, exists := categories.Categories[resolvedCategory.Slug]; exists {
 			categoryName = category.Name
 			categoryCompact = category.CompactName
 			categoryColor = category.Color
+		} else if resolvedCategory.Slug != "" {
+			resolvedCategory.Finding = "category-invalid"
+			categoryName = "Invalid category: " + resolvedCategory.Slug
+			categoryCompact = "Invalid category"
+		}
+		if resolvedCategory.Finding != "stored" && resolvedCategory.Finding != "inherited" && resolvedCategory.Finding != "uncategorized" {
+			categoryFindings[resolvedCategory.Finding]++
 		}
 		session := Session{
 			ID:                row.ID,
@@ -138,6 +157,15 @@ func Load(options LoadOptions) (Snapshot, error) {
 		}
 		byID[session.ID] = len(visible)
 		visible = append(visible, session)
+	}
+
+	if len(categoryFindings) > 0 {
+		parts := make([]string, 0, len(categoryFindings))
+		for finding, count := range categoryFindings {
+			parts = append(parts, fmt.Sprintf("%s=%d", finding, count))
+		}
+		sort.Strings(parts)
+		warnings = append(warnings, "category resolution failures: "+strings.Join(parts, ", "))
 	}
 
 	snapshot := Snapshot{

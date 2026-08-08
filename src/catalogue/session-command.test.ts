@@ -13,11 +13,11 @@ import { setCategory } from "../categories/assignment.ts";
 import type { CategoryRegistry } from "../categories/registry.ts";
 
 const CATEGORY_REGISTRY: CategoryRegistry = {
-  version: "1",
-  classifierVersion: "v1",
-  categories: [{ slug: "ai-systems", name: "AI Systems", compactName: "AI", color: "#2A67E2", aliases: [] }],
-  projectMappings: {},
-  pathMappings: {},
+  version: "1.0.0",
+  classifierVersion: "1.0.0",
+  sourcePath: "/vault/ClaudeConfig/categories/registry.json",
+  vaultRoot: "/vault",
+  categories: [{ slug: "ai-systems", name: "AI Systems", compactName: "AI", order: 1, color: "#2A67E2", scope: "AI", workspaceRoot: "Workspaces/Assistant", workspacePath: "/vault/Workspaces/Assistant" }],
 };
 
 const NOW = "2026-07-14T12:00:00Z";
@@ -181,6 +181,7 @@ describe("session read", () => {
       setParent(db, "child", "parent", NOW);
       setCategory(db, CATEGORY_REGISTRY, {
         sessionId: "parent",
+        auxiliaryPolicy: "reject",
         slug: "ai-systems",
         source: "manual",
         manualLock: true,

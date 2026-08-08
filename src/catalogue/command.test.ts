@@ -3,8 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InferenceEngine } from "../inference/engine.ts";
-import { getCategoryAssignment } from "../categories/assignment.ts";
+import { getCategoryAssignment, setCategory } from "../categories/assignment.ts";
+import { loadCategoryRegistry } from "../categories/registry.ts";
 import { openCatalogue } from "./db-schema.ts";
+import { ensureRow } from "./db-mutations.ts";
 import { applyMutations, runMetadataCommand, type SessionMeta } from "./command.ts";
 
 const NOW = "2026-08-07T00:00:00.000Z";
@@ -34,9 +36,9 @@ function installRegistry(): void {
   tempDir = mkdtempSync(join(tmpdir(), "ccs-category-command-"));
   const path = join(tempDir, "categories.json");
   writeFileSync(path, JSON.stringify({
-    version: 1,
-    classifier_version: "v1",
-    categories: [{ slug: "ai-systems", name: "AI Systems", compact_name: "AI", color: "#2A67E2" }],
+    $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+    categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,
+      todoistColorName: "Blue", todoistColor: "blue", hex: "#2A67E2", scope: "AI", googleLabelName: "AI", workspaceRoot: "Workspaces/Assistant" }],
   }));
   process.env.CCS_CATEGORY_REGISTRY_PATH = path;
 }
@@ -66,11 +68,12 @@ describe("natural-language category mutations", () => {
     installRegistry();
     const db = openCatalogue(":memory:");
     try {
+      ensureRow(db, SESSION.sessionId, NOW);
       applyMutations(db, [{ sessionId: SESSION.sessionId, op: "category", value: "ai-systems" }], NOW);
       expect(getCategoryAssignment(db, SESSION.sessionId)).toMatchObject({
         slug: "ai-systems",
-        source: "manual",
-        manualLock: true,
+        source: "model",
+        manualLock: false,
       });
       expect(db.query("SELECT entity FROM session_tags WHERE session_id = $id").all({ $id: SESSION.sessionId }))
         .toEqual([{ entity: "domain:ai-systems" }]);
@@ -79,6 +82,29 @@ describe("natural-language category mutations", () => {
       expect(getCategoryAssignment(db, SESSION.sessionId)).toBeNull();
       expect(db.query("SELECT entity FROM session_tags WHERE session_id = $id").all({ $id: SESSION.sessionId }))
         .toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects locked changes and rolls a mixed batch back atomically", () => {
+    installRegistry();
+    const registry = loadCategoryRegistry(process.env.CCS_CATEGORY_REGISTRY_PATH!);
+    if (!registry.ok) throw registry.error;
+    const db = openCatalogue(":memory:");
+    try {
+      ensureRow(db, SESSION.sessionId, NOW);
+      setCategory(db, registry.value, {
+        sessionId: SESSION.sessionId, auxiliaryPolicy: "reject", slug: "ai-systems", source: "manual",
+        manualLock: true, classifiedAt: NOW, allowLockedOverride: true,
+      });
+      expect(() => applyMutations(db, [
+        { sessionId: SESSION.sessionId, op: "title", value: "should roll back" },
+        { sessionId: SESSION.sessionId, op: "category", value: null },
+      ], NOW)).toThrow("manually locked");
+      expect(db.query("SELECT custom_title FROM catalogue WHERE session_id=$id").get({ $id: SESSION.sessionId }))
+        .toEqual({ custom_title: null });
+      expect(getCategoryAssignment(db, SESSION.sessionId)).toMatchObject({ slug: "ai-systems", manualLock: true, source: "manual" });
     } finally {
       db.close();
     }

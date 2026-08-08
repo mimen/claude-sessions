@@ -9,7 +9,7 @@
  * the 2026-07-14 full-system review). This command is the ONE authorized read path; the schema
  * is versioned and stable across catalogue migrations.
  *
- * Output shape (schema v1):
+ * Output shape (schema v2):
  * {
  *   schema: 1,                       // bump on breaking changes
  *   generatedAt: "…",                // ISO
@@ -36,7 +36,7 @@ import { getAll } from "./db-queries.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { getAllCategoryAssignments, resolveEffectiveCategory, type EffectiveCategory } from "../categories/assignment.ts";
 
-export const EXPORT_SCHEMA_VERSION = 1;
+export const EXPORT_SCHEMA_VERSION = 2;
 
 export interface CatalogueExportRow {
   sessionId: string;
@@ -153,8 +153,9 @@ export function catalogueExport(
   const parents = new Map<string, string>();
   for (const row of rows.values()) if (row.parentSessionId) parents.set(row.sessionId, row.parentSessionId);
   const known = new Set(rows.keys());
+  const classes = new Map([...rows].map(([id, row]) => [id, row.sessionClass]));
   const categories = new Map<string, EffectiveCategory>();
-  for (const id of known) categories.set(id, resolveEffectiveCategory(id, assignments, parents, known));
+  for (const id of known) categories.set(id, resolveEffectiveCategory(id, assignments, parents, known, classes));
   return buildExport(rows.values(), filter, new Date().toISOString(), categories);
 }
 

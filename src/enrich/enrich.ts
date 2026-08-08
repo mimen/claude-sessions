@@ -14,7 +14,7 @@ import { CATEGORY_REGISTRY_PATH, LOCATION_REGISTRY_PATH } from "../paths.ts";
 import { loadCategoryRegistry } from "../categories/registry.ts";
 import { categoryStaleness, type CategoryStaleReason } from "../categories/staleness.ts";
 import { classifyCategory } from "../categories/classify.ts";
-import { getAllCategoryAssignments, getCategoryAssignment, setCategory } from "../categories/assignment.ts";
+import { getAllCategoryAssignments, getCategoryAssignment, getCategoryAttemptState, recordCategoryAttemptFailure, setCategory } from "../categories/assignment.ts";
 import { loadLocationRegistry } from "../locations/registry.ts";
 
 /**
@@ -33,6 +33,7 @@ export interface EnrichCandidate {
   readonly proseReason: StaleReason;
   readonly proseStale: boolean;
   readonly categoryReasons: readonly CategoryStaleReason[];
+  readonly needsModelFallback: boolean;
   readonly messagesSince: number;
 }
 
@@ -74,6 +75,29 @@ const DEFAULT_CONCURRENCY = 3;
  * nothing you didn't know after the third one. The next scheduled run picks the work back up.
  */
 const TRANSIENT_FAILURE_LIMIT = 3;
+
+function storedCategoryOnlyResult(
+  catalogue: Database,
+  row: SessionRow,
+): Result<Enrichment> | null {
+  const stored = getAll(catalogue).get(row.sessionId)?.enrichment;
+  if (!stored?.recommendation) return null;
+  return ok({
+    title: stored.title ?? row.title,
+    state: stored.state ?? "Category updated without regenerating prose.",
+    history: stored.history ?? "",
+    next: stored.next ?? "",
+    remaining: stored.remaining ?? "",
+    recommendation: stored.recommendation,
+    reason: stored.reason ?? "",
+    junk: stored.junk,
+    ...(stored.cwdCorrect === null ? {} : { cwdCorrect: stored.cwdCorrect }),
+    ...(stored.suggestedLocation ? { suggestedLocation: stored.suggestedLocation } : {}),
+    ...(stored.suggestedCwd ? { suggestedCwd: stored.suggestedCwd } : {}),
+    atMessages: stored.atMessages ?? row.msgCount,
+    at: stored.at ?? new Date().toISOString(),
+  });
+}
 
 /**
  * Sessions worth enriching, most recently active first.
@@ -117,14 +141,19 @@ export function enrichCandidates(
           tags: tagsBySession.get(row.sessionId) ?? [],
           registry: registry.value,
         })
-      : { stale: false, reasons: [] as readonly CategoryStaleReason[] };
-    if (!verdict.stale && !categoryVerdict.stale) continue;
+      : { stale: false, reasons: [] as readonly CategoryStaleReason[], needsModelFallback: false };
+    const categoryAttempt = registry.ok ? getCategoryAttemptState(catalogue, row.sessionId) : null;
+    const categoryReady = categoryVerdict.stale && categoryAttempt !== null
+      && categoryAttempt.attempts < 5
+      && (categoryAttempt.nextAttemptAt === null || Date.parse(categoryAttempt.nextAttemptAt) <= now.getTime());
+    if (!verdict.stale && !categoryReady) continue;
     candidates.push({
       row,
       reason: verdict.stale ? verdict.reason : categoryVerdict.reasons[0]!,
       proseReason: verdict.reason,
       proseStale: verdict.stale,
-      categoryReasons: categoryVerdict.reasons,
+      categoryReasons: categoryReady ? categoryVerdict.reasons : [],
+      needsModelFallback: categoryReady && categoryVerdict.needsModelFallback,
       messagesSince: verdict.messagesSince,
     });
   }
@@ -142,11 +171,13 @@ export async function enrichOne(
   const categoryRegistry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
   let categoryChoices: EnrichOptions["categoryChoices"] = undefined;
   if (categoryRegistry.ok) {
-    const catalogueRow = getAll(catalogue).get(row.sessionId);
-    const existingCategory = getCategoryAssignment(catalogue, row.sessionId);
+    try {
+      const catalogueRow = getAll(catalogue).get(row.sessionId);
+      const existingCategory = getCategoryAssignment(catalogue, row.sessionId);
     if (existingCategory?.manualLock) {
       setCategory(catalogue, categoryRegistry.value, {
         sessionId: row.sessionId,
+        auxiliaryPolicy: "reject",
         slug: existingCategory.slug,
         source: existingCategory.source,
         confidence: existingCategory.confidence,
@@ -155,24 +186,9 @@ export async function enrichOne(
         classifiedAt: existingCategory.classifiedAt,
         allowLockedOverride: true,
       });
-      if (options.categoryOnly && catalogueRow?.enrichment?.recommendation) {
-        const stored = catalogueRow.enrichment;
-        const recommendation = stored.recommendation!;
-        return ok({
-          title: stored.title ?? row.title,
-          state: stored.state ?? "Category updated without regenerating prose.",
-          history: stored.history ?? "",
-          next: stored.next ?? "",
-          remaining: stored.remaining ?? "",
-          recommendation,
-          reason: stored.reason ?? "",
-          junk: stored.junk,
-          ...(stored.cwdCorrect === null ? {} : { cwdCorrect: stored.cwdCorrect }),
-          ...(stored.suggestedLocation ? { suggestedLocation: stored.suggestedLocation } : {}),
-          ...(stored.suggestedCwd ? { suggestedCwd: stored.suggestedCwd } : {}),
-          atMessages: stored.atMessages ?? row.msgCount,
-          at: stored.at ?? new Date().toISOString(),
-        });
+      if (options.categoryOnly) {
+        const storedResult = storedCategoryOnlyResult(catalogue, row);
+        if (storedResult) return storedResult;
       }
     }
     const locationRegistry = loadLocationRegistry(LOCATION_REGISTRY_PATH());
@@ -180,7 +196,6 @@ export async function enrichOne(
       registry: categoryRegistry.value,
       locations: locationRegistry.ok ? locationRegistry.value : null,
       locationKey: typeof catalogueRow?.meta.launch_location === "string" ? catalogueRow.meta.launch_location : null,
-      project: catalogueRow?.project ?? row.projectName,
       cwd: row.cwd,
       parentSessionId: catalogueRow?.parentSessionId,
       catalogue,
@@ -188,33 +203,41 @@ export async function enrichOne(
     if (classified.status === "resolved") {
       setCategory(catalogue, categoryRegistry.value, {
         sessionId: row.sessionId,
+        auxiliaryPolicy: "reject",
         slug: classified.value.slug,
         source: classified.value.source,
         confidence: classified.value.confidence,
         evidence: classified.value.evidence,
         classifiedAt: new Date().toISOString(),
       });
-      if (options.categoryOnly && catalogueRow?.enrichment?.recommendation) {
-        const stored = catalogueRow.enrichment;
-        const recommendation = stored.recommendation!;
-        return ok({
-          title: stored.title ?? row.title,
-          state: stored.state ?? "Category updated without regenerating prose.",
-          history: stored.history ?? "",
-          next: stored.next ?? "",
-          remaining: stored.remaining ?? "",
-          recommendation,
-          reason: stored.reason ?? "",
-          junk: stored.junk,
-          ...(stored.cwdCorrect === null ? {} : { cwdCorrect: stored.cwdCorrect }),
-          ...(stored.suggestedLocation ? { suggestedLocation: stored.suggestedLocation } : {}),
-          ...(stored.suggestedCwd ? { suggestedCwd: stored.suggestedCwd } : {}),
-          atMessages: stored.atMessages ?? row.msgCount,
-          at: stored.at ?? new Date().toISOString(),
-        });
+      if (options.categoryOnly) {
+        const storedResult = storedCategoryOnlyResult(catalogue, row);
+        if (storedResult) return storedResult;
       }
-    } else if (!getCategoryAssignment(catalogue, row.sessionId)?.manualLock) {
+    } else if (existingCategory && !existingCategory.manualLock && !options.needsModelFallback) {
+      // Version drift, a missing interoperable tag, or a prior failed write is repaired from coherent
+      // provenance. None of those conditions asks a model to reclassify the work.
+      setCategory(catalogue, categoryRegistry.value, {
+        sessionId: row.sessionId,
+        auxiliaryPolicy: "reject",
+        slug: existingCategory.slug,
+        source: existingCategory.source,
+        confidence: existingCategory.confidence,
+        evidence: existingCategory.evidence,
+        classifiedAt: new Date().toISOString(),
+        allowLockedOverride: true,
+      });
+      if (options.categoryOnly) {
+        const storedResult = storedCategoryOnlyResult(catalogue, row);
+        if (storedResult) return storedResult;
+      }
+    } else if (!existingCategory?.manualLock && options.needsModelFallback) {
       categoryChoices = categoryRegistry.value.categories.map((category) => ({ slug: category.slug, name: category.name }));
+    }
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      recordCategoryAttemptFailure(catalogue, row.sessionId, error, new Date());
+      return err(error);
     }
   }
 
@@ -257,7 +280,10 @@ export async function enrichOne(
     // Transient transport failures say nothing about this session, so they must not spend its
     // permanent attempt budget — see TransientGatewayError.
     if (!(response.error instanceof TransientGatewayError)) {
-      recordEnrichmentFailure(catalogue, row.sessionId, nowIso);
+      if (options.categoryOnly || options.needsModelFallback) {
+        recordCategoryAttemptFailure(catalogue, row.sessionId, response.error, new Date(nowIso));
+      }
+      if (!options.categoryOnly) recordEnrichmentFailure(catalogue, row.sessionId, nowIso);
     }
     return response;
   }
@@ -271,35 +297,25 @@ export async function enrichOne(
     at: nowIso,
   };
   if (categoryRegistry.ok && response.value.categorySlug) {
-    setCategory(catalogue, categoryRegistry.value, {
-      sessionId: row.sessionId,
-      slug: response.value.categorySlug,
-      source: "model",
-      confidence: 0.6,
-      evidence: "forced-schema enrichment fallback",
-      classifiedAt: nowIso,
-    });
+    try {
+      setCategory(catalogue, categoryRegistry.value, {
+        sessionId: row.sessionId,
+        auxiliaryPolicy: "reject",
+        slug: response.value.categorySlug,
+        source: "model",
+        confidence: 0.6,
+        evidence: "forced-schema enrichment fallback",
+        classifiedAt: nowIso,
+      });
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      recordCategoryAttemptFailure(catalogue, row.sessionId, error, new Date(nowIso));
+      return err(error);
+    }
   }
   if (options.categoryOnly) {
-    const stored = getAll(catalogue).get(row.sessionId)?.enrichment;
-    if (stored?.recommendation) {
-      const recommendation = stored.recommendation;
-      return ok({
-        title: stored.title ?? row.title,
-        state: stored.state ?? "Category updated without regenerating prose.",
-        history: stored.history ?? "",
-        next: stored.next ?? "",
-        remaining: stored.remaining ?? "",
-        recommendation,
-        reason: stored.reason ?? "",
-        junk: stored.junk,
-        ...(stored.cwdCorrect === null ? {} : { cwdCorrect: stored.cwdCorrect }),
-        ...(stored.suggestedLocation ? { suggestedLocation: stored.suggestedLocation } : {}),
-        ...(stored.suggestedCwd ? { suggestedCwd: stored.suggestedCwd } : {}),
-        atMessages: stored.atMessages ?? row.msgCount,
-        at: stored.at ?? nowIso,
-      });
-    }
+    const storedResult = storedCategoryOnlyResult(catalogue, row);
+    if (storedResult) return storedResult;
   }
   setEnrichment(catalogue, row.sessionId, enrichment, nowIso);
   return ok(enrichment);
@@ -336,10 +352,16 @@ export async function sweep(
       const next = cursor++;
       if (next >= candidates.length) return;
       const candidate = candidates[next]!;
-      const result = await enrichOne(catalogue, index, candidate.row, locations, {
-        ...options,
-        categoryOnly: candidate.categoryReasons.length > 0 && !candidate.proseStale,
-      });
+      let result: Result<Enrichment>;
+      try {
+        result = await enrichOne(catalogue, index, candidate.row, locations, {
+          ...options,
+          needsModelFallback: candidate.needsModelFallback,
+          categoryOnly: candidate.categoryReasons.length > 0 && !candidate.proseStale,
+        });
+      } catch (cause) {
+        result = err(cause instanceof Error ? cause : new Error(String(cause)));
+      }
       // Re-check cancellation before touching stats/progress: a caller that cancelled mid-call is
       // usually about to close the database this loop would otherwise keep reporting against.
       if (options.isCancelled?.()) return;

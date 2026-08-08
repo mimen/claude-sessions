@@ -1,40 +1,51 @@
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { z } from "zod";
 import { type Result, err, ok } from "../result.ts";
 
-const SlugSchema = z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "expected kebab-case slug");
-const ColorSchema = z.string().regex(/^#[0-9A-Fa-f]{6}$/, "expected #RRGGBB color");
+const SlugSchema = z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, "expected kebab-case slug");
+const ColorSchema = z.string().regex(/^#[0-9A-F]{6}$/, "expected #RRGGBB color");
+const VersionSchema = z.string().regex(/^\d+\.\d+\.\d+$/, "expected semantic version");
+const COMPACT_LABEL_MAX = 18;
 
 const CategorySchema = z.object({
   slug: SlugSchema,
   name: z.string().trim().min(1),
-  compact_name: z.string().trim().min(1),
-  color: ColorSchema,
-  aliases: z.array(z.string().trim().min(1)).default([]),
+  compactLabel: z.string().trim().min(1).max(COMPACT_LABEL_MAX),
+  order: z.number().int().positive(),
+  todoistColorName: z.string().trim().min(1),
+  todoistColor: z.string().regex(/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/),
+  hex: ColorSchema,
+  scope: z.string().trim().min(1),
+  googleLabelName: z.string().trim().min(1),
+  workspaceRoot: z.string().regex(/^Workspaces\/[^/]+$/),
 }).strict();
 
 const RegistrySchema = z.object({
-  version: z.union([z.string().trim().min(1), z.number().int().nonnegative()]),
-  classifier_version: z.string().trim().min(1),
+  $schema: z.literal("./registry.schema.json"),
+  version: VersionSchema,
+  source: z.literal("Life Domains.md"),
   categories: z.array(CategorySchema).min(1),
-  project_mappings: z.record(z.string(), SlugSchema).default({}),
-  path_mappings: z.record(z.string(), SlugSchema).default({}),
 }).strict();
 
 export interface CategoryDefinition {
   readonly slug: string;
   readonly name: string;
   readonly compactName: string;
+  readonly order: number;
   readonly color: string;
-  readonly aliases: readonly string[];
+  readonly scope: string;
+  readonly workspaceRoot: string;
+  readonly workspacePath: string;
 }
 
 export interface CategoryRegistry {
   readonly version: string;
+  /** Classification rules are versioned by the canonical registry itself. */
   readonly classifierVersion: string;
+  readonly sourcePath: string;
+  readonly vaultRoot: string;
   readonly categories: readonly CategoryDefinition[];
-  readonly projectMappings: Readonly<Record<string, string>>;
-  readonly pathMappings: Readonly<Record<string, string>>;
 }
 
 export function domainTag(slug: string): string {
@@ -42,7 +53,7 @@ export function domainTag(slug: string): string {
 }
 
 export function slugFromDomainTag(tag: string): string | null {
-  const match = /^domain:([a-z0-9][a-z0-9-]*)$/.exec(tag.trim());
+  const match = /^domain:([a-z][a-z0-9]*(?:-[a-z0-9]+)*)$/.exec(tag.trim());
   return match?.[1] ?? null;
 }
 
@@ -58,10 +69,18 @@ export function loadCategoryRegistry(path: string): Result<CategoryRegistry> {
     }
     const slugs = new Set<string>();
     const selectors = new Map<string, string>();
+    const orders = new Set<number>();
+    const workspaceRoots = new Set<string>();
     for (const category of parsed.data.categories) {
       if (slugs.has(category.slug)) return err(new Error(`duplicate category slug "${category.slug}"`));
       slugs.add(category.slug);
-      for (const value of [category.slug, category.name, category.compact_name, ...category.aliases]) {
+      if (orders.has(category.order)) return err(new Error(`duplicate category order ${category.order}`));
+      orders.add(category.order);
+      if (workspaceRoots.has(category.workspaceRoot)) {
+        return err(new Error(`duplicate category workspaceRoot "${category.workspaceRoot}"`));
+      }
+      workspaceRoots.add(category.workspaceRoot);
+      for (const value of [category.slug, category.name, category.compactLabel]) {
         const normalized = value.trim().toLocaleLowerCase();
         const existingSlug = selectors.get(normalized);
         if (existingSlug && existingSlug !== category.slug) {
@@ -70,27 +89,27 @@ export function loadCategoryRegistry(path: string): Result<CategoryRegistry> {
         selectors.set(normalized, category.slug);
       }
     }
-    for (const [kind, mappings] of [
-      ["project", parsed.data.project_mappings],
-      ["path", parsed.data.path_mappings],
-    ] as const) {
-      for (const [key, slug] of Object.entries(mappings)) {
-        if (!key.trim()) return err(new Error(`${kind} mapping keys must not be empty`));
-        if (!slugs.has(slug)) return err(new Error(`${kind} mapping "${key}" references unknown category "${slug}"`));
-      }
+    const expectedOrders = parsed.data.categories.map((_, index) => index + 1);
+    const actualOrders = parsed.data.categories.map((category) => category.order);
+    if (!actualOrders.every((order, index) => order === expectedOrders[index])) {
+      return err(new Error(`category order must be canonical and contiguous: ${expectedOrders.join(", ")}`));
     }
+    const vaultRoot = resolve(dirname(path), "../..");
     return ok({
-      version: String(parsed.data.version),
-      classifierVersion: parsed.data.classifier_version,
+      version: parsed.data.version,
+      classifierVersion: parsed.data.version,
+      sourcePath: path,
+      vaultRoot,
       categories: parsed.data.categories.map((category) => ({
         slug: category.slug,
         name: category.name,
-        compactName: category.compact_name,
-        color: category.color.toUpperCase(),
-        aliases: category.aliases,
+        compactName: category.compactLabel,
+        order: category.order,
+        color: category.hex,
+        scope: category.scope,
+        workspaceRoot: category.workspaceRoot,
+        workspacePath: resolve(vaultRoot, category.workspaceRoot),
       })),
-      projectMappings: parsed.data.project_mappings,
-      pathMappings: parsed.data.path_mappings,
     });
   } catch (cause) {
     return err(new Error(`Failed to read category registry at ${path}: ${(cause as Error).message}`));
@@ -100,7 +119,7 @@ export function loadCategoryRegistry(path: string): Result<CategoryRegistry> {
 export function resolveCategorySelector(registry: CategoryRegistry, selector: string): CategoryDefinition | null {
   const normalized = selector.trim().toLocaleLowerCase();
   return registry.categories.find((category) =>
-    [category.slug, category.name, category.compactName, ...category.aliases]
+    [category.slug, category.name, category.compactName]
       .some((value) => value.toLocaleLowerCase() === normalized)
   ) ?? null;
 }

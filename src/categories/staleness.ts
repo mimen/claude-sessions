@@ -4,6 +4,7 @@ import { categoryBySlug, slugFromDomainTag, type CategoryRegistry } from "./regi
 export type CategoryStaleReason =
   | "category-missing"
   | "category-invalid"
+  | "category-locked-invalid"
   | "category-conflict"
   | "category-version-drift"
   | "category-write-failed";
@@ -19,18 +20,18 @@ export function categoryStaleness(input: {
   readonly tags: readonly string[];
   readonly registry: CategoryRegistry;
 }): CategoryStalenessVerdict {
-  const parsedTags = input.tags.map(slugFromDomainTag);
+  const domainTags = input.tags.filter((tag) => tag.startsWith("domain:"));
+  const parsedTags = domainTags.map(slugFromDomainTag);
   const domainSlugs = parsedTags.filter((slug): slug is string => slug !== null);
   const reasons: CategoryStaleReason[] = [];
   if (!input.assignment || domainSlugs.length === 0) reasons.push("category-missing");
-  if (input.tags.length > 1 || (input.assignment && domainSlugs[0] && input.assignment.slug !== domainSlugs[0])) {
+  if (domainTags.length > 1 || (input.assignment && domainSlugs[0] && input.assignment.slug !== domainSlugs[0])) {
     reasons.push("category-conflict");
   }
-  if (parsedTags.some((slug) => slug === null) ||
-      domainSlugs.some((slug) => !categoryBySlug(input.registry, slug)) ||
-      (input.assignment && !categoryBySlug(input.registry, input.assignment.slug))) {
-    reasons.push("category-invalid");
-  }
+  const invalid = parsedTags.some((slug) => slug === null) ||
+    domainSlugs.some((slug) => !categoryBySlug(input.registry, slug)) ||
+    (input.assignment && !categoryBySlug(input.registry, input.assignment.slug));
+  if (invalid) reasons.push(input.assignment?.manualLock ? "category-locked-invalid" : "category-invalid");
   if (input.assignment && input.assignment.classifierVersion !== input.registry.classifierVersion && !input.assignment.manualLock) {
     reasons.push("category-version-drift");
   }

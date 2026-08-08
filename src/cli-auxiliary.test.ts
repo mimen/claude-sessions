@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openCatalogue } from "./catalogue/db-schema.ts";
@@ -11,19 +11,22 @@ import { setCategory } from "./categories/assignment.ts";
 import type { CategoryRegistry } from "./categories/registry.ts";
 
 const CATEGORY_REGISTRY: CategoryRegistry = {
-  version: "1",
-  classifierVersion: "v1",
-  categories: [{ slug: "ai-systems", name: "AI Systems", compactName: "AI", color: "#2A67E2", aliases: [] }],
-  projectMappings: {},
-  pathMappings: {},
+  version: "1.0.0",
+  classifierVersion: "1.0.0",
+  sourcePath: "/vault/ClaudeConfig/categories/registry.json",
+  vaultRoot: "/vault",
+  categories: [{ slug: "ai-systems", name: "AI Systems", compactName: "AI", order: 1, color: "#2A67E2", scope: "AI", workspaceRoot: "Workspaces/Assistant", workspacePath: "/vault/Workspaces/Assistant" }],
 };
 
 const roots: string[] = [];
 const priorRoot = process.env.CCS_ROOT;
+const priorCategoryRegistry = process.env.CCS_CATEGORY_REGISTRY_PATH;
 
 afterEach(() => {
   if (priorRoot === undefined) delete process.env.CCS_ROOT;
   else process.env.CCS_ROOT = priorRoot;
+  if (priorCategoryRegistry === undefined) delete process.env.CCS_CATEGORY_REGISTRY_PATH;
+  else process.env.CCS_CATEGORY_REGISTRY_PATH = priorCategoryRegistry;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -32,6 +35,14 @@ function seed(): void {
   roots.push(root);
   process.env.CCS_ROOT = root;
   mkdirSync(join(root, "cache"), { recursive: true });
+  const registryPath = join(root, "ClaudeConfig", "categories", "registry.json");
+  mkdirSync(join(root, "ClaudeConfig", "categories"), { recursive: true });
+  writeFileSync(registryPath, JSON.stringify({
+    $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+    categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,
+      todoistColorName: "Blue", todoistColor: "blue", hex: "#2A67E2", scope: "AI", googleLabelName: "AI", workspaceRoot: "Workspaces/Assistant" }],
+  }));
+  process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
   const index = openIndex(DB_PATH());
   const insert = index.query(
     `INSERT INTO sessions (
@@ -53,6 +64,7 @@ function seed(): void {
   setParent(catalogue, "child", "parent", "2026-07-20T00:00:00Z");
   setCategory(catalogue, CATEGORY_REGISTRY, {
     sessionId: "parent",
+    auxiliaryPolicy: "reject",
     slug: "ai-systems",
     source: "manual",
     manualLock: true,
@@ -93,7 +105,7 @@ describe("CLI auxiliary visibility", () => {
     seed();
     const filtered = await outputFor(["ls", "--category", "ai-systems"]);
     expect(filtered).toContain("domain:ai-systems");
-    expect(filtered).toContain("$5.00 shown spend");
+    expect(filtered).toContain("$5.00 displayed-root spend");
     expect(filtered).toContain("Parent Session");
 
     const inherited = await outputFor(["ls", "--category", "ai-systems", "--auxiliary"]);
@@ -103,6 +115,18 @@ describe("CLI auxiliary visibility", () => {
     const empty = await outputFor(["ls", "--category", "events"]);
     expect(empty).not.toContain("Parent Session");
     expect(empty).toContain("0 sessions");
+  });
+
+  test("explicit tag removal can clear a locked slug removed from the registry", async () => {
+    seed();
+    const catalogue = openCatalogue(CATALOGUE_PATH());
+    catalogue.query("UPDATE session_category_assignments SET slug='removed', classifier_version='0.9.0' WHERE session_id='parent'").run();
+    catalogue.query("UPDATE session_tags SET entity='domain:removed' WHERE session_id='parent' AND entity='domain:ai-systems'").run();
+    catalogue.close();
+    expect(await outputFor(["tag", "parent", "domain:removed", "--remove"])).toContain("untagged domain:removed");
+    const check = openCatalogue(CATALOGUE_PATH());
+    expect(check.query("SELECT * FROM session_category_assignments WHERE session_id='parent'").get()).toBeNull();
+    check.close();
   });
 
   test("tree keeps the parent and total while hiding auxiliary descendants", async () => {

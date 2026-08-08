@@ -239,7 +239,7 @@ func (m Model) renderListHeader(width int) string {
 		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("STAGE", 10)))
 	}
 	if width >= 82 {
-		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("CATEGORY", 12)))
+		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("CATEGORY", 13)))
 	}
 	if width >= 48 {
 		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("MODEL", 7)))
@@ -355,7 +355,13 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 		if label == "" {
 			label = "Uncategorized"
 		}
-		rightParts = append(rightParts, column(theme.CategoryColor(session.CategoryColor)).Render(pad(truncate(label, 12), 12)))
+		if session.CategoryColor == "" {
+			rightParts = append(rightParts, column(theme.FgMoreSubtle).Render(pad(label, 13)))
+		} else {
+			swatch := lipgloss.NewStyle().Foreground(theme.CategoryColor(session.CategoryColor)).Background(rowBackground).Render("■")
+			text := column(theme.FgBase).Render(pad(truncate(label, 11), 11))
+			rightParts = append(rightParts, swatch+backgroundSpace(1)+text)
+		}
 	}
 	if width >= 48 {
 		badge := theme.Model(session.Model)
@@ -568,10 +574,11 @@ func (m Model) renderPreview(width int, height int) string {
 	}
 	lines = append(lines, "", sect("Meta"))
 	categoryName := nonEmpty(session.CategoryName, "Uncategorized")
-	lines = append(lines,
-		fg(theme.FgMostSubtle).Render(pad("category", 10))+
-			fg(theme.CategoryColor(session.CategoryColor)).Render(truncate(categoryName, max(1, contentWidth-11))),
-	)
+	categoryValue := fg(theme.FgSubtle).Render(truncate(categoryName, max(1, contentWidth-13)))
+	if session.CategoryColor != "" {
+		categoryValue = fg(theme.CategoryColor(session.CategoryColor)).Render("■") + fg(theme.BgBase).Render(" ") + categoryValue
+	}
+	lines = append(lines, fg(theme.FgMostSubtle).Render(pad("category", 10))+categoryValue)
 	metadata := [][2]string{
 		{"cwd", compactHome(session.CWD)},
 		{"duration", session.Duration + " wall"},

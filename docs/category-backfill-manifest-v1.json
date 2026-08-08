@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "operation": "normalize-domain-tags",
+  "registryVersion": "1.0.0",
+  "auxiliaryPolicy": "resolve-root",
+  "conflictPolicy": "use-existing-valid-assignment-or-report",
+  "invalidPolicy": "discard-invalid-only-when-one-valid-category-remains"
+}

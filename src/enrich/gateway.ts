@@ -85,6 +85,8 @@ export interface EnrichmentRequest {
 export interface EnrichOptions {
   /** Closed category choices supplied only when deterministic classification could not decide. */
   readonly categoryChoices?: readonly { readonly slug: string; readonly name: string }[];
+  /** Internal sweep signal: only unresolved missing/invalid/conflicting roots may ask the model. */
+  readonly needsModelFallback?: boolean;
   /** Internal sweep optimization: category repair may finish without regenerating fresh prose. */
   readonly categoryOnly?: boolean;
   readonly endpoint?: string;

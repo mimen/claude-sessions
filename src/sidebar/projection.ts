@@ -16,6 +16,7 @@ import {
 import type { Recommendation } from "../catalogue/enrichment-schema.ts";
 import { familyOf } from "../display/format.ts";
 import { enrichmentDriftLabel } from "../enrich/staleness.ts";
+import type { SidebarCategoryProjection } from "./category-projection.ts";
 
 export type { Recommendation };
 
@@ -236,6 +237,10 @@ export interface ProjectionInput {
   readonly memberships?: ReadonlyMap<string, SidebarMembership>;
   /** Enrichment records keyed by canonical session id and resume alias. */
   readonly summaries?: ReadonlyMap<string, StoredEnrichment>;
+  /** Versioned category projection keyed by canonical session id and resume alias. */
+  readonly categories?: ReadonlyMap<string, SidebarCategoryProjection>;
+  /** Null when projection succeeded, otherwise the fail-closed registry/read diagnostic. */
+  readonly categoryProjectionError?: string | null;
   /**
    * Titles the catalogue owns, already resolved by `displayTitle`: a human's title first, then
    * enrichment's. Absent means nothing outranks the index title. Without this an enriched
@@ -368,6 +373,8 @@ export interface SidebarSessionRow extends SidebarRowShared {
   readonly suggestion: SidebarSuggestion | null;
   /** Which cluster and role this session belongs to, when it belongs to one. */
   readonly membership: SidebarMembership | null;
+  /** Public category seam; null only when registry/storage projection was unavailable. */
+  readonly category: SidebarCategoryProjection | null;
 }
 
 /**
@@ -395,6 +402,10 @@ export interface SidebarSnapshot {
   readonly indexReadable: boolean;
   /** False when lifecycle state was unreadable and visible rows were conservatively left active. */
   readonly catalogueReadable: boolean;
+  /** Wire version for each row's category projection. */
+  readonly categoryProjectionVersion: 1;
+  /** Fail-closed registry/storage diagnostic; null when category projection succeeded. */
+  readonly categoryProjectionError: string | null;
   /**
    * How many sessions sit in each lifecycle, whatever the current scope shows.
    *
@@ -540,6 +551,7 @@ interface ProjectionLookups {
   readonly unreadFor: (workspaceId: string | null) => number;
   readonly preferredTitleFor: (sessionId: string, resumeId?: string) => string | null;
   readonly membershipFor: (sessionId: string, resumeId?: string) => SidebarMembership | null;
+  readonly categoryFor: (sessionId: string, resumeId?: string) => SidebarCategoryProjection | null;
   readonly summaryFor: (
     sessionId: string,
     indexed: IndexedSessionInput | undefined,
@@ -657,6 +669,7 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
   const unreadByWorkspaceId = input.unreadByWorkspaceId ?? new Map<string, number>();
   const preferredTitles = input.preferredTitles ?? new Map<string, string>();
   const memberships = input.memberships ?? new Map<string, SidebarMembership>();
+  const categories = input.categories ?? new Map<string, SidebarCategoryProjection>();
   const summaries = input.summaries ?? new Map<string, StoredEnrichment>();
 
   const summaryFor = (
@@ -705,6 +718,8 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
         preferredTitles.get(sessionId) ?? (resumeId ? preferredTitles.get(resumeId) ?? null : null),
       membershipFor: (sessionId: string, resumeId?: string): SidebarMembership | null =>
         memberships.get(sessionId) ?? (resumeId ? memberships.get(resumeId) ?? null : null),
+      categoryFor: (sessionId: string, resumeId?: string): SidebarCategoryProjection | null =>
+        categories.get(sessionId) ?? (resumeId ? categories.get(resumeId) ?? null : null),
       summaryFor,
       faviconUrlFor: (cwd: string | null): string | null =>
         cwd && faviconDirectories.has(cwd) ? `/api/favicon?dir=${encodeURIComponent(cwd)}` : null,
@@ -742,6 +757,7 @@ function buildLiveSessionRow(
       lookups.catalogueLifecycleFor(live.sessionId, indexed),
     ),
     membership: lookups.membershipFor(live.sessionId, indexed?.resumeId),
+    category: lookups.categoryFor(live.sessionId, indexed?.resumeId),
     density: densityFor(true, liveLifecycle),
     sessionId: lookups.canonicalSessionIdFor(live.sessionId, indexed),
     lifecycle: liveLifecycle,
@@ -790,6 +806,7 @@ function buildIndexedSessionRow(
       lookups.catalogueLifecycleFor(session.sessionId, session),
     ),
     membership: lookups.membershipFor(session.sessionId, session.resumeId),
+    category: lookups.categoryFor(session.sessionId, session.resumeId),
     density: densityFor(knownLive, lifecycle),
     sessionId: lookups.canonicalSessionIdFor(session.sessionId, session),
     lifecycle,
@@ -954,6 +971,8 @@ function assembleSidebarSnapshot(
     livenessReadable: input.livenessReadable,
     indexReadable: input.indexReadable ?? true,
     catalogueReadable: input.catalogueReadable ?? true,
+    categoryProjectionVersion: 1,
+    categoryProjectionError: input.categoryProjectionError ?? null,
     lifecycleCounts: input.lifecycleCounts ?? { active: 0, completed: 0, archived: 0 },
     hasMoreRows: input.hasMoreRows ?? false,
     // The browser does not consume this field. Keep it byte-stable so an unchanged representation

@@ -129,6 +129,7 @@ function doRead(idArg: string, rest: string[]): number {
         getAllCategoryAssignments(db),
         parents,
         new Set(catalogueRows.keys()),
+        new Map([...catalogueRows].map(([id, candidate]) => [id, candidate.sessionClass])),
       );
       if (bools.has("json")) {
         console.log(JSON.stringify({ state: "catalogued", session: row, category, identity_key: identityKey, identity }, null, 2));

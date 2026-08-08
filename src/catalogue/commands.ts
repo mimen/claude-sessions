@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { ensureDataDir, CATALOGUE_PATH, DB_PATH, CATEGORY_REGISTRY_PATH } from "../paths.ts";
 import { categoryBySlug, loadCategoryRegistry, slugFromDomainTag } from "../categories/registry.ts";
-import { getCategoryAssignment, setCategory } from "../categories/assignment.ts";
+import { getCategoryAssignment, resolveCategoryWriteTarget, setCategory } from "../categories/assignment.ts";
 import { openCatalogue } from "./db-schema.ts";
 import { childrenOf, getRow, getTags, lifecycleOf, identityKeyOf, parentEdges } from "./db-queries.ts";
 import { ensureRow, setCustomTitle, setCompleted, setArchived, setKey, setParent, setResumeId, setSessionClass, setCreatorKind, setLaunchChannel, setLauncherIdentity, setRole, setGusWork, setSessionEpic, setStage, setStatusLine, setMeta, setProject, setCluster, addTag, removeTag } from "./db-mutations.ts";
@@ -380,17 +380,22 @@ export function tag(sessionArg: string | undefined, entity: string | undefined, 
         console.error(`ccs tag: ${registry.error.message}`);
         return 1;
       }
-      if (!categoryBySlug(registry.value, domainSlug)) {
+      const removing = flags.includes("--remove");
+      if (!removing && !categoryBySlug(registry.value, domainSlug)) {
         console.error(`ccs tag: unknown category "${domainSlug}"`);
         return 1;
       }
-      if (flags.includes("--remove") && getCategoryAssignment(db, id)?.slug !== domainSlug) {
-        console.error(`ccs tag: session is not assigned to category "${domainSlug}"`);
-        return 1;
+      if (removing) {
+        const target = resolveCategoryWriteTarget(db, id, "resolve-root");
+        if (getCategoryAssignment(db, target.sessionId)?.slug !== domainSlug) {
+          console.error(`ccs tag: session is not assigned to category "${domainSlug}"`);
+          return 1;
+        }
       }
       const result = setCategory(db, registry.value, {
         sessionId: id,
-        slug: flags.includes("--remove") ? null : domainSlug,
+        auxiliaryPolicy: "resolve-root",
+        slug: removing ? null : domainSlug,
         source: "manual",
         manualLock: !flags.includes("--remove"),
         classifiedAt: now(),

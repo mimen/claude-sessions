@@ -47,10 +47,12 @@ import { identityCommand, identityResolveCommand } from "./catalogue/identity-co
 import { sessionCommand } from "./catalogue/session-command.ts";
 import { sessionFieldsCommand } from "./catalogue/session-fields-command.ts";
 import { historicalDetachedChildBackfillCommand } from "./catalogue/historical-detached-child-backfill.ts";
+import { categoryBackfillCommand } from "./catalogue/category-backfill.ts";
 import { getCrashReporter, installCrashLog, summarizeArgv } from "./crashlog.ts";
 import { SESSION_CLASS_ROLLOUT_AT } from "./session-class.ts";
 import { launchGoTui } from "./tui-go/launch.ts";
 import { getAllCategoryAssignments, resolveEffectiveCategory } from "./categories/assignment.ts";
+import { categoryAnalyticsCommand } from "./categories/analytics.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -70,6 +72,7 @@ Usage:
   ccs triage [--list] [--json]                    Close out sessions whose verdict contradicts their lifecycle
   ccs next [--json]                               What you're mid-flight on, and the next action for each
   ccs ls [--auxiliary] [--category <slug>]  Print and filter indexed sessions with effective category
+  ccs category analytics [--json]             Group retained-root activity, tokens, lifecycle, and spend by category
   ccs tree [--auxiliary]  Causal tree with recursive self/total cost
   ccs delegate <seat> [--fallback] --child-of <uuid|.> --cwd <dir> --prompt <task>
                          Reserve and synchronously run an auxiliary seat (fallback is explicit; never automatic)
@@ -97,7 +100,7 @@ Sessions (ephemeral, per-run):
   ccs session complete|archive|uncomplete|unarchive <id>   Per-session lifecycle
   ccs session new <--top-level|--child-of <uuid|.>> [flags]  Mint id, classify at birth, launch \`claude --session-id\`
     explicit identity: --identity=<key> --cluster=<c> --role=<r> (must match stored identity; cannot combine with --key)
-    flags: --cluster --role --title --cwd <dir> --location <key> --host <canonical-host>
+    flags: --cluster --role --title --cwd <dir> --location <key> --category <slug> --host <canonical-host>
            --prompt "..." --permission-mode <mode> --require-capability <name> (repeatable)
            --model <canonical-model-id> (derives launcher; cannot combine with --via)
            --pr-repo owner/repo --pr-number 123 --gus-work W-... · --print-id (reserve only)
@@ -110,6 +113,9 @@ Sessions (ephemeral, per-run):
                          Dry-run/apply the reviewed exact historical auxiliary manifest
   ccs historical-backfill rollback --operation <uuid> [--apply]
                          Restore one audited historical backfill's managed fields
+  ccs category-backfill apply --expect-sha256 <digest> [--manifest path] [--apply]
+  ccs category-backfill rollback --operation <uuid> [--apply]
+                         Normalize existing domain tags through an audited, reversible boundary
 
 Legacy per-session verbs (still work; will migrate to \`ccs session …\` in a later sweep):
   ccs meta [<id>|.]                               Show a session's row (identity join included)
@@ -241,6 +247,8 @@ export async function main(argv: string[]): Promise<number> {
         category,
       });
     }
+    case "category":
+      return categoryAnalyticsCommand(args.slice(1));
     case "tree":
       return tree({ all: args.includes("--all"), auxiliary: args.includes("--auxiliary") });
     case "location":
@@ -415,6 +423,8 @@ export async function main(argv: string[]): Promise<number> {
       return sessionFieldsCommand(args.slice(1));
     case "historical-backfill":
       return historicalDetachedChildBackfillCommand(args.slice(1));
+    case "category-backfill":
+      return categoryBackfillCommand(args.slice(1));
     case "session":
       // ADR-0089 step 7: `ccs session <verb>` — per-session CLI noun. See session-command.ts.
       return await sessionCommand(args.slice(1));
@@ -546,11 +556,12 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean; category?:
     const categoryEdges = parentEdges(cat);
     const categoryParents = new Map(categoryEdges.map((edge) => [edge.sessionId, edge.parentId]));
     const knownCategorySessions = new Set([...catalogue.keys(), ...rows.map((row) => row.sessionId)]);
+    const categoryClasses = new Map([...catalogue].map(([id, row]) => [id, row.sessionClass]));
     const open = openSessionIds();
     const rollup = buildCostRollup(indexedRows, categoryEdges);
     const srcMark = { native: "★", codex: "✎", fallback: " " } as const;
     let shown = 0;
-    let shownSpend = 0;
+    const displayedSessionIds = new Set<string>();
     for (const r of rows) {
       const c = catalogue.get(r.sessionId) ?? null;
       const category = resolveEffectiveCategory(
@@ -558,6 +569,7 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean; category?:
         categoryAssignments,
         categoryParents,
         knownCategorySessions,
+        categoryClasses,
       );
       if (opts.category && category.slug !== opts.category) continue;
       const lifecycle = lifecycleOf(c);
@@ -581,12 +593,25 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean; category?:
       const totalCost = rollup.bySessionId.get(r.sessionId)?.totalCost ?? r.costUSD;
       const cost = pad(formatCost(totalCost), 7);
       console.log(`${srcMark[r.titleSource]} ${title} ${badge} ${sk}${key}${project} ${categoryLabel} ${age} ${cost} ${r.msgCount}m`);
-      shownSpend += totalCost;
+      displayedSessionIds.add(r.sessionId);
       shown++;
     }
+    const hasDisplayedAncestor = (sessionId: string): boolean => {
+      const visited = new Set<string>([sessionId]);
+      let current = categoryParents.get(sessionId);
+      while (current && !visited.has(current)) {
+        if (displayedSessionIds.has(current)) return true;
+        visited.add(current);
+        current = categoryParents.get(current);
+      }
+      return false;
+    };
+    const shownSpend = [...displayedSessionIds]
+      .filter((sessionId) => !hasDisplayedAncestor(sessionId))
+      .reduce((sum, sessionId) => sum + (rollup.bySessionId.get(sessionId)?.totalCost ?? 0), 0);
     const hidden = rows.length - shown;
     console.log(
-      `\n${shown} sessions · ${formatCost(shownSpend) || "$0"} shown spend  ` +
+      `\n${shown} sessions · ${formatCost(shownSpend) || "$0"} displayed-root spend  ` +
         `(★ native ✎ codex · LOOP=loop · ⚙=role · ↳=child · ⊞=key · domain:=effective category · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
         (opts.category ? ` · category=${opts.category}` : "") +
         (hidden > 0 && !opts.all ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),

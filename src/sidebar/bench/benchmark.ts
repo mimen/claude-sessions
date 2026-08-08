@@ -319,6 +319,7 @@ function sourceFor(
       }
       : { readCache: createSidebarReadCache(fixture.cataloguePath, fixture.indexPath) }),
     ensureDataDir: () => {},
+    readCategories: () => ({ status: "unavailable", error: "fixture category registry unavailable" }),
     statusReader: {
       read: async (workspaceIds) => new Map(workspaceIds.map((workspaceId, index) => [
         workspaceId,

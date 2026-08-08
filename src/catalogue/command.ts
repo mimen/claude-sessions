@@ -4,8 +4,8 @@ import type { InferenceEngine } from "../inference/engine.ts";
 import { type Kind } from "./db-schema.ts";
 import { setKey, setParent, setProject, setCompleted, setArchived, setCustomTitle, addTag, removeTag } from "./db-mutations.ts";
 import { CATEGORY_REGISTRY_PATH } from "../paths.ts";
-import { categoryBySlug, loadCategoryRegistry, slugFromDomainTag } from "../categories/registry.ts";
-import { getCategoryAssignment, setCategory } from "../categories/assignment.ts";
+import { loadCategoryRegistry, slugFromDomainTag } from "../categories/registry.ts";
+import { getCategoryAssignment, resolveCategoryWriteTarget, setCategory } from "../categories/assignment.ts";
 
 /**
  * Natural-language editor for session ORGANIZATION METADATA, backed by an inference engine. The
@@ -147,8 +147,9 @@ export async function runMetadataCommand(
 
 /** Apply resolved mutations to the catalogue. Returns a short human summary of what changed. */
 export function applyMutations(catalogue: Database, mutations: readonly Mutation[], now: string): string {
-  const counts = new Map<string, number>();
-  for (const m of mutations) {
+  return catalogue.transaction((): string => {
+    const counts = new Map<string, number>();
+    for (const m of mutations) {
     switch (m.op) {
       case "key":
       case "event":
@@ -172,14 +173,15 @@ export function applyMutations(catalogue: Database, mutations: readonly Mutation
       case "category": {
         const registry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
         if (!registry.ok) throw registry.error;
-        setCategory(catalogue, registry.value, {
+        const result = setCategory(catalogue, registry.value, {
           sessionId: m.sessionId,
+          auxiliaryPolicy: "resolve-root",
           slug: m.value,
-          source: "manual",
-          manualLock: m.value !== null,
+          source: "model",
+          manualLock: false,
           classifiedAt: now,
-          allowLockedOverride: true,
         });
+        if (result.status === "locked") throw new Error("category is manually locked; use the explicit ccs tag command to change it");
         break;
       }
       case "tag":
@@ -188,10 +190,11 @@ export function applyMutations(catalogue: Database, mutations: readonly Mutation
           if (slug) {
             const registry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
             if (!registry.ok) throw registry.error;
-            setCategory(catalogue, registry.value, {
-              sessionId: m.sessionId, slug, source: "manual", manualLock: true,
-              classifiedAt: now, allowLockedOverride: true,
+            const result = setCategory(catalogue, registry.value, {
+              sessionId: m.sessionId, auxiliaryPolicy: "resolve-root", slug, source: "model", manualLock: false,
+              classifiedAt: now,
             });
+            if (result.status === "locked") throw new Error("category is manually locked; use the explicit ccs tag command to change it");
           } else addTag(catalogue, m.sessionId, m.value);
         }
         break;
@@ -201,20 +204,21 @@ export function applyMutations(catalogue: Database, mutations: readonly Mutation
           if (slug) {
             const registry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
             if (!registry.ok) throw registry.error;
-            if (!categoryBySlug(registry.value, slug)) throw new Error(`unknown category "${slug}"`);
-            if (getCategoryAssignment(catalogue, m.sessionId)?.slug !== slug) {
+            const target = resolveCategoryWriteTarget(catalogue, m.sessionId, "resolve-root");
+            if (getCategoryAssignment(catalogue, target.sessionId)?.slug !== slug) {
               throw new Error(`session is not assigned to category "${slug}"`);
             }
-            setCategory(catalogue, registry.value, {
-              sessionId: m.sessionId, slug: null, source: "manual", classifiedAt: now,
-              allowLockedOverride: true,
+            const result = setCategory(catalogue, registry.value, {
+              sessionId: m.sessionId, auxiliaryPolicy: "resolve-root", slug: null, source: "model", classifiedAt: now,
             });
+            if (result.status === "locked") throw new Error("category is manually locked; use the explicit ccs tag command to remove it");
           } else removeTag(catalogue, m.sessionId, m.value);
         }
         break;
     }
-    counts.set(m.op, (counts.get(m.op) ?? 0) + 1);
-  }
-  const parts = [...counts.entries()].map(([op, n]) => `${n} ${op}`);
-  return parts.length ? `${mutations.length} change${mutations.length === 1 ? "" : "s"}: ${parts.join(", ")}` : "no changes";
+      counts.set(m.op, (counts.get(m.op) ?? 0) + 1);
+    }
+    const parts = [...counts.entries()].map(([op, n]) => `${n} ${op}`);
+    return parts.length ? `${mutations.length} change${mutations.length === 1 ? "" : "s"}: ${parts.join(", ")}` : "no changes";
+  })();
 }

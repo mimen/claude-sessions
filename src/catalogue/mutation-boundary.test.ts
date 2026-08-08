@@ -40,6 +40,7 @@ const SANCTIONED_RAW_SQL_WRITERS: Record<string, string> = {
   "src/catalogue/db-schema.ts": "owns catalogue schema creation and migrations",
   "src/catalogue/db-mutations.ts": "owns raw catalogue row and tag mutations",
   "src/categories/assignment.ts": "owns the atomic category tag and provenance mutation",
+  "src/catalogue/category-backfill.ts": "owns audited normalization and conflict-aware rollback of historical category state",
   "src/catalogue/commands.ts": "mirrors validated command writes into identity tables",
   "src/catalogue/identities.ts": "owns identity CRUD",
   "src/catalogue/identity-schema.ts": "materializes declared identity schemas",
