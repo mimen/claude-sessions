@@ -59,6 +59,8 @@ type Session struct {
 	CategoryCompact   string
 	CategoryColor     string
 	CategoryFinding   string
+	CategorySource    string
+	CategoryFrom      string
 	PRNumber          int
 	PRState           string
 	Project           string

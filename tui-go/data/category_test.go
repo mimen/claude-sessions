@@ -32,12 +32,23 @@ func TestLoadCanonicalCategoryRegistryAndEffectiveInheritance(t *testing.T) {
 		t.Fatalf("color = %q", got)
 	}
 	catalogue := map[string]catalogueMeta{
-		"root":  {SessionID: "root", StoredCategory: "events"},
+		"root":  {SessionID: "root", StoredCategory: "events", CategorySource: "manual"},
 		"child": {SessionID: "child", ParentSessionID: "root"},
 	}
 	resolved := resolveEffectiveCategory("child", catalogue, known(catalogue), 32)
-	if resolved.Slug != "events" || resolved.Finding != "inherited" {
+	if resolved.Slug != "events" || resolved.Finding != "inherited" || resolved.Source != "manual" || resolved.InheritedFrom != "root" {
 		t.Fatalf("resolved = %+v", resolved)
+	}
+}
+
+func TestCategoryRegistryRejectsCompactLabelsBeyondTUIBudget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.json")
+	body := `{"$schema":"./registry.schema.json","version":"1.0.0","source":"Life Domains.md","categories":[{"slug":"events","name":"Events","compactLabel":"Fourteen chars","order":1,"hex":"#692EC2","scope":"Events","workspaceRoot":"Workspaces/Events"}]}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadCategoryRegistry(path); err == nil {
+		t.Fatal("expected a 14-character compact label to be rejected")
 	}
 }
 
@@ -81,6 +92,21 @@ func TestEffectiveCategoryValidatesCompleteAncestry(t *testing.T) {
 	parentless := map[string]catalogueMeta{"a": {SessionID: "a", SessionClass: "auxiliary"}}
 	if got := resolveEffectiveCategory("a", parentless, known(parentless), 32).Finding; got != "parentless-auxiliary" {
 		t.Fatalf("parentless finding = %q", got)
+	}
+}
+
+func TestCategoryRepairDisplayDistinguishesAncestryFailures(t *testing.T) {
+	cases := map[string]string{
+		"cycle":                "Cycle",
+		"missing-parent":       "No parent",
+		"depth-exceeded":       "Too deep",
+		"parentless-auxiliary": "Aux no parent",
+	}
+	for finding, expected := range cases {
+		_, compact, repair := categoryRepairDisplay(finding)
+		if !repair || compact != expected {
+			t.Fatalf("%s display = %q, repair=%t", finding, compact, repair)
+		}
 	}
 }
 

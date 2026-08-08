@@ -116,10 +116,17 @@ func (m Model) renderHeader(width int) string {
 			fg(theme.FgMoreSubtle).Render(" "+truncate(stats.TopTitle, 34))
 	}
 	line2 := secondary
+	notices := make([]string, 0, 2)
 	if notice := m.renderCatalogueNotice(); notice != "" {
-		// The notice owns the left side. joinSides drops the secondary stats before
+		notices = append(notices, notice)
+	}
+	if notice := m.renderCategoryNotice(); notice != "" {
+		notices = append(notices, notice)
+	}
+	if len(notices) > 0 {
+		// Notices own the left side. joinSides drops the secondary stats before
 		// truncating it, so narrow terminals retain the actionable warning.
-		line2 = joinSides(notice, secondary, width)
+		line2 = joinSides(strings.Join(notices, fg(theme.WarnDim).Render(" · ")), secondary, width)
 	}
 	return theme.Main.Width(width).Render(fit(line1, width) + "\n" + fit(line2, width))
 }
@@ -180,6 +187,17 @@ func (m Model) renderCatalogueNotice() string {
 		fg(theme.WarnDim).Render(" · "+strings.Join(details, " · "))
 }
 
+func (m Model) renderCategoryNotice() string {
+	const prefix = "category resolution failures: "
+	for _, warning := range m.snapshot.Warnings {
+		if details, found := strings.CutPrefix(warning, prefix); found {
+			return fg(theme.Warning).Bold(true).Render("category repair needed") +
+				fg(theme.WarnDim).Render(" · "+details)
+		}
+	}
+	return ""
+}
+
 func formatCatalogueLag(milliseconds int64) string {
 	duration := time.Duration(milliseconds) * time.Millisecond
 	switch {
@@ -205,6 +223,9 @@ func joinSides(left string, right string, width int) string {
 }
 
 // ---- session list (groups view) ----
+
+const categoryTextWidth = 13
+const categoryColumnWidth = categoryTextWidth + 2
 
 func (m Model) renderList(width int, height int) string {
 	if len(m.rows) == 0 {
@@ -239,7 +260,7 @@ func (m Model) renderListHeader(width int) string {
 		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("STAGE", 10)))
 	}
 	if width >= 82 {
-		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("CATEGORY", 13)))
+		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("CATEGORY", categoryColumnWidth)))
 	}
 	if width >= 48 {
 		parts = append(parts, fg(theme.FgMostSubtle).Render(pad("MODEL", 7)))
@@ -356,10 +377,14 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 			label = "Uncategorized"
 		}
 		if session.CategoryColor == "" {
-			rightParts = append(rightParts, column(theme.FgMoreSubtle).Render(pad(label, 13)))
+			rightParts = append(rightParts, column(theme.FgMoreSubtle).Render(pad(label, categoryColumnWidth)))
 		} else {
-			swatch := lipgloss.NewStyle().Foreground(theme.CategoryColor(session.CategoryColor)).Background(rowBackground).Render("■")
-			text := column(theme.FgBase).Render(pad(truncate(label, 11), 11))
+			swatchStyle := lipgloss.NewStyle().Foreground(theme.CategoryColor(session.CategoryColor)).Background(rowBackground)
+			if session.State == "archived" && !selected {
+				swatchStyle = swatchStyle.Faint(true)
+			}
+			swatch := swatchStyle.Render("■")
+			text := column(theme.FgBase).Render(pad(label, categoryTextWidth))
 			rightParts = append(rightParts, swatch+backgroundSpace(1)+text)
 		}
 	}
@@ -579,6 +604,12 @@ func (m Model) renderPreview(width int, height int) string {
 		categoryValue = fg(theme.CategoryColor(session.CategoryColor)).Render("■") + fg(theme.BgBase).Render(" ") + categoryValue
 	}
 	lines = append(lines, fg(theme.FgMostSubtle).Render(pad("category", 10))+categoryValue)
+	lines = append(lines, fg(theme.FgMostSubtle).Render(pad("resolution", 10))+
+		fg(categoryFindingColor(session.CategoryFinding)).Render(categoryFindingLabel(session.CategoryFinding)))
+	if provenance := categoryProvenance(session); provenance != "" {
+		lines = append(lines, fg(theme.FgMostSubtle).Render(pad("provenance", 10))+
+			fg(theme.FgSubtle).Render(truncate(provenance, max(1, contentWidth-11))))
+	}
 	metadata := [][2]string{
 		{"cwd", compactHome(session.CWD)},
 		{"duration", session.Duration + " wall"},
@@ -694,6 +725,57 @@ func prReference(session data.Session) string {
 		return fmt.Sprintf("#%d", session.PRNumber)
 	}
 	return fmt.Sprintf("#%d · %s", session.PRNumber, session.PRState)
+}
+
+func categoryFindingLabel(finding string) string {
+	switch finding {
+	case "stored":
+		return "Stored assignment"
+	case "inherited":
+		return "Inherited assignment"
+	case "uncategorized", "":
+		return "Uncategorized"
+	case "cycle":
+		return "Repair required: ancestry cycle"
+	case "missing-parent":
+		return "Repair required: missing parent"
+	case "depth-exceeded":
+		return "Repair required: ancestry too deep"
+	case "parentless-auxiliary":
+		return "Repair required: auxiliary has no parent"
+	case "category-invalid":
+		return "Repair required: invalid stored category"
+	case "registry-unavailable":
+		return "Registry unavailable"
+	default:
+		return finding
+	}
+}
+
+func categoryFindingColor(finding string) lipgloss.Color {
+	switch finding {
+	case "stored", "inherited":
+		return theme.FgSubtle
+	case "uncategorized", "":
+		return theme.FgMoreSubtle
+	default:
+		return theme.Warning
+	}
+}
+
+func categoryProvenance(session data.Session) string {
+	parts := make([]string, 0, 3)
+	if session.CategorySource != "" {
+		parts = append(parts, session.CategorySource)
+	}
+	if session.CategoryFrom != "" {
+		parts = append(parts, "via "+session.CategoryFrom)
+	}
+	switch session.CategoryFinding {
+	case "cycle", "missing-parent", "depth-exceeded", "parentless-auxiliary", "category-invalid":
+		parts = append(parts, "repair required")
+	}
+	return strings.Join(parts, " · ")
 }
 
 func lastActivity(age string) string {

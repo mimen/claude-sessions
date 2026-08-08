@@ -14,7 +14,7 @@ var categorySlugPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
 var categoryColorPattern = regexp.MustCompile(`^#[0-9A-F]{6}$`)
 var categoryVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
-const categoryCompactLabelMax = 18
+const categoryCompactLabelMax = 13
 
 type CategoryDefinition struct {
 	Slug          string `json:"slug"`
@@ -92,47 +92,56 @@ func categoryRegistryPath(_ string) string {
 }
 
 type effectiveCategory struct {
-	Slug       string
-	StoredSlug string
-	Finding    string
+	Slug          string
+	StoredSlug    string
+	Source        string
+	InheritedFrom string
+	Finding       string
 }
 
 // resolveEffectiveCategory validates the complete bounded ancestry before accepting inheritance.
 func resolveEffectiveCategory(id string, catalogue map[string]catalogueMeta, knownSessions map[string]bool, maxDepth int) effectiveCategory {
 	meta, known := catalogue[id]
 	if known && meta.SessionClass != "auxiliary" && meta.StoredCategory != "" {
-		return effectiveCategory{Slug: meta.StoredCategory, StoredSlug: meta.StoredCategory, Finding: "stored"}
+		return effectiveCategory{Slug: meta.StoredCategory, StoredSlug: meta.StoredCategory, Source: meta.CategorySource, Finding: "stored"}
 	}
 	visited := map[string]bool{id: true}
 	current := id
 	inheritedSlug := ""
+	inheritedSource := ""
+	inheritedFrom := ""
+	finding := func(value string) effectiveCategory {
+		return effectiveCategory{Source: inheritedSource, InheritedFrom: inheritedFrom, Finding: value}
+	}
 	for depth := 0; depth < maxDepth; depth++ {
 		currentMeta, exists := catalogue[current]
 		if !exists && !knownSessions[current] {
-			return effectiveCategory{Finding: "missing-parent"}
+			return finding("missing-parent")
 		}
 		parent := currentMeta.ParentSessionID
 		if parent == "" {
 			if currentMeta.SessionClass == "auxiliary" {
-				return effectiveCategory{Finding: "parentless-auxiliary"}
+				return finding("parentless-auxiliary")
 			}
 			if inheritedSlug != "" {
-				return effectiveCategory{Slug: inheritedSlug, Finding: "inherited"}
+				return effectiveCategory{Slug: inheritedSlug, Source: inheritedSource, InheritedFrom: inheritedFrom, Finding: "inherited"}
 			}
-			return effectiveCategory{Finding: "uncategorized"}
+			return finding("uncategorized")
 		}
 		if visited[parent] {
-			return effectiveCategory{Finding: "cycle"}
+			return finding("cycle")
 		}
 		parentMeta, exists := catalogue[parent]
 		if !exists && !knownSessions[parent] {
-			return effectiveCategory{Finding: "missing-parent"}
+			return finding("missing-parent")
 		}
 		visited[parent] = true
 		if inheritedSlug == "" && parentMeta.SessionClass != "auxiliary" && parentMeta.StoredCategory != "" {
 			inheritedSlug = parentMeta.StoredCategory
+			inheritedSource = parentMeta.CategorySource
+			inheritedFrom = parent
 		}
 		current = parent
 	}
-	return effectiveCategory{Finding: "depth-exceeded"}
+	return finding("depth-exceeded")
 }

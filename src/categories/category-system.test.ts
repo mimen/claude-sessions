@@ -62,6 +62,20 @@ describe("category registry", () => {
     if (loaded.ok) expect(loaded.value.categories[0]).toMatchObject({ color: "#2A67E2", compactName: "AI", order: 1 });
   });
 
+  test("rejects compact labels beyond the 13-character TUI budget", () => {
+    const root = mkdtempSync(join(tmpdir(), "ccs-category-label-"));
+    roots.push(root);
+    const path = join(root, "registry.json");
+    writeFileSync(path, JSON.stringify({
+      $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+      categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "Fourteen chars", order: 1,
+        todoistColorName: "Blue", todoistColor: "blue", hex: "#2A67E2", scope: "AI systems", googleLabelName: "AI", workspaceRoot: "Workspaces/Assistant" }],
+    }));
+    const loaded = loadCategoryRegistry(path);
+    expect(loaded.ok).toBeFalse();
+    if (!loaded.ok) expect(loaded.error.message).toContain("Too big");
+  });
+
   test("parses the actual registry merged in the canonical vault branch", () => {
     const root = mkdtempSync(join(tmpdir(), "ccs-real-category-"));
     roots.push(root);

@@ -90,10 +90,14 @@ func Load(options LoadOptions) (Snapshot, error) {
 		categoryName := "Uncategorized"
 		categoryCompact := "Uncategorized"
 		categoryColor := ""
+		if full, compact, repair := categoryRepairDisplay(resolvedCategory.Finding); repair {
+			categoryName = full
+			categoryCompact = compact
+		}
 		if categoryErr != nil {
 			resolvedCategory.Finding = "registry-unavailable"
-			categoryName = "Registry unavailable"
-			categoryCompact = "Registry error"
+			categoryName = "Category registry unavailable"
+			categoryCompact = "No registry"
 		} else if category, exists := categories.Categories[resolvedCategory.Slug]; exists {
 			categoryName = category.Name
 			categoryCompact = category.CompactName
@@ -101,7 +105,7 @@ func Load(options LoadOptions) (Snapshot, error) {
 		} else if resolvedCategory.Slug != "" {
 			resolvedCategory.Finding = "category-invalid"
 			categoryName = "Invalid category: " + resolvedCategory.Slug
-			categoryCompact = "Invalid category"
+			categoryCompact = "Bad category"
 		}
 		if resolvedCategory.Finding != "stored" && resolvedCategory.Finding != "inherited" && resolvedCategory.Finding != "uncategorized" {
 			categoryFindings[resolvedCategory.Finding]++
@@ -126,6 +130,8 @@ func Load(options LoadOptions) (Snapshot, error) {
 			CategoryCompact:   categoryCompact,
 			CategoryColor:     categoryColor,
 			CategoryFinding:   resolvedCategory.Finding,
+			CategorySource:    resolvedCategory.Source,
+			CategoryFrom:      resolvedCategory.InheritedFrom,
 			PRNumber:          meta.PRNumber,
 			PRState:           meta.PRState,
 			Enrichment:        meta.Enrichment,
@@ -179,6 +185,21 @@ func Load(options LoadOptions) (Snapshot, error) {
 	snapshot.Tree = buildTree(snapshot, indexed, catalogue, rollups)
 	snapshot.Stats = buildStats(home, runtimeRoot, snapshot.Sessions, indexed, catalogue, rollups)
 	return snapshot, nil
+}
+
+func categoryRepairDisplay(finding string) (string, string, bool) {
+	switch finding {
+	case "cycle":
+		return "Category ancestry cycle", "Cycle", true
+	case "missing-parent":
+		return "Missing category parent", "No parent", true
+	case "depth-exceeded":
+		return "Category ancestry exceeds the resolution limit", "Too deep", true
+	case "parentless-auxiliary":
+		return "Auxiliary session has no category parent", "Aux no parent", true
+	default:
+		return "", "", false
+	}
 }
 
 func includeSession(row indexedSession, meta catalogueMeta, options LoadOptions) bool {

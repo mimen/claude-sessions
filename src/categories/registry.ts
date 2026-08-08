@@ -6,7 +6,7 @@ import { type Result, err, ok } from "../result.ts";
 const SlugSchema = z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, "expected kebab-case slug");
 const ColorSchema = z.string().regex(/^#[0-9A-F]{6}$/, "expected #RRGGBB color");
 const VersionSchema = z.string().regex(/^\d+\.\d+\.\d+$/, "expected semantic version");
-const COMPACT_LABEL_MAX = 18;
+const COMPACT_LABEL_MAX = 13;
 
 const CategorySchema = z.object({
   slug: SlugSchema,
