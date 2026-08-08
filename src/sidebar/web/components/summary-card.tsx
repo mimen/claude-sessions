@@ -107,7 +107,7 @@ export function SummaryCard({ summary }: { summary: SidebarSummary }): React.Rea
                 }}
               />
               <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-foreground">
-                {summary.junk ? "junk" : summary.recommendation}
+                {summary.recommendation}
               </span>
             </>
           ) : null}

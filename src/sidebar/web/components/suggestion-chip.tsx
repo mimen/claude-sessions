@@ -46,13 +46,13 @@ export function SuggestionChip({ suggestion }: SuggestionChipProps): React.React
         "bg-current/10",
         tone,
       )}
-      // The reason is why enrichment reached this verdict; v40 guarantees one for archive and
-      // handoff, and guarantees its absence for complete, where it only restated the verdict.
-      title={suggestion.reason ?? undefined}
+      // Junk cannot add a second visible fact: the schema guarantees it is an archive verdict.
+      // It survives here as explanation on the one chip rather than as a redundant tag in the row.
+      title={suggestion.junk
+        ? `Junk session. Archive recommended.${suggestion.reason ? ` ${suggestion.reason}` : ""}`
+        : suggestion.reason ?? undefined}
     >
-      {/* Junk is enrichment saying the session was never worth starting. It always rides an
-          archive verb, so the label carries the extra judgement rather than a second chip. */}
-      {suggestion.junk ? "junk" : label}
+      {label}
     </span>
   );
 }

@@ -40,7 +40,7 @@ import { ScopeSelect } from "./components/scope-select.tsx";
 import { GroupHeader } from "./components/group-header.tsx";
 import { Toasts, type Toast } from "./components/toasts.tsx";
 import { cn } from "@/lib/utils";
-import { actionErrorMessage, postSidebarAction } from "./action-transport.ts";
+import { actionErrorMessage, postDeclineSuggestion, postSidebarAction } from "./action-transport.ts";
 import { focusWorkspaceRow } from "./focus-bridge.ts";
 import { createSnapshotTransport, snapshotPollDelay } from "./snapshot-transport.ts";
 
@@ -493,10 +493,7 @@ export function App(): React.ReactElement {
     const verb = row.suggestion?.verb;
     if (!verb) return;
     void (async (): Promise<void> => {
-      const result = await postSidebarAction<DeclineResponse>(
-        "/api/session/decline",
-        { sessionId: row.sessionId, verb },
-      );
+      const result = await postDeclineSuggestion<DeclineResponse>(row.sessionId, verb);
       if (!result.ok) setActionError(actionErrorMessage(result.error));
       else if (result.value.status !== "ok") {
         setActionError("CCS did not record that decision. Refresh the list and try again.");
@@ -738,6 +735,7 @@ export function App(): React.ReactElement {
                   showShortcut={metaHeld}
                   opening={openingIds.has(row.id)}
                   onClose={closeWorkspace}
+                  onDismiss={declineSuggestion}
                   onLifecycle={setLifecycle}
                   onPin={setPinned}
                   onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}

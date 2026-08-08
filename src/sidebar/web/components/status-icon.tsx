@@ -1,4 +1,5 @@
 import type React from "react";
+import { cn } from "@/lib/utils";
 
 export type BrowserStatusIcon =
   | "bell"
@@ -39,10 +40,11 @@ export function validatedStatusColor(color: string | null): string | undefined {
 interface StatusIconProps {
   readonly color: string | null;
   readonly icon: string | null;
+  readonly className?: string;
 }
 
 /** Render cmux's status icon without depending on Apple's SF Symbols font. */
-export function StatusIcon({ color, icon }: StatusIconProps): React.ReactElement {
+export function StatusIcon({ color, icon, className }: StatusIconProps): React.ReactElement {
   const glyph = browserStatusIcon(icon);
   const validColor = validatedStatusColor(color);
   const style = validColor ? { color: validColor } : undefined;
@@ -51,7 +53,7 @@ export function StatusIcon({ color, icon }: StatusIconProps): React.ReactElement
     return (
       <span
         aria-hidden="true"
-        className="size-1.5 shrink-0 rounded-full bg-current text-muted-foreground"
+        className={cn("size-1.5 shrink-0 rounded-full bg-current text-muted-foreground", className)}
         style={style}
       />
     );
@@ -60,7 +62,7 @@ export function StatusIcon({ color, icon }: StatusIconProps): React.ReactElement
   return (
     <svg
       aria-hidden="true"
-      className="size-2.5 shrink-0"
+      className={cn("size-2.5 shrink-0", className)}
       fill="none"
       stroke="currentColor"
       strokeLinecap="round"

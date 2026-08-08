@@ -98,6 +98,15 @@ export async function postSidebarAction<T extends object>(
   }
 }
 
+/** The decline route is a catalogue decision, not a lifecycle mutation. */
+export function postDeclineSuggestion<T extends object>(
+  sessionId: string,
+  verb: string,
+  options: ActionTransportOptions = {},
+): Promise<ActionTransportResult<T>> {
+  return postSidebarAction<T>("/api/session/decline", { sessionId, verb }, options);
+}
+
 /** Browser-safe copy. It never renders exception text or trusts server-provided implementation text. */
 export function actionErrorMessage(error: ActionTransportError): string {
   switch (error.kind) {

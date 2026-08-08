@@ -1,16 +1,4 @@
-/**
- * A closed or settled session, in one line.
- *
- * Closing a session is a memory decision, not a judgment about the work, so a closed row has to
- * stay legible and reopenable while costing almost nothing to scroll past. Colour alone does not
- * achieve that: a muted three-line card is quieter but still eats three lines, so a hundred of them
- * bury the handful that need you. Height is the honest currency, and this row spends about a third
- * of what a live one does.
- *
- * What survives the collapse: the project's own mark, the name, enrichment's verdict when it still
- * contradicts where the session sits, and the age. Age earns its place because it is the field that
- * actually decides whether you would reopen something.
- */
+/** A closed or settled session compressed to one fixed-height line. */
 import type React from "react";
 import { useCallback } from "react";
 import type { SidebarSessionRow, SidebarSummary } from "../../projection.ts";
@@ -24,11 +12,13 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { summaryAsText } from "./summary-card.tsx";
 import { CategoryAccessibleText, CategoryMark } from "./category-mark.tsx";
+import { FullSummarySubmenu } from "./full-summary.tsx";
 
 export interface CompactRowProps {
   readonly row: SidebarSessionRow;
@@ -36,25 +26,12 @@ export interface CompactRowProps {
   readonly selected: boolean;
   readonly opening: boolean;
   readonly onOpen: (row: SidebarSessionRow) => void;
-  /**
-   * Lifecycle actions, the same ones the full rows offer.
-   *
-   * A closed session is the one most likely to want completing or archiving -- it is finished work
-   * you are looking back at -- so leaving these off the collapsed rows put the actions furthest
-   * from where they were most wanted.
-   */
   readonly onLifecycle: (
     row: SidebarSessionRow,
     action: "complete" | "archive" | "uncomplete" | "unarchive",
   ) => void;
-  /**
-   * Refuse enrichment's verdict. Lives in the context menu rather than on the row: it is the
-   * rarest of the three things you do with a suggestion, and giving it an icon put a cross beside
-   * controls that already read as "no".
-   */
   readonly onDismiss?: (row: SidebarSessionRow) => void;
   readonly registerRef?: (id: string, element: HTMLElement | null) => void;
-  /** Report the pointer entering this row, or leaving it (null); the list owns the card. */
   readonly onHover: (row: SidebarSessionRow, element: HTMLElement | null) => void;
 }
 
@@ -71,7 +48,7 @@ export function CompactRow({
 }: CompactRowProps): React.ReactElement {
   const age = relativeTime(row.lastActivityAt, now);
   const suggestion = row.suggestion;
-
+  const junk = row.summary?.junk === true;
   const open = useCallback((): void => onOpen(row), [onOpen, row]);
 
   const rowButton = (
@@ -79,60 +56,77 @@ export function CompactRow({
       aria-busy={opening}
       aria-selected={selected}
       className={cn(
-        // Same horizontal padding, corner radius and bottom margin as the full card, so the hover
-        // surface lines up with the cards above instead of reading as a differently-shaped list.
-        // Only the vertical padding shrinks -- that is where the height saving comes from.
-        "group mb-1.5 flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-[3px]",
+        // Compact rows still have one invariant height. Their name never wraps, and the hover
+        // controls overlay the reserved age slot instead of replacing it in layout.
+        "group relative mb-1.5 flex h-7 w-full cursor-pointer items-center gap-1.5 overflow-hidden rounded-md px-2.5",
         "text-left transition-colors duration-75",
         "hover:bg-secondary focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
         selected && "bg-secondary ring-1 ring-ring/60 ring-inset",
         opening && "cursor-progress opacity-70",
-        // Settled work is quieter still than merely closed work: it is finished, and the eye
-        // should be able to skip the whole section without reading it.
-        row.density === "settled" && "opacity-60",
+        // Settled rows can be quieter, but junk uses neutral colour at full contrast. Combining the
+        // two opacity treatments made exactly the rows needing review hardest to read.
+        !junk && row.density === "settled" && "opacity-60",
+        junk && "text-neutral-400",
       )}
+      data-junk={junk ? "true" : undefined}
       onClick={open}
       ref={(element) => registerRef?.(row.id, element)}
       type="button"
     >
-      <CategoryMark category={row.category} className="mr-0.5" />
+      <span className={cn("flex shrink-0 items-center", junk && "grayscale")}>
+        <CategoryMark category={row.category} className="mr-0.5" />
+        <CategoryAccessibleText category={row.category} />
+      </span>
       <ProjectMark faviconUrl={row.faviconUrl} muted />
-      <CategoryAccessibleText category={row.category} />
-      <span className="min-w-0 flex-1 truncate text-[12px] leading-[18px] font-normal text-muted-foreground group-hover:text-foreground">
+      <span className={cn(
+        "min-w-0 flex-1 truncate text-[12px] leading-[18px] font-normal text-muted-foreground group-hover:text-foreground",
+        junk && "text-neutral-300 group-hover:text-neutral-200",
+      )}>
         {row.name}
       </span>
-      {suggestion ? <SuggestionChip suggestion={suggestion} /> : null}
-      {/* Lifecycle controls, revealed like the full rows'. A completed row offers only the way
-        * back, and an archived one likewise: showing "Archive" beside a completed row invites a
-        * second terminal state that says nothing new.
-        *
-        * They also open the summary, exactly as on the full rows: a closed session is the one you
-        * remember least, so the card is worth most at the moment you reach to decide its fate. */}
-      <span className="hidden shrink-0 items-center gap-1 group-hover:flex">
-        {row.lifecycle !== "archived" ? (
-          <RowAction
-            label={row.lifecycle === "completed" ? "Mark not complete" : "Complete"}
-            onClick={() => onLifecycle(row, row.lifecycle === "completed" ? "uncomplete" : "complete")}
-            onHover={(anchor) => onHover(row, anchor)}
-            tone="confirm"
-          >
-            <CheckIcon className="size-3" />
-          </RowAction>
-        ) : null}
-        {row.lifecycle !== "completed" ? (
-          <RowAction
-            label={row.lifecycle === "archived" ? "Unarchive" : "Archive"}
-            onClick={() => onLifecycle(row, row.lifecycle === "archived" ? "unarchive" : "archive")}
-            onHover={(anchor) => onHover(row, anchor)}
-            tone="shelve"
-          >
-            <ArchiveIcon className="size-2.5" />
-          </RowAction>
-        ) : null}
-      </span>
-      {age ? (
-        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">{age}</span>
+      {suggestion ? (
+        <span className={cn("shrink-0", junk && "grayscale")}>
+          <SuggestionChip suggestion={suggestion} />
+        </span>
       ) : null}
+
+      <span className="relative flex h-5 w-[76px] shrink-0 items-center justify-end">
+        {age ? (
+          <span className={cn(
+            "text-[10px] tabular-nums text-muted-foreground/70",
+            junk && "text-neutral-400",
+          )}>{age}</span>
+        ) : null}
+        <span
+          className={cn(
+            "pointer-events-none absolute inset-0 flex items-center justify-end gap-1 pl-4 opacity-0",
+            "bg-gradient-to-l from-secondary via-secondary/95 to-transparent transition-opacity duration-75",
+            "group-hover:opacity-100 [&>[role=button]]:pointer-events-auto",
+          )}
+          data-row-actions-overlay="true"
+        >
+          {row.lifecycle !== "archived" ? (
+            <RowAction
+              label={row.lifecycle === "completed" ? "Mark not complete" : "Complete"}
+              onClick={() => onLifecycle(row, row.lifecycle === "completed" ? "uncomplete" : "complete")}
+              onHover={(anchor) => onHover(row, anchor)}
+              tone="confirm"
+            >
+              <CheckIcon className="size-3" />
+            </RowAction>
+          ) : null}
+          {row.lifecycle !== "completed" ? (
+            <RowAction
+              label={row.lifecycle === "archived" ? "Unarchive" : "Archive"}
+              onClick={() => onLifecycle(row, row.lifecycle === "archived" ? "unarchive" : "archive")}
+              onHover={(anchor) => onHover(row, anchor)}
+              tone="shelve"
+            >
+              <ArchiveIcon className="size-2.5" />
+            </RowAction>
+          ) : null}
+        </span>
+      </span>
     </button>
   );
 
@@ -140,14 +134,33 @@ export function CompactRow({
   const archived = row.lifecycle === "archived";
   const summary = row.summary;
 
-  // The same menu the full rows carry, so right-click means one thing everywhere in the list. It
-  // is also the only home for the actions that do not earn a permanent icon: refusing a verdict,
-  // and reading a summary past the card's clamp.
   return (
     <ContextMenu>
-      {/* `render` hands Base UI the row itself, so the row stays one element and one tab stop. */}
       <ContextMenuTrigger render={rowButton} />
       <ContextMenuContent>
+        {suggestion && onDismiss ? (
+          <>
+            <ContextMenuLabel>{suggestion.verb} suggested</ContextMenuLabel>
+            {suggestion.reason ? (
+              <div className="max-w-64 px-2 pb-1.5 text-[11px] leading-[1.4] text-muted-foreground">
+                {suggestion.reason}
+              </div>
+            ) : null}
+            {suggestion.actionable ? (
+              <ContextMenuItem onClick={() => onLifecycle(row, suggestion.verb as "complete" | "archive")}>
+                {suggestion.verb === "archive" ? <ArchiveIcon /> : <CheckIcon />}
+                Accept: {suggestion.verb === "archive" ? "Archive" : "Complete"}
+              </ContextMenuItem>
+            ) : null}
+            <ContextMenuItem onClick={() => onDismiss(row)}>
+              <CloseIcon />
+              Dismiss verdict
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        ) : null}
+
+        <ContextMenuLabel>Lifecycle</ContextMenuLabel>
         {!archived ? (
           <ContextMenuItem onClick={() => onLifecycle(row, completed ? "uncomplete" : "complete")}>
             <CheckIcon />
@@ -160,18 +173,12 @@ export function CompactRow({
             {archived ? "Unarchive" : "Archive"}
           </ContextMenuItem>
         ) : null}
-        {suggestion && onDismiss ? (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem onClick={() => onDismiss(row)}>
-              <CloseIcon />
-              Dismiss “{suggestion.junk ? "junk" : suggestion.verb}”
-            </ContextMenuItem>
-          </>
-        ) : null}
+
         {summary ? (
           <>
             <ContextMenuSeparator />
+            <ContextMenuLabel>Session</ContextMenuLabel>
+            <FullSummarySubmenu category={row.category} summary={summary} />
             <ContextMenuItem
               onClick={() => {
                 void navigator.clipboard.writeText(summaryAsText(summary as SidebarSummary, row.name));

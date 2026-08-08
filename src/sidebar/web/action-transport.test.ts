@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   actionErrorMessage,
+  postDeclineSuggestion,
   postSidebarAction,
   type ActionFetch,
 } from "./action-transport.ts";
@@ -13,6 +14,29 @@ function response(body: string, status: number): Response {
 }
 
 describe("sidebar action transport", () => {
+  test("posts verdict dismissal to the existing decline endpoint", async () => {
+    let requestPath = "";
+    let requestMethod: string | undefined;
+    let requestBody: BodyInit | null | undefined;
+    const result = await postDeclineSuggestion<{ readonly status: "ok" }>(
+      "session-1",
+      "archive",
+      {
+        fetch: async (path, init) => {
+          requestPath = path;
+          requestMethod = init.method;
+          requestBody = init.body;
+          return response('{"status":"ok"}', 200);
+        },
+      },
+    );
+
+    expect(result).toEqual({ ok: true, value: { status: "ok" } });
+    expect(requestPath).toBe("/api/session/decline");
+    expect(requestMethod).toBe("POST");
+    expect(requestBody).toBe(JSON.stringify({ sessionId: "session-1", verb: "archive" }));
+  });
+
   test("keeps timeout and refused connections distinct", async () => {
     const timeoutFetch: ActionFetch = (_input, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => {

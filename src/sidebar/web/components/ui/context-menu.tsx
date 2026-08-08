@@ -16,6 +16,7 @@ import type React from "react";
 import { cn } from "@/lib/utils";
 
 export const ContextMenu: typeof ContextMenuPrimitive.Root = ContextMenuPrimitive.Root;
+export const ContextMenuSub: typeof ContextMenuPrimitive.SubmenuRoot = ContextMenuPrimitive.SubmenuRoot;
 
 export function ContextMenuTrigger({
   ...props
@@ -53,6 +54,16 @@ export function ContextMenuContent({
   );
 }
 
+const itemClassName = [
+  "relative flex cursor-pointer select-none items-center gap-2 rounded-(--radius)",
+  "px-2 py-1.5 text-[13px] leading-none outline-none",
+  // Base UI highlights on both hover and keyboard focus, so one rule covers both and they
+  // cannot drift apart.
+  "data-highlighted:bg-accent data-highlighted:text-accent-foreground",
+  "data-disabled:pointer-events-none data-disabled:opacity-40",
+  "[&_svg]:size-3.5 [&_svg]:shrink-0",
+].join(" ");
+
 export function ContextMenuItem({
   className,
   disabled = false,
@@ -60,20 +71,55 @@ export function ContextMenuItem({
 }: ContextMenuPrimitive.Item.Props & { readonly disabled?: boolean }): React.ReactElement {
   return (
     <ContextMenuPrimitive.Item
-      className={cn(
-        "relative flex cursor-pointer select-none items-center gap-2 rounded-(--radius)",
-        "px-2 py-1.5 text-[13px] leading-none outline-none",
-        // Base UI highlights on both hover and keyboard focus, so one rule covers both and they
-        // cannot drift apart.
-        "data-highlighted:bg-accent data-highlighted:text-accent-foreground",
-        "data-disabled:pointer-events-none data-disabled:opacity-40",
-        "[&_svg]:size-3.5 [&_svg]:shrink-0",
-        className,
-      )}
+      className={cn(itemClassName, className)}
       data-slot="context-menu-item"
       disabled={disabled}
       {...props}
     />
+  );
+}
+
+export function ContextMenuSubTrigger({
+  className,
+  children,
+  ...props
+}: ContextMenuPrimitive.SubmenuTrigger.Props): React.ReactElement {
+  return (
+    <ContextMenuPrimitive.SubmenuTrigger
+      className={cn(itemClassName, className)}
+      data-slot="context-menu-sub-trigger"
+      {...props}
+    >
+      {children}
+      <span aria-hidden="true" className="ml-auto text-muted-foreground">›</span>
+    </ContextMenuPrimitive.SubmenuTrigger>
+  );
+}
+
+export function ContextMenuSubContent({
+  className,
+  children,
+  ...props
+}: ContextMenuPrimitive.Popup.Props): React.ReactElement {
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Positioner className="z-50 outline-none" sideOffset={4}>
+        <ContextMenuPrimitive.Popup
+          className={cn(
+            "max-h-[min(520px,calc(100vh-16px))] w-72 overflow-y-auto rounded-(--radius)",
+            "border border-border bg-popover p-2 text-popover-foreground shadow-md outline-none",
+            "origin-(--transform-origin) transition-[opacity,scale]",
+            "data-ending-style:scale-98 data-starting-style:scale-98",
+            "data-ending-style:opacity-0 data-starting-style:opacity-0",
+            className,
+          )}
+          data-slot="context-menu-sub-content"
+          {...props}
+        >
+          {children}
+        </ContextMenuPrimitive.Popup>
+      </ContextMenuPrimitive.Positioner>
+    </ContextMenuPrimitive.Portal>
   );
 }
 
