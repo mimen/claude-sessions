@@ -604,10 +604,10 @@ func (m Model) renderPreview(width int, height int) string {
 		categoryValue = fg(theme.CategoryColor(session.CategoryColor)).Render("■") + fg(theme.BgBase).Render(" ") + categoryValue
 	}
 	lines = append(lines, fg(theme.FgMostSubtle).Render(pad("category", 10))+categoryValue)
-	lines = append(lines, fg(theme.FgMostSubtle).Render(pad("resolution", 10))+
-		fg(categoryFindingColor(session.CategoryFinding)).Render(categoryFindingLabel(session.CategoryFinding)))
+	lines = append(lines, fg(theme.FgMostSubtle).Render(pad("status", 10))+
+		fg(categoryFindingColor(session.CategoryFinding)).Render(truncate(categoryFindingLabel(session.CategoryFinding), max(1, contentWidth-11))))
 	if provenance := categoryProvenance(session); provenance != "" {
-		lines = append(lines, fg(theme.FgMostSubtle).Render(pad("provenance", 10))+
+		lines = append(lines, fg(theme.FgMostSubtle).Render(pad("source", 10))+
 			fg(theme.FgSubtle).Render(truncate(provenance, max(1, contentWidth-11))))
 	}
 	metadata := [][2]string{

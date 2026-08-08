@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -70,6 +71,40 @@ func TestInheritedCategoryPreviewNamesOrigin(t *testing.T) {
 		if !strings.Contains(preview, expected) {
 			t.Fatalf("inherited preview omitted %q: %q", expected, preview)
 		}
+	}
+}
+
+func TestCategoryPreviewMetaKeysSeparateAndLongStatusFitsNarrowPane(t *testing.T) {
+	snapshot := testSnapshot(1)
+	snapshot.Sessions[0].CategoryName = "Auxiliary session has no category parent"
+	snapshot.Sessions[0].CategoryFinding = "parentless-auxiliary"
+	snapshot.Sessions[0].CategorySource = "deterministic-classifier"
+	snapshot.Sessions[0].CategoryFrom = "a-very-long-parent-session-id"
+	width := 34
+	preview := ansi.Strip(New(snapshot).renderPreview(width, 40))
+	var statusLine string
+	var sourceLine string
+	for _, line := range strings.Split(preview, "\n") {
+		switch {
+		case strings.HasPrefix(line, "status"):
+			statusLine = line
+		case strings.HasPrefix(line, "source"):
+			sourceLine = line
+		}
+	}
+	if !strings.HasPrefix(statusLine, "status    Repair") {
+		t.Fatalf("status key collided with value: %q", statusLine)
+	}
+	if !strings.HasPrefix(sourceLine, "source    determin") {
+		t.Fatalf("source key collided with value: %q", sourceLine)
+	}
+	for _, line := range []string{statusLine, sourceLine} {
+		if lipgloss.Width(line) > previewContentWidth(width) {
+			t.Fatalf("category meta line exceeded preview budget %d: %q", previewContentWidth(width), line)
+		}
+	}
+	if strings.Contains(statusLine, "auxiliary has no parent") {
+		t.Fatalf("long resolution was not truncated: %q", statusLine)
 	}
 }
 
