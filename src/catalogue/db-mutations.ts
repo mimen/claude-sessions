@@ -83,6 +83,9 @@ export function setArchived(db: Database, sessionId: string, archived: boolean, 
 export function setParked(db: Database, sessionId: string, taskId: string | null, now: string): void {
   set(db, sessionId, "parked_task_id", taskId, now);
 }
+export function setIncognito(db: Database, sessionId: string, incognito: boolean, now: string): void {
+  set(db, sessionId, "incognito", incognito ? 1 : 0, now);
+}
 export function setResumeId(db: Database, sessionId: string, resumeId: string, now: string): void {
   set(db, sessionId, "resume_id", resumeId, now);
 }
@@ -382,6 +385,81 @@ export function markHistoricalDetachedChildBackfillReverted(
         SET reverted_at = $revertedAt
       WHERE operation_id = $operationId`,
   ).run({ $operationId: operationId, $revertedAt: revertedAt });
+}
+
+/**
+ * Drop every stored enrichment field for a session, so nothing a model wrote about it survives.
+ *
+ * Columns are discovered rather than listed: `enrichment_summary` and `enrichment_outstanding` are
+ * scheduled for removal in the catalogue's reserved v41, and a hardcoded list would either break
+ * on that migration or quietly stop clearing a column added after this was written. Whatever the
+ * schema currently holds under the `enrichment_` prefix is what gets cleared.
+ *
+ * `enrichment_attempts` is a retry counter rather than an observation, so it resets to 0 instead of
+ * going NULL — the column is NOT NULL and a null there would break the budget arithmetic.
+ */
+export function clearEnrichment(db: Database, sessionId: string, now: string): void {
+  const columns = (db.query("PRAGMA table_info(catalogue)").all() as Array<{ name: string }>)
+    .map((column) => column.name)
+    .filter((name) => name.startsWith("enrichment_"));
+  if (columns.length === 0) return;
+  const assignments = columns.map((name) =>
+    name === "enrichment_attempts" ? `${name} = 0` : `${name} = NULL`,
+  );
+  db.query(
+    `UPDATE catalogue SET ${assignments.join(", ")}, updated_at = $now WHERE session_id = $id`,
+  ).run({ $now: now, $id: sessionId });
+}
+
+/**
+ * Every catalogue table keyed by session id, ordered so a row never outlives what points at it.
+ *
+ * `catalogue` is last on purpose. The category tables carry no foreign key (this database declares
+ * none at all), so nothing enforces the order for us; deleting the parent row first would leave
+ * orphans behind if a later statement threw, and callers run this inside one transaction precisely
+ * so that cannot happen.
+ */
+const SESSION_SCOPED_TABLES = [
+  "session_tags",
+  "session_category_assignments",
+  "session_category_attempts",
+  "catalogue",
+] as const;
+
+/**
+ * Delete one session's rows from every catalogue table. Unguarded and unconditional: unlike
+ * {@link deleteHistoricalDetachedChildBackfillPlaceholder} below, this is the destroy path, where
+ * authored metadata is exactly what the caller means to remove.
+ *
+ * Presence-guarded per table because the category tables are created on a migration line
+ * independent of the main version ladder, so a catalogue opened by an older binary can legitimately
+ * lack them. Returns the per-table row counts for the destroy report.
+ */
+export function deleteSessionRows(db: Database, sessionId: string): Record<string, number> {
+  const present = new Set(
+    (db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>)
+      .map((row) => row.name),
+  );
+  const deleted: Record<string, number> = {};
+  for (const table of SESSION_SCOPED_TABLES) {
+    if (!present.has(table)) continue;
+    const result = db.query(`DELETE FROM ${table} WHERE session_id = $id`).run({ $id: sessionId });
+    if (result.changes > 0) deleted[table] = result.changes;
+  }
+  return deleted;
+}
+
+/**
+ * Detach any surviving session that named the destroyed one as its causal parent.
+ *
+ * Only reachable when a caller destroys a partial subtree; a full recursive destroy removes these
+ * rows outright. Without it the survivor keeps a `parent_session_id` pointing at nothing, which
+ * reads as a corrupt constellation rather than an intentional top-level session.
+ */
+export function detachChildrenOf(db: Database, parentSessionId: string, now: string): number {
+  return db.query(
+    "UPDATE catalogue SET parent_session_id = NULL, updated_at = $now WHERE parent_session_id = $id",
+  ).run({ $now: now, $id: parentSessionId }).changes;
 }
 
 /**

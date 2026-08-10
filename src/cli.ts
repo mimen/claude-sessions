@@ -13,6 +13,7 @@ import { getAll, getRow, lifecycleOf, parentEdges, identityKeyOf, sessionsForClu
 import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson, isCoreRole } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
+import { isIncognito } from "./catalogue/incognito.ts";
 import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, stage, metaSet, meta } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
 import { delegateCommand } from "./delegate/command.ts";
@@ -107,9 +108,13 @@ Sessions (ephemeral, per-run):
            --model <canonical-model-id> (derives launcher; cannot combine with --via)
            --pr-repo owner/repo --pr-number 123 --gus-work W-... · --print-id (reserve only)
            --json (structured detached-launch receipt with full session id and workspace ref)
+           --incognito (born hidden: no listing, no enrichment, never quoted into another session)
            --via <launcher> (legacy policy-less launcher selection, e.g. claude-gpt)
            role.toml model policy: canonical IDs compile launcher + --model; it rejects --via/--model
   ccs session bump <id> [--note "..."]            Wake the session's cmux tab
+  ccs session incognito [<id>|.] [--off]          Hide from every listing; never enriched or quoted elsewhere
+  ccs session destroy <id|.> [--confirm <id>]     IRREVERSIBLE erase of the session and its subtree
+                         Bare invocation prints the manifest and deletes nothing.
   ccs session-fields <sid> --json '{...}' [--sensor <name>]  Atomic multi-field write (ADR-0078)
   ccs historical-backfill detached-children --expect-sha256 <digest> [--apply]
                          Dry-run/apply the reviewed exact historical auxiliary manifest
@@ -548,12 +553,16 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean; category?:
   const cat = openCatalogue(CATALOGUE_PATH());
   try {
     const indexedRows = listByRecency(db, true);
-    const rows = indexedRows.filter((row) => !row.isSubagent);
+    const catalogue = getAll(cat);
+    // Incognito rows are dropped from `rows` itself, not skipped in the render loop below, because
+    // the footer reports `rows.length - shown` as "N hidden … --all to show". Skipping later would
+    // leave an incognito session counted there — announcing that something exists, and pointing at
+    // a flag that will not reveal it.
+    const rows = indexedRows.filter((row) => !row.isSubagent && !isIncognito(catalogue.get(row.sessionId)));
     if (rows.length === 0) {
       console.log("No sessions indexed. Run `ccs reindex` first.");
       return 0;
     }
-    const catalogue = getAll(cat);
     const categoryAssignments = getAllCategoryAssignments(cat);
     const categoryRegistry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
     if (!categoryRegistry.ok) console.warn(`ccs ls: ${categoryRegistry.error.message}`);
@@ -657,6 +666,7 @@ function tree(opts: { all: boolean; auxiliary: boolean }): number {
     const rowById = new Map(allRows.filter((row) => !row.isSubagent).map((row) => [row.sessionId, row]));
     const visible = (id: string): boolean => {
       const row = catMap.get(id);
+      if (isIncognito(row)) return false;
       if (!opts.all && lifecycleOf(row ?? null) === "archived") return false;
       return opts.auxiliary || row?.sessionClass !== "auxiliary";
     };

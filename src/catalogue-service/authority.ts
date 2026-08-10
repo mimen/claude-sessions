@@ -507,6 +507,7 @@ export class CatalogueAuthority {
          INNER JOIN sessions AS s ON s.session_id = c.session_id
          WHERE c.session_class = 'auxiliary'
             OR COALESCE(c.substrate, 'claude-code') <> 'claude-code'
+            OR c.incognito = 1
          ORDER BY c.session_id ASC`,
       )
       .all() as Array<{ sessionId: string }>;

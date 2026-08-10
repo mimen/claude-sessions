@@ -91,6 +91,10 @@ function rowFrom(r: Record<string, unknown> | null, db?: Database): CatalogueRow
     completed: !!(r.completed || idRow?.completed),
     archived: !!(r.archived || idRow?.archived),
     parkedTaskId: (r.parked_task_id as string) ?? (idRow?.parked_task_id as string) ?? null,
+    // Session-scoped only, deliberately: incognito is a property of one conversation's content,
+    // not of the durable work-item an identity represents, so it never inherits from the identity
+    // the way lifecycle above does.
+    incognito: !!r.incognito,
     // Legacy `key` field — mapped to the same value as identityKey for API-stable consumers.
     key: identityKey,
     parentSessionId: (r.parent_session_id as string) ?? null,
@@ -237,7 +241,7 @@ export function sessionsForGusWork(db: Database, gusWork: string): string[] {
     db.query(
       `SELECT c.session_id FROM catalogue c
        JOIN identity_pr_agent p ON p.identity_key = c.identity_key
-       WHERE p.gus_work = $g`,
+       WHERE p.gus_work = $g AND c.incognito IS NOT 1`,
     ).all({ $g: gusWork }) as { session_id: string }[]
   ).map((r) => r.session_id);
 }
@@ -247,7 +251,7 @@ export function sessionsForGusWork(db: Database, gusWork: string): string[] {
  * identity_key matches the passed value (callers should just pass identity_key directly). */
 export function sessionsForWorkUnit(db: Database, workUnitId: string): string[] {
   return (
-    db.query("SELECT session_id FROM catalogue WHERE identity_key = $k").all({ $k: workUnitId }) as {
+    db.query("SELECT session_id FROM catalogue WHERE identity_key = $k AND incognito IS NOT 1").all({ $k: workUnitId }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);
@@ -265,7 +269,7 @@ export function sessionsForRole(db: Database, role: string): string[] {
     db.query(
       `SELECT c.session_id FROM catalogue c
        JOIN identities i ON i.identity_key = c.identity_key
-       WHERE i.role = $r ${MRU_ORDER.replace("updated_at", "c.updated_at").replace("session_id", "c.session_id")}`,
+       WHERE i.role = $r AND c.incognito IS NOT 1 ${MRU_ORDER.replace("updated_at", "c.updated_at").replace("session_id", "c.session_id")}`,
     ).all({ $r: role }) as { session_id: string }[]
   ).map((r) => r.session_id);
 }
@@ -278,7 +282,7 @@ export function sessionsForPr(db: Database, prNumber: number, prRepo?: string): 
         .query(
           `SELECT c.session_id FROM catalogue c
            JOIN identity_pr_agent p ON p.identity_key = c.identity_key
-           WHERE p.pr_number = $n AND p.pr_repo = $repo ${order}`,
+           WHERE p.pr_number = $n AND p.pr_repo = $repo AND c.incognito IS NOT 1 ${order}`,
         )
         .all({ $n: prNumber, $repo: prRepo }) as { session_id: string }[])
     : (db
@@ -305,7 +309,7 @@ export function sessionsForEpic(db: Database, groupingId: string): string[] {
     db.query(
       `SELECT c.session_id FROM catalogue c
        JOIN identities i ON i.identity_key = c.identity_key
-       WHERE i.grouping_id = $g`,
+       WHERE i.grouping_id = $g AND c.incognito IS NOT 1`,
     ).all({ $g: groupingId }) as { session_id: string }[]
   ).map((r) => r.session_id);
 }
@@ -314,7 +318,7 @@ export function sessionsForEpic(db: Database, groupingId: string): string[] {
  * the legacy `key` column is gone; this now queries the FK directly. */
 export function sessionsForKey(db: Database, key: string): string[] {
   return (
-    db.query("SELECT session_id FROM catalogue WHERE identity_key = $k").all({ $k: key }) as {
+    db.query("SELECT session_id FROM catalogue WHERE identity_key = $k AND incognito IS NOT 1").all({ $k: key }) as {
       session_id: string;
     }[]
   ).map((r) => r.session_id);
@@ -332,7 +336,7 @@ export function sessionsForCluster(db: Database, cluster: string): string[] {
     db.query(
       `SELECT c.session_id FROM catalogue c
        JOIN identities i ON i.identity_key = c.identity_key
-       WHERE i.cluster = $c ${MRU_ORDER.replace("updated_at", "c.updated_at").replace("session_id", "c.session_id")}`,
+       WHERE i.cluster = $c AND c.incognito IS NOT 1 ${MRU_ORDER.replace("updated_at", "c.updated_at").replace("session_id", "c.session_id")}`,
     ).all({ $c: cluster }) as { session_id: string }[]
   ).map((r) => r.session_id);
 }

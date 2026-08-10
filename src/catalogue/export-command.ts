@@ -33,6 +33,7 @@
 import type { Database } from "bun:sqlite";
 import { openCatalogue, type CatalogueRow } from "./db-schema.ts";
 import { getAll } from "./db-queries.ts";
+import { isIncognito } from "./incognito.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { getAllCategoryAssignments, resolveEffectiveCategory, type EffectiveCategory } from "../categories/assignment.ts";
 
@@ -124,6 +125,9 @@ export function buildExport(
 ): CatalogueExport {
   const out: CatalogueExportRow[] = [];
   for (const r of rows) {
+    // Unfiltered, this is the documented read path cluster engines consume, so an incognito
+    // session would leave ccs entirely through it.
+    if (isIncognito(r)) continue;
     if (filter.cluster && r.cluster !== filter.cluster) continue;
     if (filter.role && r.role !== filter.role) continue;
     const category = categories.get(r.sessionId) ?? {

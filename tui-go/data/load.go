@@ -207,6 +207,12 @@ func categoryRepairDisplay(finding string) (string, string, bool) {
 }
 
 func includeSession(row indexedSession, meta catalogueMeta, options LoadOptions) bool {
+	// Deliberately not driven by a LoadOptions field, unlike every other exclusion here. The rest
+	// are defaults with a reveal flag; this one is a guarantee, and adding an option would create
+	// the listing the design says must not exist.
+	if meta.Incognito {
+		return false
+	}
 	if row.IsSubagent && !options.IncludeSubagents {
 		return false
 	}
@@ -523,6 +529,13 @@ func shortID(id string) string {
 func buildStats(home string, runtimeRoot string, sessions []Session, indexed []indexedSession, catalogue map[string]catalogueMeta, rollups map[string]sessionRollup) Dash {
 	stats := Dash{Host: loadHostLabel(home, runtimeRoot), Sessions: len(sessions)}
 	for _, row := range indexed {
+		// This loop reads `indexed` directly rather than the already-filtered `sessions`, so the
+		// includeSession gate above does not cover it. An incognito session left in here would not
+		// be named anywhere, but its cost would still move the dashboard total — enough of a tell
+		// to defeat the point.
+		if catalogue[row.ID].Incognito {
+			continue
+		}
 		stats.Spend += row.CostUSD
 		if row.IsSubagent || catalogue[row.ID].SessionClass == "auxiliary" {
 			stats.AgentSpend += row.CostUSD

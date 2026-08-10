@@ -170,8 +170,14 @@ function readSessionsSince(
   sessionId: string,
   cwd: string | null,
   lastTs: string | null,
+  exclude: ReadonlySet<string>,
 ): { count: number; mostRecent: string | null } {
   if (!cwd || !lastTs) return { count: 0, mostRecent: null };
+  // Excluded ids are interpolated rather than bound because the count is variable and bun:sqlite
+  // has no array binding. They are catalogue session ids (UUIDs) that never reach here from user
+  // input, and the quote-stripping keeps that true even if that ever changes.
+  const excluded = [...exclude].map((id) => `'${id.replace(/'/g, "")}'`);
+  const excludeClause = excluded.length > 0 ? `AND session_id NOT IN (${excluded.join(", ")})` : "";
   const row = index
     .query(
       `SELECT COUNT(*) AS n, MAX(last_ts) AS most_recent
@@ -179,7 +185,8 @@ function readSessionsSince(
         WHERE cwd = $cwd
           AND last_ts > $lastTs
           AND session_id <> $id
-          AND is_subagent = 0`,
+          AND is_subagent = 0
+          ${excludeClause}`,
     )
     .get({ $cwd: cwd, $lastTs: lastTs, $id: sessionId }) as
     | { n: number; most_recent: string | null }
@@ -195,9 +202,20 @@ export interface WorldQuery {
   readonly lastTs: string | null;
 }
 
-/** Everything knowable about the world a session left behind, without running a subprocess. */
-export function readWorldState(index: Database, query: WorldQuery): WorldState {
-  const since = readSessionsSince(index, query.sessionId, query.cwd, query.lastTs);
+/**
+ * Everything knowable about the world a session left behind, without running a subprocess.
+ *
+ * `exclude` carries the incognito set, because this reads the INDEX and the incognito flag lives in
+ * the catalogue: the caller is the only party holding both. It defaults to empty so the existing
+ * tests and any caller with nothing to hide are unaffected. The world block is composed into a
+ * prompt sent to the gateway, so an incognito session must not contribute even its existence here.
+ */
+export function readWorldState(
+  index: Database,
+  query: WorldQuery,
+  exclude: ReadonlySet<string> = new Set(),
+): WorldState {
+  const since = readSessionsSince(index, query.sessionId, query.cwd, query.lastTs, exclude);
   return {
     cwd: query.cwd,
     repo: readRepoWorld(query.cwd, query.branch),

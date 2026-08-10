@@ -40,6 +40,8 @@ Post-ADR-0089, identity is a **first-class entity** with its own table — no lo
 - **per-role attributes** — fleet identities have an additional row in `identity_<role>` (e.g. `identity_pr_agent`) with role-declared columns (`pr_repo`, `pr_number`, `gus_work`, …). The role's `identity-schema.toml` declares the columns; ccs materializes the table at boot.
 - **embodiment** — a session actively running in a **surface** (cmux pane) right now. **Liveness** is the presence of an embodiment. One identity has at most one live embodiment (the **one-embodiment rule**).
 - **lineage** — earlier sessions with the same identity_key, oldest→newest, so a fresh session can review prior attempts.
+- **incognito** — a session hidden from every ccs surface with no flag that reveals it, and excluded from the three paths that carry its content elsewhere: the enrichment sweep (which POSTs a transcript tail to a model gateway), predecessor lineage, and the world-state block composed into another session's prompt. Not a lifecycle state — the transcript is untouched and the session still resumes. `ccs session new --incognito` at birth is the only path that guarantees nothing was ever sent; marking later clears what was stored but cannot recall what left (ADR-0097).
+- **destroy** — the only ccs operation that removes a session rather than flagging it. `ccs session destroy <id>` prints a manifest and deletes nothing; `--confirm <id>`, with the id retyped in full, then closes any live workspace, unlinks the transcript and sidecars, and removes the catalogue, index, and FTS rows for the session and its descendants. Identities always survive (ADR-0098).
 
 ### Work grouping (how sessions are filed)
 

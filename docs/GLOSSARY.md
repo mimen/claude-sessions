@@ -154,6 +154,18 @@ Post-ADR-0089, identity is a first-class database row, not a computed tuple.
 - **supersede-dedup** — in a **cluster** resume, if a **work-unit** already has a live **session**, older
   dead siblings are *superseded* (not resumed), so one PR never gets duplicate panes. (`resume-cluster.ts`)
 - **retired** — a **session** marked **completed** or **archived**; never revived. (`catalogue/db-queries.ts:lifecycleOf`)
+- **incognito** — a **session** hidden from every ccs surface with no flag that reveals it, and excluded
+  from the three paths that carry its content elsewhere: the **enrichment** sweep, **predecessor** lineage,
+  and the world-state block. NOT a **lifecycle** state and not **retired** — the transcript is untouched
+  and the session still resumes. Contrast **archived**, which `--all` shows. (ADR-0097,
+  `catalogue/incognito.ts`, `catalogue/db-schema.ts`)
+- **destroy** — the only ccs operation that removes a **session** rather than flagging it: unlinks the
+  transcript, sidechains, and sidecars, then deletes the **catalogue**, **index**, and FTS rows for the
+  session and its descendants. Irreversible, two-step (**manifest** then `--confirm <id>`), and it never
+  removes an **identity**. (ADR-0098, `catalogue/destroy.ts`)
+- **manifest** (destroy) — the resolved footprint printed by a bare `ccs session destroy`: every session in
+  the subtree, every path, which are live, which **identities** survive, and which surfaces still mention
+  the session afterward. Deleting nothing is the point. (`catalogue/destroy.ts:buildManifest`)
 - **selector** — a token that resolves to **sessionId**s: an id, `#pr` / `repo#pr`, `W-id`, an **grouping**
   short-name, a **role**, or a **cluster**. (`resume/selector.ts`)
 

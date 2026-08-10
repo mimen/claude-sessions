@@ -1,6 +1,7 @@
 import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import type { SessionRow } from "../index/index.ts";
 import { SESSION_PROVENANCE_ROLLOUT_AT, SESSION_PROVENANCE_ROLLOUT_MS } from "../session-class.ts";
+import { isIncognito } from "../catalogue/incognito.ts";
 
 export type SessionIntegrityIssue = "unclassified" | "missing_provenance";
 
@@ -29,6 +30,11 @@ export function buildSessionIntegrityReport(
 
   for (const row of rows) {
     if (row.isSubagent || row.firstTs === null || Date.parse(row.firstTs) < rolloutMs) continue;
+    // Skipped before `checked` increments, not just before a finding is pushed: every finding this
+    // loop can emit carries the session id, project, and title, so an incognito row has to leave
+    // the report entirely rather than merely pass its checks. A marked session is excluded from
+    // birth-integrity auditing as a consequence -- that is the cost the guarantee charges.
+    if (isIncognito(catalogue.get(row.sessionId))) continue;
     checked++;
     const metadata = catalogue.get(row.sessionId);
     if (metadata?.sessionClass == null) {

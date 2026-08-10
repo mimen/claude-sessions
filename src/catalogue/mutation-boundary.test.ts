@@ -27,6 +27,7 @@ const SANCTIONED_MUTATION_IMPORTERS: Record<string, string> = {
   "src/catalogue/command.ts": "the natural-language catalogue editor command surface",
   "src/catalogue/session-fields-command.ts": "the atomic multi-field CLI command surface",
   "src/catalogue/historical-detached-child-backfill.ts": "the reviewed exact-manifest transactional backfill",
+  "src/catalogue/destroy.ts": "the confirmed irreversible session-destroy transaction and the incognito mark",
   "src/resume/new-session.ts": "the spawn primitive writes session birth metadata",
   "src/delegate/command.ts": "the delegated-child launcher reserves causal birth metadata",
   "src/hooks/register.ts": "the SessionStart hook stamps the session heartbeat",

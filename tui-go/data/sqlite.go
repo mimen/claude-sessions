@@ -48,6 +48,7 @@ type catalogueMeta struct {
 	ParkedTaskID    string
 	ParentSessionID string
 	SessionClass    string
+	Incognito       bool
 	IdentityKey     string
 	Cluster         string
 	Role            string
@@ -374,6 +375,11 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		prefixedColumn(catalogueColumns, "c", "enrichment_suggested_cwd", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "enrichment_at_messages", "0"),
 		prefixedColumn(catalogueColumns, "c", "enrichment_at", "NULL"),
+		// Appended LAST on purpose: the scan below is strictly positional, so a new column added
+		// anywhere else would silently shift every field after it into the wrong variable.
+		// Presence-guarded like the rest, defaulting to 0, so a catalogue written by a binary that
+		// predates the column reads as "not incognito" rather than failing to load at all.
+		prefixedColumn(catalogueColumns, "c", "incognito", "0"),
 	}
 	rows, err := db.Query("SELECT " + strings.Join(selected, ", ") + " FROM catalogue c" + identityJoin + prJoin)
 	if err != nil {
@@ -403,6 +409,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		var enrichState, enrichHistory, enrichNext, enrichRemaining sql.NullString
 		var enrichReason, enrichSuggestedLoc, enrichSuggestedCWD, enrichAt sql.NullString
 		var enrichJunk, enrichCWDCorrect, enrichAtMessages sql.NullInt64
+		var incognito int
 		if err := rows.Scan(
 			&row.SessionID,
 			&customTitle,
@@ -438,6 +445,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 			&enrichSuggestedCWD,
 			&enrichAtMessages,
 			&enrichAt,
+			&incognito,
 		); err != nil {
 			return nil, fmt.Errorf("scan catalogue row: %w", err)
 		}
@@ -454,6 +462,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		}
 		row.ParentSessionID = normalizeInline(parent.String)
 		row.SessionClass = normalizeInline(sessionClass.String)
+		row.Incognito = incognito != 0
 		row.IdentityKey = normalizeInline(identityKey.String)
 		row.Cluster = normalizeInline(cluster.String)
 		row.Role = normalizeInline(role.String)

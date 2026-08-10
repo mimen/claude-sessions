@@ -28,6 +28,7 @@ import type { Database } from "bun:sqlite";
 import { getIdentity } from "./identities.ts";
 import { registerShimBirth, rename, mark } from "./commands.ts";
 import { newSession, preflightNewSession } from "../resume/new-session.ts";
+import { destroyCommand, incognitoCommand } from "./destroy-command.ts";
 import { pushCmuxRename } from "../cmux/liveness.ts";
 import { getAllCategoryAssignments, resolveEffectiveCategory } from "../categories/assignment.ts";
 
@@ -72,6 +73,8 @@ export async function sessionCommand(args: string[]): Promise<number> {
     case "archive":  return doLifecycle(args.slice(1), ["--archived"]);
     case "uncomplete": return doLifecycle(args.slice(1), ["--completed", "--off"]);
     case "unarchive":  return doLifecycle(args.slice(1), ["--archived", "--off"]);
+    case "destroy":  return await destroyCommand(args.slice(1));
+    case "incognito": return incognitoCommand(args.slice(1));
     case "new":      return newSession(args.slice(1));
     case "preflight": return preflightNewSession(args.slice(1));
     case "shim-register": return doShimRegister(args.slice(1));
@@ -100,6 +103,9 @@ function usage(rc = 1): number {
   console.error("    --json returns a detached launch receipt with full session id, route, and workspace ref");
   console.error("    --identity=<key> requires matching --cluster=<c> and --role=<r>; legacy PR/GUS birth remains available");
   console.error("  ccs session bump <id> [--note=\"…\"]              wake this session's cmux tab");
+  console.error("  ccs session incognito [<id>|.] [--off]          hide from every listing; never enriched or quoted elsewhere");
+  console.error("  ccs session destroy <id|.> [--confirm <id>]     IRREVERSIBLE: erase the session and its subtree from disk");
+  console.error("    bare invocation prints the manifest and deletes nothing; --confirm must retype the id exactly");
   return rc;
 }
 

@@ -9,7 +9,7 @@ import { classifyCategory } from "../categories/classify.ts";
 import { setCategory } from "../categories/assignment.ts";
 import { openCatalogue, type CreatorKind, type LaunchChannel, type RoleDef } from "../catalogue/db-schema.ts";
 import { getRow, lifecycleOf, sessionsForWorkUnit } from "../catalogue/db-queries.ts";
-import { setCustomTitle, setKey, setParent, setSessionClass, setCreatorKind, setCreatorRef, setLaunchChannel, setForkedFromSessionId, setLauncherIdentity, setRole, setProject, setCluster, setResumeId, setGusWork, setWorkUnitId, setArchived, setMeta, stampPrFacts } from "../catalogue/db-mutations.ts";
+import { setCustomTitle, setKey, setParent, setSessionClass, setCreatorKind, setCreatorRef, setLaunchChannel, setForkedFromSessionId, setLauncherIdentity, setRole, setProject, setCluster, setResumeId, setGusWork, setWorkUnitId, setArchived, setMeta, setIncognito, stampPrFacts } from "../catalogue/db-mutations.ts";
 import pkg from "../../package.json" with { type: "json" };
 import { resolveWorkUnit } from "../catalogue/resolve-work-unit.ts";
 import { getIdentity } from "../catalogue/identities.ts";
@@ -143,6 +143,9 @@ export interface NewSessionOpts {
   model?: string;
   /** Host capabilities inferred by the conversational router and revalidated by CCS. */
   requiredCapabilities?: readonly string[];
+  /** Born hidden: excluded from every listing, from enrichment, and from other sessions' context.
+   * The only path that guarantees no turn of this session was ever sent anywhere. */
+  incognito?: boolean;
   /** Emit a structured local launch receipt. Remote launches always emit their pending receipt. */
   json?: boolean;
   /** Derived launch provenance for a model-policy role, explicit model, or location default. */
@@ -162,7 +165,7 @@ const VALUE_FLAGS = new Set([
   "--cluster", "--identity", "--role", "--skill", "--project", "--category", "--key", "--title", "--parent", "--child-of",
   "--gus-work", "--pr-number", "--pr-repo", "--cwd", "--location", "--host", "--prompt", "--permission-mode", "--via", "--model", "--require-capability",
 ]);
-const BOOLEAN_FLAGS = new Set(["--print-id", "--top-level", "--inline", "--json"]);
+const BOOLEAN_FLAGS = new Set(["--print-id", "--top-level", "--inline", "--json", "--incognito"]);
 
 interface ParsedOptions {
   values: Map<string, string>;
@@ -244,6 +247,7 @@ export function parseOpts(args: string[]): Result<NewSessionOpts> {
     via: values.get("--via"),
     model: values.get("--model"),
     requiredCapabilities: allValues.get("--require-capability") ?? [],
+    incognito: booleans.has("--incognito"),
     json: booleans.has("--json"),
   });
 }
@@ -633,6 +637,10 @@ function writeSessionMetadataTransaction(db: Database, id: string, opts: NewSess
   if (opts.locationKey) setMeta(db, id, "launch_location", opts.locationKey, now);
   if (opts.locationDefaultModel) setMeta(db, id, "launch_location_model", opts.locationDefaultModel, now);
   if (opts.parent) setParent(db, id, opts.parent, now);
+  // Stamped at birth, before the session has produced a single turn. This is the only way to be
+  // certain the enrichment sweep never sees the transcript at all -- marking later can only clear
+  // what was stored locally, not unsend what already went to the gateway.
+  if (opts.incognito) setIncognito(db, id, true, now);
   setSessionClass(db, id, opts.topLevel ? "work_body" : opts.parent ? "auxiliary" : null, now);
   // Optional until the machine adapter installs the canonical registry. An absent or invalid file
   // leaves birth behavior unchanged; auxiliary children consume effective inheritance on reads.

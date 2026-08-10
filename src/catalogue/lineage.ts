@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { CatalogueRow } from "./db-schema.ts";
 import { getAll, identityKeyOf } from "./db-queries.ts";
+import { isIncognito } from "./incognito.ts";
 
 /**
  * Identity lineage (ADR-0038): a durable identity may have had SEVERAL session embodiments over
@@ -50,6 +51,11 @@ export function predecessorsOf(
   const sibs: Embodiment[] = [];
   for (const [sid, row] of rows) {
     if (sid === sessionId) continue; // exclude self
+    // Filtered on the SIBLING, never on `self`: this list is content flowing OUT of a past session
+    // into a new one's context, so an incognito predecessor must not be offered. An incognito
+    // session still reads its own non-incognito lineage — the restriction is on what leaks from
+    // it, not on what it can see.
+    if (isIncognito(row)) continue;
     if (identityKey(row) !== key) continue;
     const t = transcriptPaths.get(sid) ?? { path: null, lastTs: null };
     sibs.push({

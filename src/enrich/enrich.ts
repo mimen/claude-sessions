@@ -10,6 +10,7 @@ import { requestEnrichment, TransientGatewayError, type EnrichOptions } from "./
 import { readWorldState, renderWorldBlock } from "./world.ts";
 import { recordSweepFailure, recordSweepSuccess } from "./health.ts";
 import { enrichmentStaleness, type StaleReason } from "./staleness.ts";
+import { incognitoSessionIds, isIncognito } from "../catalogue/incognito.ts";
 import { CATEGORY_REGISTRY_PATH, LOCATION_REGISTRY_PATH } from "../paths.ts";
 import { loadCategoryRegistry } from "../categories/registry.ts";
 import { categoryStaleness, type CategoryStaleReason } from "../categories/staleness.ts";
@@ -128,6 +129,10 @@ export function enrichCandidates(
   for (const row of listByRecency(index, false)) {
     if (row.isSubagent) continue;
     const catalogueRow = catalogueRows.get(row.sessionId);
+    // The load-bearing suppression. Enrichment POSTs a transcript tail to the model gateway, so
+    // for an incognito session this skip is the difference between the label meaning something
+    // and it meaning nothing at all.
+    if (isIncognito(catalogueRow)) continue;
     if (catalogueRow?.sessionClass === "auxiliary") continue;
     if (catalogueRow?.meta.workflowJournal === true || catalogueRow?.meta.workflow_journal === true || catalogueRow?.meta.journal === true) continue;
     const verdict = enrichmentStaleness({
@@ -260,7 +265,7 @@ export async function enrichOne(
     cwd: row.cwd,
     branch: row.branch,
     lastTs: row.lastTs,
-  });
+  }, incognitoSessionIds(catalogue));
 
   const response = await requestEnrichment(
     {

@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>ccs · session destroy and incognito sessions</title>
+<style>
+  :root {
+    --bg: #fbfaf8;
+    --panel: #ffffff;
+    --panel-alt: #f6f4ef;
+    --ink: #16150f;
+    --ink-soft: #55534a;
+    --ink-faint: #85837a;
+    --rule: #e3e0d8;
+    --rule-soft: #efece5;
+    --accent: #8c2f1c;
+    --accent-soft: #fbf1ec;
+    --keep: #2f6b46;
+    --keep-soft: #eff5f1;
+    --warn: #8a6212;
+    --warn-soft: #fdf6e6;
+    --code-bg: #f4f2ec;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131311;
+      --panel: #1b1b18;
+      --panel-alt: #201f1c;
+      --ink: #eeece5;
+      --ink-soft: #b0ada3;
+      --ink-faint: #807d74;
+      --rule: #33322d;
+      --rule-soft: #262521;
+      --accent: #e88b74;
+      --accent-soft: #251b17;
+      --keep: #7fc79c;
+      --keep-soft: #17211b;
+      --warn: #e0b354;
+      --warn-soft: #292116;
+      --code-bg: #232320;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16.5px;
+    line-height: 1.64;
+    -webkit-font-smoothing: antialiased;
+    counter-reset: dec;
+  }
+  .wrap { max-width: 63rem; margin: 0 auto; padding: 0 1.6rem 7rem; }
+  header.hero { padding: 4.6rem 0 2.1rem; }
+  .kicker {
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 1.1rem;
+  }
+  h1 {
+    font-family: var(--serif); font-weight: 600; font-size: clamp(2.3rem, 5.2vw, 3.45rem);
+    line-height: 1.06; letter-spacing: -.021em; margin: 0 0 1.15rem; max-width: 20ch;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-family: var(--serif); font-size: 1.26rem; line-height: 1.56;
+    color: var(--ink-soft); max-width: 60ch; margin: 0 0 2.1rem;
+    text-wrap: pretty;
+  }
+  .status-strip {
+    display: flex; flex-wrap: wrap; gap: .7rem 1.7rem; align-items: baseline;
+    font-family: var(--mono); font-size: .74rem; color: var(--ink-soft);
+  }
+  .status-strip .pill {
+    display: inline-block; padding: .32rem .75rem; border-radius: 2rem;
+    background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn);
+    letter-spacing: .06em; text-transform: uppercase; font-size: .68rem;
+    font-weight: 500;
+  }
+  .status-strip .meta { max-width: 100%; overflow-wrap: anywhere; }
+  .status-strip .lbl {
+    color: var(--ink-faint); text-transform: uppercase; letter-spacing: .13em;
+    font-size: .66rem; margin-right: .1rem;
+  }
+  .status-strip code { background: none; padding: 0; color: var(--ink-soft); }
+
+  nav.toc {
+    display: flex; flex-wrap: wrap; gap: .55rem 2rem;
+    padding: 1.05rem 0 1.1rem; margin: 0;
+    border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+    font-family: var(--mono); font-size: .74rem;
+  }
+  nav.toc a {
+    color: var(--ink-soft); text-decoration: none;
+    display: inline-flex; align-items: baseline; gap: .55rem;
+  }
+  nav.toc a b { color: var(--accent); font-weight: 500; }
+  nav.toc a:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+
+  h2 {
+    font-family: var(--serif); font-weight: 600; font-size: 1.95rem; letter-spacing: -.014em;
+    line-height: 1.16; margin: 4.4rem 0 .7rem; padding-top: 2.3rem;
+    border-top: 1px solid var(--rule); scroll-margin-top: 1.2rem;
+    text-wrap: balance;
+  }
+  h2:first-of-type { border-top: none; padding-top: 3rem; }
+  h2 .num {
+    font-family: var(--mono); font-size: .74rem; color: var(--accent);
+    display: block; letter-spacing: .18em; margin-bottom: .6rem; font-weight: 400;
+  }
+  h3 {
+    font-family: var(--sans); font-weight: 650; font-size: .82rem;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft);
+    margin: 2.6rem 0 .8rem;
+  }
+  p { margin: 0 0 1.05rem; max-width: 70ch; text-wrap: pretty; }
+  .lede {
+    font-size: 1.11rem; line-height: 1.6; color: var(--ink-soft);
+    max-width: 66ch; margin-bottom: 1.7rem;
+  }
+  ul, ol { max-width: 70ch; padding-left: 1.2rem; margin: 0 0 1.05rem; }
+  li { margin-bottom: .45rem; }
+  li::marker { color: var(--ink-faint); }
+  code {
+    font-family: var(--mono); font-size: .855em; background: var(--code-bg);
+    padding: .1em .34em; border-radius: 3px;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--rule-soft); border-radius: 6px;
+    padding: 1rem 1.1rem; overflow-x: auto; font-family: var(--mono);
+    font-size: .82rem; line-height: 1.6; margin: 0 0 1.4rem;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+  .decision {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 1.25rem 1.45rem 1.15rem; margin: 0 0 1.15rem;
+    border-radius: 0 7px 7px 0; border-top: 1px solid var(--rule-soft);
+    border-right: 1px solid var(--rule-soft); border-bottom: 1px solid var(--rule-soft);
+    counter-increment: dec;
+  }
+  .decision .q {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--ink-faint); margin: 0 0 .45rem;
+  }
+  .decision .q::before {
+    content: "D" counter(dec); color: var(--accent);
+    margin-right: .7rem; letter-spacing: .08em;
+  }
+  .decision .a {
+    font-weight: 650; margin: 0 0 .7rem; font-size: 1.06rem;
+    line-height: 1.42; letter-spacing: -.005em; text-wrap: pretty;
+  }
+  .decision p { max-width: 66ch; }
+  .decision p:last-child { margin-bottom: 0; }
+  .decision .rejected {
+    font-size: .9rem; line-height: 1.58; color: var(--ink-soft); margin: .8rem 0 0;
+    padding-top: .7rem; border-top: 1px dashed var(--rule);
+  }
+  .decision .rejected b {
+    color: var(--accent); font-weight: 600; font-family: var(--mono);
+    font-size: .72rem; letter-spacing: .09em; text-transform: uppercase;
+    margin-right: .15rem;
+  }
+  .decision .correction {
+    font-size: .9rem; line-height: 1.58; margin: .8rem 0 0;
+    padding: .8rem .95rem; border-radius: 5px;
+    background: var(--warn-soft); border: 1px solid var(--warn);
+    color: var(--ink-soft);
+  }
+  .decision .correction b {
+    color: var(--warn); font-weight: 650; display: block; margin-bottom: .25rem;
+    font-family: var(--sans); font-size: .84rem; letter-spacing: .01em;
+  }
+  dfn { font-style: normal; font-weight: 650; color: var(--ink); }
+
+  table { border-collapse: collapse; width: 100%; font-size: .87rem; margin: 0; }
+  .scroller {
+    overflow-x: auto; margin: 0 0 1.6rem;
+    border: 1px solid var(--rule); border-radius: 7px; background: var(--panel);
+  }
+  th, td {
+    text-align: left; padding: .62rem .8rem; border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top; line-height: 1.5;
+  }
+  th {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--ink-faint); font-weight: 500;
+    background: var(--panel-alt);
+    border-bottom: 1px solid var(--rule); white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--panel-alt); }
+  td code { font-size: .82em; }
+  tr.gone td:first-child { border-left: 3px solid var(--accent); padding-left: .95rem; }
+  tr.stays td:first-child { border-left: 3px solid var(--keep); padding-left: .95rem; }
+  tr.stays td b { color: var(--keep); }
+
+  .key {
+    display: flex; flex-wrap: wrap; gap: .4rem 1.5rem; margin: 0 0 .75rem;
+    font-family: var(--mono); font-size: .69rem; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+  .key span { display: inline-flex; align-items: center; gap: .5rem; }
+  .key i { width: 3px; height: .8rem; border-radius: 2px; display: inline-block; }
+  .key .k-gone i { background: var(--accent); }
+  .key .k-stays i { background: var(--keep); }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; margin: 0 0 1.6rem; }
+  @media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 7px;
+    padding: 1.25rem 1.35rem; border-top-width: 3px;
+  }
+  .card h4 {
+    margin: 0 0 .7rem; font-size: .78rem; font-family: var(--mono);
+    letter-spacing: .09em; text-transform: uppercase;
+  }
+  .card.gone { border-top-color: var(--accent); }
+  .card.stays { border-top-color: var(--keep); }
+  .card.gone h4 { color: var(--accent); }
+  .card.stays h4 { color: var(--keep); }
+  .card p { font-size: .93rem; line-height: 1.58; }
+  .card p:last-of-type {
+    font-weight: 600; color: var(--ink); padding-top: .7rem;
+    border-top: 1px solid var(--rule-soft);
+  }
+
+  .callout {
+    background: var(--warn-soft); border: 1px solid var(--warn);
+    border-radius: 7px; padding: 1.25rem 1.4rem; margin: 1.7rem 0;
+  }
+  .callout h4 {
+    margin: 0 0 .6rem; font-size: .74rem; font-family: var(--mono);
+    letter-spacing: .1em; text-transform: uppercase; color: var(--warn);
+  }
+  .callout p:last-child { margin-bottom: 0; }
+
+  figure {
+    margin: 2rem 0; background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 8px; padding: 1.5rem 1.5rem 1.25rem;
+  }
+  figure svg { display: block; width: 100%; height: auto; }
+  figcaption {
+    font-size: .82rem; color: var(--ink-faint); margin-top: 1.1rem;
+    padding-top: .95rem; border-top: 1px solid var(--rule-soft);
+    max-width: 72ch; line-height: 1.6;
+  }
+  .steps { counter-reset: step; list-style: none; padding: 0; max-width: 74ch; }
+  .steps li {
+    counter-increment: step; position: relative; padding-left: 2.6rem;
+    margin-bottom: .9rem;
+  }
+  .steps li::before {
+    content: counter(step); position: absolute; left: 0; top: .1rem;
+    font-family: var(--mono); font-size: .7rem; width: 1.7rem; height: 1.7rem;
+    border: 1px solid var(--rule); border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; color: var(--accent);
+    background: var(--panel);
+  }
+  footer.foot {
+    margin-top: 5rem; padding-top: 1.7rem; border-top: 1px solid var(--rule);
+    font-family: var(--mono); font-size: .72rem; color: var(--ink-faint);
+    line-height: 1.9;
+  }
+  footer.foot .lbl {
+    display: inline-block; min-width: 5.5rem; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  footer.foot code { background: none; padding: 0; }
+  footer.foot div { overflow-wrap: anywhere; }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    .wrap { padding: 0 1.15rem 5rem; }
+    header.hero { padding-top: 3rem; }
+    footer.foot .lbl { display: block; min-width: 0; }
+  }
+  @media print {
+    :root { --bg: #fff; --panel: #fff; --panel-alt: #fff; }
+    body { font-size: 10.5pt; }
+    .wrap { max-width: none; padding: 0; }
+    h2 { page-break-after: avoid; }
+    .decision, .callout, .card, figure, table, .steps li { page-break-inside: avoid; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">claude-sessions · implementation plan</p>
+  <h1>Destroying a session, and never recording one</h1>
+  <p class="standfirst">
+    Two independent capabilities for <code>ccs</code>: a command that erases a session from the
+    machine, and a session mode that keeps one out of every surface ccs writes. Today the tool has
+    neither. <code>archive</code> and <code>complete</code> are flags that explicitly leave the
+    transcript alone, and nothing in the entire command registry deletes anything.
+  </p>
+  <div class="status-strip">
+    <span class="pill">Shipped — held for review</span>
+    <span class="meta"><span class="lbl">Artifact</span> <code>/Users/mimen/Programming/Worktrees/ccs-destroy-incognito/docs/plans/session-destroy-and-incognito.html</code></span>
+    <span class="meta"><span class="lbl">Branch</span> <code>feat/session-destroy-and-incognito</code> off <code>origin/master @ 472b77d</code></span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#s01"><b>01</b> What is being built</a>
+  <a href="#s02"><b>02</b> What was decided, and what lost</a>
+  <a href="#s03"><b>03</b> Where the filter has to reach</a>
+  <a href="#s04"><b>04</b> What destroy actually deletes</a>
+  <a href="#s05"><b>05</b> The risk this plan accepts</a>
+  <a href="#s06"><b>06</b> Shape of the work</a>
+</nav>
+
+<h2 id="s01"><span class="num">01</span>What is being built</h2>
+
+<p class="lede">
+  These are two separate features that share a motivation. They are not layered on each other,
+  and either could ship without the other.
+</p>
+
+<div class="split">
+  <div class="card gone">
+    <h4>ccs session destroy</h4>
+    <p>
+      Erases a session and everything below it in the causal tree (transcripts, index rows,
+      catalogue rows, sidecar logs, task state, edit history) after closing any live processes
+      involved.
+    </p>
+    <p>Works on any session. Irreversible by design.</p>
+  </div>
+  <div class="card stays">
+    <h4>incognito sessions</h4>
+    <p>
+      A session marked incognito is excluded from every listing and aggregate, and, more
+      importantly, from the background machinery that would otherwise ship its transcript to a
+      model provider or splice it into another session's prompt.
+    </p>
+    <p>Nothing lists them. Nothing deletes them.</p>
+  </div>
+</div>
+
+<p>
+  The connection between them is narrow and deliberate: because nothing lists an incognito
+  session, <code>ccs session destroy .</code> from inside the running session is the practical way
+  to end one. That is a workflow, not a coupling. No code path in incognito calls destroy.
+</p>
+
+<h2 id="s02"><span class="num">02</span>What was decided, and what lost</h2>
+
+<p class="lede">
+  Nine decisions came out of scoping. Eight had a live alternative that was rejected for a stated
+  reason, and in most of those the rejected option was the more obvious choice until a specific
+  fact killed it. The exception (D7, what incognito suppresses) was not a choice between options
+  but a question of how far the suppression should extend, and the answer was: all of it.
+</p>
+
+<div class="decision">
+  <p class="q">Relationship between the two features</p>
+  <p class="a">Independent. Incognito does not auto-destroy.</p>
+  <p>
+    Browser incognito discards history on close, and copying that would have been the tidier
+    story. It was rejected on a mechanical ground: the only places to hang auto-destruction are
+    the Stop hook and the workspace-close path, and neither fires on a crash, a
+    <code>kill -9</code>, or a reboot. A privacy feature whose guarantee silently fails open,
+    leaving precisely the transcript the user believed was gone, is worse than one that never
+    promised.
+  </p>
+  <p class="rejected">
+    <b>Rejected:</b> auto-destroy on close; auto-destroy plus a reaper sweep to catch crashes.
+    The reaper closes the hole but introduces a background process that deletes real transcripts
+    unattended.
+  </p>
+</div>
+
+<div class="decision">
+  <p class="q">Blast radius of destroy</p>
+  <p class="a">Recursive. The entire <code>parent_session_id</code> subtree dies.</p>
+  <p>
+    The two descendant kinds are structurally unlike each other. Native subagents are stored
+    <em>inside</em> the parent's own directory at
+    <code>~/.claude/projects/&lt;slug&gt;/&lt;parent-id&gt;/subagents/agent-*.jsonl</code> and quote the
+    parent's task prompts verbatim, so leaving them would defeat the command outright. Delegated
+    children (<code>ccs delegate</code>, <code>ccs session new --child-of</code>) are independent
+    top-level sessions with their own workspaces. Recursion takes both.
+  </p>
+  <p class="rejected">
+    <b>Rejected:</b> destroying subagents but orphaning delegated children with a nulled parent
+    pointer. Gentler on a child someone is actively driving, but it leaves that child's
+    transcript, which quotes the parent's instructions, intact, and its spend attributed to a
+    session id that no longer exists.
+  </p>
+</div>
+
+<div class="decision">
+  <p class="q">Live sessions in the tree</p>
+  <p class="a">Close every live workspace first, then delete. Abort if any close fails.</p>
+  <p>
+    Half of this is forced by mechanics: a running <code>claude</code> process owns its JSONL and
+    re-flushes it each turn, so deleting the file underneath it produces a resurrected transcript.
+    The actual decision was the failure posture. Aborting the whole command when a close fails,
+    before deleting anything, is what keeps "destroyed" from quietly meaning "partially
+    destroyed." ccs already owns the verified close path (<code>src/cmux/close-current.ts</code>
+    does stable-UUID workspace verification, <code>src/cmux/reap.ts:220</code> closes by surface
+    id), so this is wiring rather than new machinery.
+  </p>
+  <p class="rejected">
+    <b>Rejected:</b> refusing outright when anything is live, which turns the common case
+    (destroy the session I am sitting in) into a chore; and best-effort closing, which risks the
+    exact resurrection the feature exists to prevent.
+  </p>
+</div>
+
+<div class="decision">
+  <p class="q">Confirmation</p>
+  <p class="a">Preflight by default; execute only when the id is typed twice.</p>
+  <p>
+    <code>ccs session destroy &lt;id&gt;</code> prints the full manifest and changes nothing.
+    <code>ccs session destroy &lt;id&gt; --confirm &lt;id&gt;</code> executes, and the two ids must
+    match. A <dfn>preflight</dfn>, throughout this plan, means a bare invocation that reports what
+    would happen and mutates nothing, which is the convention every destructive-ish verb in ccs
+    already follows. This gives the tool's only irreversible verb a stronger gate than the single
+    <code>--do</code> flag that currently guards closing a duplicate workspace, while staying
+    non-interactive so unattended callers do not hang.
+  </p>
+  <p class="rejected">
+    <b>Rejected:</b> a TTY prompt that asks the operator to type the id, and plain
+    <code>--do</code> (one fat-fingered flag away from an unrecoverable mistake). The TTY option
+    was rejected because a prompt makes the command unreachable to every agent, hook, and future
+    sweep, not because it would be unprecedented.
+  </p>
+  <p class="correction">
+    <b>Correction, after the decision was taken.</b> This decision was put to Milad with the
+    supporting claim that ccs has no interactive prompt anywhere in its codebase. That claim was
+    wrong. <code>ccs triage</code> runs a full <code>readline</code> question loop over stdin
+    (<code>src/enrich/triage-command.ts:115-117</code>), so an operator-facing prompt would in
+    fact have precedent. The other half of the rationale survives unchanged: a prompt would still
+    make destroy unusable from automation. Flagged in chat for Milad to re-decide rather than
+    silently kept.
+  </p>
+</div>
+
+<div class="decision">
+  <p class="q">Identities</p>
+  <p class="a">Never touched. Reported in the preflight instead.</p>
+  <p>
+    An identity (<code>cluster:role:work-ref</code>) is durable by design. The glossary is
+    explicit that a session is a vessel and the identity outlives it, and core identities like
+    <code>control</code> expect re-embodiment indefinitely. Deleting one because its last session
+    died would destroy a longer-lived thing than the operator named. The cost of this choice is
+    honest residue: <code>~/.ccs/clusters/&lt;c&gt;/identities/…/stop-context.md</code> and
+    <code>inbox/processed/*.md</code> hold session-authored prose that survives the destroy. The
+    preflight names those paths so they can be cleared deliberately.
+  </p>
+  <p class="rejected">
+    <b>Rejected:</b> cascading identity deletion once no session references it, which wipes core
+    identities that are merely between embodiments; and a <code>--with-identity</code> opt-in,
+    which adds another lever to the most dangerous command in the tool.
+  </p>
+</div>
+
+<div class="decision">
+  <p class="q">Residue in files ccs does not own</p>
+  <p class="a">Erase everything ccs owns. Name everything that survives.</p>
+  <p>
+    cmux writes <code>~/.cmuxterm/workstream.jsonl</code> (currently 438 MB, append-only, held
+    open by a live process) alongside a 14 MB <code>events.jsonl</code>. Rewriting another
+    tool's live log to scrub lines risks corrupting it, and an APFS local snapshot is a read-only
+    point-in-time copy, so the only way to remove a file from one is to delete the entire
+    snapshot, which is far outside what this command should reach for. That makes the truthfulness of the
+    command's report its single most important property: both the preflight and the completion
+    output enumerate the surfaces that will still hold traces, so "destroyed" is never read as a
+    guarantee the tool cannot make.
+  </p>
+  <p class="rejected">
+    <b>Rejected:</b> line-scrubbing cmux and crash logs; purging <code>~/.ccs/backups/*.db</code>
+    snapshots, which exist to protect every <em>other</em> session from exactly this class of
+    mistake.
+  </p>
+</div>
+
+<div class="decision">
+  <p class="q">What incognito suppresses</p>
+  <p class="a">All four: enrichment and titling, cross-session context injection, cost aggregates, board and export.</p>
+  <p>
+    The load-bearing fact is that enrichment is not a local operation.
+    <code>src/enrich/gateway.ts:202</code> POSTs the transcript tail to
+    <code>127.0.0.1:8317</code>, the claude-gpt proxy, which forwards to a model provider. So
+    today every session's content leaves the machine automatically, via the launchd sweep and
+    again via <code>finish-current</code> on close. Separately,
+    <code>resolvePredecessors</code> (<code>lineage.ts:79</code>) and
+    <code>readSessionsSince</code> (<code>world.ts:174</code>) compose prior-session content into
+    a <em>different</em> session's prompt. Hiding a row in a list while still shipping its
+    transcript offsite and splicing it sideways into unrelated sessions would make the label a
+    lie.
+  </p>
+</div>
+
+<div class="decision">
+  <p class="q">Carrier, entry, and discoverability</p>
+  <p class="a">A boolean column on <code>catalogue</code>; settable at birth and mid-session; nothing lists them.</p>
+  <p>
+    Tags were the obvious carrier and are the wrong one. <code>session_tags</code> has
+    <em>zero</em> readers in any listing path (not <code>ccs ls</code>, not the Go TUI, not
+    <code>catalogue export</code>), so implementing incognito as a tag would mean adding a brand
+    new join at all sixteen sites enumerated in the next section. The two attributes that already
+    hide sessions (<code>archived</code>, and the <code>auxiliary</code> session class used for
+    subagent-shaped bodies) work because they are columns on <code>catalogue</code>, which is why
+    a single expression at <code>cli.ts:526</code> and <code>load.go:136</code> covers them. In
+    addition, <code>session_class</code> feeds the pre-computed
+    <code>catalogue_hidden_sessions</code> table that the whole cross-product protocol reads
+    through a single predicate.
+  </p>
+  <p>
+    Both entry points ship. <code>ccs session new --incognito</code> is airtight: no window
+    exists in which the session was ever enriched. <code>ccs incognito .</code> handles the
+    session that turns sensitive halfway through, and additionally deletes any enrichment already
+    stored, so a sweep that ran before the mark is undone locally.
+  </p>
+  <p class="rejected">
+    <b>Rejected:</b> a third <code>session_class</code> value. It would conflate two orthogonal
+    axes: a session can legitimately be both auxiliary and incognito, and one column cannot say
+    both.
+  </p>
+</div>
+
+<div class="decision">
+  <p class="q">Slash commands</p>
+  <p class="a"><code>/ccs:incognito</code> sets the mode. <code>/ccs:destroy</code> previews and then waits for a human.</p>
+  <p>
+    The naming avoids a live collision. <code>/ccs:archive</code> already exists and already means
+    "hide this session from active views without touching its transcript," so calling the new one
+    <code>/ccs:hide</code> would give the much stronger operation the weaker word, and leave two
+    near-synonymous commands where only one of them stops a transcript being shipped to a model
+    provider.
+  </p>
+  <p>
+    The destroy flow is the more consequential half, because a slash command is typed by the
+    <em>agent</em>, not the operator. Had <code>/ccs:destroy</code> run the preflight and then
+    immediately re-invoked with <code>--confirm</code>, the double-id check would have protected
+    nothing: the same process would supply both ids from one variable, and the entire gate would
+    collapse into the act of emitting one command. So the command runs the bare preflight, prints
+    the manifest, and stops. Execution requires an explicit go-ahead in the next message. The
+    human confirmation moves into chat, where it can actually be read before an irreversible
+    recursive delete, and the CLI gate keeps its meaning because a person authorized the second
+    half of it.
+  </p>
+  <p class="rejected">
+    <b>Rejected:</b> preview-and-execute in one shot, which scrolls the manifest past <em>after</em>
+    the deletion and lets any loop that can emit the command destroy a subtree; and preview-only,
+    which never lets an agent execute at all but adds a copy-paste step to every use.
+  </p>
+</div>
+
+<h2 id="s03"><span class="num">03</span>Where the filter has to reach</h2>
+
+<p class="lede">
+  There is no single choke point. Of the sixteen places that would need to know about incognito,
+  exactly two are shared filter chains that many surfaces read through. The other fourteen each
+  re-derive the same predicate by hand, because the TypeScript side has no shared filter helper at
+  all. This breadth, not any single hard problem, is the bulk of the incognito work.
+</p>
+
+<figure>
+<svg viewBox="0 0 900 340" role="img" aria-label="Diagram showing one catalogue column feeding two filter choke points, plus fourteen hand-rolled predicates that must each be updated individually">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <g font-family="ui-monospace, Menlo, monospace" fill="currentColor">
+
+    <rect x="20" y="20" width="200" height="52" rx="5" fill="var(--panel-alt)" stroke="currentColor" stroke-width="1.5"/>
+    <text x="34" y="41" font-size="10.5" font-weight="600">catalogue.incognito</text>
+    <text x="34" y="58" font-size="9.5" opacity=".7">one boolean column</text>
+
+    <path d="M 224 46 L 292 46" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)" fill="none" opacity=".55"/>
+
+    <rect x="300" y="12" width="230" height="68" rx="5" fill="var(--keep-soft)" stroke="var(--keep)" stroke-width="1.5"/>
+    <text x="314" y="32" font-size="10.5" font-weight="600">catalogue_hidden_sessions</text>
+    <text x="314" y="48" font-size="9.5" opacity=".7">authority.ts:512 · one line added</text>
+    <text x="314" y="63" font-size="9.5" opacity=".7">to the existing sync SELECT</text>
+
+    <path d="M 534 46 L 600 46" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)" fill="none" opacity=".55"/>
+    <rect x="608" y="12" width="270" height="68" rx="5" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>
+    <text x="622" y="32" font-size="10" font-weight="600">ROOT_SOURCE_PREDICATE</text>
+    <text x="622" y="48" font-size="9.5" opacity=".7">query.ts:61 · inherited free</text>
+    <text x="622" y="63" font-size="9.5" opacity=".7">covers all 3 protocol queries</text>
+
+    <path d="M 120 76 L 120 128" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)" fill="none" opacity=".55"/>
+    <rect x="20" y="136" width="230" height="68" rx="5" fill="var(--keep-soft)" stroke="var(--keep)" stroke-width="1.5"/>
+    <text x="34" y="156" font-size="10.5" font-weight="600">includeSession()</text>
+    <text x="34" y="172" font-size="9.5" opacity=".7">tui-go/data/load.go:136</text>
+    <text x="34" y="187" font-size="9.5" opacity=".7">covers the entire Go TUI</text>
+
+    <path d="M 254 170 L 320 170" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)" fill="none" opacity=".55"/>
+    <rect x="328" y="136" width="230" height="68" rx="5" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>
+    <text x="342" y="156" font-size="10" font-weight="600">list · tree · search · rows</text>
+    <text x="342" y="172" font-size="9.5" opacity=".7">all read the filtered slice</text>
+    <text x="342" y="187" font-size="9.5" opacity=".7">buildStats bypasses it</text>
+
+    <path d="M 120 208 L 120 254" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)" fill="none" opacity=".55"/>
+    <rect x="20" y="262" width="858" height="58" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+    <text x="34" y="282" font-size="10.5" font-weight="600">…and 14 hand-rolled predicates with no shared helper</text>
+    <text x="34" y="300" font-size="9.5" opacity=".72">cli.ts:526 · cli.ts:576 · enrich.ts:86 · triage.ts:74 · triage.ts:136 · lineage.ts:80 · world.ts:178 · export-command.ts:134 · default-composer.ts:10 · seven sessionsFor* queries in db.ts</text>
+  </g>
+</svg>
+<figcaption>
+  Two insertion points do most of the work. One line in the
+  <code>catalogue_hidden_sessions</code> sync gives the whole cross-product HTTP protocol the
+  filter for free, with cursor invalidation included, and <code>includeSession()</code> covers the
+  Go TUI's list, tree, and search in a single function. Everything below that line is an
+  individual site that re-derives the same predicate by hand.
+</figcaption>
+</figure>
+
+<p>
+  Two traps in that bottom row deserve naming, because both fail silently. The Go TUI's
+  <code>buildStats</code> (<code>load.go:453</code>) iterates the <em>raw</em> indexed rows rather
+  than the filtered set, so spend leaks straight past <code>includeSession()</code> unless it is
+  handled separately. And <code>src/hooks/compose-predecessors.ts:27</code> feeds
+  <code>resolvePredecessors</code> output into turn injection, the one path where an incognito
+  session's content would surface inside a different session's context window rather than merely
+  appearing in a list.
+</p>
+
+<h2 id="s04"><span class="num">04</span>What destroy actually deletes</h2>
+
+<p class="lede">
+  There are zero foreign keys and zero cascades in <code>catalogue.db</code>:
+  <code>PRAGMA foreign_key_list</code> comes back empty for every table. Every row in every table
+  must be deleted explicitly, in a known order.
+</p>
+
+<div class="key">
+  <span class="k-gone"><i></i>Deleted by destroy</span>
+  <span class="k-stays"><i></i>Survives, and is named in the report</span>
+</div>
+
+<div class="scroller">
+<table>
+  <thead>
+    <tr><th>Surface</th><th>Key</th><th>Note</th></tr>
+  </thead>
+  <tbody>
+    <tr class="gone"><td><code>~/.claude/projects/&lt;slug&gt;/&lt;id&gt;.jsonl</code></td><td>session uuid</td><td>plus every path in the index's <code>shadow_paths</code> array; a session that moved worktrees has more than one file</td></tr>
+    <tr class="gone"><td><code>&lt;id&gt;/subagents/*.jsonl</code> + <code>.meta.json</code></td><td>parent uuid dir</td><td>native subagent transcripts, stored inside the parent's own folder</td></tr>
+    <tr class="gone"><td><code>~/.claude/tasks/&lt;id&gt;/</code></td><td>session uuid</td><td>TaskCreate / TaskUpdate state</td></tr>
+    <tr class="gone"><td><code>~/.claude/file-history/&lt;id&gt;/</code></td><td>session uuid</td><td>edit-undo history: real file content, and not referenced by ccs today</td></tr>
+    <tr class="gone"><td><code>~/.claude/session-env/&lt;id&gt;/</code></td><td>session uuid</td><td>not referenced by ccs today</td></tr>
+    <tr class="gone"><td><code>~/.ccs/enrich/&lt;id&gt;.log</code></td><td>session uuid</td><td>nothing currently cleans these; roughly 40 exist</td></tr>
+    <tr class="gone"><td><code>~/.ccs/self-check/&lt;id&gt;.{log,last-prompt.md}</code> + <code>locks/</code></td><td>session uuid</td><td><code>last-prompt.md</code> holds verbatim prompt text</td></tr>
+    <tr class="gone"><td><code>catalogue</code>, <code>session_tags</code></td><td>session_id</td><td>the main row and its entity tags</td></tr>
+    <tr class="gone"><td><code>session_category_assignments</code>, <code>session_category_attempts</code></td><td>session_id</td><td>owned by <code>db-schema.ts</code>; still deleted behind a table-existence guard so an older store does not fail the transaction</td></tr>
+    <tr class="gone"><td><code>index.sessions</code>, <code>sessions_fts</code>, <code>catalogue_hidden_sessions</code></td><td>session_id</td><td>the index self-heals for <code>sessions</code>, but FTS and the hidden table need explicit deletes</td></tr>
+    <tr class="stays"><td><code>identities</code>, <code>identity_state</code>, <code>inboxes</code>, <code>identity_&lt;role&gt;</code></td><td>identity_key</td><td><b>Survives.</b> Shared durable state, reported rather than deleted</td></tr>
+    <tr class="stays"><td><code>~/.cmuxterm/{events,workstream}.jsonl</code></td><td>n/a</td><td><b>Survives.</b> cmux-owned, append-only, 452 MB combined</td></tr>
+    <tr class="stays"><td><code>~/.ccs/backups/*.db</code>, <code>crash.log</code>, launchd logs</td><td>n/a</td><td><b>Survives.</b> Recovery snapshots and rotating breadcrumbs</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="callout">
+  <h4>Correction: the category tables are owned</h4>
+  <p>
+    An earlier draft of this plan claimed <code>session_category_assignments</code> and its
+    siblings had no <code>CREATE TABLE</code> anywhere in <code>src/</code> and were therefore
+    schema drift from an outside writer. That was wrong — it came from reading a stale local
+    <code>master</code>. On <code>origin/master</code> they are created and owned by
+    <code>db-schema.ts</code>, alongside every other catalogue table. There is no drift to
+    resolve. Destroy still guards on table existence before deleting, because a store created by
+    an older binary genuinely may not have them, and an unguarded <code>DELETE</code> would fail
+    the whole transaction.
+  </p>
+</div>
+
+<h3>Order of operations</h3>
+<ol class="steps">
+  <li>Resolve the subtree by walking <code>parent_session_id</code>, and read <code>index.sessions</code> for each member's <code>path</code> and <code>shadow_paths</code>. That index row is the <em>only</em> record of where the transcript files are, so it must be read before anything is deleted.</li>
+  <li>Print the manifest. Without <code>--confirm</code>, stop here.</li>
+  <li>Close every live workspace in the tree through the verified close path and wait for exit. Any failure aborts before a single deletion.</li>
+  <li>Delete transcripts: the primary path, every shadow path, and the <code>subagents/</code> directory.</li>
+  <li>Delete the Claude Code sidecars and the ccs per-session logs.</li>
+  <li>Delete catalogue rows in one transaction, then index rows and FTS entries.</li>
+  <li>Print what was destroyed, and what still holds traces.</li>
+</ol>
+
+<h2 id="s05"><span class="num">05</span>The risk this plan accepts</h2>
+
+<div class="callout">
+  <h4>Incognito sessions accumulate invisibly, forever</h4>
+  <p>
+    Because nothing lists them and nothing deletes them, an incognito session closed without an
+    explicit <code>ccs session destroy .</code> (a crash, a force-quit, or simply forgetting)
+    persists on disk permanently with no ccs command able to surface it. Its transcript stays, its
+    spend stays, and it becomes reachable only by reading <code>~/.claude/projects</code> by hand
+    and passing the id to destroy directly, which does still work.
+  </p>
+  <p>
+    Two ways out of this were offered and both were rejected. An <code>ls --incognito</code> flag
+    would list them on request, mirroring how <code>--all</code> already reveals archived sessions,
+    but it means one command exists that enumerates the private set, which defeats the point of
+    the mode. A retention sweep would auto-destroy incognito sessions past some age, but that is
+    unattended deletion of real transcripts on a timer, and a timer set wrong deletes work nobody
+    asked it to.
+  </p>
+</div>
+
+<h2 id="s06"><span class="num">06</span>Shape of the work</h2>
+
+<p class="lede">
+  The catalogue schema is at <code>CATALOGUE_VERSION = 40</code>
+  (<code>src/catalogue/db-schema.ts</code>), and <strong>v41 is already claimed</strong> by an
+  in-flight enrichment branch that drops the <code>enrichment_*</code> columns. Stamping past it
+  here would make that branch's <code>v &lt; 41</code> check false on a live store and silently skip
+  a drop it believes it performed. So <code>incognito</code> lands <em>off the version ladder</em>,
+  behind a <code>hasColumn</code> presence guard, following the <code>enrichment_declined</code>
+  precedent already in the same file. <code>CATALOGUE_VERSION</code> stays at 40 and the two
+  branches do not collide.
+</p>
+<p class="lede">
+  The version-gated blocks keep their existing discipline either way: <code>migrate()</code> opens
+  <code>BEGIN IMMEDIATE</code>, applies each block, then runs
+  <code>validateSchemaPostcondition</code> <em>before</em> <code>COMMIT</code>, so a migration that
+  produces a malformed schema rolls back both the DDL and the version stamp together.
+</p>
+
+<div class="scroller">
+<table>
+  <thead><tr><th>Area</th><th>Files</th><th>Work</th></tr></thead>
+  <tbody>
+    <tr><td>Schema</td><td><code>catalogue/db-schema.ts</code></td><td>presence-guarded off-ladder <code>incognito</code> column plus a partial index; getter and setter routed through the existing mutation boundary (ADR-0068: only sanctioned modules mutate the catalogue)</td></tr>
+    <tr><td>Destroy</td><td>new <code>catalogue/destroy.ts</code>, <code>session-command.ts</code>, <code>cli.ts</code></td><td>subtree resolution, manifest, close orchestration, ordered deletion, residue report</td></tr>
+    <tr><td>Incognito writes</td><td><code>resume/new-session.ts</code>, <code>session-command.ts</code>, <code>cli.ts</code></td><td><code>--incognito</code> at birth; <code>ccs incognito</code> mid-session, including stored-enrichment cleanup</td></tr>
+    <tr><td>Filter (TypeScript)</td><td><code>catalogue-service/authority.ts</code>, <code>cli.ts</code> ×2, <code>enrich/{enrich,triage}.ts</code>, <code>lineage.ts</code>, <code>world.ts</code>, <code>export-command.ts</code>, <code>board/default-composer.ts</code>, <code>categories/analytics.ts</code>, <code>sidebar/{catalogue-read,snapshot}.ts</code>, <code>doctor/session-integrity.ts</code>, <code>resume/resume-session.ts</code>, seven <code>sessionsFor*</code> queries</td><td>the breadth of the feature; the authority change covers the whole protocol surface in one line. <code>sidebar/</code>, <code>categories/</code>, <code>doctor/</code>, and the live-sibling resume warning were found after the first scope pass and are additions to it</td></tr>
+    <tr><td>Filter (Go)</td><td><code>tui-go/data/{load,sqlite}.go</code></td><td><code>includeSession()</code>, plus the separate <code>buildStats</code> spend fix</td></tr>
+    <tr><td>Slash commands</td><td><code>plugins/ccs/commands/{incognito,destroy}.md</code></td><td>per D9: <code>/ccs:incognito</code> sets the mode; <code>/ccs:destroy</code> is preflight-then-stop, and its prose must forbid re-invoking with <code>--confirm</code> in the same turn</td></tr>
+    <tr><td>Docs</td><td><code>docs/adr/</code>, <code>docs/GLOSSARY.md</code>, <code>CONTEXT.md</code></td><td>one ADR per feature; glossary entries defining <em>destroy</em> and <em>incognito</em></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Verification</h3>
+<p>
+  Beyond <code>bun test</code> and <code>tsc --noEmit</code>, three properties are worth pinning
+  with tests, because each one fails silently if it regresses:
+</p>
+<ul>
+  <li>Destroy against a fixture store (<code>$CCS_ROOT</code> plus a temp Claude home) leaves <em>no</em> file or row mentioning the session id, across every surface in the table above.</li>
+  <li>An abort, triggered by a close that fails, deletes nothing at all.</li>
+  <li>An incognito session never appears in <code>enrichCandidates</code>, <code>resolvePredecessors</code>, or <code>readSessionsSince</code>. This is the property that makes the label honest, and the one most likely to rot quietly.</li>
+</ul>
+
+<p>
+  Work happens on <code>feat/session-destroy-and-incognito</code> in an isolated worktree off
+  fresh <code>origin/master</code>. Because <code>ccs</code> is fleet infrastructure and this adds
+  its first irreversible command, the branch will be committed and pushed but
+  <strong>held for review rather than self-merged</strong>.
+</p>
+
+<h2 id="s07"><span class="num">07</span>What actually shipped</h2>
+
+<p class="lede">
+  Built on <code>feat/session-destroy-and-incognito</code>, 2026-08-09. Two ADRs record the
+  decisions: <a href="../adr/0097-incognito-is-a-session-column-not-a-tag.md">ADR-0097</a>
+  (incognito) and <a href="../adr/0098-destroy-closes-before-it-deletes.md">ADR-0098</a> (destroy).
+</p>
+
+<h3>Where the build diverged from the plan</h3>
+
+<ul>
+  <li>
+    <strong>The schema change is off the version ladder.</strong> The plan said v41; v41 turned out
+    to be reserved by an in-flight enrichment branch, so the column landed presence-guarded with
+    <code>CATALOGUE_VERSION</code> unchanged at 40. Section 06 above is corrected.
+  </li>
+  <li>
+    <strong>Four filter sites were missed by the original scope pass.</strong>
+    <code>sidebar/{catalogue-read,snapshot}.ts</code>, <code>categories/analytics.ts</code>,
+    <code>doctor/session-integrity.ts</code>, and the live-sibling warning in
+    <code>resume/resume-session.ts</code> all name or print session ids and were added.
+  </li>
+  <li>
+    <strong>Two aggregate counters leaked what the row filters hid.</strong> The
+    <code>ccs ls</code> footer computes <code>rows.length - shown</code> and reports it as
+    "N hidden … <code>--all</code> to show" — which would have announced an incognito session's
+    existence while pointing at a flag that does not reveal it. The Go dashboard's
+    <code>buildStats</code> sums <code>Spend</code> over raw index rows, bypassing
+    <code>includeSession</code> entirely, so an incognito session moved the visible total. Both are
+    fixed by removing incognito rows from the input rather than skipping them at render time.
+  </li>
+  <li>
+    <strong>Incognito costs birth-integrity auditing.</strong> Every finding
+    <code>ccs doctor sessions</code> emits carries the session id, project, and title, so a marked
+    session had to leave that report entirely rather than merely pass its checks.
+  </li>
+  <li>
+    <strong>The sidebar cannot filter when the catalogue is unreadable.</strong> The catalogue is
+    the only record of which sessions are marked. This degrades identically to the existing
+    auxiliary exclusion, and is a broken-machine state rather than a routine one.
+  </li>
+</ul>
+
+<h3>Risks the plan flagged, and how they turned out</h3>
+
+<ul>
+  <li>
+    <strong>Real.</strong> The plan's concern that a mid-session mark is inherently late holds: the
+    enrichment sweep may already have POSTed a transcript tail. <code>markIncognito</code> clears
+    the stored row, which is the only half still undoable locally. The CLI and the
+    <code>/ccs:incognito</code> command both say so out loud, and <code>--incognito</code> at birth
+    is presented as the airtight path.
+  </li>
+  <li>
+    <strong>Real, and it is why the ordering is what it is.</strong> A live <code>claude</code>
+    re-flushes its transcript each turn, so the close-first ordering is load-bearing rather than
+    defensive. It is pinned by a test that fails a close and asserts every path still exists.
+  </li>
+  <li>
+    <strong>Unresolved by design.</strong> Backups are per-store, not per-session, so recovering
+    from a mis-aimed destroy means restoring a whole catalogue or nothing. The two-step confirm and
+    the manifest are the mitigation; there is no undo.
+  </li>
+</ul>
+
+<h3>Verification</h3>
+<p>
+  <code>tsc --noEmit</code> (both projects) clean, <code>go build ./...</code> and
+  <code>go test ./...</code> clean, and eight new tests in
+  <code>src/catalogue/{destroy,incognito}.test.ts</code> pin the three properties named above. The
+  CLI was exercised end to end against a scratch <code>$CCS_ROOT</code>: manifest, confirm
+  mismatch, incognito mark, <code>ccs ls</code> with and without <code>--all</code>, and the
+  destroy itself.
+</p>
+
+<footer class="foot">
+  <div><span class="lbl">Plan</span><code>/Users/mimen/Programming/Repos/claude-sessions/docs/plans/session-destroy-and-incognito.html</code></div>
+  <div><span class="lbl">Status</span>Shipped on <code>feat/session-destroy-and-incognito</code>; held for review rather than self-merged.</div>
+  <div><span class="lbl">Sources</span><code>src/catalogue/db-schema.ts</code> · <code>src/catalogue-service/{authority,query}.ts</code> · <code>src/enrich/gateway.ts</code> · <code>tui-go/data/load.go</code> · <code>src/index/{schema,index}.ts</code></div>
+</footer>
+
+</div>
+
+<script>
+  (function () {
+    var KEY = "ccs-destroy-incognito-plan-scroll";
+    try {
+      var saved = sessionStorage.getItem(KEY);
+      if (saved !== null) window.scrollTo(0, parseInt(saved, 10) || 0);
+    } catch (e) {}
+    window.addEventListener("scroll", function () {
+      try { sessionStorage.setItem(KEY, String(window.scrollY)); } catch (e) {}
+    }, { passive: true });
+  })();
+</script>
+</html>

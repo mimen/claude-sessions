@@ -14,6 +14,7 @@ import type { Bridge } from "../cmux/bridge.ts";
 import { liveBridge } from "../cmux/live.ts";
 import { type RoleDef } from "../catalogue/db-schema.ts";
 import { getRow, getAll, lifecycleOf } from "../catalogue/db-queries.ts";
+import { isIncognito } from "../catalogue/incognito.ts";
 import { identityKey } from "../catalogue/lineage.ts";
 import { resolveRole } from "../roles/role-files.ts";
 import { readClusterManifest, type ClusterManifest } from "../cluster/manifest.ts";
@@ -308,6 +309,7 @@ function warnLiveSiblings(catalogueDb: Database, bridge: Bridge, selfId: string,
     const siblings: string[] = [];
     for (const [sid, row] of getAll(catalogueDb)) {
       if (sid === selfId) continue;
+      if (isIncognito(row)) continue; // this warning prints session ids; an incognito twin stays unnamed
       const lc = lifecycleOf(row);
       if (lc === "completed" || lc === "archived") continue; // retired can't be a live twin
       if (identityKey(row) !== key) continue;

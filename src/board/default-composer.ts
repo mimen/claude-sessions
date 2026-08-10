@@ -1,5 +1,6 @@
 import { openCatalogue } from "../catalogue/db-schema.ts";
 import { getAll, identityKeyOf } from "../catalogue/db-queries.ts";
+import { isIncognito } from "../catalogue/incognito.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import type { Board, BoardRow } from "./types.ts";
 import { readBoard, writeBoard } from "./paths.ts";
@@ -9,6 +10,7 @@ export function runDefaultComposer(cluster: string, opts: { identity?: string } 
   const catalogueDb = openCatalogue(CATALOGUE_PATH());
   const rows: BoardRow[] = [];
   for (const [sid, catRow] of getAll(catalogueDb)) {
+    if (isIncognito(catRow)) continue;
     if (catRow.cluster !== cluster) continue;
     const identity = identityKeyOf(catRow);
     if (!identity) continue;

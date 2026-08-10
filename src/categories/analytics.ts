@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { openCatalogue } from "../catalogue/db-schema.ts";
 import { getAll, lifecycleOf, parentEdges } from "../catalogue/db-queries.ts";
+import { isIncognito } from "../catalogue/incognito.ts";
 import { formatCost } from "../cost.ts";
 import { listByRecency } from "../index/index.ts";
 import { buildCostRollup } from "../index/cost-rollup.ts";
@@ -47,6 +48,7 @@ export function buildCategoryAnalytics(index: Database, catalogue: Database, now
   const eligible = indexed.filter((row) => {
     const stored = rows.get(row.sessionId);
     return !row.isSubagent
+      && !isIncognito(stored)
       && stored?.sessionClass !== "auxiliary"
       && stored?.meta.workflowJournal !== true
       && stored?.meta.workflow_journal !== true

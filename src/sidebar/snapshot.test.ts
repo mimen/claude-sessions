@@ -125,6 +125,7 @@ function catalogueRead(rows: ReadonlyArray<{
     memberships: new Map(),
     sessionIds,
     auxiliary: new Set(),
+    incognito: new Set(),
     summaries: new Map(),
   };
   return { status: "ok", facts };

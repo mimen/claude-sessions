@@ -568,6 +568,10 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       memberships: new Map<string, SidebarMembership>(),
       // Nothing is known to be auxiliary when the catalogue is unreadable, so nothing is hidden.
       auxiliary: new Set<string>(),
+      // Incognito degrades the same way, and cannot do better: the catalogue is the only record of
+      // which sessions are marked, so an unreadable one leaves the sidebar with nothing to filter
+      // on. This is a broken-machine state, not a routine one -- the warning above is the signal.
+      incognito: new Set<string>(),
       summaries: new Map<string, StoredEnrichment>(),
       sessionIds: new Map<SidebarLifecycle, readonly string[]>([
         ["active", []],
@@ -730,7 +734,11 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       // because a running agent is something you may need to act on.
       const visible = index.sessions.filter(
         (session) => !catalogue.auxiliary.has(session.sessionId)
-          && !catalogue.auxiliary.has(session.resumeId),
+          && !catalogue.auxiliary.has(session.resumeId)
+          // Incognito hides unconditionally, including for a live session -- the reason a delegated
+          // seat still shows while running does not apply to a session the user asked to hide.
+          && !catalogue.incognito.has(session.sessionId)
+          && !catalogue.incognito.has(session.resumeId),
       );
       // Only rows carrying an enrichment worth aging pay for any of this. The index refreshes on a
       // timer, so its message count trails a session that is still typing; reading the bytes it has

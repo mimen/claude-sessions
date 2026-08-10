@@ -25,6 +25,13 @@ export interface CatalogueSnapshotFacts {
   readonly memberships: ReadonlyMap<string, SidebarMembership>;
   readonly sessionIds: ReadonlyMap<SidebarLifecycle, readonly string[]>;
   readonly auxiliary: ReadonlySet<string>;
+  /**
+   * Sessions marked incognito, by canonical id and resume alias. They are absent from every map
+   * above — no lifecycle, title, membership, or summary is projected for them — but the sidebar's
+   * session list comes from the Index, not from here, so their ids still have to travel out so the
+   * caller can drop the index rows that would otherwise render with degraded defaults.
+   */
+  readonly incognito: ReadonlySet<string>;
   readonly summaries: ReadonlyMap<string, StoredEnrichment>;
 }
 
@@ -46,6 +53,7 @@ interface CatalogueQueryRow {
   readonly custom_title: string | null;
   readonly enrichment_title: string | null;
   readonly session_class: string | null;
+  readonly incognito: number | null;
   readonly identity_key: string | null;
   readonly identity_cluster: string | null;
   readonly identity_role: string | null;
@@ -112,10 +120,18 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
   const memberships = new Map<string, SidebarMembership>();
   const sessionIds = emptyLifecycleIds();
   const auxiliary = new Set<string>();
+  const incognito = new Set<string>();
   const summaries = new Map<string, StoredEnrichment>();
 
   // Canonical ids win when a historical resume alias collides with another canonical row.
   for (const row of rows) {
+    // Incognito is checked before anything is derived, not filtered out afterwards: every map
+    // below carries content (a title, a summary, an identity) that would be the leak.
+    if (row.incognito === 1) {
+      incognito.add(row.session_id);
+      if (row.resume_id) incognito.add(row.resume_id);
+      continue;
+    }
     // Match full CatalogueRow hydration exactly: session-scoped non-default flags win, while the
     // joined identity supplies durable lifecycle for rows whose session flags remain at defaults.
     const catalogueLifecycle: Lifecycle = row.archived === 1 || row.identity_archived === 1
@@ -171,7 +187,7 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
   }
 
   for (const row of rows) {
-    if (!row.resume_id || lifecycles.has(row.resume_id)) continue;
+    if (!row.resume_id || incognito.has(row.session_id) || lifecycles.has(row.resume_id)) continue;
     lifecycles.set(row.resume_id, lifecycles.get(row.session_id) ?? "active");
     catalogueLifecycles.set(
       row.resume_id,
@@ -188,6 +204,7 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
     memberships,
     sessionIds,
     auxiliary,
+    incognito,
     summaries,
   };
 }
@@ -236,6 +253,7 @@ export function readCatalogueDatabase(db: Database): CatalogueReadOutcome {
               ${selected(catalogueColumns, "parked_task_id")},
               ${selected(catalogueColumns, "custom_title")},
               ${selected(catalogueColumns, "session_class")},
+              ${selected(catalogueColumns, "incognito", "0")},
               ${selected(catalogueColumns, "identity_key")},
               ${identitySelections.join(",\n              ")},
               ${enrichmentSelections.join(",\n              ")}

@@ -32,6 +32,16 @@ export interface CatalogueRow {
   completed: boolean;
   archived: boolean;
   parkedTaskId: string | null;
+  /**
+   * Excluded from every listing, aggregate, and enrichment path — and, critically, never sent to
+   * the model gateway and never composed into another session's prompt. Distinct from `archived`,
+   * which only hides a row from active views while leaving all of that machinery running.
+   *
+   * Optional in the same way as `substrate` and `launcherIdentity`: hydration always populates it,
+   * so a reader can treat absence as false, but fixtures built before the column existed stay
+   * valid without a sweep through every test file.
+   */
+  incognito?: boolean;
   /** Neutral, opaque identity key for system-level grouping. */
   key: string | null;
   /** The causal session that spawned this body; descendant cost belongs to it. */
@@ -1034,6 +1044,25 @@ function applyMigrations(db: Database): void {
   if (!hasColumn(db, "catalogue", "enrichment_declined")) {
     db.exec("ALTER TABLE catalogue ADD COLUMN enrichment_declined TEXT;");
   }
+  // Marks a session the tool must not surface, summarize, or transmit.
+  //
+  // A COLUMN, not a tag. `session_tags` has no reader in any listing path, so a tag would have to
+  // grow a new join at every one of them; `archived` and `session_class` already reach everywhere
+  // precisely because they are columns, and `session_class` additionally feeds the pre-computed
+  // `catalogue_hidden_sessions` table the whole cross-product protocol reads through.
+  //
+  // Orthogonal to `session_class` rather than another value of it: a session can legitimately be
+  // both `auxiliary` and incognito, and one column cannot say both.
+  //
+  // Outside the version ladder for the same reason as `enrichment_declined` directly above — v41
+  // belongs to the enrichment-column retirement, and stamping past it here would silently skip
+  // that migration on the live store.
+  if (!hasColumn(db, "catalogue", "incognito")) {
+    db.exec("ALTER TABLE catalogue ADD COLUMN incognito INTEGER NOT NULL DEFAULT 0;");
+  }
+  // Partial: the incognito set is tiny by construction, and every read is "exclude these", so the
+  // index only ever needs to enumerate the few rows that are excluded.
+  db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_incognito ON catalogue(session_id) WHERE incognito = 1;");
   // Life-domain storage has its own numbered migration line because catalogue user_version 41 is
   // already reserved by the enrichment-column retirement. This keeps category DDL idempotent and
   // observable without skipping that independent migration when it lands.

@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { type CatalogueRow, type Lifecycle } from "../catalogue/db-schema.ts";
 import { getAll, lifecycleOf } from "../catalogue/db-queries.ts";
 import { recommendationDisagreement } from "../catalogue/enrichment.ts";
+import { isIncognito } from "../catalogue/incognito.ts";
 import { listByRecency, type SessionRow } from "../index/index.ts";
 import type { Recommendation } from "../catalogue/enrichment-schema.ts";
 
@@ -62,6 +63,7 @@ export function triageQueue(index: Database, catalogue: Database): TriageQueue {
   for (const session of listByRecency(index, false)) {
     if (session.isSubagent) continue;
     const row = rows.get(session.sessionId);
+    if (isIncognito(row)) continue;
     if (row?.sessionClass === "auxiliary") continue;
     const item = disagreement(session, row ?? null);
     if (!item) continue;
@@ -120,6 +122,7 @@ export function nextActions(index: Database, catalogue: Database): NextItem[] {
   for (const session of listByRecency(index, false)) {
     if (session.isSubagent) continue;
     const row = rows.get(session.sessionId);
+    if (isIncognito(row)) continue;
     if (row?.sessionClass === "auxiliary") continue;
     const enrichment = row?.enrichment;
     if (!enrichment || enrichment.recommendation !== "continue" || !enrichment.next) continue;
