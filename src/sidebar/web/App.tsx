@@ -31,7 +31,6 @@ import {
   type ShelfState,
 } from "./format.ts";
 import { SessionRow } from "./components/session-row.tsx";
-import { CompactRow } from "./components/compact-row.tsx";
 import { HoverSummary, type HoverTarget } from "./components/hover-summary.tsx";
 import { Input } from "@/components/ui/input";
 import { SearchIcon } from "./components/icons.tsx";
@@ -708,43 +707,28 @@ export function App(): React.ReactElement {
                 onToggleLiveOnly={() => updateShelf(group.key, toggleLiveOnly)}
               />
             ) : null}
+            {/* One row component for every row. Density still decides what a row says — a closed
+              session drops the model and status it no longer has, and its card with them — but not
+              how tall it is or where its parts sit, so the eye tracks one column of names down the
+              whole list instead of re-finding it at each section boundary. */}
             {visible.map((row) => (
-              // Density is decided in the projection, so the view only has to honour it. A closed
-              // or settled session collapses to a line; anything live keeps the full card.
-              row.kind === "session" && row.density !== "full" ? (
-                <CompactRow
-                  key={row.id}
-                  now={now}
-                  onDismiss={declineSuggestion}
-                  onLifecycle={setLifecycle}
-                  onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
-                  opening={openingIds.has(row.id)}
-                  registerRef={(_id, element) => {
-                    rowRefs.current[flatRows.indexOf(row)] = element as HTMLButtonElement | null;
-                  }}
-                  onHover={onHover}
-                  row={row}
-                  selected={flatRows[selected]?.id === row.id}
-                />
-              ) : (
-                <SessionRow
-                  key={row.id}
-                  row={row}
-                  now={now}
-                  selected={flatRows[selected]?.id === row.id}
-                  showShortcut={metaHeld}
-                  opening={openingIds.has(row.id)}
-                  onClose={closeWorkspace}
-                  onDismiss={declineSuggestion}
-                  onLifecycle={setLifecycle}
-                  onPin={setPinned}
-                  onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
-                  onHover={onHover}
-                  registerRef={(element) => {
-                    rowRefs.current[flatRows.indexOf(row)] = element;
-                  }}
-                />
-              )
+              <SessionRow
+                key={row.id}
+                row={row}
+                now={now}
+                selected={flatRows[selected]?.id === row.id}
+                showShortcut={metaHeld}
+                opening={openingIds.has(row.id)}
+                onClose={closeWorkspace}
+                onDismiss={declineSuggestion}
+                onLifecycle={setLifecycle}
+                onPin={setPinned}
+                onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
+                onHover={onHover}
+                registerRef={(element) => {
+                  rowRefs.current[flatRows.indexOf(row)] = element;
+                }}
+              />
             ))}
           </div>
           );

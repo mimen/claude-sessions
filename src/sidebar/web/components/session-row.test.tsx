@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SidebarCategoryProjection } from "../../category-projection.ts";
 import type { SidebarSessionRow } from "../../projection.ts";
-import { CompactRow } from "./compact-row.tsx";
 import { FullSummary } from "./full-summary.tsx";
 import { SessionRow, StatusMetadata } from "./session-row.tsx";
 
@@ -97,26 +96,32 @@ describe("session row layout", () => {
     expect(markup).not.toContain("relative flex h-5 shrink-0");
   });
 
-  test("keeps compact names single-line and overlays its actions too", () => {
-    const markup = renderToStaticMarkup(
-      <CompactRow
-        now={2_000}
-        onHover={noop}
-        onLifecycle={noop}
-        onOpen={noop}
-        opening={false}
-        row={session({ density: "settled", lifecycle: "completed" })}
-        selected={false}
-      />,
-    );
-    expect(markup).toContain("h-7");
-    expect(markup).toContain("truncate text-[12px]");
+  test("a closed session keeps the live layout and drops only what stopped being true", () => {
+    const markup = renderRow(session({ density: "settled", lifecycle: "completed" }));
+
+    // Same grid as a live row, so names stay in one column down the whole list.
+    expect(markup).toContain("h-[46px]");
+    expect(markup).toContain("truncate text-[13px]");
+    // No card. The row draws itself only under the pointer. Matched with the preceding class so
+    // the assertion cannot pass on the left edge's own `before:bg-transparent`.
+    expect(markup).toContain("duration-75 bg-transparent");
+    expect(markup).not.toContain("duration-75 bg-card");
+    expect(markup).toContain("hover:bg-secondary");
+    // Model and status describe a running process, so a closed row must not claim either.
+    expect(markup).not.toContain("Sol");
+    expect(markup).not.toContain("Waiting");
+    // What still holds is still shown.
+    expect(markup).toContain("claude-sessions");
     expect(markup).toContain('data-row-actions-overlay="true"');
-    expect(markup).toContain("absolute inset-y-0 right-0");
-    expect(markup).not.toContain("group-hover:hidden");
-    // Same fixed-slot regression, compact side: 76px held for text as short as "15h".
-    expect(markup).not.toContain("w-[76px] shrink-0");
     expect(markup).toContain("relative flex h-full shrink-0");
+  });
+
+  test("a live session keeps its card, model and status", () => {
+    const markup = renderRow(session());
+    expect(markup).toContain("duration-75 bg-card");
+    expect(markup).not.toContain("duration-75 bg-transparent");
+    expect(markup).toContain("Sol");
+    expect(markup).toContain("Waiting");
   });
 
   test("titles carry one step of weight, not semibold", () => {

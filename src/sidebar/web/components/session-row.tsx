@@ -129,6 +129,11 @@ export function SessionRow({
   const junk = session?.summary?.junk === true;
   const pinnable = row.workspaceId !== null;
   const age = session ? relativeTime(row.lastActivityAt, now) : null;
+  // A closed session keeps the live layout and loses only the facts that stopped being true.
+  // Model and status describe a running process; on a closed row they are stale, so the row shows
+  // what still holds — name, project, category, age — and drops its card so the live rows above it
+  // are the only ones carrying weight.
+  const ghost = row.kind === "session" && row.density !== "full";
 
   const rowButton = (
     <button
@@ -138,7 +143,8 @@ export function SessionRow({
         // Every row owns exactly 46px. Long names truncate instead of buying a second line, so live
         // data cannot turn the list into a mixture of heights and move targets under the pointer.
         "group relative mb-1.5 block h-[46px] w-full cursor-pointer overflow-hidden rounded-md px-2.5 text-left",
-        "bg-card transition-colors duration-75",
+        "transition-colors duration-75",
+        ghost ? "bg-transparent" : "bg-card",
         "before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-transparent",
         "hover:bg-secondary focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2",
         row.focused && "bg-secondary before:bg-primary",
@@ -172,7 +178,8 @@ export function SessionRow({
                 // enough to keep needs-you rows separable at a glance.
                 "truncate text-[13px] leading-[18px]",
                 row.section === "needs-you" ? "font-medium" : "font-normal",
-                !junk && row.section === "recent" && "text-muted-foreground",
+                !junk && (ghost || row.section === "recent") && "text-muted-foreground",
+                ghost && "group-hover:text-foreground",
                 junk && "text-neutral-300",
               )}
               title={row.name}
@@ -191,7 +198,7 @@ export function SessionRow({
               </span>
             ) : null}
             <span className="truncate">{row.directory ?? shortenPath(row.directoryPath)}</span>
-            {session?.model ? (
+            {session?.model && !ghost ? (
               <>
                 <span aria-hidden="true">·</span>
                 <span
@@ -242,7 +249,7 @@ export function SessionRow({
                 ⌘{row.shortcut}
               </span>
             ) : null}
-            {session ? <StatusMetadata availability={row.statusAvailability} status={row.status} /> : null}
+            {session && !ghost ? <StatusMetadata availability={row.statusAvailability} status={row.status} /> : null}
             {age ? <span className="shrink-0 tabular-nums">{age}</span> : null}
           </span>
 
