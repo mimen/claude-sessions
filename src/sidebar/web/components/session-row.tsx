@@ -174,23 +174,26 @@ export function SessionRow({
             "flex min-w-0 items-center gap-1 text-[10px] leading-[14px] text-muted-foreground",
             junk && "text-neutral-400",
           )}>
-            {session ? (
+            {/* Project first: it is the fact most rows are scanned by, and putting it at the line's
+              start keeps every project name on one left edge under the title. Its glyph is muted on
+              ghost rows in step with the rest of the row. */}
+            <ProjectMark faviconUrl={row.faviconUrl} muted={ghost} />
+            <span className="truncate">{row.directory ?? shortenPath(row.directoryPath)}</span>
+            {session?.category ? (
               // The dot carries the category's colour and the name carries the category, so the
               // hue is recognition rather than the only encoding. The short label is used because
               // the full one ("Events, Booking & Live Production") would take the line on its own.
-              <span className={cn("flex shrink-0 items-center gap-1", junk && "grayscale")}>
-                <CategoryMark category={session.category} />
-                {session.category?.compactLabel ? (
-                  <span className="shrink-0">{session.category.compactLabel}</span>
-                ) : null}
-                <CategoryAccessibleText category={session.category} />
-              </span>
+              <>
+                <span aria-hidden="true">·</span>
+                <span className={cn("flex shrink-0 items-center gap-1", junk && "grayscale")}>
+                  <CategoryMark category={session.category} />
+                  {session.category.compactLabel ? (
+                    <span className="shrink-0">{session.category.compactLabel}</span>
+                  ) : null}
+                  <CategoryAccessibleText category={session.category} />
+                </span>
+              </>
             ) : null}
-            {session?.category?.compactLabel ? <span aria-hidden="true">·</span> : null}
-            {/* Project identity is a glyph plus its name. Ghost rows mute the glyph in step with
-              the rest of the row and restore it on hover. */}
-            <ProjectMark faviconUrl={row.faviconUrl} muted={ghost} />
-            <span className="truncate">{row.directory ?? shortenPath(row.directoryPath)}</span>
             {session?.model && !ghost ? (
               <>
                 <span aria-hidden="true">·</span>
