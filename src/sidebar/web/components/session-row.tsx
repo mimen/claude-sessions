@@ -15,6 +15,7 @@ import {
 import {
   ContextMenu,
   ContextMenuContent,
+  ContextMenuGroup,
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
@@ -288,65 +289,71 @@ export function SessionRow({
       <ContextMenuContent>
         {suggestion ? (
           <>
-            <ContextMenuLabel>{suggestion.verb} suggested</ContextMenuLabel>
-            {suggestion.reason ? (
-              <div className="max-w-64 px-2 pb-1.5 text-[11px] leading-[1.4] text-muted-foreground">
-                {suggestion.reason}
-              </div>
-            ) : null}
-            {suggestion.actionable ? (
-              <ContextMenuItem onClick={() => onLifecycle(session!, suggestion.verb as "complete" | "archive")}>
-                {suggestion.verb === "archive" ? <ArchiveIcon /> : <CheckIcon />}
-                Accept: {suggestion.verb === "archive" ? "Archive" : "Complete"}
+            <ContextMenuGroup>
+              <ContextMenuLabel>{suggestion.verb} suggested</ContextMenuLabel>
+              {suggestion.reason ? (
+                <div className="max-w-64 px-2 pb-1.5 text-[11px] leading-[1.4] text-muted-foreground">
+                  {suggestion.reason}
+                </div>
+              ) : null}
+              {suggestion.actionable ? (
+                <ContextMenuItem onClick={() => onLifecycle(session!, suggestion.verb as "complete" | "archive")}>
+                  {suggestion.verb === "archive" ? <ArchiveIcon /> : <CheckIcon />}
+                  Accept: {suggestion.verb === "archive" ? "Archive" : "Complete"}
+                </ContextMenuItem>
+              ) : null}
+              <ContextMenuItem onClick={() => onDismiss(session!)}>
+                <CloseIcon />
+                Dismiss verdict
               </ContextMenuItem>
-            ) : null}
-            <ContextMenuItem onClick={() => onDismiss(session!)}>
-              <CloseIcon />
-              Dismiss verdict
-            </ContextMenuItem>
+            </ContextMenuGroup>
             <ContextMenuSeparator />
           </>
         ) : null}
 
-        <ContextMenuLabel>Lifecycle</ContextMenuLabel>
-        {session && !archived ? (
-          <ContextMenuItem onClick={() => onLifecycle(session, completed ? "uncomplete" : "complete")}>
-            <CheckIcon />
-            {completed ? "Mark not complete" : "Complete"}
+        <ContextMenuGroup>
+          <ContextMenuLabel>Lifecycle</ContextMenuLabel>
+          {session && !archived ? (
+            <ContextMenuItem onClick={() => onLifecycle(session, completed ? "uncomplete" : "complete")}>
+              <CheckIcon />
+              {completed ? "Mark not complete" : "Complete"}
+            </ContextMenuItem>
+          ) : null}
+          {session && !completed ? (
+            <ContextMenuItem onClick={() => onLifecycle(session, archived ? "unarchive" : "archive")}>
+              <ArchiveIcon />
+              {archived ? "Unarchive" : "Archive"}
+            </ContextMenuItem>
+          ) : null}
+          <ContextMenuItem disabled={!pinnable} onClick={() => onPin(row, !row.pinned)}>
+            {row.pinned ? <PinOffIcon /> : <PinIcon />}
+            {row.pinned ? "Unpin" : "Pin to top"}
           </ContextMenuItem>
-        ) : null}
-        {session && !completed ? (
-          <ContextMenuItem onClick={() => onLifecycle(session, archived ? "unarchive" : "archive")}>
-            <ArchiveIcon />
-            {archived ? "Unarchive" : "Archive"}
-          </ContextMenuItem>
-        ) : null}
-        <ContextMenuItem disabled={!pinnable} onClick={() => onPin(row, !row.pinned)}>
-          {row.pinned ? <PinOffIcon /> : <PinIcon />}
-          {row.pinned ? "Unpin" : "Pin to top"}
-        </ContextMenuItem>
+        </ContextMenuGroup>
 
         <ContextMenuSeparator />
-        <ContextMenuLabel>Session</ContextMenuLabel>
-        {session?.summary ? (
-          <>
-            <FullSummarySubmenu category={session.category} summary={session.summary} />
-            <ContextMenuItem
-              onClick={() => {
-                void navigator.clipboard.writeText(
-                  summaryAsText(session.summary as SidebarSummary, row.name),
-                );
-              }}
-            >
-              <CopyIcon />
-              Copy summary
-            </ContextMenuItem>
-          </>
-        ) : null}
-        <ContextMenuItem disabled={!row.workspaceRef} onClick={() => onClose(row)}>
-          <CloseIcon />
-          Close tab
-        </ContextMenuItem>
+        <ContextMenuGroup>
+          <ContextMenuLabel>Session</ContextMenuLabel>
+          {session?.summary ? (
+            <>
+              <FullSummarySubmenu category={session.category} summary={session.summary} />
+              <ContextMenuItem
+                onClick={() => {
+                  void navigator.clipboard.writeText(
+                    summaryAsText(session.summary as SidebarSummary, row.name),
+                  );
+                }}
+              >
+                <CopyIcon />
+                Copy summary
+              </ContextMenuItem>
+            </>
+          ) : null}
+          <ContextMenuItem disabled={!row.workspaceRef} onClick={() => onClose(row)}>
+            <CloseIcon />
+            Close tab
+          </ContextMenuItem>
+        </ContextMenuGroup>
       </ContextMenuContent>
     </ContextMenu>
   );

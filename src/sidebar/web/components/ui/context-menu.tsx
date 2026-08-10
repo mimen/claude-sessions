@@ -136,6 +136,21 @@ export function ContextMenuSeparator({
   );
 }
 
+/**
+ * A labelled section of the menu.
+ *
+ * `ContextMenuLabel` is Base UI's `GroupLabel`, which reads the group context to point its
+ * group's `aria-labelledby` at itself — so it throws outright when rendered without a group
+ * around it. Every label therefore belongs to a `ContextMenuGroup`, and the pairing is what
+ * makes a screen reader announce "Lifecycle" when entering those items rather than reading a
+ * flat run of commands.
+ */
+export function ContextMenuGroup({
+  ...props
+}: ContextMenuPrimitive.Group.Props): React.ReactElement {
+  return <ContextMenuPrimitive.Group data-slot="context-menu-group" {...props} />;
+}
+
 export function ContextMenuLabel({
   className,
   ...props

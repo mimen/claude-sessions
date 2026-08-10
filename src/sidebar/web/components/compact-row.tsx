@@ -11,6 +11,7 @@ import { RowAction } from "./row-action.tsx";
 import {
   ContextMenu,
   ContextMenuContent,
+  ContextMenuGroup,
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
@@ -140,53 +141,59 @@ export function CompactRow({
       <ContextMenuContent>
         {suggestion && onDismiss ? (
           <>
-            <ContextMenuLabel>{suggestion.verb} suggested</ContextMenuLabel>
-            {suggestion.reason ? (
-              <div className="max-w-64 px-2 pb-1.5 text-[11px] leading-[1.4] text-muted-foreground">
-                {suggestion.reason}
-              </div>
-            ) : null}
-            {suggestion.actionable ? (
-              <ContextMenuItem onClick={() => onLifecycle(row, suggestion.verb as "complete" | "archive")}>
-                {suggestion.verb === "archive" ? <ArchiveIcon /> : <CheckIcon />}
-                Accept: {suggestion.verb === "archive" ? "Archive" : "Complete"}
+            <ContextMenuGroup>
+              <ContextMenuLabel>{suggestion.verb} suggested</ContextMenuLabel>
+              {suggestion.reason ? (
+                <div className="max-w-64 px-2 pb-1.5 text-[11px] leading-[1.4] text-muted-foreground">
+                  {suggestion.reason}
+                </div>
+              ) : null}
+              {suggestion.actionable ? (
+                <ContextMenuItem onClick={() => onLifecycle(row, suggestion.verb as "complete" | "archive")}>
+                  {suggestion.verb === "archive" ? <ArchiveIcon /> : <CheckIcon />}
+                  Accept: {suggestion.verb === "archive" ? "Archive" : "Complete"}
+                </ContextMenuItem>
+              ) : null}
+              <ContextMenuItem onClick={() => onDismiss(row)}>
+                <CloseIcon />
+                Dismiss verdict
               </ContextMenuItem>
-            ) : null}
-            <ContextMenuItem onClick={() => onDismiss(row)}>
-              <CloseIcon />
-              Dismiss verdict
-            </ContextMenuItem>
+            </ContextMenuGroup>
             <ContextMenuSeparator />
           </>
         ) : null}
 
-        <ContextMenuLabel>Lifecycle</ContextMenuLabel>
-        {!archived ? (
-          <ContextMenuItem onClick={() => onLifecycle(row, completed ? "uncomplete" : "complete")}>
-            <CheckIcon />
-            {completed ? "Mark not complete" : "Complete"}
-          </ContextMenuItem>
-        ) : null}
-        {!completed ? (
-          <ContextMenuItem onClick={() => onLifecycle(row, archived ? "unarchive" : "archive")}>
-            <ArchiveIcon />
-            {archived ? "Unarchive" : "Archive"}
-          </ContextMenuItem>
-        ) : null}
+        <ContextMenuGroup>
+          <ContextMenuLabel>Lifecycle</ContextMenuLabel>
+          {!archived ? (
+            <ContextMenuItem onClick={() => onLifecycle(row, completed ? "uncomplete" : "complete")}>
+              <CheckIcon />
+              {completed ? "Mark not complete" : "Complete"}
+            </ContextMenuItem>
+          ) : null}
+          {!completed ? (
+            <ContextMenuItem onClick={() => onLifecycle(row, archived ? "unarchive" : "archive")}>
+              <ArchiveIcon />
+              {archived ? "Unarchive" : "Archive"}
+            </ContextMenuItem>
+          ) : null}
+        </ContextMenuGroup>
 
         {summary ? (
           <>
             <ContextMenuSeparator />
-            <ContextMenuLabel>Session</ContextMenuLabel>
-            <FullSummarySubmenu category={row.category} summary={summary} />
-            <ContextMenuItem
-              onClick={() => {
-                void navigator.clipboard.writeText(summaryAsText(summary as SidebarSummary, row.name));
-              }}
-            >
-              <CopyIcon />
-              Copy summary
-            </ContextMenuItem>
+            <ContextMenuGroup>
+              <ContextMenuLabel>Session</ContextMenuLabel>
+              <FullSummarySubmenu category={row.category} summary={summary} />
+              <ContextMenuItem
+                onClick={() => {
+                  void navigator.clipboard.writeText(summaryAsText(summary as SidebarSummary, row.name));
+                }}
+              >
+                <CopyIcon />
+                Copy summary
+              </ContextMenuItem>
+            </ContextMenuGroup>
           </>
         ) : null}
       </ContextMenuContent>
