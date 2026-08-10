@@ -119,6 +119,17 @@ describe("session row layout", () => {
     expect(markup).toContain("relative flex h-full shrink-0");
   });
 
+  test("titles carry one step of weight, not semibold", () => {
+    const needsYou = renderRow(session({ section: "needs-you" }));
+    expect(needsYou).toContain("font-medium");
+    expect(needsYou).not.toContain("font-semibold");
+
+    // One step below, so the two stay separable without either being heavy.
+    const working = renderRow(session({ section: "working" }));
+    expect(working).toContain("font-normal");
+    expect(working).not.toContain("font-medium");
+  });
+
   test("focused edge wins over unread blue", () => {
     const focused = renderRow(session({ focused: true, unread: 4 }));
     expect(focused).toContain("before:bg-primary");

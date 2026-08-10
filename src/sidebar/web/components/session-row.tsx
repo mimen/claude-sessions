@@ -165,9 +165,14 @@ export function SessionRow({
             {row.unread > 0 ? <span className="sr-only">{row.unread} unread</span> : null}
             <span
               className={cn(
+                // Titles sit a step below the usual UI weights: 500 for rows wanting attention,
+                // 400 for the rest. Semibold at 13px read as heavy in a dense list, and the row
+                // still marks itself without it — the coloured left edge, the section header, and
+                // the status text all say the same thing. One step of weight between the two is
+                // enough to keep needs-you rows separable at a glance.
                 "truncate text-[13px] leading-[18px]",
-                row.section === "needs-you" ? "font-semibold" : "font-medium",
-                !junk && row.section === "recent" && "font-normal text-muted-foreground",
+                row.section === "needs-you" ? "font-medium" : "font-normal",
+                !junk && row.section === "recent" && "text-muted-foreground",
                 junk && "text-neutral-300",
               )}
               title={row.name}
