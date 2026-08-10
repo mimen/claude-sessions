@@ -258,6 +258,10 @@ export function enrichmentJsonSchema(
         "'CCS sidebar redesign' even when the final 50 turns went to one row's drop shadow. If a " +
         "detail from the closing turns would not have appeared in the title at turn 200, it does " +
         "not belong in it now. " +
+        "Before joining two subjects with 'and', check that the session spent real time on both. " +
+        "A conjunction whose second half comes from the closing turns is the tail bolted onto the " +
+        "subject — drop it. Two genuine halves may stay; do not retreat to an abstraction that " +
+        "covers them both. " +
         "Name the concrete thing worked on, not the activity: 'Transactional catalogue " +
         "migrations', not 'Debugging session'. " +
         `No trailing punctuation, no quotes, at most ${TARGET_TITLE_CHARS} characters.`,
