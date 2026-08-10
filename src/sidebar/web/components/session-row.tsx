@@ -214,9 +214,15 @@ export function SessionRow({
           </span>
         </span>
 
-        {/* Metadata always keeps its 132px slot. Actions are painted over it with a short fade;
-          nothing is removed from layout on hover, which is the invariant that prevents reflow. */}
-        <span className="relative flex h-5 w-[132px] shrink-0 items-center justify-end">
+        {/* Metadata takes only the width it needs, so the name gets the rest of the row. A fixed
+          slot here reserved space for the longest possible status on every row, which left 55 to
+          88px empty next to a name that was already being cut.
+
+          Hover stays reflow-free regardless: the actions are absolutely positioned, so they never
+          occupy layout. They anchor to this slot's right edge and are wider than it, painting
+          leftward over the end of the name behind a gradient. The row clips its own overflow, so
+          that overhang cannot escape the row. */}
+        <span className="relative flex h-5 shrink-0 items-center justify-end">
           <span className={cn(
             "flex min-w-0 items-center justify-end gap-1.5 text-[10px] text-muted-foreground",
             junk && "text-neutral-400",
@@ -232,7 +238,7 @@ export function SessionRow({
 
           <span
             className={cn(
-              "pointer-events-none absolute inset-0 flex items-center justify-end gap-1 pl-5 opacity-0",
+              "pointer-events-none absolute inset-y-0 right-0 flex w-[132px] items-center justify-end gap-1 pl-5 opacity-0",
               "bg-gradient-to-l from-secondary via-secondary/95 to-transparent transition-opacity duration-75",
               "group-hover:opacity-100 [&>[role=button]]:pointer-events-auto",
             )}

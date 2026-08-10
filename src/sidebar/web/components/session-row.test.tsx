@@ -80,10 +80,17 @@ describe("session row layout", () => {
     expect(markup).toContain("h-[46px]");
     expect(markup).toContain("truncate text-[13px]");
     expect(markup).toContain('data-row-actions-overlay="true"');
-    expect(markup).toContain("absolute inset-0");
+    // Absolute keeps the actions out of layout, which is what makes hover reflow-free. They
+    // anchor right and overhang leftward over the name, so the metadata beside them is free to
+    // take only the width it needs instead of reserving room for the longest possible status.
+    expect(markup).toContain("absolute inset-y-0 right-0");
     expect(markup).toContain("group-hover:opacity-100");
     expect(markup).not.toContain("line-clamp-2");
     expect(markup).not.toContain("group-hover:hidden");
+    // The metadata itself survives the overlay rather than being swapped out on hover.
+    expect(markup).toContain("Waiting");
+    // A fixed metadata slot is what stranded 55 to 88px next to a truncated name.
+    expect(markup).not.toContain("w-[132px] shrink-0");
   });
 
   test("keeps compact names single-line and overlays its actions too", () => {
@@ -101,7 +108,10 @@ describe("session row layout", () => {
     expect(markup).toContain("h-7");
     expect(markup).toContain("truncate text-[12px]");
     expect(markup).toContain('data-row-actions-overlay="true"');
+    expect(markup).toContain("absolute inset-y-0 right-0");
     expect(markup).not.toContain("group-hover:hidden");
+    // Same fixed-slot regression, compact side: 76px held for text as short as "15h".
+    expect(markup).not.toContain("w-[76px] shrink-0");
   });
 
   test("focused edge wins over unread blue", () => {
