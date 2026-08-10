@@ -72,6 +72,8 @@ export interface EnrichmentRequest {
   /** How the session ended. */
   readonly tail: string;
   readonly tailTruncated: boolean;
+  /** User prompts sampled across the stretch the tail dropped. Empty on a short session. */
+  readonly arc: string;
   /**
    * Ground truth about the world the transcript describes, rendered by `world.ts`.
    *
@@ -127,6 +129,11 @@ function buildPrompt(
     "Describe this Claude Code session so someone picking it up cold weeks later knows where it",
     "stands and what to do next. Be concrete and specific to THIS session — never generic.",
     "",
+    "Two of these fields are asked at different zoom levels, and getting them confused is the most",
+    "common way this goes wrong. `state`, `next`, and `recommendation` are about the END of the",
+    "session — where it stopped. `title` and `history` are about the WHOLE of it. What the session",
+    "was doing in its last few turns is rarely what the session is.",
+    "",
   ];
 
   // The cwd question is asked ONLY when there is a registry to answer it from. Under v39 it was
@@ -180,6 +187,22 @@ function buildPrompt(
     "",
     "--- opening and closing turns (indexed skeleton) ---",
     request.skeleton || "(none indexed)",
+  );
+
+  // Printed BEFORE the tail so the session reads in the order it happened. It is also the block
+  // most likely to disagree with the tail about what the session is, and a reader — model or
+  // human — weighs a disagreement it meets first differently from one it meets as a correction.
+  if (request.arc) {
+    lines.push(
+      "",
+      "--- what the session worked through, sampled across its span (user prompts only) ---",
+      "These cover the middle of the session, which neither block above reaches. The percentage is",
+      "how far into the session each prompt sits. This is the span the title has to describe.",
+      request.arc,
+    );
+  }
+
+  lines.push(
     "",
     `--- how the session ended${request.tailTruncated ? " (earlier turns omitted)" : ""} ---`,
     request.tail || "(empty transcript)",

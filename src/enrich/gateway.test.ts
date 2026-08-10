@@ -17,6 +17,7 @@ const REQUEST: EnrichmentRequest = {
   lastActivity: "2026-07-24T11:00:00.000Z",
   skeleton: "user: build enrichment\nassistant: done",
   world: "working directory: exists\nlater sessions in this directory: 0",
+  arc: "",
   tail: "assistant: shipped the migration",
   tailTruncated: false,
 };

@@ -5,7 +5,7 @@ import { getSkeleton, listByRecency, type SessionRow } from "../index/index.ts";
 import { err, ok, type Result } from "../result.ts";
 import type { Enrichment } from "../catalogue/enrichment-schema.ts";
 import { loadEnrichmentLocations, type EnrichmentLocation } from "./locations.ts";
-import { readTranscriptTail } from "./transcript-tail.ts";
+import { readTranscriptTail, type TranscriptTail } from "./transcript-tail.ts";
 import { requestEnrichment, TransientGatewayError, type EnrichOptions } from "./gateway.ts";
 import { readWorldState, renderWorldBlock } from "./world.ts";
 import { recordSweepFailure, recordSweepSuccess } from "./health.ts";
@@ -243,7 +243,7 @@ export async function enrichOne(
     }
   }
 
-  let tail: { text: string; truncated: boolean };
+  let tail: TranscriptTail;
   try {
     tail = await readTranscriptTail(row.path);
   } catch (error) {
@@ -271,6 +271,7 @@ export async function enrichOne(
       skeleton: getSkeleton(index, row.sessionId),
       tail: tail.text,
       tailTruncated: tail.truncated,
+      arc: tail.arc,
       world: renderWorldBlock(world),
     },
     locations,

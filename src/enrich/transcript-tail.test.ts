@@ -98,6 +98,81 @@ describe("readTranscriptTail", () => {
       const tail = await readTranscriptTail(path, 50);
       expect(tail.text).toBe("");
       expect(tail.truncated).toBe(false);
+      expect(tail.arc).toBe("");
+    });
+  });
+});
+
+describe("the arc", () => {
+  test("covers the middle a long session's head and tail both miss", async () => {
+    // The defect this exists for: a 488-message session showed the model turns 1-8 and 429-488,
+    // so it named the whole thing after the last thing it touched.
+    const lines = Array.from({ length: 300 }, (_, i) => message("user", `turn ${i}`));
+    await withTranscript(lines, async (path) => {
+      const tail = await readTranscriptTail(path, 20);
+      const ordinals = [...tail.arc.matchAll(/turn (\d+)/g)].map((m) => Number(m[1]));
+      // The middle third is exactly what the skeleton's opening turns and the tail both miss.
+      expect(ordinals.some((n) => n > 100 && n < 200)).toBe(true);
+      expect(tail.text).not.toMatch(/turn 1\d\d\b/);
+    });
+  });
+
+  test("is empty when the tail already covers the whole session", async () => {
+    // Breadth over a session the model can already see whole would be pure duplication.
+    await withTranscript([message("user", "one"), message("assistant", "two")], async (path) => {
+      const tail = await readTranscriptTail(path, 50);
+      expect(tail.arc).toBe("");
+    });
+  });
+
+  test("never repeats a prompt the tail already carries", async () => {
+    const lines = Array.from({ length: 40 }, (_, i) => message("user", `turn ${i}`));
+    await withTranscript(lines, async (path) => {
+      const tail = await readTranscriptTail(path, 10);
+      // Turns 30-39 are in the tail; the arc's budget belongs to everything before them.
+      expect(tail.arc).not.toContain("turn 39");
+      expect(tail.arc).not.toContain("turn 30");
+      expect(tail.arc).toContain("turn 0");
+    });
+  });
+
+  test("samples evenly rather than taking the first N", async () => {
+    // Taking the first N would reproduce the same bug at the opposite end: the opening prompts of
+    // a long session are all still its opening topic.
+    const lines = Array.from({ length: 600 }, (_, i) => message("user", `turn ${i}`));
+    await withTranscript(lines, async (path) => {
+      const tail = await readTranscriptTail(path, 20);
+      const sampled = tail.arc.split("\n");
+      expect(sampled.length).toBe(24);
+      expect(sampled[0]).toContain("turn 0");
+      // Last arc entry sits just under the tail window, not in the first 24 turns.
+      expect(sampled.at(-1)).toContain("turn 579");
+    });
+  });
+
+  test("carries user prompts only, and tags each with its position", async () => {
+    const lines = Array.from({ length: 100 }, (_, i) =>
+      message(i % 2 === 0 ? "user" : "assistant", `turn ${i}`),
+    );
+    await withTranscript(lines, async (path) => {
+      const tail = await readTranscriptTail(path, 10);
+      expect(tail.arc).toMatch(/^\[\d+%\] turn 0$/m);
+      // Every odd turn is an assistant message, and none of them may appear.
+      const ordinals = [...tail.arc.matchAll(/turn (\d+)/g)].map((m) => Number(m[1]));
+      expect(ordinals.every((n) => n % 2 === 0)).toBe(true);
+      expect(tail.arc).toContain("%] turn 50");
+    });
+  });
+
+  test("bounds a pasted handoff document to the per-entry budget", async () => {
+    // One prompt can be a whole document; the arc is a spine, so it must not become a transcript.
+    const lines = [
+      message("user", "X".repeat(5_000)),
+      ...Array.from({ length: 30 }, (_, i) => message("assistant", `turn ${i}`)),
+    ];
+    await withTranscript(lines, async (path) => {
+      const tail = await readTranscriptTail(path, 10);
+      expect(tail.arc.length).toBeLessThan(250);
     });
   });
 });

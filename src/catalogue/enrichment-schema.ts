@@ -251,9 +251,15 @@ export function enrichmentJsonSchema(
     title: {
       type: "string",
       description:
-        "A short, specific name for what this session actually turned out to be — the name it " +
-        "would have been given if anyone had known in advance. Name the concrete thing worked " +
-        "on, not the activity: 'Transactional catalogue migrations', not 'Debugging session'. " +
+        "A short, specific name for the BODY OF WORK this session is about — the name it would " +
+        "have been given if anyone had known in advance. " +
+        "Name the whole span, NOT the step it stopped on. The last turns of a long session are " +
+        "its most recent slice, not its subject: a 400-message session redesigning a sidebar is " +
+        "'CCS sidebar redesign' even when the final 50 turns went to one row's drop shadow. If a " +
+        "detail from the closing turns would not have appeared in the title at turn 200, it does " +
+        "not belong in it now. " +
+        "Name the concrete thing worked on, not the activity: 'Transactional catalogue " +
+        "migrations', not 'Debugging session'. " +
         `No trailing punctuation, no quotes, at most ${TARGET_TITLE_CHARS} characters.`,
     },
     state: {
