@@ -93,8 +93,9 @@ export function CompactRow({
 
       {/* Sized to the age it actually holds. The old fixed slot reserved 76px for text like "15h"
         and left 55px empty on every row while the name beside it was truncated. Hover actions are
-        absolutely positioned and overhang leftward, so nothing here shifts on hover. */}
-      <span className="relative flex h-5 shrink-0 items-center justify-end">
+        absolutely positioned and overhang leftward, so nothing here shifts on hover. Full height so
+        the actions' gradient covers the whole row rather than a band across its middle. */}
+      <span className="relative flex h-full shrink-0 items-center justify-end">
         {age ? (
           <span className={cn(
             "text-[10px] tabular-nums text-muted-foreground/70",

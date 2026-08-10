@@ -91,6 +91,10 @@ describe("session row layout", () => {
     expect(markup).toContain("Waiting");
     // A fixed metadata slot is what stranded 55 to 88px next to a truncated name.
     expect(markup).not.toContain("w-[132px] shrink-0");
+    // The slot is the overlay's positioning context, so a short slot fades a band across the
+    // row's middle instead of the whole row.
+    expect(markup).toContain("relative flex h-full shrink-0");
+    expect(markup).not.toContain("relative flex h-5 shrink-0");
   });
 
   test("keeps compact names single-line and overlays its actions too", () => {
@@ -112,6 +116,7 @@ describe("session row layout", () => {
     expect(markup).not.toContain("group-hover:hidden");
     // Same fixed-slot regression, compact side: 76px held for text as short as "15h".
     expect(markup).not.toContain("w-[76px] shrink-0");
+    expect(markup).toContain("relative flex h-full shrink-0");
   });
 
   test("focused edge wins over unread blue", () => {

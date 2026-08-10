@@ -221,8 +221,13 @@ export function SessionRow({
           Hover stays reflow-free regardless: the actions are absolutely positioned, so they never
           occupy layout. They anchor to this slot's right edge and are wider than it, painting
           leftward over the end of the name behind a gradient. The row clips its own overflow, so
-          that overhang cannot escape the row. */}
-        <span className="relative flex h-5 shrink-0 items-center justify-end">
+          that overhang cannot escape the row.
+
+          The slot takes the row's full height so that gradient covers the whole row. Sized to the
+          metadata instead, it faded a 20px band across the middle of a 46px row, cutting the name
+          mid-word while the line below it stayed sharp. Content stays vertically centred either
+          way. */}
+        <span className="relative flex h-full shrink-0 items-center justify-end">
           <span className={cn(
             "flex min-w-0 items-center justify-end gap-1.5 text-[10px] text-muted-foreground",
             junk && "text-neutral-400",
