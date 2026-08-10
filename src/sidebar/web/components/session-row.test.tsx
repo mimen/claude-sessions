@@ -124,6 +124,23 @@ describe("session row layout", () => {
     expect(markup).toContain("Waiting");
   });
 
+  test("the metadata line names the category and the project, and shows no vendor logo", () => {
+    const markup = renderRow(session());
+
+    // Short label beside the dot, so colour is recognition rather than the only encoding.
+    expect(markup).toContain("Events");
+    expect(markup).not.toContain("Events, Booking &amp; Live Production</span> ·");
+    // The full wording stays for screen readers.
+    expect(markup).toContain("Category: Events, Booking &amp; Live Production.");
+
+    // Project identity is a glyph plus a name. With no published favicon it falls back to a folder.
+    expect(markup).toContain("claude-sessions");
+
+    // The model is named but not badged: the label is already tinted by vendor.
+    expect(markup).toContain("Sol");
+    expect(markup).not.toContain("inline-flex size-3");
+  });
+
   test("titles carry one step of weight, not semibold", () => {
     const needsYou = renderRow(session({ section: "needs-you" }));
     expect(needsYou).toContain("font-medium");

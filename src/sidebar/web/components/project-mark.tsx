@@ -1,9 +1,9 @@
 /**
  * The project's own icon, or a folder when it publishes none.
  *
- * Shared by the full and compact rows so a session keeps the same visual identity as it moves down
- * the list. T3's settled rows drop project identity entirely; keeping it costs one glyph and is
- * what makes a collapsed list still scannable by project.
+ * Every row carries one, so a session keeps the same visual identity wherever it sits in the list.
+ * T3's settled rows drop project identity entirely; keeping it costs one glyph and is what makes a
+ * long tail of closed sessions still scannable by project.
  */
 import type React from "react";
 import { useEffect, useState } from "react";

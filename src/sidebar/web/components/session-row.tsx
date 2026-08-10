@@ -3,7 +3,6 @@ import { useCallback, useState } from "react";
 import type { CmuxStatusAvailability, SidebarRow, SidebarSessionRow, SidebarSummary } from "../../projection.ts";
 import { relativeTime, shortenPath } from "../format.ts";
 import { cn } from "@/lib/utils";
-import { BRAND_ICON_SVGS } from "../brand-icons.ts";
 import {
   ArchiveIcon,
   CheckIcon,
@@ -25,25 +24,9 @@ import { StatusIcon } from "./status-icon.tsx";
 import { RowAction } from "./row-action.tsx";
 import { summaryAsText } from "./summary-card.tsx";
 import { CategoryAccessibleText, CategoryMark } from "./category-mark.tsx";
+import { ProjectMark } from "./project-mark.tsx";
 import { SuggestionChip } from "./suggestion-chip.tsx";
 import { FullSummarySubmenu } from "./full-summary.tsx";
-
-/** The vendor's published logo, inlined and never recoloured. */
-function ModelMark({ provider }: { provider: string }): React.ReactElement | null {
-  const svg = provider === "anthropic"
-    ? BRAND_ICON_SVGS.claudeColor
-    : provider === "openai"
-      ? BRAND_ICON_SVGS.openai
-      : null;
-  if (!svg) return null;
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-flex size-3 shrink-0 [&>svg]:size-full dark:[&_path[fill='#000']]:fill-white"
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
-  );
-}
 
 function surfaceSummary(kinds: readonly string[]): string {
   const distinct = [...new Set(kinds)];
@@ -192,21 +175,32 @@ export function SessionRow({
             junk && "text-neutral-400",
           )}>
             {session ? (
-              <span className={cn("flex shrink-0 items-center", junk && "grayscale")}>
+              // The dot carries the category's colour and the name carries the category, so the
+              // hue is recognition rather than the only encoding. The short label is used because
+              // the full one ("Events, Booking & Live Production") would take the line on its own.
+              <span className={cn("flex shrink-0 items-center gap-1", junk && "grayscale")}>
                 <CategoryMark category={session.category} />
+                {session.category?.compactLabel ? (
+                  <span className="shrink-0">{session.category.compactLabel}</span>
+                ) : null}
                 <CategoryAccessibleText category={session.category} />
               </span>
             ) : null}
+            {session?.category?.compactLabel ? <span aria-hidden="true">·</span> : null}
+            {/* Project identity is a glyph plus its name. Ghost rows mute the glyph in step with
+              the rest of the row and restore it on hover. */}
+            <ProjectMark faviconUrl={row.faviconUrl} muted={ghost} />
             <span className="truncate">{row.directory ?? shortenPath(row.directoryPath)}</span>
             {session?.model && !ghost ? (
               <>
                 <span aria-hidden="true">·</span>
+                {/* No vendor logo. The label already names the model and is tinted by vendor, so a
+                  glyph made it the third encoding of one fact and the loudest thing in the row. */}
                 <span
-                  className={cn("flex shrink-0 items-center gap-1", junk && "text-neutral-400 grayscale")}
+                  className={cn("shrink-0", junk && "text-neutral-400")}
                   style={junk ? undefined : { color: session.model.color }}
                 >
                   {session.model.label}
-                  <ModelMark provider={session.model.provider} />
                 </span>
               </>
             ) : workspace ? (
