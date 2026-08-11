@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SidebarCategoryProjection } from "../../category-projection.ts";
 import type { SidebarSessionRow } from "../../projection.ts";
+import type { RowLayout } from "../format.ts";
 import { FullSummary } from "./full-summary.tsx";
 import { SessionRow, StatusMetadata } from "./session-row.tsx";
 
@@ -54,7 +55,7 @@ function session(overrides: Partial<SidebarSessionRow> = {}): SidebarSessionRow 
 }
 
 const noop = (): void => {};
-function renderRow(row: SidebarSessionRow): string {
+function renderRow(row: SidebarSessionRow, layout: RowLayout = "wide"): string {
   return renderToStaticMarkup(
     <SessionRow
       now={2_000}
@@ -66,6 +67,7 @@ function renderRow(row: SidebarSessionRow): string {
       onPin={noop}
       opening={false}
       registerRef={noop}
+      layout={layout}
       row={row}
       selected={false}
       showShortcut={false}
@@ -75,7 +77,7 @@ function renderRow(row: SidebarSessionRow): string {
 
 describe("session row layout", () => {
   test("has one fixed-height title line and overlays hover actions without removing metadata", () => {
-    const markup = renderRow(session());
+    const markup = renderRow(session(), "compact");
     expect(markup).toContain("h-[46px]");
     expect(markup).toContain("truncate text-[13px]");
     expect(markup).toContain('data-row-actions-overlay="true"');
@@ -113,7 +115,6 @@ describe("session row layout", () => {
     // What still holds is still shown.
     expect(markup).toContain("claude-sessions");
     expect(markup).toContain('data-row-actions-overlay="true"');
-    expect(markup).toContain("relative flex h-full shrink-0");
   });
 
   test("a live session keeps its card, model and status", () => {
@@ -139,6 +140,33 @@ describe("session row layout", () => {
     // The model is named but not badged: the label is already tinted by vendor.
     expect(markup).toContain("Sol");
     expect(markup).not.toContain("inline-flex size-3");
+  });
+
+  test("each row layout spends its height differently", () => {
+    // Wide is the default: two lines, and the title owns its own with nothing beside it.
+    const wide = renderRow(session());
+    expect(wide).toContain("h-[46px]");
+    expect(wide).toContain("flex h-full min-w-0 flex-col justify-center");
+    // Status is pushed to the far end of the metadata line rather than sitting next to the title.
+    expect(wide).toContain("ml-auto");
+
+    // Compact keeps status in its own slot beside the title, which is what shortens it.
+    const compact = renderRow(session(), "compact");
+    expect(compact).toContain("h-[46px]");
+    expect(compact).toContain("relative flex h-full shrink-0");
+
+    // Three lines is the only option that changes row height.
+    const three = renderRow(session(), "three-line");
+    expect(three).toContain("h-[62px]");
+    expect(three).not.toContain("h-[46px]");
+  });
+
+  test("three-line-live grows running rows only, so the long tail keeps its height", () => {
+    const live = renderRow(session(), "three-line-live");
+    expect(live).toContain("h-[62px]");
+
+    const closed = renderRow(session({ density: "settled" }), "three-line-live");
+    expect(closed).toContain("h-[46px]");
   });
 
   test("titles carry one step of weight, not semibold", () => {

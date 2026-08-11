@@ -101,6 +101,38 @@ export function parseGroupingMode(value: string | null): GroupingMode {
   return GROUPING_MODES.includes(value as GroupingMode) ? (value as GroupingMode) : "status";
 }
 
+/**
+ * How much room a row gives the title, and how many lines it spends to do it.
+ *
+ * `wide` is the default: status and age sit on the metadata line rather than beside the title,
+ * which is what was squeezing it. Measured on a real catalogue that widens the title from 289 to
+ * 388px without changing row height or list length, so the three-line options buy hierarchy
+ * rather than width — `three-line` at 31% more scrolling, `three-line-live` at about 1% because
+ * only the handful of live rows grow.
+ */
+export type RowLayout = "compact" | "wide" | "three-line" | "three-line-live";
+
+export const ROW_LAYOUTS: readonly RowLayout[] = ["wide", "compact", "three-line", "three-line-live"];
+
+export const ROW_LAYOUT_LABELS: Readonly<Record<RowLayout, string>> = {
+  wide: "Wide title",
+  compact: "Status beside title",
+  "three-line": "Three lines",
+  "three-line-live": "Three lines, live only",
+};
+
+export const ROW_LAYOUT_HINTS: Readonly<Record<RowLayout, string>> = {
+  wide: "Title spans the row. Same height as today.",
+  compact: "Status and age sit beside the title, shortening it.",
+  "three-line": "Project and status above the title, category below. 31% more scrolling.",
+  "three-line-live": "Three lines for running sessions, two for closed ones.",
+};
+
+/** Only a value the app actually understands survives a round trip through storage. */
+export function parseRowLayout(value: string | null): RowLayout {
+  return ROW_LAYOUTS.includes(value as RowLayout) ? (value as RowLayout) : "wide";
+}
+
 /** Age bands, coarsest boundaries people actually reason in. Order is display order. */
 export const RECENCY_BANDS: readonly string[] = [
   "Last 2 hours",

@@ -51,6 +51,20 @@ export function SortIcon({ className }: IconProps): React.ReactElement {
   );
 }
 
+/** Sliders rather than a gear: these are display preferences, not application settings. */
+export function SettingsIcon({ className }: IconProps): React.ReactElement {
+  return (
+    <Glyph className={className}>
+      <path d="M4 6h10" />
+      <path d="M18 6h2" />
+      <circle cx="16" cy="6" r="2" />
+      <path d="M4 18h6" />
+      <path d="M14 18h6" />
+      <circle cx="12" cy="18" r="2" />
+    </Glyph>
+  );
+}
+
 export function ChevronIcon({ className }: IconProps): React.ReactElement {
   return (
     <Glyph className={className}>

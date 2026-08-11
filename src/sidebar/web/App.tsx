@@ -20,6 +20,7 @@ import {
   groupSessions,
   OPEN_SHELF,
   parseGroupingMode,
+  parseRowLayout,
   parseShelfStates,
   serializeShelfStates,
   shelfRows,
@@ -28,6 +29,7 @@ import {
   shouldApplySnapshotResponse,
   shouldReloadSnapshot,
   type GroupingMode,
+  type RowLayout,
   type ShelfState,
 } from "./format.ts";
 import { SessionRow } from "./components/session-row.tsx";
@@ -36,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import { SearchIcon } from "./components/icons.tsx";
 import { GroupingSelect } from "./components/grouping-select.tsx";
 import { ScopeSelect } from "./components/scope-select.tsx";
+import { DisplayOptions } from "./components/display-options.tsx";
 import { GroupHeader } from "./components/group-header.tsx";
 import { Toasts, type Toast } from "./components/toasts.tsx";
 import { cn } from "@/lib/utils";
@@ -48,6 +51,7 @@ const GROUPING_STORAGE_KEY = "ccs-sidebar-grouping";
 const SCOPE_STORAGE_KEY = "ccs-sidebar-scope";
 const SHELVES_STORAGE_KEY = "ccs-sidebar-collapsed";
 const CLUSTERS_STORAGE_KEY = "ccs-sidebar-clusters";
+const LAYOUT_STORAGE_KEY = "ccs-sidebar-row-layout";
 const CLOCK_INTERVAL_MS = 30_000;
 /**
  * How long a card survives the pointer leaving one control, in case it is on its way to the next.
@@ -172,6 +176,9 @@ export function App(): React.ReactElement {
    */
   const [clusterFirst, setClusterFirst] = useState(
     () => localStorage.getItem(CLUSTERS_STORAGE_KEY) === "1",
+  );
+  const [rowLayout, setRowLayout] = useState<RowLayout>(
+    () => parseRowLayout(localStorage.getItem(LAYOUT_STORAGE_KEY)),
   );
   const listRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -674,6 +681,13 @@ export function App(): React.ReactElement {
           }}
           value={grouping}
         />
+        <DisplayOptions
+          layout={rowLayout}
+          onLayoutChange={(next) => {
+            setRowLayout(next);
+            localStorage.setItem(LAYOUT_STORAGE_KEY, next);
+          }}
+        />
       </div>
 
       {/* Bottom padding rather than a shorter list, so rows scroll *under* the host's footer
@@ -725,6 +739,7 @@ export function App(): React.ReactElement {
                 onPin={setPinned}
                 onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
                 onHover={onHover}
+                layout={rowLayout}
                 registerRef={(element) => {
                   rowRefs.current[flatRows.indexOf(row)] = element;
                 }}
