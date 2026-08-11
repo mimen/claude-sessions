@@ -1,5 +1,5 @@
 import type React from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { CmuxStatusAvailability, SidebarRow, SidebarSessionRow, SidebarSummary } from "../../projection.ts";
 import { relativeTime, shortenPath, type RowLayouts } from "../format.ts";
 import { cn } from "@/lib/utils";
@@ -106,6 +106,26 @@ export function SessionRow({
 }: SessionRowProps): React.ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const closeNow = useCallback((): void => onHover(row, null), [onHover, row]);
+
+  /**
+   * Dismiss the menu when the pointer or focus leaves the sidebar.
+   *
+   * Base UI dismisses on an outside press, which is the whole story for a page that owns the
+   * screen. This page is a dock panel a few hundred pixels wide: the usual way to abandon a menu
+   * here is to move to the terminal beside it, and that produces no press inside the document at
+   * all. The menu stayed open over a sidebar nobody was pointing at, and was still there on the
+   * next glance.
+   */
+  useEffect(() => {
+    if (!menuOpen) return;
+    const dismiss = (): void => setMenuOpen(false);
+    window.addEventListener("blur", dismiss);
+    document.addEventListener("mouseleave", dismiss);
+    return () => {
+      window.removeEventListener("blur", dismiss);
+      document.removeEventListener("mouseleave", dismiss);
+    };
+  }, [menuOpen]);
   const session = row.kind === "session" ? row : null;
   const workspace = row.kind === "workspace" ? row : null;
   const archived = session?.lifecycle === "archived";
@@ -119,7 +139,6 @@ export function SessionRow({
   // what still holds — name, project, category, age — and drops its card so the live rows above it
   // are the only ones carrying weight.
   const ghost = row.kind === "session" && row.density !== "full";
-  // a: three lines everywhere. b: two lines, title full width. c: three lines for live rows only.
   // Open and closed rows carry different facts, so each side picks its own arrangement.
   const layout = ghost ? layouts.closed : layouts.open;
   const threeLine = layout === "three-line";

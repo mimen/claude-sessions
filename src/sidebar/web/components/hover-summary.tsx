@@ -25,13 +25,16 @@ export interface HoverTarget {
 }
 
 /**
- * Narrow enough to read as an annotation on the row rather than a takeover of the sidebar.
+ * The card mirrors the row it describes: same left edge, same width.
  *
- * The dock is itself only a few hundred pixels wide, so a card sized as a fraction of the
- * viewport is indistinguishable from a full-width panel. A fixed, deliberately small width is
- * what makes it read as a note about a row.
+ * A fixed narrow width left it hugging the sidebar's left edge with dead space beside it, which
+ * read as a panel that had failed to size itself rather than a note attached to a row. Sharing the
+ * row's edges is what makes the association legible, and in a dock a few hundred pixels wide the
+ * row is already narrow enough that the card cannot become a takeover.
+ *
+ * Horizontal placement therefore takes no margin of its own — the row's inset is the margin, and
+ * imposing a second one put the card two pixels inside the row it was supposed to line up with.
  */
-const CARD_WIDTH = 240;
 const VIEWPORT_MARGIN = 8;
 /** Gap between the row and the card, so the card is clearly about the row and not part of it. */
 const ROW_GAP = 6;
@@ -39,6 +42,7 @@ const ROW_GAP = 6;
 interface Placement {
   readonly top: number;
   readonly left: number;
+  readonly width: number;
 }
 
 export function HoverSummary({
@@ -73,12 +77,10 @@ export function HoverSummary({
       ? Math.min(below, Math.max(VIEWPORT_MARGIN, window.innerHeight - height - VIEWPORT_MARGIN))
       : above;
 
-    // Left-aligned with the row, clamped so a card near the edge stays fully on screen.
-    const left = Math.min(
-      Math.max(VIEWPORT_MARGIN, target.rect.left),
-      Math.max(VIEWPORT_MARGIN, window.innerWidth - CARD_WIDTH - VIEWPORT_MARGIN),
-    );
-    setPlacement({ top, left });
+    // Aligned to the row on both edges, clamped only by the viewport itself.
+    const width = Math.min(target.rect.width, window.innerWidth);
+    const left = Math.max(0, Math.min(target.rect.left, window.innerWidth - width));
+    setPlacement({ top, left, width });
   }, [target]);
 
   if (!target) return null;
@@ -93,7 +95,7 @@ export function HoverSummary({
       style={{
         left: placement?.left ?? 0,
         top: placement?.top ?? 0,
-        width: CARD_WIDTH,
+        width: placement?.width ?? 0,
         visibility: placement ? "visible" : "hidden",
       }}
     >

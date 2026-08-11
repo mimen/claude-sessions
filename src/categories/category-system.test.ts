@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -47,6 +46,8 @@ function ensure(db: ReturnType<typeof openCatalogue>, ...ids: string[]): void {
   for (const id of ids) ensureRow(db, id, "2026-08-07T00:00:00Z");
 }
 
+const VAULT_REGISTRY = "/Users/mimen/Documents/milad-vault/ClaudeConfig/categories/registry.json";
+
 describe("category registry", () => {
   test("loads the canonical merged registry shape and canonical order", () => {
     const root = mkdtempSync(join(tmpdir(), "ccs-category-"));
@@ -76,13 +77,10 @@ describe("category registry", () => {
     if (!loaded.ok) expect(loaded.error.message).toContain("Too big");
   });
 
-  test("parses the actual registry merged in the canonical vault branch", () => {
-    const root = mkdtempSync(join(tmpdir(), "ccs-real-category-"));
-    roots.push(root);
-    const path = join(root, "registry.json");
-    const bytes = execFileSync("git", ["-C", "/Users/mimen/Documents/milad-vault", "show", "origin/main:ClaudeConfig/categories/registry.json"]);
-    writeFileSync(path, bytes);
-    const loaded = loadCategoryRegistry(path);
+  test("parses the registry the vault actually publishes", () => {
+    // Read straight from the vault. The registry is a plain file there, so the file on disk is
+    // the canonical copy and the one every machine loads at runtime.
+    const loaded = loadCategoryRegistry(VAULT_REGISTRY);
     expect(loaded.ok).toBeTrue();
     if (loaded.ok) {
       expect(loaded.value.version).toBe("1.0.0");
