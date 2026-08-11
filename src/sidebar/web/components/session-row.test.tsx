@@ -55,7 +55,7 @@ function session(overrides: Partial<SidebarSessionRow> = {}): SidebarSessionRow 
 }
 
 const noop = (): void => {};
-function renderRow(row: SidebarSessionRow, layout: RowLayout = "wide"): string {
+function renderRow(row: SidebarSessionRow, layout: RowLayout = "wide", closed: RowLayout = layout): string {
   return renderToStaticMarkup(
     <SessionRow
       now={2_000}
@@ -67,7 +67,7 @@ function renderRow(row: SidebarSessionRow, layout: RowLayout = "wide"): string {
       onPin={noop}
       opening={false}
       registerRef={noop}
-      layout={layout}
+      layouts={{ open: layout, closed }}
       row={row}
       selected={false}
       showShortcut={false}
@@ -161,12 +161,18 @@ describe("session row layout", () => {
     expect(three).not.toContain("h-[46px]");
   });
 
-  test("three-line-live grows running rows only, so the long tail keeps its height", () => {
-    const live = renderRow(session(), "three-line-live");
+  test("open and closed rows take their layout from their own side of the control", () => {
+    // Three lines for what is running, two for the long tail: the pairing that makes splitting
+    // the control worth having, since the tail is what a third line actually costs.
+    const live = renderRow(session(), "three-line", "wide");
     expect(live).toContain("h-[62px]");
 
-    const closed = renderRow(session({ density: "settled" }), "three-line-live");
+    const closed = renderRow(session({ density: "settled" }), "three-line", "wide");
     expect(closed).toContain("h-[46px]");
+
+    // And the reverse, so neither side is quietly driving the other.
+    expect(renderRow(session(), "wide", "three-line")).toContain("h-[46px]");
+    expect(renderRow(session({ density: "settled" }), "wide", "three-line")).toContain("h-[62px]");
   });
 
   test("titles carry one step of weight, not semibold", () => {

@@ -1,7 +1,7 @@
 import type React from "react";
 import { useCallback, useState } from "react";
 import type { CmuxStatusAvailability, SidebarRow, SidebarSessionRow, SidebarSummary } from "../../projection.ts";
-import { relativeTime, shortenPath, type RowLayout } from "../format.ts";
+import { relativeTime, shortenPath, type RowLayouts } from "../format.ts";
 import { cn } from "@/lib/utils";
 import {
   ArchiveIcon,
@@ -86,7 +86,7 @@ export interface SessionRowProps {
   readonly onOpen: (row: SidebarRow) => void;
   readonly registerRef: (element: HTMLButtonElement | null) => void;
   readonly onHover: (row: SidebarRow, element: HTMLElement | null) => void;
-  readonly layout: RowLayout;
+  readonly layouts: RowLayouts;
 }
 
 export function SessionRow({
@@ -102,7 +102,7 @@ export function SessionRow({
   onPin,
   registerRef,
   onHover,
-  layout,
+  layouts,
 }: SessionRowProps): React.ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const closeNow = useCallback((): void => onHover(row, null), [onHover, row]);
@@ -120,7 +120,9 @@ export function SessionRow({
   // are the only ones carrying weight.
   const ghost = row.kind === "session" && row.density !== "full";
   // a: three lines everywhere. b: two lines, title full width. c: three lines for live rows only.
-  const threeLine = layout === "three-line" || (layout === "three-line-live" && !ghost);
+  // Open and closed rows carry different facts, so each side picks its own arrangement.
+  const layout = ghost ? layouts.closed : layouts.open;
+  const threeLine = layout === "three-line";
 
   const titleLine = (
       <span

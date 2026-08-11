@@ -29,7 +29,7 @@ import {
   shouldApplySnapshotResponse,
   shouldReloadSnapshot,
   type GroupingMode,
-  type RowLayout,
+  type RowLayouts,
   type ShelfState,
 } from "./format.ts";
 import { SessionRow } from "./components/session-row.tsx";
@@ -51,7 +51,8 @@ const GROUPING_STORAGE_KEY = "ccs-sidebar-grouping";
 const SCOPE_STORAGE_KEY = "ccs-sidebar-scope";
 const SHELVES_STORAGE_KEY = "ccs-sidebar-collapsed";
 const CLUSTERS_STORAGE_KEY = "ccs-sidebar-clusters";
-const LAYOUT_STORAGE_KEY = "ccs-sidebar-row-layout";
+const OPEN_LAYOUT_STORAGE_KEY = "ccs-sidebar-row-layout-open";
+const CLOSED_LAYOUT_STORAGE_KEY = "ccs-sidebar-row-layout-closed";
 const CLOCK_INTERVAL_MS = 30_000;
 /**
  * How long a card survives the pointer leaving one control, in case it is on its way to the next.
@@ -177,9 +178,10 @@ export function App(): React.ReactElement {
   const [clusterFirst, setClusterFirst] = useState(
     () => localStorage.getItem(CLUSTERS_STORAGE_KEY) === "1",
   );
-  const [rowLayout, setRowLayout] = useState<RowLayout>(
-    () => parseRowLayout(localStorage.getItem(LAYOUT_STORAGE_KEY)),
-  );
+  const [rowLayouts, setRowLayouts] = useState<RowLayouts>(() => ({
+    open: parseRowLayout(localStorage.getItem(OPEN_LAYOUT_STORAGE_KEY)),
+    closed: parseRowLayout(localStorage.getItem(CLOSED_LAYOUT_STORAGE_KEY)),
+  }));
   const listRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const openingIdsRef = useRef(new Set<string>());
@@ -682,10 +684,11 @@ export function App(): React.ReactElement {
           value={grouping}
         />
         <DisplayOptions
-          layout={rowLayout}
-          onLayoutChange={(next) => {
-            setRowLayout(next);
-            localStorage.setItem(LAYOUT_STORAGE_KEY, next);
+          layouts={rowLayouts}
+          onChange={(next) => {
+            setRowLayouts(next);
+            localStorage.setItem(OPEN_LAYOUT_STORAGE_KEY, next.open);
+            localStorage.setItem(CLOSED_LAYOUT_STORAGE_KEY, next.closed);
           }}
         />
       </div>
@@ -739,7 +742,7 @@ export function App(): React.ReactElement {
                 onPin={setPinned}
                 onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
                 onHover={onHover}
-                layout={rowLayout}
+                layouts={rowLayouts}
                 registerRef={(element) => {
                   rowRefs.current[flatRows.indexOf(row)] = element;
                 }}

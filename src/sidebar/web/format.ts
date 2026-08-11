@@ -104,29 +104,43 @@ export function parseGroupingMode(value: string | null): GroupingMode {
 /**
  * How much room a row gives the title, and how many lines it spends to do it.
  *
- * `wide` is the default: status and age sit on the metadata line rather than beside the title,
- * which is what was squeezing it. Measured on a real catalogue that widens the title from 289 to
- * 388px without changing row height or list length, so the three-line options buy hierarchy
- * rather than width — `three-line` at 31% more scrolling, `three-line-live` at about 1% because
- * only the handful of live rows grow.
+ * Measured on a real catalogue, the title is 388px wide in every layout except `compact`, where
+ * status sits beside it and cuts it to 286px. The third line therefore buys hierarchy, not width.
  */
-export type RowLayout = "compact" | "wide" | "three-line" | "three-line-live";
+export type RowLayout = "compact" | "wide" | "three-line";
 
-export const ROW_LAYOUTS: readonly RowLayout[] = ["wide", "compact", "three-line", "three-line-live"];
+export const ROW_LAYOUTS: readonly RowLayout[] = ["wide", "compact", "three-line"];
 
 export const ROW_LAYOUT_LABELS: Readonly<Record<RowLayout, string>> = {
   wide: "Wide title",
   compact: "Status beside title",
   "three-line": "Three lines",
-  "three-line-live": "Three lines, live only",
 };
 
-export const ROW_LAYOUT_HINTS: Readonly<Record<RowLayout, string>> = {
-  wide: "Title spans the row. Same height as today.",
-  compact: "Status and age sit beside the title, shortening it.",
-  "three-line": "Project and status above the title, category below. 31% more scrolling.",
-  "three-line-live": "Three lines for running sessions, two for closed ones.",
+/**
+ * Open and closed rows are chosen separately, and the same choice does not cost the same on both.
+ *
+ * Almost every row in the list is closed, so a third line there is what actually lengthens the
+ * scroll; the handful of open rows can afford one for a fraction of a percent. Stating the cost
+ * per side is the point of splitting the control, so the hints differ rather than being shared.
+ */
+export const ROW_LAYOUT_HINTS_OPEN: Readonly<Record<RowLayout, string>> = {
+  wide: "Title spans the row.",
+  compact: "Status and age beside the title, shortening it.",
+  "three-line": "Project and status above, title, category below.",
 };
+
+export const ROW_LAYOUT_HINTS_CLOSED: Readonly<Record<RowLayout, string>> = {
+  wide: "Title spans the row.",
+  compact: "Age beside the title, shortening it.",
+  "three-line": "Project above, title, category below. Much longer list.",
+};
+
+/** The layout of a row depends on whether its session is still running. */
+export interface RowLayouts {
+  readonly open: RowLayout;
+  readonly closed: RowLayout;
+}
 
 /** Only a value the app actually understands survives a round trip through storage. */
 export function parseRowLayout(value: string | null): RowLayout {
