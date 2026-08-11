@@ -165,6 +165,14 @@ export interface SidebarSource {
     view?: SidebarView,
     rowLimit?: number,
     include?: readonly SidebarLifecycle[],
+    /**
+     * Receives this call's phase timings before the promise settles.
+     *
+     * Per call rather than a shared callback on the source: the caller that wants to log a slow
+     * request needs the phases belonging to *that* request, and reading a latest-wins slot after
+     * an await can attribute another concurrent snapshot's numbers to it.
+     */
+    observe?: (measurement: SidebarSnapshotMeasurement) => void,
   ): Promise<SidebarSnapshot>;
   /** Start a fresh snapshot-only liveness read without delaying the current response. */
   refreshSnapshotLiveness?(): void;
@@ -638,6 +646,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       view: SidebarView = "active",
       rowLimit?: number,
       include: readonly SidebarLifecycle[] = [],
+      observe?: (measurement: SidebarSnapshotMeasurement) => void,
     ): Promise<SidebarSnapshot> {
       const snapshotStartedAt = performance.now();
       let phaseStartedAt = snapshotStartedAt;
@@ -806,7 +815,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         [...facts.favicons].filter(([directory]) => publishedDirectories.has(directory)),
       );
       const projectionMs = performance.now() - phaseStartedAt;
-      observeSnapshot?.({
+      const measurement: SidebarSnapshotMeasurement = {
         view,
         rowCount: snapshot.rows.length,
         totalMs: performance.now() - snapshotStartedAt,
@@ -814,7 +823,9 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         livenessReadable: snapshot.livenessReadable,
         catalogueReadable: snapshot.catalogueReadable,
         indexReadable: snapshot.indexReadable,
-      });
+      };
+      observeSnapshot?.(measurement);
+      observe?.(measurement);
       return snapshot;
     },
 

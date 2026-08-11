@@ -1053,3 +1053,54 @@ describe("sidebar server", () => {
     expect((await fetch(`${app.url}/missing.js`)).status).toBe(404);
   });
 });
+
+describe("slow snapshot diagnostics", () => {
+  test("the warning carries the phase breakdown and the loop lag", async () => {
+    const app = harness({
+      snapshot: async (_scope, _limit, _include, observe) => {
+        // A slow request whose cost is entirely in one phase: the whole point of the breakdown is
+        // that the log can say which.
+        observe?.({
+          view: "active",
+          rowCount: 0,
+          totalMs: 420,
+          phases: { bridgeMs: 400, catalogueMs: 5, indexMs: 6, statusMs: 7, projectionMs: 2 },
+          livenessReadable: true,
+          catalogueReadable: true,
+          indexReadable: true,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        return EMPTY_SNAPSHOT;
+      },
+    });
+
+    expect((await fetch(`${app.url}/api/snapshot`)).status).toBe(200);
+
+    const slow = app.diagnostics.find((entry) => entry.message === "slow sidebar snapshot request");
+    expect(slow).toBeDefined();
+    expect(slow?.context).toMatchObject({
+      sourceMs: 420,
+      bridgeMs: 400,
+      catalogueMs: 5,
+      indexMs: 6,
+      statusMs: 7,
+      projectionMs: 2,
+    });
+    expect(typeof slow?.context?.eventLoopLagMs).toBe("number");
+    expect(slow?.context?.eventLoopLagMs as number).toBeGreaterThanOrEqual(0);
+  });
+
+  test("a source that reports nothing still logs, with the phases absent rather than wrong", async () => {
+    const app = harness({
+      snapshot: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        return EMPTY_SNAPSHOT;
+      },
+    });
+
+    expect((await fetch(`${app.url}/api/snapshot`)).status).toBe(200);
+
+    const slow = app.diagnostics.find((entry) => entry.message === "slow sidebar snapshot request");
+    expect(slow?.context).toMatchObject({ sourceMs: null, bridgeMs: null, catalogueMs: null });
+  });
+});

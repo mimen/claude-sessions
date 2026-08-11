@@ -13,7 +13,12 @@ import { err, ok, type Result } from "../result.ts";
 import { loadFavicon } from "./favicon.ts";
 import { RECOMMENDATIONS } from "../catalogue/enrichment-schema.ts";
 import type { SidebarLifecycle, SidebarView } from "./projection.ts";
-import type { SessionLifecycleAction, SidebarSource } from "./snapshot.ts";
+import type {
+  SessionLifecycleAction,
+  SidebarSnapshotMeasurement,
+  SidebarSource,
+} from "./snapshot.ts";
+import { startEventLoopLagSampler, type EventLoopLagSampler } from "./event-loop-lag.ts";
 import { sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
 
 /**
@@ -49,6 +54,8 @@ export interface SidebarServerOptions {
   readonly snapshotRepresentationTtlMs?: number;
   /** Test seam; production retains at most four MiB of serialized snapshot bodies. */
   readonly snapshotRepresentationMaxBytes?: number;
+  /** Test seam so a slow-request assertion does not depend on the real scheduler. */
+  readonly lagSampler?: EventLoopLagSampler;
 }
 
 type JsonValue = string | number | boolean | null | JsonObject | readonly JsonValue[];
@@ -294,6 +301,9 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
   const hostname = options.hostname ?? DEFAULT_SIDEBAR_HOST;
   const { source, assets } = options;
   const logger = options.logger ?? log;
+  // Sampled continuously rather than around each request: the starvation worth catching
+  // happens between requests as readily as during one.
+  const lagSampler = options.lagSampler ?? startEventLoopLagSampler();
   const snapshotRepresentationTtlMs = options.snapshotRepresentationTtlMs
     ?? SNAPSHOT_REPRESENTATION_TTL_MS;
   const snapshotRepresentationMaxBytes = Math.max(
@@ -368,7 +378,12 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
 
     const rebuild = (async (): Promise<SnapshotRepresentation> => {
       const startedAt = performance.now();
-      const snapshot = await source.snapshot(query.scope, query.limit, query.include);
+      // A holder rather than a bare `let`: control-flow analysis cannot see the callback run,
+      // so a plain variable narrows to `never` at the read and would need a cast to recover.
+      const measured: { value: SidebarSnapshotMeasurement | null } = { value: null };
+      const snapshot = await source.snapshot(query.scope, query.limit, query.include, (seen) => {
+        measured.value = seen;
+      });
       const serializationStartedAt = performance.now();
       const body = JSON.stringify(snapshot);
       const serializationMs = performance.now() - serializationStartedAt;
@@ -381,12 +396,23 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       };
       const totalMs = representation.completedAt - startedAt;
       if (totalMs >= 100) {
+        // Phases and loop lag together are what make this line actionable. Phases alone cannot
+        // distinguish a source that blocked from a process that was descheduled, because a phase
+        // spanning a starved period reports the starvation as its own work.
+        const phases = measured.value?.phases;
         logger.warn("slow sidebar snapshot request", {
           view: query.scope,
           rowCount: snapshot.rows.length,
           payloadBytes: byteLength,
           totalMs,
           serializationMs,
+          sourceMs: measured.value?.totalMs ?? null,
+          bridgeMs: phases?.bridgeMs ?? null,
+          catalogueMs: phases?.catalogueMs ?? null,
+          indexMs: phases?.indexMs ?? null,
+          statusMs: phases?.statusMs ?? null,
+          projectionMs: phases?.projectionMs ?? null,
+          eventLoopLagMs: lagSampler.takePeak(),
           livenessReadable: snapshot.livenessReadable,
           catalogueReadable: snapshot.catalogueReadable,
           indexReadable: snapshot.indexReadable,
