@@ -412,6 +412,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           indexMs: phases?.indexMs ?? null,
           statusMs: phases?.statusMs ?? null,
           workspaceStateMs: phases?.workspaceStateMs ?? null,
+          messageCountMs: phases?.messageCountMs ?? null,
           directoryFactsMs: phases?.directoryFactsMs ?? null,
           notificationsMs: phases?.notificationsMs ?? null,
           projectionMs: phases?.projectionMs ?? null,

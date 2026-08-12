@@ -382,6 +382,13 @@ export interface SidebarSnapshotMeasurement {
     statusMs: number;
     /** Per-workspace state for workspaces with no session, read only when some exist. */
     workspaceStateMs: number;
+    /**
+     * Exact message counts for rows carrying an enrichment.
+     *
+     * One `statSync` per such row, so the cost scales with the list and blocks the loop while
+     * it runs — the `Promise.all` around it parallelises nothing.
+     */
+    messageCountMs: number;
     /** Checkout and favicon facts for every directory the visible rows name. */
     directoryFactsMs: number;
     notificationsMs: number;
@@ -730,6 +737,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       // not parsed yet turns "something happened" into a number. Measured on the live store: 12
       // rows, 28.8 KB, 1.0 ms -- because the cost is what the session typed since the last refresh,
       // not what it has ever typed.
+      phaseStartedAt = performance.now();
       const indexed = await Promise.all(visible.map(async (session) => {
         if (!catalogue.summaries.has(session.sessionId)) {
           return { ...session, transcriptMtimeMs: null };
@@ -745,6 +753,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
             : null,
         };
       }));
+      const messageCountMs = performance.now() - phaseStartedAt;
 
       phaseStartedAt = performance.now();
       const statuses = bridge.readable
@@ -838,6 +847,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
           indexMs,
           statusMs,
           workspaceStateMs,
+          messageCountMs,
           directoryFactsMs,
           notificationsMs,
           projectionMs,
