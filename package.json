@@ -26,7 +26,7 @@
     "report:detached-children:dossier": "bun run scripts/render-detached-child-dossier.ts",
     "lint:exports": "ts-prune -e",
     "lint:circular": "madge --circular --extensions ts,tsx src/",
-    "test:dom": "bun test --preload ./src/sidebar/web/test-dom.ts src/sidebar/web/components/session-row.dom.test.tsx"
+    "test:dom": "bun test --preload ./src/sidebar/web/test-dom.ts src/sidebar/web/components/*.dom.test.tsx"
   },
   "dependencies": {
     "@base-ui/react": "1.6.0",

@@ -17,10 +17,11 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { SidebarSessionRow } from "../../projection.ts";
 import { CategorySummary, EmptySummaryCard, SummaryCard } from "./summary-card.tsx";
 
-/** Which row the pointer is resting on, and where that row is on screen. */
+/** Which row the pointer is resting on, and the element the card follows. */
 export interface HoverTarget {
   readonly row: SidebarSessionRow;
-  /** Viewport rect of the row, read when the hover settled. */
+  readonly element: HTMLElement;
+  /** Initial viewport rect, so the hidden first render already has the row's final width. */
   readonly rect: DOMRect;
 }
 
@@ -55,33 +56,53 @@ export function HoverSummary({
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [placement, setPlacement] = useState<Placement | null>(null);
 
+  // Give the hidden card its final horizontal geometry before measuring it. Measuring at width zero
+  // makes prose wrap into a very tall column; the subsequent real width shortens the card without
+  // changing the already-calculated top, which detaches summaries from rows in the lower half.
+  const width = target ? Math.min(target.rect.width, window.innerWidth) : 0;
+  const left = target
+    ? Math.max(0, Math.min(target.rect.left, window.innerWidth - width))
+    : 0;
+
   // Placement needs the card's height, which depends on how much prose this particular session has,
-  // so it cannot be known until the card exists. It is therefore rendered hidden for one frame and
-  // positioned here -- hidden rather than at a guessed position, because a card that visibly jumps
-  // is worse than one that appears a frame later.
+  // so it cannot be known until the card exists at its final width. It is rendered hidden for one
+  // frame and positioned here -- hidden rather than at a guessed position, because a card that
+  // visibly jumps is worse than one that appears a frame later.
   useLayoutEffect(() => {
     if (!target) {
       setPlacement(null);
       return;
     }
-    const height = cardRef.current?.offsetHeight ?? 0;
-    const below = target.rect.bottom + ROW_GAP;
-    const above = target.rect.top - height - ROW_GAP;
 
-    // Below the row by default, flipping above only when the card would run off the bottom. Never
-    // over the row: the row is what the card is describing, and covering it takes away the thing
-    // you were reading about.
-    const fitsBelow = below + height + VIEWPORT_MARGIN <= window.innerHeight;
-    const fitsAbove = above >= VIEWPORT_MARGIN;
-    const top = fitsBelow || !fitsAbove
-      ? Math.min(below, Math.max(VIEWPORT_MARGIN, window.innerHeight - height - VIEWPORT_MARGIN))
-      : above;
+    const place = (): void => {
+      const height = cardRef.current?.offsetHeight ?? 0;
+      const rect = target.element.getBoundingClientRect();
+      const below = rect.bottom + ROW_GAP;
+      const above = rect.top - height - ROW_GAP;
 
-    // Aligned to the row on both edges, clamped only by the viewport itself.
-    const width = Math.min(target.rect.width, window.innerWidth);
-    const left = Math.max(0, Math.min(target.rect.left, window.innerWidth - width));
-    setPlacement({ top, left, width });
-  }, [target]);
+      // Below the row by default, flipping above only when the card would run off the bottom. Never
+      // over the row: the row is what the card is describing, and covering it takes away the thing
+      // you were reading about.
+      const fitsBelow = below + height + VIEWPORT_MARGIN <= window.innerHeight;
+      const fitsAbove = above >= VIEWPORT_MARGIN;
+      const top = fitsBelow || !fitsAbove
+        ? Math.min(below, Math.max(VIEWPORT_MARGIN, window.innerHeight - height - VIEWPORT_MARGIN))
+        : above;
+
+      setPlacement({ top, left, width });
+    };
+
+    place();
+    // The row lives in a nested scroll container and can also move when a polling update reorders a
+    // section. Capture-phase scroll sees that container; resize covers the viewport changing around
+    // it. Both refresh from the live element rather than the rect saved when hover began.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [left, target, width]);
 
   if (!target) return null;
 
@@ -93,9 +114,9 @@ export function HoverSummary({
         bg-popover px-2 py-1.5 text-popover-foreground shadow-lg"
       ref={cardRef}
       style={{
-        left: placement?.left ?? 0,
+        left,
         top: placement?.top ?? 0,
-        width: placement?.width ?? 0,
+        width,
         visibility: placement ? "visible" : "hidden",
       }}
     >

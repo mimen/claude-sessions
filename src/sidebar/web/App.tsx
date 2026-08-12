@@ -484,7 +484,7 @@ export function App(): React.ReactElement {
       hoverTimerRef.current = setTimeout(() => setHoverTarget(null), HOVER_CLOSE_GRACE_MS);
       return;
     }
-    setHoverTarget({ row, rect: element.getBoundingClientRect() });
+    setHoverTarget({ row, element, rect: element.getBoundingClientRect() });
   }, []);
 
   /** Switch which lifecycle the list shows, clearing old rows while the next scope loads. */
