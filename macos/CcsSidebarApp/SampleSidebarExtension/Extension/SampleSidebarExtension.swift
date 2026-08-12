@@ -16,36 +16,13 @@ final class CcsSidebarExtension: @MainActor CmuxSidebarExtension {
         actionScopes: [.selectWorkspace]
     )
 
-    private let client = SnapshotClient()
-
     required init() {}
 
     var body: some View {
-        CcsSidebarRootView(client: client)
+        SidebarRootView()
     }
 
     func update(context: CmuxSidebarContext) {}
 
     func connectionStatusDidChange(_ status: CmuxSidebarConnectionStatus) {}
-}
-
-struct CcsSidebarRootView: View {
-    let client: SnapshotClient
-
-    var body: some View {
-        Group {
-            if client.rows.isEmpty {
-                ContentUnavailableView {
-                    Label("No sessions", systemImage: "rectangle.stack")
-                } description: {
-                    Text(client.lastError.map { "Sidebar server unreachable.\n\($0)" }
-                         ?? "Waiting for the sidebar server on 127.0.0.1:8788.")
-                }
-            } else {
-                SessionListView(rows: client.rows)
-            }
-        }
-        .onAppear { client.start() }
-        .onDisappear { client.stop() }
-    }
 }

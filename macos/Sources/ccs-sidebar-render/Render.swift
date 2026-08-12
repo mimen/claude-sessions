@@ -40,7 +40,7 @@ struct Render {
 
         let view = VStack(spacing: 6) {
             ForEach(Array(rows), id: \.id) { row in
-                SessionRowView(row: row, age: Harness.age(from: row.lastActivityAt))
+                SessionRowView(row: row, age: Harness.age(from: row.lastActivityAt), actions: RowActions())
             }
         }
         .padding(8)

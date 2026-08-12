@@ -5,13 +5,18 @@ import SwiftUI
 /// Sections come from each row's `section`, in first-appearance order, because the server has
 /// already sorted the rows into the order it wants them read. Re-sorting here would be a second
 /// opinion about priority, and the two would drift.
+@MainActor
 public struct SessionListView: View {
     private let rows: [SidebarRow]
     private let now: Date
+    private let actions: RowActions
+    private let selectedId: String?
 
-    public init(rows: [SidebarRow], now: Date = Date()) {
+    public init(rows: [SidebarRow], actions: RowActions, now: Date = Date(), selectedId: String? = nil) {
         self.rows = rows
+        self.actions = actions
         self.now = now
+        self.selectedId = selectedId
     }
 
     /// Section order, fixed rather than derived from the response.
@@ -41,7 +46,7 @@ public struct SessionListView: View {
                 ForEach(sections, id: \.name) { section in
                     Section {
                         ForEach(section.rows) { row in
-                            SessionRowView(row: row, age: RelativeAge.format(row.lastActivityAt, now: now))
+                            SessionRowView(row: row, age: RelativeAge.format(row.lastActivityAt, now: now), actions: actions, isSelected: row.id == selectedId)
                         }
                     } header: {
                         HStack {

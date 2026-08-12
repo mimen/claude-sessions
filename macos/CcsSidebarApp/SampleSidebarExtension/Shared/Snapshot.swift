@@ -27,6 +27,20 @@ public struct SidebarRow: Decodable, Identifiable, Sendable {
         public let verb: String
         public let actionable: Bool
         public let reason: String?
+        public let junk: Bool?
+    }
+
+    /// The enrichment's account of the session, and how far it has aged.
+    public struct Summary: Decodable, Sendable {
+        public let state: String?
+        public let history: String?
+        public let next: String?
+        public let remaining: String?
+        public let recommendation: String?
+        public let reason: String?
+        public let junk: Bool
+        public let messagesSince: Int?
+        public let driftLabel: String?
     }
 
     public let id: String
@@ -43,6 +57,13 @@ public struct SidebarRow: Decodable, Identifiable, Sendable {
     public let lastActivityAt: Double?
     public let unread: Int
     public let workspaceRef: String?
+    public let workspaceId: String?
+    public let sessionId: String?
+    public let summary: Summary?
+    public let pinned: Bool
+    public let focused: Bool
+    public let shortcut: Int?
+    public let worktree: String?
 
     /// A session that is no longer running: it keeps the grid but drops the facts that stopped
     /// being true. Mirrors the web sidebar's rule so the two cannot describe a row differently.
@@ -52,4 +73,21 @@ public struct SidebarRow: Decodable, Identifiable, Sendable {
 public struct SidebarSnapshot: Decodable, Sendable {
     public let rows: [SidebarRow]
     public let livenessReadable: Bool
+    public let hasMoreRows: Bool?
+    public let lifecycleCounts: [String: Int]?
+}
+
+/// The scopes the server will project, matching the web sidebar's own picker.
+public enum SidebarScope: String, CaseIterable, Sendable {
+    case active, saved, completed, archived, triage
+
+    public var title: String {
+        switch self {
+        case .active: return "Active"
+        case .saved: return "Saved"
+        case .completed: return "Done"
+        case .archived: return "Archived"
+        case .triage: return "Triage"
+        }
+    }
 }

@@ -24,23 +24,40 @@ extension Color {
 /// The layout is the web sidebar's, carried over rather than reinvented — the title spans the row
 /// because status beside it was what squeezed it, and a closed row loses its card and its
 /// running-process facts while keeping the same grid.
+@MainActor
 public struct SessionRowView: View {
     public let row: SidebarRow
     public let age: String
+    public let actions: RowActions
+    public let isSelected: Bool
 
-    public init(row: SidebarRow, age: String) {
+    @State private var hovering = false
+
+    public init(row: SidebarRow, age: String, actions: RowActions, isSelected: Bool = false) {
         self.row = row
         self.age = age
+        self.actions = actions
+        self.isSelected = isSelected
     }
 
     private var titleWeight: Font.Weight { row.section == "needs-you" ? .medium : .regular }
 
     public var body: some View {
+        content
+            .contentShape(Rectangle())
+            .onTapGesture { actions.open(row) }
+            .onHover { hovering = $0 }
+            // A native menu, so it is free to extend past the sidebar's edge — the constraint the
+            // web version could never escape, being painted inside a web view's own viewport.
+            .contextMenu { RowContextMenu(row: row, actions: actions) }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Text(row.name)
                     .font(.system(size: 13, weight: titleWeight))
-                    .foregroundStyle(row.isGhost ? .secondary : .primary)
+                    .foregroundStyle(row.isJunk ? AnyShapeStyle(.tertiary) : row.isGhost ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 8)
@@ -64,15 +81,35 @@ public struct SessionRowView: View {
                     Text(model.label).foregroundStyle(Color(hex: model.color) ?? .secondary)
                 }
                 Spacer(minLength: 6)
-                if let status = row.status, !row.isGhost {
-                    Text(status.label)
-                    if let icon = status.icon {
-                        Image(systemName: icon)
-                            .font(.system(size: 8))
-                            .foregroundStyle(Color(hex: status.color) ?? .secondary)
+                if hovering {
+                    // Only what this row can actually do: a control that is always visible and
+                    // never able to act is the thing the web sidebar had to remove.
+                    HStack(spacing: 4) {
+                        if !row.isCompleted {
+                            RowActionButton(
+                                symbol: row.isSaved ? "bookmark.fill" : "bookmark",
+                                help: row.isSaved ? "Move to Active" : "Save for later"
+                            ) { actions.lifecycle(row, row.isSaved ? "unsave" : "save") }
+                            RowActionButton(symbol: "checkmark", help: "Mark done") {
+                                actions.lifecycle(row, "complete")
+                            }
+                        }
+                        if row.hasTab {
+                            RowActionButton(symbol: "xmark", help: "Close tab") { actions.closeTab(row) }
+                        }
                     }
+                    .transition(.opacity)
+                } else {
+                    if let status = row.status, !row.isGhost {
+                        Text(status.label)
+                        if let icon = status.icon {
+                            Image(systemName: icon)
+                                .font(.system(size: 8))
+                                .foregroundStyle(Color(hex: status.color) ?? .secondary)
+                        }
+                    }
+                    Text(age).monospacedDigit()
                 }
-                Text(age).monospacedDigit()
             }
             .font(.system(size: 10))
             .foregroundStyle(.secondary)
@@ -81,13 +118,52 @@ public struct SessionRowView: View {
         .padding(.vertical, 6)
         .frame(height: 46, alignment: .center)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(row.isGhost ? Color.clear : Color.primary.opacity(0.06))
+        .background(background)
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        // The left edge marks unread, exactly as the web row does.
-        .overlay(alignment: .leading) {
-            if row.unread > 0 {
-                Rectangle().fill(Color(hex: "#4C8DFF") ?? .blue).frame(width: 2)
+        .overlay {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 6).strokeBorder(.tertiary, lineWidth: 1)
             }
         }
+        // The left edge marks the open session, or unread when it is some other row. Focus wins:
+        // where a session is matters more than that it has news, and opening it clears the news.
+        .overlay(alignment: .leading) { edge }
+    }
+
+    private var background: some View {
+        Group {
+            if row.focused { Color.primary.opacity(0.12) }
+            else if hovering { Color.primary.opacity(0.10) }
+            else if row.isGhost { Color.clear }
+            else { Color.primary.opacity(0.06) }
+        }
+    }
+
+    @ViewBuilder
+    private var edge: some View {
+        if row.focused {
+            Rectangle().fill(.primary).frame(width: 2)
+        } else if row.unread > 0 {
+            Rectangle().fill(Color(hex: "#4C8DFF") ?? .blue).frame(width: 2)
+        }
+    }
+}
+
+/// One hover control. Small, square, and quiet until pointed at.
+struct RowActionButton: View {
+    let symbol: String
+    let help: String
+    let run: () -> Void
+
+    var body: some View {
+        Button(action: run) {
+            Image(systemName: symbol)
+                .font(.system(size: 9, weight: .medium))
+                .frame(width: 18, height: 18)
+                .background(Color.primary.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }
