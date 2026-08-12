@@ -1064,7 +1064,16 @@ describe("slow snapshot diagnostics", () => {
           view: "active",
           rowCount: 0,
           totalMs: 420,
-          phases: { bridgeMs: 400, catalogueMs: 5, indexMs: 6, statusMs: 7, projectionMs: 2 },
+          phases: {
+            bridgeMs: 400,
+            catalogueMs: 5,
+            indexMs: 6,
+            statusMs: 7,
+            workspaceStateMs: 8,
+            directoryFactsMs: 9,
+            notificationsMs: 10,
+            projectionMs: 2,
+          },
           livenessReadable: true,
           catalogueReadable: true,
           indexReadable: true,
@@ -1084,6 +1093,9 @@ describe("slow snapshot diagnostics", () => {
       catalogueMs: 5,
       indexMs: 6,
       statusMs: 7,
+      workspaceStateMs: 8,
+      directoryFactsMs: 9,
+      notificationsMs: 10,
       projectionMs: 2,
     });
     expect(typeof slow?.context?.eventLoopLagMs).toBe("number");

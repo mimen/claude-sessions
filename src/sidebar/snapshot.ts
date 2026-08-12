@@ -378,7 +378,13 @@ export interface SidebarSnapshotMeasurement {
     bridgeMs: number;
     catalogueMs: number;
     indexMs: number;
+    /** The `cmux list-status` sweep alone: one subprocess per workspace, eight at a time. */
     statusMs: number;
+    /** Per-workspace state for workspaces with no session, read only when some exist. */
+    workspaceStateMs: number;
+    /** Checkout and favicon facts for every directory the visible rows name. */
+    directoryFactsMs: number;
+    notificationsMs: number;
     projectionMs: number;
   }>;
   readonly livenessReadable: boolean;
@@ -744,21 +750,25 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const statuses = bridge.readable
         ? await statusReader.read(bridge.workspaceIds())
         : new Map<string, CmuxStatusRead>();
+      const statusMs = performance.now() - phaseStartedAt;
 
       const pinnedWorkspaces = pinnedWorkspacesFrom(bridge);
       const live = liveSessionsFrom(bridge, pinnedWorkspaces, statuses);
       // Sessionless workspaces have no hook-store cwd, so cmux's own per-workspace record is the
       // only truthful source for the directory their row names.
       const sessionless = liveWorkspacesFrom(bridge, pinnedWorkspaces);
+      phaseStartedAt = performance.now();
       const workspaceStates = sessionless.length > 0
         ? await workspaceStateReader.read(sessionless.map((entry) => entry.workspaceId))
         : new Map<string, null>();
+      const workspaceStateMs = performance.now() - phaseStartedAt;
       const workspaces: LiveWorkspaceInput[] = sessionless.map((entry) => ({
         ...entry,
         cwd: workspaceStates.get(entry.workspaceId)?.cwd ?? null,
       }));
       const indexedForScope = indexed.filter((session) =>
         lifecycles.includes(lifecycleForIndexedSession(session, catalogue.lifecycles)));
+      phaseStartedAt = performance.now();
       const facts = await directoryFacts.lookup([
         ...directoriesToResolve(
           live,
@@ -767,10 +777,13 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         ),
         ...workspaces.flatMap((entry) => (entry.cwd ? [entry.cwd] : [])),
       ]);
+      const directoryFactsMs = performance.now() - phaseStartedAt;
+
+      phaseStartedAt = performance.now();
       const notifications = bridge.readable
         ? await notificationReader.read()
         : null;
-      const statusMs = performance.now() - phaseStartedAt;
+      const notificationsMs = performance.now() - phaseStartedAt;
       phaseStartedAt = performance.now();
       const categoryProjection = readCategories(cataloguePath, categoryRegistryPath);
       const snapshot = projectSidebar({
@@ -819,7 +832,16 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         view,
         rowCount: snapshot.rows.length,
         totalMs: performance.now() - snapshotStartedAt,
-        phases: { bridgeMs, catalogueMs, indexMs, statusMs, projectionMs },
+        phases: {
+          bridgeMs,
+          catalogueMs,
+          indexMs,
+          statusMs,
+          workspaceStateMs,
+          directoryFactsMs,
+          notificationsMs,
+          projectionMs,
+        },
         livenessReadable: snapshot.livenessReadable,
         catalogueReadable: snapshot.catalogueReadable,
         indexReadable: snapshot.indexReadable,
