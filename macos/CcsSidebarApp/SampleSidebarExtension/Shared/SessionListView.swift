@@ -11,33 +11,27 @@ public struct SessionListView: View {
     private let now: Date
     private let actions: RowActions
     private let selectedId: String?
+    private let grouping: GroupingMode
+    private let layouts: RowLayouts
 
-    public init(rows: [SidebarRow], actions: RowActions, now: Date = Date(), selectedId: String? = nil) {
+    public init(
+        rows: [SidebarRow],
+        actions: RowActions,
+        now: Date = Date(),
+        selectedId: String? = nil,
+        grouping: GroupingMode = .status,
+        layouts: RowLayouts = RowLayouts()
+    ) {
         self.rows = rows
         self.actions = actions
         self.now = now
         self.selectedId = selectedId
+        self.grouping = grouping
+        self.layouts = layouts
     }
 
-    /// Section order, fixed rather than derived from the response.
-    ///
-    /// Taken from the web sidebar so both read the same: what is asking for you first, finished
-    /// work last. First-appearance order looked equivalent and was not — it put `working` above
-    /// `needs-you` whenever a running session happened to sort first.
-    private static let order: [String] = [
-        "needs-you", "working", "ready", "other", "incognito", "recent", "saved", "completed",
-    ]
-
     private var sections: [(name: String, rows: [SidebarRow])] {
-        var grouped: [String: [SidebarRow]] = [:]
-        for row in rows { grouped[row.section ?? "other", default: []].append(row) }
-        // Anything the server introduces that this list has not heard of still shows, after the
-        // known sections rather than silently dropped.
-        let unknown = grouped.keys.filter { !Self.order.contains($0) }.sorted()
-        return (Self.order + unknown).compactMap { key in
-            guard let rows = grouped[key], !rows.isEmpty else { return nil }
-            return (key, rows)
-        }
+        Grouping.group(rows: rows, by: grouping)
     }
 
     public var body: some View {
@@ -46,11 +40,17 @@ public struct SessionListView: View {
                 ForEach(sections, id: \.name) { section in
                     Section {
                         ForEach(section.rows) { row in
-                            SessionRowView(row: row, age: RelativeAge.format(row.lastActivityAt, now: now), actions: actions, isSelected: row.id == selectedId)
+                            SessionRowView(
+                                row: row,
+                                age: RelativeAge.format(row.lastActivityAt, now: now),
+                                actions: actions,
+                                isSelected: row.id == selectedId,
+                                layout: layouts.layout(for: row)
+                            )
                         }
                     } header: {
                         HStack {
-                            Text(sectionTitle(section.name).uppercased())
+                            Text(section.name.uppercased())
                                 .font(.system(size: 10, weight: .semibold))
                                 .tracking(0.8)
                             Spacer()
@@ -68,22 +68,7 @@ public struct SessionListView: View {
             .padding(8)
         }
     }
-
-    private func sectionTitle(_ key: String) -> String {
-        switch key {
-        case "needs-you": return "Needs you"
-        case "working": return "Working"
-        case "ready": return "Ready"
-        case "recent": return "Recent"
-        case "other": return "Other tabs"
-        case "incognito": return "Incognito"
-        case "saved": return "Saved"
-        case "completed": return "Done"
-        default: return key
-        }
-    }
 }
-
 /// Coarse ages. The bands match the web sidebar's so the two read the same at a glance.
 public enum RelativeAge {
     public static func format(_ epochMs: Double?, now: Date = Date()) -> String {

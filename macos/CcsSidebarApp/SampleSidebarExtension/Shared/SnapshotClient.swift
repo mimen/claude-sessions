@@ -17,13 +17,28 @@ public final class SnapshotClient {
     public private(set) var lastError: String?
     public private(set) var livenessReadable = true
 
-    private let endpoint: URL
+    public private(set) var counts: [String: Int] = [:]
+    public var scope: SidebarScope = .active {
+        didSet { if scope != oldValue { Task { await refresh() } } }
+    }
+
+    private let port: Int
+    private let limit: Int
     private let interval: Duration
     private var pollTask: Task<Void, Never>?
 
     public init(port: Int = 8788, limit: Int = 2_000, interval: Duration = .seconds(1)) {
-        endpoint = URL(string: "http://127.0.0.1:\(port)/api/snapshot?limit=\(limit)")!
+        self.port = port
+        self.limit = limit
         self.interval = interval
+    }
+
+    /// Closed scopes need their rows requested explicitly; the server only projects a section it
+    /// was asked for, which is what keeps the active view from carrying hundreds of finished rows.
+    private var endpoint: URL {
+        var url = "http://127.0.0.1:\(port)/api/snapshot?limit=\(limit)&scope=\(scope.rawValue)"
+        if scope == .active { url += "&include=saved" }
+        return URL(string: url)!
     }
 
     public func start() {
@@ -46,6 +61,7 @@ public final class SnapshotClient {
             let (data, _) = try await URLSession.shared.data(from: endpoint)
             let snapshot = try JSONDecoder().decode(SidebarSnapshot.self, from: data)
             rows = snapshot.rows
+            counts = snapshot.lifecycleCounts ?? [:]
             livenessReadable = snapshot.livenessReadable
             lastError = nil
         } catch {

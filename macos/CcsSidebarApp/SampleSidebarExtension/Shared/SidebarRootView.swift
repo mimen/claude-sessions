@@ -12,6 +12,10 @@ public struct SidebarRootView: View {
     @State private var failure: String?
     @State private var pendingDestroy: SidebarRow?
     @State private var destroyDetail: String?
+    @State private var scope: SidebarScope = .active
+    @State private var grouping: GroupingMode = .status
+    @State private var query = ""
+    @State private var layouts = RowLayouts()
     private let actionClient: ActionClient
 
     public init(port: Int = 8788) {
@@ -21,12 +25,26 @@ public struct SidebarRootView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
+            SidebarHeader(
+                scope: $scope,
+                grouping: $grouping,
+                query: $query,
+                layouts: $layouts,
+                counts: client.counts
+            )
+            Divider()
             if let failure {
                 FailureBanner(message: failure) { self.failure = nil }
             }
             content
         }
-        .onAppear { client.start() }
+        .onAppear {
+            restorePreferences()
+            client.start()
+        }
+        .onChange(of: scope) { _, next in client.scope = next }
+        .onChange(of: grouping) { _, next in Preferences.grouping = next }
+        .onChange(of: layouts) { _, next in Preferences.layouts = next }
         .onDisappear { client.stop() }
         .confirmationDialog(
             "Destroy this session?",
@@ -44,15 +62,20 @@ public struct SidebarRootView: View {
 
     @ViewBuilder
     private var content: some View {
-        if client.rows.isEmpty {
+        let visible = client.rows.filter { $0.matches(query) }
+        if visible.isEmpty {
             ContentUnavailableView {
-                Label("No sessions", systemImage: "rectangle.stack")
+                Label(client.rows.isEmpty ? "No sessions" : "No matches", systemImage: "rectangle.stack")
             } description: {
-                Text(client.lastError.map { "Sidebar server unreachable.\n\($0)" }
-                     ?? "Waiting for the sidebar server.")
+                if client.rows.isEmpty {
+                    Text(client.lastError.map { "Sidebar server unreachable.\n\($0)" }
+                         ?? "Waiting for the sidebar server.")
+                } else {
+                    Text("Nothing in \(scope.title.lowercased()) matches “\(query)”.")
+                }
             }
         } else {
-            SessionListView(rows: client.rows, actions: actions)
+            SessionListView(rows: visible, actions: actions, grouping: grouping, layouts: layouts)
         }
     }
 
@@ -73,6 +96,12 @@ public struct SidebarRootView: View {
             destroy: { row in confirmDestroy(row) },
             copySummary: { row in copy(summary: row) }
         )
+    }
+
+    private func restorePreferences() {
+        grouping = Preferences.grouping
+        layouts = Preferences.layouts
+        client.scope = scope
     }
 
     private func run(_ action: SidebarAction) {

@@ -30,14 +30,22 @@ public struct SessionRowView: View {
     public let age: String
     public let actions: RowActions
     public let isSelected: Bool
+    public let layout: RowLayout
 
     @State private var hovering = false
 
-    public init(row: SidebarRow, age: String, actions: RowActions, isSelected: Bool = false) {
+    public init(
+        row: SidebarRow,
+        age: String,
+        actions: RowActions,
+        isSelected: Bool = false,
+        layout: RowLayout = .wide
+    ) {
         self.row = row
         self.age = age
         self.actions = actions
         self.isSelected = isSelected
+        self.layout = layout
     }
 
     private var titleWeight: Font.Weight { row.section == "needs-you" ? .medium : .regular }
@@ -54,6 +62,7 @@ public struct SessionRowView: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 2) {
+            if layout == .threeLine { projectLine }
             HStack(spacing: 6) {
                 Text(row.name)
                     .font(.system(size: 13, weight: titleWeight))
@@ -61,14 +70,20 @@ public struct SessionRowView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 8)
+                // Compact keeps status beside the title, which is exactly what shortens it.
+                if layout == .compact, !hovering {
+                    statusAndAge
+                }
             }
 
             HStack(spacing: 4) {
-                Image(systemName: "folder")
+                if layout != .threeLine {
+                    Image(systemName: "folder")
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
-                Text(row.directory ?? "—")
-                    .lineLimit(1)
+                    Text(row.directory ?? "—")
+                        .lineLimit(1)
+                }
                 if let category = row.category, let label = category.compactLabel {
                     Text("·").foregroundStyle(.quaternary)
                     Circle()
@@ -81,34 +96,10 @@ public struct SessionRowView: View {
                     Text(model.label).foregroundStyle(Color(hex: model.color) ?? .secondary)
                 }
                 Spacer(minLength: 6)
-                if hovering {
-                    // Only what this row can actually do: a control that is always visible and
-                    // never able to act is the thing the web sidebar had to remove.
-                    HStack(spacing: 4) {
-                        if !row.isCompleted {
-                            RowActionButton(
-                                symbol: row.isSaved ? "bookmark.fill" : "bookmark",
-                                help: row.isSaved ? "Move to Active" : "Save for later"
-                            ) { actions.lifecycle(row, row.isSaved ? "unsave" : "save") }
-                            RowActionButton(symbol: "checkmark", help: "Mark done") {
-                                actions.lifecycle(row, "complete")
-                            }
-                        }
-                        if row.hasTab {
-                            RowActionButton(symbol: "xmark", help: "Close tab") { actions.closeTab(row) }
-                        }
-                    }
-                    .transition(.opacity)
-                } else {
-                    if let status = row.status, !row.isGhost {
-                        Text(status.label)
-                        if let icon = status.icon {
-                            Image(systemName: icon)
-                                .font(.system(size: 8))
-                                .foregroundStyle(Color(hex: status.color) ?? .secondary)
-                        }
-                    }
-                    Text(age).monospacedDigit()
+                if hovering && layout != .threeLine {
+                    hoverControls
+                } else if layout != .compact {
+                    statusAndAge
                 }
             }
             .font(.system(size: 10))
@@ -116,7 +107,7 @@ public struct SessionRowView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .frame(height: 46, alignment: .center)
+        .frame(height: layout == .threeLine ? 62 : 46, alignment: .center)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(background)
         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -128,6 +119,58 @@ public struct SessionRowView: View {
         // The left edge marks the open session, or unread when it is some other row. Focus wins:
         // where a session is matters more than that it has news, and opening it clears the news.
         .overlay(alignment: .leading) { edge }
+    }
+
+    /// Only what this row can actually do: a control that is always visible and never able to act
+    /// is the thing the web sidebar had to remove.
+    private var hoverControls: some View {
+        HStack(spacing: 4) {
+            if !row.isCompleted {
+                RowActionButton(
+                    symbol: row.isSaved ? "bookmark.fill" : "bookmark",
+                    help: row.isSaved ? "Move to Active" : "Save for later"
+                ) { actions.lifecycle(row, row.isSaved ? "unsave" : "save") }
+                RowActionButton(symbol: "checkmark", help: "Mark done") {
+                    actions.lifecycle(row, "complete")
+                }
+            }
+            if row.hasTab {
+                RowActionButton(symbol: "xmark", help: "Close tab") { actions.closeTab(row) }
+            }
+        }
+    }
+
+    /// Project and status above the title, the shape the three-line layout is for.
+    private var projectLine: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "folder").font(.system(size: 9)).foregroundStyle(.tertiary)
+            Text(row.directory ?? "—").lineLimit(1)
+            Spacer(minLength: 6)
+            if hovering {
+                hoverControls
+            } else {
+                statusAndAge
+            }
+        }
+        .font(.system(size: 10))
+        .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var statusAndAge: some View {
+        HStack(spacing: 4) {
+            if let status = row.status, !row.isGhost {
+                Text(status.label)
+                if let icon = status.icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color(hex: status.color) ?? .secondary)
+                }
+            }
+            Text(age).monospacedDigit()
+        }
+        .font(.system(size: 10))
+        .foregroundStyle(.secondary)
     }
 
     private var background: some View {
