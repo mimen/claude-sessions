@@ -282,10 +282,13 @@ export function SessionRow({
           <CheckIcon className="size-3" />
         </RowAction>
       ) : null}
-      {session ? (
+      {/* Only when there is a tab to close. Rendering it disabled everywhere put a dead control on
+        every closed row — 393 of 398 on the live list — to keep the icons in fixed positions. The
+        overlay is absolutely positioned against the row's right edge, so dropping a button shifts
+        the rest along that edge and cannot reflow the row, which was the invariant worth having. */}
+      {session && row.workspaceRef ? (
         <RowAction
-          disabled={!row.workspaceRef}
-          label={row.workspaceRef ? "Close tab" : "No tab to close"}
+          label="Close tab"
           onClick={() => onClose(session)}
           onHover={(anchor) => onHover(row, anchor)}
           tone="dismiss"

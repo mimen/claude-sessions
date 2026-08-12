@@ -152,6 +152,20 @@ mounted("session row, mounted", () => {
     }
   });
 
+  test("the close action appears only on rows that have a tab to close", () => {
+    // It used to render disabled on every row, which put a control that could never do anything on
+    // all but a handful of a four-hundred row list.
+    const closeActions = (): Element[] =>
+      [...container.querySelectorAll('[role="button"]')]
+        .filter((a) => /Close tab|No tab to close/.test(a.getAttribute("aria-label") ?? ""));
+
+    mount(session({ workspaceRef: "workspace:1" }));
+    expect(closeActions()).toHaveLength(1);
+
+    mount(session({ workspaceRef: null, density: "settled" }));
+    expect(closeActions()).toHaveLength(0);
+  });
+
   test("an actionable verdict offers both accepting it and dismissing it", () => {
     // Asserted as a pairing rather than by wording: the lifecycle vocabulary is owned elsewhere and
     // has already been renamed once, but a verdict you can act on and cannot decline is the bug.
