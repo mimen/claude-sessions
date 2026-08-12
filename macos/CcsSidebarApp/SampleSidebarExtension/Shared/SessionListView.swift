@@ -14,15 +14,25 @@ public struct SessionListView: View {
         self.now = now
     }
 
+    /// Section order, fixed rather than derived from the response.
+    ///
+    /// Taken from the web sidebar so both read the same: what is asking for you first, finished
+    /// work last. First-appearance order looked equivalent and was not — it put `working` above
+    /// `needs-you` whenever a running session happened to sort first.
+    private static let order: [String] = [
+        "needs-you", "working", "ready", "other", "incognito", "recent", "saved", "completed",
+    ]
+
     private var sections: [(name: String, rows: [SidebarRow])] {
-        var order: [String] = []
         var grouped: [String: [SidebarRow]] = [:]
-        for row in rows {
-            let key = row.section ?? "other"
-            if grouped[key] == nil { order.append(key) }
-            grouped[key, default: []].append(row)
+        for row in rows { grouped[row.section ?? "other", default: []].append(row) }
+        // Anything the server introduces that this list has not heard of still shows, after the
+        // known sections rather than silently dropped.
+        let unknown = grouped.keys.filter { !Self.order.contains($0) }.sorted()
+        return (Self.order + unknown).compactMap { key in
+            guard let rows = grouped[key], !rows.isEmpty else { return nil }
+            return (key, rows)
         }
-        return order.map { ($0, grouped[$0] ?? []) }
     }
 
     public var body: some View {
@@ -60,6 +70,10 @@ public struct SessionListView: View {
         case "working": return "Working"
         case "ready": return "Ready"
         case "recent": return "Recent"
+        case "other": return "Other tabs"
+        case "incognito": return "Incognito"
+        case "saved": return "Saved"
+        case "completed": return "Done"
         default: return key
         }
     }

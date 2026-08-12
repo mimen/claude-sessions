@@ -667,7 +667,7 @@
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SampleSidebarExtension/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "CMUX ExtKit Sample Sidebar$(CMUX_DISPLAY_NAME_SUFFIX)";
+				INFOPLIST_KEY_CFBundleDisplayName = "CCS Sessions$(CMUX_DISPLAY_NAME_SUFFIX)";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -702,7 +702,7 @@
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SampleSidebarExtension/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "CMUX ExtKit Sample Sidebar$(CMUX_DISPLAY_NAME_SUFFIX)";
+				INFOPLIST_KEY_CFBundleDisplayName = "CCS Sessions$(CMUX_DISPLAY_NAME_SUFFIX)";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
