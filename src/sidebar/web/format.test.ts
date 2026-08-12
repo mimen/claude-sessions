@@ -100,6 +100,29 @@ describe("category grouping", () => {
   });
 });
 
+describe("status grouping", () => {
+  test("shows recent sessions newest first", () => {
+    const recentRow = (id: string, lastActivityAt: number) => ({
+      id,
+      kind: "session" as const,
+      section: "recent" as const,
+      directory: "ccs",
+      lastActivityAt,
+      pinned: false,
+      density: "line" as const,
+    });
+
+    const groups = groupSessions([
+      recentRow("oldest", 100),
+      recentRow("newest", 300),
+      recentRow("middle", 200),
+    ], "status", 0);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.rows.map((row) => row.id)).toEqual(["newest", "middle", "oldest"]);
+  });
+});
+
 describe("emptyStateMessage", () => {
   test("does not claim the queue is empty when liveness is unreadable", () => {
     expect(emptyStateMessage("", false)).toBeNull();

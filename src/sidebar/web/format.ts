@@ -398,10 +398,10 @@ function groupUnpinned<Row extends GroupableRow>(
     .map((section) => ({
       key: section,
       label: SECTION_LABELS[section],
-      // A status section is a queue: whatever has been waiting longest is at the top, so the
-      // thing most overdue for attention is the first thing read. Pins still lead.
+      // Live status sections are queues, so the longest-waiting work leads. Recent is history,
+      // where the newest session is the useful entry point and therefore belongs at the top.
       rows: rows.filter((row) => row.section === section)
-        .sort(pinnedFirst(openFirst(byWaitingLongest))),
+        .sort(pinnedFirst(openFirst(section === "recent" ? byRecency : byWaitingLongest))),
     }))
     .filter((group) => group.rows.length > 0);
 }
