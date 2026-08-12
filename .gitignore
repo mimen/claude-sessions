@@ -8,3 +8,6 @@ dist/
 
 # Go TUI build output (built on demand by src/tui-go/launch.ts)
 tui-go/.bin/
+
+# Swift build products for the native sidebar.
+macos/**/.build/
