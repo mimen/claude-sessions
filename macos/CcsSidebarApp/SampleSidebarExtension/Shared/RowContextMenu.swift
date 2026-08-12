@@ -55,7 +55,16 @@ struct RowContextMenu: View {
         }
 
         Section("Session") {
-            if row.summary != nil {
+            if let summary = row.summary {
+                // The whole summary, for a row you are not hovering and for keyboard users.
+                Menu {
+                    if let state = summary.state { Text(state) }
+                    if let next = summary.next { Text("Next: \(next)") }
+                    if let remaining = summary.remaining { Text("Remaining: \(remaining)") }
+                    if let drift = summary.driftLabel { Text(drift) }
+                } label: {
+                    Label("Full summary", systemImage: "text.alignleft")
+                }
                 Button {
                     actions.copySummary(row)
                 } label: {

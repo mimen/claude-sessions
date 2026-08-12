@@ -17,10 +17,12 @@ public struct SidebarRootView: View {
     @State private var query = ""
     @State private var layouts = RowLayouts()
     private let actionClient: ActionClient
+    private let port: Int
 
     public init(port: Int = 8788) {
         _client = State(initialValue: SnapshotClient(port: port))
         actionClient = ActionClient(port: port)
+        self.port = port
     }
 
     public var body: some View {
@@ -75,7 +77,7 @@ public struct SidebarRootView: View {
                 }
             }
         } else {
-            SessionListView(rows: visible, actions: actions, grouping: grouping, layouts: layouts)
+            SessionListView(rows: visible, actions: actions, grouping: grouping, layouts: layouts, port: port)
         }
     }
 

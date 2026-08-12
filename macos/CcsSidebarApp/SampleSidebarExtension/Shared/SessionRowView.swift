@@ -31,21 +31,26 @@ public struct SessionRowView: View {
     public let actions: RowActions
     public let isSelected: Bool
     public let layout: RowLayout
+    public let port: Int
 
     @State private var hovering = false
+    @State private var showingSummary = false
+    @State private var hoverTask: Task<Void, Never>?
 
     public init(
         row: SidebarRow,
         age: String,
         actions: RowActions,
         isSelected: Bool = false,
-        layout: RowLayout = .wide
+        layout: RowLayout = .wide,
+        port: Int = 8788
     ) {
         self.row = row
         self.age = age
         self.actions = actions
         self.isSelected = isSelected
         self.layout = layout
+        self.port = port
     }
 
     private var titleWeight: Font.Weight { row.section == "needs-you" ? .medium : .regular }
@@ -54,7 +59,19 @@ public struct SessionRowView: View {
         content
             .contentShape(Rectangle())
             .onTapGesture { actions.open(row) }
-            .onHover { hovering = $0 }
+            .onHover { inside in
+                hovering = inside
+                hoverTask?.cancel()
+                guard inside else { showingSummary = false; return }
+                // A pause, so sweeping down the list does not strobe cards at every row.
+                hoverTask = Task {
+                    try? await Task.sleep(for: .milliseconds(550))
+                    if !Task.isCancelled { showingSummary = true }
+                }
+            }
+            .popover(isPresented: $showingSummary, arrowEdge: .trailing) {
+                SummaryCard(row: row)
+            }
             // A native menu, so it is free to extend past the sidebar's edge — the constraint the
             // web version could never escape, being painted inside a web view's own viewport.
             .contextMenu { RowContextMenu(row: row, actions: actions) }
@@ -94,6 +111,9 @@ public struct SessionRowView: View {
                 if let model = row.model, !row.isGhost {
                     Text("·").foregroundStyle(.quaternary)
                     Text(model.label).foregroundStyle(Color(hex: model.color) ?? .secondary)
+                }
+                if let suggestion = row.suggestion {
+                    SuggestionChip(suggestion: suggestion)
                 }
                 Spacer(minLength: 6)
                 if hovering && layout != .threeLine {
@@ -143,7 +163,7 @@ public struct SessionRowView: View {
     /// Project and status above the title, the shape the three-line layout is for.
     private var projectLine: some View {
         HStack(spacing: 4) {
-            Image(systemName: "folder").font(.system(size: 9)).foregroundStyle(.tertiary)
+            ProjectMark(faviconUrl: row.faviconUrl, muted: row.isGhost, port: port)
             Text(row.directory ?? "—").lineLimit(1)
             Spacer(minLength: 6)
             if hovering {

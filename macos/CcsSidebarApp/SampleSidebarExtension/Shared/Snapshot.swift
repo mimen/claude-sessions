@@ -64,6 +64,7 @@ public struct SidebarRow: Decodable, Identifiable, Sendable {
     public let focused: Bool
     public let shortcut: Int?
     public let worktree: String?
+    public let faviconUrl: String?
 
     /// A session that is no longer running: it keeps the grid but drops the facts that stopped
     /// being true. Mirrors the web sidebar's rule so the two cannot describe a row differently.

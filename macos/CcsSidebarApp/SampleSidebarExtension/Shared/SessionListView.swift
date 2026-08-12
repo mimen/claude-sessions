@@ -13,6 +13,8 @@ public struct SessionListView: View {
     private let selectedId: String?
     private let grouping: GroupingMode
     private let layouts: RowLayouts
+    private let port: Int
+    @State private var collapsed: Set<String> = []
 
     public init(
         rows: [SidebarRow],
@@ -20,7 +22,8 @@ public struct SessionListView: View {
         now: Date = Date(),
         selectedId: String? = nil,
         grouping: GroupingMode = .status,
-        layouts: RowLayouts = RowLayouts()
+        layouts: RowLayouts = RowLayouts(),
+        port: Int = 8788
     ) {
         self.rows = rows
         self.actions = actions
@@ -28,6 +31,7 @@ public struct SessionListView: View {
         self.selectedId = selectedId
         self.grouping = grouping
         self.layouts = layouts
+        self.port = port
     }
 
     private var sections: [(name: String, rows: [SidebarRow])] {
@@ -39,17 +43,20 @@ public struct SessionListView: View {
             LazyVStack(alignment: .leading, spacing: 6, pinnedViews: [.sectionHeaders]) {
                 ForEach(sections, id: \.name) { section in
                     Section {
-                        ForEach(section.rows) { row in
+                        ForEach(collapsed.contains(section.name) ? [] : section.rows) { row in
                             SessionRowView(
                                 row: row,
                                 age: RelativeAge.format(row.lastActivityAt, now: now),
                                 actions: actions,
                                 isSelected: row.id == selectedId,
-                                layout: layouts.layout(for: row)
+                                layout: layouts.layout(for: row),
+                                port: port
                             )
                         }
                     } header: {
-                        HStack {
+                        HStack(spacing: 4) {
+                            Image(systemName: collapsed.contains(section.name) ? "chevron.right" : "chevron.down")
+                                .font(.system(size: 8, weight: .semibold))
                             Text(section.name.uppercased())
                                 .font(.system(size: 10, weight: .semibold))
                                 .tracking(0.8)
@@ -62,6 +69,13 @@ public struct SessionListView: View {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
                         .background(.background)
+                        .contentShape(Rectangle())
+                        // Shelving a section is a standing choice about how much you want to see,
+                        // so its count stays visible while its rows are away.
+                        .onTapGesture {
+                            if collapsed.contains(section.name) { collapsed.remove(section.name) }
+                            else { collapsed.insert(section.name) }
+                        }
                     }
                 }
             }
