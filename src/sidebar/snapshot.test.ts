@@ -14,6 +14,7 @@ import type {
   SidebarRow,
   SidebarSessionRow,
 } from "./projection.ts";
+import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 import type { CatalogueReadOutcome, CatalogueSnapshotFacts } from "./catalogue-read.ts";
 import { createSidebarSource, type SidebarSourceOptions } from "./snapshot.ts";
 import type { CmuxStatusRead } from "./status.ts";
@@ -1255,4 +1256,49 @@ describe("createSidebarSource snapshot", () => {
     expect(source.faviconFor("/repo/0")).toBeNull();
     expect(source.faviconFor("/repo/8")).toBe("/repo/8/icon.png");
   });
+});
+
+function storedEnrichment(): StoredEnrichment {
+  return {
+    title: null, state: "Working", history: null, next: null, remaining: null,
+    recommendation: null, reason: null, junk: false, cwdCorrect: null,
+    suggestedLocation: null, suggestedCwd: null, atMessages: 2,
+    at: "2026-08-10T00:00:00Z", legacyShape: false, declined: null,
+  };
+}
+
+test("the exact-count pass stats live rows only, so a long tail costs nothing", async () => {
+  // A stat per row is synchronous, so at four hundred rows this pass blocked the event loop for
+  // seconds. A closed session cannot have typed since the index parsed it, so its count is already
+  // final and reading it buys nothing.
+  const statted: string[] = [];
+  const summaries = new Map<string, StoredEnrichment>();
+  const catalogueWithSummaries = (): CatalogueReadOutcome => {
+    const outcome = catalogueRead([
+      { sessionId: "primary" },
+      { sessionId: "closed-one", completed: true },
+    ]);
+    if (outcome.status !== "ok") throw new Error("fixture catalogue must read");
+    summaries.set("primary", storedEnrichment());
+    summaries.set("closed-one", storedEnrichment());
+    return { ...outcome, facts: { ...outcome.facts, summaries } };
+  };
+
+  const source = createSidebarSource(sourceOptions({
+    readBridge: async () => multiSurfaceBridge(),
+    readCatalogue: catalogueWithSummaries,
+    indexedSessions: () => [
+      indexed({ sessionId: "primary", resumeId: "primary", transcriptPath: "/transcripts/primary.jsonl" }),
+      indexed({ sessionId: "closed-one", resumeId: "closed-one", transcriptPath: "/transcripts/closed-one.jsonl" }),
+    ],
+    readExactMessageCount: async (session) => {
+      statted.push(session.transcriptPath ?? "unknown");
+      return 1;
+    },
+  }));
+
+  await source.snapshot("active", 50, ["completed"]);
+
+  // "primary" is the bridge's live surface; "closed-one" exists only in the index.
+  expect(statted).toEqual(["/transcripts/primary.jsonl"]);
 });

@@ -409,6 +409,8 @@ export interface SidebarSourceOptions {
   /** Test seam for the snapshot-only stale-while-revalidate window. */
   readonly snapshotLivenessTtlMs?: number;
   readonly readStatuses?: typeof readClaudeStatuses;
+  /** Test seam: lets a test observe which rows the exact-count pass decided to stat. */
+  readonly readExactMessageCount?: typeof exactMessageCount;
   readonly statusReader?: CachedStatusReader;
   readonly workspaceStateReader?: CachedWorkspaceStateReader;
   readonly notificationReader?: CachedNotificationReader;
@@ -460,6 +462,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     now,
   });
   const readStatuses = options.readStatuses ?? readClaudeStatuses;
+  const readExactMessageCount = options.readExactMessageCount ?? exactMessageCount;
   // Requests read this cache rather than spawning a subprocess per workspace.
   const statusReader: CachedStatusReader = options.statusReader
     ?? createCachedStatusReader(cmuxBin, STATUS_TTL_MS, now, readStatuses);
@@ -740,17 +743,27 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
           && !catalogue.incognito.has(session.sessionId)
           && !catalogue.incognito.has(session.resumeId),
       );
-      // Only rows carrying an enrichment worth aging pay for any of this. The index refreshes on a
-      // timer, so its message count trails a session that is still typing; reading the bytes it has
-      // not parsed yet turns "something happened" into a number. Measured on the live store: 12
-      // rows, 28.8 KB, 1.0 ms -- because the cost is what the session typed since the last refresh,
-      // not what it has ever typed.
+      // Only live rows carrying an enrichment pay for any of this. The index refreshes on a timer,
+      // so its message count trails a session that is still typing; reading the bytes it has not
+      // parsed yet turns "something happened" into a number.
+      //
+      // A closed session cannot type, so its indexed count is already as true as it will get and
+      // the read buys nothing. That distinction did not matter when the list held a dozen rows and
+      // this cost 1.0 ms; it decides the whole thing at four hundred, because `statSync` is
+      // synchronous and the `Promise.all` around it parallelises none of the waiting. Measured on
+      // the live store, this pass reached 6.2 seconds and blocked the event loop for all of it.
+      //
+      // The cost of skipping is bounded and self-healing: a session that ends between one index
+      // refresh and the next carries a slightly stale `messagesSince` until the next reindex, on a
+      // row nobody is working on.
+      const liveSessionIds = allLiveSessionIdsFrom(bridge);
       phaseStartedAt = performance.now();
       const indexed = await Promise.all(visible.map(async (session) => {
-        if (!catalogue.summaries.has(session.sessionId)) {
+        const live = liveSessionIds.has(session.sessionId) || liveSessionIds.has(session.resumeId);
+        if (!live || !catalogue.summaries.has(session.sessionId)) {
           return { ...session, transcriptMtimeMs: null };
         }
-        const exact = await exactMessageCount(session);
+        const exact = await readExactMessageCount(session);
         return {
           ...session,
           messageCount: exact ?? session.messageCount ?? null,
@@ -806,7 +819,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const snapshot = projectSidebar({
         live,
         workspaces,
-        liveSessionIds: allLiveSessionIdsFrom(bridge),
+        liveSessionIds,
         indexed,
         lifecycles: catalogue.lifecycles,
         catalogueLifecycles: catalogue.catalogueLifecycles,
