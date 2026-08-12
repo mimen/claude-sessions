@@ -1,8 +1,8 @@
 {
   "name": "ccs",
   "displayName": "ccs session hygiene",
-  "version": "0.4.0",
-  "description": "Slash commands for routed CCS session starts plus safe close, lifecycle, title, tag, and catalogue hygiene.",
+  "version": "0.5.0",
+  "description": "Slash commands for routed CCS session starts plus safe close, Saved and Done lifecycle, title, tag, and catalogue hygiene.",
   "author": {
     "name": "Milad Imen",
     "url": "https://github.com/mimen"
@@ -13,7 +13,7 @@
     "ccs",
     "sessions",
     "lifecycle",
-    "archive",
+    "saved",
     "routing",
     "hygiene"
   ]

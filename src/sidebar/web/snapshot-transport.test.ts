@@ -9,19 +9,19 @@ const SNAPSHOT: SidebarSnapshot = {
   catalogueReadable: true,
   categoryProjectionVersion: 1,
   categoryProjectionError: null,
-  lifecycleCounts: { active: 0, completed: 0, archived: 0 },
+  lifecycleCounts: { active: 0, completed: 0, saved: 0 },
   hasMoreRows: false,
   generatedAt: 0,
 };
 
 const ACTIVE_SNAPSHOT: SidebarSnapshot = {
   ...SNAPSHOT,
-  lifecycleCounts: { active: 7, completed: 3, archived: 1 },
+  lifecycleCounts: { active: 7, completed: 3, saved: 1 },
 };
 
 const COMPLETED_SNAPSHOT: SidebarSnapshot = {
   ...SNAPSHOT,
-  lifecycleCounts: { active: 6, completed: 4, archived: 1 },
+  lifecycleCounts: { active: 6, completed: 4, saved: 1 },
 };
 
 function jsonResponse(body: object, init: ResponseInit = {}): Response {

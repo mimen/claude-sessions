@@ -76,13 +76,13 @@ describe("disagreement", () => {
     expect(item?.title).toBe("T3 static-seam refactor");
   });
 
-  test("archive and handoff both imply archived", () => {
+  test("archive and handoff both imply Done", () => {
     for (const recommendation of ["archive", "handoff"] as const) {
       const item = disagreement(
         session(),
         row({ enrichment: enrichment({ recommendation, reason: "Superseded." }) }),
       );
-      expect(item?.target).toBe("archived");
+      expect(item?.target).toBe("completed");
     }
   });
 
@@ -130,7 +130,7 @@ describe("disagreement", () => {
       row({ enrichment: enrichment({ junk: true, recommendation: "archive", reason: "Probe." }) }),
     );
     expect(item?.junk).toBe(true);
-    expect(item?.target).toBe("archived");
+    expect(item?.target).toBe("completed");
     expect(item?.messages).toBe(12);
   });
 

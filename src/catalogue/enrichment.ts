@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { RECOMMENDATIONS, type Recommendation } from "./enrichment-schema.ts";
 
 /** Catalogue lifecycle vocabulary needed by recommendation decisions. */
-export type RecommendationLifecycle = "idle" | "parked" | "completed" | "archived";
+export type RecommendationLifecycle = "idle" | "parked" | "saved" | "completed" | "archived";
 
 /**
  * The complete stored enrichment shape shared by catalogue, sidebar, staleness, and triage.
@@ -120,8 +120,13 @@ export function recommendationDisagreement(
 ): RecommendationLifecycle | null {
   if (recommendationValue === null || recommendationValue === "continue") return null;
   if (declined === recommendationValue) return null;
-  if (lifecycle === "parked" || lifecycle === "completed" || lifecycle === "archived") return null;
-  return recommendationValue === "complete" ? "completed" : "archived";
+  if (
+    lifecycle === "parked"
+    || lifecycle === "saved"
+    || lifecycle === "completed"
+    || lifecycle === "archived"
+  ) return null;
+  return "completed";
 }
 
 /**

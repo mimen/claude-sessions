@@ -444,30 +444,50 @@ describe("session title", () => {
 });
 
 describe("session lifecycle", () => {
-  test("complete flips the flag", async () => {
-    await withRoot(async (root) => {
-      seedSession(root, "sess-8");
-      const rc = await sessionCommand(["complete", "sess-8"]);
+  test("complete uses the ordered finish primitive", async () => {
+    await withRoot(async () => {
+      const calls: string[] = [];
+      const sid = "33333333-3333-4333-8333-333333333333";
+      const rc = await sessionCommand(["complete", sid], {
+        finishSession: async (sessionId, lifecycle, mutate) => {
+          calls.push(`${sessionId}:${lifecycle}:${mutate}`);
+          return {
+            status: "close-result",
+            sessionId,
+            lifecycle,
+            lifecycleRecorded: true,
+            enrichmentWarning: null,
+            close: { status: "closed", identity: { sessionId, workspaceId: "workspace-id", surfaceId: "surface-id" } },
+          };
+        },
+      });
       expect(rc).toBe(0);
-      const db = openCatalogue(join(root, "cache", "catalogue.db"));
-      const row = db.query("SELECT completed FROM catalogue WHERE session_id = 'sess-8'").get() as {
-        completed: number;
-      };
-      expect(row.completed).toBe(1);
-      db.close();
+      expect(calls).toEqual([`${sid}:complete:true`]);
     });
   });
 
-  test("archive flips the flag", async () => {
+  test("save uses the ordered finish primitive so open work is closed", async () => {
     await withRoot(async (root) => {
-      seedSession(root, "sess-9");
-      await sessionCommand(["archive", "sess-9"]);
-      const db = openCatalogue(join(root, "cache", "catalogue.db"));
-      const row = db.query("SELECT archived FROM catalogue WHERE session_id = 'sess-9'").get() as {
-        archived: number;
-      };
-      expect(row.archived).toBe(1);
-      db.close();
+      seedSession(root, "44444444-4444-4444-8444-444444444444");
+      const calls: string[] = [];
+      const rc = await sessionCommand(
+        ["save", "44444444-4444-4444-8444-444444444444"],
+        {
+          finishSession: async (sessionId, lifecycle, mutate) => {
+            calls.push(`${sessionId}:${lifecycle}:${mutate}`);
+            return {
+              status: "close-result",
+              sessionId,
+              lifecycle,
+              lifecycleRecorded: true,
+              enrichmentWarning: null,
+              close: { status: "closed", identity: { sessionId, workspaceId: "workspace-id", surfaceId: "surface-id" } },
+            };
+          },
+        },
+      );
+      expect(rc).toBe(0);
+      expect(calls).toEqual(["44444444-4444-4444-8444-444444444444:save:true"]);
     });
   });
 

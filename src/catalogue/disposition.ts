@@ -22,7 +22,7 @@ export function describe(lifecycle: Lifecycle, open: boolean): Disposition {
     lifecycle,
     open,
     nudge: open && (lifecycle === "parked" || lifecycle === "completed"),
-    hidden: lifecycle === "archived",
+    hidden: lifecycle === "archived" || lifecycle === "saved",
   };
   let label: string;
   if (lifecycle === "idle") label = open ? "active" : "idle";

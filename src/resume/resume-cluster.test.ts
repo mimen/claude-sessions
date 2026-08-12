@@ -11,7 +11,7 @@ import type { Database } from "bun:sqlite";
 function catRow(over: Partial<CatalogueRow>): CatalogueRow {
   return {
     sessionId: "", resumeId: null, customTitle: null, kind: "session", completed: false,
-    archived: false, parkedTaskId: null, key: null, parentSessionId: null,
+    archived: false, saved: false, parkedTaskId: null, key: null, parentSessionId: null,
     sessionClass: null,
     role: "pr-agent", resumeCommand: null, project: null, cluster: "pr-watch",
     gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null,

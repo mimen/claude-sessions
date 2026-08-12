@@ -18,7 +18,7 @@ import (
 type persistedPrefs struct {
 	View            string   `json:"view"`
 	Sort            string   `json:"sort"`
-	ShowArchived    bool     `json:"showArchived"`
+	ShowSaved       bool     `json:"showSaved"`
 	ShowSubagents   bool     `json:"showSubagents"`
 	ShowAuxiliary   bool     `json:"showAuxiliary"`
 	TaskFilter      string   `json:"taskFilter"`
@@ -115,7 +115,7 @@ func (m *Model) applyPrefs() {
 	}
 	m.view = viewFromString(stored.View)
 	m.options.sort = sortFromString(stored.Sort)
-	m.options.showArchived = stored.ShowArchived
+	m.options.showSaved = stored.ShowSaved
 	m.options.showSubagents = stored.ShowSubagents
 	m.options.showAuxiliary = stored.ShowAuxiliary
 	m.options.taskFilter = taskFilterFromString(stored.TaskFilter)
@@ -131,12 +131,10 @@ func (m *Model) applyPrefs() {
 	}
 }
 
-// defaultCollapsed folds the noisy archival sections on a first run, mirroring
-// the Ink TUI's DEFAULT_COLLAPSED so the landing view stays about live work.
+// defaultCollapsed folds Done on a first run so the landing view stays about live work.
 func defaultCollapsed() map[string]bool {
 	return map[string]bool{
-		"no-system:done":     true,
-		"no-system:archived": true,
+		"no-system:done": true,
 	}
 }
 
@@ -159,7 +157,7 @@ func (m Model) savePrefs() {
 	payload := persistedPrefs{
 		View:            m.view.String(),
 		Sort:            m.options.sort.String(),
-		ShowArchived:    m.options.showArchived,
+		ShowSaved:       m.options.showSaved,
 		ShowSubagents:   m.options.showSubagents,
 		ShowAuxiliary:   m.options.showAuxiliary,
 		TaskFilter:      m.options.taskFilter.String(),

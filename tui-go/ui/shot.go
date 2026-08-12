@@ -87,7 +87,7 @@ func Shot(name string, snapshot data.Snapshot) string {
 		}
 	case "organize":
 		if session, ok := model.selectedSession(); ok {
-			model.confirmation = &confirmation{kind: confirmArchive, title: "Archive session?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs mark --archived", enabled: true}}}
+			model.confirmation = &confirmation{kind: confirmSave, title: "Save session?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs session save", enabled: true}}}
 		}
 	case "ai":
 		if session, ok := model.selectedSession(); ok {

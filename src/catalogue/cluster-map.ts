@@ -25,7 +25,7 @@ export interface ClusterMember {
   readonly groupingId: string | null; // the epic/grouping FK — for metadata-gap detection
   readonly prNumber: number | null;
   readonly prRepo: string | null;
-  readonly lifecycle: string; // idle | parked | completed | archived
+  readonly lifecycle: string; // idle | parked | saved | completed
   readonly live: boolean;
 }
 
@@ -185,13 +185,13 @@ function foldByUnit(members: ClusterMember[]): { primaries: ClusterMember[]; fol
  * sessions are listed indented under their primary instead of a "(+N)" note. */
 export function renderClusterMap(map: ClusterMap, expand = false): string {
   const dot = (m: ClusterMember): string =>
-    m.lifecycle === "completed" ? "✔" : m.lifecycle === "archived" ? "▪" : m.live ? "●" : "○";
+    m.lifecycle === "completed" || m.lifecycle === "archived" ? "✔" : m.lifecycle === "saved" ? "▪" : m.live ? "●" : "○";
   const lines: string[] = [];
   const c = map.counts;
   lines.push(
     `cluster: ${map.cluster}  —  ${c.total} members (${c.core} core · ${c.fleet} fleet) · ${c.live} live · ${c.retired} retired`,
   );
-  lines.push(`  ● live   ○ idle/not-open   ✔ completed   ▪ archived`);
+  lines.push(`  ● live   ○ idle/not-open   ▪ Saved   ✔ Done`);
   for (const g of map.groups) {
     lines.push("");
     lines.push(`  [${g.kind}] ${g.role}  (${g.members.length})`);
@@ -210,7 +210,12 @@ export function renderClusterMap(map: ClusterMap, expand = false): string {
       if (expand) {
         for (const s of sibs) {
           const sreach = s.cwd ? s.cwd.replace(process.env.HOME ?? "~", "~") : s.sessionId.slice(0, 8);
-          lines.push(`        ↳ ${dot(s)} ${s.sessionId.slice(0, 8)} · ${sreach}  (older ${s.lifecycle})`);
+          const lifecycle = s.lifecycle === "saved"
+            ? "Saved"
+            : s.lifecycle === "completed" || s.lifecycle === "archived"
+            ? "Done"
+            : s.lifecycle;
+          lines.push(`        ↳ ${dot(s)} ${s.sessionId.slice(0, 8)} · ${sreach}  (older ${lifecycle})`);
         }
       }
     }
@@ -225,7 +230,7 @@ export interface ClusterMemberJson {
   kind: "core" | "fleet";
   title: string | null;
   live: boolean;
-  lifecycle: string; // idle | parked | completed | archived
+  lifecycle: string; // idle | parked | saved | completed
   prNumber: number | null;
   prRepo: string | null;
   gusWork: string | null;
@@ -267,7 +272,10 @@ export function clusterMapToJson(map: ClusterMap): {
     }
   }
   const active = (m: ClusterMemberJson) =>
-    m.kind === "fleet" && m.lifecycle !== "completed" && m.lifecycle !== "archived";
+    m.kind === "fleet"
+    && m.lifecycle !== "saved"
+    && m.lifecycle !== "completed"
+    && m.lifecycle !== "archived";
   const closedWithWork = members.filter((m) => active(m) && !m.live);
   const metadataGaps = members
     .filter(active)

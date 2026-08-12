@@ -424,6 +424,7 @@ function readCurrentStatesFromDatabase(db: Database, sessionIds: readonly string
     readonly customTitle: string | null;
     readonly completed: number;
     readonly archived: number;
+    readonly saved: number;
     readonly parkedTaskId: string | null;
     readonly notes: string | null;
     readonly identityKey: string | null;
@@ -434,7 +435,7 @@ function readCurrentStatesFromDatabase(db: Database, sessionIds: readonly string
     const bound = bindIn(chunk, "id");
     const found = db.query(
       `SELECT session_id AS sessionId, session_class AS sessionClass, parent_session_id AS parentSessionId, meta,
-              resume_id AS resumeId, custom_title AS customTitle, completed, archived,
+              resume_id AS resumeId, custom_title AS customTitle, completed, archived, saved,
               parked_task_id AS parkedTaskId, notes, identity_key AS identityKey,
               substrate, launcher_identity AS launcherIdentity
          FROM catalogue WHERE session_id IN (${bound.placeholders})`,
@@ -447,6 +448,7 @@ function readCurrentStatesFromDatabase(db: Database, sessionIds: readonly string
       customTitle: string | null;
       completed: number;
       archived: number;
+      saved: number;
       parkedTaskId: string | null;
       notes: string | null;
       identityKey: string | null;
@@ -502,6 +504,7 @@ function readCurrentStatesFromDatabase(db: Database, sessionIds: readonly string
         && row.customTitle === null
         && row.completed === 0
         && row.archived === 0
+        && row.saved === 0
         && row.parkedTaskId === null
         && row.notes === null
         && row.identityKey === null

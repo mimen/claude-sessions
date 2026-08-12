@@ -210,6 +210,13 @@ export function createSessionActionCoordinator(
         return { status: "already-open" };
       case "not-indexed":
         return { status: "not-found" };
+      case "completed":
+        return { status: "failed", reason: "the session is done; reopen it before resuming" };
+      case "reactivation-failed":
+        return {
+          status: "failed",
+          reason: "the session resumed but could not move from Saved to Active",
+        };
       case "liveness-unreadable":
         return { status: "liveness-unreadable" };
       default:

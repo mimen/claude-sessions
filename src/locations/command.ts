@@ -186,7 +186,7 @@ function existingSessionWarnings(cwd: string): SessionWarning[] {
     try {
       const warnings: SessionWarning[] = [];
       const stateQuery = catalogue.query(
-        `SELECT session_class AS sessionClass, completed, archived, parked_task_id AS parkedTaskId
+        `SELECT session_class AS sessionClass, completed, archived, saved, parked_task_id AS parkedTaskId
          FROM catalogue WHERE session_id = $sessionId`,
       );
       for (const session of listByRecency(index)) {
@@ -195,9 +195,10 @@ function existingSessionWarnings(cwd: string): SessionWarning[] {
           sessionClass: string | null;
           completed: number;
           archived: number;
+          saved: number;
           parkedTaskId: string | null;
         } | null;
-        if (!row || row.sessionClass !== "work_body" || row.completed !== 0 || row.archived !== 0 || row.parkedTaskId) continue;
+        if (!row || row.sessionClass !== "work_body" || row.completed !== 0 || row.archived !== 0 || row.saved !== 0 || row.parkedTaskId) continue;
         warnings.push({ sessionId: session.sessionId, title: session.title, lifecycle: "idle" });
         if (warnings.length >= 5) break;
       }

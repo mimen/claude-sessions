@@ -4,7 +4,7 @@ import type { CatalogueRow } from "./db-schema.ts";
 
 const row = (o: Partial<CatalogueRow>): CatalogueRow => ({
   sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,
-  archived: false, parkedTaskId: null, key: null, parentSessionId: null, role: null, resumeCommand: null, project: null,
+  archived: false, saved: false, parkedTaskId: null, key: null, parentSessionId: null, role: null, resumeCommand: null, project: null,
   sessionClass: null,
   cluster: null, gusWork: null, workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null, identityKey: null, ...o,
 });
@@ -50,6 +50,16 @@ test("clusterMapToJson: flat roster + folds + closedWithWork roll-up (the agent-
   // closedWithWork = fleet, not live, not retired → only w-closed (w-done is completed, w-live is live)
   expect(j.closedWithWork.map((m) => m.sessionId)).toEqual(["w-closed"]);
   expect(j.closedWithWork[0]!.prNumber).toBe(2);
+});
+
+test("clusterMapToJson: Saved is inactive and excluded from work and metadata attention", () => {
+  const members = [
+    toMember(row({ sessionId: "saved", role: "pr-agent", saved: true }), "/w/saved", "rs", false),
+  ];
+  const j = clusterMapToJson(buildClusterMap("pr-watch", members));
+  expect(j.members[0]).toMatchObject({ sessionId: "saved", lifecycle: "saved" });
+  expect(j.closedWithWork).toEqual([]);
+  expect(j.metadataGaps).toEqual([]);
 });
 
 test("clusterMapToJson: metadataGaps flags non-retired fleet workers missing gusWork/groupingId", () => {

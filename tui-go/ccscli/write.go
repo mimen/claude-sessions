@@ -72,29 +72,29 @@ func SetTitle(ctx context.Context, sessionID string, title string) error {
 	return err
 }
 
-// MarkCompleted changes per-session completion state through ccs mark.
+// MarkCompleted changes per-session Done state through the canonical session lifecycle command.
 func MarkCompleted(ctx context.Context, sessionID string, enabled bool) error {
 	if err := ensureCatalogued(ctx, sessionID); err != nil {
 		return err
 	}
-	args := []string{"mark", sessionID, "--completed"}
+	verb := "complete"
 	if !enabled {
-		args = append(args, "--off")
+		verb = "uncomplete"
 	}
-	_, err := Run(ctx, args...)
+	_, err := Run(ctx, "session", verb, sessionID)
 	return err
 }
 
-// MarkArchived changes per-session archive state through ccs mark.
-func MarkArchived(ctx context.Context, sessionID string, enabled bool) error {
+// MarkSaved changes per-session Saved state through the canonical session lifecycle command.
+func MarkSaved(ctx context.Context, sessionID string, enabled bool) error {
 	if err := ensureCatalogued(ctx, sessionID); err != nil {
 		return err
 	}
-	args := []string{"mark", sessionID, "--archived"}
+	verb := "save"
 	if !enabled {
-		args = append(args, "--off")
+		verb = "unsave"
 	}
-	_, err := Run(ctx, args...)
+	_, err := Run(ctx, "session", verb, sessionID)
 	return err
 }
 
@@ -113,7 +113,7 @@ func ApplyMutation(ctx context.Context, mutation inference.MetadataMutation) err
 	case "completed":
 		return MarkCompleted(ctx, mutation.SessionID, mutation.Enabled != nil && *mutation.Enabled)
 	case "archived":
-		return MarkArchived(ctx, mutation.SessionID, mutation.Enabled != nil && *mutation.Enabled)
+		return MarkCompleted(ctx, mutation.SessionID, mutation.Enabled != nil && *mutation.Enabled)
 	case "parent", "parked", "identity":
 		if err := ensureCatalogued(ctx, mutation.SessionID); err != nil {
 			return err
@@ -150,11 +150,11 @@ func ApplyMutations(ctx context.Context, mutations []inference.MetadataMutation)
 	return nil
 }
 
-// ArchiveBatch applies an approved cleanup set one ccs mark command at a time.
-func ArchiveBatch(ctx context.Context, sessionIDs []string) error {
+// SaveBatch applies an approved cleanup set one canonical save command at a time.
+func SaveBatch(ctx context.Context, sessionIDs []string) error {
 	for index, sessionID := range sessionIDs {
-		if err := MarkArchived(ctx, sessionID, true); err != nil {
-			return fmt.Errorf("archive %d/%d: %w", index+1, len(sessionIDs), err)
+		if err := MarkSaved(ctx, sessionID, true); err != nil {
+			return fmt.Errorf("save %d/%d: %w", index+1, len(sessionIDs), err)
 		}
 	}
 	return nil

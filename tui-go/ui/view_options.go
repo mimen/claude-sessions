@@ -56,7 +56,7 @@ func (filter taskFilter) String() string {
 
 type viewOptions struct {
 	sort            sortMode
-	showArchived    bool
+	showSaved       bool
 	showSubagents   bool
 	showAuxiliary   bool
 	taskFilter      taskFilter
@@ -75,7 +75,7 @@ func defaultViewOptions() viewOptions {
 
 func (options viewOptions) loadOptions() data.LoadOptions {
 	return data.LoadOptions{
-		IncludeArchived:  options.showArchived,
+		IncludeSaved:     options.showSaved,
 		IncludeSubagents: options.showSubagents,
 		IncludeAuxiliary: options.showAuxiliary,
 	}
@@ -85,7 +85,7 @@ type viewOptionRow int
 
 const (
 	viewOptionSort viewOptionRow = iota
-	viewOptionArchived
+	viewOptionSaved
 	viewOptionSubagents
 	viewOptionAuxiliary
 	viewOptionTasks
@@ -169,8 +169,8 @@ func (m Model) adjustViewOption(direction int) (tea.Model, tea.Cmd) {
 	case viewOptionSort:
 		m.options.sort = sortMode(cycleIndex(int(m.options.sort), int(sortMemory)+1, direction))
 		m.rebuildRowsPreserving(preferredID)
-	case viewOptionArchived:
-		m.options.showArchived = !m.options.showArchived
+	case viewOptionSaved:
+		m.options.showSaved = !m.options.showSaved
 		visibilityChanged = true
 	case viewOptionSubagents:
 		m.options.showSubagents = !m.options.showSubagents
@@ -235,7 +235,7 @@ func (m Model) renderViewOptions() string {
 	}
 	labels := []string{
 		"Sort",
-		"Show archived",
+		"Show saved",
 		"Show subagents",
 		"Show auxiliary",
 		"Task filter",
@@ -270,8 +270,8 @@ func (m Model) viewOptionValue(row viewOptionRow) string {
 	switch row {
 	case viewOptionSort:
 		return m.options.sort.String()
-	case viewOptionArchived:
-		return onOff(m.options.showArchived)
+	case viewOptionSaved:
+		return onOff(m.options.showSaved)
 	case viewOptionSubagents:
 		return onOff(m.options.showSubagents)
 	case viewOptionAuxiliary:

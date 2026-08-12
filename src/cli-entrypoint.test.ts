@@ -18,7 +18,7 @@ test("bin/ccs --help module-loads under an isolated runtime root", () => {
     expect(help).toContain("ccs — find and resume any Claude Code session");
     expect(help).toContain("ccs start [--] [text...]");
     expect(help).toContain("ccs location list|show|match|register|retire");
-    expect(help).toContain("ccs finish-current <complete|archive> [--do]");
+    expect(help).toContain("ccs finish-current <complete|save> [--do]");
     expect(help).toContain("ccs close-current-workspace [--do]");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -36,7 +36,7 @@ test("bin/ccs routes finish-current to its deterministic argument parser", () =>
       stderr: "pipe",
     });
     expect(result.exitCode).toBe(2);
-    expect(result.stderr.toString()).toContain("usage: ccs finish-current <complete|archive> [--do]");
+    expect(result.stderr.toString()).toContain("usage: ccs finish-current <complete|save> [--do]");
     expect(result.stderr.toString()).not.toContain("Unknown command");
   } finally {
     rmSync(root, { recursive: true, force: true });

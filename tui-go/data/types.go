@@ -28,7 +28,7 @@ func (c ProviderCost) Total() float64 {
 
 // LoadOptions controls which normally hidden session classes are included.
 type LoadOptions struct {
-	IncludeArchived  bool
+	IncludeSaved     bool
 	IncludeSubagents bool
 	IncludeAuxiliary bool
 }

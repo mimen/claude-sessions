@@ -8,6 +8,38 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestLoadCatalogueReadsSavedFromSessionAndIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalogue.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements := []string{
+		`CREATE TABLE catalogue (session_id TEXT PRIMARY KEY, identity_key TEXT, saved INTEGER)`,
+		`CREATE TABLE identities (identity_key TEXT PRIMARY KEY, saved INTEGER)`,
+		`INSERT INTO catalogue (session_id, identity_key, saved) VALUES ('session-saved', NULL, 1)`,
+		`INSERT INTO catalogue (session_id, identity_key, saved) VALUES ('identity-saved', 'worker:one', 0)`,
+		`INSERT INTO identities (identity_key, saved) VALUES ('worker:one', 1)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	catalogue, err := loadCatalogue(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !catalogue["session-saved"].Saved || !catalogue["identity-saved"].Saved {
+		t.Fatalf("saved metadata = %+v", catalogue)
+	}
+}
+
 func TestLoadCatalogueReadsIdentityStageAndPRFacts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "catalogue.db")
 	db, err := sql.Open("sqlite", path)

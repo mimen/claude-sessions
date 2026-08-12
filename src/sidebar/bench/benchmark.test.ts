@@ -57,13 +57,13 @@ describe("sidebar performance characterization", () => {
         "active",
         "triage",
         "completed",
-        "archived",
+        "saved",
       ]);
       expect(Object.keys(result.snapshots)).toEqual([
         "active",
         "triage",
         "completed",
-        "archived",
+        "saved",
         "unreadableCatalogue",
         "unreadableIndex",
         "unreadableLiveness",

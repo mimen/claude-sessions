@@ -4,7 +4,7 @@ import type { CmuxStatusAvailability, SidebarRow, SidebarSessionRow, SidebarSumm
 import { relativeTime, shortenPath, type RowLayouts } from "../format.ts";
 import { cn } from "@/lib/utils";
 import {
-  ArchiveIcon,
+  BookmarkIcon,
   CheckIcon,
   CloseIcon,
   CopyIcon,
@@ -74,7 +74,7 @@ export function StatusMetadata({
 }
 
 export interface SessionRowProps {
-  readonly onLifecycle: (row: SidebarSessionRow, action: "complete" | "archive" | "uncomplete" | "unarchive") => void;
+  readonly onLifecycle: (row: SidebarSessionRow, action: "complete" | "save" | "uncomplete" | "unsave") => void;
   readonly onDismiss: (row: SidebarSessionRow) => void;
   readonly onClose: (row: SidebarRow) => void;
   readonly onPin: (row: SidebarRow, pinned: boolean) => void;
@@ -128,7 +128,7 @@ export function SessionRow({
   }, [menuOpen]);
   const session = row.kind === "session" ? row : null;
   const workspace = row.kind === "workspace" ? row : null;
-  const archived = session?.lifecycle === "archived";
+  const saved = session?.lifecycle === "saved";
   const completed = session?.lifecycle === "completed";
   const suggestion = session?.suggestion ?? null;
   const junk = session?.summary?.junk === true;
@@ -252,24 +252,24 @@ export function SessionRow({
           <CloseIcon className="size-3" />
         </RowAction>
       ) : null}
-      {session && !archived ? (
+      {session && !completed ? (
         <RowAction
-          label={completed ? "Mark not complete" : "Complete"}
-          onClick={() => onLifecycle(session, completed ? "uncomplete" : "complete")}
+          label={saved ? "Move to Active" : "Save for later"}
+          onClick={() => onLifecycle(session, saved ? "unsave" : "save")}
           onHover={(anchor) => onHover(row, anchor)}
-          tone="confirm"
+          tone="shelve"
         >
-          <CheckIcon className="size-3" />
+          <BookmarkIcon className="size-2.5" />
         </RowAction>
       ) : null}
       {session && !completed ? (
         <RowAction
-          label={archived ? "Unarchive" : "Archive"}
-          onClick={() => onLifecycle(session, archived ? "unarchive" : "archive")}
+          label="Mark done"
+          onClick={() => onLifecycle(session, "complete")}
           onHover={(anchor) => onHover(row, anchor)}
-          tone="shelve"
+          tone="confirm"
         >
-          <ArchiveIcon className="size-2.5" />
+          <CheckIcon className="size-3" />
         </RowAction>
       ) : null}
       {session ? (
@@ -398,9 +398,9 @@ export function SessionRow({
                 </div>
               ) : null}
               {suggestion.actionable ? (
-                <ContextMenuItem onClick={() => onLifecycle(session!, suggestion.verb as "complete" | "archive")}>
-                  {suggestion.verb === "archive" ? <ArchiveIcon /> : <CheckIcon />}
-                  Accept: {suggestion.verb === "archive" ? "Archive" : "Complete"}
+                <ContextMenuItem onClick={() => onLifecycle(session!, "complete")}>
+                  <CheckIcon />
+                  Mark done
                 </ContextMenuItem>
               ) : null}
               <ContextMenuItem onClick={() => onDismiss(session!)}>
@@ -414,16 +414,22 @@ export function SessionRow({
 
         <ContextMenuGroup>
           <ContextMenuLabel>Lifecycle</ContextMenuLabel>
-          {session && !archived ? (
-            <ContextMenuItem onClick={() => onLifecycle(session, completed ? "uncomplete" : "complete")}>
+          {session && completed ? (
+            <ContextMenuItem onClick={() => onLifecycle(session, "uncomplete")}>
               <CheckIcon />
-              {completed ? "Mark not complete" : "Complete"}
+              Reopen
             </ContextMenuItem>
           ) : null}
           {session && !completed ? (
-            <ContextMenuItem onClick={() => onLifecycle(session, archived ? "unarchive" : "archive")}>
-              <ArchiveIcon />
-              {archived ? "Unarchive" : "Archive"}
+            <ContextMenuItem onClick={() => onLifecycle(session, saved ? "unsave" : "save")}>
+              <BookmarkIcon />
+              {saved ? "Move to Active" : "Save for later"}
+            </ContextMenuItem>
+          ) : null}
+          {session && !completed ? (
+            <ContextMenuItem onClick={() => onLifecycle(session, "complete")}>
+              <CheckIcon />
+              Mark done
             </ContextMenuItem>
           ) : null}
           <ContextMenuItem disabled={!pinnable} onClick={() => onPin(row, !row.pinned)}>

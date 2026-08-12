@@ -15,6 +15,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func testSnapshot(sessionCount int) data.Snapshot {
@@ -386,6 +387,43 @@ func TestFleetCandidateRankingUsesIndexedSkeleton(t *testing.T) {
 	}
 	if all := fleetCandidateIndexes(snapshot.Sessions, "grok build", 0); len(all) != len(snapshot.Sessions) {
 		t.Fatalf("unlimited fleet candidates = %d, want %d", len(all), len(snapshot.Sessions))
+	}
+}
+
+func TestLifecycleLabelsAndActionsUseSavedAndDoneLanguage(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	snapshot := testSnapshot(2)
+	snapshot.Sessions[0].State = "saved"
+	snapshot.Sessions[1].State = "completed"
+	model := New(snapshot)
+	model.options.showSaved = true
+	model.rebuildRows()
+	view := ansi.Strip(model.renderHelp() + "\n" + model.renderViewOptions() + "\n" + model.renderKeybar(200))
+	for _, want := range []string{"save/unsave", "Show saved", "done/reopen"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("lifecycle UI missing %q:\n%s", want, view)
+		}
+	}
+	for _, old := range []string{"archive toggle", "Show archived", "archive/unarchive"} {
+		if strings.Contains(view, old) {
+			t.Fatalf("lifecycle UI retained %q:\n%s", old, view)
+		}
+	}
+}
+
+func TestDoneSessionRefusesResume(t *testing.T) {
+	snapshot := testSnapshot(1)
+	snapshot.Sessions[0].State = "completed"
+	model := New(snapshot)
+	model.view = ViewFlat
+	model.rebuildRows()
+	model.cursor = firstSessionRow(model.rows)
+	updated, command := model.resumeDefault()
+	if command != nil {
+		t.Fatal("done session produced a resume command")
+	}
+	if got := updated.(Model).status; !strings.Contains(got, "reopen") {
+		t.Fatalf("status = %q", got)
 	}
 }
 

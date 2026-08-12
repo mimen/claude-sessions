@@ -28,7 +28,8 @@
  *   parentSessionId      -> setParent
  *   key                  -> setKey (freeform anchor — see ADR-0069/0078)
  *   completed            -> setCompleted (boolean)
- *   archived             -> setArchived (boolean)
+ *   saved                -> setSaved (boolean)
+ *   archived             -> compatibility alias for completed (boolean)
  *   meta                 -> setMeta per key (object of key→value; null values delete)
  *   enrichment           -> setEnrichment (REQUIRES --sensor; whole object, written atomically)
  *
@@ -41,7 +42,7 @@
 import { z } from "zod";
 import { openCatalogue } from "./db-schema.ts";
 import { getRow } from "./db-queries.ts";
-import { setCustomTitle, setRole, setProject, setCluster, setGusWork, setWorkUnitId, setStatusLine, setParked, setParent, setKey, setCompleted, setArchived, setMeta, setStage, setEnrichment, setSessionEpic } from "./db-mutations.ts";
+import { setCustomTitle, setRole, setProject, setCluster, setGusWork, setWorkUnitId, setStatusLine, setParked, setParent, setKey, setCompleted, setArchived, setSaved, setMeta, setStage, setEnrichment, setSessionEpic } from "./db-mutations.ts";
 import { validateStageTransition } from "./stage-schema.ts";
 import { EnrichmentPayloadSchema, validateEnrichment } from "./enrichment-schema.ts";
 import { loadEnrichmentLocations, locationKeySet } from "../enrich/locations.ts";
@@ -63,10 +64,7 @@ const STRING_OR_NULL_FIELDS: Record<string, (db: any, sid: string, v: string | n
   key: setKey,
 };
 
-const BOOL_FIELDS: Record<string, (db: any, sid: string, v: boolean, now: string) => void> = {
-  completed: setCompleted,
-  archived: setArchived,
-};
+const BOOL_FIELDS: Record<string, (db: any, sid: string, v: boolean, now: string) => void> = {};
 
 /**
  * The enrichment object as an external sensor writes it: the model's assertions plus the message
@@ -189,6 +187,44 @@ export function sessionFieldsCommand(args: string[]): number {
         }
         strSetter(db, sid, value as string | null, now);
         applied.push(`${field}=${value ?? "null"}`);
+        continue;
+      }
+      if (field === "completed") {
+        if (typeof value !== "boolean") {
+          console.error("ccs session-fields: completed must be a boolean");
+          return 1;
+        }
+        setCompleted(db, sid, value, now);
+        if (value) {
+          setArchived(db, sid, false, now);
+          setSaved(db, sid, false, now);
+          setParked(db, sid, null, now);
+        }
+        applied.push(`completed=${value}`);
+        continue;
+      }
+      if (field === "saved") {
+        if (typeof value !== "boolean") {
+          console.error("ccs session-fields: saved must be a boolean");
+          return 1;
+        }
+        setSaved(db, sid, value, now);
+        if (value) {
+          setCompleted(db, sid, false, now);
+          setArchived(db, sid, false, now);
+        }
+        applied.push(`saved=${value}`);
+        continue;
+      }
+      if (field === "archived") {
+        if (typeof value !== "boolean") {
+          console.error("ccs session-fields: archived must be a boolean");
+          return 1;
+        }
+        setCompleted(db, sid, value, now);
+        setArchived(db, sid, false, now);
+        if (value) setSaved(db, sid, false, now);
+        applied.push(`completed=${value} (archive alias)`);
         continue;
       }
       const boolSetter = BOOL_FIELDS[field];

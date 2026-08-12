@@ -91,7 +91,7 @@ func StateColor(state string) lipgloss.Color {
 		return Warning
 	case "completed", "done":
 		return Info
-	case "archived":
+	case "saved":
 		return FgMostSubtle
 	case "loop":
 		return Accent

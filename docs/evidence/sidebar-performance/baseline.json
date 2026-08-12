@@ -252,7 +252,7 @@
             "category": null,
             "density": "settled",
             "sessionId": "session-0003",
-            "lifecycle": "archived",
+            "lifecycle": "saved",
             "name": "Indexed session 3",
             "directory": "project-3",
             "directoryPath": "<fixture-root>/repos/project-3",
@@ -267,7 +267,7 @@
             "status": null,
             "statusAvailability": "not-live",
             "lastActivityAt": 1785931020000,
-            "section": "archived",
+            "section": "saved",
             "workspaceRef": null,
             "pinned": false,
             "focused": false
@@ -401,7 +401,7 @@
             "category": null,
             "density": "settled",
             "sessionId": "session-0007",
-            "lifecycle": "archived",
+            "lifecycle": "saved",
             "name": "Enriched session 7",
             "directory": "project-7",
             "directoryPath": "<fixture-root>/repos/project-7",
@@ -416,7 +416,7 @@
             "status": null,
             "statusAvailability": "not-live",
             "lastActivityAt": 1785930780000,
-            "section": "archived",
+            "section": "saved",
             "workspaceRef": null,
             "pinned": false,
             "focused": false
@@ -430,7 +430,7 @@
         "lifecycleCounts": {
           "active": 3,
           "completed": 2,
-          "archived": 2
+          "saved": 2
         },
         "hasMoreRows": false,
         "generatedAt": 0
@@ -497,7 +497,7 @@
         "lifecycleCounts": {
           "active": 3,
           "completed": 2,
-          "archived": 2
+          "saved": 2
         },
         "hasMoreRows": false,
         "generatedAt": 0
@@ -581,12 +581,12 @@
         "lifecycleCounts": {
           "active": 3,
           "completed": 2,
-          "archived": 2
+          "saved": 2
         },
         "hasMoreRows": false,
         "generatedAt": 0
       },
-      "archived": {
+      "saved": {
         "rows": [
           {
             "kind": "session",
@@ -602,7 +602,7 @@
             "category": null,
             "density": "settled",
             "sessionId": "session-0003",
-            "lifecycle": "archived",
+            "lifecycle": "saved",
             "name": "Indexed session 3",
             "directory": "project-3",
             "directoryPath": "<fixture-root>/repos/project-3",
@@ -617,7 +617,7 @@
             "status": null,
             "statusAvailability": "not-live",
             "lastActivityAt": 1785931020000,
-            "section": "archived",
+            "section": "saved",
             "workspaceRef": null,
             "pinned": false,
             "focused": false
@@ -649,7 +649,7 @@
             "category": null,
             "density": "settled",
             "sessionId": "session-0007",
-            "lifecycle": "archived",
+            "lifecycle": "saved",
             "name": "Enriched session 7",
             "directory": "project-7",
             "directoryPath": "<fixture-root>/repos/project-7",
@@ -664,7 +664,7 @@
             "status": null,
             "statusAvailability": "not-live",
             "lastActivityAt": 1785930780000,
-            "section": "archived",
+            "section": "saved",
             "workspaceRef": null,
             "pinned": false,
             "focused": false
@@ -678,7 +678,7 @@
         "lifecycleCounts": {
           "active": 3,
           "completed": 2,
-          "archived": 2
+          "saved": 2
         },
         "hasMoreRows": false,
         "generatedAt": 0
@@ -974,7 +974,7 @@
         "lifecycleCounts": {
           "active": 0,
           "completed": 0,
-          "archived": 0
+          "saved": 0
         },
         "hasMoreRows": false,
         "generatedAt": 0
@@ -1074,7 +1074,7 @@
         "lifecycleCounts": {
           "active": 3,
           "completed": 2,
-          "archived": 2
+          "saved": 2
         },
         "hasMoreRows": false,
         "generatedAt": 0
@@ -1089,7 +1089,7 @@
         "lifecycleCounts": {
           "active": 3,
           "completed": 2,
-          "archived": 2
+          "saved": 2
         },
         "hasMoreRows": false,
         "generatedAt": 0

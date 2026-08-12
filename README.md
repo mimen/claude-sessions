@@ -62,8 +62,8 @@ ccs location list      # list curated session starting locations
 ccs location match "work on the session catalogue" --json
 ccs location show ccs
 ccs finish-current complete          # dry-run the exact current workspace close only
-ccs finish-current complete --do     # catalogue, complete, enrich detached, then safely close
-ccs finish-current archive --do      # catalogue, archive, enrich detached, then safely close
+ccs finish-current complete --do     # catalogue, mark Done, enrich detached, then safely close
+ccs finish-current save --do         # catalogue, save for later, enrich detached, then safely close
 
 # CCS-managed launches declare their intent before a UUID is reserved:
 ccs session new --top-level --location ccs --model gpt-5.6-sol --json --prompt "Implement the router"
@@ -156,21 +156,22 @@ conversation, where filing the work is one command away.
 | command | what it does |
 |---------|--------------|
 | `/ccs:new <initial prompt>` | choose a registered launch location conversationally and create one fresh CCS-managed session |
-| `/ccs:archive` | synchronously archive, launch detached enrichment, then safely close its workspace |
-| `/ccs:complete` | synchronously complete, launch detached enrichment, then safely close its workspace |
+| `/ccs:save` | save the session for later, launch detached enrichment, then safely close its workspace |
+| `/ccs:complete` | mark the session Done, launch detached enrichment, then safely close its workspace |
 | `/ccs:close-workspace` | close only the current session's sole-surface workspace after exact identity checks |
-| `/ccs:unarchive` | clear archive or completion flags and return to active views |
+| `/ccs:unsave` | move a Saved session back to Active without resuming it |
 | `/ccs:title <words>` | set an explicit title verbatim and sync the cmux tab |
 | `/ccs:suggest-title` | generate a title from what the session actually became |
 | `/ccs:tag <entity>` | tag the session so related work is easy to find |
 | `/ccs:info` | show this session's lifecycle, cost, identity, and tags |
 
-`completed` and `archived` are different claims. Completed work stays visible in CCS
-history but completed cluster members are not resumed. Archived work leaves active
-browse/search views and cluster resumes. Both states are reversible; neither touches
-the transcript.
+The user-facing lifecycle is Active, Parked, Saved, and Done. Parked remains active work with an
+outstanding obligation. Saved leaves Active and appears in the Saved view, keeps its transcript and
+context, and returns to Active after a successful explicit resume. Done is terminal until explicitly
+reopened. Historical `archive` and `unarchive` CLI invocations remain compatibility aliases for Done
+and reopen; they never create Saved sessions.
 
-`ccs finish-current <complete|archive>` is a close preflight only: it performs no catalogue,
+`ccs finish-current <complete|save>` is a close preflight only: it performs no catalogue,
 lifecycle, or enrichment mutation. With `--do`, it validates the explicit current session UUID,
 ensures the catalogue row, records the per-session lifecycle, launches `ccs enrich <uuid>` through
 `/usr/bin/nohup` with per-session runtime logging, then hands closure to the existing two-snapshot

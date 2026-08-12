@@ -1,8 +1,8 @@
 /**
  * Which lifecycle the queue is showing.
  *
- * Active is the working view; completed and archived are for looking back. Same native-select
- * treatment as the arrangement control so the two read as a pair.
+ * Active is the working view; Saved holds resumable context and Done holds concluded work. Same
+ * native-select treatment as the arrangement control so the two read as a pair.
  */
 import type React from "react";
 import type { SidebarView } from "../../projection.ts";
@@ -10,14 +10,14 @@ import { ChevronIcon } from "./icons.tsx";
 
 /**
  * Triage sits next to Active because it is the same list, narrowed: the sessions whose verdict
- * still contradicts where they sit. Completed and archived remain reachable here as well as from
- * the bottom bars, so the control stays a complete account of what the list can show.
+ * still contradicts where they sit. Saved and Done remain reachable in the same control, so it
+ * stays a complete account of what the list can show.
  */
 const SCOPES: ReadonlyArray<{ readonly value: SidebarView; readonly label: string }> = [
   { value: "active", label: "Active" },
   { value: "triage", label: "Triage" },
-  { value: "completed", label: "Completed" },
-  { value: "archived", label: "Archived" },
+  { value: "saved", label: "Saved" },
+  { value: "completed", label: "Done" },
 ];
 
 export function ScopeSelect({ value, onChange }: {

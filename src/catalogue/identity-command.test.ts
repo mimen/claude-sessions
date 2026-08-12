@@ -73,6 +73,33 @@ describe("ccs identity set — unknown field handling", () => {
   });
 });
 
+describe("ccs identity archive compatibility", () => {
+  test("archive normalizes stale archived state to Done and the archived list filter still finds it", async () => {
+    await withRoot(async (root) => {
+      const key = "pr-watch:pr-agent:o/r#2";
+      const db = openCatalogue(join(root, "cache", "catalogue.db"));
+      mintIdentity(db, key, { cluster: "pr-watch", role: "pr-agent" }, NOW);
+      db.close();
+
+      expect(await identityCommand(["archive", key])).toBe(0);
+      const check = openCatalogue(join(root, "cache", "catalogue.db"));
+      expect(check.query("SELECT completed, archived, saved FROM identities WHERE identity_key = $key").get({ $key: key }))
+        .toEqual({ completed: 1, archived: 0, saved: 0 });
+      check.close();
+
+      const lines: string[] = [];
+      const original = console.log;
+      console.log = (line?: unknown) => lines.push(String(line ?? ""));
+      try {
+        expect(await identityCommand(["list", "--archived", "--json"])).toBe(0);
+      } finally {
+        console.log = original;
+      }
+      expect(JSON.parse(lines.join("\n"))).toEqual([expect.objectContaining({ identityKey: key, completed: true, archived: false })]);
+    });
+  });
+});
+
 describe("ccs identity ls / list — both aliases work", () => {
   // The top-level `ccs --help` advertises `ccs identity ls`, but the noun's
   // dispatch only knew `list`. Users copying from the top-level help hit

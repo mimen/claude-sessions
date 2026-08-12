@@ -58,16 +58,20 @@ cmux-t3-sidebar-v1                       Sol ⬡  2m
 - **Bottom right** — the model's short name with its provider's own logo, then time since the
   last recorded activity.
 
-Sections come from cmux's own status words: `needs input` → **Needs you**, `running` →
-**Working**, anything else live → **Ready**. Sessions that are not live fill a small **Recent**
-shelf. Within a section, cmux's ordering is preserved so rows never jump mid-turn.
+The scope control separates **Active**, **Triage**, **Saved**, and **Done**. Saved sessions are kept
+out of Active without losing their transcript or resumability; Done sessions stay closed until they
+are explicitly reopened. Inside Active, sections come from cmux's own status words: `needs input` →
+**Needs you**, `running` → **Working**, anything else live → **Ready**. Sessions that are not live
+fill a small **Recent** shelf. Within a section, cmux's ordering is preserved so rows never jump
+mid-turn.
 
 ## Clicking a row
 
 One action, decided on the server: focus the workspace when the session is live, resume it
-through CCS when it is not. The browser never chooses between them, because choosing wrong
-spawns a duplicate of a running session. When cmux state is unreadable the sidebar says so and
-refuses to resume anything.
+through CCS when it is not. Explicitly resuming a Saved session moves it back to Active only after
+the workspace is created successfully. Done sessions refuse resume until reopened. The browser
+never chooses focus versus resume, because choosing wrong spawns a duplicate of a running session.
+When cmux state is unreadable the sidebar says so and refuses to resume anything.
 
 ### The native focus bridge
 

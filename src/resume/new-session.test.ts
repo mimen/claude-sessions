@@ -156,7 +156,7 @@ test("supersede-on-spawn: a new worker archives prior sessions of the same ident
     ]), NOW);
 
     // the old one is archived (expired) with a pointer to who superseded it
-    expect(lifecycleOf(getRow(db, oldId)!)).toBe("archived");
+    expect(lifecycleOf(getRow(db, oldId)!)).toBe("completed");
     expect(getMeta(getRow(db, oldId)!, "superseded_by")).toBe(newId);
     // the new one is idle + shares the identity_key
     expect(lifecycleOf(getRow(db, newId)!)).toBe("idle");
@@ -191,7 +191,7 @@ test("supersede-on-spawn keeps the fleet identity alive (acceptance #9)", () => 
     ]), NOW);
 
     // Old session is archived + points at the successor.
-    expect(lifecycleOf(getRow(db, oldId)!)).toBe("archived");
+    expect(lifecycleOf(getRow(db, oldId)!)).toBe("completed");
     expect(getMeta(getRow(db, oldId)!, "superseded_by")).toBe(newId);
     // New session is live and attached to the same identity.
     expect(lifecycleOf(getRow(db, newId)!)).toBe("idle");

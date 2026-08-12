@@ -189,9 +189,9 @@ function mixedProjectionInput(overrides: Partial<ProjectionInput> = {}): Project
         lastTs: "2026-08-05T11:55:00.000Z",
       }),
       indexed({
-        sessionId: "archived-id",
-        resumeId: "archived-resume",
-        title: "Archived closed",
+        sessionId: "saved-id",
+        resumeId: "saved-resume",
+        title: "Saved closed",
         cwd: root,
         lastTs: "2026-08-05T11:54:00.000Z",
       }),
@@ -206,7 +206,7 @@ function mixedProjectionInput(overrides: Partial<ProjectionInput> = {}): Project
     lifecycles: new Map([
       ["terminal-live", "completed"],
       ["terminal-closed-resume", "completed"],
-      ["archived-resume", "archived"],
+      ["saved-resume", "saved"],
     ]),
     catalogueLifecycles: new Map([
       ["resume-live", "idle"],
@@ -214,7 +214,7 @@ function mixedProjectionInput(overrides: Partial<ProjectionInput> = {}): Project
       ["declined-resume", "idle"],
       ["closed-triage-resume", "idle"],
       ["terminal-closed-resume", "completed"],
-      ["archived-resume", "archived"],
+      ["saved-resume", "saved"],
       ["identity-resume", "parked"],
     ]),
     canonicalSessionIds: new Map([
@@ -239,8 +239,8 @@ function mixedProjectionInput(overrides: Partial<ProjectionInput> = {}): Project
     checkouts: new Map([[root, { project: "mixed", worktree: "projection", branch: "phase-5" }]]),
     faviconDirectories: new Set([root]),
     unreadByWorkspaceId: new Map([["ws-live", 2], ["ws-browser", 1]]),
-    includeLifecycles: ["completed", "archived"],
-    lifecycleCounts: { active: 5, completed: 2, archived: 1 },
+    includeLifecycles: ["completed", "saved"],
+    lifecycleCounts: { active: 5, completed: 2, saved: 1 },
     recentLimit: 4,
     historyLimit: 2,
     hasMoreRows: true,
@@ -268,8 +268,9 @@ describe("sidebarLifecycleOf", () => {
   test("maps terminal catalogue states and collapses idle or parked to active", () => {
     expect(sidebarLifecycleOf("idle")).toBe("active");
     expect(sidebarLifecycleOf("parked")).toBe("active");
+    expect(sidebarLifecycleOf("saved")).toBe("saved");
     expect(sidebarLifecycleOf("completed")).toBe("completed");
-    expect(sidebarLifecycleOf("archived")).toBe("archived");
+    expect(sidebarLifecycleOf("archived")).toBe("completed");
   });
 });
 
@@ -456,7 +457,7 @@ describe("projectSidebar", () => {
     });
   });
 
-  test("active scope excludes completed and archived live or shelved rows", () => {
+  test("active scope excludes completed and saved live or shelved rows", () => {
     const snapshot = projectSidebar(input({
       live: [
         live({ sessionId: "active-live", workspaceTitle: "Active live" }),
@@ -466,11 +467,11 @@ describe("projectSidebar", () => {
         indexed({ sessionId: "active-live", resumeId: "active-live" }),
         indexed({ sessionId: "completed-live", resumeId: "completed-live" }),
         indexed({ sessionId: "active-closed", resumeId: "active-closed" }),
-        indexed({ sessionId: "archived-closed", resumeId: "archived-closed" }),
+        indexed({ sessionId: "saved-closed", resumeId: "saved-closed" }),
       ],
       lifecycles: new Map([
         ["completed-live", "completed"],
-        ["archived-closed", "archived"],
+        ["saved-closed", "saved"],
       ]),
       scope: "active",
     }));
@@ -545,12 +546,12 @@ describe("projectSidebar", () => {
     });
   });
 
-  test("archived scope lists only archived rows and respects the history cap", () => {
+  test("saved scope lists only saved rows and respects the history cap", () => {
     const snapshot = projectSidebar(input({
       indexed: [
         indexed({
-          sessionId: "archived-newer",
-          resumeId: "archived-newer",
+          sessionId: "saved-newer",
+          resumeId: "saved-newer",
           lastTs: "2026-07-24T21:00:00.000Z",
         }),
         indexed({
@@ -559,22 +560,22 @@ describe("projectSidebar", () => {
           lastTs: "2026-07-24T22:00:00.000Z",
         }),
         indexed({
-          sessionId: "archived-older",
-          resumeId: "archived-older",
+          sessionId: "saved-older",
+          resumeId: "saved-older",
           lastTs: "2026-07-24T20:00:00.000Z",
         }),
       ],
       lifecycles: new Map([
-        ["archived-newer", "archived"],
+        ["saved-newer", "saved"],
         ["completed", "completed"],
-        ["archived-older", "archived"],
+        ["saved-older", "saved"],
       ]),
-      scope: "archived",
+      scope: "saved",
       historyLimit: 1,
     }));
 
-    expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual(["archived-newer"]);
-    expect(sessionRows(snapshot.rows)[0]?.lifecycle).toBe("archived");
+    expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual(["saved-newer"]);
+    expect(sessionRows(snapshot.rows)[0]?.lifecycle).toBe("saved");
   });
 
   test("does not represent lifecycle history as closed when liveness is unreadable", () => {
@@ -749,7 +750,7 @@ describe("projectSidebar", () => {
       projectSidebar(mixedProjectionInput({ scope: "completed", livenessReadable: false })),
     ]);
 
-    expect(createHash("sha256").update(serialized).digest("hex")).toBe("3dbb6b28fe5866306fc189d704f9885ccbd33414841891e3f49e1b1259ad4eb7");
+    expect(createHash("sha256").update(serialized).digest("hex")).toBe("2a49ae3d59f9bf529f2c8cd0181cf05cb863cd41865d440ba5b6e2dd27fa5c7d");
   });
 });
 
@@ -844,7 +845,7 @@ describe("declined verdicts", () => {
   });
 
   test("parked and either terminal catalogue lifecycle suppress every recommendation", () => {
-    for (const lifecycle of ["parked", "completed", "archived"] as const) {
+    for (const lifecycle of ["parked", "completed", "saved"] as const) {
       const browserLifecycle = lifecycle === "parked" ? "active" : lifecycle;
       const snapshot = projectSidebar(input({
         indexed: [indexed({ sessionId: "s1", resumeId: "s1" })],
@@ -870,7 +871,7 @@ describe("declined verdicts", () => {
     });
   });
 
-  test("junk and reason remain presentation metadata on an archive disagreement", () => {
+  test("junk and reason remain presentation metadata on an save disagreement", () => {
     const snapshot = projectSidebar(input({
       indexed: [indexed({ sessionId: "s1", resumeId: "s1" })],
       summaries: new Map([["s1", enrichment({ junk: true, reason: "Probe" })]]),

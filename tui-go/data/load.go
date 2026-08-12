@@ -216,7 +216,7 @@ func includeSession(row indexedSession, meta catalogueMeta, options LoadOptions)
 	if row.IsSubagent && !options.IncludeSubagents {
 		return false
 	}
-	if meta.Archived && !options.IncludeArchived {
+	if meta.Saved && !options.IncludeSaved {
 		return false
 	}
 	if meta.SessionClass == "auxiliary" && !options.IncludeAuxiliary {
@@ -267,9 +267,9 @@ func resolveDisplayTitle(row indexedSession, meta catalogueMeta, liveTitle strin
 
 func disposition(meta catalogueMeta, open bool) string {
 	switch {
-	case meta.Archived:
-		return "archived"
-	case meta.Completed:
+	case meta.Saved:
+		return "saved"
+	case meta.Completed || meta.Archived:
 		return "completed"
 	case meta.ParkedTaskID != "":
 		return "parked"

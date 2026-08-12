@@ -34,7 +34,7 @@ const writeMd = (root: string, sub: string, content: string) => {
 function row(over: Partial<CatalogueRow>): CatalogueRow {
   return {
     sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,
-    archived: false, parkedTaskId: null, key: null, parentSessionId: null,
+    archived: false, saved: false, parkedTaskId: null, key: null, parentSessionId: null,
     sessionClass: null,
     role: null, resumeCommand: null, project: null, cluster: null, gusWork: null, workUnitId: null,
     groupingId: null, statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null, prNumber: null, prRepo: null,

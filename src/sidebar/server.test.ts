@@ -33,7 +33,7 @@ const EMPTY_SNAPSHOT: SidebarSnapshot = {
   catalogueReadable: true,
   categoryProjectionVersion: 1,
   categoryProjectionError: null,
-  lifecycleCounts: { active: 0, completed: 0, archived: 0 },
+  lifecycleCounts: { active: 0, completed: 0, saved: 0 },
   hasMoreRows: false,
   generatedAt: 0,
 };
@@ -124,7 +124,7 @@ function harness(
       action: SessionLifecycleAction,
     ): Promise<SessionLifecycleOutcome> => {
       lifecycleChanges.push({ sessionId, action });
-      return { status: "ok", lifecycle: action === "archive" ? "archived" : "completed" };
+      return { status: "ok", lifecycle: action === "save" ? "saved" : "completed" };
     },
     faviconFor: () => null,
     ...overrides,
@@ -191,7 +191,7 @@ async function expectActionHttpError(
 function postLifecycle(
   app: Harness,
   origin: string | null,
-  body: string = JSON.stringify({ sessionId: "abc", action: "archive" }),
+  body: string = JSON.stringify({ sessionId: "abc", action: "save" }),
   host?: string,
 ): Promise<Response> {
   const headers: Record<string, string> = { "content-type": "application/json" };
@@ -736,8 +736,8 @@ describe("sidebar server", () => {
     const response = await postLifecycle(app, app.url);
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "ok", lifecycle: "archived" });
-    expect(app.lifecycleChanges).toEqual([{ sessionId: "abc", action: "archive" }]);
+    expect(await response.json()).toEqual({ status: "ok", lifecycle: "saved" });
+    expect(app.lifecycleChanges).toEqual([{ sessionId: "abc", action: "save" }]);
   });
 
   test("passes through not-found without mutating an unknown session", async () => {
@@ -789,7 +789,7 @@ describe("sidebar server", () => {
       const lifecycle = await fetch(`${url}/api/session/lifecycle`, {
         method: "POST",
         headers: { "content-type": "application/json", origin: url },
-        body: JSON.stringify({ sessionId: "concrete-lifecycle", action: "unarchive" }),
+        body: JSON.stringify({ sessionId: "concrete-lifecycle", action: "unsave" }),
       });
       const lifecycleBody = await lifecycle.text();
       expect(lifecycle.status).toBe(503);
@@ -822,7 +822,7 @@ describe("sidebar server", () => {
         context: {
           operation: "lifecycle",
           sessionId: "concrete-lifecycle",
-          action: "unarchive",
+          action: "unsave",
           cataloguePath: directory,
           error: "unable to open database file",
         },

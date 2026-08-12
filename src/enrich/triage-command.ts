@@ -103,8 +103,8 @@ export async function triageCommand(args: string[]): Promise<number> {
  * have closed the session out in the catalogue while leaving every identity reader still seeing it
  * as live — a queue that half-applies its own verdicts is worse than no queue.
  */
-function apply(item: TriageItem, target: "completed" | "archived"): void {
-  mark(item.sessionId, [target === "completed" ? "--completed" : "--archived"]);
+function apply(item: TriageItem): void {
+  mark(item.sessionId, ["--completed"]);
 }
 
 async function interactive(
@@ -127,11 +127,11 @@ async function interactive(
         console.log(`  ${item.title}  ${dim(`${item.messages} msg`)}`);
       }
       if (junk.length > 3) console.log(dim(`  … ${junk.length - 3} more`));
-      const answer = await ask("\n  [A] archive all  [s] skip  > ");
-      if (answer === "a") {
-        for (const item of junk) apply(item, "archived");
+      const answer = await ask("\n  [D] mark all Done  [s] skip  > ");
+      if (answer === "d") {
+        for (const item of junk) apply(item);
         applied += junk.length;
-        console.log(green(`  archived ${junk.length}\n`));
+        console.log(green(`  marked ${junk.length} Done\n`));
       } else {
         skipped += junk.length;
         console.log(dim("  skipped\n"));
@@ -148,16 +148,12 @@ async function interactive(
       if (item.reason) console.log(dim(item.reason));
       console.log(dim(`${ago(item.lastTs, now)} · ${projectOf(item.cwd)} · ${item.messages} msg`));
 
-      const answer = await ask("  [c] complete  [a] archive  [s] skip  [q] quit  > ");
+      const answer = await ask("  [d] Done  [s] skip  [q] quit  > ");
       if (answer === "q") break;
-      if (answer === "c") {
-        apply(item, "completed");
+      if (answer === "d") {
+        apply(item);
         applied++;
-        console.log(green("  completed\n"));
-      } else if (answer === "a") {
-        apply(item, "archived");
-        applied++;
-        console.log(green("  archived\n"));
+        console.log(green("  Done\n"));
       } else {
         skipped++;
         console.log(dim("  skipped\n"));

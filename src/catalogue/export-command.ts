@@ -23,7 +23,7 @@
  *       prRepo, prNumber, prBranch, prState, prHeadSha,
  *       stage, statusLine, meta,               // meta is the JSON-decoded map
  *       customTitle, kind, resumeCommand,
- *       completed, archived, parkedTaskId, parentSessionId,
+ *       completed, archived, saved, parkedTaskId, parentSessionId,
  *       project, notes, updatedAt,
  *       storedCategory, effectiveCategory, categoryFinding,
  *     },
@@ -62,6 +62,8 @@ export interface CatalogueExportRow {
   resumeCommand: string | null;
   completed: boolean;
   archived: boolean;
+  /** Resumable work intentionally hidden from the active working set. Additive in schema v2. */
+  saved: boolean;
   parkedTaskId: string | null;
   parentSessionId: string | null;
   project: string | null;
@@ -105,6 +107,7 @@ function toExportRow(r: CatalogueRow, category: EffectiveCategory): CatalogueExp
     resumeCommand: r.resumeCommand,
     completed: r.completed,
     archived: r.archived,
+    saved: r.saved,
     parkedTaskId: r.parkedTaskId,
     parentSessionId: r.parentSessionId,
     project: r.project,

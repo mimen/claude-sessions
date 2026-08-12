@@ -80,6 +80,9 @@ export function setCompleted(db: Database, sessionId: string, completed: boolean
 export function setArchived(db: Database, sessionId: string, archived: boolean, now: string): void {
   set(db, sessionId, "archived", archived ? 1 : 0, now);
 }
+export function setSaved(db: Database, sessionId: string, saved: boolean, now: string): void {
+  set(db, sessionId, "saved", saved ? 1 : 0, now);
+}
 export function setParked(db: Database, sessionId: string, taskId: string | null, now: string): void {
   set(db, sessionId, "parked_task_id", taskId, now);
 }
@@ -479,6 +482,7 @@ export function deleteHistoricalDetachedChildBackfillPlaceholder(db: Database, s
         AND custom_title IS NULL
         AND completed = 0
         AND archived = 0
+        AND saved = 0
         AND parked_task_id IS NULL
         AND notes IS NULL
         AND identity_key IS NULL

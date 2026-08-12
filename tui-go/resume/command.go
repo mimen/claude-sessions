@@ -25,6 +25,9 @@ type Command struct {
 
 // Build constructs the origin/cross-backend resume command from indexed metadata.
 func Build(session data.Session, launcher data.Launcher) (Command, string, error) {
+	if session.State == "completed" || session.State == "done" {
+		return Command{}, "", errors.New("session is done; reopen it before resuming")
+	}
 	cwd, note, err := resolveCWD(session)
 	if err != nil {
 		return Command{}, "", err
@@ -32,6 +35,17 @@ func Build(session data.Session, launcher data.Launcher) (Command, string, error
 	binary := strings.TrimSpace(launcher.Backend)
 	if binary == "" {
 		binary = "claude"
+	}
+	if session.State == "saved" {
+		launcherName := strings.TrimSpace(launcher.Name)
+		if launcherName == "" {
+			launcherName = binary
+		}
+		return Command{
+			Argv: []string{"ccs", "resume-session", session.ID, "--via", launcherName},
+			CWD:  cwd,
+			Env:  copyEnv(launcher.Env),
+		}, note, nil
 	}
 	resumeID := strings.TrimSpace(session.ResumeID)
 	if resumeID == "" {

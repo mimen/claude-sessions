@@ -13,7 +13,7 @@ import { deriveKey } from "./db-queries.ts";
 function row(over: Partial<CatalogueRow>): CatalogueRow {
   const base: CatalogueRow = {
     sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,
-    archived: false, parkedTaskId: null, key: null, parentSessionId: null,
+    archived: false, saved: false, parkedTaskId: null, key: null, parentSessionId: null,
     sessionClass: null,
     role: null, resumeCommand: null, project: null, cluster: "pr-watch", gusWork: null, workUnitId: null,
     groupingId: null, statusLine: null, meta: {}, stage: null, notes: null, updatedAt: null, prNumber: null, prRepo: null,
@@ -56,6 +56,22 @@ test("predecessorsOf: returns same-identity siblings, oldest→newest, self excl
   const preds = predecessorsOf(rows, "c", tp);
   expect(preds.map((p) => p.sessionId)).toEqual(["a", "b"]);
   expect(preds[0]!.transcriptPath).toBe("/t/a.jsonl");
+});
+
+test("predecessorsOf: projects Saved and folds legacy Archive into Done", () => {
+  const rows = new Map<string, CatalogueRow>([
+    ["saved", row({ sessionId: "saved", role: "control", saved: true })],
+    ["legacy", row({ sessionId: "legacy", role: "control", archived: true })],
+    ["cur", row({ sessionId: "cur", role: "control" })],
+  ]);
+  const preds = predecessorsOf(rows, "cur", paths({
+    saved: ["/t/saved.jsonl", "2026-07-01T00:00:00Z"],
+    legacy: ["/t/legacy.jsonl", "2026-07-02T00:00:00Z"],
+  }));
+  expect(preds).toMatchObject([
+    { sessionId: "saved", lifecycle: "saved" },
+    { sessionId: "legacy", lifecycle: "completed" },
+  ]);
 });
 
 test("predecessorsOf: a work-unit identity groups its PR embodiments", () => {

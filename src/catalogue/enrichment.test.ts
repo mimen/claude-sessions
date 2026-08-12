@@ -205,16 +205,14 @@ describe("recommendation disagreement", () => {
   const recommendations: Array<Recommendation | null> = [
     null, "continue", "complete", "archive", "handoff",
   ];
-  const lifecycles: Lifecycle[] = ["idle", "parked", "completed", "archived"];
+  const lifecycles: Lifecycle[] = ["idle", "parked", "saved", "completed", "archived"];
 
   test("characterizes every recommendation against every catalogue lifecycle", () => {
     for (const recommendation of recommendations) {
       for (const lifecycle of lifecycles) {
         const expected = lifecycle !== "idle" || recommendation === null || recommendation === "continue"
           ? null
-          : recommendation === "complete"
-          ? "completed"
-          : "archived";
+          : "completed";
         expect(recommendationDisagreement(recommendation, null, lifecycle)).toBe(expected);
       }
     }
@@ -222,7 +220,7 @@ describe("recommendation disagreement", () => {
 
   test("same declined verdict is quiet and a different verdict is new information", () => {
     expect(recommendationDisagreement("archive", "archive", "idle")).toBeNull();
-    expect(recommendationDisagreement("archive", "complete", "idle")).toBe("archived");
+    expect(recommendationDisagreement("archive", "complete", "idle")).toBe("completed");
     expect(recommendationDisagreement("complete", "archive", "idle")).toBe("completed");
   });
 
@@ -231,8 +229,8 @@ describe("recommendation disagreement", () => {
     expect(recommendationDisagreement("archive", null, "completed")).toBeNull();
     expect(recommendationDisagreement("handoff", null, "archived")).toBeNull();
     expect(recommendationDisagreement("complete", null, "parked")).toBeNull();
-    // Junk is presentation metadata; its archive recommendation follows the ordinary domain rule.
-    expect(recommendationDisagreement("archive", null, "idle")).toBe("archived");
+    // Junk is presentation metadata; its archive recommendation follows the ordinary Done rule.
+    expect(recommendationDisagreement("archive", null, "idle")).toBe("completed");
   });
 });
 

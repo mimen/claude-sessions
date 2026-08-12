@@ -28,10 +28,10 @@ describe("ccs workspace-closing slash commands", () => {
     expect(source).not.toContain("claude-actions");
   });
 
-  test("archive has one foreground finish-current call and no action-link flow", () => {
-    const source = command("archive");
+  test("save has one foreground finish-current call and no action-link flow", () => {
+    const source = command("save");
 
-    expect(executableCcsLines(source)).toEqual(["ccs finish-current archive --do"]);
+    expect(executableCcsLines(source)).toEqual(["ccs finish-current save --do"]);
     expect(source).toContain("only tool call and final action");
     expect(source).not.toContain("ccs whoami");
     expect(source).not.toContain("ccs session .");
@@ -53,6 +53,6 @@ describe("ccs workspace-closing slash commands", () => {
     const manifest = JSON.parse(
       readFileSync(join(pluginDir, ".claude-plugin", "plugin.json"), "utf8"),
     ) as { version: string };
-    expect(manifest.version).toBe("0.4.0");
+    expect(manifest.version).toBe("0.5.0");
   });
 });

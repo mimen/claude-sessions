@@ -57,7 +57,7 @@ test("each state shows what it claims", () => {
 
 // Two older formats exist in the wild. Dropping either silently reopens sections someone shelved.
 test("the original collapsed-key array still reads as shelved", () => {
-  const states = parseShelfStates(JSON.stringify(["completed", "archived", "milad-vault"]));
+  const states = parseShelfStates(JSON.stringify(["completed", "saved", "milad-vault"]));
   expect(states.get("completed")).toEqual({ shelved: true, liveOnly: false });
   expect(states.get("milad-vault")).toEqual({ shelved: true, liveOnly: false });
   expect(states.size).toBe(3);
@@ -70,16 +70,13 @@ test("the three-state cycle that briefly replaced it still reads back", () => {
   expect(states.get("c")).toEqual({ shelved: true, liveOnly: false });
 });
 
-test("finished sections start shelved when nothing is stored", () => {
-  const states = parseShelfStates(null);
-  expect(states.get("completed")).toEqual({ shelved: true, liveOnly: false });
-  expect(states.get("archived")).toEqual({ shelved: true, liveOnly: false });
-  expect(states.size).toBe(2);
+test("dedicated lifecycle views start open when nothing is stored", () => {
+  expect(parseShelfStates(null)).toEqual(new Map());
 });
 
 test("unreadable or nonsense storage falls back rather than throwing", () => {
-  expect(parseShelfStates("{not json").get("archived")).toEqual({ shelved: true, liveOnly: false });
-  expect(parseShelfStates("42").get("archived")).toEqual({ shelved: true, liveOnly: false });
+  expect(parseShelfStates("{not json")).toEqual(new Map());
+  expect(parseShelfStates("42")).toEqual(new Map());
 });
 
 test("a state this build does not understand is dropped, not trusted", () => {

@@ -81,12 +81,10 @@ export function CheckIcon({ className }: IconProps): React.ReactElement {
   );
 }
 
-export function ArchiveIcon({ className }: IconProps): React.ReactElement {
+export function BookmarkIcon({ className }: IconProps): React.ReactElement {
   return (
     <Glyph className={className}>
-      <rect height="5" rx="1" width="20" x="2" y="3" />
-      <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
-      <path d="M10 12h4" />
+      <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z" />
     </Glyph>
   );
 }

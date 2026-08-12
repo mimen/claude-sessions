@@ -127,7 +127,7 @@ describe("finishSession", () => {
   test("immediate enrichment launch failure records a warning and continues closing", async () => {
     const state = commandState({ launchResult: err(new Error("spawn failed")) });
 
-    const outcome = await finishSession(SESSION_ID, "archive", true, state.sessionDeps);
+    const outcome = await finishSession(SESSION_ID, "save", true, state.sessionDeps);
 
     expect(state.order.at(-1)).toBe(`close:${SESSION_ID}:do`);
     expect(outcome.status).toBe("close-result");
@@ -151,9 +151,9 @@ describe("finishCurrentCommand", () => {
   test("resolves the current UUID then delegates to the general form", async () => {
     const state = commandState({ sessionId: OTHER_SESSION_ID });
 
-    expect(await finishCurrentCommand(["archive", "--do"], state.currentDeps)).toBe(0);
+    expect(await finishCurrentCommand(["save", "--do"], state.currentDeps)).toBe(0);
     expect(state.order).toEqual([
-      `lifecycle:archive:${OTHER_SESSION_ID}`,
+      `lifecycle:save:${OTHER_SESSION_ID}`,
       `launch:${OTHER_SESSION_ID}`,
       `close:${OTHER_SESSION_ID}:do`,
     ]);
@@ -163,7 +163,7 @@ describe("finishCurrentCommand", () => {
   test("renders enrichment warnings and still closes", async () => {
     const state = commandState({ launchResult: err(new Error("spawn failed")) });
 
-    expect(await finishCurrentCommand(["archive", "--do"], state.currentDeps)).toBe(0);
+    expect(await finishCurrentCommand(["save", "--do"], state.currentDeps)).toBe(0);
     expect(state.order.at(-1)).toBe(`close:${SESSION_ID}:do`);
     expect(state.stderr.join("\n")).toContain("warning: spawn failed");
     expect(state.stderr.join("\n")).toContain("ccs enrich --sweep can retry");
@@ -258,7 +258,7 @@ describe("finishSessionCommand", () => {
     expect(await finishSessionCommand([SESSION_ID, "uncomplete"], state.commandDeps)).toBe(2);
     expect(state.order).toEqual([]);
     expect(state.stderr.join("\n")).toContain(
-      "usage: ccs finish <sessionId> <complete|archive> [--do]",
+      "usage: ccs finish <sessionId> <complete|save> [--do]",
     );
   });
 });

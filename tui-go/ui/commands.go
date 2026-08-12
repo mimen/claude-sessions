@@ -65,33 +65,37 @@ func setTitleCmd(sessionID string, title string, options data.LoadOptions) tea.C
 	}
 }
 
-func markCompletedCmd(sessionID string, preferredID string, options data.LoadOptions) tea.Cmd {
+func markCompletedCmd(sessionID string, enabled bool, preferredID string, options data.LoadOptions) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := ccscli.MarkCompleted(ctx, sessionID, true); err != nil {
+		if err := ccscli.MarkCompleted(ctx, sessionID, enabled); err != nil {
 			return reloadAfterFailure(options, preferredID, err)
 		}
-		return reloadAfterWrite(options, preferredID, "marked done")
+		status := "marked done"
+		if !enabled {
+			status = "reopened"
+		}
+		return reloadAfterWrite(options, preferredID, status)
 	}
 }
 
-func archiveBatchCmd(sessionIDs []string, preferredID string, status string, options data.LoadOptions) tea.Cmd {
+func saveBatchCmd(sessionIDs []string, preferredID string, status string, options data.LoadOptions) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(max(30, len(sessionIDs)*10))*time.Second)
 		defer cancel()
-		if err := ccscli.ArchiveBatch(ctx, sessionIDs); err != nil {
+		if err := ccscli.SaveBatch(ctx, sessionIDs); err != nil {
 			return reloadAfterFailure(options, preferredID, err)
 		}
 		return reloadAfterWrite(options, preferredID, status)
 	}
 }
 
-func markArchivedCmd(sessionID string, enabled bool, preferredID string, status string, options data.LoadOptions) tea.Cmd {
+func markSavedCmd(sessionID string, enabled bool, preferredID string, status string, options data.LoadOptions) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := ccscli.MarkArchived(ctx, sessionID, enabled); err != nil {
+		if err := ccscli.MarkSaved(ctx, sessionID, enabled); err != nil {
 			return reloadAfterFailure(options, preferredID, err)
 		}
 		return reloadAfterWrite(options, preferredID, status)

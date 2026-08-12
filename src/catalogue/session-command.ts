@@ -8,7 +8,7 @@
  *   ccs session set <id> --identity=<key> [--title="…"] [--parent=<id>] [--parked=<task>]
  *   ccs session unset <id> --identity | --title | --parent | --parked
  *   ccs session title <id> "text"                   same as --title but also cmux tab sync
- *   ccs session complete <id> | archive <id>        session lifecycle (distinct from identity)
+ *   ccs session complete <id> | save <id>           session lifecycle (distinct from identity)
  *   ccs session new <--top-level|--child-of <uuid|.>> [flags]  delegates to legacy new-session
  *   ccs session bump <id> [--note "…"]              wake a specific session
  *
@@ -19,18 +19,23 @@
  */
 import { randomUUID } from "node:crypto";
 import { openCatalogue } from "./db-schema.ts";
-import { getAll, getRow } from "./db-queries.ts";
+import { getAll, getRow, lifecycleOf } from "./db-queries.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { existsSync } from "node:fs";
 import { openIndex } from "../index/schema.ts";
 import { sessionById } from "../index/index.ts";
 import type { Database } from "bun:sqlite";
 import { getIdentity } from "./identities.ts";
-import { registerShimBirth, rename, mark } from "./commands.ts";
+import { registerShimBirth, rename, setExistingSessionLifecycle, type SessionLifecycleAction } from "./commands.ts";
 import { newSession, preflightNewSession } from "../resume/new-session.ts";
 import { destroyCommand, incognitoCommand } from "./destroy-command.ts";
 import { pushCmuxRename } from "../cmux/liveness.ts";
 import { getAllCategoryAssignments, resolveEffectiveCategory } from "../categories/assignment.ts";
+import {
+  finishSession,
+  type FinishSessionDependencies,
+  type FinishSessionOutcome,
+} from "../cmux/finish-current.ts";
 
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -60,7 +65,19 @@ function resolveSessionId(sIdOrDot: string | undefined): string | null {
   return env ?? null;
 }
 
-export async function sessionCommand(args: string[]): Promise<number> {
+export interface SessionCommandDependencies {
+  readonly finishSession?: (
+    sessionId: string,
+    lifecycle: "complete" | "save",
+    mutate: boolean,
+    dependencies?: FinishSessionDependencies,
+  ) => Promise<FinishSessionOutcome>;
+}
+
+export async function sessionCommand(
+  args: string[],
+  dependencies: SessionCommandDependencies = {},
+): Promise<number> {
   const sub = args[0];
   if (!sub) return usage();
   switch (sub) {
@@ -69,11 +86,14 @@ export async function sessionCommand(args: string[]): Promise<number> {
     case "adopt":    return doAdopt(args.slice(1));
     case "unset":    return doUnset(args.slice(1));
     case "title":    return doTitle(args.slice(1));
-    case "complete": return doLifecycle(args.slice(1), ["--completed"]);
-    case "archive":  return doLifecycle(args.slice(1), ["--archived"]);
-    case "uncomplete": return doLifecycle(args.slice(1), ["--completed", "--off"]);
-    case "unarchive":  return doLifecycle(args.slice(1), ["--archived", "--off"]);
-    case "destroy":  return await destroyCommand(args.slice(1));
+    case "complete": return doFinishLifecycle(args.slice(1), "complete", dependencies);
+    case "save": return doFinishLifecycle(args.slice(1), "save", dependencies);
+    case "uncomplete": return doLifecycle(args.slice(1), "uncomplete");
+    case "unsave": return doLifecycle(args.slice(1), "unsave");
+    // Compatibility aliases retain their terminal meaning.
+    case "archive": return doFinishLifecycle(args.slice(1), "complete", dependencies);
+    case "unarchive": return doLifecycle(args.slice(1), "uncomplete");
+    case "destroy": return await destroyCommand(args.slice(1));
     case "incognito": return incognitoCommand(args.slice(1));
     case "new":      return newSession(args.slice(1));
     case "preflight": return preflightNewSession(args.slice(1));
@@ -95,7 +115,7 @@ function usage(rc = 1): number {
   console.error("  ccs session set <id> --identity=<key> [--title=\"…\"] [--parent=<id>] [--parked=<task>]  (catalogued only)");
   console.error("  ccs session unset <id> --identity|--title|--parent|--parked");
   console.error("  ccs session title <id> \"text\"                   set title + sync cmux tab");
-  console.error("  ccs session complete|archive|uncomplete|unarchive <id>");
+  console.error("  ccs session complete|save|uncomplete|unsave <id>");
   console.error("  ccs session new <--top-level|--child-of <uuid|.>> [flags]  mint id + launch claude");
   console.error("    --location=<key> resolves a curated cwd/title/harness before birth; cannot combine with --cwd");
   console.error("    --host=<canonical-host> places a top-level location birth through registered SSH + local cmux");
@@ -147,6 +167,7 @@ function doRead(idArg: string, rest: string[]): number {
       console.log(`  parent:       ${row.parentSessionId ?? "-"}`);
       console.log(`  category:     ${category.slug ?? "uncategorized"} (${category.finding})`);
       console.log(`  stored:       ${category.storedSlug ?? "-"}`);
+      console.log(`  lifecycle:    ${lifecycleOf(row) === "completed" ? "Done" : lifecycleOf(row) === "saved" ? "Saved" : lifecycleOf(row) === "parked" ? "Parked" : "Active"}`);
       console.log(`  parked:       ${row.parkedTaskId ?? "-"}`);
       console.log(`  identity_key: ${identityKey ?? "(loose)"}`);
       if (identity) {
@@ -454,14 +475,63 @@ function doTitle(rest: string[]): number {
   return rename(sid, text);
 }
 
-function doLifecycle(rest: string[], flags: string[]): number {
+async function doFinishLifecycle(
+  rest: string[],
+  lifecycle: "complete" | "save",
+  dependencies: SessionCommandDependencies,
+): Promise<number> {
   const { positional } = parseFlags(rest);
   const sid = resolveSessionId(positional[0]);
   if (!sid) {
     console.error("ccs session: missing <session-id>");
     return 1;
   }
-  return mark(sid, flags);
+  const runFinish = dependencies.finishSession ?? finishSession;
+  const outcome = await runFinish(sid, lifecycle, true);
+  if (outcome.status === "invalid-session") {
+    console.error(`ccs session: ${outcome.error.message}`);
+    return 1;
+  }
+  if (outcome.status === "lifecycle-failed") {
+    console.error(`ccs session: ${outcome.error.message}`);
+    return 1;
+  }
+  if (!outcome.lifecycleRecorded) {
+    console.error("ccs session: lifecycle was not recorded");
+    return 1;
+  }
+  if (outcome.enrichmentWarning) console.error(`ccs session: warning: ${outcome.enrichmentWarning}`);
+  if (outcome.close.status === "refused") {
+    if (outcome.close.reason !== "session-not-live" || outcome.close.phase !== "preflight") {
+      console.error("ccs session: lifecycle recorded, but workspace close refused");
+      return 1;
+    }
+  } else if (outcome.close.status === "close-failed") {
+    console.error("ccs session: lifecycle recorded, but workspace close failed");
+    return 1;
+  }
+  console.log(JSON.stringify({
+    status: "OK",
+    session_id: sid,
+    lifecycle: lifecycle === "complete" ? "completed" : "saved",
+  }));
+  return 0;
+}
+
+function doLifecycle(rest: string[], action: SessionLifecycleAction): number {
+  const { positional } = parseFlags(rest);
+  const sid = resolveSessionId(positional[0]);
+  if (!sid) {
+    console.error("ccs session: missing <session-id>");
+    return 1;
+  }
+  const outcome = setExistingSessionLifecycle(sid, action);
+  if (outcome.status === "ok") {
+    console.log(JSON.stringify({ status: "OK", session_id: sid, lifecycle: outcome.value }));
+    return 0;
+  }
+  console.error(`ccs session: ${outcome.status}`);
+  return 1;
 }
 
 async function doBump(rest: string[]): Promise<number> {

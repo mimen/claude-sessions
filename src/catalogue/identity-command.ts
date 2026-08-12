@@ -4,7 +4,7 @@
  *
  *   ccs identity <key>                              read one (default verb)
  *   ccs identity list [--cluster=c] [--role=r] [--grouping=g] [--kind=fleet|core]
- *                     [--completed] [--archived]
+ *                     [--completed] [--saved] [--archived compatibility alias]
  *   ccs identity mint <key> --cluster=c --role=r [--grouping=g]
  *   ccs identity set <key> --field=value [--other=value …]     universal + per-role fields
  *                                                              meta.<key>=value merges JSON
@@ -24,6 +24,8 @@ import type { Database } from "bun:sqlite";
 import {
   archiveIdentity,
   completeIdentity,
+  saveIdentity,
+  unsaveIdentity,
   ensureScratchDir,
   getIdentity,
   identityScratchDir,
@@ -80,6 +82,8 @@ export async function identityCommand(args: string[]): Promise<number> {
       case "mint":       return doMint(db, args.slice(1));
       case "set":        return doSet(db, args.slice(1));
       case "complete":   return doLifecycle(db, args.slice(1), "complete");
+      case "save":       return doLifecycle(db, args.slice(1), "save");
+      case "unsave":     return doLifecycle(db, args.slice(1), "unsave");
       case "archive":    return doLifecycle(db, args.slice(1), "archive");
       case "uncomplete": return doLifecycle(db, args.slice(1), "uncomplete");
       case "path":       return doPath(db, args.slice(1));
@@ -100,12 +104,12 @@ function usage(rc = 1): number {
   console.error("");
   console.error("  ccs identity <key>                                 show identity (default)");
   console.error("  ccs identity list|ls [--cluster=…] [--role=…] [--grouping=…] [--kind=…]");
-  console.error("                    [--completed|--archived]");
+  console.error("                    [--completed|--saved]");
   console.error("  ccs identity mint <key> --cluster=c --role=r [--grouping=g]");
   console.error("  ccs identity set <key> --field=value [--other=value …]");
   console.error("                                                     meta.<k>=v merges JSON");
   console.error("                                                     --unset=field clears one");
-  console.error("  ccs identity complete|archive|uncomplete <key>");
+  console.error("  ccs identity complete|save|unsave|uncomplete <key>");
   console.error("  ccs identity path <key> [--new]");
   console.error("  ccs identity sessions <key>");
   console.error('  ccs identity lineage <key> [--search "<q>"]        bodies in succession + transcript search');
@@ -131,6 +135,7 @@ function doRead(db: Database, key: string, rest: string[]): number {
   if (id.stage) console.log(`  stage:       ${id.stage}`);
   if (id.statusLine) console.log(`  status:      ${id.statusLine}`);
   if (id.completed) console.log(`  completed:   yes`);
+  if (id.saved) console.log(`  saved:       yes`);
   if (id.archived) console.log(`  archived:    yes`);
   if (id.parkedTaskId) console.log(`  parked:      ${id.parkedTaskId}`);
   if (Object.keys(id.meta).length > 0) {
@@ -156,8 +161,8 @@ function doList(db: Database, rest: string[]): number {
     role: flags.role,
     groupingId: flags.grouping,
     kind: kind === "fleet" || kind === "core" ? kind : undefined,
-    completed: bools.has("completed") ? true : undefined,
-    archived: bools.has("archived") ? true : undefined,
+    completed: bools.has("completed") || bools.has("archived") ? true : undefined,
+    saved: bools.has("saved") ? true : undefined,
   });
   if (bools.has("json")) {
     console.log(JSON.stringify(rows, null, 2));
@@ -168,7 +173,7 @@ function doList(db: Database, rest: string[]): number {
     return 0;
   }
   for (const r of rows) {
-    const lifecycle = r.archived ? "[A]" : r.completed ? "[C]" : "   ";
+    const lifecycle = r.saved ? "[S]" : r.archived || r.completed ? "[D]" : "   ";
     const stage = r.stage ? ` · ${r.stage}` : "";
     console.log(`${lifecycle} ${r.identityKey}${stage}`);
   }
@@ -229,7 +234,11 @@ function doSet(db: Database, rest: string[]): number {
   }
 }
 
-function doLifecycle(db: Database, rest: string[], op: "complete" | "archive" | "uncomplete"): number {
+function doLifecycle(
+  db: Database,
+  rest: string[],
+  op: "complete" | "save" | "unsave" | "archive" | "uncomplete",
+): number {
   const { positional } = parseFlags(rest);
   const key = positional[0];
   if (!key) {
@@ -242,6 +251,8 @@ function doLifecycle(db: Database, rest: string[], op: "complete" | "archive" | 
   }
   const t = now();
   if (op === "complete") completeIdentity(db, key, t);
+  else if (op === "save") saveIdentity(db, key, t);
+  else if (op === "unsave") unsaveIdentity(db, key, t);
   else if (op === "archive") archiveIdentity(db, key, t);
   else uncompleteIdentity(db, key, t);
   console.log(JSON.stringify({ status: "OK", identity_key: key, [op]: true }));

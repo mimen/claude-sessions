@@ -226,7 +226,7 @@ describe("session row layout", () => {
     expect(markup).toContain("text-neutral-300");
     expect(markup).not.toContain("opacity-60");
     expect(markup).not.toContain(">junk<");
-    expect(markup).toContain("Junk session. Archive recommended.");
+    expect(markup).toContain("Junk session. Done recommended.");
   });
 });
 

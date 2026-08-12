@@ -123,11 +123,28 @@ test("export: exposes stored and inherited effective categories and filters by e
   }
 });
 
+test("buildExport: Saved is represented additively without changing schema v2", () => {
+  const rows = [
+    {
+      sessionId: "saved", resumeId: null, customTitle: null, kind: "session" as const,
+      completed: false, archived: false, saved: true, parkedTaskId: null, key: null,
+      parentSessionId: null, sessionClass: null, role: null, resumeCommand: null, project: null,
+      cluster: null, gusWork: null, workUnitId: null, groupingId: null,
+      stage: null, statusLine: null, meta: {}, notes: null, updatedAt: NOW,
+      prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null,
+      identityKey: null,
+    },
+  ];
+  const out = buildExport(rows, {}, NOW);
+  expect(out.schema).toBe(2);
+  expect(out.rows[0]).toMatchObject({ saved: true, completed: false, archived: false });
+});
+
 test("buildExport: pure — same inputs, deterministic output shape", () => {
   const rows = [
     {
       sessionId: "s1", resumeId: null, customTitle: null, kind: "session" as const,
-      completed: false, archived: false, parkedTaskId: null, key: "pr-watch:pr-agent:o/r#1",
+      completed: false, archived: false, saved: false, parkedTaskId: null, key: "pr-watch:pr-agent:o/r#1",
       parentSessionId: null, sessionClass: null, role: "pr-agent", resumeCommand: null, project: null,
       cluster: "pr-watch", gusWork: null, workUnitId: null, groupingId: null,
       stage: null, statusLine: null, meta: {}, notes: null, updatedAt: NOW,

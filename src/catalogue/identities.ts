@@ -31,6 +31,7 @@ export interface IdentityRow {
   statusLine: string | null;
   completed: boolean;
   archived: boolean;
+  saved: boolean;
   parkedTaskId: string | null;
   meta: Record<string, unknown>;
   createdAt: string | null;
@@ -68,6 +69,7 @@ export function getIdentity(db: Database, identityKey: string, configRoot = ccsC
     statusLine: (r.status_line as string) ?? null,
     completed: !!(r.completed as number),
     archived: !!(r.archived as number),
+    saved: !!(r.saved as number),
     parkedTaskId: (r.parked_task_id as string) ?? null,
     meta: parseMeta(r.meta as string | null),
     createdAt: (r.created_at as string) ?? null,
@@ -108,6 +110,7 @@ export interface ListFilters {
   kind?: "fleet" | "core";
   completed?: boolean;
   archived?: boolean;
+  saved?: boolean;
 }
 
 /** List identities, filterable, joined with per-role attrs. */
@@ -124,6 +127,7 @@ export function listIdentities(
   if (filters.kind)    { clauses.push("kind = $kind");        params.$kind = filters.kind; }
   if (filters.completed !== undefined) { clauses.push("completed = $c"); params.$c = filters.completed ? 1 : 0; }
   if (filters.archived !== undefined)  { clauses.push("archived = $a");  params.$a = filters.archived ? 1 : 0; }
+  if (filters.saved !== undefined)     { clauses.push("saved = $s");     params.$s = filters.saved ? 1 : 0; }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = db.query(`SELECT identity_key FROM identities ${where} ORDER BY identity_key`).all(
     params as never,
@@ -172,8 +176,8 @@ export function mintIdentity(db: Database, identityKey: string, fields: MintFiel
   const res = db.query(
     `INSERT INTO identities
        (identity_key, cluster, role, kind, grouping_id, stage, status_line,
-        completed, archived, parked_task_id, meta, created_at, updated_at)
-     VALUES ($k, $c, $r, $kind, $g, NULL, NULL, 0, 0, NULL, $m, $now, $now)
+        completed, archived, saved, parked_task_id, meta, created_at, updated_at)
+     VALUES ($k, $c, $r, $kind, $g, NULL, NULL, 0, 0, 0, NULL, $m, $now, $now)
      ON CONFLICT(identity_key) DO NOTHING`,
   ).run({
     $k: identityKey,
@@ -222,7 +226,7 @@ export function setIdentityFields(
   }
   const perRoleCols = new Set(schema ? Object.keys(schema.columns) : []);
   const universalCols = new Set([
-    "grouping_id", "stage", "status_line", "completed", "archived", "parked_task_id",
+    "grouping_id", "stage", "status_line", "completed", "archived", "saved", "parked_task_id",
     // note: cluster/role/kind are NOT settable via this path — a re-key requires a new
     // identity_key. Enforced below.
   ]);
@@ -306,26 +310,37 @@ export function setIdentityFields(
 /** Coerce booleans and null-shaped inputs to sqlite storage. */
 function normalizeValue(col: string, v: unknown): unknown {
   if (v === null) return null;
-  if (col === "completed" || col === "archived") return v ? 1 : 0;
+  if (col === "completed" || col === "archived" || col === "saved") return v ? 1 : 0;
   return v;
 }
 
-/** Lifecycle: mark completed/archived (also clears the other flag by default). */
+/** Done is terminal; Saved is hidden but resumable. Parked survives a save/restore round trip. */
 export function completeIdentity(db: Database, identityKey: string, now: string): void {
   db.query(
-    "UPDATE identities SET completed = 1, archived = 0, updated_at = $now WHERE identity_key = $k",
+    "UPDATE identities SET completed = 1, archived = 0, saved = 0, parked_task_id = NULL, updated_at = $now WHERE identity_key = $k",
   ).run({ $now: now, $k: identityKey });
 }
 
-export function archiveIdentity(db: Database, identityKey: string, now: string): void {
+export function saveIdentity(db: Database, identityKey: string, now: string): void {
   db.query(
-    "UPDATE identities SET archived = 1, updated_at = $now WHERE identity_key = $k",
+    "UPDATE identities SET completed = 0, archived = 0, saved = 1, updated_at = $now WHERE identity_key = $k",
   ).run({ $now: now, $k: identityKey });
+}
+
+export function unsaveIdentity(db: Database, identityKey: string, now: string): void {
+  db.query(
+    "UPDATE identities SET saved = 0, updated_at = $now WHERE identity_key = $k",
+  ).run({ $now: now, $k: identityKey });
+}
+
+/** Compatibility for automation that still records the old terminal verb. */
+export function archiveIdentity(db: Database, identityKey: string, now: string): void {
+  completeIdentity(db, identityKey, now);
 }
 
 export function uncompleteIdentity(db: Database, identityKey: string, now: string): void {
   db.query(
-    "UPDATE identities SET completed = 0, archived = 0, updated_at = $now WHERE identity_key = $k",
+    "UPDATE identities SET completed = 0, archived = 0, saved = 0, updated_at = $now WHERE identity_key = $k",
   ).run({ $now: now, $k: identityKey });
 }
 

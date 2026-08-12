@@ -8,7 +8,7 @@
  * v40's shape drives the layout. `state` is where the session stands and is the only field
  * guaranteed to exist, so it leads. `next` is one imperative action, promoted out of the old prose
  * blob so it could be read on its own, so it gets its own line. `reason` is conditional: required
- * for archive and handoff, required empty for continue and complete, where it only restated the
+ * for terminal dead-end and handoff verdicts, required empty for continue and complete, where it only restated the
  * verdict.
  */
 import type React from "react";

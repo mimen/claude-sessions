@@ -10,6 +10,7 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   kind: "session",
   completed: false,
   archived: false,
+  saved: false,
   parkedTaskId: null,
   key: null,
   parentSessionId: null,
@@ -127,7 +128,7 @@ test("renderTab: loops carry no epic pill", () => {
 test("renderTab: state pill comes from board.json (not row.stage) — no board, no pill", () => {
   // ADR-0077: the tool doesn't hardcode a stage → pill mapping anymore. The cluster's board
   // composer supplies pills; the tool renders whatever's there. A session with no matching
-  // board row falls through to the lifecycle pill (parked/completed/archived) or null.
+  // board row falls through to the lifecycle pill (parked/saved/done) or null.
   const r = row({ stage: "building", prNumber: 12136, prRepo: "heroku/dashboard" });
   const ops = renderTab(r, "session");
   // No board.json fixture in this test → statusPill falls back to lifecycle (null for a plain
@@ -179,12 +180,20 @@ test("renderTab: lifecycle completed -> done status pill", () => {
   expect(ops.statusPill?.label).toMatch(/done/i);
 });
 
-test("renderTab: lifecycle archived -> archived status pill", () => {
+test("renderTab: lifecycle saved -> saved status pill", () => {
+  const r = row({ saved: true });
+  const ops = renderTab(r, "session");
+  expect(ops.statusPill).not.toBeNull();
+  expect(ops.statusPill?.key).toBe("ccs_lifecycle");
+  expect(ops.statusPill?.label).toBe("saved");
+});
+
+test("renderTab: legacy archive renders as Done", () => {
   const r = row({ archived: true });
   const ops = renderTab(r, "session");
   expect(ops.statusPill).not.toBeNull();
   expect(ops.statusPill?.key).toBe("ccs_lifecycle");
-  expect(ops.statusPill?.label).toMatch(/archived/i);
+  expect(ops.statusPill?.label).toMatch(/done/i);
 });
 
 test("renderTab: workers carry NO sidebar color (the phase pill owns state)", () => {

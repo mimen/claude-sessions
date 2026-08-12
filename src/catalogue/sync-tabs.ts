@@ -212,7 +212,7 @@ function paintSet(
     const row = rows.get(sid);
     if (row) {
       const lc = lifecycleOf(row);
-      if (lc === "archived" || lc === "completed") { skippedRetired++; continue; }
+      if (lc === "archived" || lc === "completed" || lc === "saved") { skippedRetired++; continue; }
     }
     if (pushRenderOps(sid, cmuxBin)) synced++;
     else notOpen++;

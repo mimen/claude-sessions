@@ -57,7 +57,7 @@ func (m Model) renderConfirmation() string {
 		}
 	}
 	if confirmation.kind == confirmCleanup {
-		lines = append(lines, "", fit(fg(theme.FgMostSubtle).Render("j/k move · space toggle · y/enter archive checked · esc cancel"), contentWidth))
+		lines = append(lines, "", fit(fg(theme.FgMostSubtle).Render("j/k move · space toggle · y/enter save checked · esc cancel"), contentWidth))
 	} else {
 		lines = append(lines, "", fit(fg(theme.FgMostSubtle).Render("y/enter apply via ccs · esc cancel"), contentWidth))
 	}

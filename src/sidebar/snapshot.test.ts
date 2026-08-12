@@ -50,7 +50,7 @@ function catalogueDb(rows: ReadonlyArray<{
   readonly sessionId: string;
   readonly resumeId?: string;
   readonly completed?: boolean;
-  readonly archived?: boolean;
+  readonly saved?: boolean;
 }> = []): Database {
   const db = new Database(":memory:");
   db.exec(`
@@ -59,7 +59,7 @@ function catalogueDb(rows: ReadonlyArray<{
       resume_id TEXT,
       custom_title TEXT,
       completed INTEGER NOT NULL DEFAULT 0,
-      archived INTEGER NOT NULL DEFAULT 0,
+      saved INTEGER NOT NULL DEFAULT 0,
       parked_task_id TEXT,
       notes TEXT,
       updated_at TEXT,
@@ -76,15 +76,15 @@ function catalogueDb(rows: ReadonlyArray<{
     );
   `);
   const insert = db.query(
-    `INSERT INTO catalogue (session_id, resume_id, completed, archived, updated_at)
-     VALUES ($sessionId, $resumeId, $completed, $archived, '2026-07-24T20:00:00.000Z')`,
+    `INSERT INTO catalogue (session_id, resume_id, completed, saved, updated_at)
+     VALUES ($sessionId, $resumeId, $completed, $saved, '2026-07-24T20:00:00.000Z')`,
   );
   for (const row of rows) {
     insert.run({
       $sessionId: row.sessionId,
       $resumeId: row.resumeId ?? row.sessionId,
       $completed: row.completed ? 1 : 0,
-      $archived: row.archived ? 1 : 0,
+      $saved: row.saved ? 1 : 0,
     });
   }
   return db;
@@ -94,18 +94,18 @@ function catalogueRead(rows: ReadonlyArray<{
   readonly sessionId: string;
   readonly resumeId?: string;
   readonly completed?: boolean;
-  readonly archived?: boolean;
+  readonly saved?: boolean;
 }> = []): CatalogueReadOutcome {
-  const lifecycles = new Map<string, "active" | "completed" | "archived">();
-  const catalogueLifecycles = new Map<string, "idle" | "completed" | "archived">();
+  const lifecycles = new Map<string, "active" | "completed" | "saved">();
+  const catalogueLifecycles = new Map<string, "idle" | "completed" | "saved">();
   const canonicalSessionIds = new Map<string, string>();
-  const sessionIds = new Map<"active" | "completed" | "archived", string[]>([
+  const sessionIds = new Map<"active" | "completed" | "saved", string[]>([
     ["active", []],
     ["completed", []],
-    ["archived", []],
+    ["saved", []],
   ]);
   for (const row of rows) {
-    const lifecycle = row.archived ? "archived" : row.completed ? "completed" : "active";
+    const lifecycle = row.saved ? "saved" : row.completed ? "completed" : "active";
     lifecycles.set(row.sessionId, lifecycle);
     catalogueLifecycles.set(row.sessionId, lifecycle === "active" ? "idle" : lifecycle);
     canonicalSessionIds.set(row.sessionId, row.sessionId);
@@ -695,7 +695,7 @@ describe("createSidebarSource open", () => {
 });
 
 describe("createSidebarSource lifecycle", () => {
-  test("applies complete, archive, unarchive, and uncomplete without changing other flags", async () => {
+  test("applies complete, save, unsave, and uncomplete without changing other flags", async () => {
     const directory = mkdtempSync(join(tmpdir(), "ccs-sidebar-lifecycle-"));
     const dbPath = join(directory, "catalogue.db");
     try {
@@ -710,12 +710,12 @@ describe("createSidebarSource lifecycle", () => {
       const source = createSidebarSource(sourceOptions({
         cataloguePath: dbPath,
       }));
-      const identityLifecycle = (): { readonly completed: boolean; readonly archived: boolean } => {
+      const identityLifecycle = (): { readonly completed: boolean; readonly saved: boolean } => {
         const db = openCatalogue(dbPath);
         try {
           const identity = getIdentity(db, identityKey);
           if (!identity) throw new Error("test identity disappeared");
-          return { completed: identity.completed, archived: identity.archived };
+          return { completed: identity.completed, saved: identity.saved };
         } finally {
           db.close();
         }
@@ -725,22 +725,26 @@ describe("createSidebarSource lifecycle", () => {
         status: "ok",
         lifecycle: "completed",
       });
-      expect(identityLifecycle()).toEqual({ completed: true, archived: false });
-      await expect(source.setLifecycle("session-1", "archive")).resolves.toEqual({
+      expect(identityLifecycle()).toEqual({ completed: true, saved: false });
+      await expect(source.setLifecycle("session-1", "save")).resolves.toEqual({
         status: "ok",
-        lifecycle: "archived",
+        lifecycle: "saved",
       });
-      expect(identityLifecycle()).toEqual({ completed: true, archived: true });
-      await expect(source.setLifecycle("session-1", "unarchive")).resolves.toEqual({
+      expect(identityLifecycle()).toEqual({ completed: false, saved: true });
+      await expect(source.setLifecycle("session-1", "unsave")).resolves.toEqual({
+        status: "ok",
+        lifecycle: "active",
+      });
+      expect(identityLifecycle()).toEqual({ completed: false, saved: false });
+      await expect(source.setLifecycle("session-1", "complete")).resolves.toEqual({
         status: "ok",
         lifecycle: "completed",
       });
-      expect(identityLifecycle()).toEqual({ completed: true, archived: false });
       await expect(source.setLifecycle("session-1", "uncomplete")).resolves.toEqual({
         status: "ok",
         lifecycle: "active",
       });
-      expect(identityLifecycle()).toEqual({ completed: false, archived: false });
+      expect(identityLifecycle()).toEqual({ completed: false, saved: false });
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -761,14 +765,14 @@ describe("createSidebarSource lifecycle", () => {
       const source = createSidebarSource(sourceOptions({
         cataloguePath: dbPath,
       }));
-      await expect(source.setLifecycle("core-session", "archive")).resolves.toEqual({
+      await expect(source.setLifecycle("core-session", "save")).resolves.toEqual({
         status: "ok",
-        lifecycle: "archived",
+        lifecycle: "saved",
       });
 
       const check = openCatalogue(dbPath);
       try {
-        expect(getIdentity(check, identityKey)?.archived).toBeFalse();
+        expect(getIdentity(check, identityKey)?.saved).toBeFalse();
       } finally {
         check.close();
       }
@@ -877,9 +881,9 @@ describe("createSidebarSource lifecycle", () => {
         closeCmuxWorkspace: () => false,
       }));
 
-      await expect(source.retire(CANONICAL_SESSION_ID, "archive")).resolves.toEqual({
+      await expect(source.retire(CANONICAL_SESSION_ID, "save")).resolves.toEqual({
         status: "ok",
-        lifecycle: "archived",
+        lifecycle: "saved",
         closeFailed: "cmux refused to close the workspace after CCS authorized it",
       });
     } finally {
@@ -1104,18 +1108,18 @@ describe("createSidebarSource snapshot", () => {
     expect(mutated).toEqual(["canonical-primary"]);
   });
 
-  test("joins catalogue lifecycle into active, completed, and archived scopes", async () => {
+  test("joins catalogue lifecycle into active, completed, and saved scopes", async () => {
     const sessions = [
       indexed({ sessionId: "active", resumeId: "active", lastTs: "2026-07-24T22:00:00.000Z" }),
       indexed({ sessionId: "completed", resumeId: "completed", lastTs: "2026-07-24T21:00:00.000Z" }),
-      indexed({ sessionId: "archived", resumeId: "archived", lastTs: "2026-07-24T20:00:00.000Z" }),
+      indexed({ sessionId: "saved", resumeId: "saved", lastTs: "2026-07-24T20:00:00.000Z" }),
     ];
     const source = createSidebarSource(sourceOptions({
       indexedSessions: () => sessions,
       readCatalogue: () => catalogueRead([
         { sessionId: "active" },
         { sessionId: "completed", completed: true },
-        { sessionId: "archived", archived: true },
+        { sessionId: "saved", saved: true },
       ]),
     }));
 
@@ -1124,8 +1128,8 @@ describe("createSidebarSource snapshot", () => {
     ]);
     expect(sessionRows((await source.snapshot("completed")).rows).map((row) => [row.sessionId, row.lifecycle]))
       .toEqual([["completed", "completed"]]);
-    expect(sessionRows((await source.snapshot("archived")).rows).map((row) => [row.sessionId, row.lifecycle]))
-      .toEqual([["archived", "archived"]]);
+    expect(sessionRows((await source.snapshot("saved")).rows).map((row) => [row.sessionId, row.lifecycle]))
+      .toEqual([["saved", "saved"]]);
   });
 
   test("degrades every visible row to active and reports an unreadable catalogue", async () => {

@@ -6,6 +6,8 @@ import { Database } from "bun:sqlite";
 import { openCatalogue } from "./db-schema.ts";
 import { getMeta, getRow } from "./db-queries.ts";
 import { setMeta, ensureRow } from "./db-mutations.ts";
+import { lifecycleDisplayLabel } from "./commands.ts";
+import type { CatalogueRow } from "./db-schema.ts";
 
 const NOW = "2026-07-11T12:00:00Z";
 
@@ -19,6 +21,20 @@ function withDb<T>(fn: (db: Database) => T): T {
     rmSync(tmp, { recursive: true, force: true });
   }
 }
+
+test("meta lifecycle labels expose Saved and Done, folding legacy Archive into Done", () => {
+  const row = (over: Partial<CatalogueRow>): CatalogueRow => ({
+    sessionId: "s", resumeId: null, customTitle: null, kind: "session", completed: false,
+    archived: false, saved: false, parkedTaskId: null, key: null, parentSessionId: null,
+    sessionClass: null, role: null, resumeCommand: null, project: null, cluster: null, gusWork: null,
+    workUnitId: null, groupingId: null, statusLine: null, meta: {}, stage: null, notes: null,
+    updatedAt: null, prNumber: null, prRepo: null, prBranch: null, prState: null, prHeadSha: null,
+    identityKey: null, ...over,
+  });
+  expect(lifecycleDisplayLabel(row({ saved: true }))).toBe("Saved");
+  expect(lifecycleDisplayLabel(row({ completed: true }))).toBe("Done");
+  expect(lifecycleDisplayLabel(row({ archived: true }))).toBe("Done");
+});
 
 test("setMeta: set a key in the meta map", () => {
   withDb((db) => {

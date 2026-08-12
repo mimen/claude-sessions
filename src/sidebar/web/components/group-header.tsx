@@ -2,7 +2,7 @@
  * A group heading with two controls.
  *
  * Shelving is a property of grouping itself, not a feature of one kind of group: "Today", a
- * project, a cluster and "Archived" all get it from here. That is what lets finished work be an
+ * project, a cluster and "Saved" all get it from here. That is what lets finished work be an
  * ordinary section instead of a pinned bar with its own rules -- a header that can be shelved
  * needs no help staying out of the way.
  *

@@ -12,7 +12,7 @@
     {
       "name": "ccs",
       "source": "./plugins/ccs",
-      "description": "Session hygiene from inside the session: archive, complete, retitle, and tag the conversation you're in.",
+      "description": "Session hygiene from inside the session: save for later, mark done, retitle, and tag the session you're in.",
       "category": "productivity"
     }
   ]

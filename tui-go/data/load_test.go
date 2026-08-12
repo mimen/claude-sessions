@@ -53,16 +53,25 @@ func TestBuildStatsExcludesLoopsFromActiveAndParked(t *testing.T) {
 }
 
 func TestIncludeSessionHonorsViewOptions(t *testing.T) {
-	archived := catalogueMeta{Archived: true}
+	saved := catalogueMeta{Saved: true}
 	auxiliary := catalogueMeta{SessionClass: "auxiliary"}
 	subagent := indexedSession{IsSubagent: true}
 	defaults := DefaultLoadOptions()
-	if includeSession(subagent, catalogueMeta{}, defaults) || includeSession(indexedSession{}, archived, defaults) || includeSession(indexedSession{}, auxiliary, defaults) {
+	if includeSession(subagent, catalogueMeta{}, defaults) || includeSession(indexedSession{}, saved, defaults) || includeSession(indexedSession{}, auxiliary, defaults) {
 		t.Fatal("default options included a hidden session class")
 	}
-	all := LoadOptions{IncludeArchived: true, IncludeSubagents: true, IncludeAuxiliary: true}
-	if !includeSession(subagent, catalogueMeta{}, all) || !includeSession(indexedSession{}, archived, all) || !includeSession(indexedSession{}, auxiliary, all) {
+	all := LoadOptions{IncludeSaved: true, IncludeSubagents: true, IncludeAuxiliary: true}
+	if !includeSession(subagent, catalogueMeta{}, all) || !includeSession(indexedSession{}, saved, all) || !includeSession(indexedSession{}, auxiliary, all) {
 		t.Fatal("inclusive options hid a requested session class")
+	}
+}
+
+func TestDispositionShowsSavedAndFoldsArchiveIntoDone(t *testing.T) {
+	if got := disposition(catalogueMeta{Saved: true}, false); got != "saved" {
+		t.Fatalf("saved disposition = %q", got)
+	}
+	if got := disposition(catalogueMeta{Archived: true}, false); got != "completed" {
+		t.Fatalf("archived disposition = %q, want completed", got)
 	}
 }
 

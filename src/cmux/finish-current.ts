@@ -1,4 +1,4 @@
-import { mark } from "../catalogue/commands.ts";
+import { setExistingSessionLifecycle } from "../catalogue/commands.ts";
 import { CATALOGUE_PATH, ensureDataDir } from "../paths.ts";
 import { err, ok, type Result } from "../result.ts";
 import {
@@ -9,7 +9,7 @@ import { launchImmediateEnrichment } from "./launch-enrichment.ts";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type FinishLifecycle = "complete" | "archive";
+export type FinishLifecycle = "complete" | "save";
 
 export interface FinishCurrentEnvironment {
   readonly CLAUDE_CODE_SESSION_ID?: string;
@@ -58,9 +58,17 @@ interface ParsedFinishArgs extends ParsedCurrentArgs {
   readonly sessionId: string;
 }
 
+function finishLifecycle(value: string | undefined): FinishLifecycle | null {
+  if (value === "complete") return "complete";
+  if (value === "save") return "save";
+  // Preserve the old terminal meaning for stale installed slash commands.
+  if (value === "archive") return "complete";
+  return null;
+}
+
 function parseCurrentArgs(args: readonly string[]): ParsedCurrentArgs | null {
-  const lifecycle = args[0];
-  if (lifecycle !== "complete" && lifecycle !== "archive") return null;
+  const lifecycle = finishLifecycle(args[0]);
+  if (lifecycle === null) return null;
   if (args.length === 1) return { lifecycle, mutate: false };
   if (args.length === 2 && args[1] === "--do") return { lifecycle, mutate: true };
   return null;
@@ -68,8 +76,8 @@ function parseCurrentArgs(args: readonly string[]): ParsedCurrentArgs | null {
 
 function parseFinishArgs(args: readonly string[]): ParsedFinishArgs | null {
   const sessionId = args[0];
-  const lifecycle = args[1];
-  if (!sessionId || (lifecycle !== "complete" && lifecycle !== "archive")) return null;
+  const lifecycle = finishLifecycle(args[1]);
+  if (!sessionId || lifecycle === null) return null;
   if (args.length === 2) return { sessionId, lifecycle, mutate: false };
   if (args.length === 3 && args[2] === "--do") {
     return { sessionId, lifecycle, mutate: true };
@@ -96,12 +104,9 @@ export function explicitCurrentSessionId(environment: FinishCurrentEnvironment):
 
 function recordSessionLifecycle(sessionId: string, lifecycle: FinishLifecycle): Result<void> {
   try {
-    const exitCode = mark(
-      sessionId,
-      lifecycle === "complete" ? ["--completed"] : ["--archived"],
-    );
-    if (exitCode !== 0) {
-      return err(new Error(`per-session lifecycle command exited ${exitCode}`));
+    const outcome = setExistingSessionLifecycle(sessionId, lifecycle);
+    if (outcome.status !== "ok") {
+      return err(new Error(`per-session lifecycle command returned ${outcome.status}`));
     }
     return ok(undefined);
   } catch (cause) {
@@ -209,14 +214,14 @@ function renderOutcome(
   }
 }
 
-/** `ccs finish <sessionId> <complete|archive> [--do]`. */
+/** `ccs finish <sessionId> <complete|save> [--do]`. */
 export async function finishSessionCommand(
   args: string[],
   deps: FinishCommandDependencies = productionCommandDependencies(),
 ): Promise<number> {
   const parsed = parseFinishArgs(args);
   if (!parsed) {
-    deps.stderr("usage: ccs finish <sessionId> <complete|archive> [--do]");
+    deps.stderr("usage: ccs finish <sessionId> <complete|save> [--do]");
     return 2;
   }
   return renderOutcome(
@@ -226,14 +231,14 @@ export async function finishSessionCommand(
   );
 }
 
-/** Current-session compatibility wrapper used by `/ccs:complete` and `/ccs:archive`. */
+/** Current-session wrapper used by lifecycle slash commands. */
 export async function finishCurrentCommand(
   args: string[],
   deps: FinishCurrentDependencies = productionCurrentDependencies(),
 ): Promise<number> {
   const parsed = parseCurrentArgs(args);
   if (!parsed) {
-    deps.stderr("usage: ccs finish-current <complete|archive> [--do]");
+    deps.stderr("usage: ccs finish-current <complete|save> [--do]");
     return 2;
   }
 

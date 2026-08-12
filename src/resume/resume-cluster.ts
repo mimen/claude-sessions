@@ -75,7 +75,7 @@ export function planClusterMembers(
     isLive(m.sessionId, m.row?.resumeId ?? null);
   const retired = (m: { row: CatalogueRow | null }) => {
     const lc = lifecycleOf(m.row);
-    return lc === "completed" || lc === "archived";
+    return lc === "completed" || lc === "archived" || lc === "saved";
   };
 
   // PASS 1 — a LIVE, non-retired session claims its unit (regardless of freshness). A live
@@ -277,7 +277,9 @@ export function resumeMany(
       case "resumed":      summary.resumed++;     pinResumed(res.workspaceRef, p.row?.cluster ?? null, p.row?.role ?? null); break;
       case "already-open": summary.alreadyOpen++; pinAlreadyOpen(p.sessionId, p.row?.cluster ?? null, p.row?.role ?? null); break;
       case "not-indexed":  summary.notIndexed++;  break;
+      case "completed":    summary.failed++;      break;
       case "spawn-failed": summary.failed++;      break;
+      case "reactivation-failed": summary.failed++; break;
       // A member whose history the requested launcher can't replay is SKIPPED, not failed —
       // e.g. `--via gpt` over a mixed cluster resumes the gpt-only members and reports the rest.
       case "route-ineligible": summary.routeIneligible++; break;

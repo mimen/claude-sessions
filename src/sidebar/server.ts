@@ -74,14 +74,14 @@ function isJsonObject(value: JsonValue): value is JsonObject {
 
 /** Triage is a view, not a lifecycle; the snapshot maps it back to the active list plus a filter. */
 function isSidebarView(value: string): value is SidebarView {
-  return value === "active" || value === "completed" || value === "archived" || value === "triage";
+  return value === "active" || value === "completed" || value === "saved" || value === "triage";
 }
 
 function isLifecycleAction(value: JsonValue | undefined): value is SessionLifecycleAction {
   return value === "complete"
-    || value === "archive"
+    || value === "save"
     || value === "uncomplete"
-    || value === "unarchive";
+    || value === "unsave";
 }
 
 function parseLifecycleRequest(value: JsonValue): Result<LifecycleRequestBody, string> {
@@ -469,7 +469,7 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           .split(",")
           .map((value) => value.trim())
           .filter((value): value is SidebarLifecycle =>
-            value === "completed" || value === "archived");
+            value === "completed" || value === "saved");
         const query: SnapshotQuery = { scope, limit, include };
         const key = snapshotQueryKey(query);
         try {

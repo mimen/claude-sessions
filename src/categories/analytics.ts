@@ -19,8 +19,8 @@ export interface CategoryAnalyticsGroup {
   readonly retainedSessions: number;
   readonly rootSessions: number;
   readonly active: number;
-  readonly completed: number;
-  readonly archived: number;
+  readonly saved: number;
+  readonly done: number;
   readonly messages: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -80,8 +80,8 @@ export function buildCategoryAnalytics(index: Database, catalogue: Database, now
       retainedSessions: 0,
       rootSessions: 0,
       active: 0,
-      completed: 0,
-      archived: 0,
+      saved: 0,
+      done: 0,
       messages: 0,
       inputTokens: 0,
       outputTokens: 0,
@@ -96,8 +96,8 @@ export function buildCategoryAnalytics(index: Database, catalogue: Database, now
       retainedSessions: current.retainedSessions + 1,
       rootSessions: current.rootSessions + (root ? 1 : 0),
       active: current.active + (lifecycle === "idle" || lifecycle === "parked" ? 1 : 0),
-      completed: current.completed + (lifecycle === "completed" ? 1 : 0),
-      archived: current.archived + (lifecycle === "archived" ? 1 : 0),
+      saved: current.saved + (lifecycle === "saved" ? 1 : 0),
+      done: current.done + (lifecycle === "completed" || lifecycle === "archived" ? 1 : 0),
       messages: current.messages + row.msgCount,
       inputTokens: current.inputTokens + row.tokInput,
       outputTokens: current.outputTokens + row.tokOutput,
@@ -137,7 +137,7 @@ export function categoryAnalyticsCommand(args: readonly string[]): number {
     }
     console.log("Category analytics (retained roots; auxiliary/native-subagent/workflow-journal rows excluded)");
     for (const group of result.groups) {
-      console.log(`${group.label}\t${group.rootSessions} roots\t${group.retainedSessions} sessions\t${formatCost(group.rootCostUsd) || "$0"}\t${group.messages} messages\t${group.active} active/${group.completed} completed/${group.archived} archived`);
+      console.log(`${group.label}\t${group.rootSessions} roots\t${group.retainedSessions} sessions\t${formatCost(group.rootCostUsd) || "$0"}\t${group.messages} messages\t${group.active} Active/${group.saved} Saved/${group.done} Done`);
     }
     return 0;
   } finally {

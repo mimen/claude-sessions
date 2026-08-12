@@ -2,7 +2,7 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import type { InferenceEngine } from "../inference/engine.ts";
 import { type Kind } from "./db-schema.ts";
-import { setKey, setParent, setProject, setCompleted, setArchived, setCustomTitle, addTag, removeTag } from "./db-mutations.ts";
+import { setKey, setParent, setProject, setCompleted, setArchived, setSaved, setCustomTitle, addTag, removeTag } from "./db-mutations.ts";
 import { CATEGORY_REGISTRY_PATH } from "../paths.ts";
 import { loadCategoryRegistry, slugFromDomainTag } from "../categories/registry.ts";
 import { getCategoryAssignment, resolveCategoryWriteTarget, setCategory } from "../categories/assignment.ts";
@@ -22,6 +22,7 @@ export interface SessionMeta {
   readonly parentSessionId: string | null;
   readonly completed: boolean;
   readonly archived: boolean;
+  readonly saved: boolean;
   /** User-assigned project label (catalogue), if any. */
   readonly project: string | null;
   /** Stored primary category slug. Effective inheritance is resolved by catalogue readers. */
@@ -32,7 +33,7 @@ export interface SessionMeta {
 
 export interface Mutation {
   readonly sessionId: string;
-  readonly op: "key" | "event" | "skill" | "parent" | "project" | "completed" | "archived" | "title" | "category" | "tag" | "untag";
+  readonly op: "key" | "event" | "skill" | "parent" | "project" | "completed" | "saved" | "archived" | "title" | "category" | "tag" | "untag";
   /** Resolved value: parent sessionId, canonical category slug, or null; booleans as strings. */
   readonly value: string | null;
 }
@@ -47,7 +48,8 @@ const PROMPT =
   "the instruction is primarily about that session (but you may reference others by number, e.g. " +
   "for a parent). Ops and their value: event→a slug or 'none'; skill→a " +
   "name or 'none'; project→a project/initiative name (lowercase slug) or 'none'; parent→the " +
-  "target session NUMBER or 'none'; completed/archived→'true'|'false'; title→a short custom " +
+  "target session NUMBER or 'none'; completed/saved→'true'|'false'; archive is a compatibility " +
+  "alias for completed; title→a short custom " +
   "title; category→a canonical category slug or 'none'; tag/untag→a non-domain entity name. " +
   "Never represent a category as a tag. Respond using the provided JSON schema.";
 
@@ -69,8 +71,8 @@ function renderSessions(sessions: readonly SessionMeta[]): string {
         `project=${s.project ?? "none"}`,
         `category=${s.category ?? "none"}`,
         `parent=${parent}`,
-        s.completed ? "done" : "",
-        s.archived ? "archived" : "",
+        s.saved ? "Saved" : "",
+        s.completed || s.archived ? "Done" : "",
         `repo=${s.repo}`,
       ].filter(Boolean);
       return `${i + 1}. ${s.title}  [${flags.join(" ")}]`;
@@ -126,8 +128,9 @@ export async function runMetadataCommand(
           value = cleared ? null : v;
           break;
         case "completed":
+        case "saved":
         case "archived":
-          value = /^(true|yes|1|done)$/i.test(v ?? "") ? "true" : "false";
+          value = /^(true|yes|1|done|saved)$/i.test(v ?? "") ? "true" : "false";
           break;
         case "tag":
         case "untag":
@@ -163,9 +166,20 @@ export function applyMutations(catalogue: Database, mutations: readonly Mutation
         break;
       case "completed":
         setCompleted(catalogue, m.sessionId, m.value === "true", now);
+        setArchived(catalogue, m.sessionId, false, now);
+        setSaved(catalogue, m.sessionId, false, now);
+        break;
+      case "saved":
+        setSaved(catalogue, m.sessionId, m.value === "true", now);
+        if (m.value === "true") {
+          setCompleted(catalogue, m.sessionId, false, now);
+          setArchived(catalogue, m.sessionId, false, now);
+        }
         break;
       case "archived":
-        setArchived(catalogue, m.sessionId, m.value === "true", now);
+        setCompleted(catalogue, m.sessionId, m.value === "true", now);
+        setArchived(catalogue, m.sessionId, false, now);
+        if (m.value === "true") setSaved(catalogue, m.sessionId, false, now);
         break;
       case "title":
         setCustomTitle(catalogue, m.sessionId, m.value, now);

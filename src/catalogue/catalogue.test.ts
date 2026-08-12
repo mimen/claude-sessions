@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openCatalogue } from "./db-schema.ts";
 import { childrenOf, getRow, getTags, lifecycleOf, parentEdges, sessionsForEntity } from "./db-queries.ts";
-import { addTag, setArchived, setCompleted, setCustomTitle, setParent, setParked } from "./db-mutations.ts";
+import { addTag, setArchived, setCompleted, setCustomTitle, setParent, setParked, setSaved } from "./db-mutations.ts";
 import { describe as dispo } from "./disposition.ts";
 
 /**
@@ -31,15 +31,17 @@ test("upsert is idempotent and custom_title round-trips", () => {
   expect(r.updatedAt).toBe(NOW);
 });
 
-test("lifecycle precedence: archived > completed > parked > idle", () => {
+test("lifecycle precedence: saved > done > parked > active", () => {
   const db = openCatalogue(":memory:");
   expect(lifecycleOf(getRow(db, "x"))).toBe("idle");
   setParked(db, "x", "task-123", NOW);
   expect(lifecycleOf(getRow(db, "x"))).toBe("parked");
   setCompleted(db, "x", true, NOW);
   expect(lifecycleOf(getRow(db, "x"))).toBe("completed");
+  setSaved(db, "x", true, NOW);
+  expect(lifecycleOf(getRow(db, "x"))).toBe("saved");
   setArchived(db, "x", true, NOW);
-  expect(lifecycleOf(getRow(db, "x"))).toBe("archived");
+  expect(lifecycleOf(getRow(db, "x"))).toBe("saved");
 });
 
 test("kind is 'session' for a row without a resolvable role", () => {
@@ -94,6 +96,7 @@ test("disposition combines lifecycle × liveness", () => {
   expect(po.label).toBe("parked·open");
   expect(po.nudge).toBe(true);
   expect(dispo("archived", false).hidden).toBe(true);
+  expect(dispo("saved", false).hidden).toBe(true);
   expect(dispo("completed", true).nudge).toBe(true);
 });
 

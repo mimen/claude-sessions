@@ -215,6 +215,36 @@ describe("historical detached-child backfill", () => {
     }
   });
 
+  test("rollback refuses to delete a placeholder that was saved after the backfill", () => {
+    const f = fixture();
+    try {
+      const seed = openCatalogue(f.cataloguePath);
+      seed.query("DELETE FROM session_tags WHERE session_id = $id").run({ $id: CHILD });
+      seed.query("DELETE FROM catalogue WHERE session_id = $id").run({ $id: CHILD });
+      seed.close();
+
+      expect(historicalDetachedChildBackfillCommand(commandArgs(f, true))).toBe(0);
+      const changed = openCatalogue(f.cataloguePath);
+      changed.query("UPDATE catalogue SET saved = 1 WHERE session_id = $id").run({ $id: CHILD });
+      const audit = changed.query("SELECT operation_id FROM historical_detached_child_backfills").get() as {
+        operation_id: string;
+      };
+      changed.close();
+
+      expect(historicalDetachedChildBackfillCommand([
+        "rollback", "--operation", audit.operation_id,
+        "--index", f.indexPath, "--catalogue", f.cataloguePath, "--apply",
+      ])).toBe(1);
+
+      const check = openCatalogue(f.cataloguePath);
+      const row = check.query("SELECT saved FROM catalogue WHERE session_id = $id").get({ $id: CHILD });
+      check.close();
+      expect(row).toEqual({ saved: 1 });
+    } finally {
+      f.cleanup();
+    }
+  });
+
   test("migrates a v35 catalogue to add the audited backfill table", () => {
     const f = fixture();
     try {

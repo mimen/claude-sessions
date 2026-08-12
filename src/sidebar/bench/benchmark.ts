@@ -266,7 +266,7 @@ export function normalizeRecommendationAlignment(value: JsonValue): JsonValue {
     ) as Record<string, JsonValue>;
     const lifecycle = normalized.lifecycle;
     const catalogueLifecycle = normalized.catalogueLifecycle;
-    const settled = lifecycle === "completed" || lifecycle === "archived" || lifecycle === "parked"
+    const settled = lifecycle === "completed" || lifecycle === "saved" || lifecycle === "parked"
       || catalogueLifecycle === "parked";
     if (settled && Object.hasOwn(normalized, "suggestion")) normalized.suggestion = null;
 
@@ -276,7 +276,7 @@ export function normalizeRecommendationAlignment(value: JsonValue): JsonValue {
       normalized.rows = normalized.rows.filter((row) => {
         if (row === null || typeof row !== "object" || Array.isArray(row)) return true;
         const rowLifecycle = row.lifecycle;
-        return rowLifecycle !== "completed" && rowLifecycle !== "archived"
+        return rowLifecycle !== "completed" && rowLifecycle !== "saved"
           && rowLifecycle !== "parked" && row.catalogueLifecycle !== "parked";
       });
     }
@@ -359,7 +359,7 @@ export async function characterizeFixture(
 ): Promise<CharacterizationResult> {
   const measurements: SidebarSnapshotMeasurement[] = [];
   const source = sourceFor(fixture, measurements);
-  const views: readonly SidebarView[] = ["active", "triage", "completed", "archived"];
+  const views: readonly SidebarView[] = ["active", "triage", "completed", "saved"];
   const latency = new Map<SidebarView, number[]>();
   const payload = new Map<SidebarView, number[]>();
   const serialization = new Map<SidebarView, number[]>();
@@ -371,7 +371,7 @@ export async function characterizeFixture(
     serialization.set(view, []);
     for (let sample = 0; sample < sampleCount + 2; sample += 1) {
       const startedAt = performance.now();
-      const snapshot = await source.snapshot(view, 500, ["completed", "archived"]);
+      const snapshot = await source.snapshot(view, 500, ["completed", "saved"]);
       const snapshotMs = performance.now() - startedAt;
       const serializationStartedAt = performance.now();
       const body = JSON.stringify(snapshot);
@@ -505,7 +505,7 @@ export async function measureIdleProfile(
   const startedAt = performance.now();
   while (performance.now() - startedAt < durationMs) {
     const pollStartedAt = performance.now();
-    const snapshot = await source.snapshot("active", 500, ["completed", "archived"]);
+    const snapshot = await source.snapshot("active", 500, ["completed", "saved"]);
     latencies.push(performance.now() - pollStartedAt);
     payloadBytes += Buffer.byteLength(JSON.stringify(snapshot));
     polls += 1;
@@ -542,7 +542,7 @@ export async function measureSnapshotLivenessCache(
     },
   });
   const server = createSidebarServer({ source, assets: new Map(), port: 0 });
-  const url = `${server.url.origin}/api/snapshot?scope=active&limit=500&include=completed,archived`;
+  const url = `${server.url.origin}/api/snapshot?scope=active&limit=500&include=completed,saved`;
   try {
     const initial = await fetch(url);
     const etag = initial.headers.get("etag");
@@ -619,7 +619,7 @@ export async function measureEtagLoopback(
     port: 0,
     snapshotRepresentationTtlMs: 1,
   });
-  const url = `${server.url.origin}/api/snapshot?scope=active&limit=500&include=completed,archived`;
+  const url = `${server.url.origin}/api/snapshot?scope=active&limit=500&include=completed,saved`;
   try {
     const initial = await fetch(url);
     const initialBodyBytes = (await initial.arrayBuffer()).byteLength;

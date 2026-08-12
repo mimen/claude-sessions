@@ -3,7 +3,7 @@ import { openCatalogue } from "../catalogue/db-schema.ts";
 import { getRow } from "../catalogue/db-queries.ts";
 import { openIndex } from "../index/schema.ts";
 import { CATALOGUE_PATH, DB_PATH } from "../paths.ts";
-import { resolvePredecessors } from "../catalogue/lineage.ts";
+import { resolvePredecessors, type Embodiment } from "../catalogue/lineage.ts";
 
 /**
  * Compose the predecessor-rehydration context (ADR-0038, source 1): on a fresh embodiment of an
@@ -17,6 +17,12 @@ import { resolvePredecessors } from "../catalogue/lineage.ts";
  * Only emits for a session with actual predecessors (a solo identity gets nothing), and only
  * on a fresh start (not a resume of the same session — that keeps its own transcript).
  */
+export function predecessorLifecycleLabel(predecessor: Embodiment): "prior" | "Saved" | "Done" {
+  if (predecessor.lifecycle === "completed") return "Done";
+  if (predecessor.lifecycle === "saved") return "Saved";
+  return "prior";
+}
+
 export function composePredecessors(sessionId: string): string | null {
   try {
     if (!existsSync(CATALOGUE_PATH()) || !existsSync(DB_PATH())) return null;
@@ -30,7 +36,7 @@ export function composePredecessors(sessionId: string): string | null {
       if (withTranscripts.length === 0) return null;
 
       const lines = withTranscripts.map((p) => {
-        const state = p.completed ? "completed" : p.archived ? "archived" : "prior";
+        const state = predecessorLifecycleLabel(p);
         return `- ${p.sessionId.slice(0, 8)} (${state}): ${p.transcriptPath}`;
       });
       return (

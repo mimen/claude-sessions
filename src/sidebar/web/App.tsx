@@ -119,7 +119,7 @@ export function App(): React.ReactElement {
   const [optimisticPins, setOptimisticPins] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [scope, setScope] = useState<SidebarView>(() => {
     const stored = localStorage.getItem(SCOPE_STORAGE_KEY);
-    return stored === "completed" || stored === "archived" || stored === "triage"
+    return stored === "completed" || stored === "saved" || stored === "triage"
       ? stored
       : "active";
   });
@@ -163,7 +163,6 @@ export function App(): React.ReactElement {
   const [shelves, setShelves] = useState<ReadonlyMap<string, ShelfState>>(
     () => parseShelfStates(localStorage.getItem(SHELVES_STORAGE_KEY)),
   );
-  const shelvesRef = useRef(shelves);
   /** Everything a group does not say explicitly: show it all. */
   const shelfOf = useCallback(
     (key: string): ShelfState => shelves.get(key) ?? OPEN_SHELF,
@@ -212,13 +211,7 @@ export function App(): React.ReactElement {
           requestScope = selectedScopeRef.current;
           const requestId = ++nextSnapshotRequestIdRef.current;
           try {
-            // A shelved finished section costs nothing: not asking for its rows is the point of
-            // the default. Any other state needs them.
-            const include = (["completed", "archived"] as const)
-              .filter((section) => !(shelvesRef.current.get(section) ?? OPEN_SHELF).shelved)
-              .join(",");
-            const requestUrl = `/api/snapshot?scope=${requestScope}&limit=${ROW_LIMIT}`
-              + (include ? `&include=${include}` : "");
+            const requestUrl = `/api/snapshot?scope=${requestScope}&limit=${ROW_LIMIT}`;
             const result = await snapshotTransportRef.current.load(requestUrl, refreshLiveness);
             if (result.kind === "failure") throw result.error;
             consecutiveSnapshotFailuresRef.current = 0;
@@ -353,24 +346,15 @@ export function App(): React.ReactElement {
       const pending = optimistic.get(row.sessionId);
       return pending && pending !== row.lifecycle ? { ...row, lifecycle: pending } : row;
       // A sessionless workspace has no lifecycle to browse by, so it belongs to the live view
-      // only — it would be dishonest to list a running browser pane under Completed.
-    // The finished sections live in this list now, so a row belongs if its lifecycle is the
-    // browsed one OR a section the user has expanded. Filtering to the scope alone would drop
-    // exactly the rows the server was just asked for.
-    }).filter((row) => {
-      if (row.kind !== "session") return scope === "active";
-      if (row.lifecycle === scope) return true;
-      return scope === "active"
-        && (row.lifecycle === "completed" || row.lifecycle === "archived")
-        && !shelfOf(row.lifecycle).shelved;
-    });
+      // only — it would be dishonest to list a running browser pane under Done or Saved.
+    }).filter((row) => row.kind === "session" ? row.lifecycle === scope : scope === "active");
     const needle = query.trim().toLowerCase();
     const matched = needle
       ? all.filter((row) =>
           `${row.name} ${row.directory ?? ""} ${row.worktree ?? ""}`.toLowerCase().includes(needle))
       : all;
     return groupSessions(matched, grouping, now, clusterFirst);
-  }, [snapshot, query, grouping, now, optimistic, optimisticPins, scope, shelfOf, clusterFirst]);
+  }, [snapshot, query, grouping, now, optimistic, optimisticPins, scope, clusterFirst]);
 
   // One flat order underlies the groups so arrow keys cross headings without special cases.
   const flatRows = useMemo(() => groups.flatMap((group) => group.rows), [groups]);
@@ -411,7 +395,7 @@ export function App(): React.ReactElement {
   }, [actionError, snapshot, snapshotError]);
 
   const emptyMessage = snapshot && flatRows.length === 0
-    ? emptyStateMessage(query, snapshot.livenessReadable)
+    ? emptyStateMessage(query, snapshot.livenessReadable, scope)
     : null;
 
   const moveSelection = useCallback((delta: number) => {
@@ -475,18 +459,13 @@ export function App(): React.ReactElement {
     setHoverTarget({ row, rect: element.getBoundingClientRect() });
   }, []);
 
-  /**
-   * Switch which lifecycle the list shows.
-   *
-   * Shared by the scope dropdown and the bottom bars so the two can never disagree about what is on
-   * screen; the bars are simply a more reachable affordance for the same state.
-   */
+  /** Switch which lifecycle the list shows, clearing old rows while the next scope loads. */
   const selectScope = useCallback((next: SidebarView): void => {
     if (next === selectedScopeRef.current) return;
     selectedScopeRef.current = next;
     setScope(next);
     // The rows on screen belong to the old scope, so keeping them while the new ones load would
-    // show completed sessions under an "Archived" heading for one poll.
+    // show Done sessions under a Saved heading for one poll.
     setSnapshot(null);
     setSnapshotError(null);
     localStorage.setItem(SCOPE_STORAGE_KEY, next);
@@ -515,25 +494,21 @@ export function App(): React.ReactElement {
       setShelves((current) => {
         const next = new Map(current);
         next.set(key, change(current.get(key) ?? OPEN_SHELF));
-        shelvesRef.current = next;
         localStorage.setItem(SHELVES_STORAGE_KEY, serializeShelfStates(next));
         return next;
       });
-      // Unshelving a finished section is also the request for its rows, so the snapshot has to be
-      // re-read rather than waiting for the next poll to notice.
-      load(true);
     },
-    [load],
+    [],
   );
 
   const setLifecycle = useCallback((
     row: SidebarSessionRow,
-    action: "complete" | "archive" | "uncomplete" | "unarchive",
+    action: "complete" | "save" | "uncomplete" | "unsave",
   ): void => {
     const optimisticLifecycle: SidebarSessionRow["lifecycle"] = action === "complete"
       ? "completed"
-      : action === "archive"
-        ? "archived"
+      : action === "save"
+        ? "saved"
         : "active";
     setOptimistic((current) => new Map(current).set(row.sessionId, optimisticLifecycle));
 
@@ -703,12 +678,7 @@ export function App(): React.ReactElement {
           const state = shelfOf(group.key);
           const filterable = canFilterLive(group.rows);
           const visible = shelfRows(group.rows, state);
-          // A shelved finished section has no rows to count, so its catalogue total stands in --
-          // otherwise shelving one would make it read as empty.
-          const total = group.rows.length === 0
-            && (group.key === "completed" || group.key === "archived")
-            ? snapshot?.lifecycleCounts[group.key] ?? 0
-            : group.rows.length;
+          const total = group.rows.length;
           return (
           <div key={group.key}>
             {group.label ? (

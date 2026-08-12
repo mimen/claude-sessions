@@ -1,8 +1,10 @@
 import { test, expect } from "bun:test";
-import { chooseLauncher, planResumeSession, resumeSessionEntry } from "./resume-session.ts";
+import { chooseLauncher, planResumeSession, resumeSessionEntry, resumeSessionEntryAsync } from "./resume-session.ts";
 import { openIndex } from "../index/schema.ts";
 import { openCatalogue } from "../catalogue/db-schema.ts";
-import { setCluster, setResumeId, setRole } from "../catalogue/db-mutations.ts";
+import { getRow } from "../catalogue/db-queries.ts";
+import { setCluster, setCompleted, setResumeId, setRole, setSaved } from "../catalogue/db-mutations.ts";
+import type { AsyncProcessAdapter } from "../process/async.ts";
 import type { SessionRow } from "../index/index.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 
@@ -229,6 +231,68 @@ test("resume FAILS CLOSED when liveness is unreadable — never spawns (ADR-0054
     // isn't in the (empty) open set. Fail-open here would re-spawn a possibly-running session.
     const res = resumeSessionEntry(idx, cat, "s1", { dryRun: true, bridge: stubBridge([], false) });
     expect(res.status).toBe("liveness-unreadable");
+  } finally {
+    idx.close();
+    cat.close();
+  }
+});
+
+test("completed sessions remain terminal until explicitly reactivated", () => {
+  const idx = openIndex(":memory:");
+  const cat = openCatalogue(":memory:");
+  const NOW = "2026-08-11T00:00:00Z";
+  try {
+    idx.query(
+      `INSERT INTO sessions (session_id, host, path, cwd, project_root, project_name,
+         fallback_label, first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id)
+       VALUES ('done', 'h', '/store/done.jsonl', '/tmp', '/tmp', 'p', 'done', $now, $now, 1, 0, 0, 0, 'done')`,
+    ).run({ $now: NOW });
+    setResumeId(cat, "done", "done", NOW);
+    setCompleted(cat, "done", true, NOW);
+
+    expect(resumeSessionEntry(idx, cat, "done", { dryRun: true, bridge: stubBridge([]) })).toEqual({
+      status: "completed",
+    });
+  } finally {
+    idx.close();
+    cat.close();
+  }
+});
+
+test("successfully resuming a saved session reactivates it", async () => {
+  const idx = openIndex(":memory:");
+  const cat = openCatalogue(":memory:");
+  const NOW = "2026-08-11T00:00:00Z";
+  const processAdapter: AsyncProcessAdapter = {
+    async run(): Promise<{ ok: boolean; stdout: string; stderr: string; timedOut: boolean }> {
+      return { ok: true, stdout: "OK workspace:91", stderr: "", timedOut: false };
+    },
+  };
+  try {
+    idx.query(
+      `INSERT INTO sessions (session_id, host, path, cwd, project_root, project_name,
+         fallback_label, first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id)
+       VALUES ('saved', 'h', '/store/saved.jsonl', '/tmp', '/tmp', 'p', 'saved', $now, $now, 1, 0, 0, 0, 'saved')`,
+    ).run({ $now: NOW });
+    setResumeId(cat, "saved", "saved", NOW);
+    setSaved(cat, "saved", true, NOW);
+
+    const result = await resumeSessionEntryAsync(
+      idx,
+      cat,
+      "saved",
+      {
+        bridge: stubBridge([]),
+        reactivateSaved(sessionId): boolean {
+          setSaved(cat, sessionId, false, NOW);
+          return true;
+        },
+      },
+      processAdapter,
+    );
+
+    expect(result.status).toBe("resumed");
+    expect(getRow(cat, "saved")?.saved).toBeFalse();
   } finally {
     idx.close();
     cat.close();

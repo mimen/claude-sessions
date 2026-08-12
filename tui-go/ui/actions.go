@@ -29,8 +29,8 @@ type confirmationKind string
 
 const (
 	confirmComplete  confirmationKind = "complete"
-	confirmArchive   confirmationKind = "archive"
-	confirmUnarchive confirmationKind = "unarchive"
+	confirmSave      confirmationKind = "save"
+	confirmUnsave    confirmationKind = "unsave"
 	confirmMutations confirmationKind = "mutations"
 	confirmCleanup   confirmationKind = "cleanup"
 )
@@ -129,18 +129,17 @@ func (m Model) handleConfirmationKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "marking done via ccs…"
 			// Cursor moves to the NEXT session, not down into the done section,
 			// so you can keep cleaning up in place.
-			return m, markCompletedCmd(item.sessionID, m.nextSessionID(m.cursor), m.options.loadOptions())
-		case confirmArchive:
+			return m, markCompletedCmd(item.sessionID, true, m.nextSessionID(m.cursor), m.options.loadOptions())
+		case confirmSave:
 			item := confirmation.items[0]
 			m.confirmation = nil
-			m.status = "archiving via ccs…"
-			// Same as the fast `e` archive: land on the next session, not a jump.
-			return m, archiveBatchCmd([]string{item.sessionID}, m.nextSessionID(m.cursor), "archived 1 session", m.options.loadOptions())
-		case confirmUnarchive:
+			m.status = "saving via ccs…"
+			return m, saveBatchCmd([]string{item.sessionID}, m.nextSessionID(m.cursor), "saved 1 session", m.options.loadOptions())
+		case confirmUnsave:
 			item := confirmation.items[0]
 			m.confirmation = nil
-			m.status = "unarchiving via ccs…"
-			return m, markArchivedCmd(item.sessionID, false, preferredID, "unarchived 1 session", m.options.loadOptions())
+			m.status = "unsaving via ccs…"
+			return m, markSavedCmd(item.sessionID, false, preferredID, "unsaved 1 session", m.options.loadOptions())
 		case confirmMutations:
 			mutations := make([]inference.MetadataMutation, 0, len(confirmation.items))
 			for _, item := range confirmation.items {
@@ -164,8 +163,8 @@ func (m Model) handleConfirmationKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.confirmation = nil
-			m.status = fmt.Sprintf("archiving %d approved sessions via ccs…", len(ids))
-			return m, archiveBatchCmd(ids, preferredID, fmt.Sprintf("archived %d sessions", len(ids)), m.options.loadOptions())
+			m.status = fmt.Sprintf("saving %d approved sessions via ccs…", len(ids))
+			return m, saveBatchCmd(ids, preferredID, fmt.Sprintf("saved %d sessions", len(ids)), m.options.loadOptions())
 		}
 	}
 	return m, nil

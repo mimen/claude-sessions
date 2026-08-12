@@ -45,6 +45,7 @@ type catalogueMeta struct {
 	CustomTitle     string
 	Completed       bool
 	Archived        bool
+	Saved           bool
 	ParkedTaskID    string
 	ParentSessionID string
 	SessionClass    string
@@ -341,6 +342,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		prefixedColumn(catalogueColumns, "c", "custom_title", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "completed", "0"),
 		prefixedColumn(catalogueColumns, "c", "archived", "0"),
+		prefixedColumn(catalogueColumns, "c", "saved", "0"),
 		prefixedColumn(catalogueColumns, "c", "parked_task_id", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "parent_session_id", "NULL"),
 		prefixedColumn(catalogueColumns, "c", "session_class", "NULL"),
@@ -350,6 +352,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		identityExpr("kind", "NULL"),
 		identityNumberExpr("completed"),
 		identityNumberExpr("archived"),
+		identityNumberExpr("saved"),
 		identityExpr("parked_task_id", "NULL"),
 		stageExpr,
 		prNumberExpr,
@@ -402,8 +405,10 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		var prState sql.NullString
 		var completed int
 		var archived int
+		var saved int
 		var identityCompleted int
 		var identityArchived int
+		var identitySaved int
 		var identityParked sql.NullString
 		var enrichTitle, enrichSummary, enrichOutstanding, enrichRecommendation sql.NullString
 		var enrichState, enrichHistory, enrichNext, enrichRemaining sql.NullString
@@ -415,6 +420,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 			&customTitle,
 			&completed,
 			&archived,
+			&saved,
 			&parked,
 			&parent,
 			&sessionClass,
@@ -424,6 +430,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 			&identityKind,
 			&identityCompleted,
 			&identityArchived,
+			&identitySaved,
 			&identityParked,
 			&stage,
 			&prNumber,
@@ -456,6 +463,7 @@ func loadCatalogue(path string) (map[string]catalogueMeta, error) {
 		row.CustomTitle = normalizeInline(customTitle.String)
 		row.Completed = completed != 0 || identityCompleted != 0
 		row.Archived = archived != 0 || identityArchived != 0
+		row.Saved = saved != 0 || identitySaved != 0
 		row.ParkedTaskID = normalizeInline(parked.String)
 		if row.ParkedTaskID == "" {
 			row.ParkedTaskID = normalizeInline(identityParked.String)

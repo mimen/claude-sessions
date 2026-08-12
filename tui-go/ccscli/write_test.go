@@ -36,7 +36,7 @@ func TestApplyMutationShellsToCCS(t *testing.T) {
 	got := string(contents)
 	for _, want := range []string{
 		"session title sid A title with spaces",
-		"mark sid --completed",
+		"session complete sid",
 		"identity set event:worker:key --meta.review=approved",
 	} {
 		if !strings.Contains(got, want) {
@@ -53,7 +53,7 @@ func TestWriteMaterializesIndexedUnattachedSessionThroughCCS(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CCS_BINARY", binary)
-	if err := MarkArchived(context.Background(), "loose", true); err != nil {
+	if err := MarkSaved(context.Background(), "loose", true); err != nil {
 		t.Fatal(err)
 	}
 	contents, err := os.ReadFile(logPath)
@@ -61,12 +61,12 @@ func TestWriteMaterializesIndexedUnattachedSessionThroughCCS(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(contents)
-	if got != "session-fields loose --json {\"customTitle\":null}\nmark loose --archived\n" {
+	if got != "session-fields loose --json {\"customTitle\":null}\nsession save loose\n" {
 		t.Fatalf("calls = %q", got)
 	}
 }
 
-func TestUnarchiveUsesMarkArchivedOff(t *testing.T) {
+func TestUnsaveUsesSessionUnsave(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "calls")
 	binary := filepath.Join(t.TempDir(), "ccs")
 	script := "#!/bin/sh\nif [ \"$1\" = session ] && [ \"$3\" = --json ]; then printf '{\"state\":\"catalogued\"}'; exit 0; fi\nprintf '%s\\n' \"$*\" >> " + shellPath(logPath) + "\n"
@@ -74,14 +74,14 @@ func TestUnarchiveUsesMarkArchivedOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CCS_BINARY", binary)
-	if err := MarkArchived(context.Background(), "archived", false); err != nil {
+	if err := MarkSaved(context.Background(), "saved", false); err != nil {
 		t.Fatal(err)
 	}
 	contents, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(contents); got != "mark archived --archived --off\n" {
+	if got := string(contents); got != "session unsave saved\n" {
 		t.Fatalf("calls = %q", got)
 	}
 }
@@ -106,7 +106,7 @@ func TestUnsetTitleMaterializesIndexedUnattachedSession(t *testing.T) {
 	}
 }
 
-func TestArchiveBatchUsesIndividualMarkCommands(t *testing.T) {
+func TestSaveBatchUsesIndividualSessionCommands(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "calls")
 	binary := filepath.Join(t.TempDir(), "ccs")
 	script := "#!/bin/sh\nif [ \"$1\" = session ] && [ \"$3\" = --json ]; then printf '{\"state\":\"catalogued\"}'; exit 0; fi\nprintf '%s\\n' \"$*\" >> " + shellPath(logPath) + "\n"
@@ -114,11 +114,11 @@ func TestArchiveBatchUsesIndividualMarkCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CCS_BINARY", binary)
-	if err := ArchiveBatch(context.Background(), []string{"one", "two"}); err != nil {
+	if err := SaveBatch(context.Background(), []string{"one", "two"}); err != nil {
 		t.Fatal(err)
 	}
 	contents, _ := os.ReadFile(logPath)
-	if got := string(contents); got != "mark one --archived\nmark two --archived\n" {
+	if got := string(contents); got != "session save one\nsession save two\n" {
 		t.Fatalf("calls = %q", got)
 	}
 }

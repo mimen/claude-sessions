@@ -106,7 +106,7 @@ const NOTIFICATION_TTL_MS = 2_000;
 /** The live tree changes quickly, but a subprocess per one-second poll is unnecessary. */
 const SNAPSHOT_LIVENESS_TTL_MS = 2_500;
 
-export type SessionLifecycleAction = "complete" | "archive" | "uncomplete" | "unarchive";
+export type SessionLifecycleAction = "complete" | "save" | "uncomplete" | "unsave";
 
 export type SessionLifecycleOutcome =
   | {
@@ -579,7 +579,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       sessionIds: new Map<SidebarLifecycle, readonly string[]>([
         ["active", []],
         ["completed", []],
-        ["archived", []],
+        ["saved", []],
       ]),
       readable: false,
     };
@@ -838,7 +838,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         lifecycleCounts: {
           active: catalogue.sessionIds.get("active")?.length ?? 0,
           completed: catalogue.sessionIds.get("completed")?.length ?? 0,
-          archived: catalogue.sessionIds.get("archived")?.length ?? 0,
+          saved: catalogue.sessionIds.get("saved")?.length ?? 0,
         },
         livenessReadable: bridge.readable,
         indexReadable: index.readable,
@@ -950,14 +950,14 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     },
 
     /**
-     * Complete/archive delegates the whole ordered gesture to the CCS primitive. Reversing remains
+     * Done/Save delegates the whole ordered gesture to the CCS primitive. Reversing remains
      * lifecycle-only because there is no enrichment or workspace retirement to perform.
      */
     async retire(
       sessionId: string,
       action: SessionLifecycleAction,
     ): Promise<SessionLifecycleOutcome> {
-      if (action === "uncomplete" || action === "unarchive") {
+      if (action === "uncomplete" || action === "unsave") {
         return updateLifecycle(sessionId, action);
       }
 

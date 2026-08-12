@@ -4,6 +4,9 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitContextForPath, locationCommand } from "./command.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { setSaved, setSessionClass } from "../catalogue/db-mutations.ts";
+import { openIndex } from "../index/schema.ts";
 
 const roots: string[] = [];
 
@@ -133,6 +136,20 @@ test("match is fresh-only and returns deterministic candidates", () => {
   expect(payload.registered_hosts.find((host: { name: string }) => host.name === "Milads-Mac-mini").capabilities)
     .toContain("always-on");
   expect(payload.caller_context).toHaveProperty("cwd");
+});
+
+test("match does not warn about Saved sessions at a location", () => {
+  const { root, project } = setup();
+  const index = openIndex(join(root, "cache", "index.db"));
+  index.query(`INSERT INTO sessions(session_id,host,path,cwd,project_root,project_name,fallback_label,msg_count,file_mtime,file_size,skeleton,resume_id,cost_usd,tok_input,tok_output,tok_cache_read,tok_cache_write,is_subagent) VALUES ('saved','h','/saved',$cwd,$cwd,'work','Saved work',1,1,1,'','saved',0,0,0,0,0,0)`).run({ $cwd: project });
+  index.close();
+  const catalogue = openCatalogue(join(root, "cache", "catalogue.db"), { materialize: false });
+  setSessionClass(catalogue, "saved", "work_body", "2026-08-11T00:00:00Z");
+  setSaved(catalogue, "saved", true, "2026-08-11T00:00:00Z");
+  catalogue.close();
+
+  const matched = captureLogs(() => locationCommand(["match", "session", "catalogue", "--json"]));
+  expect(JSON.parse(matched.logs.join("\n")).candidates[0].existing_session_warnings).toEqual([]);
 });
 
 test("match exposes registry defaults even when no location matches", () => {

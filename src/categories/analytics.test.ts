@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openCatalogue } from "../catalogue/db-schema.ts";
-import { setParent, setSessionClass } from "../catalogue/db-mutations.ts";
+import { setArchived, setParent, setSaved, setSessionClass } from "../catalogue/db-mutations.ts";
 import { openIndex } from "../index/schema.ts";
 import { setCategory } from "./assignment.ts";
 import { buildCategoryAnalytics } from "./analytics.ts";
@@ -41,6 +41,20 @@ test("strategic analytics groups explicit metrics without double-counting displa
   const result = buildCategoryAnalytics(index, catalogue, "2026-08-07T00:00:00Z");
   expect(result.groups).toHaveLength(1);
   expect(result.groups[0]).toMatchObject({ slug: "events", retainedSessions: 1, rootSessions: 1, messages: 10, inputTokens: 100, outputTokens: 20, rootCostUsd: 5 });
+  catalogue.close();
+  index.close();
+});
+
+test("strategic analytics reports Saved and folds legacy Archive into Done", () => {
+  const index = openIndex(":memory:");
+  const insert = index.query(`INSERT INTO sessions(session_id,host,path,cwd,project_root,project_name,fallback_label,msg_count,file_mtime,file_size,skeleton,resume_id,cost_usd,tok_input,tok_output,tok_cache_read,tok_cache_write,is_subagent) VALUES ($id,'h',$path,'/work','/work','work',$id,1,1,1,'',$id,0,0,0,0,0,0)`);
+  insert.run({ $id: "saved", $path: "/saved" });
+  insert.run({ $id: "legacy", $path: "/legacy" });
+  const catalogue = openCatalogue(":memory:", { materialize: false });
+  setSaved(catalogue, "saved", true, "2026-08-07T00:00:00Z");
+  setArchived(catalogue, "legacy", true, "2026-08-07T00:00:00Z");
+  const result = buildCategoryAnalytics(index, catalogue, "2026-08-07T00:00:00Z");
+  expect(result.groups[0]).toMatchObject({ active: 0, saved: 1, done: 1 });
   catalogue.close();
   index.close();
 });

@@ -14,7 +14,7 @@ import { openSessionIds } from "./cmux/liveness.ts";
 import { toMember, buildClusterMap, renderClusterMap, clusterMapToJson, isCoreRole } from "./catalogue/cluster-map.ts";
 import { describe as describeDisposition } from "./catalogue/disposition.ts";
 import { isIncognito } from "./catalogue/incognito.ts";
-import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, stage, metaSet, meta } from "./catalogue/commands.ts";
+import { whoami, rename, mark, tag, key, parent, role, gusWork, sessionEpic, project, setClusterCmd, status, name, stage, metaSet, meta, setExistingSessionLifecycle } from "./catalogue/commands.ts";
 import { newSession } from "./resume/new-session.ts";
 import { delegateCommand } from "./delegate/command.ts";
 import { startCommand } from "./start/command.ts";
@@ -88,8 +88,8 @@ Identities (durable, per-work-unit — ADR-0089):
   ccs identity mint <key> --cluster=<c> --role=<r> [--grouping=<g>]
   ccs identity set <key> --field=value [...]      Universal or per-role attrs (schema-routed)
   ccs identity <key>                              Read one identity (+ per-role attrs join)
-  ccs identity ls [--cluster=<c>] [--role=<r>] [--kind=core|fleet] [--completed] [--archived]
-  ccs identity complete|archive|uncomplete <key>  Lifecycle (cascades to attached sessions)
+  ccs identity ls [--cluster=<c>] [--role=<r>] [--kind=core|fleet] [--completed] [--saved]
+  ccs identity complete|save|uncomplete|unsave <key>  Lifecycle (cascades to attached sessions)
   ccs identity path <key> [--new]                 Deterministic scratch dir for the identity
   ccs identity sessions <key>                     List sessions attached to this identity
   ccs identity lineage <key> [--search "<q>"]     Bodies in succession + transcript search
@@ -100,7 +100,7 @@ Sessions (ephemeral, per-run):
   ccs session set <id> --identity=<key> [--title="..."] [--parent=<id>] [--parked=<task>]
   ccs session unset <id> --identity|--title|--parent|--parked
   ccs session title <id> "text"                   Custom title + cmux tab sync
-  ccs session complete|archive|uncomplete|unarchive <id>   Per-session lifecycle
+  ccs session complete|save|uncomplete|unsave <id>   Per-session lifecycle
   ccs session new <--top-level|--child-of <uuid|.>> [flags]  Mint id, classify at birth, launch \`claude --session-id\`
     explicit identity: --identity=<key> --cluster=<c> --role=<r> (must match stored identity; cannot combine with --key)
     flags: --cluster --role --title --cwd <dir> --location <key> --category <slug> --host <canonical-host>
@@ -128,7 +128,7 @@ Legacy per-session verbs (still work; will migrate to \`ccs session …\` in a l
   ccs meta [<id>|.]                               Show a session's row (identity join included)
   ccs meta [<id>|.] <key> <value> [--off]         Set meta.<key> (mirrors to identity meta)
   ccs rename [<id>|.] "<name>"                    Alias for \`ccs session title\`
-  ccs mark [<id>|.] --completed|--archived [--off]   Per-session lifecycle (core-identity safe)
+  ccs mark [<id>|.] --completed [--off]           Legacy Done/reopen surface (archive remains a Done alias)
   ccs tag [<id>|.] "<Entity>" [--remove]          Add/remove a tag; domain:<slug> is validated and locked
   ccs parent [<id>|.] <parent-id|.> [--off]       Set/clear the spawning parent
   ccs status [<id>|.] "<line>" [--off]            Freeform status pill (mirrors to identity.status_line)
@@ -172,8 +172,8 @@ Resume & tabs:
                                                   Claude Code, and a fresh process. Bare form is a
                                                   preflight; passes no --model so aliases re-resolve
   ccs sync-tabs [<selector>|.|--all]              Paint cmux tabs from catalogue metadata
-  ccs finish <id> <complete|archive> [--do]       Same as finish-current, for a named session
-  ccs finish-current <complete|archive> [--do]    Preflight, or record lifecycle + enrich + close this workspace
+  ccs finish <id> <complete|save> [--do]       Same as finish-current, for a named session
+  ccs finish-current <complete|save> [--do]    Preflight, or record lifecycle + enrich + close this workspace
   ccs sidebar serve [--port N]                    Serve the productivity sidebar on loopback
   ccs close-current-workspace [--do]              Prove or close only this session's cmux workspace
   ccs reap-duplicates [--do]                      Close cmux dupes for sessions with >1 live \`claude --resume\`
@@ -587,7 +587,7 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean; category?:
       if (opts.category && category.slug !== opts.category) continue;
       const lifecycle = lifecycleOf(c);
       const keyValue = identityKeyOf(c);
-      if (!opts.all && lifecycle === "archived") continue;
+      if (!opts.all && (lifecycle === "archived" || lifecycle === "saved")) continue;
       if (!opts.auxiliary && c?.sessionClass === "auxiliary") continue;
       if (opts.loops && c?.kind !== "loop") continue;
       const d = describeDisposition(lifecycle, open.has(r.sessionId));
@@ -637,7 +637,7 @@ function ls(opts: { all: boolean; loops: boolean; auxiliary: boolean; category?:
       `\n${shown} sessions · ${formatCost(shownSpend) || "$0"} displayed-root spend  ` +
         `(★ native ✎ codex · LOOP=loop · ⚙=role · ↳=child · ⊞=key · domain:=effective category · !=open+parked/completed · $=API-equivalent cost incl. subagents)` +
         (opts.category ? ` · category=${opts.category}` : "") +
-        (hidden > 0 && !opts.all ? ` · ${hidden} hidden (archived/filtered; --all to show)` : ""),
+        (hidden > 0 && !opts.all ? ` · ${hidden} hidden (Saved/filtered; --all to show)` : ""),
     );
   } finally {
     db.close();
@@ -667,7 +667,8 @@ function tree(opts: { all: boolean; auxiliary: boolean }): number {
     const visible = (id: string): boolean => {
       const row = catMap.get(id);
       if (isIncognito(row)) return false;
-      if (!opts.all && lifecycleOf(row ?? null) === "archived") return false;
+      const lifecycle = lifecycleOf(row ?? null);
+      if (!opts.all && (lifecycle === "saved" || lifecycle === "completed")) return false;
       return opts.auxiliary || row?.sessionClass !== "auxiliary";
     };
     const childMap = new Map<string, string[]>();
@@ -798,7 +799,14 @@ function resumeSession(
   const db = openIndex(DB_PATH());
   const cat = openCatalogue(CATALOGUE_PATH());
   try {
-    const res = resumeSessionEntry(db, cat, sessionId, { dryRun, via, force, launchers });
+    const res = resumeSessionEntry(db, cat, sessionId, {
+      dryRun,
+      via,
+      force,
+      launchers,
+      reactivateSaved: (resumedSessionId): boolean =>
+        setExistingSessionLifecycle(resumedSessionId, "unsave").status === "ok",
+    });
     switch (res.status) {
       case "resumed":
         console.log(`ccs: ${dryRun ? "would resume" : "resumed"} ${sessionId}${res.note ? ` (${res.note})` : ""}`);
@@ -809,8 +817,14 @@ function resumeSession(
       case "not-indexed":
         console.error(`ccs: ${sessionId} is not indexed (run \`ccs reindex\`)`);
         return 1;
+      case "completed":
+        console.error(`ccs: ${sessionId} is done; mark it active before resuming`);
+        return 1;
       case "spawn-failed":
         console.error(`ccs: failed to spawn cmux workspace for ${sessionId}`);
+        return 1;
+      case "reactivation-failed":
+        console.error(`ccs: resumed ${sessionId}, but could not move it from Saved to Active`);
         return 1;
       case "liveness-unreadable":
         console.error(

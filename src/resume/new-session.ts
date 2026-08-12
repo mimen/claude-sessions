@@ -729,7 +729,7 @@ function supersedeWorkUnitSiblings(db: Database, workUnitId: string, keepId: str
       const row = getRow(db, sid);
       if (!row) continue;
       const lc = lifecycleOf(row);
-      if (lc === "completed" || lc === "archived") continue; // already retired — leave it
+      if (lc === "completed" || lc === "archived" || lc === "saved") continue; // not active — leave it
       setArchived(db, sid, true, now);
       setMeta(db, sid, "superseded_by", keepId, now);
     }

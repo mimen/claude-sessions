@@ -154,7 +154,7 @@ describe("readCatalogueReadOnly", () => {
       const outcome = readCatalogueReadOnly(fixture.path);
       expect(outcome.status).toBe("ok");
       if (outcome.status !== "ok") throw new Error("partial catalogue was not readable");
-      expect(outcome.facts.lifecycles.get("partial")).toBe("archived");
+      expect(outcome.facts.lifecycles.get("partial")).toBe("completed");
       expect(outcome.facts.memberships.size).toBe(0);
       expect(outcome.facts.summaries.size).toBe(0);
     } finally {

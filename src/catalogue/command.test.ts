@@ -18,6 +18,7 @@ const SESSION: SessionMeta = {
   parentSessionId: null,
   completed: false,
   archived: false,
+  saved: false,
   project: null,
   repo: "claude-sessions",
 };
@@ -50,6 +51,59 @@ function engineWith(result: unknown): InferenceEngine {
     runStructured: async () => result,
   };
 }
+
+describe("natural-language lifecycle mutations", () => {
+  test("parses saved and renders Saved in the inference context", async () => {
+    let stdin = "";
+    const engine: InferenceEngine = {
+      name: "codex",
+      available: () => true,
+      runStructured: async (request) => {
+        stdin = request.stdin;
+        return { mutations: [{ n: 1, op: "saved", value: "true" }] };
+      },
+    };
+    const result = await runMetadataCommand(
+      "save this session",
+      [{ ...SESSION, saved: true }],
+      SESSION.sessionId,
+      engine,
+    );
+    expect(stdin).toContain("Saved");
+    expect(result).toEqual({
+      mutations: [{ sessionId: SESSION.sessionId, op: "saved", value: "true" }],
+    });
+  });
+
+  test("normalizes archive input to Done without storing archived=1", () => {
+    const db = openCatalogue(":memory:");
+    try {
+      ensureRow(db, SESSION.sessionId, NOW);
+      applyMutations(db, [{ sessionId: SESSION.sessionId, op: "archived", value: "true" }], NOW);
+      expect(db.query("SELECT completed, archived, saved FROM catalogue WHERE session_id = $id").get({
+        $id: SESSION.sessionId,
+      })).toEqual({ completed: 1, archived: 0, saved: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reopening clears legacy Archive as well as Done", () => {
+    const db = openCatalogue(":memory:");
+    try {
+      ensureRow(db, SESSION.sessionId, NOW);
+      db.query("UPDATE catalogue SET archived = 1, saved = 1 WHERE session_id = $id").run({
+        $id: SESSION.sessionId,
+      });
+      applyMutations(db, [{ sessionId: SESSION.sessionId, op: "completed", value: "false" }], NOW);
+      expect(db.query("SELECT completed, archived, saved FROM catalogue WHERE session_id = $id").get({
+        $id: SESSION.sessionId,
+      })).toEqual({ completed: 0, archived: 0, saved: 0 });
+    } finally {
+      db.close();
+    }
+  });
+});
 
 describe("natural-language category mutations", () => {
   test("parses category as a first-class operation", async () => {

@@ -108,7 +108,7 @@ func buildDefaultRows(sessions []data.Session, query string, mode sortMode, filt
 			{key: "idle", label: "idle", glyph: "○"},
 			{key: "parked", label: "parked", glyph: "⏸"},
 			{key: "done", label: "done", glyph: "✓"},
-			{key: "archived", label: "archived", glyph: "·"},
+			{key: "saved", label: "saved", glyph: "·"},
 		}
 		for _, state := range states {
 			members := noSystem[state.key]

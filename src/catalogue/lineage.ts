@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { CatalogueRow } from "./db-schema.ts";
-import { getAll, identityKeyOf } from "./db-queries.ts";
+import { getAll, identityKeyOf, lifecycleOf } from "./db-queries.ts";
 import { isIncognito } from "./incognito.ts";
 
 /**
@@ -26,8 +26,8 @@ export interface Embodiment {
   transcriptPath: string | null;
   /** Last-activity timestamp for ordering (ISO), or null. */
   lastTs: string | null;
-  completed: boolean;
-  archived: boolean;
+  /** Public lifecycle projection: Saved remains resumable; legacy Archive folds into Done. */
+  lifecycle: "idle" | "parked" | "saved" | "completed";
 }
 
 /**
@@ -58,12 +58,12 @@ export function predecessorsOf(
     if (isIncognito(row)) continue;
     if (identityKey(row) !== key) continue;
     const t = transcriptPaths.get(sid) ?? { path: null, lastTs: null };
+    const lifecycle = lifecycleOf(row);
     sibs.push({
       sessionId: sid,
       transcriptPath: t.path,
       lastTs: t.lastTs,
-      completed: row.completed,
-      archived: row.archived,
+      lifecycle: lifecycle === "archived" ? "completed" : lifecycle,
     });
   }
   // oldest → newest by lastTs (nulls last), so the fresh embodiment reads history in order.

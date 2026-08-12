@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import type { Bridge } from "../cmux/bridge.ts";
 import { type CatalogueRow } from "../catalogue/db-schema.ts";
+import { setExistingSessionLifecycle } from "../catalogue/commands.ts";
 import { getRow } from "../catalogue/db-queries.ts";
 import { CATALOGUE_PATH, DB_PATH } from "../paths.ts";
 import type { AsyncProcessAdapter } from "../process/async.ts";
@@ -91,6 +92,12 @@ export function createSidebarResumeAction(
           focus: true,
           cmuxBin: input.cmuxBin,
           launchers: input.launchers,
+          reactivateSaved(resumedSessionId): boolean {
+            return setExistingSessionLifecycle(resumedSessionId, "unsave", {
+              cataloguePath,
+              logger,
+            }).status === "ok";
+          },
         },
         options.processAdapter,
       );

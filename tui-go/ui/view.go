@@ -344,7 +344,7 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 		return lipgloss.NewStyle().Background(rowBackground).Render(strings.Repeat(" ", max(0, n)))
 	}
 	rowColor := func(color lipgloss.Color) lipgloss.Color {
-		if session.State == "archived" && !selected {
+		if session.State == "saved" && !selected {
 			return theme.FgMostSubtle
 		}
 		return color
@@ -358,7 +358,7 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 		caret = column(theme.Primary).Bold(true).Render("❯")
 	}
 	dotGlyph := "●"
-	if session.State == "archived" {
+	if session.State == "saved" {
 		dotGlyph = "·"
 	}
 	dot := column(theme.StateColor(session.State)).Render(dotGlyph)
@@ -380,7 +380,7 @@ func (m Model) renderSessionRow(width int, session data.Session, level int, sele
 			rightParts = append(rightParts, column(theme.FgMoreSubtle).Render(pad(label, categoryColumnWidth)))
 		} else {
 			swatchStyle := lipgloss.NewStyle().Foreground(theme.CategoryColor(session.CategoryColor)).Background(rowBackground)
-			if session.State == "archived" && !selected {
+			if session.State == "saved" && !selected {
 				swatchStyle = swatchStyle.Faint(true)
 			}
 			swatch := swatchStyle.Render("■")
@@ -933,7 +933,7 @@ func (m Model) renderHelp() string {
 		{"space", "fold ⇄ unfold the section"},
 		{"o", "view options, filters, sort, autorefresh"},
 		{"/", "fuzzy title / project / task search"},
-		{"t / C / e / X", "retitle / done / archive toggle via ccs"},
+		{"t / C / e / X", "retitle / done / reopen / save / unsave via ccs"},
 		{"E", "AI edit one session; review mutations"},
 		{"S", "summarize selected transcript"},
 		{"A", "ask across transcript excerpts"},
@@ -975,7 +975,7 @@ func (m Model) renderKeybar(width int) string {
 	items := [][2]string{
 		{"Tab", "skills"}, {"↑↓", "move"}, {"enter", "resume"}, {"r", "harness…"}, {"v", "transcript"},
 		{"/", "search"}, {"g", "view:" + viewLabel}, {"←→", "fold"}, {"o", "options"}, {"R", "refresh"},
-		{"e", "archive/unarchive"}, {"t", "retitle"}, {"C", "done"}, {"E", "edit"},
+		{"e", "save/unsave"}, {"t", "retitle"}, {"C", "done/reopen"}, {"E", "edit"},
 		{"S/A/D", "AI"}, {"?", "help"}, {"q", "quit"},
 	}
 	parts := make([]string, 0, len(items))

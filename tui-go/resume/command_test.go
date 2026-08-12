@@ -29,6 +29,31 @@ func TestBuildUsesResumeIDAndLauncher(t *testing.T) {
 	}
 }
 
+func TestBuildUsesCCSResumePathForSavedSession(t *testing.T) {
+	cwd := t.TempDir()
+	command, _, err := Build(data.Session{ID: "saved-id", ResumeID: "internal", CWD: cwd, State: "saved"}, data.Launcher{
+		Name:    "gateway",
+		Backend: "claude-gpt",
+		Env:     map[string]string{"GATEWAY": "one two"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(command.Argv, " "); got != "ccs resume-session saved-id --via gateway" {
+		t.Fatalf("argv = %q", got)
+	}
+	if got := Shell(command); got != "env GATEWAY='one two' ccs resume-session saved-id --via gateway" {
+		t.Fatalf("shell = %q", got)
+	}
+}
+
+func TestBuildRefusesDoneSession(t *testing.T) {
+	_, _, err := Build(data.Session{ID: "done-id", State: "completed", CWD: t.TempDir()}, data.Launcher{Backend: "claude"})
+	if err == nil || !strings.Contains(err.Error(), "done") {
+		t.Fatalf("error = %v, want done refusal", err)
+	}
+}
+
 func TestBuildFallsBackToProjectRoot(t *testing.T) {
 	root := t.TempDir()
 	command, note, err := Build(data.Session{ResumeID: "id", CWD: root + "/gone", ProjectRoot: root}, data.Launcher{Backend: "claude"})

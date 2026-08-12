@@ -48,7 +48,7 @@ describe("sidebar catalogue commands", () => {
     }
   });
 
-  test("preserves archived-over-completed precedence and mirrors fleet identity lifecycle", () => {
+  test("saved and completed are mutually exclusive and mirror fleet identity lifecycle", () => {
     const { directory, path } = fixture("sidebar-identity-mirror");
     try {
       const identityKey = "sidebar:worker:task-61";
@@ -63,18 +63,18 @@ describe("sidebar catalogue commands", () => {
         status: "ok",
         value: "completed",
       });
-      expect(setExistingSessionLifecycle("known", "archive", { cataloguePath: path })).toEqual({
+      expect(setExistingSessionLifecycle("known", "save", { cataloguePath: path })).toEqual({
         status: "ok",
-        value: "archived",
+        value: "saved",
       });
-      expect(setExistingSessionLifecycle("known", "unarchive", { cataloguePath: path })).toEqual({
+      expect(setExistingSessionLifecycle("known", "unsave", { cataloguePath: path })).toEqual({
         status: "ok",
-        value: "completed",
+        value: "idle",
       });
 
       const check = openCatalogue(path);
       try {
-        expect(getIdentity(check, identityKey)).toMatchObject({ completed: true, archived: false });
+        expect(getIdentity(check, identityKey)).toMatchObject({ completed: false, archived: false });
       } finally {
         check.close();
       }

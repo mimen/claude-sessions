@@ -94,7 +94,11 @@ export type ResumeSessionResult =
   | { status: "resumed"; note: string | null; workspaceRef: string | null }
   | { status: "already-open" }
   | { status: "not-indexed" }
+  /** Completed sessions are terminal until the lifecycle is explicitly cleared. */
+  | { status: "completed" }
   | { status: "spawn-failed" }
+  /** The workspace opened, but Saved could not be cleared from the catalogue. */
+  | { status: "reactivation-failed"; workspaceRef: string | null }
   /** liveness sources were unreadable — we fail closed and spawn nothing (ADR-0054) */
   | { status: "liveness-unreadable" }
   /** cwd location failed with I/O error — fail closed per ADR-0066 */
@@ -182,11 +186,17 @@ export interface ResumeSessionOptions {
   readonly roleLookup?: (role: string, cluster: string | null) => RoleDef | null;
   /** Internal shared lookup from resumeMany; defaults to a fail-open manifest read for one resume. */
   readonly clusterManifestLookup?: (cluster: string) => ClusterManifest | null;
+  /** Clear Saved after a successful explicit resume. Bulk resume never selects Saved sessions. */
+  readonly reactivateSaved?: (sessionId: string) => boolean;
 }
 
 type PreparedResumeSession =
   | { readonly ready: false; readonly result: ResumeSessionResult }
-  | { readonly ready: true; readonly plan: Extract<ResumePlan, { readonly action: "resume" }> };
+  | {
+    readonly ready: true;
+    readonly plan: Extract<ResumePlan, { readonly action: "resume" }>;
+    readonly saved: boolean;
+  };
 
 function prepareResumeSession(
   indexDb: Database,
@@ -204,6 +214,8 @@ function prepareResumeSession(
   // runaway (ADR-0054). Abort instead — spawn nothing, report the reason.
   if (!bridge.readable) return { ready: false, result: { status: "liveness-unreadable" } };
   if (sessionIsOpen(bridge, row)) return { ready: false, result: { status: "already-open" } };
+  const lifecycle = lifecycleOf(cat);
+  if (lifecycle === "completed") return { ready: false, result: { status: "completed" } };
   const launchers = opts.launchers ?? DEFAULT_LAUNCHERS;
   const chosen = chooseLauncher(launchers, row.models, {
     via: opts.via,
@@ -246,7 +258,7 @@ function prepareResumeSession(
     return { ready: false, result: { status: "cwd-unreadable", error: plan.error } };
   }
   if (cat) warnLiveSiblings(catalogueDb, bridge, cat.sessionId, identityKey(cat));
-  return { ready: true, plan };
+  return { ready: true, plan, saved: lifecycle === "saved" };
 }
 
 export function resumeSessionEntry(
@@ -259,9 +271,11 @@ export function resumeSessionEntry(
   if (!prepared.ready) return prepared.result;
   if (opts.dryRun) return { status: "resumed", note: prepared.plan.note, workspaceRef: null };
   const ref = executeResumePlan(prepared.plan, { cmuxBin: opts.cmuxBin, focus: opts.focus });
-  return ref !== null
-    ? { status: "resumed", note: prepared.plan.note, workspaceRef: ref }
-    : { status: "spawn-failed" };
+  if (ref === null) return { status: "spawn-failed" };
+  if (prepared.saved && !opts.reactivateSaved?.(sessionId)) {
+    return { status: "reactivation-failed", workspaceRef: ref };
+  }
+  return { status: "resumed", note: prepared.plan.note, workspaceRef: ref };
 }
 
 /** Non-blocking action-lane entry. Cosmetic paint is deliberately owned by its caller. */
@@ -284,9 +298,11 @@ export async function resumeSessionEntryAsync(
     focus: opts.focus,
     cmuxBin: opts.cmuxBin,
   }, processAdapter);
-  return ref !== null
-    ? { status: "resumed", note: prepared.plan.note, workspaceRef: ref }
-    : { status: "spawn-failed" };
+  if (ref === null) return { status: "spawn-failed" };
+  if (prepared.saved && !opts.reactivateSaved?.(sessionId)) {
+    return { status: "reactivation-failed", workspaceRef: ref };
+  }
+  return { status: "resumed", note: prepared.plan.note, workspaceRef: ref };
 }
 
 /**
@@ -311,7 +327,7 @@ function warnLiveSiblings(catalogueDb: Database, bridge: Bridge, selfId: string,
       if (sid === selfId) continue;
       if (isIncognito(row)) continue; // this warning prints session ids; an incognito twin stays unnamed
       const lc = lifecycleOf(row);
-      if (lc === "completed" || lc === "archived") continue; // retired can't be a live twin
+      if (lc === "completed" || lc === "archived" || lc === "saved") continue; // inactive can't be a live twin
       if (identityKey(row) !== key) continue;
       if (bridge.isOpen(sid) || (row.resumeId && bridge.isOpen(row.resumeId))) siblings.push(sid);
     }

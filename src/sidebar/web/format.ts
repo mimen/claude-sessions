@@ -30,8 +30,8 @@ export const SECTION_LABELS: Readonly<Record<SidebarSection, string>> = {
   working: "Working",
   ready: "Ready",
   recent: "Recent",
-  completed: "Complete",
-  archived: "Archived",
+  completed: "Done",
+  saved: "Saved",
 };
 
 /** Fixed order: the queue reads top to bottom by how much it wants attention. */
@@ -39,7 +39,7 @@ export const SECTION_LABELS: Readonly<Record<SidebarSection, string>> = {
 // Finished work sits last: it is the least likely to need you, and collapsing it there keeps
 // the live groups at the top where the eye starts.
 export const SECTION_ORDER: readonly SidebarSection[] =
-  ["needs-you", "working", "ready", "other", "recent", "completed", "archived"];
+  ["needs-you", "working", "ready", "other", "recent", "saved", "completed"];
 
 /** A response may update the view only when it belongs to the selected scope and is newest. */
 export function shouldApplySnapshotResponse(
@@ -61,9 +61,19 @@ export function shouldReloadSnapshot(
 }
 
 /** An unreadable cmux state cannot support a truthful claim that the queue is empty. */
-export function emptyStateMessage(query: string, livenessReadable: boolean): string | null {
+export function emptyStateMessage(
+  query: string,
+  livenessReadable: boolean,
+  view: SidebarView = "active",
+): string | null {
   if (!livenessReadable) return null;
-  return query.trim().length > 0 ? "No sessions match." : "Nothing running.";
+  if (query.trim().length > 0) return "No sessions match.";
+  if (view === "saved") {
+    return "Nothing saved. Save a session to keep it out of the way without losing it.";
+  }
+  if (view === "completed") return "Nothing finished yet.";
+  if (view === "triage") return "No verdicts waiting.";
+  return "Nothing running.";
 }
 
 /**
@@ -490,12 +500,7 @@ function decodeShelfState(value: unknown): ShelfState | null {
  * every section someone had shelved.
  */
 export function parseShelfStates(raw: string | null): Map<string, ShelfState> {
-  // Finished sections start shelved: they are the least likely to need you, and unshelving one is
-  // also what asks the server for its rows, so the default costs nothing.
-  const fallback = (): Map<string, ShelfState> => new Map([
-    ["completed", { shelved: true, liveOnly: false }],
-    ["archived", { shelved: true, liveOnly: false }],
-  ]);
+  const fallback = (): Map<string, ShelfState> => new Map();
   if (raw === null) return fallback();
   try {
     const parsed = JSON.parse(raw) as unknown;

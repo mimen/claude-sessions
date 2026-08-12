@@ -223,8 +223,8 @@ func firstSessionRow(rows []row) int {
 }
 
 // nextSessionID returns the session ID of the session row after `cursor`
-// (falling back to the previous session row when at the end). Used so archiving
-// keeps the cursor on the next item — you don't lose your place mid-cleanup.
+// (falling back to the previous session row when at the end). Used so saving
+// keeps the cursor on the next item without losing your place mid-cleanup.
 // Returns "" when no other session exists.
 func (m Model) nextSessionID(cursor int) string {
 	for i := cursor + 1; i < len(m.rows); i++ {
@@ -482,7 +482,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.status = "AI cleanup failed: " + msg.err.Error()
 		} else if len(msg.proposals) == 0 {
-			m.status = string(msg.engine) + " proposed no safe archives"
+			m.status = string(msg.engine) + " proposed no safe saves"
 		} else {
 			items := make([]confirmationItem, 0, len(msg.proposals))
 			for _, proposal := range msg.proposals {
@@ -640,25 +640,31 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "C":
 		if session, ok := m.selectedSession(); ok {
-			m.confirmation = &confirmation{kind: confirmComplete, title: "Mark session done?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs mark --completed", enabled: true}}}
+			if session.State == "completed" {
+				m.status = "reopening via ccs…"
+				return m, markCompletedCmd(session.ID, false, session.ID, m.options.loadOptions())
+			}
+			m.confirmation = &confirmation{kind: confirmComplete, title: "Mark session done?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs session complete", enabled: true}}}
 		}
 	case "e":
-		// Fast archive/unarchive: both directions remain owned by `ccs mark`.
 		if session, ok := m.selectedSession(); ok {
-			if session.State == "archived" {
-				m.status = "unarchiving via ccs…"
-				return m, markArchivedCmd(session.ID, false, session.ID, "unarchived → "+truncate(session.Title, 40), m.options.loadOptions())
+			if session.State == "saved" {
+				m.status = "moving to Active via ccs…"
+				return m, markSavedCmd(session.ID, false, session.ID, "moved to Active → "+truncate(session.Title, 40), m.options.loadOptions())
 			}
-			m.status = "archiving via ccs…"
-			return m, archiveBatchCmd([]string{session.ID}, m.nextSessionID(m.cursor), "archived → "+truncate(session.Title, 40), m.options.loadOptions())
+			if session.State == "completed" {
+				m.status = "reopen before saving"
+				return m, nil
+			}
+			m.status = "saving via ccs…"
+			return m, saveBatchCmd([]string{session.ID}, m.nextSessionID(m.cursor), "saved → "+truncate(session.Title, 40), m.options.loadOptions())
 		}
 	case "X":
-		// Archive/unarchive with a confirmation, for when you want the safety prompt.
 		if session, ok := m.selectedSession(); ok {
-			if session.State == "archived" {
-				m.confirmation = &confirmation{kind: confirmUnarchive, title: "Unarchive session?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs mark --archived --off", enabled: true}}}
-			} else {
-				m.confirmation = &confirmation{kind: confirmArchive, title: "Archive session?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs mark --archived", enabled: true}}}
+			if session.State == "saved" {
+				m.confirmation = &confirmation{kind: confirmUnsave, title: "Move session to Active?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs session unsave", enabled: true}}}
+			} else if session.State != "completed" {
+				m.confirmation = &confirmation{kind: confirmSave, title: "Save session for later?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs session save", enabled: true}}}
 			}
 		}
 	case "E":
@@ -837,6 +843,10 @@ func (m Model) resumeDefault() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	if session.State == "completed" || session.State == "done" {
+		m.status = "session is done; reopen it before resuming"
+		return m, nil
+	}
 	if session.LiveWorkspaceRef != "" {
 		m.status = "focusing live session…"
 		return m, focusLiveCmd(session)
@@ -857,6 +867,11 @@ func (m Model) resumeDefault() (tea.Model, tea.Cmd) {
 func (m Model) activateRoute(route data.Launcher) (tea.Model, tea.Cmd) {
 	session, ok := m.selectedSession()
 	if !ok {
+		return m, nil
+	}
+	if session.State == "completed" || session.State == "done" {
+		m.overlay = OverlayNone
+		m.status = "session is done; reopen it before resuming"
 		return m, nil
 	}
 	m.overlay = OverlayNone

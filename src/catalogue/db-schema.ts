@@ -13,7 +13,7 @@ export type { StoredEnrichment } from "./enrichment.ts";
  */
 
 export type Kind = "session" | "loop";
-export type Lifecycle = "idle" | "parked" | "completed" | "archived";
+export type Lifecycle = "idle" | "parked" | "saved" | "completed" | "archived";
 export type PrState = "open" | "merged" | "closed";
 export type SessionClass = "work_body" | "auxiliary";
 export type CreatorKind = "human" | "agent" | "automation";
@@ -31,6 +31,8 @@ export interface CatalogueRow {
   kind: Kind;
   completed: boolean;
   archived: boolean;
+  /** Resumable work intentionally hidden from the active working set. */
+  saved: boolean;
   parkedTaskId: string | null;
   /**
    * Excluded from every listing, aggregate, and enrichment path — and, critically, never sent to
@@ -272,6 +274,7 @@ function validateSchemaPostcondition(db: Database): { ok: true } | { ok: false; 
     "meta",
     "updated_at",
     "session_class",
+    "saved",
     "creator_kind",
     "creator_ref",
     "launch_channel",
@@ -336,6 +339,7 @@ function applyMigrations(db: Database): void {
         kind           TEXT NOT NULL DEFAULT 'session',
         completed      INTEGER NOT NULL DEFAULT 0,
         archived       INTEGER NOT NULL DEFAULT 0,
+        saved          INTEGER NOT NULL DEFAULT 0,
         parked_task_id TEXT,
         notes          TEXT,
         updated_at     TEXT
@@ -703,6 +707,7 @@ function applyMigrations(db: Database): void {
         status_line    TEXT,
         completed      INTEGER NOT NULL DEFAULT 0,
         archived       INTEGER NOT NULL DEFAULT 0,
+        saved          INTEGER NOT NULL DEFAULT 0,
         parked_task_id TEXT,
         meta           TEXT,
         created_at     TEXT,
@@ -1063,6 +1068,38 @@ function applyMigrations(db: Database): void {
   // Partial: the incognito set is tiny by construction, and every read is "exclude these", so the
   // index only ever needs to enumerate the few rows that are excluded.
   db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_incognito ON catalogue(session_id) WHERE incognito = 1;");
+
+  // Saved is a distinct resumable state. Archive represented terminal discarded work, so existing
+  // archived rows fold into Done once; Saved starts empty rather than claiming old discards were kept.
+  // This migration has its own line because catalogue user_version 41 is reserved by enrichment.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS lifecycle_schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
+  `);
+  const lifecycleSchemaVersion = (db.query(
+    "SELECT COALESCE(MAX(version), 0) AS version FROM lifecycle_schema_migrations",
+  ).get() as { version: number }).version;
+  if (!hasColumn(db, "catalogue", "saved")) {
+    db.exec("ALTER TABLE catalogue ADD COLUMN saved INTEGER NOT NULL DEFAULT 0;");
+  }
+  if (!hasColumn(db, "identities", "saved")) {
+    db.exec("ALTER TABLE identities ADD COLUMN saved INTEGER NOT NULL DEFAULT 0;");
+  }
+  if (lifecycleSchemaVersion < 1) {
+    if (hasColumn(db, "catalogue", "completed") && hasColumn(db, "catalogue", "archived")) {
+      db.exec("UPDATE catalogue SET completed = 1, archived = 0 WHERE archived = 1;");
+    }
+    if (hasColumn(db, "identities", "completed") && hasColumn(db, "identities", "archived")) {
+      db.exec("UPDATE identities SET completed = 1, archived = 0 WHERE archived = 1;");
+    }
+    db.exec(`
+      INSERT INTO lifecycle_schema_migrations(version, applied_at)
+      VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+    `);
+  }
+
   // Life-domain storage has its own numbered migration line because catalogue user_version 41 is
   // already reserved by the enrichment-column retirement. This keeps category DDL idempotent and
   // observable without skipping that independent migration when it lands.

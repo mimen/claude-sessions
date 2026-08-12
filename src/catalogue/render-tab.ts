@@ -157,7 +157,7 @@ function renderSession(row: CatalogueRow, ctx: RenderContext): TabRenderOps {
   const color = null;
   // State pill comes from the cluster's board composer (ADR-0077). The tool doesn't know what
   // "stage" means — that's cluster vocabulary. No board pill → fall back to the generic lifecycle
-  // pill (parked/completed/archived) which is a tool-level concept.
+  // pill (parked/saved/done) which is a tool-level concept.
   const statusPill = computePillFromBoard(row) ?? computeLifecyclePill(row);
   // The worker's EPIC as its own quiet pill (orthogonal to the state pill).
   const epicPill = computeEpicPill(ctx);
@@ -289,8 +289,9 @@ function computeLifecyclePill(row: CatalogueRow): StatusPill | null {
   if (lc === "idle") return null;
   const labels: Record<string, string> = {
     parked: "parked",
+    saved: "saved",
     completed: "done",
-    archived: "archived",
+    archived: "done",
   };
   const label = labels[lc];
   if (!label) return null;

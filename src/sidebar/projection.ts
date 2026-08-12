@@ -158,7 +158,7 @@ export type SidebarDensity =
   | "full"
   /** Closed but still active work: one line, reopenable, not a judgment about the work. */
   | "line"
-  /** Complete or archived: one line inside a section that is collapsed by default. */
+  /** Done or saved: one line inside a section that is collapsed by default. */
   | "settled";
 
 /**
@@ -192,7 +192,7 @@ export interface SidebarMembership {
   readonly kind: "core" | "fleet";
 }
 
-export type SidebarLifecycle = "active" | "completed" | "archived";
+export type SidebarLifecycle = "active" | "completed" | "saved";
 export type SidebarScope = SidebarLifecycle;
 
 /**
@@ -205,7 +205,7 @@ export type SidebarScope = SidebarLifecycle;
  */
 export type SidebarView = SidebarScope | "triage";
 
-export const SIDEBAR_VIEWS: readonly SidebarView[] = ["active", "triage", "completed", "archived"];
+export const SIDEBAR_VIEWS: readonly SidebarView[] = ["active", "triage", "completed", "saved"];
 
 /** The lifecycle a view browses. Triage reads the active list, then filters it. */
 export function lifecycleForView(view: SidebarView): SidebarScope {
@@ -258,11 +258,8 @@ export interface ProjectionInput {
   readonly now: number;
   /** How many resumable sessions the active shelf may show. */
   /**
-   * Lifecycles this projection should emit rows for, beyond the scope's own.
-   *
-   * The finished sections are groups in the one list now, so the active view has to be able to
-   * carry completed and archived rows when those sections are expanded. Absent means the scope
-   * alone, which is the behaviour every other caller wants.
+   * Additional lifecycles for non-browser consumers that intentionally combine scopes. The web
+   * sidebar uses dedicated Active, Saved, and Done views and leaves this absent.
    */
   readonly includeLifecycles?: readonly SidebarLifecycle[];
   /** Keep only rows carrying an un-acted enrichment verdict. */
@@ -279,7 +276,7 @@ export interface ProjectionInput {
    */
   readonly hasMoreRows?: boolean;
   readonly recentLimit?: number;
-  /** How many rows a completed or archived history view may show. */
+  /** How many rows a Saved or Done history view may show. */
   readonly historyLimit?: number;
 }
 
@@ -289,16 +286,9 @@ export type SidebarSection =
   | "ready"
   | "recent"
   | "other"
-  /**
-   * Finished work, as sections rather than a separate scope.
-   *
-   * These exist so completed and archived sessions can be headers in the one list, opened and
-   * closed like every other group. They were bottom bars while every group was permanently
-   * expanded; once a header can be shelved, a pinned affordance is a second way to do what
-   * collapsing already does.
-   */
+  /** Lifecycle headings used when Saved or Done is the selected scope. */
   | "completed"
-  | "archived";
+  | "saved";
 
 export interface SidebarModel {
   readonly id: string;
@@ -425,8 +415,8 @@ const DEFAULT_HISTORY_LIMIT = 50;
 
 /** Collapse catalogue's non-terminal states into the sidebar's active lifecycle. */
 export function sidebarLifecycleOf(lifecycle: Lifecycle): SidebarLifecycle {
-  if (lifecycle === "archived") return "archived";
-  if (lifecycle === "completed") return "completed";
+  if (lifecycle === "saved") return "saved";
+  if (lifecycle === "completed" || lifecycle === "archived") return "completed";
   return "active";
 }
 
@@ -599,7 +589,7 @@ function suggestionFor(
   return {
     verb,
     // Handoff is deliberately inert here: passing a thread on is work done inside the session,
-    // not a flag flipped from a list.
+    // not a flag flipped from a list. Archive recommendations are terminal and map to Done.
     actionable: verb === "complete" || verb === "archive",
     reason: summary?.reason ?? null,
     junk: summary?.junk ?? false,
@@ -637,8 +627,8 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
         : undefined)
       ?? (lifecycleFor(sessionId, indexed) === "completed"
         ? "completed"
-        : lifecycleFor(sessionId, indexed) === "archived"
-        ? "archived"
+        : lifecycleFor(sessionId, indexed) === "saved"
+        ? "saved"
         : "idle");
 
   const canonicalSessionIds = input.canonicalSessionIds ?? new Map<string, string>();
@@ -973,7 +963,7 @@ function assembleSidebarSnapshot(
     catalogueReadable: input.catalogueReadable ?? true,
     categoryProjectionVersion: 1,
     categoryProjectionError: input.categoryProjectionError ?? null,
-    lifecycleCounts: input.lifecycleCounts ?? { active: 0, completed: 0, archived: 0 },
+    lifecycleCounts: input.lifecycleCounts ?? { active: 0, completed: 0, saved: 0 },
     hasMoreRows: input.hasMoreRows ?? false,
     // The browser does not consume this field. Keep it byte-stable so an unchanged representation
     // can share one strong ETag instead of changing merely because another poll happened later.

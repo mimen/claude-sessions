@@ -49,6 +49,7 @@ interface CatalogueQueryRow {
   readonly resume_id: string | null;
   readonly completed: number | null;
   readonly archived: number | null;
+  readonly saved: number | null;
   readonly parked_task_id: string | null;
   readonly custom_title: string | null;
   readonly enrichment_title: string | null;
@@ -60,6 +61,7 @@ interface CatalogueQueryRow {
   readonly identity_kind: string | null;
   readonly identity_completed: number | null;
   readonly identity_archived: number | null;
+  readonly identity_saved: number | null;
   readonly identity_parked_task_id: string | null;
   readonly enrichment_state: string | null;
   readonly enrichment_summary: string | null;
@@ -108,7 +110,7 @@ function emptyLifecycleIds(): Map<SidebarLifecycle, string[]> {
   return new Map<SidebarLifecycle, string[]>([
     ["active", []],
     ["completed", []],
-    ["archived", []],
+    ["saved", []],
   ]);
 }
 
@@ -134,15 +136,16 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
     }
     // Match full CatalogueRow hydration exactly: session-scoped non-default flags win, while the
     // joined identity supplies durable lifecycle for rows whose session flags remain at defaults.
-    const catalogueLifecycle: Lifecycle = row.archived === 1 || row.identity_archived === 1
-      ? "archived"
+    const catalogueLifecycle: Lifecycle = row.saved === 1 || row.identity_saved === 1
+      ? "saved"
       : row.completed === 1 || row.identity_completed === 1
+        || row.archived === 1 || row.identity_archived === 1
       ? "completed"
       : text(row.parked_task_id) !== null || text(row.identity_parked_task_id) !== null
       ? "parked"
       : "idle";
-    const lifecycle: SidebarLifecycle = catalogueLifecycle === "archived"
-      ? "archived"
+    const lifecycle: SidebarLifecycle = catalogueLifecycle === "saved"
+      ? "saved"
       : catalogueLifecycle === "completed"
       ? "completed"
       : "active";
@@ -237,6 +240,7 @@ export function readCatalogueDatabase(db: Database): CatalogueReadOutcome {
       identitySelection("kind"),
       identitySelection("completed", "0"),
       identitySelection("archived", "0"),
+      identitySelection("saved", "0"),
       identitySelection("parked_task_id"),
     ];
     const join = canJoinIdentity
@@ -250,6 +254,7 @@ export function readCatalogueDatabase(db: Database): CatalogueReadOutcome {
               ${selected(catalogueColumns, "resume_id")},
               ${selected(catalogueColumns, "completed", "0")},
               ${selected(catalogueColumns, "archived", "0")},
+              ${selected(catalogueColumns, "saved", "0")},
               ${selected(catalogueColumns, "parked_task_id")},
               ${selected(catalogueColumns, "custom_title")},
               ${selected(catalogueColumns, "session_class")},

@@ -90,6 +90,7 @@ function rowFrom(r: Record<string, unknown> | null, db?: Database): CatalogueRow
     // rows minted via `ccs identity complete/archive` where the catalogue row wasn't touched.
     completed: !!(r.completed || idRow?.completed),
     archived: !!(r.archived || idRow?.archived),
+    saved: !!(r.saved || idRow?.saved),
     parkedTaskId: (r.parked_task_id as string) ?? (idRow?.parked_task_id as string) ?? null,
     // Session-scoped only, deliberately: incognito is a property of one conversation's content,
     // not of the durable work-item an identity represents, so it never inherits from the identity
@@ -181,11 +182,11 @@ export function getAll(db: Database): Map<string, CatalogueRow> {
   return map;
 }
 
-/** Pure: lifecycle from a row (precedence archived > completed > parked > idle). */
+/** Pure: lifecycle from a row. Saved hides resumable work; terminal legacy archive folds into Done. */
 export function lifecycleOf(row: CatalogueRow | null): Lifecycle {
   if (!row) return "idle";
-  if (row.archived) return "archived";
-  if (row.completed) return "completed";
+  if (row.saved) return "saved";
+  if (row.completed || row.archived) return "completed";
   if (row.parkedTaskId) return "parked";
   return "idle";
 }

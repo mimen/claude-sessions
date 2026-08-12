@@ -4,7 +4,7 @@ import { categoryBySlug, loadCategoryRegistry, slugFromDomainTag } from "../cate
 import { getCategoryAssignment, resolveCategoryWriteTarget, setCategory } from "../categories/assignment.ts";
 import { openCatalogue } from "./db-schema.ts";
 import { childrenOf, getRow, getTags, lifecycleOf, identityKeyOf, parentEdges } from "./db-queries.ts";
-import { ensureRow, setCustomTitle, setCompleted, setArchived, setKey, setParent, setResumeId, setSessionClass, setCreatorKind, setLaunchChannel, setLauncherIdentity, setRole, setGusWork, setSessionEpic, setStage, setStatusLine, setMeta, setProject, setCluster, addTag, removeTag } from "./db-mutations.ts";
+import { ensureRow, setCustomTitle, setCompleted, setArchived, setSaved, setParked, setKey, setParent, setResumeId, setSessionClass, setCreatorKind, setLaunchChannel, setLauncherIdentity, setRole, setGusWork, setSessionEpic, setStage, setStatusLine, setMeta, setProject, setCluster, addTag, removeTag } from "./db-mutations.ts";
 import { openIndex } from "../index/schema.ts";
 import { titleOf, usageOf, listByRecency, type SessionUsage } from "../index/index.ts";
 import { buildCostRollup, type SessionCostRollup } from "../index/cost-rollup.ts";
@@ -33,7 +33,14 @@ export type ShimBirthRegistration =
   | { readonly status: "missing" }
   | { readonly status: "mismatch"; readonly reason: string };
 
-export type SessionLifecycleAction = "complete" | "archive" | "uncomplete" | "unarchive";
+export type SessionLifecycleAction =
+  | "complete"
+  | "save"
+  | "uncomplete"
+  | "unsave"
+  /** Compatibility aliases for older callers and stored automation. */
+  | "archive"
+  | "unarchive";
 
 export type CatalogueMutationOutcome<T> =
   | { readonly status: "ok"; readonly value: T }
@@ -80,11 +87,33 @@ export function setExistingSessionLifecycle(
     db = context.open(context.path);
     return db.transaction((): CatalogueMutationOutcome<ReturnType<typeof lifecycleOf>> => {
       if (getRow(db!, sessionId) === null) return { status: "not-found" };
-      const field = action === "complete" || action === "uncomplete" ? "completed" : "archived";
-      const value = action === "complete" || action === "archive";
-      if (field === "completed") setCompleted(db!, sessionId, value, context.nowIso);
-      else setArchived(db!, sessionId, value, context.nowIso);
-      mirrorToIdentity(db!, sessionId, { [field]: value }, context.nowIso);
+      const normalized = action === "archive"
+        ? "complete"
+        : action === "unarchive"
+        ? "uncomplete"
+        : action;
+      const patch: Record<string, unknown> = {};
+      if (normalized === "complete") {
+        setCompleted(db!, sessionId, true, context.nowIso);
+        setArchived(db!, sessionId, false, context.nowIso);
+        setSaved(db!, sessionId, false, context.nowIso);
+        setParked(db!, sessionId, null, context.nowIso);
+        Object.assign(patch, { completed: true, archived: false, saved: false, parked_task_id: null });
+      } else if (normalized === "save") {
+        setCompleted(db!, sessionId, false, context.nowIso);
+        setArchived(db!, sessionId, false, context.nowIso);
+        setSaved(db!, sessionId, true, context.nowIso);
+        Object.assign(patch, { completed: false, archived: false, saved: true });
+      } else if (normalized === "uncomplete") {
+        setCompleted(db!, sessionId, false, context.nowIso);
+        setArchived(db!, sessionId, false, context.nowIso);
+        setSaved(db!, sessionId, false, context.nowIso);
+        Object.assign(patch, { completed: false, archived: false, saved: false });
+      } else {
+        setSaved(db!, sessionId, false, context.nowIso);
+        patch.saved = false;
+      }
+      mirrorToIdentity(db!, sessionId, patch, context.nowIso);
       return { status: "ok", value: lifecycleOf(getRow(db!, sessionId)) };
     })();
   } catch (error) {
@@ -229,7 +258,7 @@ function mirrorToIdentity(
     for (const [k, v] of Object.entries(patch)) {
       if (k === "status_line" || k === "stage" || k === "grouping_id" || k.startsWith("meta.")) {
         identityFields[k] = v;
-      } else if (k === "completed" || k === "archived" || k === "parked_task_id") {
+      } else if (k === "completed" || k === "archived" || k === "saved" || k === "parked_task_id") {
         // Lifecycle: only mirror for fleet identities. Core is per-session only.
         if (identKind !== "core") identityFields[k] = v;
       }
@@ -334,19 +363,28 @@ export function mark(sessionArg: string | undefined, flags: string[]): number {
       return 1;
     }
     // ADR-0062: `--loop` (setKind) is retired — kind derives from the session's role now, not a
-    // per-session flag. `ccs mark` handles lifecycle (completed/archived) only.
-    if (flags.includes("--completed") || flags.includes("--complete")) {
+    // per-session flag. Archive remains a compatibility spelling for Done.
+    if (
+      flags.includes("--completed")
+      || flags.includes("--complete")
+      || flags.includes("--archived")
+      || flags.includes("--archive")
+    ) {
       setCompleted(db, id, !off, nowIso);
+      setArchived(db, id, false, nowIso);
+      if (!off) {
+        setSaved(db, id, false, nowIso);
+        setParked(db, id, null, nowIso);
+      }
       changes.push(`completed=${!off}`);
-      mirror.completed = !off;
-    }
-    if (flags.includes("--archived") || flags.includes("--archive")) {
-      setArchived(db, id, !off, nowIso);
-      changes.push(`archived=${!off}`);
-      mirror.archived = !off;
+      Object.assign(mirror, {
+        completed: !off,
+        archived: false,
+        ...(!off ? { saved: false, parked_task_id: null } : {}),
+      });
     }
     if (changes.length === 0) {
-      console.error("usage: ccs mark [<session-id>|.] --completed|--archived [--off]");
+      console.error("usage: ccs mark [<session-id>|.] --completed [--off]  (--archived is a compatibility alias)");
       return 1;
     }
     // Mirror lifecycle onto the identity too (ADR-0089 step 10) so identity readers see the
@@ -787,6 +825,14 @@ function usageFor(id: string, edges: ReturnType<typeof parentEdges>): { usage: S
   }
 }
 
+export function lifecycleDisplayLabel(row: ReturnType<typeof getRow>): "Active" | "Parked" | "Saved" | "Done" {
+  const lifecycle = lifecycleOf(row);
+  if (lifecycle === "saved") return "Saved";
+  if (lifecycle === "completed" || lifecycle === "archived") return "Done";
+  if (lifecycle === "parked") return "Parked";
+  return "Active";
+}
+
 /** Print the current session's catalogue row (self-awareness). */
 export function meta(sessionArg: string | undefined): number {
   const id = resolveSessionId(sessionArg);
@@ -805,9 +851,7 @@ export function meta(sessionArg: string | undefined): number {
     if (row?.customTitle) console.log(`  title: ${row.customTitle}`);
     console.log(`  kind: ${row?.kind ?? "session"}`);
     console.log(`  session class: ${row?.sessionClass ?? "unclassified"}`);
-    console.log(
-      `  lifecycle: ${row?.archived ? "archived" : row?.completed ? "completed" : row?.parkedTaskId ? "parked" : "idle"}`,
-    );
+    console.log(`  lifecycle: ${lifecycleDisplayLabel(row)}`);
     if (row?.cluster) console.log(`  cluster: ${row.cluster}`);
     if (row?.role) console.log(`  role: ${row.role}`);
     if (row?.parentSessionId) console.log(`  parent: ${labelFor(row.parentSessionId)}`);

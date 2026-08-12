@@ -62,12 +62,12 @@ function seedCatalogue(path: string, sessionCount: number): void {
   try {
     const insert = db.query(
       `INSERT INTO catalogue
-         (session_id, resume_id, custom_title, completed, archived, updated_at, session_class,
+         (session_id, resume_id, custom_title, completed, archived, saved, updated_at, session_class,
           enrichment_title, enrichment_state, enrichment_history, enrichment_next,
           enrichment_remaining, enrichment_recommendation, enrichment_reason, enrichment_junk,
           enrichment_cwd_correct, enrichment_at_messages, enrichment_at)
        VALUES
-         ($sessionId, $resumeId, $title, $completed, $archived, $updatedAt, $sessionClass,
+         ($sessionId, $resumeId, $title, $completed, $archived, $saved, $updatedAt, $sessionClass,
           $enrichmentTitle, $state, $history, $next, $remaining, $recommendation, $reason,
           0, 1, $atMessages, $enrichmentAt)`,
     );
@@ -80,7 +80,8 @@ function seedCatalogue(path: string, sessionCount: number): void {
         $resumeId: stableId("resume", index),
         $title: index % 9 === 0 ? `Catalogue title ${index}` : null,
         $completed: lifecycle === 2 ? 1 : 0,
-        $archived: lifecycle === 3 ? 1 : 0,
+        $archived: 0,
+        $saved: lifecycle === 3 ? 1 : 0,
         $updatedAt: timestampFor(index),
         $sessionClass: index % 11 === 0 ? "auxiliary" : "work_body",
         $enrichmentTitle: enriched ? `Enriched session ${index}` : null,
