@@ -26,10 +26,12 @@ export interface CatalogueSnapshotFacts {
   readonly sessionIds: ReadonlyMap<SidebarLifecycle, readonly string[]>;
   readonly auxiliary: ReadonlySet<string>;
   /**
-   * Sessions marked incognito, by canonical id and resume alias. They are absent from every map
-   * above — no lifecycle, title, membership, or summary is projected for them — but the sidebar's
-   * session list comes from the Index, not from here, so their ids still have to travel out so the
-   * caller can drop the index rows that would otherwise render with degraded defaults.
+   * Sessions marked incognito, by canonical id and resume alias.
+   *
+   * They keep their entries in the maps above so a live one can be rendered with its real name,
+   * but they are deliberately absent from `sessionIds`, which drives the lifecycle sections and
+   * their counts. The caller uses this set twice: to drop every incognito row that is not open
+   * right now, and to route the ones that are into their own section.
    */
   readonly incognito: ReadonlySet<string>;
   readonly summaries: ReadonlyMap<string, StoredEnrichment>;
@@ -127,12 +129,15 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
 
   // Canonical ids win when a historical resume alias collides with another canonical row.
   for (const row of rows) {
-    // Incognito is checked before anything is derived, not filtered out afterwards: every map
-    // below carries content (a title, a summary, an identity) that would be the leak.
-    if (row.incognito === 1) {
+    // Incognito rows keep their derived facts, because the sidebar shows the ones that are open
+    // right now and a row still needs a name. What they never get is a place in `sessionIds`
+    // below -- those lists drive the lifecycle sections and their counts, so an entry there would
+    // put a marked session under Active and inflate the header beside it. The caller drops the
+    // closed ones; see the incognito set's own doc comment.
+    const isIncognito = row.incognito === 1;
+    if (isIncognito) {
       incognito.add(row.session_id);
       if (row.resume_id) incognito.add(row.resume_id);
-      continue;
     }
     // Match full CatalogueRow hydration exactly: session-scoped non-default flags win, while the
     // joined identity supplies durable lifecycle for rows whose session flags remain at defaults.
@@ -184,7 +189,7 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
     if (row.session_class === "auxiliary") {
       auxiliary.add(row.session_id);
       if (row.resume_id) auxiliary.add(row.resume_id);
-    } else {
+    } else if (!isIncognito) {
       sessionIds.get(lifecycle)?.push(row.session_id);
     }
   }

@@ -401,10 +401,26 @@ export function markHistoricalDetachedChildBackfillReverted(
  * `enrichment_attempts` is a retry counter rather than an observation, so it resets to 0 instead of
  * going NULL — the column is NOT NULL and a null there would break the budget arithmetic.
  */
+/**
+ * What survives a clear.
+ *
+ * `enrichment_title` is the session's display name everywhere it is listed, and a marked session
+ * still has to be identifiable while it is open -- an incognito section of bare session ids tells
+ * you nothing. A one-line title is also the same class of thing as the cmux tab title, which is on
+ * screen regardless and which incognito does not touch. The substantive model-written content is
+ * the prose below it, and that is what this removes.
+ *
+ * `enrichment_at` still goes, so the row honestly reads as un-enriched. That does mean the hydrated
+ * `row.enrichment` is null and `displayTitle` falls back to the index title -- which costs nothing,
+ * because the surfaces `displayTitle` feeds (`ccs ls`, the TUI) exclude marked sessions outright.
+ * The sidebar, the one surface that shows them, reads the column directly.
+ */
+const ENRICHMENT_COLUMNS_KEPT: ReadonlySet<string> = new Set(["enrichment_title"]);
+
 export function clearEnrichment(db: Database, sessionId: string, now: string): void {
   const columns = (db.query("PRAGMA table_info(catalogue)").all() as Array<{ name: string }>)
     .map((column) => column.name)
-    .filter((name) => name.startsWith("enrichment_"));
+    .filter((name) => name.startsWith("enrichment_") && !ENRICHMENT_COLUMNS_KEPT.has(name));
   if (columns.length === 0) return;
   const assignments = columns.map((name) =>
     name === "enrichment_attempts" ? `${name} = 0` : `${name} = NULL`,

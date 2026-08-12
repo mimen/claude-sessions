@@ -8,6 +8,15 @@
  * spawns a duplicate of a running session.
  */
 import { statSync } from "node:fs";
+import type { DestroyEnvironment } from "../catalogue/destroy.ts";
+// ADR-0068 keeps database handles out of the request layer: this module may not open the
+// catalogue, so the destroy and incognito writes go through the command layer that owns them.
+import {
+  destroySessionTree,
+  markSessionIncognito,
+  previewDestroy,
+  type CatalogueDestroyOptions,
+} from "../catalogue/destroy-command.ts";
 import {
   declineExistingSessionRecommendation,
   setExistingSessionLifecycle,
@@ -143,6 +152,38 @@ export type PinWorkspaceOutcome =
   | { readonly status: "timeout" }
   | { readonly status: "failed"; readonly reason: string };
 
+export type IncognitoOutcome =
+  | { readonly status: "ok"; readonly incognito: boolean }
+  | { readonly status: "catalogue-unreadable" }
+  | { readonly status: "failed"; readonly reason: string };
+
+/** The figures the confirmation dialog needs, and nothing the reader would have to interpret. */
+export type DestroyPreflightOutcome =
+  | {
+    readonly status: "ok";
+    /** The named session plus every descendant that would go with it. */
+    readonly sessionCount: number;
+    /** Files and directories that would be removed. */
+    readonly pathCount: number;
+    /** Sessions that would be closed before anything is deleted. */
+    readonly liveCount: number;
+    /** Identity keys left behind, since destroy never removes an identity. */
+    readonly survivingIdentities: readonly string[];
+  }
+  | { readonly status: "not-found" }
+  | { readonly status: "failed"; readonly reason: string };
+
+export type DestroyOutcomeReport =
+  | {
+    readonly status: "destroyed";
+    readonly sessionIds: readonly string[];
+    readonly filesRemoved: number;
+  }
+  /** A live workspace would not close, so nothing at all was deleted. */
+  | { readonly status: "aborted"; readonly reason: string }
+  | { readonly status: "not-found" }
+  | { readonly status: "failed"; readonly reason: string };
+
 /** Declining touches one column and nothing else, so there is little that can go wrong loudly. */
 export type DeclineOutcome =
   | { readonly status: "ok" }
@@ -210,6 +251,18 @@ export interface SidebarSource {
   closeLooseWorkspace(workspaceId: string): Promise<CloseWorkspaceOutcome>;
   /** Pin or unpin a workspace. Pins are cmux's own, so cmux stays the single source of truth. */
   setPinned(workspaceId: string, pinned: boolean): Promise<PinWorkspaceOutcome>;
+  /** Mark or unmark a session incognito. Marking also clears any stored enrichment. */
+  setIncognito(sessionId: string, incognito: boolean): Promise<IncognitoOutcome>;
+  /**
+   * What destroying this session would remove. Reads only; deletes nothing.
+   *
+   * Its own call rather than a flag on `destroySession` because the confirmation dialog needs the
+   * figures before the reader decides, and an endpoint that sometimes deletes is one typo in a
+   * client away from deleting when it was asked to describe.
+   */
+  destroyPreflight(sessionId: string): Promise<DestroyPreflightOutcome>;
+  /** Irreversibly erase a session and its descendants. Closes live workspaces first, or aborts. */
+  destroySession(sessionId: string): Promise<DestroyOutcomeReport>;
   /**
    * The icon file for a directory the latest snapshot published, or null for anything else.
    * Callers pass a directory, never a path to read, so this is the only way a file reaches the
@@ -432,6 +485,8 @@ export interface SidebarSourceOptions {
   readonly deferActionTask?: (task: () => void) => void;
   readonly indexPath?: string;
   readonly cataloguePath?: string;
+  /** Test seam for destroy: a fake store, a fake cmux, and no real files to unlink. */
+  readonly destroyEnvironment?: () => DestroyEnvironment;
   readonly categoryRegistryPath?: string;
   readonly readCategories?: typeof readSidebarCategoryProjection;
   readonly lifecycleCommand?: typeof setExistingSessionLifecycle;
@@ -452,6 +507,16 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const now = options.now ?? (() => Date.now());
   const indexPath = options.indexPath ?? DB_PATH();
   const cataloguePath = options.cataloguePath ?? CATALOGUE_PATH();
+  const destroyOptions = (): CatalogueDestroyOptions => ({
+    cataloguePath,
+    indexPath,
+    now: () => new Date(now()),
+    ensureDataDir: ensureDataDirectory,
+    ...(options.destroyEnvironment === undefined
+      ? {}
+      : { environment: options.destroyEnvironment() }),
+  });
+
   const categoryRegistryPath = options.categoryRegistryPath ?? CATEGORY_REGISTRY_PATH();
   const readCategories = options.readCategories ?? readSidebarCategoryProjection;
   const recentlyResumedMs = options.recentlyResumedMs ?? RECENTLY_RESUMED_MS;
@@ -673,6 +738,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       let indexMs = 0;
       const scope = lifecycleForView(view);
       const triageOnly = view === "triage";
+      const incognitoOnly = view === "incognito";
       const bridge = await snapshotLiveness.read();
       const bridgeMs = performance.now() - phaseStartedAt;
       phaseStartedAt = performance.now();
@@ -735,13 +801,21 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
 
       // Delegated seats never reach the shelf or the history scopes; a live one still shows,
       // because a running agent is something you may need to act on.
+      //
+      // Incognito is the same shape of rule with a harder edge. A marked session shows while it is
+      // open, in its own section, and is gone the instant it closes -- not shelved, not one flag
+      // away, absent. So the liveness set is the whole test, and this is the only place in the
+      // sidebar that decides it, which is why the projection is left to route the survivors rather
+      // than to re-derive who they are.
+      const liveSessionIds = allLiveSessionIdsFrom(bridge);
+      const incognitoAndClosed = (session: { sessionId: string; resumeId: string }): boolean =>
+        (catalogue.incognito.has(session.sessionId) || catalogue.incognito.has(session.resumeId))
+        && !liveSessionIds.has(session.sessionId)
+        && !liveSessionIds.has(session.resumeId);
       const visible = index.sessions.filter(
         (session) => !catalogue.auxiliary.has(session.sessionId)
           && !catalogue.auxiliary.has(session.resumeId)
-          // Incognito hides unconditionally, including for a live session -- the reason a delegated
-          // seat still shows while running does not apply to a session the user asked to hide.
-          && !catalogue.incognito.has(session.sessionId)
-          && !catalogue.incognito.has(session.resumeId),
+          && !incognitoAndClosed(session),
       );
       // Only live rows carrying an enrichment pay for any of this. The index refreshes on a timer,
       // so its message count trails a session that is still typing; reading the bytes it has not
@@ -756,7 +830,10 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       // The cost of skipping is bounded and self-healing: a session that ends between one index
       // refresh and the next carries a slightly stale `messagesSince` until the next reindex, on a
       // row nobody is working on.
-      const liveSessionIds = allLiveSessionIdsFrom(bridge);
+      //
+      // `liveSessionIds` is the set computed above for the incognito filter; the two uses want
+      // exactly the same answer, and reading the bridge twice in one snapshot could give them
+      // different ones.
       phaseStartedAt = performance.now();
       const indexed = await Promise.all(visible.map(async (session) => {
         const live = liveSessionIds.has(session.sessionId) || liveSessionIds.has(session.resumeId);
@@ -831,9 +908,11 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         summaries: catalogue.summaries,
         preferredTitles: catalogue.preferredTitles,
         memberships: catalogue.memberships,
+        incognitoSessionIds: catalogue.incognito,
         categories: categoryProjection.status === "ok" ? categoryProjection.categories : new Map(),
         categoryProjectionError: categoryProjection.status === "unavailable" ? categoryProjection.error : null,
         triageOnly,
+        incognitoOnly,
         includeLifecycles: lifecycles.filter((lifecycle) => lifecycle !== "active"),
         lifecycleCounts: {
           active: catalogue.sessionIds.get("active")?.length ?? 0,
@@ -1034,6 +1113,24 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       if (outcome.status === "not-found") return outcome;
       if (outcome.status === "catalogue-unreadable") return outcome;
       return { status: "ok" };
+    },
+
+    async setIncognito(sessionId: string, incognito: boolean): Promise<IncognitoOutcome> {
+      const outcome = markSessionIncognito(sessionId, incognito, destroyOptions());
+      if (outcome.status === "ok") return outcome;
+      log.warn("sidebar could not change a session's incognito mark", {
+        error: outcome.reason,
+        sessionId,
+      });
+      return { status: "catalogue-unreadable" };
+    },
+
+    async destroyPreflight(sessionId: string): Promise<DestroyPreflightOutcome> {
+      return previewDestroy(sessionId, destroyOptions());
+    },
+
+    async destroySession(sessionId: string): Promise<DestroyOutcomeReport> {
+      return destroySessionTree(sessionId, destroyOptions());
     },
 
     async open(sessionId: string): Promise<OpenSessionOutcome> {

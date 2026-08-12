@@ -24,6 +24,155 @@ import {
   type DestroyManifest,
 } from "./destroy.ts";
 
+/**
+ * Programmatic entry points for callers that must not open the catalogue themselves.
+ *
+ * The sidebar is the reason these exist. ADR-0068 keeps database handles out of the request layer
+ * -- `src/sidebar/**` may hold no writer -- so the sidebar calls these and this module owns the
+ * handle, exactly as `commands.ts` does for the lifecycle verbs.
+ */
+export interface CatalogueDestroyOptions {
+  readonly cataloguePath?: string;
+  readonly indexPath?: string;
+  readonly now?: () => Date;
+  readonly ensureDataDir?: () => void;
+  readonly environment?: DestroyEnvironment;
+}
+
+interface DestroyContext {
+  readonly cataloguePath: string;
+  readonly indexPath: string;
+  readonly nowIso: string;
+  readonly environment: DestroyEnvironment;
+}
+
+function destroyContext(options: CatalogueDestroyOptions): DestroyContext {
+  (options.ensureDataDir ?? ensureDataDir)();
+  return {
+    cataloguePath: options.cataloguePath ?? CATALOGUE_PATH(),
+    indexPath: options.indexPath ?? DB_PATH(),
+    nowIso: (options.now ?? (() => new Date()))().toISOString(),
+    environment: options.environment ?? productionEnvironment(),
+  };
+}
+
+export type MarkIncognitoOutcome =
+  | { readonly status: "ok"; readonly incognito: boolean }
+  | { readonly status: "catalogue-unreadable"; readonly reason: string };
+
+/** Mark or unmark, creating the catalogue row if the session has never been catalogued. */
+export function markSessionIncognito(
+  sessionId: string,
+  incognito: boolean,
+  options: CatalogueDestroyOptions = {},
+): MarkIncognitoOutcome {
+  const context = destroyContext(options);
+  let catalogue: Database | null = null;
+  try {
+    catalogue = openCatalogue(context.cataloguePath);
+    markIncognito(catalogue, sessionId, incognito, context.nowIso);
+    return { status: "ok", incognito };
+  } catch (error) {
+    return {
+      status: "catalogue-unreadable",
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    catalogue?.close();
+  }
+}
+
+export interface DestroyFigures {
+  readonly sessionCount: number;
+  readonly pathCount: number;
+  readonly liveCount: number;
+  readonly survivingIdentities: readonly string[];
+}
+
+export type DestroyPreflightResult =
+  | ({ readonly status: "ok" } & DestroyFigures)
+  | { readonly status: "not-found" }
+  | { readonly status: "failed"; readonly reason: string };
+
+export type DestroyResult =
+  | { readonly status: "destroyed"; readonly sessionIds: readonly string[]; readonly filesRemoved: number }
+  | { readonly status: "aborted"; readonly reason: string }
+  | { readonly status: "not-found" }
+  | { readonly status: "failed"; readonly reason: string };
+
+function pathsIn(manifest: DestroyManifest): number {
+  return manifest.footprints.reduce(
+    (total, footprint) =>
+      total + footprint.transcripts.length + footprint.files.length + footprint.directories.length,
+    0,
+  );
+}
+
+/** What a destroy would remove. Reads only. */
+export async function previewDestroy(
+  sessionId: string,
+  options: CatalogueDestroyOptions = {},
+): Promise<DestroyPreflightResult> {
+  const context = destroyContext(options);
+  let catalogue: Database | null = null;
+  let index: Database | null = null;
+  try {
+    catalogue = openCatalogue(context.cataloguePath);
+    index = existsSync(context.indexPath) ? openIndex(context.indexPath) : null;
+    const manifest = await buildManifest(catalogue, index, sessionId, context.environment);
+    const pathCount = pathsIn(manifest);
+    if (pathCount === 0 && getRow(catalogue, sessionId) === null) return { status: "not-found" };
+    return {
+      status: "ok",
+      sessionCount: manifest.footprints.length,
+      pathCount,
+      liveCount: manifest.liveSessionIds.length,
+      survivingIdentities: manifest.survivingIdentities,
+    };
+  } catch (error) {
+    return { status: "failed", reason: error instanceof Error ? error.message : String(error) };
+  } finally {
+    index?.close();
+    catalogue?.close();
+  }
+}
+
+/**
+ * Execute a destroy.
+ *
+ * The manifest is rebuilt here rather than accepted from the caller. A caller-supplied manifest
+ * would be a list of paths to delete arriving from outside, and the seconds between a reader
+ * confirming and this running are long enough for a session to go live.
+ */
+export async function destroySessionTree(
+  sessionId: string,
+  options: CatalogueDestroyOptions = {},
+): Promise<DestroyResult> {
+  const context = destroyContext(options);
+  let catalogue: Database | null = null;
+  let index: Database | null = null;
+  try {
+    catalogue = openCatalogue(context.cataloguePath);
+    index = existsSync(context.indexPath) ? openIndex(context.indexPath) : null;
+    const manifest = await buildManifest(catalogue, index, sessionId, context.environment);
+    if (pathsIn(manifest) === 0 && getRow(catalogue, sessionId) === null) {
+      return { status: "not-found" };
+    }
+    const outcome = await executeDestroy(catalogue, index, manifest, context.environment, context.nowIso);
+    if (!outcome.ok) return { status: "aborted", reason: outcome.error.message };
+    return {
+      status: "destroyed",
+      sessionIds: outcome.value.destroyed,
+      filesRemoved: outcome.value.filesRemoved,
+    };
+  } catch (error) {
+    return { status: "failed", reason: error instanceof Error ? error.message : String(error) };
+  } finally {
+    index?.close();
+    catalogue?.close();
+  }
+}
+
 function now(): string {
   return new Date().toISOString().replace(/\.\d+Z$/, "Z");
 }

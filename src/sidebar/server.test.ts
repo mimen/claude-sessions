@@ -110,6 +110,9 @@ function harness(
       return EMPTY_SNAPSHOT;
     },
     declineSuggestion: async () => ({ status: "ok" as const }),
+    setIncognito: async (_sessionId: string, incognito: boolean) => ({ status: "ok" as const, incognito }),
+    destroyPreflight: async () => ({ status: "not-found" as const }),
+    destroySession: async () => ({ status: "not-found" as const }),
     closeWorkspace: async (): Promise<CloseWorkspaceOutcome> => ({ status: "not-live" }),
     focusWorkspace: async (): Promise<FocusWorkspaceOutcome> => ({ status: "not-live" }),
     closeLooseWorkspace: async (): Promise<CloseWorkspaceOutcome> => ({ status: "not-live" }),
@@ -973,6 +976,9 @@ describe("sidebar server", () => {
     const source: SidebarSource = {
       snapshot: async () => EMPTY_SNAPSHOT,
       declineSuggestion: async () => ({ status: "ok" as const }),
+      setIncognito: async (_sessionId: string, incognito: boolean) => ({ status: "ok" as const, incognito }),
+      destroyPreflight: async () => ({ status: "not-found" as const }),
+      destroySession: async () => ({ status: "not-found" as const }),
       open: async () => ({ status: "not-found" }),
       setLifecycle: async () => ({ status: "not-found" }),
       closeWorkspace: async () => ({ status: "not-live" }),
@@ -1116,5 +1122,116 @@ describe("slow snapshot diagnostics", () => {
 
     const slow = app.diagnostics.find((entry) => entry.message === "slow sidebar snapshot request");
     expect(slow?.context).toMatchObject({ sourceMs: null, bridgeMs: null, catalogueMs: null });
+  });
+});
+
+describe("destroy and incognito endpoints", () => {
+  test("the preflight never destroys, and destroy refuses a body without confirm", async () => {
+    const destroyed: string[] = [];
+    const previewed: string[] = [];
+    const app = harness({
+      destroyPreflight: async (sessionId: string) => {
+        previewed.push(sessionId);
+        return {
+          status: "ok" as const,
+          sessionCount: 2,
+          pathCount: 7,
+          liveCount: 1,
+          survivingIdentities: ["c:r:w"],
+        };
+      },
+      destroySession: async (sessionId: string) => {
+        destroyed.push(sessionId);
+        return { status: "destroyed" as const, sessionIds: [sessionId], filesRemoved: 7 };
+      },
+    });
+
+    const preflight = await fetch(`${app.url}/api/session/destroy/preflight`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: app.url },
+      body: JSON.stringify({ sessionId: "target" }),
+    });
+    expect(preflight.status).toBe(200);
+    expect(await preflight.json()).toMatchObject({ sessionCount: 2, pathCount: 7, liveCount: 1 });
+    expect(previewed).toEqual(["target"]);
+    // The assertion the split exists for: describing a destroy must never perform one.
+    expect(destroyed).toEqual([]);
+
+    // The preflight's own body, replayed against the destroy route, must not delete anything.
+    const replay = await fetch(`${app.url}/api/session/destroy`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: app.url },
+      body: JSON.stringify({ sessionId: "target" }),
+    });
+    expect(replay.status).toBe(400);
+    expect(destroyed).toEqual([]);
+
+    const confirmedFalse = await fetch(`${app.url}/api/session/destroy`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: app.url },
+      body: JSON.stringify({ sessionId: "target", confirm: false }),
+    });
+    expect(confirmedFalse.status).toBe(400);
+    expect(destroyed).toEqual([]);
+
+    const confirmed = await fetch(`${app.url}/api/session/destroy`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: app.url },
+      body: JSON.stringify({ sessionId: "target", confirm: true }),
+    });
+    expect(confirmed.status).toBe(200);
+    expect(await confirmed.json()).toMatchObject({ status: "destroyed", filesRemoved: 7 });
+    expect(destroyed).toEqual(["target"]);
+  });
+
+  test("an aborted destroy is a 200 carrying the refusal, not an error the client must decode", async () => {
+    const app = harness({
+      destroySession: async () => ({
+        status: "aborted" as const,
+        reason: "could not close the live workspace for target.",
+      }),
+    });
+    const response = await fetch(`${app.url}/api/session/destroy`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: app.url },
+      body: JSON.stringify({ sessionId: "target", confirm: true }),
+    });
+    // The request succeeded; the operation declined to act. Collapsing that into an HTTP error
+    // would lose the reason, which is the only part the reader needs.
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "aborted" });
+  });
+
+  test("incognito requires a boolean and rejects a cross-origin caller", async () => {
+    const marks: Array<{ sessionId: string; incognito: boolean }> = [];
+    const app = harness({
+      setIncognito: async (sessionId: string, incognito: boolean) => {
+        marks.push({ sessionId, incognito });
+        return { status: "ok" as const, incognito };
+      },
+    });
+
+    const bad = await fetch(`${app.url}/api/session/incognito`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: app.url },
+      body: JSON.stringify({ sessionId: "target", incognito: "yes" }),
+    });
+    expect(bad.status).toBe(400);
+
+    const foreign = await fetch(`${app.url}/api/session/incognito`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://attacker.example" },
+      body: JSON.stringify({ sessionId: "target", incognito: true }),
+    });
+    expect(foreign.status).toBe(403);
+    expect(marks).toEqual([]);
+
+    const ok = await fetch(`${app.url}/api/session/incognito`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: app.url },
+      body: JSON.stringify({ sessionId: "target", incognito: true }),
+    });
+    expect(ok.status).toBe(200);
+    expect(marks).toEqual([{ sessionId: "target", incognito: true }]);
   });
 });

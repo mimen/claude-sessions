@@ -60,8 +60,10 @@ function renderRow(row: SidebarSessionRow, layout: RowLayout = "wide", closed: R
     <SessionRow
       now={2_000}
       onClose={noop}
+      onDestroy={noop}
       onDismiss={noop}
       onHover={noop}
+      onIncognito={noop}
       onLifecycle={noop}
       onOpen={noop}
       onPin={noop}

@@ -107,6 +107,41 @@ export function postDeclineSuggestion<T extends object>(
   return postSidebarAction<T>("/api/session/decline", { sessionId, verb }, options);
 }
 
+/** Marking is a catalogue decision like declining, not a lifecycle move. */
+export function postIncognito<T extends object>(
+  sessionId: string,
+  incognito: boolean,
+  options: ActionTransportOptions = {},
+): Promise<ActionTransportResult<T>> {
+  return postSidebarAction<T>("/api/session/incognito", { sessionId, incognito }, options);
+}
+
+/** Read-only: asks what a destroy would remove. Safe to call from a dialog that may be dismissed. */
+export function postDestroyPreflight<T extends object>(
+  sessionId: string,
+  options: ActionTransportOptions = {},
+): Promise<ActionTransportResult<T>> {
+  return postSidebarAction<T>("/api/session/destroy/preflight", { sessionId }, options);
+}
+
+/**
+ * The irreversible one.
+ *
+ * `confirm` is spelled out at every layer -- here, in the request body, and in the server's
+ * parser -- so that no accidental call, and no replay of the preflight request, can reach it.
+ * A longer deadline than the default because the destroy closes live workspaces first.
+ */
+export function postDestroySession<T extends object>(
+  sessionId: string,
+  options: ActionTransportOptions = {},
+): Promise<ActionTransportResult<T>> {
+  return postSidebarAction<T>(
+    "/api/session/destroy",
+    { sessionId, confirm: true },
+    { deadlineMs: 30_000, ...options },
+  );
+}
+
 /** Browser-safe copy. It never renders exception text or trusts server-provided implementation text. */
 export function actionErrorMessage(error: ActionTransportError): string {
   switch (error.kind) {

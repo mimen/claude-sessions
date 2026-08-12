@@ -85,8 +85,10 @@ function mount(row: SidebarSessionRow): void {
         layouts={{ open: "wide", closed: "wide" }}
         now={2_000}
         onClose={noop}
+        onDestroy={noop}
         onDismiss={noop}
         onHover={noop}
+        onIncognito={noop}
         onLifecycle={noop}
         onOpen={noop}
         onPin={noop}

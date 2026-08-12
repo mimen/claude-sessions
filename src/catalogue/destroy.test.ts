@@ -210,7 +210,8 @@ test("markIncognito sets the flag and clears anything a model already wrote", ()
   const catalogue = openCatalogue(CATALOGUE_PATH());
   try {
     catalogue.query(
-      "UPDATE catalogue SET enrichment_at = $at, enrichment_summary = 'leaked' WHERE session_id = 'parent'",
+      "UPDATE catalogue SET enrichment_at = $at, enrichment_summary = 'leaked', "
+      + "enrichment_title = 'Readable name' WHERE session_id = 'parent'",
     ).run({ $at: AT });
 
     markIncognito(catalogue, "parent", true, AT);
@@ -220,9 +221,17 @@ test("markIncognito sets the flag and clears anything a model already wrote", ()
     // still be undone locally, so it must actually happen rather than only stopping future sweeps.
     expect(marked?.enrichment).toBeNull();
 
+    // The title survives on purpose: the sidebar shows open marked sessions and reads this column
+    // directly, so clearing it would leave that section a list of bare session ids.
+    const title = catalogue
+      .query("SELECT enrichment_title, enrichment_summary FROM catalogue WHERE session_id = 'parent'")
+      .get() as { enrichment_title: string | null; enrichment_summary: string | null };
+    expect(title.enrichment_title).toBe("Readable name");
+    expect(title.enrichment_summary).toBeNull();
+
     markIncognito(catalogue, "parent", false, AT);
     expect(getRow(catalogue, "parent")?.incognito).toBe(false);
-    // Un-marking is not a restore: the cleared enrichment stays cleared.
+    // Un-marking is not a restore: the cleared enrichment prose stays cleared.
     expect(getRow(catalogue, "parent")?.enrichment).toBeNull();
   } finally {
     catalogue.close();

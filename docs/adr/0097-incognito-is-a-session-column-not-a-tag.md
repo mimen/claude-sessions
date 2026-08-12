@@ -20,7 +20,11 @@ The obvious implementation — a `session_tags` entity like `domain:` tags — w
 
 `catalogue.incognito` is an `INTEGER NOT NULL DEFAULT 0` column with a partial index on the marked rows, added **off the version ladder** behind a `hasColumn` presence guard, following the `enrichment_declined` precedent already in `db-schema.ts`. `CATALOGUE_VERSION` stays at 40.
 
-The exclusion is **unconditional everywhere**. There is no `--all` for incognito, no `IncludeIncognito` option on the Go TUI's `LoadOptions`, no reveal flag on any surface. `archived` is a default you can override; incognito is a guarantee, and a reveal flag would make it the former.
+The exclusion is **unconditional in every listing of history**. There is no `--all` for incognito, no `IncludeIncognito` option on the Go TUI's `LoadOptions`, no reveal flag on any CLI surface. `archived` is a default you can override; incognito is a guarantee, and a reveal flag would make it the former.
+
+The one place a marked session is visible is the sidebar, and only while it is **open**: it appears in its own `incognito` section, and the instant it closes it is absent again. That is not a hole in the rule, it is the rule stated precisely — the guarantee is about history and about what leaves the machine, not about the screen you are sitting in front of. A session running in front of you is not a secret from you, and the thing you actually want is for it to leave no trace once it ends. Liveness is therefore the whole test, decided in one place (`snapshot.ts`), with the projection left to route the survivors rather than re-derive who they are.
+
+Because that section has to be readable, `clearEnrichment` keeps `enrichment_title` and clears the prose beneath it. A one-line generated title is the same class of thing as the cmux tab title, which is on screen regardless and which incognito never touched; the substantive model-written content is the summary, and that is what goes.
 
 Aggregate counters are covered too, not just row rendering. The `ccs ls` footer reports `rows.length - shown` as "N hidden … `--all` to show", and the Go dashboard sums `Spend` over raw index rows. Both would announce that something exists while pointing at a flag that does not reveal it, so incognito rows are removed from the denominator rather than skipped at render time.
 

@@ -149,3 +149,25 @@ export function SummaryIcon({ className }: IconProps): React.ReactElement {
     </svg>
   );
 }
+
+/** Incognito: the mask, borrowed from every browser's private-window affordance. */
+export function MaskIcon({ className }: IconProps): React.ReactElement {
+  return (
+    <Glyph className={className}>
+      <path d="M2 10h20v3a4 4 0 0 1-4 4h-1a3 3 0 0 1-3-3 2 2 0 0 0-4 0 3 3 0 0 1-3 3H6a4 4 0 0 1-4-4z" />
+      <path d="M6 10V8a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v2" />
+    </Glyph>
+  );
+}
+
+/** Destroy. A trash can rather than an X: closing and erasing must not look alike. */
+export function TrashIcon({ className }: IconProps): React.ReactElement {
+  return (
+    <Glyph className={className}>
+      <path d="M3 6h18" />
+      <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+      <path d="M19 6v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6" />
+      <path d="M10 11v6M14 11v6" />
+    </Glyph>
+  );
+}

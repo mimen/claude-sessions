@@ -307,3 +307,42 @@ describe("readCatalogueReadOnly", () => {
     }
   });
 });
+
+describe("incognito facts", () => {
+  test("keeps a marked session's derived facts but never its lifecycle id list", () => {
+    const fixture = temporaryCatalogue("catalogue-incognito", (path) => {
+      const db = openCatalogue(path, { materialize: false });
+      try {
+        db.query(
+          `INSERT INTO catalogue (session_id, resume_id, custom_title, incognito)
+           VALUES ('hidden', 'hidden-resume', 'Hidden work', 1),
+                  ('shown', 'shown-resume', 'Shown work', 0)`,
+        ).run();
+      } finally {
+        db.close();
+      }
+    });
+
+    try {
+      const outcome = readCatalogueReadOnly(fixture.path);
+      expect(outcome.status).toBe("ok");
+      if (outcome.status !== "ok") throw new Error("catalogue was not readable");
+
+      // The id set travels by canonical id AND resume alias, because the index row a caller holds
+      // may be keyed by either.
+      expect(outcome.facts.incognito.has("hidden")).toBeTrue();
+      expect(outcome.facts.incognito.has("hidden-resume")).toBeTrue();
+      expect(outcome.facts.incognito.has("shown")).toBeFalse();
+
+      // Facts are kept: a live marked session still has to render with its real name.
+      expect(outcome.facts.preferredTitles.get("hidden")).toBe("Hidden work");
+      expect(outcome.facts.lifecycles.get("hidden")).toBe("active");
+
+      // But it is absent from the list that drives the lifecycle sections and their counts. This
+      // is the assertion that keeps a marked session from appearing under Active.
+      expect(outcome.facts.sessionIds.get("active")).toEqual(["shown"]);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+});

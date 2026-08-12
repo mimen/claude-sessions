@@ -8,8 +8,10 @@ import {
   CheckIcon,
   CloseIcon,
   CopyIcon,
+  MaskIcon,
   PinIcon,
   PinOffIcon,
+  TrashIcon,
 } from "./icons.tsx";
 import {
   ContextMenu,
@@ -78,6 +80,9 @@ export interface SessionRowProps {
   readonly onDismiss: (row: SidebarSessionRow) => void;
   readonly onClose: (row: SidebarRow) => void;
   readonly onPin: (row: SidebarRow, pinned: boolean) => void;
+  readonly onIncognito: (row: SidebarSessionRow, incognito: boolean) => void;
+  /** Opens the confirmation. Nothing is destroyed until that dialog is answered. */
+  readonly onDestroy: (row: SidebarSessionRow) => void;
   readonly row: SidebarRow;
   readonly now: number;
   readonly selected: boolean;
@@ -100,6 +105,8 @@ export function SessionRow({
   onDismiss,
   onClose,
   onPin,
+  onIncognito,
+  onDestroy,
   registerRef,
   onHover,
   layouts,
@@ -130,6 +137,9 @@ export function SessionRow({
   const workspace = row.kind === "workspace" ? row : null;
   const saved = session?.lifecycle === "saved";
   const completed = session?.lifecycle === "completed";
+  // Read off the section rather than a flag of its own: the projection already decided which rows
+  // are marked, and a second source here could show "Leave incognito" on a row that is not.
+  const incognito = row.section === "incognito";
   const suggestion = session?.suggestion ?? null;
   const junk = session?.summary?.junk === true;
   const pinnable = row.workspaceId !== null;
@@ -460,7 +470,30 @@ export function SessionRow({
             <CloseIcon />
             Close tab
           </ContextMenuItem>
+          {session ? (
+            <ContextMenuItem onClick={() => onIncognito(session, !incognito)}>
+              <MaskIcon />
+              {incognito ? "Leave incognito" : "Make incognito"}
+            </ContextMenuItem>
+          ) : null}
         </ContextMenuGroup>
+
+        {session ? (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuGroup>
+              {/* Its own group at the bottom, away from Close tab. Closing a tab and erasing a
+                  session are one row apart in a menu and a world apart in consequence. */}
+              <ContextMenuItem
+                className="text-destructive data-[highlighted]:text-destructive"
+                onClick={() => onDestroy(session)}
+              >
+                <TrashIcon />
+                Destroy…
+              </ContextMenuItem>
+            </ContextMenuGroup>
+          </>
+        ) : null}
       </ContextMenuContent>
     </ContextMenu>
   );

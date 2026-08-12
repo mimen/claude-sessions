@@ -13,6 +13,7 @@ import type {
   SidebarSessionRow,
   SidebarSnapshot,
 } from "../projection.ts";
+import { lifecycleForView } from "../projection.ts";
 import {
   canFilterLive,
   emptyStateMessage,
@@ -42,7 +43,13 @@ import { DisplayOptions } from "./components/display-options.tsx";
 import { GroupHeader } from "./components/group-header.tsx";
 import { Toasts, type Toast } from "./components/toasts.tsx";
 import { cn } from "@/lib/utils";
-import { actionErrorMessage, postDeclineSuggestion, postSidebarAction } from "./action-transport.ts";
+import {
+  actionErrorMessage,
+  postDeclineSuggestion,
+  postIncognito,
+  postSidebarAction,
+} from "./action-transport.ts";
+import { DestroyDialog } from "./components/destroy-dialog.tsx";
 import { focusWorkspaceRow } from "./focus-bridge.ts";
 import { createSnapshotTransport, snapshotPollDelay } from "./snapshot-transport.ts";
 
@@ -117,8 +124,17 @@ export function App(): React.ReactElement {
   );
   /** Pin changes shown before the poll confirms them, keyed by workspace UUID. */
   const [optimisticPins, setOptimisticPins] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  // The row awaiting confirmation, or null. Held here rather than in the row so the dialog
+  // survives the list re-rendering underneath it -- which it does, every poll.
+  const [destroyTarget, setDestroyTarget] = useState<{
+    readonly sessionId: string;
+    readonly name: string;
+  } | null>(null);
   const [scope, setScope] = useState<SidebarView>(() => {
     const stored = localStorage.getItem(SCOPE_STORAGE_KEY);
+    // Incognito is deliberately absent from the restore list. Every other view is a place you
+    // meant to be, worth returning to; reopening the sidebar into a list of hidden sessions is
+    // not, because the one thing a marked session should never do is be on screen unasked.
     return stored === "completed" || stored === "saved" || stored === "triage"
       ? stored
       : "active";
@@ -347,7 +363,19 @@ export function App(): React.ReactElement {
       return pending && pending !== row.lifecycle ? { ...row, lifecycle: pending } : row;
       // A sessionless workspace has no lifecycle to browse by, so it belongs to the live view
       // only — it would be dishonest to list a running browser pane under Done or Saved.
-    }).filter((row) => row.kind === "session" ? row.lifecycle === scope : scope === "active");
+    }).filter((row) => {
+      // The incognito view is already exactly its rows: the server narrowed the response to the
+      // marked sessions that are open, and they keep whatever lifecycle they had, so filtering by
+      // lifecycle here would drop a marked session that happened to be completed.
+      if (scope === "incognito") return row.kind === "session";
+      // Compare against the LIFECYCLE the view browses, not the view itself. `scope` is a
+      // SidebarView and `row.lifecycle` a SidebarLifecycle, so a view with no lifecycle of its own
+      // matches nothing: before this, selecting Triage filtered every session row away and showed
+      // an empty list. Triage reads the active list and the server has already narrowed it to the
+      // rows carrying an un-acted verdict, so the lifecycle test is all that belongs here.
+      const browsed = lifecycleForView(scope);
+      return row.kind === "session" ? row.lifecycle === browsed : browsed === "active";
+    });
     const needle = query.trim().toLowerCase();
     const matched = needle
       ? all.filter((row) =>
@@ -484,6 +512,24 @@ export function App(): React.ReactElement {
       if (!result.ok) setActionError(actionErrorMessage(result.error));
       else if (result.value.status !== "ok") {
         setActionError("CCS did not record that decision. Refresh the list and try again.");
+      } else load(true);
+    })();
+  }, [load]);
+
+  /**
+   * Mark or unmark incognito.
+   *
+   * Not optimistic, unlike the lifecycle actions above. Those move a row between sections the
+   * reader can still see; this one can make a row vanish outright -- a marked session that is not
+   * open belongs nowhere -- so guessing the outcome and being wrong would leave the list showing a
+   * session that is gone or hiding one that is not. The reload is the confirmation.
+   */
+  const setIncognito = useCallback((row: SidebarSessionRow, incognito: boolean): void => {
+    void (async (): Promise<void> => {
+      const result = await postIncognito<{ status: string }>(row.sessionId, incognito);
+      if (!result.ok) setActionError(actionErrorMessage(result.error));
+      else if (result.value.status !== "ok") {
+        setActionError("CCS did not record that change. Refresh the list and try again.");
       } else load(true);
     })();
   }, [load]);
@@ -707,7 +753,9 @@ export function App(): React.ReactElement {
                 showShortcut={metaHeld}
                 opening={openingIds.has(row.id)}
                 onClose={closeWorkspace}
+                onDestroy={setDestroyTarget}
                 onDismiss={declineSuggestion}
+                onIncognito={setIncognito}
                 onLifecycle={setLifecycle}
                 onPin={setPinned}
                 onOpen={(clicked) => { setSelectedId(clicked.id); void open(clicked); }}
@@ -748,6 +796,19 @@ export function App(): React.ReactElement {
         target={hoverTarget}
       />
 
+      {destroyTarget ? (
+        <DestroyDialog
+          key={destroyTarget.sessionId}
+          name={destroyTarget.name}
+          onCancel={() => setDestroyTarget(null)}
+          onDestroyed={(message: string) => {
+            setDestroyTarget(null);
+            setActionError(message);
+            load(true);
+          }}
+          sessionId={destroyTarget.sessionId}
+        />
+      ) : null}
       <Toasts onDismiss={() => setActionError(null)} toasts={toasts} />
     </div>
   );

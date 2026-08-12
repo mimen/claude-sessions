@@ -95,6 +95,7 @@ function catalogueRead(rows: ReadonlyArray<{
   readonly resumeId?: string;
   readonly completed?: boolean;
   readonly saved?: boolean;
+  readonly incognito?: boolean;
 }> = []): CatalogueReadOutcome {
   const lifecycles = new Map<string, "active" | "completed" | "saved">();
   const catalogueLifecycles = new Map<string, "idle" | "completed" | "saved">();
@@ -104,12 +105,20 @@ function catalogueRead(rows: ReadonlyArray<{
     ["completed", []],
     ["saved", []],
   ]);
+  const incognito = new Set<string>();
   for (const row of rows) {
     const lifecycle = row.saved ? "saved" : row.completed ? "completed" : "active";
     lifecycles.set(row.sessionId, lifecycle);
     catalogueLifecycles.set(row.sessionId, lifecycle === "active" ? "idle" : lifecycle);
     canonicalSessionIds.set(row.sessionId, row.sessionId);
-    sessionIds.get(lifecycle)?.push(row.sessionId);
+    if (row.incognito) {
+      // Mirrors the real reader: marked rows keep their derived facts and stay out of the
+      // per-lifecycle id lists.
+      incognito.add(row.sessionId);
+      if (row.resumeId) incognito.add(row.resumeId);
+    } else {
+      sessionIds.get(lifecycle)?.push(row.sessionId);
+    }
   }
   for (const row of rows) {
     const resumeId = row.resumeId ?? row.sessionId;
@@ -126,7 +135,7 @@ function catalogueRead(rows: ReadonlyArray<{
     memberships: new Map(),
     sessionIds,
     auxiliary: new Set(),
-    incognito: new Set(),
+    incognito,
     summaries: new Map(),
   };
   return { status: "ok", facts };
@@ -1305,4 +1314,44 @@ test("the exact-count pass stats live rows only, so a long tail costs nothing", 
 
   // "primary" is the bridge's live surface; "closed-one" exists only in the index.
   expect(statted).toEqual(["/transcripts/primary.jsonl"]);
+});
+
+describe("createSidebarSource incognito", () => {
+  test("a closed marked session is absent; the same session open appears in its own section", async () => {
+    const rows = [{ sessionId: RESUME_SESSION_ID, resumeId: RESUME_SESSION_ID, incognito: true }];
+    const indexedRow = indexed({ sessionId: RESUME_SESSION_ID, resumeId: RESUME_SESSION_ID });
+
+    // Closed: the whole point of the guarantee. Not shelved, not one flag away -- gone.
+    const closed = createSidebarSource(sourceOptions({
+      readCatalogue: () => catalogueRead(rows),
+      indexedSessions: () => [indexedRow],
+      readBridge: async () => emptyBridge(),
+    }));
+    const closedSnapshot = await closed.snapshot("active", 50);
+    expect(closedSnapshot.rows.some((row) => row.id === RESUME_SESSION_ID)).toBeFalse();
+
+    // Open: the same session, same mark, now visible -- and in the incognito section rather than
+    // among the live status queues.
+    const open = createSidebarSource(sourceOptions({
+      readCatalogue: () => catalogueRead(rows),
+      indexedSessions: () => [indexedRow],
+      readBridge: async () => retireBridge(),
+    }));
+    const openSnapshot = await open.snapshot("active", 50);
+    const openRow = openSnapshot.rows.find((row) => row.id === RESUME_SESSION_ID);
+    expect(openRow).toBeDefined();
+    expect(openRow?.section).toBe("incognito");
+  });
+
+  test("an unmarked session is untouched by any of this", async () => {
+    const source = createSidebarSource(sourceOptions({
+      readCatalogue: () => catalogueRead([{ sessionId: RESUME_SESSION_ID, resumeId: RESUME_SESSION_ID }]),
+      indexedSessions: () => [indexed({ sessionId: RESUME_SESSION_ID, resumeId: RESUME_SESSION_ID })],
+      readBridge: async () => retireBridge(),
+    }));
+    const snapshot = await source.snapshot("active", 50);
+    const row = snapshot.rows.find((candidate) => candidate.id === RESUME_SESSION_ID);
+    expect(row).toBeDefined();
+    expect(row?.section).not.toBe("incognito");
+  });
 });

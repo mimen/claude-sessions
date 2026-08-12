@@ -10,12 +10,15 @@ import { ChevronIcon } from "./icons.tsx";
 
 /**
  * Triage sits next to Active because it is the same list, narrowed: the sessions whose verdict
- * still contradicts where they sit. Saved and Done remain reachable in the same control, so it
- * stays a complete account of what the list can show.
+ * still contradicts where they sit. Incognito is the same shape -- the active list narrowed to the
+ * marked sessions that are open right now. Saved and Done remain reachable in the same control,
+ * because it is meant to be a complete account of what the list can show, and a view that existed
+ * but could not be named from here would make it a partial one.
  */
 const SCOPES: ReadonlyArray<{ readonly value: SidebarView; readonly label: string }> = [
   { value: "active", label: "Active" },
   { value: "triage", label: "Triage" },
+  { value: "incognito", label: "Incognito" },
   { value: "saved", label: "Saved" },
   { value: "completed", label: "Done" },
 ];

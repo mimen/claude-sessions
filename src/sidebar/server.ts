@@ -12,7 +12,7 @@ import { log } from "../logger.ts";
 import { err, ok, type Result } from "../result.ts";
 import { loadFavicon } from "./favicon.ts";
 import { RECOMMENDATIONS } from "../catalogue/enrichment-schema.ts";
-import type { SidebarLifecycle, SidebarView } from "./projection.ts";
+import { SIDEBAR_VIEWS, type SidebarLifecycle, type SidebarView } from "./projection.ts";
 import type {
   SessionLifecycleAction,
   SidebarSnapshotMeasurement,
@@ -72,9 +72,12 @@ function isJsonObject(value: JsonValue): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Triage is a view, not a lifecycle; the snapshot maps it back to the active list plus a filter. */
+/** Triage and incognito are views, not lifecycles; the snapshot maps each back to a list plus a filter. */
 function isSidebarView(value: string): value is SidebarView {
-  return value === "active" || value === "completed" || value === "saved" || value === "triage";
+  // Derived from SIDEBAR_VIEWS rather than repeated here. The hand-written list this replaces had
+  // already fallen behind the type: a view could be added, typecheck clean, and still be rejected
+  // at the door with a bad_request the client could not explain.
+  return (SIDEBAR_VIEWS as readonly string[]).includes(value);
 }
 
 function isLifecycleAction(value: JsonValue | undefined): value is SessionLifecycleAction {
@@ -100,6 +103,53 @@ function parseLifecycleRequest(value: JsonValue): Result<LifecycleRequestBody, s
   }
   if (!isLifecycleAction(value.action)) return err("action is invalid");
   return ok({ sessionId, action: value.action });
+}
+
+/** Marking a session incognito. A boolean, so the caller always states which way it is going. */
+function parseIncognitoRequest(
+  value: JsonValue,
+): Result<{ sessionId: string; incognito: boolean }, string> {
+  if (!isJsonObject(value)) return err("request body must be an object");
+  const keys = Object.keys(value);
+  if (
+    keys.length !== 2
+    || !Object.prototype.hasOwnProperty.call(value, "sessionId")
+    || !Object.prototype.hasOwnProperty.call(value, "incognito")
+  ) {
+    return err("request body must contain only sessionId and incognito");
+  }
+  const sessionId = value.sessionId;
+  if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+    return err("sessionId is required");
+  }
+  const incognito = value.incognito;
+  if (typeof incognito !== "boolean") return err("incognito must be a boolean");
+  return ok({ sessionId, incognito });
+}
+
+/**
+ * Destroy requires an explicit `confirm: true` alongside the id.
+ *
+ * Not a security control -- anything that can reach this loopback port can also set a boolean. It
+ * is a shape control: the preflight body is `{ sessionId }`, so no client can destroy by replaying
+ * the request it just used to ask what destroying would do.
+ */
+function parseDestroyRequest(value: JsonValue): Result<{ sessionId: string }, string> {
+  if (!isJsonObject(value)) return err("request body must be an object");
+  const keys = Object.keys(value);
+  if (
+    keys.length !== 2
+    || !Object.prototype.hasOwnProperty.call(value, "sessionId")
+    || !Object.prototype.hasOwnProperty.call(value, "confirm")
+  ) {
+    return err("request body must contain only sessionId and confirm");
+  }
+  const sessionId = value.sessionId;
+  if (typeof sessionId !== "string" || sessionId.trim().length === 0) {
+    return err("sessionId is required");
+  }
+  if (value.confirm !== true) return err("confirm must be true");
+  return ok({ sessionId });
 }
 
 /**
@@ -580,6 +630,96 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           logUnexpected(logger, "sidebar decline request failed", error, {
             sessionId: parsed.value.sessionId,
             verb: parsed.value.verb,
+          });
+          return errorJson("internal_failure");
+        }
+      }
+
+      // Marking a session incognito. Its own endpoint rather than a lifecycle action because a
+      // marked session keeps whatever lifecycle it had -- nothing about where it sits moves.
+      if (url.pathname === "/api/session/incognito" && request.method === "POST") {
+        if (!originIsBound(request, boundHostname, boundPort)) {
+          return errorJson("denied");
+        }
+        let parsed: Result<{ sessionId: string; incognito: boolean }, string>;
+        try {
+          parsed = parseIncognitoRequest((await request.json()) as JsonValue);
+        } catch {
+          return errorJson("bad_request");
+        }
+        if (!parsed.ok) return errorJson("bad_request");
+        try {
+          return actionJson(
+            logger,
+            "incognito",
+            await source.setIncognito(parsed.value.sessionId, parsed.value.incognito),
+            { sessionId: parsed.value.sessionId, incognito: parsed.value.incognito },
+            invalidateSnapshots,
+          );
+        } catch (error) {
+          logUnexpected(logger, "sidebar incognito request failed", error, {
+            sessionId: parsed.value.sessionId,
+          });
+          return errorJson("internal_failure");
+        }
+      }
+
+      // What a destroy would remove. Deliberately separate from the destroy itself, and read-only:
+      // the confirmation dialog needs these figures before the reader decides, and an endpoint
+      // that sometimes deletes is one client typo away from deleting when asked to describe.
+      if (url.pathname === "/api/session/destroy/preflight" && request.method === "POST") {
+        if (!originIsBound(request, boundHostname, boundPort)) {
+          return errorJson("denied");
+        }
+        let sessionId: JsonValue | undefined;
+        try {
+          sessionId = ((await request.json()) as JsonObject).sessionId;
+        } catch {
+          return errorJson("bad_request");
+        }
+        if (typeof sessionId !== "string" || sessionId.length === 0) {
+          return errorJson("bad_request");
+        }
+        try {
+          return actionJson(
+            logger,
+            "destroy-preflight",
+            await source.destroyPreflight(sessionId),
+            { sessionId },
+            // A read changes nothing, so the cached snapshots stay valid.
+            () => {},
+          );
+        } catch (error) {
+          logUnexpected(logger, "sidebar destroy preflight failed", error, { sessionId });
+          return errorJson("internal_failure");
+        }
+      }
+
+      // The irreversible one. `confirm: true` has to be in the body: it is not a security control
+      // -- anything that can reach this port can send it -- but it does mean no client reaches
+      // this path by replaying the preflight body it already had in hand.
+      if (url.pathname === "/api/session/destroy" && request.method === "POST") {
+        if (!originIsBound(request, boundHostname, boundPort)) {
+          return errorJson("denied");
+        }
+        let parsed: Result<{ sessionId: string }, string>;
+        try {
+          parsed = parseDestroyRequest((await request.json()) as JsonValue);
+        } catch {
+          return errorJson("bad_request");
+        }
+        if (!parsed.ok) return errorJson("bad_request");
+        try {
+          return actionJson(
+            logger,
+            "destroy",
+            await source.destroySession(parsed.value.sessionId),
+            { sessionId: parsed.value.sessionId },
+            invalidateSnapshots,
+          );
+        } catch (error) {
+          logUnexpected(logger, "sidebar destroy request failed", error, {
+            sessionId: parsed.value.sessionId,
           });
           return errorJson("internal_failure");
         }

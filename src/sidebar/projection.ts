@@ -203,13 +203,20 @@ export type SidebarScope = SidebarLifecycle;
  * `SidebarLifecycle` means no lifecycle-typed value can ever be handed one, and the catalogue
  * never has to answer a question it has no column for.
  */
-export type SidebarView = SidebarScope | "triage";
+export type SidebarView = SidebarScope | "triage" | "incognito";
 
-export const SIDEBAR_VIEWS: readonly SidebarView[] = ["active", "triage", "completed", "saved"];
+export const SIDEBAR_VIEWS: readonly SidebarView[] =
+  ["active", "triage", "incognito", "completed", "saved"];
 
-/** The lifecycle a view browses. Triage reads the active list, then filters it. */
+/**
+ * The lifecycle a view browses. Triage reads the active list, then filters it.
+ *
+ * Incognito reads the active list for the same reason and one more: a marked session is excluded
+ * from the catalogue's per-lifecycle id lists entirely, so there is no id set to address it by.
+ * The rows it wants are live ones, and live rows come from cmux rather than from those lists.
+ */
 export function lifecycleForView(view: SidebarView): SidebarScope {
-  return view === "triage" ? "active" : view;
+  return view === "triage" || view === "incognito" ? "active" : view;
 }
 
 export interface ProjectionInput {
@@ -235,6 +242,13 @@ export interface ProjectionInput {
   readonly unreadByWorkspaceId?: ReadonlyMap<string, number>;
   /** Cluster membership keyed by canonical session id and resume alias. */
   readonly memberships?: ReadonlyMap<string, SidebarMembership>;
+  /**
+   * Sessions marked incognito, keyed by canonical session id and resume alias.
+   *
+   * Only routes them to their own section. Dropping the ones that are not open is the caller's
+   * job, because the caller is where liveness is read.
+   */
+  readonly incognitoSessionIds?: ReadonlySet<string>;
   /** Enrichment records keyed by canonical session id and resume alias. */
   readonly summaries?: ReadonlyMap<string, StoredEnrichment>;
   /** Versioned category projection keyed by canonical session id and resume alias. */
@@ -264,6 +278,8 @@ export interface ProjectionInput {
   readonly includeLifecycles?: readonly SidebarLifecycle[];
   /** Keep only rows carrying an un-acted enrichment verdict. */
   readonly triageOnly?: boolean;
+  /** Keep only open incognito rows. The incognito view is the active list narrowed to them. */
+  readonly incognitoOnly?: boolean;
   /** Totals per lifecycle, from the catalogue rather than from the rows in view. */
   readonly lifecycleCounts?: Readonly<Record<SidebarLifecycle, number>>;
   /**
@@ -288,7 +304,16 @@ export type SidebarSection =
   | "other"
   /** Lifecycle headings used when Saved or Done is the selected scope. */
   | "completed"
-  | "saved";
+  | "saved"
+  /**
+   * Open incognito sessions, and only those.
+   *
+   * Not a lifecycle: a marked session keeps whatever lifecycle it had. It is here because the
+   * guarantee incognito makes is about history, not about the machine you are sitting at — a
+   * session running in front of you is not a secret from you. The moment it closes it leaves this
+   * section and appears nowhere else, which is the whole of what "for as long as it is open" buys.
+   */
+  | "incognito";
 
 export interface SidebarModel {
   readonly id: string;
@@ -534,6 +559,7 @@ interface ProjectionLookups {
     sessionId: string,
     indexed: IndexedSessionInput | undefined,
   ) => Lifecycle;
+  readonly isIncognito: (sessionId: string, resumeId?: string) => boolean;
   readonly canonicalSessionIdFor: (
     sessionId: string,
     indexed: IndexedSessionInput | undefined,
@@ -631,6 +657,7 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
         ? "saved"
         : "idle");
 
+  const incognitoSessionIds = input.incognitoSessionIds ?? new Set<string>();
   const canonicalSessionIds = input.canonicalSessionIds ?? new Map<string, string>();
   const canonicalSessionIdFor = (
     sessionId: string,
@@ -702,6 +729,8 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
       lifecycleFor,
       catalogueLifecycleFor,
       canonicalSessionIdFor,
+      isIncognito: (sessionId: string, resumeId?: string): boolean =>
+        incognitoSessionIds.has(sessionId) || (resumeId !== undefined && incognitoSessionIds.has(resumeId)),
       unreadFor: (workspaceId: string | null): number =>
         (workspaceId ? unreadByWorkspaceId.get(workspaceId) : 0) ?? 0,
       preferredTitleFor: (sessionId: string, resumeId?: string): string | null =>
@@ -763,10 +792,14 @@ function buildLiveSessionRow(
     status: live.status,
     statusAvailability: live.statusAvailability,
     lastActivityAt: cmuxActivity ?? parseTimestamp(indexed?.lastTs ?? null),
-    section: sectionForLifecycle(
-      liveLifecycle,
-      sectionForStatus(live.status, live.statusAvailability),
-    ),
+    // Incognito overrides the lifecycle section rather than sitting beside it: a marked session
+    // must appear in exactly one place, and "Working" plus "Incognito" would be two.
+    section: lookups.isIncognito(live.sessionId, indexed?.resumeId)
+      ? "incognito"
+      : sectionForLifecycle(
+        liveLifecycle,
+        sectionForStatus(live.status, live.statusAvailability),
+      ),
     workspaceRef: live.workspaceRef,
     pinned: live.pinned,
     focused: live.focused,
@@ -811,7 +844,9 @@ function buildIndexedSessionRow(
     status: null,
     statusAvailability: knownLive ? "absent" : "not-live",
     lastActivityAt: parseTimestamp(session.lastTs),
-    section: sectionForLifecycle(lifecycle, knownLive ? "ready" : "recent"),
+    section: lookups.isIncognito(session.sessionId, session.resumeId)
+      ? "incognito"
+      : sectionForLifecycle(lifecycle, knownLive ? "ready" : "recent"),
     workspaceRef: null,
     pinned: false,
     focused: false,
@@ -946,6 +981,12 @@ function selectHistoryRows(context: ProjectionContext): SidebarRow[] {
 
 /** Apply the final view filter only after selection and capacity decisions are complete. */
 function selectVisibleRows(context: ProjectionContext, rows: readonly SidebarRow[]): SidebarRow[] {
+  if (context.input.incognitoOnly) {
+    // Filtering on the assigned section rather than re-testing the id set: the section is where
+    // "incognito and open" was already decided, so the view cannot disagree with the list it
+    // narrows. A sessionless workspace has no session to be marked and is never one of these.
+    return rows.filter((row) => row.section === "incognito");
+  }
   return context.input.triageOnly
     ? rows.filter((row) => row.kind === "session" && row.suggestion !== null)
     : [...rows];

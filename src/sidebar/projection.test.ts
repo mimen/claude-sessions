@@ -885,3 +885,41 @@ describe("declined verdicts", () => {
     });
   });
 });
+
+describe("incognito sections", () => {
+  test("a live marked session gets its own section instead of a status one", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ sessionId: "hidden" }), live({ sessionId: "seen", workspaceId: "ws-2", workspaceRef: "workspace:2" })],
+      indexed: [indexed({ sessionId: "hidden", resumeId: "hidden" }), indexed({ sessionId: "seen", resumeId: "seen" })],
+      incognitoSessionIds: new Set(["hidden"]),
+    }));
+    const byId = new Map(sessionRows(snapshot.rows).map((row) => [row.sessionId, row]));
+    // The marked one leaves the status queue entirely rather than appearing in both places.
+    expect(byId.get("hidden")?.section).toBe("incognito");
+    expect(byId.get("seen")?.section).not.toBe("incognito");
+    // Lifecycle is untouched: incognito is not a lifecycle and must not read as one.
+    expect(byId.get("hidden")?.lifecycle).toBe("active");
+  });
+
+  test("the incognito view narrows to exactly those rows", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ sessionId: "hidden" }), live({ sessionId: "seen", workspaceId: "ws-2", workspaceRef: "workspace:2" })],
+      indexed: [indexed({ sessionId: "hidden", resumeId: "hidden" }), indexed({ sessionId: "seen", resumeId: "seen" })],
+      incognitoSessionIds: new Set(["hidden"]),
+      incognitoOnly: true,
+    }));
+    expect(sessionRows(snapshot.rows).map((row) => row.sessionId)).toEqual(["hidden"]);
+  });
+
+  test("a marked session that is merely indexed still lands in the section, so the caller's liveness filter is what removes it", () => {
+    // The projection is deliberately not the place that drops closed marked sessions -- liveness
+    // lives in the snapshot layer. This pins the division of labour so a future change cannot
+    // quietly move the guarantee somewhere it would be re-derived from weaker information.
+    const snapshot = projectSidebar(input({
+      indexed: [indexed({ sessionId: "hidden", resumeId: "hidden-resume" })],
+      incognitoSessionIds: new Set(["hidden-resume"]),
+    }));
+    const rows = sessionRows(snapshot.rows);
+    expect(rows.map((row) => row.section)).toEqual(["incognito"]);
+  });
+});
