@@ -11,3 +11,6 @@ tui-go/.bin/
 
 # Swift build products for the native sidebar.
 macos/**/.build/
+
+# Local checkout of cmux's extension SDK, symlinked per machine.
+macos/CmuxExtensionKit
