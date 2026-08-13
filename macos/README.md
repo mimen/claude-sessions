@@ -44,3 +44,17 @@ stay installed: an appex is only available while its container app is.
 Then in cmux: puzzle button beside the sidebar help button, Sidebar Extensions, enable CCS
 Sessions, and choose the extension sidebar provider. The puzzle button appears only while
 `extensions.beta.enabled` is set.
+
+## What it does
+
+Everything the web sidebar does: open or resume on click, hover controls for save/done/close, a
+context menu carrying the verdict and the lifecycle and session commands, destroy behind a
+confirmation that names its descendants, summaries on hover, verdict chips, project icons, scope
+and grouping and filter, three row layouts chosen separately for open and closed sessions,
+clusters, shelvable sections, arrow-key navigation, and notices for unreadable liveness or a
+truncated response.
+
+Two things are natively better rather than merely equivalent. Menus and summary popovers are real
+windows, so they extend past the sidebar's edge instead of being folded back inside it, and the
+list is a `LazyVStack` in a real `ScrollView` rather than four hundred DOM rows re-rendered on a
+one-second poll.
