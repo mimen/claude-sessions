@@ -37,6 +37,7 @@ public struct SessionRowView: View {
     @State private var showingSummary = false
     @State private var hoverTask: Task<Void, Never>?
 
+
     public init(
         row: SidebarRow,
         age: String,
@@ -62,12 +63,7 @@ public struct SessionRowView: View {
             .onHover { inside in
                 hovering = inside
                 hoverTask?.cancel()
-                guard inside else { showingSummary = false; return }
-                // A pause, so sweeping down the list does not strobe cards at every row.
-                hoverTask = Task {
-                    try? await Task.sleep(for: .milliseconds(550))
-                    if !Task.isCancelled { showingSummary = true }
-                }
+                showingSummary = inside
             }
             .popover(isPresented: $showingSummary, arrowEdge: .trailing) {
                 SummaryCard(row: row)
@@ -102,7 +98,7 @@ public struct SessionRowView: View {
                         .lineLimit(1)
                 }
                 if let category = row.category, let label = category.compactLabel {
-                    Text("·").foregroundStyle(.quaternary)
+                    if layout != .threeLine { Text("·").foregroundStyle(.quaternary) }
                     Circle()
                         .fill(Color(hex: category.hex) ?? .secondary)
                         .frame(width: 7, height: 7)
@@ -116,10 +112,8 @@ public struct SessionRowView: View {
                     SuggestionChip(suggestion: suggestion)
                 }
                 Spacer(minLength: 6)
-                if hovering && layout != .threeLine {
-                    hoverControls
-                } else if layout != .compact {
-                    statusAndAge
+                if layout == .wide {
+                    statusAndAge.opacity(hovering ? 0 : 1)
                 }
             }
             .font(.system(size: 10))
@@ -129,16 +123,23 @@ public struct SessionRowView: View {
         .padding(.vertical, 6)
         .frame(height: layout == .threeLine ? 62 : 46, alignment: .center)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .trailing) {
+            if hovering {
+                hoverControls
+                    .padding(.trailing, 10)
+                    .transition(.opacity)
+            }
+        }
         .background(background)
+        // The edge is drawn inside the clip so it takes the row's corner radius instead of
+        // squaring off against it — one shape, not a bar sitting beside a rounded card.
+        .overlay(alignment: .leading) { edge }
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay {
             if isSelected {
                 RoundedRectangle(cornerRadius: 6).strokeBorder(.tertiary, lineWidth: 1)
             }
         }
-        // The left edge marks the open session, or unread when it is some other row. Focus wins:
-        // where a session is matters more than that it has news, and opening it clears the news.
-        .overlay(alignment: .leading) { edge }
     }
 
     /// Only what this row can actually do: a control that is always visible and never able to act
@@ -166,11 +167,7 @@ public struct SessionRowView: View {
             ProjectMark(faviconUrl: row.faviconUrl, muted: row.isGhost, port: port)
             Text(row.directory ?? "—").lineLimit(1)
             Spacer(minLength: 6)
-            if hovering {
-                hoverControls
-            } else {
-                statusAndAge
-            }
+            statusAndAge.opacity(hovering ? 0 : 1)
         }
         .font(.system(size: 10))
         .foregroundStyle(.secondary)
@@ -218,15 +215,21 @@ struct RowActionButton: View {
     let help: String
     let run: () -> Void
 
+    @State private var hovering = false
+
     var body: some View {
         Button(action: run) {
             Image(systemName: symbol)
                 .font(.system(size: 9, weight: .medium))
                 .frame(width: 18, height: 18)
-                .background(Color.primary.opacity(0.10))
+                // Lights up under the pointer: without it there is no way to tell which control a
+                // click is about to hit.
+                .background(Color.primary.opacity(hovering ? 0.24 : 0.10))
                 .clipShape(RoundedRectangle(cornerRadius: 4))
+                .contentShape(RoundedRectangle(cornerRadius: 4))
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
         .help(help)
     }
 }

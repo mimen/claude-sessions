@@ -72,6 +72,11 @@ public struct ActionClient: Sendable {
         var request = URLRequest(url: base.appendingPathComponent(action.path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Every mutating endpoint requires the origin of the address the server bound. A browser
+        // attaches it; URLSession does not, so without this the server refuses every action with
+        // "the sidebar rejected this request". The guard exists to stop a page on another origin
+        // POSTing here, which a native client cannot be tricked into doing.
+        request.setValue(base.absoluteString, forHTTPHeaderField: "Origin")
         request.httpBody = try JSONSerialization.data(withJSONObject: action.body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -90,6 +95,7 @@ public struct ActionClient: Sendable {
         var request = URLRequest(url: base.appendingPathComponent("/api/session/destroy/preflight"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(base.absoluteString, forHTTPHeaderField: "Origin")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["sessionId": sessionId])
         let (data, _) = try await URLSession.shared.data(for: request)
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
