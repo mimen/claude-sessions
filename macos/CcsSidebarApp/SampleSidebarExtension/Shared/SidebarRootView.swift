@@ -21,14 +21,19 @@ public struct SidebarRootView: View {
     @State private var clock = WorkingClock()
     @State private var lastFocusedId: String?
     @State private var modifiers = ModifierMonitor()
-    private let actionClient: ActionClient
+    private let host: HostIdentity?
     private let port: Int
 
-    public init(port: Int = 8788) {
+    public init(port: Int = 8788, host: HostIdentity? = nil) {
         _client = State(initialValue: SnapshotClient(port: port))
-        actionClient = ActionClient(port: port)
+        self.host = host
         self.port = port
     }
+
+    /// Built per call rather than stored, because the client may have moved to another server once
+    /// the host said which cmux it is; an action sent to the previous one would act on the wrong
+    /// window's session.
+    private var actionClient: ActionClient { ActionClient(port: client.port) }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -57,6 +62,7 @@ public struct SidebarRootView: View {
             client.start()
             clock.start()
             modifiers.start()
+            adoptHostServer()
         }
         .onChange(of: scope) { _, next in client.scope = next }
         .onChange(of: grouping) { _, next in Preferences.grouping = next }
@@ -66,6 +72,7 @@ public struct SidebarRootView: View {
             clock.stop()
             modifiers.stop()
         }
+        .onChange(of: host?.workspaceIds ?? []) { _, _ in adoptHostServer() }
         .onChange(of: client.rows) { _, rows in
             clock.observe(rows: rows)
             followExternalFocus(in: rows)
@@ -104,7 +111,7 @@ public struct SidebarRootView: View {
                 actions: actions,
                 grouping: grouping,
                 layouts: layouts,
-                port: port,
+                port: client.port,
                 selection: $selection,
                 clusterFirst: clusterFirst,
                 truncated: client.truncated,
@@ -164,6 +171,13 @@ public struct SidebarRootView: View {
         var labels: [String: String] = [:]
         for (index, row) in rows.prefix(9).enumerated() { labels[row.id] = "⌘\(index + 1)" }
         return labels
+    }
+
+    /// Ask the client to follow whichever cmux is hosting this sidebar.
+    private func adoptHostServer() {
+        guard let host else { return }
+        let ids = host.workspaceIds
+        Task { await client.adopt(hostWorkspaceIds: ids) }
     }
 
     /// Move the selection when something else changed which workspace is focused.

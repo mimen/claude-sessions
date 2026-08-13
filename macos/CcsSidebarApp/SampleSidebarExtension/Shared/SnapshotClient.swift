@@ -23,7 +23,8 @@ public final class SnapshotClient {
         didSet { if scope != oldValue { Task { await refresh(freshLiveness: true) } } }
     }
 
-    private let port: Int
+    /// Settled once the host has said which workspaces it owns; until then the default is used.
+    public private(set) var port: Int
     private let limit: Int
     private let interval: Duration
     private var pollTask: Task<Void, Never>?
@@ -55,6 +56,18 @@ public final class SnapshotClient {
     public func stop() {
         pollTask?.cancel()
         pollTask = nil
+    }
+
+    /// Point at whichever server describes the cmux hosting this sidebar.
+    ///
+    /// Re-run whenever the host's workspaces change, which is the only signal available that the
+    /// sidebar may have been moved to a different cmux.
+    public func adopt(hostWorkspaceIds: Set<String>) async {
+        guard let found = await ServerLocator.locate(hostWorkspaceIds: hostWorkspaceIds),
+              found != port
+        else { return }
+        port = found
+        await refresh(freshLiveness: true)
     }
 
     /// Fetch immediately, telling the server not to answer from its caches.

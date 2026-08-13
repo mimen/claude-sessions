@@ -16,13 +16,18 @@ final class CcsSidebarExtension: @MainActor CmuxSidebarExtension {
         actionScopes: [.selectWorkspace]
     )
 
+    private let host = HostIdentity()
+
     required init() {}
 
     var body: some View {
-        SidebarRootView()
+        SidebarRootView(host: host)
     }
 
-    func update(context: CmuxSidebarContext) {}
+    /// cmux's own workspace list, which is how this extension works out which cmux it is in.
+    func update(context: CmuxSidebarContext) {
+        host.workspaceIds = Set(context.snapshot.workspaces.map { $0.id.uuidString.uppercased() })
+    }
 
     func connectionStatusDidChange(_ status: CmuxSidebarConnectionStatus) {}
 }
