@@ -19,6 +19,7 @@ public struct SidebarRootView: View {
     @State private var selection: String?
     @State private var clusterFirst = false
     @State private var clock = WorkingClock()
+    @State private var lastFocusedId: String?
     @State private var modifiers = ModifierMonitor()
     private let actionClient: ActionClient
     private let port: Int
@@ -65,7 +66,10 @@ public struct SidebarRootView: View {
             clock.stop()
             modifiers.stop()
         }
-        .onChange(of: client.rows) { _, rows in clock.observe(rows: rows) }
+        .onChange(of: client.rows) { _, rows in
+            clock.observe(rows: rows)
+            followExternalFocus(in: rows)
+        }
         .confirmationDialog(
             "Destroy this session?",
             isPresented: Binding(get: { pendingDestroy != nil }, set: { if !$0 { pendingDestroy = nil } }),
@@ -160,6 +164,21 @@ public struct SidebarRootView: View {
         var labels: [String: String] = [:]
         for (index, row) in rows.prefix(9).enumerated() { labels[row.id] = "⌘\(index + 1)" }
         return labels
+    }
+
+    /// Move the selection when something else changed which workspace is focused.
+    ///
+    /// cmux owns Command-number and the tab bar, so a switch can happen without this sidebar ever
+    /// seeing the keystroke. Clicking a row already marks it immediately; this is the other half —
+    /// the list should not keep pointing at the row you were on before you left it.
+    ///
+    /// Only on a change of focus, never on every snapshot: assigning continuously would drag the
+    /// selection back on each poll and make arrow-key navigation impossible to hold.
+    private func followExternalFocus(in rows: [SidebarRow]) {
+        let focused = rows.first(where: \.focused)?.id
+        defer { lastFocusedId = focused }
+        guard let focused, focused != lastFocusedId else { return }
+        selection = focused
     }
 
     /// Command-number opens the row wearing that badge.
