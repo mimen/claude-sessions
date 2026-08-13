@@ -38,6 +38,9 @@ public struct RowActions {
 }
 
 public extension SidebarRow {
+    /// A tab with no session behind it. It can be shown and closed, and nothing else: there is no
+    /// transcript to resume, no lifecycle to move, and no enrichment to act on.
+    var isWorkspaceOnly: Bool { kind == "workspace" }
     var isSaved: Bool { lifecycle == "saved" }
     var isCompleted: Bool { lifecycle == "completed" }
     var isJunk: Bool { summary?.junk == true }

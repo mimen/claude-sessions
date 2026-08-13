@@ -112,7 +112,15 @@ public struct SidebarRootView: View {
 
     private var actions: RowActions {
         RowActions(
-            open: { row in run(.open(sessionId: row.sessionId ?? row.id)) },
+            open: { row in
+                // A workspace row has no session to resume, so opening it means focusing the tab.
+                // Posting its row id to /api/open asked for a session that never existed.
+                if row.isWorkspaceOnly, let workspaceId = row.workspaceId {
+                    run(.focusWorkspace(workspaceId: workspaceId))
+                } else {
+                    run(.open(sessionId: row.sessionId ?? row.id))
+                }
+            },
             lifecycle: { row, action in run(.lifecycle(sessionId: row.sessionId ?? row.id, action: action)) },
             declineSuggestion: { row in
                 guard let verb = row.suggestion?.verb else { return }
@@ -122,7 +130,13 @@ public struct SidebarRootView: View {
                 guard let workspaceId = row.workspaceId else { return }
                 run(.pinWorkspace(workspaceId: workspaceId, pinned: pinned))
             },
-            closeTab: { row in run(.closeSession(sessionId: row.sessionId ?? row.id)) },
+            closeTab: { row in
+                if row.isWorkspaceOnly, let workspaceId = row.workspaceId {
+                    run(.closeWorkspace(workspaceId: workspaceId))
+                } else {
+                    run(.closeSession(sessionId: row.sessionId ?? row.id))
+                }
+            },
             setIncognito: { row, on in run(.incognito(sessionId: row.sessionId ?? row.id, incognito: on)) },
             destroy: { row in confirmDestroy(row) },
             copySummary: { row in copy(summary: row) }

@@ -27,8 +27,17 @@ struct RowContextMenu: View {
             }
         }
 
+        // A workspace-only row has no session, so the lifecycle and session commands would all be
+        // asking the server about something that does not exist.
         Section("Lifecycle") {
-            if !row.isCompleted {
+            if row.isWorkspaceOnly {
+                Button {
+                    actions.closeTab(row)
+                } label: {
+                    Label("Close tab", systemImage: "xmark")
+                }
+                .disabled(row.workspaceId == nil)
+            } else if !row.isCompleted {
                 Button {
                     actions.lifecycle(row, row.isSaved ? "unsave" : "save")
                 } label: {
@@ -54,6 +63,7 @@ struct RowContextMenu: View {
             .disabled(row.workspaceId == nil)
         }
 
+        if row.isWorkspaceOnly { EmptyView() } else {
         Section("Session") {
             if let summary = row.summary {
                 // The whole summary, for a row you are not hovering and for keyboard users.
@@ -89,6 +99,7 @@ struct RowContextMenu: View {
             } label: {
                 Label("Destroy…", systemImage: "trash")
             }
+        }
         }
     }
 }

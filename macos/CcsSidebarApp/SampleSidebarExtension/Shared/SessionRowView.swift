@@ -157,7 +157,7 @@ public struct SessionRowView: View {
     /// is the thing the web sidebar had to remove.
     private var hoverControls: some View {
         HStack(spacing: 4) {
-            if !row.isCompleted {
+            if !row.isCompleted && !row.isWorkspaceOnly {
                 RowActionButton(
                     symbol: row.isSaved ? "bookmark.fill" : "bookmark",
                     help: row.isSaved ? "Move to Active" : "Save for later",
@@ -172,7 +172,9 @@ public struct SessionRowView: View {
                     actions.closeTab(row)
                 }
             }
-            SummaryButton(showing: $showingSummary, row: row)
+            if !row.isWorkspaceOnly {
+                SummaryButton(showing: $showingSummary, row: row)
+            }
         }
     }
 
