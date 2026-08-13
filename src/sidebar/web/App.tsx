@@ -1,9 +1,18 @@
 /**
- * The productivity sidebar.
+ * The productivity sidebar, in the browser.
  *
  * One question, top to bottom: what deserves attention next? Rows are grouped by cmux's own
  * Claude status, then by whether the session is still live. Clicking a row focuses it when it
  * is running and resumes it through CCS when it is not; the browser never decides which.
+ *
+ * FROZEN. `macos/` carries the same sidebar as a native cmux extension, and that is where new
+ * work goes. This one stays because a web view runs anywhere the extension cannot — a cmux
+ * without the extensions beta, another machine, a browser tab — so it remains the fallback and
+ * keeps working. Fix it when it breaks; add features to the native one.
+ *
+ * Both are clients of the same server. Anything that belongs to the projection, the actions or
+ * the catalogue goes in `src/sidebar/*.ts` and both surfaces get it at once; only presentation
+ * lives here.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {

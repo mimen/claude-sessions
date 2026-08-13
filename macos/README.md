@@ -1,7 +1,8 @@
 # CCS native sidebar
 
-A cmux sidebar extension that renders the CCS session list in SwiftUI, alongside the web sidebar
-rather than in place of it.
+A cmux sidebar extension that renders the CCS session list in SwiftUI. This is where sidebar work
+happens now; the web sidebar in `src/sidebar/web` is frozen and kept as the fallback for a cmux
+without the extensions beta, another machine, or a plain browser tab.
 
 It is a client of the sidebar server, not a second implementation. Rows come from
 `http://127.0.0.1:8788/api/snapshot`, which already projects, orders and enriches them, so the
