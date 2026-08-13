@@ -32,12 +32,13 @@ stack; scrolling and menus are checked against the installed extension instead.
 ## Building and installing the extension
 
     ln -sfn <cmux-checkout>/Packages/macOS/CmuxExtensionKit macos/CmuxExtensionKit
-    cd CcsSidebarApp
-    xcodebuild -project SampleSidebarExtensionApp.xcodeproj -scheme SampleSidebarExtensionApp \
-      -configuration Debug -derivedDataPath /tmp/ccs-ext-dd \
-      CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=<team> -allowProvisioningUpdates build
-    cp -R "/tmp/ccs-ext-dd/Build/Products/Debug/CCS Sessions.app" ~/Applications/
-    open "$HOME/Applications/CCS Sessions.app"
+    ./install.sh
+
+Use the script rather than copying by hand. Deleting the installed bundle while cmux is connected
+to the extension inside it leaves cmux holding a handle to something that no longer exists — the
+sidebar shows "Extension Blocked" and Try Again cannot recover it. The script overwrites the
+bundle in place with `ditto`, waits for the appex to re-register, then makes cmux drop the stale
+host by leaving the provider and returning to it.
 
 The SDK is symlinked per machine because it lives in the cmux checkout, not here. The host app must
 stay installed: an appex is only available while its container app is.
