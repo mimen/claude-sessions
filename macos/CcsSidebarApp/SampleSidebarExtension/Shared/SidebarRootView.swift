@@ -172,6 +172,8 @@ public struct SidebarRootView: View {
                 try await actionClient.perform(action)
                 failure = nil
                 pendingDestroy = nil
+                // The list should catch up with the action, not with the next poll.
+                await client.refreshNow()
             } catch let error as ActionFailure {
                 failure = error.message
             } catch {

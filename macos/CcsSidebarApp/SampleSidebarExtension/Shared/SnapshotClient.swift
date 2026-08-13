@@ -20,7 +20,7 @@ public final class SnapshotClient {
     public private(set) var counts: [String: Int] = [:]
     public private(set) var truncated = false
     public var scope: SidebarScope = .active {
-        didSet { if scope != oldValue { Task { await refresh() } } }
+        didSet { if scope != oldValue { Task { await refresh(freshLiveness: true) } } }
     }
 
     private let port: Int
@@ -57,9 +57,22 @@ public final class SnapshotClient {
         pollTask = nil
     }
 
-    private func refresh() async {
+    /// Fetch immediately, telling the server not to answer from its caches.
+    ///
+    /// Called after an action, because the state it changed lives behind two 2.5-second caches —
+    /// the serialized snapshot and the cmux liveness read. Waiting them out is what made closing
+    /// or switching a session take seconds to appear when the action itself was instant.
+    public func refreshNow() async {
+        await refresh(freshLiveness: true)
+    }
+
+    private func refresh(freshLiveness: Bool = false) async {
         do {
-            let (data, _) = try await URLSession.shared.data(from: endpoint)
+            var request = URLRequest(url: endpoint)
+            // The server drops this query's cached representation and re-reads liveness rather
+            // than serving the previous projection.
+            if freshLiveness { request.setValue("1", forHTTPHeaderField: "x-ccs-refresh-liveness") }
+            let (data, _) = try await URLSession.shared.data(for: request)
             let snapshot = try JSONDecoder().decode(SidebarSnapshot.self, from: data)
             rows = snapshot.rows
             counts = snapshot.lifecycleCounts ?? [:]
