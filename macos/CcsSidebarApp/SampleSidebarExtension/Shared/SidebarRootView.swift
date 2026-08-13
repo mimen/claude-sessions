@@ -20,6 +20,7 @@ public struct SidebarRootView: View {
     @State private var clusterFirst = false
     @State private var clock = WorkingClock()
     @State private var lastFocusedId: String?
+    @State private var serverOverride: Int?
     @State private var modifiers = ModifierMonitor()
     private let host: HostIdentity?
     private let port: Int
@@ -43,6 +44,9 @@ public struct SidebarRootView: View {
                 query: $query,
                 layouts: $layouts,
                 clusterFirst: $clusterFirst,
+                serverOverride: $serverOverride,
+                activePort: client.port,
+                adopted: client.adopted,
                 counts: client.counts
             )
             Divider()
@@ -79,6 +83,7 @@ public struct SidebarRootView: View {
             modifiers.stop()
         }
         .onChange(of: host?.workspaceIds ?? []) { _, _ in adoptHostServer() }
+        .onChange(of: serverOverride) { _, next in client.pinnedPort = next }
         .onChange(of: client.rows) { _, rows in
             clock.observe(rows: rows)
             followExternalFocus(in: rows)

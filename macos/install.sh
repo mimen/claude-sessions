@@ -8,7 +8,9 @@
 set -euo pipefail
 
 TEAM="${CCS_SIGNING_TEAM:-458KZD965T}"
-DOMAIN="${CCS_CMUX_DOMAIN:-com.cmuxterm.app.staging.ccs}"
+# Every cmux build that might be hosting the extension. A reload that touches only one leaves the
+# others running the previous build while reporting success, which is worse than not reloading.
+DOMAINS=(${CCS_CMUX_DOMAINS:-com.cmuxterm.app com.cmuxterm.app.staging.ccs})
 APP_NAME="CCS Sessions.app"
 DERIVED="${TMPDIR:-/tmp}/ccs-ext-dd"
 INSTALLED="$HOME/Applications/$APP_NAME"
@@ -37,12 +39,15 @@ for _ in $(seq 1 30); do
   sleep 0.5
 done
 
-# Make cmux drop the stale host and build a new one: leave the provider and come back to it.
-CURRENT=$(defaults read "$DOMAIN" cmuxExtensionSidebar.providerId 2>/dev/null || echo "cmux.sidebar.default")
-if [[ "$CURRENT" == "cmux.sidebar.extensions" ]]; then
-  defaults write "$DOMAIN" cmuxExtensionSidebar.providerId -string "cmux.sidebar.default"
+# Make each cmux showing the extension drop its stale host and build a new one: leave the provider
+# and come back to it.
+for domain in "${DOMAINS[@]}"; do
+  current=$(defaults read "$domain" cmuxExtensionSidebar.providerId 2>/dev/null || echo "")
+  [[ "$current" == "cmux.sidebar.extensions" ]] || continue
+  defaults write "$domain" cmuxExtensionSidebar.providerId -string "cmux.sidebar.default"
   sleep 1
-  defaults write "$DOMAIN" cmuxExtensionSidebar.providerId -string "cmux.sidebar.extensions"
-fi
+  defaults write "$domain" cmuxExtensionSidebar.providerId -string "cmux.sidebar.extensions"
+  echo "reloaded $domain"
+done
 
 echo "installed: $(pluginkit -m -p com.cmuxterm.app.cmux.sidebar 2>/dev/null | tr -d ' ')"

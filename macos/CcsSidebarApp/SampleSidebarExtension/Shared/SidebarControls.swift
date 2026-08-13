@@ -54,6 +54,9 @@ public struct SidebarHeader: View {
     @Binding var query: String
     @Binding var layouts: RowLayouts
     @Binding var clusterFirst: Bool
+    @Binding var serverOverride: Int?
+    let activePort: Int
+    let adopted: Bool
     let counts: [String: Int]
 
     public init(
@@ -62,6 +65,9 @@ public struct SidebarHeader: View {
         query: Binding<String>,
         layouts: Binding<RowLayouts>,
         clusterFirst: Binding<Bool>,
+        serverOverride: Binding<Int?>,
+        activePort: Int,
+        adopted: Bool,
         counts: [String: Int]
     ) {
         _scope = scope
@@ -69,6 +75,9 @@ public struct SidebarHeader: View {
         _query = query
         _layouts = layouts
         _clusterFirst = clusterFirst
+        _serverOverride = serverOverride
+        self.activePort = activePort
+        self.adopted = adopted
         self.counts = counts
     }
 
@@ -123,6 +132,20 @@ public struct SidebarHeader: View {
                     Section("Open sessions") {
                         Picker("", selection: $layouts.open) {
                             ForEach(RowLayout.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.inline)
+                        .labelsHidden()
+                    }
+                    Section("Window") {
+                        // Detection can only work if cmux tells the extension which workspaces it
+                        // owns. This is the way out when it does not, and the way to check what
+                        // the sidebar decided when it did.
+                        Picker("", selection: $serverOverride) {
+                            Text(adopted ? "Automatic (\(activePort))" : "Automatic (unmatched)")
+                                .tag(Int?.none)
+                            ForEach(ServerLocator.candidates, id: \.self) { port in
+                                Text("Port \(port)").tag(Int?.some(port))
+                            }
                         }
                         .pickerStyle(.inline)
                         .labelsHidden()

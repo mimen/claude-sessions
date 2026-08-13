@@ -73,7 +73,18 @@ public final class SnapshotClient {
     ///
     /// Re-run whenever the host's workspaces change, which is the only signal available that the
     /// sidebar may have been moved to a different cmux.
+    /// A port chosen by hand, which stops detection from moving the client afterwards.
+    public var pinnedPort: Int? {
+        didSet {
+            guard let pinnedPort, pinnedPort != port else { return }
+            port = pinnedPort
+            adopted = true
+            Task { await refresh(freshLiveness: true) }
+        }
+    }
+
     public func adopt(hostWorkspaceIds: Set<String>) async {
+        guard pinnedPort == nil else { return }
         guard let match = await ServerLocator.locate(hostWorkspaceIds: hostWorkspaceIds) else { return }
         adopted = true
         guard match.port != port else { return }
