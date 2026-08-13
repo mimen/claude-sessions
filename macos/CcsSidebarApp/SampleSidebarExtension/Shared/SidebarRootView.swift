@@ -84,6 +84,12 @@ public struct SidebarRootView: View {
         }
         .onChange(of: host?.workspaceIds ?? []) { _, _ in adoptHostServer() }
         .onChange(of: serverOverride) { _, next in client.pinnedPort = next }
+        .onChange(of: client.adoptionGeneration) { _, _ in
+            // The previous server's rows are gone; a selection pointing into them would keep a
+            // row highlighted that this window has never opened.
+            selection = nil
+            lastFocusedId = nil
+        }
         .onChange(of: client.rows) { _, rows in
             clock.observe(rows: rows)
             followExternalFocus(in: rows)
@@ -186,8 +192,12 @@ public struct SidebarRootView: View {
 
     /// Ask the client to follow whichever cmux is hosting this sidebar.
     private func adoptHostServer() {
-        guard let host else { return }
+        guard let host else {
+            Diagnostics.note("adoptHostServer: no host identity")
+            return
+        }
         let ids = host.workspaceIds
+        Diagnostics.note("adoptHostServer: host reports \(ids.count) workspaces")
         client.hostWorkspaceIds = ids
         Task { await client.adopt(hostWorkspaceIds: ids) }
     }

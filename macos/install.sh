@@ -29,6 +29,10 @@ BUILT="$DERIVED/Build/Products/Debug/$APP_NAME"
 # Quit the host, then overwrite in place. `ditto` replaces contents without unlinking the bundle
 # directory itself, so anything holding the path keeps resolving it.
 pkill -f "$APP_NAME/Contents/MacOS" 2>/dev/null || true
+# And the extension process itself. Bouncing the provider rebuilds cmux's host but reuses a running
+# appex, so a new build can be installed, registered and reported successfully while every window
+# keeps executing the previous one — which is indistinguishable from a fix that did not work.
+pkill -f "CCS Sessions Extension.appex" 2>/dev/null || true
 mkdir -p "$HOME/Applications"
 ditto "$BUILT" "$INSTALLED"
 open "$INSTALLED"

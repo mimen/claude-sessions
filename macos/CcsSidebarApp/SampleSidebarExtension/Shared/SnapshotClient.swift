@@ -27,6 +27,9 @@ public final class SnapshotClient {
     public private(set) var port: Int
     /// True once a server has been matched to the hosting cmux, rather than assumed.
     public private(set) var adopted = false
+    /// Bumped whenever the client moves to a different server, so callers can drop state that
+    /// belonged to the previous one — a selected row id from another cmux means nothing here.
+    public private(set) var adoptionGeneration = 0
     private let limit: Int
     private let interval: Duration
     private var pollTask: Task<Void, Never>?
@@ -85,10 +88,15 @@ public final class SnapshotClient {
 
     public func adopt(hostWorkspaceIds: Set<String>) async {
         guard pinnedPort == nil else { return }
-        guard let match = await ServerLocator.locate(hostWorkspaceIds: hostWorkspaceIds) else { return }
+        guard let match = await ServerLocator.locate(hostWorkspaceIds: hostWorkspaceIds) else {
+            Diagnostics.note("adopt: no match for \(hostWorkspaceIds.count) host workspaces")
+            return
+        }
+        Diagnostics.note("adopt: port \(match.port) shares \(match.shared) workspaces")
         adopted = true
         guard match.port != port else { return }
         port = match.port
+        adoptionGeneration &+= 1
         await refresh(freshLiveness: true)
     }
 
@@ -110,6 +118,8 @@ public final class SnapshotClient {
             let (data, _) = try await URLSession.shared.data(for: request)
             let snapshot = try JSONDecoder().decode(SidebarSnapshot.self, from: data)
             rows = snapshot.rows
+            let focused = snapshot.rows.first(where: { $0.focused })?.name ?? "none"
+            Diagnostics.note("refresh: port=\(port) rows=\(snapshot.rows.count) focused=\(focused)")
             counts = snapshot.lifecycleCounts ?? [:]
             truncated = snapshot.hasMoreRows ?? false
             livenessReadable = snapshot.livenessReadable

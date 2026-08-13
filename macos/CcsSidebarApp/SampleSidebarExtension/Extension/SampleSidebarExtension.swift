@@ -26,7 +26,12 @@ final class CcsSidebarExtension: @MainActor CmuxSidebarExtension {
 
     /// cmux's own workspace list, which is how this extension works out which cmux it is in.
     func update(context: CmuxSidebarContext) {
-        host.workspaceIds = Set(context.snapshot.workspaces.map { $0.id.uuidString.uppercased() })
+        let ids = Set(context.snapshot.workspaces.map { $0.id.uuidString.uppercased() })
+        host.workspaceIds = ids
+        Diagnostics.note(
+            "update: workspaces=\(ids.count) scopes=\(context.grantedReadScopes.map(\.rawValue).sorted()) "
+            + "first=\(ids.sorted().first ?? "none")"
+        )
     }
 
     func connectionStatusDidChange(_ status: CmuxSidebarConnectionStatus) {}
