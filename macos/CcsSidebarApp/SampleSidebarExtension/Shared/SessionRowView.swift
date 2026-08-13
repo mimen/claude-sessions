@@ -37,7 +37,6 @@ public struct SessionRowView: View {
 
     @State private var hovering = false
     @State private var showingSummary = false
-    @State private var hoverTask: Task<Void, Never>?
 
 
     public init(
@@ -68,11 +67,7 @@ public struct SessionRowView: View {
             .onTapGesture { actions.open(row) }
             .onHover { inside in
                 hovering = inside
-                hoverTask?.cancel()
-                showingSummary = inside
-            }
-            .popover(isPresented: $showingSummary, arrowEdge: .trailing) {
-                SummaryCard(row: row)
+                if !inside { showingSummary = false }
             }
             // A native menu, so it is free to extend past the sidebar's edge — the constraint the
             // web version could never escape, being painted inside a web view's own viewport.
@@ -177,6 +172,7 @@ public struct SessionRowView: View {
                     actions.closeTab(row)
                 }
             }
+            SummaryButton(showing: $showingSummary, row: row)
         }
     }
 
@@ -225,6 +221,35 @@ public struct SessionRowView: View {
         } else if row.unread > 0 {
             Rectangle().fill(Color(hex: "#4C8DFF") ?? .blue).frame(width: 2)
         }
+    }
+}
+
+/// The summary, opened from its own control rather than from the row.
+///
+/// Hovering the row was too broad a trigger: reading the list means sweeping the pointer down it,
+/// and a card appearing under the pointer mid-sweep covers the rows being read. Reaching this
+/// control is deliberate, so it opens with no delay at all.
+struct SummaryButton: View {
+    @Binding var showing: Bool
+    let row: SidebarRow
+
+    @State private var hovering = false
+
+    var body: some View {
+        Image(systemName: "text.alignleft")
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(hovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .frame(width: 18, height: 18)
+            .background(Color.primary.opacity(hovering ? 0.24 : 0.10))
+            .contentShape(Rectangle())
+            .onHover { inside in
+                hovering = inside
+                showing = inside
+            }
+            .popover(isPresented: $showing, arrowEdge: .trailing) {
+                SummaryCard(row: row)
+            }
+            .help("Summary")
     }
 }
 
