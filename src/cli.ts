@@ -83,6 +83,7 @@ Usage:
   ccs launcher install  Install the CCS shim, named wrappers, and shell initialization
   ccs doctor sessions [--json]  Report post-rollout unclassified or provenance-missing sessions
   ccs doctor launcher [--json]  Report deployed-vs-origin and installed-vs-config launcher drift
+  ccs doctor categories [--json] [--deep]  Report life-domain category drift across every surface
 
 Identities (durable, per-work-unit — ADR-0089):
   ccs identity mint <key> --cluster=<c> --role=<r> [--grouping=<g>]

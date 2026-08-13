@@ -7,6 +7,8 @@ import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { buildSessionIntegrityReport } from "./session-integrity.ts";
 import { collectLauncherDrift } from "./launcher-drift-io.ts";
 import { launcherDriftExitCode, renderLauncherDriftReport } from "./launcher-drift.ts";
+import { collectCategoryHealth } from "./category-health-io.ts";
+import { categoryHealthExitCode, renderCategoryHealthReport } from "./category-health.ts";
 
 /**
  * `ccs doctor launcher` — report-only drift between what is DEPLOYED/INSTALLED and what the
@@ -19,10 +21,26 @@ function launcherDoctor(args: readonly string[]): number {
   return launcherDriftExitCode(report);
 }
 
+/**
+ * `ccs doctor categories` — one signal for the whole category contract, so a loop, a hook
+ * or a human can branch on the same check instead of each rebuilding its own.
+ */
+function categoryDoctor(args: readonly string[]): number {
+  const report = collectCategoryHealth({ deep: args.includes("--deep") });
+  if (args.includes("--json")) console.log(JSON.stringify(report, null, 2));
+  else console.log(renderCategoryHealthReport(report));
+  return categoryHealthExitCode(report);
+}
+
 export function doctorCommand(args: readonly string[]): number {
   if (args[0] === "launcher") return launcherDoctor(args.slice(1));
+  if (args[0] === "categories") return categoryDoctor(args.slice(1));
   if (args[0] !== "sessions") {
-    console.error("usage: ccs doctor sessions [--json]\n       ccs doctor launcher [--json]");
+    console.error(
+      "usage: ccs doctor sessions [--json]\n" +
+        "       ccs doctor launcher [--json]\n" +
+        "       ccs doctor categories [--json] [--deep]",
+    );
     return 2;
   }
   if (!existsSync(DB_PATH())) {
