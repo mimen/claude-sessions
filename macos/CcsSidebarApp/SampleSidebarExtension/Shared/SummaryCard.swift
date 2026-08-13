@@ -70,20 +70,20 @@ struct SuggestionChip: View {
 
     private var tint: Color {
         switch suggestion.verb {
-        case "complete", "archive": return .green
-        case "handoff": return .secondary
-        default: return .blue
+        case "complete", "archive": return Color(red: 0.42, green: 0.72, blue: 0.50)
+        case "handoff": return Color(red: 0.60, green: 0.62, blue: 0.66)
+        default: return Color(red: 0.40, green: 0.60, blue: 0.90)
         }
     }
 
     var body: some View {
         Text(label)
-            .font(.system(size: 9, weight: .medium))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(tint.opacity(0.20))
+            .font(.system(size: 9))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 0.5)
+            .background(tint.opacity(0.16))
             .foregroundStyle(tint)
-            .clipShape(RoundedRectangle(cornerRadius: 3))
+            .clipShape(Rectangle())
     }
 }
 

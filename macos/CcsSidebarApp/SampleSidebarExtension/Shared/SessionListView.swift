@@ -17,6 +17,8 @@ public struct SessionListView: View {
     private let selection: Binding<String?>?
     private let clusterFirst: Bool
     private let truncated: Bool
+    private let clock: WorkingClock
+    private let jumpLabels: [String: String]
     @State private var collapsed: Set<String> = []
     @FocusState private var listFocused: Bool
 
@@ -30,7 +32,9 @@ public struct SessionListView: View {
         port: Int = 8788,
         selection: Binding<String?>? = nil,
         clusterFirst: Bool = false,
-        truncated: Bool = false
+        truncated: Bool = false,
+        clock: WorkingClock,
+        jumpLabels: [String: String] = [:]
     ) {
         self.rows = rows
         self.actions = actions
@@ -42,6 +46,8 @@ public struct SessionListView: View {
         self.selection = selection
         self.clusterFirst = clusterFirst
         self.truncated = truncated
+        self.clock = clock
+        self.jumpLabels = jumpLabels
     }
 
     private var sections: [(name: String, rows: [SidebarRow])] {
@@ -86,7 +92,7 @@ public struct SessionListView: View {
 
     private var listBody: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 6, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(alignment: .leading, spacing: 6) {
                 ForEach(sections, id: \.name) { section in
                     Section {
                         ForEach(collapsed.contains(section.name) ? [] : section.rows) { row in
@@ -96,7 +102,9 @@ public struct SessionListView: View {
                                 actions: actions,
                                 isSelected: row.id == (selection?.wrappedValue ?? selectedId),
                                 layout: layouts.layout(for: row),
-                                port: port
+                                port: port,
+                                workingFor: clock.elapsed(for: row),
+                                jumpLabel: jumpLabels[row.id]
                             )
                             .id(row.id)
                         }
@@ -114,8 +122,8 @@ public struct SessionListView: View {
                         }
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(.background)
+                        .padding(.top, 10)
+                        .padding(.bottom, 2)
                         .contentShape(Rectangle())
                         // Shelving a section is a standing choice about how much you want to see,
                         // so its count stays visible while its rows are away.

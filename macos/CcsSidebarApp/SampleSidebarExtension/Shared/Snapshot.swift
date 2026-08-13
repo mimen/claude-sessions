@@ -6,30 +6,30 @@ import Foundation
 /// exists to read that projection, not to re-derive it, so a field belongs here only when a view
 /// draws it. Everything is optional that the server can legitimately omit — a row with no model
 /// is a closed session, not a decoding failure.
-public struct SidebarRow: Decodable, Identifiable, Sendable {
-    public struct Status: Decodable, Sendable {
+public struct SidebarRow: Decodable, Identifiable, Sendable, Equatable {
+    public struct Status: Decodable, Sendable, Equatable {
         public let label: String
         public let icon: String?
         public let color: String?
     }
 
-    public struct Model: Decodable, Sendable {
+    public struct Model: Decodable, Sendable, Equatable {
         public let label: String
         public let color: String?
     }
 
     /// Which cluster and role a delegated session belongs to, when it belongs to one.
-    public struct Membership: Decodable, Sendable {
+    public struct Membership: Decodable, Sendable, Equatable {
         public let cluster: String?
         public let role: String?
     }
 
-    public struct Category: Decodable, Sendable {
+    public struct Category: Decodable, Sendable, Equatable {
         public let compactLabel: String?
         public let hex: String?
     }
 
-    public struct Suggestion: Decodable, Sendable {
+    public struct Suggestion: Decodable, Sendable, Equatable {
         public let verb: String
         public let actionable: Bool
         public let reason: String?
@@ -37,7 +37,7 @@ public struct SidebarRow: Decodable, Identifiable, Sendable {
     }
 
     /// The enrichment's account of the session, and how far it has aged.
-    public struct Summary: Decodable, Sendable {
+    public struct Summary: Decodable, Sendable, Equatable {
         public let state: String?
         public let history: String?
         public let next: String?

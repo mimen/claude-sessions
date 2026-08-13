@@ -32,6 +32,8 @@ public struct SessionRowView: View {
     public let isSelected: Bool
     public let layout: RowLayout
     public let port: Int
+    public let workingFor: String?
+    public let jumpLabel: String?
 
     @State private var hovering = false
     @State private var showingSummary = false
@@ -44,7 +46,9 @@ public struct SessionRowView: View {
         actions: RowActions,
         isSelected: Bool = false,
         layout: RowLayout = .wide,
-        port: Int = 8788
+        port: Int = 8788,
+        workingFor: String? = nil,
+        jumpLabel: String? = nil
     ) {
         self.row = row
         self.age = age
@@ -52,6 +56,8 @@ public struct SessionRowView: View {
         self.isSelected = isSelected
         self.layout = layout
         self.port = port
+        self.workingFor = workingFor
+        self.jumpLabel = jumpLabel
     }
 
     private var titleWeight: Font.Weight { row.section == "needs-you" ? .medium : .regular }
@@ -124,6 +130,16 @@ public struct SessionRowView: View {
         .frame(height: layout == .threeLine ? 62 : 46, alignment: .center)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .trailing) {
+            if let jumpLabel, !hovering {
+                Text(jumpLabel)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.background.opacity(0.95))
+                    .overlay(Capsule().strokeBorder(.quaternary))
+                    .clipShape(Capsule())
+                    .padding(.trailing, 10)
+            }
             if hovering {
                 hoverControls
                     .padding(.trailing, 10)
@@ -134,10 +150,10 @@ public struct SessionRowView: View {
         // The edge is drawn inside the clip so it takes the row's corner radius instead of
         // squaring off against it — one shape, not a bar sitting beside a rounded card.
         .overlay(alignment: .leading) { edge }
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(Rectangle())
         .overlay {
             if isSelected {
-                RoundedRectangle(cornerRadius: 6).strokeBorder(.tertiary, lineWidth: 1)
+                Rectangle().strokeBorder(.tertiary, lineWidth: 1)
             }
         }
     }
@@ -149,14 +165,17 @@ public struct SessionRowView: View {
             if !row.isCompleted {
                 RowActionButton(
                     symbol: row.isSaved ? "bookmark.fill" : "bookmark",
-                    help: row.isSaved ? "Move to Active" : "Save for later"
+                    help: row.isSaved ? "Move to Active" : "Save for later",
+                    tint: .orange
                 ) { actions.lifecycle(row, row.isSaved ? "unsave" : "save") }
-                RowActionButton(symbol: "checkmark", help: "Mark done") {
+                RowActionButton(symbol: "checkmark", help: "Mark done", tint: .green) {
                     actions.lifecycle(row, "complete")
                 }
             }
             if row.hasTab {
-                RowActionButton(symbol: "xmark", help: "Close tab") { actions.closeTab(row) }
+                RowActionButton(symbol: "xmark", help: "Close tab", tint: .red) {
+                    actions.closeTab(row)
+                }
             }
         }
     }
@@ -184,7 +203,7 @@ public struct SessionRowView: View {
                         .foregroundStyle(Color(hex: status.color) ?? .secondary)
                 }
             }
-            Text(age).monospacedDigit()
+            Text(workingFor ?? age).monospacedDigit()
         }
         .font(.system(size: 10))
         .foregroundStyle(.secondary)
@@ -213,6 +232,7 @@ public struct SessionRowView: View {
 struct RowActionButton: View {
     let symbol: String
     let help: String
+    let tint: Color
     let run: () -> Void
 
     @State private var hovering = false
@@ -221,12 +241,12 @@ struct RowActionButton: View {
         Button(action: run) {
             Image(systemName: symbol)
                 .font(.system(size: 9, weight: .medium))
+                // Colour carries the meaning at rest; the pointer makes the target unmistakable.
+                .foregroundStyle(hovering ? AnyShapeStyle(tint) : AnyShapeStyle(tint.opacity(0.75)))
                 .frame(width: 18, height: 18)
-                // Lights up under the pointer: without it there is no way to tell which control a
-                // click is about to hit.
-                .background(Color.primary.opacity(hovering ? 0.24 : 0.10))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .contentShape(RoundedRectangle(cornerRadius: 4))
+                .background(tint.opacity(hovering ? 0.28 : 0.12))
+                .clipShape(Rectangle())
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }

@@ -18,6 +18,8 @@ public struct SidebarRootView: View {
     @State private var layouts = RowLayouts()
     @State private var selection: String?
     @State private var clusterFirst = false
+    @State private var clock = WorkingClock()
+    @State private var modifiers = ModifierMonitor()
     private let actionClient: ActionClient
     private let port: Int
 
@@ -52,11 +54,18 @@ public struct SidebarRootView: View {
         .onAppear {
             restorePreferences()
             client.start()
+            clock.start()
+            modifiers.start()
         }
         .onChange(of: scope) { _, next in client.scope = next }
         .onChange(of: grouping) { _, next in Preferences.grouping = next }
         .onChange(of: layouts) { _, next in Preferences.layouts = next }
-        .onDisappear { client.stop() }
+        .onDisappear {
+            client.stop()
+            clock.stop()
+            modifiers.stop()
+        }
+        .onChange(of: client.rows) { _, rows in clock.observe(rows: rows) }
         .confirmationDialog(
             "Destroy this session?",
             isPresented: Binding(get: { pendingDestroy != nil }, set: { if !$0 { pendingDestroy = nil } }),
@@ -94,7 +103,9 @@ public struct SidebarRootView: View {
                 port: port,
                 selection: $selection,
                 clusterFirst: clusterFirst,
-                truncated: client.truncated
+                truncated: client.truncated,
+                clock: clock,
+                jumpLabels: jumpLabels(for: visible)
             )
         }
     }
@@ -116,6 +127,23 @@ public struct SidebarRootView: View {
             destroy: { row in confirmDestroy(row) },
             copySummary: { row in copy(summary: row) }
         )
+    }
+
+    /// Command-number jumps, offered only for the first nine rows on screen.
+    ///
+    /// Numbered by position rather than by the server's own shortcut field: what ⌘3 should open is
+    /// the third row you can see, and the stored shortcut belongs to a workspace that may be
+    /// filtered out or sorted elsewhere.
+    private func jumpLabels(for rows: [SidebarRow]) -> [String: String] {
+        guard modifiers.commandHeld else { return [:] }
+        var labels: [String: String] = [:]
+        for (index, row) in rows.prefix(9).enumerated() { labels[row.id] = "⌘\(index + 1)" }
+        return labels
+    }
+
+    private func jump(to index: Int, in rows: [SidebarRow]) {
+        guard rows.indices.contains(index) else { return }
+        actions.open(rows[index])
     }
 
     private func restorePreferences() {
