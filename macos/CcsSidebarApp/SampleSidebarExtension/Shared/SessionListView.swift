@@ -19,6 +19,7 @@ public struct SessionListView: View {
     private let truncated: Bool
     private let clock: WorkingClock
     private let jumpLabels: [String: String]
+    private let onJump: (Int) -> Void
     @State private var collapsed: Set<String> = []
     @FocusState private var listFocused: Bool
 
@@ -34,7 +35,8 @@ public struct SessionListView: View {
         clusterFirst: Bool = false,
         truncated: Bool = false,
         clock: WorkingClock,
-        jumpLabels: [String: String] = [:]
+        jumpLabels: [String: String] = [:],
+        onJump: @escaping (Int) -> Void = { _ in }
     ) {
         self.rows = rows
         self.actions = actions
@@ -48,6 +50,7 @@ public struct SessionListView: View {
         self.truncated = truncated
         self.clock = clock
         self.jumpLabels = jumpLabels
+        self.onJump = onJump
     }
 
     private var sections: [(name: String, rows: [SidebarRow])] {
@@ -77,6 +80,14 @@ public struct SessionListView: View {
                 .onAppear { listFocused = true }
                 .onKeyPress(.upArrow) { move(by: -1); return .handled }
                 .onKeyPress(.downArrow) { move(by: 1); return .handled }
+                // The badges promised these; without a handler they were decoration.
+                .onKeyPress(phases: .down) { press in
+                    guard press.modifiers.contains(.command),
+                          let digit = Int(press.characters), (1...9).contains(digit)
+                    else { return .ignored }
+                    onJump(digit - 1)
+                    return .handled
+                }
                 .onKeyPress(.return) {
                     if let id = selection?.wrappedValue, let row = navigable.first(where: { $0.id == id }) {
                         actions.open(row)

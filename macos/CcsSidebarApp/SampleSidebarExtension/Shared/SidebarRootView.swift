@@ -105,7 +105,8 @@ public struct SidebarRootView: View {
                 clusterFirst: clusterFirst,
                 truncated: client.truncated,
                 clock: clock,
-                jumpLabels: jumpLabels(for: visible)
+                jumpLabels: jumpLabels(for: visible),
+                onJump: { index in jump(to: index, in: visible) }
             )
         }
     }
@@ -113,6 +114,12 @@ public struct SidebarRootView: View {
     private var actions: RowActions {
         RowActions(
             open: { row in
+                // Selection is set here, before the request, and it is what makes a click feel
+                // instant. `focused` is cmux's own state and only turns true once cmux has
+                // actually switched, which is why waiting for it looked broken and clicking twice
+                // looked fine — the second click landed after the switch. Selection says "this is
+                // the row you picked", which is true the moment you pick it.
+                selection = row.id
                 // A workspace row has no session to resume, so opening it means focusing the tab.
                 // Posting its row id to /api/open asked for a session that never existed.
                 if row.isWorkspaceOnly, let workspaceId = row.workspaceId {
@@ -155,7 +162,8 @@ public struct SidebarRootView: View {
         return labels
     }
 
-    private func jump(to index: Int, in rows: [SidebarRow]) {
+    /// Command-number opens the row wearing that badge.
+    func jump(to index: Int, in rows: [SidebarRow]) {
         guard rows.indices.contains(index) else { return }
         actions.open(rows[index])
     }

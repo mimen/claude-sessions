@@ -151,11 +151,7 @@ public struct SessionRowView: View {
         // squaring off against it — one shape, not a bar sitting beside a rounded card.
         .overlay(alignment: .leading) { edge }
         .clipShape(Rectangle())
-        .overlay {
-            if isSelected {
-                Rectangle().strokeBorder(.tertiary, lineWidth: 1)
-            }
-        }
+
     }
 
     /// Only what this row can actually do: a control that is always visible and never able to act
@@ -214,7 +210,8 @@ public struct SessionRowView: View {
 
     private var background: some View {
         Group {
-            if row.focused { Color.primary.opacity(0.12) }
+            if isSelected { Color.accentColor.opacity(0.22) }
+            else if row.focused { Color.primary.opacity(0.12) }
             else if hovering { Color.primary.opacity(0.10) }
             else if row.isGhost { Color.clear }
             else { Color.primary.opacity(0.06) }
@@ -223,7 +220,9 @@ public struct SessionRowView: View {
 
     @ViewBuilder
     private var edge: some View {
-        if row.focused {
+        if isSelected {
+            Rectangle().fill(Color.accentColor).frame(width: 2)
+        } else if row.focused {
             Rectangle().fill(.primary).frame(width: 2)
         } else if row.unread > 0 {
             Rectangle().fill(Color(hex: "#4C8DFF") ?? .blue).frame(width: 2)
