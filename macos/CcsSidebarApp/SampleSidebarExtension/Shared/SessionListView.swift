@@ -135,6 +135,7 @@ public struct SessionListView: View {
                 }
             }
             .padding(8)
+            .background(OverlayScrollers().frame(width: 0, height: 0))
 
             if truncated {
                 // A list that silently stopped is worse than one that says it did.
