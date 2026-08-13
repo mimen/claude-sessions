@@ -46,6 +46,12 @@ public struct SidebarRootView: View {
                 counts: client.counts
             )
             Divider()
+            if host != nil && !client.adopted {
+                NoticeBar(
+                    symbol: "questionmark.circle",
+                    message: "Showing port \(client.port) — this window's cmux has not been identified yet."
+                )
+            }
             if !client.livenessReadable {
                 NoticeBar(
                     symbol: "bolt.horizontal.circle",
@@ -177,6 +183,7 @@ public struct SidebarRootView: View {
     private func adoptHostServer() {
         guard let host else { return }
         let ids = host.workspaceIds
+        client.hostWorkspaceIds = ids
         Task { await client.adopt(hostWorkspaceIds: ids) }
     }
 

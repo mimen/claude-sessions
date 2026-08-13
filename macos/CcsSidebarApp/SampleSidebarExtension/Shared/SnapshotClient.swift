@@ -25,6 +25,8 @@ public final class SnapshotClient {
 
     /// Settled once the host has said which workspaces it owns; until then the default is used.
     public private(set) var port: Int
+    /// True once a server has been matched to the hosting cmux, rather than assumed.
+    public private(set) var adopted = false
     private let limit: Int
     private let interval: Duration
     private var pollTask: Task<Void, Never>?
@@ -48,6 +50,7 @@ public final class SnapshotClient {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
+                await self?.retryAdoptionIfUnmatched()
                 try? await Task.sleep(for: self?.interval ?? .seconds(1))
             }
         }
@@ -58,15 +61,23 @@ public final class SnapshotClient {
         pollTask = nil
     }
 
+    /// The host's workspaces, as last reported, so a retry has something to match against.
+    public var hostWorkspaceIds: Set<String> = []
+
+    private func retryAdoptionIfUnmatched() async {
+        guard !adopted, !hostWorkspaceIds.isEmpty else { return }
+        await adopt(hostWorkspaceIds: hostWorkspaceIds)
+    }
+
     /// Point at whichever server describes the cmux hosting this sidebar.
     ///
     /// Re-run whenever the host's workspaces change, which is the only signal available that the
     /// sidebar may have been moved to a different cmux.
     public func adopt(hostWorkspaceIds: Set<String>) async {
-        guard let found = await ServerLocator.locate(hostWorkspaceIds: hostWorkspaceIds),
-              found != port
-        else { return }
-        port = found
+        guard let match = await ServerLocator.locate(hostWorkspaceIds: hostWorkspaceIds) else { return }
+        adopted = true
+        guard match.port != port else { return }
+        port = match.port
         await refresh(freshLiveness: true)
     }
 
