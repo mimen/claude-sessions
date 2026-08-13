@@ -1,4 +1,5 @@
 import {
+  refusalMessage,
   isSidebarHttpErrorEnvelope,
   sidebarHttpError,
   type SidebarHttpErrorCode,
@@ -21,6 +22,8 @@ export type ActionTransportError =
     readonly code: SidebarHttpErrorCode;
     readonly status: number;
     readonly retryable: boolean;
+    /** The refusal code, when the attempt produced one. */
+    readonly refusal?: string;
   };
 
 export type ActionTransportResult<T> =
@@ -85,6 +88,7 @@ export async function postSidebarAction<T extends object>(
         ok: false,
         error: {
           kind: "server",
+          ...(parsed.refusal === undefined ? {} : { refusal: parsed.refusal }),
           code: parsed.code,
           status: response.status,
           retryable: parsed.retryable,
@@ -152,6 +156,7 @@ export function actionErrorMessage(error: ActionTransportError): string {
     case "malformed-json":
       return "The CCS sidebar returned an invalid response. Restart the sidebar, then try again.";
     case "server":
-      return sidebarHttpError(error.code).message;
+      // A named refusal says what to do instead; the envelope's message only names a class.
+      return refusalMessage(error.refusal) ?? sidebarHttpError(error.code).message;
   }
 }

@@ -83,11 +83,34 @@ public struct ActionClient: Sendable {
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else {
-            let reason = json["message"] as? String ?? json["error"] as? String ?? "HTTP \(code)"
+            // A named refusal says what to do instead; the envelope's message names only a class.
+            let reason = Self.refusalMessage(json["refusal"] as? String)
+                ?? json["message"] as? String
+                ?? json["error"] as? String
+                ?? "HTTP \(code)"
             throw ActionFailure(message: reason)
         }
         if let failure = json["closeFailed"] as? String { throw ActionFailure(message: failure) }
         return json
+    }
+
+    /// A sentence for each refusal a person can do something about. Mirrors the server's own list,
+    /// which is the authority; an unknown code falls back to the envelope's class message.
+    static func refusalMessage(_ refusal: String?) -> String? {
+        switch refusal {
+        case "shared-workspace":
+            return "Another session shares this workspace, so CCS will not close it."
+        case "not-primary-surface":
+            return "This session is not the workspace's primary surface, so closing it would take the others with it."
+        case "session-not-live":
+            return "That session is no longer running."
+        case "ambiguous-session-target":
+            return "CCS could not tell which workspace this session means."
+        case "session-workspace-mismatch", "session-surface-mismatch", "hook-workspace-mismatch":
+            return "The session and its workspace disagree about where it lives. Refresh the list."
+        default:
+            return nil
+        }
     }
 
     /// What destroying this session would take with it, so the confirmation can say so.

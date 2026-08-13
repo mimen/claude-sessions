@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSidebarServer, isLoopbackSidebarHost } from "./server.ts";
-import { sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
+import { refusalMessage, sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
 import { createSidebarSource } from "./snapshot.ts";
 import { buildBridge, type Bridge } from "../cmux/bridge.ts";
 import type { Launcher } from "../resume/launchers.ts";
@@ -185,10 +185,16 @@ async function expectActionHttpError(
   response: Response,
   code: SidebarHttpErrorCode,
   legacyStatus: "not-found" | "failed",
+  /** The refusal code, when there was one; clients render a sentence from it. */
+  refusal?: string,
 ): Promise<void> {
   const { status, ...envelope } = sidebarHttpError(code);
   expect(response.status).toBe(status);
-  expect(await response.json()).toEqual({ ...envelope, status: legacyStatus });
+  expect(await response.json()).toEqual({
+    ...envelope,
+    status: legacyStatus,
+    ...(refusal === undefined ? {} : { refusal }),
+  });
 }
 
 function postLifecycle(
@@ -693,6 +699,7 @@ describe("sidebar server", () => {
         await postOpen(app, app.url),
         entry.code,
         entry.outcome.status === "not-found" ? "not-found" : "failed",
+        undefined,
       );
       expect(app.diagnostics).toEqual([{
         message: "sidebar action failed",
@@ -769,6 +776,30 @@ describe("sidebar server", () => {
       expect(legacyResult).not.toHaveProperty("reason");
       expect(JSON.stringify(legacyResult)).not.toContain("/private/catalogue.db");
     }
+  });
+
+  test("a close refusal names itself without leaking the reason it was logged with", async () => {
+    // The two halves must not be confused: the code is a fixed token safe to show, the reason is
+    // free text that has carried absolute paths.
+    const app = harness({
+      closeWorkspace: async () => ({
+        status: "failed",
+        reason: "ccs refused to close the workspace (/private/state.db says shared-workspace)",
+        refusal: "shared-workspace",
+      }),
+    });
+
+    const response = await fetch(`${app.url}/api/session/close`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: app.url },
+      body: JSON.stringify({ sessionId: "abc" }),
+    });
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(body.refusal).toBe("shared-workspace");
+    expect(body).not.toHaveProperty("reason");
+    expect(JSON.stringify(body)).not.toContain("/private/state.db");
+    expect(refusalMessage("shared-workspace")).toContain("shares this workspace");
   });
 
   test("SQLite mutation failures reach diagnostics but not lifecycle or decline envelopes", async () => {

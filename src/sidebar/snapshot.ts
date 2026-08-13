@@ -135,7 +135,11 @@ export type CloseWorkspaceOutcome =
   | { readonly status: "not-live" }
   | { readonly status: "liveness-unreadable" }
   | { readonly status: "timeout" }
-  | { readonly status: "failed"; readonly reason: string };
+  /**
+   * `reason` is for the log and may name paths; `refusal` is the safe half, drawn from CCS's own
+   * closed set of refusals, and is the only part a client is told.
+   */
+  | { readonly status: "failed"; readonly reason: string; readonly refusal?: string };
 
 export type FocusWorkspaceOutcome =
   | { readonly status: "focused" }
@@ -1024,7 +1028,12 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
           if (outcome.reason === "session-not-live" && outcome.phase === "preflight") {
             return { status: "not-live" };
           }
-          return { status: "failed", reason: closeFailureReason(outcome) };
+          // The refusal code travels with the text: one for the log, one safe enough to show.
+          return {
+            status: "failed",
+            reason: closeFailureReason(outcome),
+            refusal: outcome.reason,
+          };
       }
     },
 

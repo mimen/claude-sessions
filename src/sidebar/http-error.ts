@@ -13,6 +13,34 @@ export interface SidebarHttpErrorEnvelope {
   readonly code: SidebarHttpErrorCode;
   readonly message: string;
   readonly retryable: boolean;
+  /**
+   * Which refusal this was, from CCS's closed set of them.
+   *
+   * `message` describes a class of failure and is written before anything happens; a refusal code
+   * is produced by the attempt. It is a code rather than the outcome's free-text reason because
+   * reasons can carry absolute paths and database errors, which must never reach a client.
+   */
+  readonly refusal?: string;
+}
+
+/** A sentence for each refusal a person can do something about. */
+export function refusalMessage(refusal: string | undefined): string | null {
+  switch (refusal) {
+    case "shared-workspace":
+      return "Another session shares this workspace, so CCS will not close it.";
+    case "not-primary-surface":
+      return "This session is not the workspace's primary surface, so closing it would take the others with it.";
+    case "session-not-live":
+      return "That session is no longer running.";
+    case "ambiguous-session-target":
+      return "CCS could not tell which workspace this session means.";
+    case "session-workspace-mismatch":
+    case "session-surface-mismatch":
+    case "hook-workspace-mismatch":
+      return "The session and its workspace disagree about where it lives. Refresh the list.";
+    default:
+      return null;
+  }
 }
 
 interface SidebarHttpErrorDefinition extends SidebarHttpErrorEnvelope {

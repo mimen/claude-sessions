@@ -245,9 +245,26 @@ function json(body: object, status = 200): Response {
   return jsonText(JSON.stringify(body), status);
 }
 
-function errorJson(code: SidebarHttpErrorCode, legacyStatus?: "not-found" | "failed"): Response {
+function errorJson(
+  code: SidebarHttpErrorCode,
+  legacyStatus?: "not-found" | "failed",
+  /**
+   * Which refusal this was, from the closed vocabulary of them.
+   *
+   * A code rather than the outcome's `reason`: reasons are free text and can carry absolute paths
+   * and database errors, which must not reach a client. A refusal code cannot, being one of a
+   * fixed set, and it is enough for a client to say "this workspace is shared" instead of "CCS
+   * could not complete that action".
+   */
+  refusal?: string,
+): Response {
   const { status: httpStatus, ...envelope } = sidebarHttpError(code);
-  return json(legacyStatus === undefined ? envelope : { ...envelope, status: legacyStatus }, httpStatus);
+  const body = {
+    ...envelope,
+    ...(legacyStatus === undefined ? {} : { status: legacyStatus }),
+    ...(refusal === undefined ? {} : { refusal }),
+  };
+  return json(body, httpStatus);
 }
 
 function logUnexpected(
@@ -285,7 +302,11 @@ function actionFailureCode(status: string | undefined): SidebarHttpErrorCode | n
 function actionJson(
   logger: SidebarServerLogger,
   operation: string,
-  outcome: object & { readonly status?: string; readonly reason?: string },
+  outcome: object & {
+    readonly status?: string;
+    readonly reason?: string;
+    readonly refusal?: string;
+  },
   details: JsonObject,
   invalidateSnapshots: () => void,
 ): Response {
@@ -304,7 +325,7 @@ function actionJson(
   const legacyStatus = outcome.status === "not-found" || outcome.status === "not-live"
     ? "not-found"
     : "failed";
-  return errorJson(code, legacyStatus);
+  return errorJson(code, legacyStatus, outcome.refusal);
 }
 
 /** Only literal loopback addresses are valid sidebar bind targets. */
