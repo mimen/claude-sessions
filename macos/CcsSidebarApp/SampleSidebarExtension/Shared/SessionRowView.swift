@@ -112,6 +112,11 @@ public struct SessionRowView: View {
                 if let suggestion = row.suggestion {
                     SuggestionChip(suggestion: suggestion)
                 }
+                if row.pinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer(minLength: 6)
                 if layout == .wide {
                     statusAndAge.opacity(hovering ? 0 : 1)

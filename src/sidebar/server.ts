@@ -545,10 +545,16 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         const key = snapshotQueryKey(query);
         try {
           if (request.headers.get("x-ccs-refresh-liveness") === "1") {
-            // A native bridge focus changed state outside HTTP. Drop only this query so load(true)
-            // waits for a completed projection instead of accepting its previous representation.
+            // Something changed state outside HTTP. Drop this query's representation and wait for
+            // a liveness read newer than the change: rebuilding against the cached bridge would
+            // project the world as it was before it, which reads as the action having done
+            // nothing until a later poll catches up.
             removeCachedEntry(key);
-            source.refreshSnapshotLiveness?.();
+            if (source.refreshSnapshotLivenessNow) {
+              await source.refreshSnapshotLivenessNow();
+            } else {
+              source.refreshSnapshotLiveness?.();
+            }
           }
           const entry = cachedEntry(key) ?? createCachedEntry(key);
           const cached = entry.representation;

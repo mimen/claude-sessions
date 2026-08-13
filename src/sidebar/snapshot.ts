@@ -221,6 +221,8 @@ export interface SidebarSource {
   ): Promise<SidebarSnapshot>;
   /** Start a fresh snapshot-only liveness read without delaying the current response. */
   refreshSnapshotLiveness?(): void;
+  /** Await a liveness read newer than this call, for a caller that just changed the world. */
+  refreshSnapshotLivenessNow?(): Promise<void>;
   /** Record that the reader refused a verdict, so the same one stops being offered. */
   declineSuggestion(sessionId: string, verb: string): Promise<DeclineOutcome>;
   open(sessionId: string): Promise<OpenSessionOutcome>;
@@ -963,6 +965,10 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       observeSnapshot?.(measurement);
       observe?.(measurement);
       return snapshot;
+    },
+
+    async refreshSnapshotLivenessNow(): Promise<void> {
+      await snapshotLiveness.refreshNow();
     },
 
     refreshSnapshotLiveness(): void {

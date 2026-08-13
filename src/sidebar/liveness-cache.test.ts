@@ -119,6 +119,51 @@ describe("snapshot liveness cache", () => {
     expect(reads).toBe(3);
   });
 
+  test("refreshNow returns state newer than the call, not the cached bridge", async () => {
+    // The difference that matters: `refresh` starts a read and returns, so a snapshot rebuilt
+    // beside it projects the world before the change. `refreshNow` waits for the read.
+    let clock = 0;
+    let reads = 0;
+    const reader = createSnapshotLivenessReader({
+      ttlMs: 10_000,
+      now: () => clock,
+      readBridge: async () => {
+        reads += 1;
+        return workspaceBridge(reads === 1 ? "before" : "after");
+      },
+    });
+
+    expect((await reader.read()).workspaceIds()).toEqual(["before"]);
+
+    // Well inside the TTL, so a plain read would keep answering "before" indefinitely.
+    clock = 1;
+    expect((await reader.refreshNow()).workspaceIds()).toEqual(["after"]);
+    expect((await reader.read()).workspaceIds()).toEqual(["after"]);
+  });
+
+  test("refreshNow outlives a flight that began before the change", async () => {
+    let reads = 0;
+    const oldFlight = deferred<Bridge>();
+    const reader = createSnapshotLivenessReader({
+      ttlMs: 10_000,
+      readBridge: async () => {
+        reads += 1;
+        if (reads === 1) return workspaceBridge("initial");
+        if (reads === 2) return oldFlight.promise;
+        return workspaceBridge("after");
+      },
+    });
+
+    expect((await reader.read()).workspaceIds()).toEqual(["initial"]);
+    reader.refresh();
+    await waitFor(() => reads === 2);
+
+    const pending = reader.refreshNow();
+    // That flight started before the caller changed anything, so its answer is already stale.
+    oldFlight.resolve(workspaceBridge("stale"));
+    expect((await pending).workspaceIds()).toEqual(["after"]);
+  });
+
   test("a cold read awaits and suppresses one transient unreadable Bridge", async () => {
     let reads = 0;
     let completed = false;

@@ -17,6 +17,19 @@ public enum Grouping {
         clusterFirst: Bool = false,
         now: Date = Date()
     ) -> [(name: String, rows: [SidebarRow])] {
+        // Pinned work leads the list under every grouping, above clusters too.
+        //
+        // A pin says "keep this where I can find it", which only holds if its position does not
+        // depend on the sort in effect. So pinned rows are lifted into their own group and removed
+        // from the groups below rather than sorted first within them — otherwise switching to
+        // project grouping would scatter them back down the list.
+        let pinned = rows.filter(\.pinned)
+        if !pinned.isEmpty {
+            let rest = rows.filter { !$0.pinned }
+            return [("Pinned", pinned)]
+                + group(rows: rest, by: mode, clusterFirst: clusterFirst, now: now)
+        }
+
         // Clusters are a lens, not an arrangement: when it is on, a fleet is lifted out of the
         // list and everything else keeps whatever order the chosen mode gives it.
         if clusterFirst {

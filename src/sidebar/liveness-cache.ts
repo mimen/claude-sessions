@@ -5,6 +5,15 @@ export interface SnapshotLivenessReader {
   read(): Promise<Bridge>;
   /** Start a refresh now, or queue one trailing refresh behind the current flight. */
   refresh(): void;
+  /**
+   * Await a read newer than this call, rather than starting one and returning.
+   *
+   * `refresh` exists so a hint never delays the response that carried it. A caller that has just
+   * changed the world needs the opposite: rebuilding from the cached bridge would project the
+   * state the action replaced, which is why acting once looked like nothing happened and acting
+   * twice looked instant.
+   */
+  refreshNow(): Promise<Bridge>;
 }
 
 export interface SnapshotLivenessReaderOptions {
@@ -94,6 +103,13 @@ export function createSnapshotLivenessReader(
     async read(): Promise<Bridge> {
       if (cached === null) await startRefresh();
       else if (now() - refreshedAt >= options.ttlMs) void startRefresh();
+      return cached ?? unreadableBridge();
+    },
+    async refreshNow(): Promise<Bridge> {
+      // Join a flight already running, then take the trailing read it schedules: that flight may
+      // have started before the change this caller made.
+      if (inFlight !== null) await inFlight;
+      await startRefresh();
       return cached ?? unreadableBridge();
     },
     refresh(): void {
