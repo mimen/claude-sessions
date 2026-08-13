@@ -18,6 +18,12 @@ public struct SidebarRow: Decodable, Identifiable, Sendable {
         public let color: String?
     }
 
+    /// Which cluster and role a delegated session belongs to, when it belongs to one.
+    public struct Membership: Decodable, Sendable {
+        public let cluster: String?
+        public let role: String?
+    }
+
     public struct Category: Decodable, Sendable {
         public let compactLabel: String?
         public let hex: String?
@@ -65,6 +71,7 @@ public struct SidebarRow: Decodable, Identifiable, Sendable {
     public let shortcut: Int?
     public let worktree: String?
     public let faviconUrl: String?
+    public let membership: Membership?
 
     /// A session that is no longer running: it keeps the grid but drops the facts that stopped
     /// being true. Mirrors the web sidebar's rule so the two cannot describe a row differently.

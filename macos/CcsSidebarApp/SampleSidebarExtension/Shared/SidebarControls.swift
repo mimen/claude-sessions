@@ -53,6 +53,7 @@ public struct SidebarHeader: View {
     @Binding var grouping: GroupingMode
     @Binding var query: String
     @Binding var layouts: RowLayouts
+    @Binding var clusterFirst: Bool
     let counts: [String: Int]
 
     public init(
@@ -60,12 +61,14 @@ public struct SidebarHeader: View {
         grouping: Binding<GroupingMode>,
         query: Binding<String>,
         layouts: Binding<RowLayouts>,
+        clusterFirst: Binding<Bool>,
         counts: [String: Int]
     ) {
         _scope = scope
         _grouping = grouping
         _query = query
         _layouts = layouts
+        _clusterFirst = clusterFirst
         self.counts = counts
     }
 
@@ -107,6 +110,12 @@ public struct SidebarHeader: View {
                 .labelsHidden()
                 .controlSize(.small)
                 .fixedSize()
+
+                Toggle(isOn: $clusterFirst) { Text("Clusters") }
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("Lift cluster sessions into their own groups at the top")
 
                 Spacer(minLength: 0)
 

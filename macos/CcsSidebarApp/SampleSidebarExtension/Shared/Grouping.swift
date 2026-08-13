@@ -14,8 +14,24 @@ public enum Grouping {
     public static func group(
         rows: [SidebarRow],
         by mode: GroupingMode,
+        clusterFirst: Bool = false,
         now: Date = Date()
     ) -> [(name: String, rows: [SidebarRow])] {
+        // Clusters are a lens, not an arrangement: when it is on, a fleet is lifted out of the
+        // list and everything else keeps whatever order the chosen mode gives it.
+        if clusterFirst {
+            let clustered = rows.filter { $0.membership?.cluster != nil }
+            if !clustered.isEmpty {
+                let rest = rows.filter { $0.membership?.cluster == nil }
+                let byCluster = ordered(
+                    clustered,
+                    keyed: { $0.membership?.cluster ?? "Cluster" },
+                    order: nil,
+                    title: { $0 }
+                )
+                return byCluster + group(rows: rest, by: mode, clusterFirst: false, now: now)
+            }
+        }
         switch mode {
         case .status:
             return ordered(rows, keyed: { $0.section ?? "other" }, order: statusOrder, title: statusTitle)

@@ -14,7 +14,11 @@ public struct SessionListView: View {
     private let grouping: GroupingMode
     private let layouts: RowLayouts
     private let port: Int
+    private let selection: Binding<String?>?
+    private let clusterFirst: Bool
+    private let truncated: Bool
     @State private var collapsed: Set<String> = []
+    @FocusState private var listFocused: Bool
 
     public init(
         rows: [SidebarRow],
@@ -23,7 +27,10 @@ public struct SessionListView: View {
         selectedId: String? = nil,
         grouping: GroupingMode = .status,
         layouts: RowLayouts = RowLayouts(),
-        port: Int = 8788
+        port: Int = 8788,
+        selection: Binding<String?>? = nil,
+        clusterFirst: Bool = false,
+        truncated: Bool = false
     ) {
         self.rows = rows
         self.actions = actions
@@ -32,13 +39,52 @@ public struct SessionListView: View {
         self.grouping = grouping
         self.layouts = layouts
         self.port = port
+        self.selection = selection
+        self.clusterFirst = clusterFirst
+        self.truncated = truncated
     }
 
     private var sections: [(name: String, rows: [SidebarRow])] {
-        Grouping.group(rows: rows, by: grouping)
+        Grouping.group(rows: rows, by: grouping, clusterFirst: clusterFirst)
+    }
+
+    /// What the arrow keys walk: visible rows in display order, so a shelved section is skipped
+    /// rather than selected invisibly.
+    private var navigable: [SidebarRow] {
+        sections.filter { !collapsed.contains($0.name) }.flatMap(\.rows)
+    }
+
+    private func move(by delta: Int) {
+        guard let selection, !navigable.isEmpty else { return }
+        let ids = navigable.map(\.id)
+        let current = selection.wrappedValue.flatMap { ids.firstIndex(of: $0) }
+        let next = current.map { min(max($0 + delta, 0), ids.count - 1) } ?? (delta > 0 ? 0 : ids.count - 1)
+        selection.wrappedValue = ids[next]
     }
 
     public var body: some View {
+        ScrollViewReader { proxy in
+            listBody
+                .focusable()
+                .focusEffectDisabled()
+                .focused($listFocused)
+                .onAppear { listFocused = true }
+                .onKeyPress(.upArrow) { move(by: -1); return .handled }
+                .onKeyPress(.downArrow) { move(by: 1); return .handled }
+                .onKeyPress(.return) {
+                    if let id = selection?.wrappedValue, let row = navigable.first(where: { $0.id == id }) {
+                        actions.open(row)
+                    }
+                    return .handled
+                }
+                .onChange(of: selection?.wrappedValue) { _, id in
+                    guard let id else { return }
+                    withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id, anchor: .center) }
+                }
+        }
+    }
+
+    private var listBody: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 6, pinnedViews: [.sectionHeaders]) {
                 ForEach(sections, id: \.name) { section in
@@ -48,10 +94,11 @@ public struct SessionListView: View {
                                 row: row,
                                 age: RelativeAge.format(row.lastActivityAt, now: now),
                                 actions: actions,
-                                isSelected: row.id == selectedId,
+                                isSelected: row.id == (selection?.wrappedValue ?? selectedId),
                                 layout: layouts.layout(for: row),
                                 port: port
                             )
+                            .id(row.id)
                         }
                     } header: {
                         HStack(spacing: 4) {
@@ -80,6 +127,14 @@ public struct SessionListView: View {
                 }
             }
             .padding(8)
+
+            if truncated {
+                // A list that silently stopped is worse than one that says it did.
+                Text("More sessions exist than this view will show.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .padding(.bottom, 10)
+            }
         }
     }
 }

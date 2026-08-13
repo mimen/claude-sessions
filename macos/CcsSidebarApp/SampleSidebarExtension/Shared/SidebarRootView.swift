@@ -16,6 +16,8 @@ public struct SidebarRootView: View {
     @State private var grouping: GroupingMode = .status
     @State private var query = ""
     @State private var layouts = RowLayouts()
+    @State private var selection: String?
+    @State private var clusterFirst = false
     private let actionClient: ActionClient
     private let port: Int
 
@@ -32,9 +34,16 @@ public struct SidebarRootView: View {
                 grouping: $grouping,
                 query: $query,
                 layouts: $layouts,
+                clusterFirst: $clusterFirst,
                 counts: client.counts
             )
             Divider()
+            if !client.livenessReadable {
+                NoticeBar(
+                    symbol: "bolt.horizontal.circle",
+                    message: "cmux liveness unreadable — showing stored sessions only."
+                )
+            }
             if let failure {
                 FailureBanner(message: failure) { self.failure = nil }
             }
@@ -77,7 +86,16 @@ public struct SidebarRootView: View {
                 }
             }
         } else {
-            SessionListView(rows: visible, actions: actions, grouping: grouping, layouts: layouts, port: port)
+            SessionListView(
+                rows: visible,
+                actions: actions,
+                grouping: grouping,
+                layouts: layouts,
+                port: port,
+                selection: $selection,
+                clusterFirst: clusterFirst,
+                truncated: client.truncated
+            )
         }
     }
 
@@ -147,6 +165,24 @@ public struct SidebarRootView: View {
 }
 
 /// A refusal the server explained, kept until dismissed rather than flashed and lost.
+/// A standing condition, stated rather than left to be inferred from a short list.
+struct NoticeBar: View {
+    let symbol: String
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 10))
+            Text(message).font(.system(size: 11)).lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color.yellow.opacity(0.14))
+        .foregroundStyle(.secondary)
+    }
+}
+
 struct FailureBanner: View {
     let message: String
     let dismiss: () -> Void

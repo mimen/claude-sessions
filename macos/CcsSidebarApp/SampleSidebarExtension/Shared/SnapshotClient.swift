@@ -18,6 +18,7 @@ public final class SnapshotClient {
     public private(set) var livenessReadable = true
 
     public private(set) var counts: [String: Int] = [:]
+    public private(set) var truncated = false
     public var scope: SidebarScope = .active {
         didSet { if scope != oldValue { Task { await refresh() } } }
     }
@@ -62,6 +63,7 @@ public final class SnapshotClient {
             let snapshot = try JSONDecoder().decode(SidebarSnapshot.self, from: data)
             rows = snapshot.rows
             counts = snapshot.lifecycleCounts ?? [:]
+            truncated = snapshot.hasMoreRows ?? false
             livenessReadable = snapshot.livenessReadable
             lastError = nil
         } catch {
