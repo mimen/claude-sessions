@@ -284,6 +284,26 @@ export interface SidebarSource {
  * has no reachable shortcut even though it has an index — showing its number there would send you
  * to whatever occupies that slot in the window you are actually looking at.
  */
+/**
+ * Whether this workspace is the focused one, rather than merely the active one in its own window.
+ *
+ * cmux marks an active workspace per window, so `workspaceActive` is true once per window and a
+ * reader that trusts it alone highlights several rows at once. Focus is a single fact about the
+ * whole app, which is what `activeWindowId` is for — the same gate `shortcutFor` already applies.
+ *
+ * An unknown active window falls back to the workspace's own flag, matching the rule stated on
+ * `activeWindowId`: null means "unknown", never "none", so a consumer shows rather than hides.
+ */
+function focusedFor(
+  workspaceActive: boolean | undefined,
+  windowId: string,
+  activeWindowId: string | null,
+): boolean {
+  if (workspaceActive !== true) return false;
+  if (activeWindowId === null) return true;
+  return windowId === activeWindowId;
+}
+
 function shortcutFor(
   workspaceIndex: number | null,
   windowId: string,
@@ -323,7 +343,7 @@ function liveSessionsFrom(
       windowRef: surface.windowRef,
       workspaceTitle: surface.workspaceTitle,
       pinned: pinnedWorkspaces.has(surface.workspaceId),
-      focused: surface.workspaceActive === true,
+      focused: focusedFor(surface.workspaceActive, surface.windowId, bridge.activeWindowId),
       shortcut: shortcutFor(surface.workspaceIndex ?? null, surface.windowId, bridge.activeWindowId),
       cwd: info.cwd,
       status: statusRead.state === "published" || statusRead.state === "derived"
@@ -371,7 +391,7 @@ function liveWorkspacesFrom(
       windowId: first.windowId,
       windowRef: first.windowRef,
       pinned: pinnedWorkspaces.has(workspaceId),
-      focused: first.workspaceActive === true,
+      focused: focusedFor(first.workspaceActive, first.windowId, activeWindowId),
       shortcut: shortcutFor(first.workspaceIndex ?? null, first.windowId, activeWindowId),
       cwd: null,
       surfaceKinds: surfaces.map((surface) => surface.surfaceType ?? "unknown"),

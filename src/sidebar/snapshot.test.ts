@@ -1354,4 +1354,47 @@ describe("createSidebarSource incognito", () => {
     expect(row).toBeDefined();
     expect(row?.section).not.toBe("incognito");
   });
+
+test("only the workspace in the active window is focused", async () => {
+  // cmux marks an active workspace in every window, so trusting that flag alone highlighted one
+  // row per window and made "which session am I in" unanswerable from the list.
+  const bridge = buildBridge(
+    {
+      windows: [
+        {
+          id: "window-a", ref: "window:1",
+          workspaces: [{
+            id: "ws-a", ref: "workspace:1", title: "A", active: true,
+            panes: [{ id: "pane-a", ref: "pane:1", index: 0, surfaces: [{ id: "surface-a", ref: "surface:1", index_in_pane: 0 }] }],
+          }],
+        },
+        {
+          id: "window-b", ref: "window:2",
+          workspaces: [{
+            id: "ws-b", ref: "workspace:2", title: "B", active: true,
+            panes: [{ id: "pane-b", ref: "pane:2", index: 0, surfaces: [{ id: "surface-b", ref: "surface:2", index_in_pane: 0 }] }],
+          }],
+        },
+      ],
+      active: { window_id: "window-b" },
+    },
+    {
+      sessions: {
+        "session-a": { surfaceId: "surface-a", workspaceId: "ws-a", cwd: "/a", updatedAt: 1 },
+        "session-b": { surfaceId: "surface-b", workspaceId: "ws-b", cwd: "/b", updatedAt: 2 },
+      },
+    },
+  );
+
+  const source = createSidebarSource(sourceOptions({
+    readBridge: async () => bridge,
+    readCatalogue: () => catalogueRead([{ sessionId: "session-a" }, { sessionId: "session-b" }]),
+    indexedSessions: () => [],
+  }));
+
+  const snapshot = await source.snapshot("active", 50);
+  const focused = snapshot.rows.filter((row) => row.focused);
+  expect(focused).toHaveLength(1);
+  expect(focused[0]?.workspaceId).toBe("ws-b");
+});
 });
