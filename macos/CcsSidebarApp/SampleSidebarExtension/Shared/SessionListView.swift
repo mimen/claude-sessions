@@ -20,6 +20,7 @@ public struct SessionListView: View {
     private let clock: WorkingClock
     private let jumpLabels: [String: String]
     private let onJump: (Int) -> Void
+    private let scrollTarget: Binding<String?>?
     @State private var collapsed: Set<String> = []
     @FocusState private var listFocused: Bool
 
@@ -36,7 +37,8 @@ public struct SessionListView: View {
         truncated: Bool = false,
         clock: WorkingClock,
         jumpLabels: [String: String] = [:],
-        onJump: @escaping (Int) -> Void = { _ in }
+        onJump: @escaping (Int) -> Void = { _ in },
+        scrollTarget: Binding<String?>? = nil
     ) {
         self.rows = rows
         self.actions = actions
@@ -51,6 +53,7 @@ public struct SessionListView: View {
         self.clock = clock
         self.jumpLabels = jumpLabels
         self.onJump = onJump
+        self.scrollTarget = scrollTarget
     }
 
     private var sections: [(name: String, rows: [SidebarRow])] {
@@ -69,6 +72,8 @@ public struct SessionListView: View {
         let current = selection.wrappedValue.flatMap { ids.firstIndex(of: $0) }
         let next = current.map { min(max($0 + delta, 0), ids.count - 1) } ?? (delta > 0 ? 0 : ids.count - 1)
         selection.wrappedValue = ids[next]
+        // Arrow keys can walk past the edge of the view, so this is the one case that must scroll.
+        scrollTarget?.wrappedValue = ids[next]
     }
 
     public var body: some View {
@@ -94,9 +99,15 @@ public struct SessionListView: View {
                     }
                     return .handled
                 }
-                .onChange(of: selection?.wrappedValue) { _, id in
+                // Scrolling follows an explicit request, not the selection.
+                //
+                // Clicking a row selects it, and a row you clicked is by definition already on
+                // screen — centring it yanked the list out from under the pointer for no reason.
+                // Only movement the reader cannot see coming asks for a scroll.
+                .onChange(of: scrollTarget?.wrappedValue) { _, id in
                     guard let id else { return }
                     withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id, anchor: .center) }
+                    scrollTarget?.wrappedValue = nil
                 }
         }
     }

@@ -20,6 +20,7 @@ public struct SidebarRootView: View {
     @State private var clusterFirst = false
     @State private var clock = WorkingClock()
     @State private var lastFocusedId: String?
+    @State private var scrollTarget: String?
     @State private var modifiers = ModifierMonitor()
     private let actionClient: ActionClient
     private let port: Int
@@ -110,7 +111,8 @@ public struct SidebarRootView: View {
                 truncated: client.truncated,
                 clock: clock,
                 jumpLabels: jumpLabels(for: visible),
-                onJump: { index in jump(to: index, in: visible) }
+                onJump: { index in jump(to: index, in: visible) },
+                scrollTarget: $scrollTarget
             )
         }
     }
@@ -179,6 +181,9 @@ public struct SidebarRootView: View {
         defer { lastFocusedId = focused }
         guard let focused, focused != lastFocusedId else { return }
         selection = focused
+        // A switch made outside the sidebar can land on a row far down the list, so this one is
+        // worth revealing; a click is not.
+        scrollTarget = focused
     }
 
     /// Command-number opens the row wearing that badge.
