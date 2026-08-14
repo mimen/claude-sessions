@@ -20,21 +20,15 @@ public struct SidebarRootView: View {
     @State private var clusterFirst = false
     @State private var clock = WorkingClock()
     @State private var lastFocusedId: String?
-    @State private var serverOverride: Int?
     @State private var modifiers = ModifierMonitor()
-    private let host: HostIdentity?
+    private let actionClient: ActionClient
     private let port: Int
 
-    public init(port: Int = 8788, host: HostIdentity? = nil) {
+    public init(port: Int = 8788) {
         _client = State(initialValue: SnapshotClient(port: port))
-        self.host = host
+        actionClient = ActionClient(port: port)
         self.port = port
     }
-
-    /// Built per call rather than stored, because the client may have moved to another server once
-    /// the host said which cmux it is; an action sent to the previous one would act on the wrong
-    /// window's session.
-    private var actionClient: ActionClient { ActionClient(port: client.port) }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -44,18 +38,9 @@ public struct SidebarRootView: View {
                 query: $query,
                 layouts: $layouts,
                 clusterFirst: $clusterFirst,
-                serverOverride: $serverOverride,
-                activePort: client.port,
-                adopted: client.adopted,
                 counts: client.counts
             )
             Divider()
-            if host != nil && !client.adopted {
-                NoticeBar(
-                    symbol: "questionmark.circle",
-                    message: "Showing port \(client.port) — this window's cmux has not been identified yet."
-                )
-            }
             if !client.livenessReadable {
                 NoticeBar(
                     symbol: "bolt.horizontal.circle",
@@ -72,7 +57,6 @@ public struct SidebarRootView: View {
             client.start()
             clock.start()
             modifiers.start()
-            adoptHostServer()
         }
         .onChange(of: scope) { _, next in client.scope = next }
         .onChange(of: grouping) { _, next in Preferences.grouping = next }
@@ -81,14 +65,6 @@ public struct SidebarRootView: View {
             client.stop()
             clock.stop()
             modifiers.stop()
-        }
-        .onChange(of: host?.workspaceIds ?? []) { _, _ in adoptHostServer() }
-        .onChange(of: serverOverride) { _, next in client.pinnedPort = next }
-        .onChange(of: client.adoptionGeneration) { _, _ in
-            // The previous server's rows are gone; a selection pointing into them would keep a
-            // row highlighted that this window has never opened.
-            selection = nil
-            lastFocusedId = nil
         }
         .onChange(of: client.rows) { _, rows in
             clock.observe(rows: rows)
@@ -128,7 +104,7 @@ public struct SidebarRootView: View {
                 actions: actions,
                 grouping: grouping,
                 layouts: layouts,
-                port: client.port,
+                port: port,
                 selection: $selection,
                 clusterFirst: clusterFirst,
                 truncated: client.truncated,
@@ -188,18 +164,6 @@ public struct SidebarRootView: View {
         var labels: [String: String] = [:]
         for (index, row) in rows.prefix(9).enumerated() { labels[row.id] = "⌘\(index + 1)" }
         return labels
-    }
-
-    /// Ask the client to follow whichever cmux is hosting this sidebar.
-    private func adoptHostServer() {
-        guard let host else {
-            Diagnostics.note("adoptHostServer: no host identity")
-            return
-        }
-        let ids = host.workspaceIds
-        Diagnostics.note("adoptHostServer: host reports \(ids.count) workspaces")
-        client.hostWorkspaceIds = ids
-        Task { await client.adopt(hostWorkspaceIds: ids) }
     }
 
     /// Move the selection when something else changed which workspace is focused.

@@ -23,13 +23,7 @@ public final class SnapshotClient {
         didSet { if scope != oldValue { Task { await refresh(freshLiveness: true) } } }
     }
 
-    /// Settled once the host has said which workspaces it owns; until then the default is used.
-    public private(set) var port: Int
-    /// True once a server has been matched to the hosting cmux, rather than assumed.
-    public private(set) var adopted = false
-    /// Bumped whenever the client moves to a different server, so callers can drop state that
-    /// belonged to the previous one — a selected row id from another cmux means nothing here.
-    public private(set) var adoptionGeneration = 0
+    public let port: Int
     private let limit: Int
     private let interval: Duration
     private var pollTask: Task<Void, Never>?
@@ -53,7 +47,6 @@ public final class SnapshotClient {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                await self?.retryAdoptionIfUnmatched()
                 try? await Task.sleep(for: self?.interval ?? .seconds(1))
             }
         }
@@ -62,42 +55,6 @@ public final class SnapshotClient {
     public func stop() {
         pollTask?.cancel()
         pollTask = nil
-    }
-
-    /// The host's workspaces, as last reported, so a retry has something to match against.
-    public var hostWorkspaceIds: Set<String> = []
-
-    private func retryAdoptionIfUnmatched() async {
-        guard !adopted, !hostWorkspaceIds.isEmpty else { return }
-        await adopt(hostWorkspaceIds: hostWorkspaceIds)
-    }
-
-    /// Point at whichever server describes the cmux hosting this sidebar.
-    ///
-    /// Re-run whenever the host's workspaces change, which is the only signal available that the
-    /// sidebar may have been moved to a different cmux.
-    /// A port chosen by hand, which stops detection from moving the client afterwards.
-    public var pinnedPort: Int? {
-        didSet {
-            guard let pinnedPort, pinnedPort != port else { return }
-            port = pinnedPort
-            adopted = true
-            Task { await refresh(freshLiveness: true) }
-        }
-    }
-
-    public func adopt(hostWorkspaceIds: Set<String>) async {
-        guard pinnedPort == nil else { return }
-        guard let match = await ServerLocator.locate(hostWorkspaceIds: hostWorkspaceIds) else {
-            Diagnostics.note("adopt: no match for \(hostWorkspaceIds.count) host workspaces")
-            return
-        }
-        Diagnostics.note("adopt: port \(match.port) shares \(match.shared) workspaces")
-        adopted = true
-        guard match.port != port else { return }
-        port = match.port
-        adoptionGeneration &+= 1
-        await refresh(freshLiveness: true)
     }
 
     /// Fetch immediately, telling the server not to answer from its caches.
@@ -118,8 +75,6 @@ public final class SnapshotClient {
             let (data, _) = try await URLSession.shared.data(for: request)
             let snapshot = try JSONDecoder().decode(SidebarSnapshot.self, from: data)
             rows = snapshot.rows
-            let focused = snapshot.rows.first(where: { $0.focused })?.name ?? "none"
-            Diagnostics.note("refresh: port=\(port) rows=\(snapshot.rows.count) focused=\(focused)")
             counts = snapshot.lifecycleCounts ?? [:]
             truncated = snapshot.hasMoreRows ?? false
             livenessReadable = snapshot.livenessReadable
