@@ -49,7 +49,14 @@ public struct SidebarRootView: View {
                 FailureBanner(message: failure) { self.failure = nil }
             }
             content
+                // The list takes whatever is left, so the stack always fills the panel.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        // Without this the stack asks for only as much height as its contents need, and a panel
+        // taller than that centres the difference — which is how the header ends up floating in
+        // the middle with the list running off the bottom. It depends on whether rows arrive
+        // before the first layout pass, which is why it only happened sometimes.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {
             restorePreferences()
             client.start()
