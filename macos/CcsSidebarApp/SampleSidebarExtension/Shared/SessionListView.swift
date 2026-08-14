@@ -14,15 +14,12 @@ public struct SessionListView: View {
     private let grouping: GroupingMode
     private let layouts: RowLayouts
     private let port: Int
-    private let selection: Binding<String?>?
     private let clusterFirst: Bool
     private let truncated: Bool
     private let clock: WorkingClock
     private let jumpLabels: [String: String]
     private let onJump: (Int) -> Void
-    private let scrollTarget: Binding<String?>?
     @State private var collapsed: Set<String> = []
-    @FocusState private var listFocused: Bool
 
     public init(
         rows: [SidebarRow],
@@ -32,13 +29,11 @@ public struct SessionListView: View {
         grouping: GroupingMode = .status,
         layouts: RowLayouts = RowLayouts(),
         port: Int = 8788,
-        selection: Binding<String?>? = nil,
         clusterFirst: Bool = false,
         truncated: Bool = false,
         clock: WorkingClock,
         jumpLabels: [String: String] = [:],
-        onJump: @escaping (Int) -> Void = { _ in },
-        scrollTarget: Binding<String?>? = nil
+        onJump: @escaping (Int) -> Void = { _ in }
     ) {
         self.rows = rows
         self.actions = actions
@@ -47,69 +42,19 @@ public struct SessionListView: View {
         self.grouping = grouping
         self.layouts = layouts
         self.port = port
-        self.selection = selection
         self.clusterFirst = clusterFirst
         self.truncated = truncated
         self.clock = clock
         self.jumpLabels = jumpLabels
         self.onJump = onJump
-        self.scrollTarget = scrollTarget
     }
 
     private var sections: [(name: String, rows: [SidebarRow])] {
         Grouping.group(rows: rows, by: grouping, clusterFirst: clusterFirst)
     }
 
-    /// What the arrow keys walk: visible rows in display order, so a shelved section is skipped
-    /// rather than selected invisibly.
-    private var navigable: [SidebarRow] {
-        sections.filter { !collapsed.contains($0.name) }.flatMap(\.rows)
-    }
-
-    private func move(by delta: Int) {
-        guard let selection, !navigable.isEmpty else { return }
-        let ids = navigable.map(\.id)
-        let current = selection.wrappedValue.flatMap { ids.firstIndex(of: $0) }
-        let next = current.map { min(max($0 + delta, 0), ids.count - 1) } ?? (delta > 0 ? 0 : ids.count - 1)
-        selection.wrappedValue = ids[next]
-        // Arrow keys can walk past the edge of the view, so this is the one case that must scroll.
-        scrollTarget?.wrappedValue = ids[next]
-    }
-
     public var body: some View {
-        ScrollViewReader { proxy in
-            listBody
-                .focusable()
-                .focusEffectDisabled()
-                .focused($listFocused)
-                .onAppear { listFocused = true }
-                .onKeyPress(.upArrow) { move(by: -1); return .handled }
-                .onKeyPress(.downArrow) { move(by: 1); return .handled }
-                // The badges promised these; without a handler they were decoration.
-                .onKeyPress(phases: .down) { press in
-                    guard press.modifiers.contains(.command),
-                          let digit = Int(press.characters), (1...9).contains(digit)
-                    else { return .ignored }
-                    onJump(digit - 1)
-                    return .handled
-                }
-                .onKeyPress(.return) {
-                    if let id = selection?.wrappedValue, let row = navigable.first(where: { $0.id == id }) {
-                        actions.open(row)
-                    }
-                    return .handled
-                }
-                // Scrolling follows an explicit request, not the selection.
-                //
-                // Clicking a row selects it, and a row you clicked is by definition already on
-                // screen — centring it yanked the list out from under the pointer for no reason.
-                // Only movement the reader cannot see coming asks for a scroll.
-                .onChange(of: scrollTarget?.wrappedValue) { _, id in
-                    guard let id else { return }
-                    withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id, anchor: .center) }
-                    scrollTarget?.wrappedValue = nil
-                }
-        }
+        listBody
     }
 
     private var listBody: some View {
@@ -122,7 +67,6 @@ public struct SessionListView: View {
                                 row: row,
                                 age: RelativeAge.format(row.lastActivityAt, now: now),
                                 actions: actions,
-                                isSelected: row.id == (selection?.wrappedValue ?? selectedId),
                                 layout: layouts.layout(for: row),
                                 port: port,
                                 workingFor: clock.elapsed(for: row),

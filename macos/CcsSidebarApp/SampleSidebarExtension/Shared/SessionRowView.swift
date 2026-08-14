@@ -29,7 +29,6 @@ public struct SessionRowView: View {
     public let row: SidebarRow
     public let age: String
     public let actions: RowActions
-    public let isSelected: Bool
     public let layout: RowLayout
     public let port: Int
     public let workingFor: String?
@@ -43,7 +42,6 @@ public struct SessionRowView: View {
         row: SidebarRow,
         age: String,
         actions: RowActions,
-        isSelected: Bool = false,
         layout: RowLayout = .wide,
         port: Int = 8788,
         workingFor: String? = nil,
@@ -52,7 +50,6 @@ public struct SessionRowView: View {
         self.row = row
         self.age = age
         self.actions = actions
-        self.isSelected = isSelected
         self.layout = layout
         self.port = port
         self.workingFor = workingFor
@@ -210,20 +207,19 @@ public struct SessionRowView: View {
 
     private var background: some View {
         Group {
-            if isSelected { Color.accentColor.opacity(0.22) }
-            else if row.focused { Color.primary.opacity(0.12) }
-            else if hovering { Color.primary.opacity(0.10) }
+            // Wide apart on purpose. Focused sat at 0.12 against a resting 0.06, which is a
+            // difference you cannot see, so the one state that says where you are read as noise.
+            if row.focused { Color.primary.opacity(0.22) }
+            else if hovering { Color.primary.opacity(0.11) }
             else if row.isGhost { Color.clear }
-            else { Color.primary.opacity(0.06) }
+            else { Color.primary.opacity(0.05) }
         }
     }
 
     @ViewBuilder
     private var edge: some View {
-        if isSelected {
-            Rectangle().fill(Color.accentColor).frame(width: 2)
-        } else if row.focused {
-            Rectangle().fill(.primary).frame(width: 2)
+        if row.focused {
+            Rectangle().fill(.primary).frame(width: 3)
         } else if row.unread > 0 {
             Rectangle().fill(Color(hex: "#4C8DFF") ?? .blue).frame(width: 2)
         }
