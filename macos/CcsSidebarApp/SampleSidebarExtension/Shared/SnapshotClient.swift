@@ -110,6 +110,9 @@ public final class SnapshotClient {
                 }
                 changeStreamConnected = true
                 attempt = 0
+                // Whether the stream is up decides whether the sidebar is live or on a five-second
+                // timer, and from inside an appex there is no other way to find out.
+                Diagnostics.note("change stream: connected to port \(port)")
                 for try await line in bytes.lines {
                     if Task.isCancelled { break }
                     guard let revision = Self.revision(inFrame: line) else { continue }
@@ -122,9 +125,11 @@ public final class SnapshotClient {
                     if slept { await refresh() }
                 }
             } catch {
-                // Nothing to report: losing the stream costs responsiveness, not correctness, and
-                // an error banner for it would cry wolf during every deploy.
+                // Not shown to the reader: losing the stream costs responsiveness, not
+                // correctness, and a banner for it would cry wolf during every deploy.
+                Diagnostics.note("change stream: \(error.localizedDescription)")
             }
+            if changeStreamConnected { Diagnostics.note("change stream: disconnected") }
             changeStreamConnected = false
             if Task.isCancelled { return }
             let backoff = Self.reconnectDelays[min(attempt, Self.reconnectDelays.count - 1)]
