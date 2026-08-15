@@ -14,6 +14,15 @@ export interface SnapshotLivenessReader {
    * twice looked instant.
    */
   refreshNow(): Promise<Bridge>;
+  /**
+   * Declare the cached tree out of date, leaving the read that needs it to pay for the reread.
+   *
+   * Deliberately not `refresh`: a read of the cmux tree is a subprocess, and this is called from a
+   * stream of change notifications rather than once per request. Starting a refresh per
+   * notification spawns processes at the rate cmux emits events, which starves the loop it was
+   * meant to keep responsive. Marking stale costs nothing until somebody actually asks.
+   */
+  invalidate(): void;
 }
 
 export interface SnapshotLivenessReaderOptions {
@@ -47,6 +56,9 @@ export function createSnapshotLivenessReader(
   let refreshedAt = Number.NEGATIVE_INFINITY;
   let inFlight: Promise<void> | null = null;
   let forcedTrailingRefresh = false;
+  let stale = false;
+  /** See the warm cache: a flight that began before the change must not clear the staleness. */
+  let invalidations = 0;
 
   async function readBridgeAttempt(): Promise<Bridge | null> {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -82,12 +94,14 @@ export function createSnapshotLivenessReader(
   function startRefresh(): Promise<void> {
     if (inFlight !== null) return inFlight;
 
+    const startedAt = invalidations;
     let flight: Promise<void>;
     flight = Promise.resolve()
       .then(readBridgeWithRetry)
       .then(completeRefresh)
       .catch(() => completeRefresh(null))
       .finally(() => {
+        if (invalidations === startedAt) stale = false;
         if (inFlight !== flight) return;
         inFlight = null;
         if (forcedTrailingRefresh) {
@@ -102,8 +116,17 @@ export function createSnapshotLivenessReader(
   return {
     async read(): Promise<Bridge> {
       if (cached === null) await startRefresh();
+      // A tree known to be out of date is worth waiting for. The TTL path stays
+      // stale-while-revalidate because expiry is only a guess that the tree moved; an invalidation
+      // is cmux saying it did, and serving the previous one is the stale-row bug.
+      else if (stale) await startRefresh();
       else if (now() - refreshedAt >= options.ttlMs) void startRefresh();
       return cached ?? unreadableBridge();
+    },
+    invalidate(): void {
+      if (cached === null) return;
+      invalidations += 1;
+      stale = true;
     },
     async refreshNow(): Promise<Bridge> {
       // Join a flight already running, then take the trailing read it schedules: that flight may

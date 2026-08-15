@@ -1041,7 +1041,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         touched = true;
         switch (scope) {
           case "liveness":
-            snapshotLiveness.refresh();
+            snapshotLiveness.invalidate();
             break;
           case "status":
             statusReader.invalidate();

@@ -36,11 +36,16 @@ const MAX_SNAPSHOT_REPRESENTATION_BYTES = 4 * 1024 * 1024;
 /**
  * How long a burst of changes is collected before connected clients are told.
  *
- * Closing a window emits a frame per workspace it held, all within a millisecond or two. Far below
- * the threshold where a person notices a delay, and it turns a burst into one refetch instead of a
- * dozen identical ones.
+ * Two things are being balanced. Closing a window emits a frame per workspace it held, all within
+ * a millisecond or two, and waking clients for each would have them refetch the same snapshot
+ * repeatedly. Meanwhile every announcement costs a full projection — several hundred milliseconds
+ * across a few hundred rows — so an announcement rate that tracks cmux's raw event rate is more
+ * work than the timer it replaced, not less.
+ *
+ * A quarter second is far below what anyone perceives as delay and puts a hard ceiling of four
+ * projections a second on even a pathological event storm.
  */
-const CHANGE_ANNOUNCE_DELAY_MS = 40;
+const CHANGE_ANNOUNCE_DELAY_MS = 250;
 /**
  * How often a silent change stream says it is still there.
  *
@@ -705,6 +710,10 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       }
 
       if (url.pathname === "/api/events" && request.method === "GET") {
+        // Bun closes a request that has been idle for ten seconds, which for a stream that is
+        // supposed to be quiet when nothing is happening means being disconnected constantly. The
+        // exemption is per-request, so ordinary endpoints keep the protection.
+        server.timeout(request, 0);
         return changeStreamResponse(request);
       }
 

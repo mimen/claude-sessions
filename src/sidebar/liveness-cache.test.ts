@@ -325,3 +325,64 @@ describe("snapshot liveness cache", () => {
     expect(reads).toBe(5);
   });
 });
+
+describe("snapshot liveness invalidation", () => {
+  test("costs nothing until something asks, so a stream of changes cannot spawn a process each", async () => {
+    // The failure this prevents: invalidating by starting a read spawned a `cmux tree` subprocess
+    // per cmux event, at the rate cmux emits them, and starved the loop it was meant to keep quick.
+    let reads = 0;
+    let clock = 0;
+    const reader = createSnapshotLivenessReader({
+      ttlMs: 10_000,
+      now: () => clock,
+      readBridge: async () => {
+        reads += 1;
+        return workspaceBridge(`read-${reads}`);
+      },
+    });
+
+    expect((await reader.read()).workspaceIds()).toEqual(["read-1"]);
+    for (let change = 0; change < 25; change += 1) reader.invalidate();
+    await settle();
+
+    expect(reads).toBe(1);
+  });
+
+  test("the next read waits for a tree the change has been applied to", async () => {
+    // Unlike TTL expiry, which is only a guess that the tree moved, an invalidation is cmux saying
+    // it did -- so serving the previous tree here is exactly the row-drawn-wrong bug.
+    let reads = 0;
+    const reader = createSnapshotLivenessReader({
+      ttlMs: 10_000,
+      now: () => 0,
+      readBridge: async () => {
+        reads += 1;
+        return workspaceBridge(`read-${reads}`);
+      },
+    });
+
+    expect((await reader.read()).workspaceIds()).toEqual(["read-1"]);
+    reader.invalidate();
+
+    expect((await reader.read()).workspaceIds()).toEqual(["read-2"]);
+    // And having caught up, it goes back to serving the warm tree.
+    expect((await reader.read()).workspaceIds()).toEqual(["read-2"]);
+    expect(reads).toBe(2);
+  });
+
+  test("invalidating before anything is cached leaves the first read to do its own work", async () => {
+    let reads = 0;
+    const reader = createSnapshotLivenessReader({
+      ttlMs: 10_000,
+      now: () => 0,
+      readBridge: async () => {
+        reads += 1;
+        return workspaceBridge(`read-${reads}`);
+      },
+    });
+
+    reader.invalidate();
+    expect((await reader.read()).workspaceIds()).toEqual(["read-1"]);
+    expect(reads).toBe(1);
+  });
+});
