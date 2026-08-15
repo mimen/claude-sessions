@@ -20,5 +20,10 @@ let package = Package(
             dependencies: ["CcsSidebarUI"],
             path: "Sources/ccs-sidebar-render"
         ),
+        .testTarget(
+            name: "CcsSidebarUITests",
+            dependencies: ["CcsSidebarUI"],
+            path: "Tests/CcsSidebarUITests"
+        ),
     ]
 )

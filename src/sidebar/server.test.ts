@@ -1266,3 +1266,165 @@ describe("destroy and incognito endpoints", () => {
     expect(marks).toEqual([{ sessionId: "target", incognito: true }]);
   });
 });
+
+describe("sidebar change stream", () => {
+  /** A source that lets a test move the revision by hand, standing in for cmux saying so. */
+  function changeableSource(): {
+    readonly source: SidebarSource;
+    readonly bump: () => void;
+    readonly snapshots: () => number;
+  } {
+    const listeners = new Set<(revision: number) => void>();
+    let revision = 0;
+    let snapshots = 0;
+    const source: SidebarSource = {
+      snapshot: async () => {
+        snapshots += 1;
+        return EMPTY_SNAPSHOT;
+      },
+      declineSuggestion: async () => ({ status: "ok" as const }),
+      setIncognito: async (_sessionId: string, incognito: boolean) =>
+        ({ status: "ok" as const, incognito }),
+      destroyPreflight: async () => ({ status: "not-found" as const }),
+      destroySession: async () => ({ status: "not-found" as const }),
+      closeWorkspace: async (): Promise<CloseWorkspaceOutcome> => ({ status: "not-live" }),
+      focusWorkspace: async (): Promise<FocusWorkspaceOutcome> => ({ status: "not-live" }),
+      closeLooseWorkspace: async (): Promise<CloseWorkspaceOutcome> => ({ status: "not-live" }),
+      setPinned: async (): Promise<PinWorkspaceOutcome> => ({ status: "not-live" }),
+      open: async (): Promise<OpenSessionOutcome> => ({ status: "focused", workspaceRef: "workspace:1" }),
+      setLifecycle: async (): Promise<SessionLifecycleOutcome> =>
+        ({ status: "ok", lifecycle: "completed" }),
+      retire: async (): Promise<SessionLifecycleOutcome> => ({ status: "ok", lifecycle: "completed" }),
+      faviconFor: () => null,
+      revision: () => revision,
+      onRevision: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    return {
+      source,
+      snapshots: () => snapshots,
+      bump: () => {
+        revision += 1;
+        for (const listener of listeners) listener(revision);
+      },
+    };
+  }
+
+  /** Read whole SSE frames off the stream, so an assertion never sees half a message. */
+  async function frames(
+    response: Response,
+    until: (seen: readonly string[]) => boolean,
+  ): Promise<string[]> {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("the change stream had no body");
+    const decoder = new TextDecoder();
+    const seen: string[] = [];
+    let buffer = "";
+    while (!until(seen)) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary !== -1) {
+        seen.push(buffer.slice(0, boundary));
+        buffer = buffer.slice(boundary + 2);
+        boundary = buffer.indexOf("\n\n");
+      }
+    }
+    await reader.cancel();
+    return seen;
+  }
+
+  test("opens with the current revision, so a reconnecting client can tell it missed one", async () => {
+    const { source, bump } = changeableSource();
+    const server = createSidebarServer({ source, assets: ASSETS, port: 0, changeAnnounceDelayMs: 1 });
+    running.push(server);
+    bump();
+    bump();
+
+    const response = await fetch(`${server.url.origin}/api/events`);
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    const seen = await frames(response, (f) => f.length >= 1);
+
+    expect(seen[0]).toBe('data: {"revision":2}');
+  });
+
+  test("announces a change without being asked for a snapshot", async () => {
+    const { source, bump } = changeableSource();
+    const server = createSidebarServer({ source, assets: ASSETS, port: 0, changeAnnounceDelayMs: 1 });
+    running.push(server);
+
+    const response = await fetch(`${server.url.origin}/api/events`);
+    const collected = frames(response, (f) => f.length >= 2);
+    await Bun.sleep(5);
+    bump();
+
+    expect((await collected)[1]).toBe('data: {"revision":1}');
+  });
+
+  test("collapses a burst into one announcement", async () => {
+    // A window closing emits a frame per workspace it held. Waking the client for each would have
+    // it refetch the same snapshot several times over.
+    const { source, bump } = changeableSource();
+    const server = createSidebarServer({ source, assets: ASSETS, port: 0, changeAnnounceDelayMs: 20 });
+    running.push(server);
+
+    const response = await fetch(`${server.url.origin}/api/events`);
+    const collected = frames(response, (f) => f.length >= 2);
+    await Bun.sleep(5);
+    bump();
+    bump();
+    bump();
+    const seen = await collected;
+    await Bun.sleep(40);
+
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toBe('data: {"revision":3}');
+  });
+
+  test("a change drops cached representations, so the refetch it prompts is not answered stale", async () => {
+    // Without this the stream would be an instruction to ask again and get the same bytes back.
+    const { source, bump, snapshots } = changeableSource();
+    const server = createSidebarServer({
+      source,
+      assets: ASSETS,
+      port: 0,
+      changeAnnounceDelayMs: 1,
+      snapshotRepresentationTtlMs: 60_000,
+    });
+    running.push(server);
+
+    await fetch(`${server.url.origin}/api/snapshot`);
+    await fetch(`${server.url.origin}/api/snapshot`);
+    const beforeChange = snapshots();
+    expect(beforeChange).toBe(1);
+
+    bump();
+    await fetch(`${server.url.origin}/api/snapshot`);
+
+    expect(snapshots()).toBe(beforeChange + 1);
+  });
+
+  test("a disconnected client stops being written to", async () => {
+    const { source, bump } = changeableSource();
+    const server = createSidebarServer({ source, assets: ASSETS, port: 0, changeAnnounceDelayMs: 1 });
+    running.push(server);
+
+    const abort = new AbortController();
+    const response = await fetch(`${server.url.origin}/api/events`, { signal: abort.signal });
+    await frames(response, (f) => f.length >= 1);
+    abort.abort();
+    await Bun.sleep(5);
+
+    // The listener is gone, so this must not throw inside the server's announce loop.
+    expect(() => bump()).not.toThrow();
+    await Bun.sleep(5);
+
+    // A fresh client still works, which a leaked or broken listener set would prevent.
+    const second = await fetch(`${server.url.origin}/api/events`);
+    const seen = await frames(second, (f) => f.length >= 1);
+    expect(seen[0]).toBe('data: {"revision":1}');
+  });
+});

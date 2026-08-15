@@ -327,10 +327,12 @@ function sourceFor(
           ? { state: "published" as const, status: { label: "Needs input", icon: null, color: null } }
           : { state: "published" as const, status: { label: "Running", icon: null, color: null } },
       ])),
+      invalidate: () => {},
     },
-    workspaceStateReader: { read: async () => new Map() },
+    workspaceStateReader: { read: async () => new Map(), invalidate: () => {} },
     notificationReader: {
       read: async () => ({ notifications: [], unreadCountsByWorkspaceId: new Map() }),
+      invalidate: () => {},
     },
     directoryFacts: {
       lookup: async (directories) => ({

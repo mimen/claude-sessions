@@ -121,6 +121,8 @@ export function statusFromAgentLifecycle(agentLifecycle: string | null): CmuxCla
 export interface CachedStatusReader {
   /** Cached statuses, refreshing in the background once they age past the TTL. */
   read(workspaceIds: readonly string[]): Promise<Map<string, CmuxStatusRead>>;
+  /** Something authoritative said a status changed; revalidate rather than wait out the TTL. */
+  invalidate(): void;
 }
 
 /**
@@ -146,5 +148,8 @@ export function createCachedStatusReader(
     // the next read retry rather than treating a failed attempt as a fresh observation.
     failure: { type: "retain-and-retry" },
   });
-  return { read: (workspaceIds) => cache.read(workspaceIds) };
+  return {
+    read: (workspaceIds) => cache.read(workspaceIds),
+    invalidate: () => cache.invalidate(),
+  };
 }

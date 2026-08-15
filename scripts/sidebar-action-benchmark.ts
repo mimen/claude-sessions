@@ -65,8 +65,11 @@ try {
     now: () => FIXED_NOW,
     cmuxBin: "benchmark-never-runs-cmux",
     readStatuses: async () => new Map(),
-    workspaceStateReader: { read: async () => new Map() },
-    notificationReader: { read: async () => ({ notifications: [], unreadCountsByWorkspaceId: new Map() }) },
+    workspaceStateReader: { read: async () => new Map(), invalidate: () => {} },
+    notificationReader: {
+      read: async () => ({ notifications: [], unreadCountsByWorkspaceId: new Map() }),
+      invalidate: () => {},
+    },
     directoryFacts: { lookup: async () => ({ checkouts: new Map(), favicons: new Map() }) },
     loadLaunchers: () => ({ ok: true, value: [{ name: "gateway", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] }] }),
     cataloguePath: fixture.cataloguePath,

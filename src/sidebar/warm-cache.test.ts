@@ -147,3 +147,91 @@ describe("createWarmCache", () => {
     await expect(cache.read()).resolves.toBe("new value");
   });
 });
+
+describe("createWarmCache invalidation", () => {
+  test("a change notification revalidates without waiting out the TTL", async () => {
+    let clock = 100;
+    let calls = 0;
+    const cache = createWarmCache<void, string>({
+      ttlMs: 10_000,
+      initialValue: "initial",
+      coldRead: "block",
+      now: () => clock,
+      load: () => {
+        calls += 1;
+        return Promise.resolve(`value ${calls}`);
+      },
+      failure: { type: "retain-and-retry" },
+    });
+
+    await expect(cache.read()).resolves.toBe("value 1");
+    // Well inside a ten-second TTL: without invalidation this read would never reload.
+    clock = 200;
+    await expect(cache.read()).resolves.toBe("value 1");
+    expect(calls).toBe(1);
+
+    cache.invalidate();
+    // The warm value is still served rather than the reader being made to wait.
+    await expect(cache.read()).resolves.toBe("value 1");
+    await settleRefresh();
+    await expect(cache.read()).resolves.toBe("value 2");
+  });
+
+  test("invalidating before anything is cached leaves the cold read alone", async () => {
+    let calls = 0;
+    const cache = createWarmCache<void, string>({
+      ttlMs: 10,
+      initialValue: "initial",
+      coldRead: "block",
+      now: () => 100,
+      load: () => {
+        calls += 1;
+        return Promise.resolve("loaded");
+      },
+      failure: { type: "retain-and-retry" },
+    });
+
+    cache.invalidate();
+    await expect(cache.read()).resolves.toBe("loaded");
+    expect(calls).toBe(1);
+  });
+
+  test("a refresh that began before the change does not clear the staleness it predates", async () => {
+    // The failure this prevents: an event fires mid-flight, the in-flight read returns the state
+    // the event replaced, and the cache then considers itself current on a value that is already
+    // wrong -- which is the stale-row bug arriving by a new route.
+    let clock = 100;
+    let calls = 0;
+    const firstFlight = deferred<string>();
+    const cache = createWarmCache<void, string>({
+      ttlMs: 10,
+      initialValue: "initial",
+      coldRead: "block",
+      now: () => clock,
+      load: () => {
+        calls += 1;
+        if (calls === 1) return Promise.resolve("warm");
+        if (calls === 2) return firstFlight.promise;
+        return Promise.resolve("after the change");
+      },
+      failure: { type: "retain-and-retry" },
+    });
+
+    await expect(cache.read()).resolves.toBe("warm");
+    clock = 120;
+    // Starts flight two, which is now in progress and predates the change below.
+    await expect(cache.read()).resolves.toBe("warm");
+    expect(calls).toBe(2);
+
+    cache.invalidate();
+    firstFlight.resolve("state the change replaced");
+    await firstFlight.promise;
+    await settleRefresh();
+
+    // Still stale, so this read starts a third load rather than trusting flight two.
+    await expect(cache.read()).resolves.toBe("state the change replaced");
+    await settleRefresh();
+    expect(calls).toBe(3);
+    await expect(cache.read()).resolves.toBe("after the change");
+  });
+});

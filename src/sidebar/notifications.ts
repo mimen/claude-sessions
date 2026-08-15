@@ -173,6 +173,8 @@ export async function readNotifications(
 export interface CachedNotificationReader {
   /** Return the warm notification state and refresh it in the background when stale. */
   read(): Promise<CmuxNotificationState>;
+  /** Something authoritative said a notification changed; revalidate rather than wait out the TTL. */
+  invalidate(): void;
 }
 
 /**
@@ -195,5 +197,8 @@ export function createCachedNotificationReader(
     load: () => read(cmuxBin),
     failure: { type: "replace", value: emptyNotificationState },
   });
-  return { read: () => cache.read() };
+  return {
+    read: () => cache.read(),
+    invalidate: () => cache.invalidate(),
+  };
 }

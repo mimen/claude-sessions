@@ -11,6 +11,7 @@ import {
   isLoopbackSidebarHost,
 } from "./server.ts";
 import { createSidebarSource } from "./snapshot.ts";
+import { subscribeToCmuxEvents } from "../cmux/events.ts";
 
 const HELP = `ccs sidebar — the productivity sidebar's local web host
 
@@ -79,8 +80,12 @@ export async function sidebarCommand(args: readonly string[]): Promise<number> {
   }
 
   try {
+    const source = createSidebarSource();
+    // Only the long-lived server follows cmux. A source built for a one-shot command has no use
+    // for a subscription that outlives the answer, and would leave a child process behind.
+    subscribeToCmuxEvents({ onChange: (scopes) => source.invalidate?.(scopes) });
     const server = createSidebarServer({
-      source: createSidebarSource(),
+      source,
       assets: assets.value,
       port,
       hostname: host,

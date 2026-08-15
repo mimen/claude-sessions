@@ -33,6 +33,22 @@ const SNAPSHOT_REPRESENTATION_TTL_MS = 2_500;
 const MAX_SNAPSHOT_REPRESENTATIONS = 16;
 /** Bound retained serialized bodies even when several queries project the maximum row count. */
 const MAX_SNAPSHOT_REPRESENTATION_BYTES = 4 * 1024 * 1024;
+/**
+ * How long a burst of changes is collected before connected clients are told.
+ *
+ * Closing a window emits a frame per workspace it held, all within a millisecond or two. Far below
+ * the threshold where a person notices a delay, and it turns a burst into one refetch instead of a
+ * dozen identical ones.
+ */
+const CHANGE_ANNOUNCE_DELAY_MS = 40;
+/**
+ * How often a silent change stream says it is still there.
+ *
+ * A stream carrying no traffic is indistinguishable from one whose peer has gone until something
+ * is written to it, and a sidebar that has quietly stopped hearing about change is the failure
+ * this whole mechanism exists to remove.
+ */
+const CHANGE_HEARTBEAT_MS = 20_000;
 
 /** cmux's Dock needs a stable origin, so the port is fixed unless deliberately overridden. */
 export const DEFAULT_SIDEBAR_PORT = 8787;
@@ -56,6 +72,10 @@ export interface SidebarServerOptions {
   readonly snapshotRepresentationMaxBytes?: number;
   /** Test seam so a slow-request assertion does not depend on the real scheduler. */
   readonly lagSampler?: EventLoopLagSampler;
+  /** Test seam for the window a burst of changes is collapsed into. */
+  readonly changeAnnounceDelayMs?: number;
+  /** Test seam for the interval that proves a silent change stream is still alive. */
+  readonly changeHeartbeatMs?: number;
 }
 
 type JsonValue = string | number | boolean | null | JsonObject | readonly JsonValue[];
@@ -383,6 +403,8 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
   );
   const snapshotRepresentations = new Map<string, SnapshotRepresentationEntry>();
   let snapshotRepresentationBytes = 0;
+  const changeAnnounceDelayMs = options.changeAnnounceDelayMs ?? CHANGE_ANNOUNCE_DELAY_MS;
+  const changeHeartbeatMs = options.changeHeartbeatMs ?? CHANGE_HEARTBEAT_MS;
 
   function removeCachedEntry(key: string): void {
     const entry = snapshotRepresentations.get(key);
@@ -394,6 +416,107 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
   function invalidateSnapshots(): void {
     snapshotRepresentations.clear();
     snapshotRepresentationBytes = 0;
+  }
+
+  /**
+   * Everyone currently listening for change, and the batching that keeps them from thrashing.
+   *
+   * A burst — a window closing takes several workspaces with it — arrives as many frames within a
+   * few milliseconds, and waking every client for each one would have them refetch the same
+   * snapshot repeatedly. One announcement shortly after the burst starts costs a delay far below
+   * what anyone perceives and collapses the burst into a single refetch.
+   */
+  const changeListeners = new Set<(revision: number) => void>();
+  let announceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function announceRevision(): void {
+    if (announceTimer !== null) return;
+    announceTimer = setTimeout(() => {
+      announceTimer = null;
+      const revision = source.revision?.() ?? 0;
+      for (const listener of changeListeners) {
+        try {
+          listener(revision);
+        } catch {
+          // A client that cannot be written to is closing; its own cleanup removes it.
+        }
+      }
+    }, changeAnnounceDelayMs);
+    announceTimer.unref?.();
+  }
+
+  // A representation cached before a change is exactly as stale as the reads behind it. Without
+  // this, telling a client to refetch would hand back the same bytes it already had.
+  source.onRevision?.(() => {
+    invalidateSnapshots();
+    announceRevision();
+  });
+
+  /**
+   * A stream that says when something changed, and deliberately not what.
+   *
+   * Sending the snapshot itself would mean choosing a view, a row limit and a set of expanded
+   * sections on the client's behalf, and those are exactly what differ between the two sidebars and
+   * between one window and the next. A revision costs a few bytes, leaves the client's own query in
+   * its hands, and still lets a conditional refetch answer from the ETag when nothing it can see
+   * moved.
+   */
+  function changeStreamResponse(request: Request): Response {
+    const encoder = new TextEncoder();
+    let listener: ((revision: number) => void) | null = null;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        const send = (text: string): void => {
+          try {
+            controller.enqueue(encoder.encode(text));
+          } catch {
+            // The peer went away between the change and this write; cleanup runs on abort.
+          }
+        };
+
+        // Sent immediately so a client that reconnects can compare against the revision it last
+        // saw and refetch once if it slept through a change.
+        send(`data: {"revision":${source.revision?.() ?? 0}}\n\n`);
+
+        listener = (revision: number): void => {
+          send(`data: {"revision":${revision}}\n\n`);
+        };
+        changeListeners.add(listener);
+
+        heartbeat = setInterval(() => {
+          // A comment frame: valid SSE that every client ignores, and enough to fail a write to a
+          // peer that has gone without waiting for the next real change.
+          send(": heartbeat\n\n");
+        }, changeHeartbeatMs);
+        heartbeat.unref?.();
+      },
+      cancel(): void {
+        release();
+      },
+    });
+
+    function release(): void {
+      if (listener !== null) {
+        changeListeners.delete(listener);
+        listener = null;
+      }
+      if (heartbeat !== null) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
+    }
+
+    request.signal.addEventListener("abort", release, { once: true });
+
+    return new Response(stream, {
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-store",
+        connection: "keep-alive",
+      },
+    });
   }
 
   function cachedEntry(key: string): SnapshotRepresentationEntry | undefined {
@@ -579,6 +702,10 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           });
           return errorJson("internal_failure");
         }
+      }
+
+      if (url.pathname === "/api/events" && request.method === "GET") {
+        return changeStreamResponse(request);
       }
 
       if (url.pathname === "/api/open" && request.method === "POST") {

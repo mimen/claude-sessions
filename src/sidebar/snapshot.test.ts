@@ -975,6 +975,7 @@ describe("createSidebarSource snapshot", () => {
         readStatuses: async () => new Map<string, CmuxStatusRead>(),
         notificationReader: {
           read: async () => ({ notifications: [], unreadCountsByWorkspaceId: new Map() }),
+          invalidate: () => {},
         },
         processAdapter: {
           run: async () => ({ ok: true, stdout: "", stderr: "", timedOut: false }),
@@ -1071,6 +1072,7 @@ describe("createSidebarSource snapshot", () => {
       },
       notificationReader: {
         read: async () => ({ notifications: [], unreadCountsByWorkspaceId: new Map() }),
+        invalidate: () => {},
       },
     }));
 
@@ -1397,4 +1399,97 @@ test("only the workspace in the active window is focused", async () => {
   expect(focused).toHaveLength(1);
   expect(focused[0]?.workspaceId).toBe("ws-b");
 });
+});
+
+describe("createSidebarSource invalidation", () => {
+  /** A source whose every source of truth is a counter, so a revalidation is directly observable. */
+  function countingSource(): {
+    readonly source: ReturnType<typeof createSidebarSource>;
+    readonly counts: { status: number; workspaceState: number; notifications: number };
+  } {
+    const counts = { status: 0, workspaceState: 0, notifications: 0 };
+    const source = createSidebarSource({
+      cmuxBin: "never-run-cmux",
+      readBridge: async () => emptyBridge(),
+      statusReader: {
+        read: async () => new Map<string, CmuxStatusRead>(),
+        invalidate: () => {
+          counts.status += 1;
+        },
+      },
+      workspaceStateReader: {
+        read: async () => new Map(),
+        invalidate: () => {
+          counts.workspaceState += 1;
+        },
+      },
+      notificationReader: {
+        read: async () => ({ notifications: [], unreadCountsByWorkspaceId: new Map() }),
+        invalidate: () => {
+          counts.notifications += 1;
+        },
+      },
+      ensureDataDir: () => {},
+      directoryFacts: { lookup: async () => ({ checkouts: new Map(), favicons: new Map() }) },
+    });
+    return { source, counts };
+  }
+
+  test("each scope revalidates only the source it names", () => {
+    const { source, counts } = countingSource();
+
+    source.invalidate?.(["status"]);
+    expect(counts).toEqual({ status: 1, workspaceState: 0, notifications: 0 });
+
+    source.invalidate?.(["workspaceState", "notifications"]);
+    expect(counts).toEqual({ status: 1, workspaceState: 1, notifications: 1 });
+  });
+
+  test("the revision moves once per change, so a client can tell whether to refetch", () => {
+    const { source } = countingSource();
+    const start = source.revision?.() ?? 0;
+
+    source.invalidate?.(["status"]);
+    source.invalidate?.(["liveness", "notifications"]);
+
+    expect(source.revision?.()).toBe(start + 2);
+  });
+
+  test("a change that names nothing does not move the revision", () => {
+    // An empty set reaches here when a frame turned out to invalidate nothing. Moving the revision
+    // for it would wake every connected client to refetch an identical snapshot.
+    const { source } = countingSource();
+    const start = source.revision?.() ?? 0;
+
+    source.invalidate?.([]);
+
+    expect(source.revision?.()).toBe(start);
+  });
+
+  test("subscribers hear the new revision, and stop hearing it once they unsubscribe", () => {
+    const { source } = countingSource();
+    const heard: number[] = [];
+
+    const unsubscribe = source.onRevision?.((revision) => heard.push(revision));
+    source.invalidate?.(["status"]);
+    source.invalidate?.(["status"]);
+    unsubscribe?.();
+    source.invalidate?.(["status"]);
+
+    expect(heard).toHaveLength(2);
+    expect(heard[1]).toBe((heard[0] ?? 0) + 1);
+  });
+
+  test("one failing subscriber does not stop the others being told", () => {
+    const { source } = countingSource();
+    const heard: number[] = [];
+
+    source.onRevision?.(() => {
+      throw new Error("subscriber is broken");
+    });
+    source.onRevision?.((revision) => heard.push(revision));
+    source.invalidate?.(["status"]);
+
+    expect(heard).toHaveLength(1);
+  });
 });

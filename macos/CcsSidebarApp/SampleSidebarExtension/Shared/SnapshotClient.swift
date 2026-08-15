@@ -7,9 +7,14 @@ import Observation
 /// the catalogue and index, projecting rows, enrichment, categories, talking to cmux — already
 /// happens behind it, so this type deliberately knows nothing except how to ask.
 ///
-/// One second matches the web client's cadence. Failures leave the last good rows in place rather
-/// than blanking the list: a sidebar that empties itself because one request timed out is worse
-/// than one showing figures a second old.
+/// Polling is the fallback, not the mechanism. The server follows cmux's own event stream and
+/// publishes a revision whenever anything the sidebar draws from changed, so the ordinary case is
+/// that a change arrives as soon as it happens and the timer is only there for whatever the stream
+/// never hears about. That is why the interval stretches once the stream is connected: a one-second
+/// poll behind a working change channel is repeated work that answers a question already answered.
+///
+/// Failures leave the last good rows in place rather than blanking the list: a sidebar that empties
+/// itself because one request timed out is worse than one showing figures a second old.
 @Observable
 @MainActor
 public final class SnapshotClient {
@@ -23,15 +28,28 @@ public final class SnapshotClient {
         didSet { if scope != oldValue { Task { await refresh(freshLiveness: true) } } }
     }
 
+    /// Whether the server's change channel is currently carrying us. Drives the poll interval.
+    public private(set) var changeStreamConnected = false
+
     public let port: Int
     private let limit: Int
     private let interval: Duration
+    private let backstopInterval: Duration
     private var pollTask: Task<Void, Never>?
+    private var changeTask: Task<Void, Never>?
+    /// The last revision the server reported, so a reconnection can tell whether it slept through one.
+    private var lastRevision: Int?
 
-    public init(port: Int = 8788, limit: Int = 2_000, interval: Duration = .seconds(1)) {
+    public init(
+        port: Int = 8788,
+        limit: Int = 2_000,
+        interval: Duration = .seconds(1),
+        backstopInterval: Duration = .seconds(5)
+    ) {
         self.port = port
         self.limit = limit
         self.interval = interval
+        self.backstopInterval = backstopInterval
     }
 
     /// Closed scopes need their rows requested explicitly; the server only projects a section it
@@ -47,14 +65,90 @@ public final class SnapshotClient {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                try? await Task.sleep(for: self?.interval ?? .seconds(1))
+                let wait = await self?.pollWait ?? .seconds(1)
+                try? await Task.sleep(for: wait)
             }
+        }
+        changeTask = Task { [weak self] in
+            await self?.followChanges()
         }
     }
 
     public func stop() {
         pollTask?.cancel()
         pollTask = nil
+        changeTask?.cancel()
+        changeTask = nil
+        changeStreamConnected = false
+    }
+
+    private var pollWait: Duration {
+        changeStreamConnected ? backstopInterval : interval
+    }
+
+    private var changeEndpoint: URL {
+        URL(string: "http://127.0.0.1:\(port)/api/events")!
+    }
+
+    /// Follow the server's change channel, reconnecting for as long as anyone is watching.
+    ///
+    /// Reconnection is unconditional and backed off rather than given up on: the stream going away
+    /// means the server restarted or is being deployed, which is exactly when a sidebar left
+    /// polling every five seconds would feel broken. The poll interval tightens on its own while
+    /// disconnected, so a permanent outage degrades to the behaviour that existed before this.
+    private func followChanges() async {
+        var attempt = 0
+        while !Task.isCancelled {
+            do {
+                var request = URLRequest(url: changeEndpoint)
+                // Long-lived by construction. The server heartbeats well inside this, so a silent
+                // connection is still proven alive rather than being torn down as idle.
+                request.timeoutInterval = 3_600
+                let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    throw URLError(.badServerResponse)
+                }
+                changeStreamConnected = true
+                attempt = 0
+                for try await line in bytes.lines {
+                    if Task.isCancelled { break }
+                    guard let revision = Self.revision(inFrame: line) else { continue }
+                    guard revision != lastRevision else { continue }
+                    let slept = lastRevision != nil
+                    lastRevision = revision
+                    // The opening frame only establishes where we are; the poll's own first fetch
+                    // has already asked. A later one means something actually moved -- or, after a
+                    // reconnection, that something moved while we were not listening.
+                    if slept { await refresh() }
+                }
+            } catch {
+                // Nothing to report: losing the stream costs responsiveness, not correctness, and
+                // an error banner for it would cry wolf during every deploy.
+            }
+            changeStreamConnected = false
+            if Task.isCancelled { return }
+            let backoff = Self.reconnectDelays[min(attempt, Self.reconnectDelays.count - 1)]
+            attempt += 1
+            try? await Task.sleep(for: backoff)
+        }
+    }
+
+    private static let reconnectDelays: [Duration] = [
+        .milliseconds(250), .seconds(1), .seconds(2), .seconds(5),
+    ]
+
+    /// Pull the revision out of one SSE frame, ignoring heartbeats and anything unrecognised.
+    ///
+    /// Pure text handling touching no state, so it is deliberately outside the actor: keeping it in
+    /// would make parsing a line an await from anywhere else, tests included.
+    nonisolated static func revision(inFrame line: String) -> Int? {
+        guard line.hasPrefix("data:") else { return nil }
+        let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+        guard let data = payload.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let revision = object["revision"] as? Int
+        else { return nil }
+        return revision
     }
 
     /// Fetch immediately, telling the server not to answer from its caches.

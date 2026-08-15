@@ -230,6 +230,8 @@ export async function readWorkspaceStates(
 export interface CachedWorkspaceStateReader {
   /** Cached workspace states, refreshing in the background once they age past the TTL. */
   read(workspaceIds: readonly string[]): Promise<Map<string, WorkspaceState | null>>;
+  /** Something authoritative said a workspace changed; revalidate rather than wait out the TTL. */
+  invalidate(): void;
 }
 
 function nullStates(workspaceIds: readonly string[]): Map<string, WorkspaceState | null> {
@@ -271,5 +273,8 @@ export function createCachedWorkspaceStateReader(
     },
     failure: { type: "replace", value: nullStates },
   });
-  return { read: (workspaceIds) => cache.read(workspaceIds) };
+  return {
+    read: (workspaceIds) => cache.read(workspaceIds),
+    invalidate: () => cache.invalidate(),
+  };
 }

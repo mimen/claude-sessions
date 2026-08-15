@@ -351,6 +351,27 @@ export function App(): React.ReactElement {
     const refreshVisible = (): void => {
       if (document.visibilityState === "visible") load(true);
     };
+    // The server follows cmux's own event stream and publishes a revision whenever anything the
+    // sidebar draws from changed, so a change arrives when it happens instead of on the next tick
+    // of the timer above. EventSource reconnects by itself, and the timer covers the gap while it
+    // is doing so, which is why nothing here treats a dropped stream as an error worth showing.
+    let lastRevision: number | null = null;
+    const changes = new EventSource("/api/events");
+    changes.onmessage = (message: MessageEvent<string>): void => {
+      let revision: unknown;
+      try {
+        revision = (JSON.parse(message.data) as { revision?: unknown }).revision;
+      } catch {
+        return;
+      }
+      if (typeof revision !== "number" || revision === lastRevision) return;
+      // The opening frame only says where we are; `load` below has already asked. A later one
+      // means something moved, or that something moved while the stream was reconnecting.
+      const slept = lastRevision !== null;
+      lastRevision = revision;
+      if (slept) load();
+    };
+
     load();
     schedule();
     document.addEventListener("visibilitychange", refreshVisible);
@@ -359,6 +380,7 @@ export function App(): React.ReactElement {
       stopped = true;
       if (poll !== null) clearTimeout(poll);
       clearInterval(clock);
+      changes.close();
       document.removeEventListener("visibilitychange", refreshVisible);
     };
   }, [load]);

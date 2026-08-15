@@ -25,6 +25,7 @@ import {
 import { DB_PATH, CATALOGUE_PATH, CATEGORY_REGISTRY_PATH, ensureDataDir } from "../paths.ts";
 import { createLiveBridgeReader } from "../cmux/live.ts";
 import type { Bridge } from "../cmux/bridge.ts";
+import type { CmuxChangeScope } from "../cmux/events.ts";
 import {
   closeSessionWorkspaceCandidates,
   type CloseSessionWorkspaceDependencies,
@@ -223,6 +224,25 @@ export interface SidebarSource {
   refreshSnapshotLiveness?(): void;
   /** Await a liveness read newer than this call, for a caller that just changed the world. */
   refreshSnapshotLivenessNow?(): Promise<void>;
+  /**
+   * Declare the named sources out of date, because something authoritative said they are.
+   *
+   * The caches keep their TTLs as a backstop for whatever this never hears about, but a TTL is
+   * only ever a guess at when a value stopped being true. When cmux says a workspace was selected
+   * or an agent's status changed, waiting out the remainder of that guess is pure latency — and
+   * because the guesses differ per source, it is also how one response comes to carry a fresh tree
+   * beside a ten-second-old workspace state and draw a row that contradicts itself.
+   */
+  invalidate?(scopes: Iterable<CmuxChangeScope>): void;
+  /**
+   * How many times anything the snapshot draws from has been declared out of date.
+   *
+   * Monotonic and cheap to read, so a client can be told "something moved" without being sent a
+   * snapshot it may not want in the shape it wants it.
+   */
+  revision?(): number;
+  /** Called when the revision moves. Returns the unsubscribe. */
+  onRevision?(listener: (revision: number) => void): () => void;
   /** Record that the reader refused a verdict, so the same one stops being offered. */
   declineSuggestion(sessionId: string, verb: string): Promise<DeclineOutcome>;
   open(sessionId: string): Promise<OpenSessionOutcome>;
@@ -598,6 +618,23 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   // Only directories the latest snapshot published can serve an icon; the map is replaced on
   // each snapshot so a directory that disappears stops being servable.
   let favicons = new Map<string, string>();
+  let revision = 0;
+  const revisionListeners = new Set<(next: number) => void>();
+
+  function bumpRevision(): void {
+    revision += 1;
+    for (const listener of revisionListeners) {
+      // One subscriber's failure must not stop the rest being told, and a listener that throws is
+      // a bug in that listener rather than a reason to stop tracking change at all.
+      try {
+        listener(revision);
+      } catch (error) {
+        options.logger?.warn("sidebar revision listener failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
   const directoryFacts = options.directoryFacts ?? createDirectoryFactsCache(now);
 
   /**
@@ -989,10 +1026,46 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
 
     async refreshSnapshotLivenessNow(): Promise<void> {
       await snapshotLiveness.refreshNow();
+      // An action that just changed the world is itself news, and the client waiting on it should
+      // not have to wait for cmux to report the change back before repainting.
+      bumpRevision();
     },
 
     refreshSnapshotLiveness(): void {
       snapshotLiveness.refresh();
+    },
+
+    invalidate(scopes: Iterable<CmuxChangeScope>): void {
+      let touched = false;
+      for (const scope of scopes) {
+        touched = true;
+        switch (scope) {
+          case "liveness":
+            snapshotLiveness.refresh();
+            break;
+          case "status":
+            statusReader.invalidate();
+            break;
+          case "workspaceState":
+            workspaceStateReader.invalidate();
+            break;
+          case "notifications":
+            notificationReader.invalidate();
+            break;
+        }
+      }
+      if (touched) bumpRevision();
+    },
+
+    revision(): number {
+      return revision;
+    },
+
+    onRevision(listener: (next: number) => void): () => void {
+      revisionListeners.add(listener);
+      return () => {
+        revisionListeners.delete(listener);
+      };
     },
 
     faviconFor(directory: string): string | null {
