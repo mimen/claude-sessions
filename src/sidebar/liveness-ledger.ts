@@ -33,14 +33,23 @@ export interface LivenessLedger {
   observeIndex(sessions: Iterable<{ readonly sessionId: string; readonly resumeId: string }>): void;
   /**
    * Feed the tree's active-window pointer and get back the effective one: the value itself when
-   * present, otherwise the last one that was. Null only before the first successful read.
+   * present, otherwise the last one that was — but only while that window still exists. Pass
+   * `liveWindowIds` from a readable tree so a sticky pointer to a closed window is dropped
+   * instead of filtering every workspace against a window that is gone. Null when nothing
+   * current is known.
    */
-  observeActiveWindow(activeWindowId: string | null): string | null;
+  observeActiveWindow(
+    activeWindowId: string | null,
+    liveWindowIds?: ReadonlySet<string>,
+  ): string | null;
 
   /** Every id known to name the same session, the requested id included. */
   aliasesFor(sessionId: string): readonly string[];
   canonicalFor(sessionId: string): string;
-  /** alias → canonical for every id the ledger has seen. Built fresh; do not retain across writes. */
+  /**
+   * alias → canonical for every id the ledger has observed. Cached until the graph changes; the
+   * returned map must be treated as immutable and not retained across writes.
+   */
   canonicalMap(): ReadonlyMap<string, string>;
   /** Locate a session's live surface trying every alias, not just the requested id. */
   locate(bridge: Bridge, sessionId: string): SurfaceLocation | null;
@@ -50,9 +59,17 @@ export interface LivenessLedger {
   recentResumeTarget(sessionIds: readonly string[]): ResumeTarget | null;
   /** All unexpired resume hints, keyed by canonical id. */
   activeResumeHints(): ReadonlyMap<string, ResumeTarget>;
-  /** Record a close the action layer performed; clears any resume note for the same session. */
-  noteClosed(sessionIds: readonly string[]): void;
-  isRecentlyClosed(sessionId: string): boolean;
+  /**
+   * Record a close the action layer performed; clears any resume note for the same session.
+   * `workspaceId` scopes the suppression to the workspace that was actually closed.
+   */
+  noteClosed(sessionIds: readonly string[], workspaceId?: string): void;
+  /**
+   * Whether a close hint should suppress this session's liveness. A hint records which workspace
+   * was closed; a live binding observed in a DIFFERENT workspace is fresh truth (the session was
+   * reopened elsewhere) and is not suppressed. Callers that have a binding pass its workspaceId.
+   */
+  isRecentlyClosed(sessionId: string, boundWorkspaceId?: string): boolean;
 
   /** Introspection for the debug endpoint; shape is for eyes, not for programs. */
   debugState(): Record<string, unknown>;
@@ -69,6 +86,18 @@ export interface LivenessLedgerOptions {
 const RESUME_HINT_TTL_MS = 15_000;
 const CLOSED_HINT_TTL_MS = 12_000;
 
+interface ResumeHint {
+  readonly until: number;
+  readonly writtenAt: number;
+  readonly target: ResumeTarget;
+}
+
+interface ClosedHint {
+  readonly until: number;
+  readonly writtenAt: number;
+  readonly workspaceId: string | null;
+}
+
 export function createLivenessLedger(options: LivenessLedgerOptions = {}): LivenessLedger {
   const now = options.now ?? (() => Date.now());
   const resumeTtl = options.resumeHintTtlMs ?? RESUME_HINT_TTL_MS;
@@ -82,11 +111,24 @@ export function createLivenessLedger(options: LivenessLedgerOptions = {}): Liven
   /** Ids seen in the index's sessionId column — the row identity, preferred over resume aliases. */
   const indexPrimary = new Set<string>();
 
+  // Structure version: bumped by every registration, union, and promotion. Guards the
+  // canonicalMap cache; path compression rewrites edges without changing any answer, so it
+  // deliberately does not bump.
+  let generation = 0;
+
+  // Pure: an id the ledger has never observed resolves to itself and is NOT retained. Reads are
+  // reachable from HTTP with caller-supplied ids, and a lookup must not grow the graph — only
+  // observations (register below) do.
   function find(id: string): string {
     let root = id;
+    // Bounded ascent: this runs on the request path of a long-lived daemon, so a future bug that
+    // corrupts the parent map into a cycle must degrade to a wrong answer, never to a spin that
+    // wedges the process.
+    let steps = 0;
     while (true) {
       const up = parent.get(root);
       if (up === undefined || up === root) break;
+      if (++steps > parent.size) return id;
       root = up;
     }
     // Path compression, done as a second walk so the first stays allocation-free.
@@ -96,8 +138,14 @@ export function createLivenessLedger(options: LivenessLedgerOptions = {}): Liven
       parent.set(walk, root);
       walk = up;
     }
-    if (!parent.has(root)) parent.set(root, root);
     return root;
+  }
+
+  function register(id: string): void {
+    if (id && !parent.has(id)) {
+      parent.set(id, id);
+      generation += 1;
+    }
   }
 
   // Root preference decides which alias a row is displayed and addressed under. The catalogue's
@@ -119,20 +167,40 @@ export function createLivenessLedger(options: LivenessLedgerOptions = {}): Liven
 
   // An id can become preferred AFTER its component already chose a root — the index taught the
   // pair before the catalogue named the canonical. Re-root so later observations still win the
-  // rank they deserve; without this the answer would depend on which source spoke first.
+  // rank they deserve. The id must point at ITSELF before the old root points at it, or the two
+  // form a cycle and every subsequent find() spins forever.
   function promote(id: string): void {
     const root = find(id);
-    if (root !== id && preferredRoot(id, root) === id) parent.set(root, id);
+    if (root === id || preferredRoot(id, root) !== id) return;
+    parent.set(id, id);
+    parent.set(root, id);
+    generation += 1;
   }
 
-  function union(a: string, b: string): void {
-    if (!a || !b || a === b) return;
+  // The two sources assert different relations. A catalogue alias→canonical edge is the
+  // catalogue saying "one session" — its own reader already refuses to alias two of its
+  // canonical rows together, so the edge is trusted. An index sessionId→resumeId edge only says
+  // "this transcript DESCENDS from that id": for a linear resume that coincides with identity,
+  // for a fork it does not, and the index cannot tell the two apart. So an index edge never
+  // merges two ids that are each a session in their own right — two catalogue-canonical rows,
+  // or two indexed transcripts (fork siblings both descend from one parent; a resumed parent's
+  // own transcript is also still indexed). The genuine-resume merge those guards defer is made
+  // later by the catalogue edge, which is the authority on it. What an index edge still merges
+  // is a dangling historical id — a resume ancestor with no row of its own anywhere.
+  function union(a: string, b: string, source: "catalogue" | "index"): void {
+    if (!a || !b) return;
+    register(a);
+    register(b);
+    if (a === b) return;
     const rootA = find(a);
     const rootB = find(b);
     if (rootA === rootB) return;
+    if (catalogueCanonical.has(rootA) && catalogueCanonical.has(rootB)) return;
+    if (source === "index" && indexPrimary.has(rootA) && indexPrimary.has(rootB)) return;
     const winner = preferredRoot(rootA, rootB);
     const loser = winner === rootA ? rootB : rootA;
     parent.set(loser, winner);
+    generation += 1;
   }
 
   function componentOf(id: string): string[] {
@@ -145,16 +213,44 @@ export function createLivenessLedger(options: LivenessLedgerOptions = {}): Liven
     return members;
   }
 
-  // Hints, keyed by canonical id at write time. Reads re-canonicalize, so a hint written before
-  // the graph learned an alias is still found through it afterwards.
-  const resumeHints = new Map<string, { readonly until: number; readonly target: ResumeTarget }>();
-  const closedHints = new Map<string, number>();
+  // Hints, keyed by the component root current at write time. sweep() re-keys them whenever the
+  // graph has since chosen a different root, so alias-graph growth can neither orphan a hint
+  // (reads look up the new root) nor resurrect one over a newer verdict for the same session.
+  const resumeHints = new Map<string, ResumeHint>();
+  const closedHints = new Map<string, ClosedHint>();
   let lastActiveWindowId: string | null = null;
+  let cachedCanonicalMap: { generation: number; map: ReadonlyMap<string, string> } | null = null;
+
+  function rekey<V>(map: Map<string, V>, merge: (a: V, b: V) => V): void {
+    let moves: Array<[string, string, V]> | null = null;
+    for (const [key, value] of map) {
+      const root = find(key);
+      if (root !== key) (moves ??= []).push([key, root, value]);
+    }
+    if (!moves) return;
+    for (const [key, root, value] of moves) {
+      map.delete(key);
+      const existing = map.get(root);
+      map.set(root, existing === undefined ? value : merge(existing, value));
+    }
+  }
 
   function sweep(): void {
     const current = now();
     for (const [key, hint] of resumeHints) if (hint.until <= current) resumeHints.delete(key);
-    for (const [key, until] of closedHints) if (until <= current) closedHints.delete(key);
+    for (const [key, hint] of closedHints) if (hint.until <= current) closedHints.delete(key);
+    rekey(resumeHints, (a, b) => (a.writtenAt >= b.writtenAt ? a : b));
+    rekey(closedHints, (a, b) => (a.writtenAt >= b.writtenAt ? a : b));
+    // Re-keying can land a resume hint and a close hint on the same root even though every write
+    // clears its opposite — they were written under different roots that have since merged. The
+    // newer write is the session's latest known state; a tie suppresses, which self-heals in one
+    // close TTL either way.
+    for (const [key, resume] of resumeHints) {
+      const closed = closedHints.get(key);
+      if (closed === undefined) continue;
+      if (closed.writtenAt >= resume.writtenAt) resumeHints.delete(key);
+      else closedHints.delete(key);
+    }
   }
 
   function canonicalKeys(sessionIds: readonly string[]): Set<string> {
@@ -169,21 +265,41 @@ export function createLivenessLedger(options: LivenessLedgerOptions = {}): Liven
         if (canonical) catalogueCanonical.add(canonical);
       }
       for (const [alias, canonical] of canonicalSessionIds) {
-        union(alias, canonical);
+        union(alias, canonical, "catalogue");
         if (canonical) promote(canonical);
       }
     },
 
     observeIndex(sessions) {
-      for (const session of sessions) {
-        if (session.sessionId) indexPrimary.add(session.sessionId);
-        union(session.sessionId, session.resumeId);
+      // Two passes: every row identity is registered before any edge is judged, so whether a
+      // union is refused cannot depend on row order within the batch.
+      const batch = [...sessions];
+      for (const session of batch) {
+        if (session.sessionId) {
+          register(session.sessionId);
+          indexPrimary.add(session.sessionId);
+        }
+      }
+      for (const session of batch) {
+        union(session.sessionId, session.resumeId, "index");
         if (session.sessionId) promote(session.sessionId);
       }
     },
 
-    observeActiveWindow(activeWindowId) {
-      if (activeWindowId !== null) lastActiveWindowId = activeWindowId;
+    observeActiveWindow(activeWindowId, liveWindowIds) {
+      if (activeWindowId !== null) {
+        lastActiveWindowId = activeWindowId;
+        return activeWindowId;
+      }
+      if (
+        lastActiveWindowId !== null
+        && liveWindowIds !== undefined
+        && !liveWindowIds.has(lastActiveWindowId)
+      ) {
+        // The remembered window is gone from a readable tree: it closed. Answering with it
+        // anyway would filter every sessionless workspace against a window none can be in.
+        lastActiveWindowId = null;
+      }
       return lastActiveWindowId;
     },
 
@@ -196,8 +312,14 @@ export function createLivenessLedger(options: LivenessLedgerOptions = {}): Liven
     },
 
     canonicalMap() {
+      // Rebuilt only when the graph actually changed; snapshots poll every second and the graph
+      // holds every id ever observed, so an uncached rebuild would be the hot path's biggest map.
+      if (cachedCanonicalMap !== null && cachedCanonicalMap.generation === generation) {
+        return cachedCanonicalMap.map;
+      }
       const map = new Map<string, string>();
       for (const key of parent.keys()) map.set(key, find(key));
+      cachedCanonicalMap = { generation, map };
       return map;
     },
 
@@ -214,9 +336,10 @@ export function createLivenessLedger(options: LivenessLedgerOptions = {}): Liven
 
     noteResumed(sessionIds, target) {
       sweep();
-      const until = now() + Math.max(0, resumeTtl);
+      const writtenAt = now();
+      const until = writtenAt + Math.max(0, resumeTtl);
       for (const key of canonicalKeys(sessionIds)) {
-        resumeHints.set(key, { until, target });
+        resumeHints.set(key, { until, writtenAt, target });
         closedHints.delete(key);
       }
     },
@@ -233,23 +356,26 @@ export function createLivenessLedger(options: LivenessLedgerOptions = {}): Liven
     activeResumeHints() {
       sweep();
       const map = new Map<string, ResumeTarget>();
-      // Keys were canonical at write time; re-canonicalize in case the graph has since merged them.
-      for (const [key, hint] of resumeHints) map.set(find(key), hint.target);
+      for (const [key, hint] of resumeHints) map.set(key, hint.target);
       return map;
     },
 
-    noteClosed(sessionIds) {
+    noteClosed(sessionIds, workspaceId) {
       sweep();
-      const until = now() + Math.max(0, closedTtl);
+      const writtenAt = now();
+      const until = writtenAt + Math.max(0, closedTtl);
       for (const key of canonicalKeys(sessionIds)) {
-        closedHints.set(key, until);
+        closedHints.set(key, { until, writtenAt, workspaceId: workspaceId ?? null });
         resumeHints.delete(key);
       }
     },
 
-    isRecentlyClosed(sessionId) {
+    isRecentlyClosed(sessionId, boundWorkspaceId) {
       sweep();
-      return closedHints.has(find(sessionId));
+      const hint = closedHints.get(find(sessionId));
+      if (hint === undefined) return false;
+      if (boundWorkspaceId === undefined || hint.workspaceId === null) return true;
+      return hint.workspaceId === boundWorkspaceId;
     },
 
     debugState() {
@@ -273,9 +399,10 @@ export function createLivenessLedger(options: LivenessLedgerOptions = {}): Liven
           workspaceRef: hint.target.workspaceRef,
           expiresInMs: Math.max(0, hint.until - now()),
         })),
-        closedHints: [...closedHints.entries()].map(([id, until]) => ({
+        closedHints: [...closedHints.entries()].map(([id, hint]) => ({
           sessionId: id,
-          expiresInMs: Math.max(0, until - now()),
+          workspaceId: hint.workspaceId,
+          expiresInMs: Math.max(0, hint.until - now()),
         })),
         lastActiveWindowId,
       };

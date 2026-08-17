@@ -101,6 +101,8 @@ export type { OpenSessionOutcome } from "./session-action-coordinator.ts";
 
 /** How many indexed sessions are considered before the resume shelf is filled. */
 const INDEX_SCAN_LIMIT = 200;
+/** Mirrors the close primitive's own candidate validation, which fail-closes on any non-UUID. */
+const SESSION_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RECENT_LIMIT = 8;
 const HISTORY_LIMIT = 50;
 /** Covers the normal gap between workspace spawn and cmux's SessionStart surface binding. */
@@ -751,7 +753,12 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     const row = index.sessions[0];
     return [...new Set([...aliases, row?.sessionId, row?.resumeId].filter(
       (candidate): candidate is string => candidate !== undefined,
-    ))];
+    ))]
+      // The close primitive refuses the WHOLE batch on the first candidate that is not a UUID,
+      // and real stores hold non-UUID ids (".orphaned-…" suffixes). One of those in the alias
+      // set would turn every close of this session into invalid-session-id, so they never
+      // reach the primitive — a non-UUID id cannot name a live cmux binding anyway.
+      .filter((candidate) => SESSION_UUID_PATTERN.test(candidate));
   }
 
   function primitiveCloseDependencies(): CloseSessionWorkspaceDependencies {
@@ -775,8 +782,10 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     );
     if (mutate && outcome.status === "closed") {
       // The hook store forgets a closed binding on its own schedule; the ledger knows now, so
-      // the next snapshot demotes the row instead of showing a tab that no longer exists.
-      ledger.noteClosed(candidates);
+      // the next snapshot demotes the row instead of showing a tab that no longer exists. The
+      // workspace scopes the hint: a binding that reappears in a DIFFERENT workspace is a fresh
+      // reopen, not the stale binding this hint exists to suppress.
+      ledger.noteClosed(candidates, outcome.identity.workspaceId);
       bumpRevision();
     }
     return outcome;
@@ -805,7 +814,12 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       // alias still resolves — displayed-but-unopenable was the defect class this closes.
       const index = readIndexedSessionsSafely(1, ledger.aliasesFor(sessionId));
       const row = index.sessions[0];
-      if (row) return { status: "found", row };
+      if (row) {
+        // An action can teach identity before any snapshot has: feed the row back so the shared
+        // authority knows the pair the moment the action does, not one snapshot later.
+        ledger.observeIndex([row]);
+        return { status: "found", row };
+      }
       return index.readable
         ? { status: "absent" }
         : { status: "unreadable", reason: "session index read failed" };
@@ -813,6 +827,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     identity: {
       locate: (bridge, sessionId) => ledger.locate(bridge, sessionId),
       aliasesFor: (sessionId) => ledger.aliasesFor(sessionId),
+      canonicalFor: (sessionId) => ledger.canonicalFor(sessionId),
       noteResumed: (sessionIds, target) => {
         ledger.noteResumed(sessionIds, target);
         // Announce so every client refetches into the hint window, not after it.
@@ -848,8 +863,15 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const bridge = await snapshotLiveness.read();
       const bridgeMs = performance.now() - phaseStartedAt;
       // Sticky: a degraded tree read without an `active` pointer inherits the last known one
-      // instead of un-knowing which window the user is in.
-      const activeWindowId = ledger.observeActiveWindow(bridge.activeWindowId);
+      // instead of un-knowing which window the user is in. The live window set lets the ledger
+      // drop a remembered window that has since closed; an unreadable bridge proves nothing
+      // about which windows exist, so it validates against nothing.
+      const activeWindowId = ledger.observeActiveWindow(
+        bridge.activeWindowId,
+        bridge.readable
+          ? new Set(bridge.surfaces.map((surface) => surface.windowId))
+          : undefined,
+      );
       phaseStartedAt = performance.now();
       const catalogue = readCatalogueLifecyclesSafely();
       ledger.observeCatalogue(catalogue.canonicalSessionIds);
@@ -926,7 +948,9 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         for (const alias of ledger.aliasesFor(hintedId)) liveSessionIds.add(alias);
       }
       for (const id of [...liveSessionIds]) {
-        if (ledger.isRecentlyClosed(id)) liveSessionIds.delete(id);
+        if (ledger.isRecentlyClosed(id, bridge.locateSession(id)?.workspaceId)) {
+          liveSessionIds.delete(id);
+        }
       }
       const incognitoAndClosed = (session: { sessionId: string; resumeId: string }): boolean =>
         (catalogue.incognito.has(session.sessionId) || catalogue.incognito.has(session.resumeId))
@@ -981,13 +1005,16 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
 
       const pinnedWorkspaces = pinnedWorkspacesFrom(bridge);
       const boundLive = liveSessionsFrom(bridge, pinnedWorkspaces, statuses, activeWindowId)
-        .filter((session) => !ledger.isRecentlyClosed(session.sessionId));
+        .filter((session) => !ledger.isRecentlyClosed(session.sessionId, session.workspaceId));
       // A resumed session's workspace exists in the tree before the hook store binds its session,
       // and the click that resumed it deserves a live row now, not after the binding catches up.
       // The hint synthesizes the binding; the real one replaces it within the hint's TTL.
       const claimedWorkspaces = new Set(boundLive.map((session) => session.workspaceId));
       const hintedLive: LiveSessionInput[] = [];
       for (const [hintedId, target] of ledger.activeResumeHints()) {
+        // The same belt the other two liveness consumers wear: a close verdict newer than this
+        // hint must win even if a bookkeeping gap ever leaves both standing.
+        if (ledger.isRecentlyClosed(hintedId)) continue;
         if (boundLive.some((session) => ledger.canonicalFor(session.sessionId) === hintedId)) continue;
         const surface = bridge.surfaces.find((s) => s.workspaceRef === target.workspaceRef);
         if (!surface || claimedWorkspaces.has(surface.workspaceId)) continue;
@@ -1011,7 +1038,10 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const live = [...boundLive, ...hintedLive];
       // Sessionless workspaces have no hook-store cwd, so cmux's own per-workspace record is the
       // only truthful source for the directory their row names.
-      const sessionless = liveWorkspacesFrom(bridge, pinnedWorkspaces, activeWindowId)
+      // Deliberately the RAW pointer, not the sticky one: this filter decides visibility, and
+      // "unknown active window shows everything" must survive a degraded read. The sticky value
+      // exists so focus paint doesn't flap; hiding tabs on its guess would be the worse trade.
+      const sessionless = liveWorkspacesFrom(bridge, pinnedWorkspaces, bridge.activeWindowId)
         .filter((workspace) => !claimedWorkspaces.has(workspace.workspaceId));
       phaseStartedAt = performance.now();
       const workspaceStates = sessionless.length > 0
