@@ -251,7 +251,11 @@ struct VersionFooter: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 3)
+        .padding(.top, 3)
+        // cmux hands the panel its full rect and floats its own icon strip over the bottom of it
+        // (the HTML sidebar handles the same via viewport-fit and inset custom properties). The
+        // native host publishes no inset, so the footer clears the strip by a measured constant.
+        .padding(.bottom, 26)
         .foregroundStyle(.tertiary)
         .background(.black.opacity(0.12))
     }
