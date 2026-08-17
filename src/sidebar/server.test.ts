@@ -240,7 +240,8 @@ describe("sidebar server", () => {
     const response = await fetch(`${app.url}/api/snapshot`);
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(EMPTY_SNAPSHOT);
+    // The transport stamps which release is answering; a repo checkout stamps "dev".
+    expect(await response.json()).toEqual({ ...EMPTY_SNAPSHOT, serverVersion: "dev" });
     expect(app.snapshotScopes).toEqual(["active"]);
   });
 
