@@ -35,11 +35,13 @@ export interface CmuxEventSubscription {
   stop(): void;
 }
 
-/** One running `cmux events` process, reduced to the two things a subscriber needs. */
+/** One running `cmux events` process, reduced to the things a subscriber needs. */
 export interface CmuxEventStreamProcess {
   /** Complete NDJSON lines, in order, until the process ends. */
   readonly lines: AsyncIterable<string>;
   kill(): void;
+  /** Whatever the process wrote to stderr, for explaining a stream that ended silently. */
+  stderrTail?(): string;
 }
 
 export interface CmuxEventStreamIo {
@@ -151,12 +153,23 @@ function resumeGapped(frame: unknown): boolean {
   return typeof resume === "object" && resume !== null && resume.gap === true;
 }
 
+const STDERR_TAIL_LIMIT = 2_000;
+
 const bunEventStreamIo: CmuxEventStreamIo = {
   spawn(cmuxBin, args) {
-    const child = Bun.spawn([cmuxBin, ...args], { stdout: "pipe", stderr: "ignore" });
+    const child = Bun.spawn([cmuxBin, ...args], { stdout: "pipe", stderr: "pipe" });
+    // A stream that exits without frames only explains itself on stderr, so keep a bounded tail.
+    let stderrTail = "";
+    void (async () => {
+      const decoder = new TextDecoder();
+      for await (const chunk of child.stderr) {
+        stderrTail = (stderrTail + decoder.decode(chunk, { stream: true })).slice(-STDERR_TAIL_LIMIT);
+      }
+    })().catch(() => {});
     return {
       lines: readLines(child.stdout),
       kill: () => child.kill(),
+      stderrTail: () => stderrTail.trim(),
     };
   },
 };
@@ -203,14 +216,18 @@ export function subscribeToCmuxEvents(
   let warnedUnavailable = false;
 
   /** @returns whether the stream produced anything at all, which is how support is detected. */
-  async function runOnce(): Promise<boolean> {
+  async function runOnce(): Promise<{ sawOutput: boolean; stderr: string }> {
     const child = io.spawn(cmuxBin, ["events", "--reconnect"]);
     current = child;
     let sawOutput = false;
+    const outcome = (): { sawOutput: boolean; stderr: string } => ({
+      sawOutput,
+      stderr: child.stderrTail?.() ?? "",
+    });
     try {
       for await (const line of child.lines) {
         sawOutput = true;
-        if (stopped) return sawOutput;
+        if (stopped) return outcome();
         let frame: unknown;
         try {
           frame = JSON.parse(line);
@@ -226,18 +243,21 @@ export function subscribeToCmuxEvents(
         const scopes = scopesForFrame(frame);
         if (scopes !== null) options.onChange(scopes);
       }
-      return sawOutput;
+      return outcome();
     } finally {
       if (current === child) current = null;
     }
   }
 
-  function warnUnavailableOnce(reason: string): void {
+  function warnUnavailableOnce(reason: string, stderr = ""): void {
     if (warnedUnavailable) return;
     warnedUnavailable = true;
     // Once, not per attempt: a cmux that predates `cmux events` would otherwise fill the log with
     // a fact that does not change, and the sidebar is still correct without the stream.
-    logger.warn("cmux event stream unavailable; falling back to timed reads", { reason });
+    logger.warn("cmux event stream unavailable; falling back to timed reads", {
+      reason,
+      ...(stderr ? { stderr } : {}),
+    });
   }
 
   async function supervise(): Promise<void> {
@@ -245,8 +265,9 @@ export function subscribeToCmuxEvents(
     while (!stopped) {
       try {
         // A stream that ends without ever emitting a frame is how a cmux without `events` — or one
-        // that is not running — presents itself. It exits cleanly, so only the silence says so.
-        if (!await runOnce()) warnUnavailableOnce("stream produced no frames");
+        // that is not running — presents itself. It exits cleanly, so only stderr can say why.
+        const result = await runOnce();
+        if (!result.sawOutput) warnUnavailableOnce("stream produced no frames", result.stderr);
       } catch (error) {
         warnUnavailableOnce(error instanceof Error ? error.message : String(error));
       }

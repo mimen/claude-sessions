@@ -9,6 +9,7 @@ import {
   projectSidebar,
   sectionForStatus,
   sidebarLifecycleOf,
+  titleIsSessionIdish,
   type IndexedSessionInput,
   type LiveSessionInput,
   type LiveWorkspaceInput,
@@ -310,6 +311,8 @@ describe("cleanSessionName", () => {
     expect(cleanSessionName("✳ Reduce idle session RAM usage")).toBe("Reduce idle session RAM usage");
     expect(cleanSessionName("⠐ Design Cmux sidebar integration")).toBe("Design Cmux sidebar integration");
     expect(cleanSessionName("⠂ Debug managed session verification")).toBe("Debug managed session verification");
+    expect(cleanSessionName("◐ Waiting on approval")).toBe("Waiting on approval");
+    expect(cleanSessionName("◴ Long build")).toBe("Long build");
   });
 
   test("leaves an ordinary title untouched", () => {
@@ -319,6 +322,22 @@ describe("cleanSessionName", () => {
 
   test("keeps a title that is only glyphs rather than blanking the row", () => {
     expect(cleanSessionName("✳")).toBe("✳");
+  });
+});
+
+describe("titleIsSessionIdish", () => {
+  test("recognises full and truncated session UUIDs", () => {
+    expect(titleIsSessionIdish("0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9")).toBe(true);
+    expect(titleIsSessionIdish("0a1b2c3d-4e5f-6071")).toBe(true);
+    expect(titleIsSessionIdish("0a1b2c3d")).toBe(true);
+    expect(titleIsSessionIdish(" 0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9 ")).toBe(true);
+  });
+
+  test("leaves real titles alone, hex-looking words included", () => {
+    expect(titleIsSessionIdish("Design the sidebar")).toBe(false);
+    expect(titleIsSessionIdish("deadbeef fix")).toBe(false);
+    expect(titleIsSessionIdish("cafe")).toBe(false);
+    expect(titleIsSessionIdish("")).toBe(false);
   });
 });
 
@@ -627,6 +646,43 @@ describe("projectSidebar", () => {
       status: null,
       statusAvailability: "unreadable",
     });
+  });
+
+  test("demotes a raw session-id workspace title below the indexed title", () => {
+    // cmux titles a freshly resumed workspace with the raw session UUID until its own titler
+    // runs; the indexed title is what the row was actually about.
+    const snapshot = projectSidebar(input({
+      live: [live({ workspaceTitle: "0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9" })],
+      indexed: [indexed({ title: "Real work title" })],
+    }));
+
+    expect(snapshot.rows[0]?.name).toBe("Real work title");
+  });
+
+  test("keeps the session-id title when nothing better is known", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ workspaceTitle: "0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9" })],
+    }));
+
+    expect(snapshot.rows[0]?.name).toBe("0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9");
+  });
+
+  test("keeps a predecessor off the shelf while its resumed incarnation runs", () => {
+    // The catalogue already knows old-run and new-run are one session; the index still lists
+    // them as two rows in the window before its next scan.
+    const snapshot = projectSidebar(input({
+      live: [live({ sessionId: "new-run", workspaceTitle: "Resumed work" })],
+      indexed: [
+        indexed({ sessionId: "old-run", resumeId: "old-run", title: "Original work" }),
+      ],
+      canonicalSessionIds: new Map([
+        ["new-run", "canonical"],
+        ["old-run", "canonical"],
+      ]),
+    }));
+
+    expect(snapshot.rows).toHaveLength(1);
+    expect(sessionRows(snapshot.rows)[0]?.sessionId).toBe("canonical");
   });
 
   test("caps the resume shelf", () => {

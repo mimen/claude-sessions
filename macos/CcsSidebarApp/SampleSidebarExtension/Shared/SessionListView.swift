@@ -8,7 +8,6 @@ import SwiftUI
 @MainActor
 public struct SessionListView: View {
     private let rows: [SidebarRow]
-    private let now: Date
     private let actions: RowActions
     private let selectedId: String?
     private let grouping: GroupingMode
@@ -20,11 +19,18 @@ public struct SessionListView: View {
     private let jumpLabels: [String: String]
     private let onJump: (Int) -> Void
     @State private var collapsed: Set<String> = []
+    /// The one row the pointer is in, owned here rather than as per-row state.
+    ///
+    /// Per-row `@State` latched: a row that scrolled or reordered away under a stationary pointer
+    /// never received its exit event, so it stayed painted as hovered until its view was destroyed
+    /// — which is why closing and reopening the sidebar "fixed" rows stuck in the open state. One
+    /// owner makes a second hovered row structurally impossible, and a stale id simply stops
+    /// matching once the row list changes.
+    @State private var hoveredId: String?
 
     public init(
         rows: [SidebarRow],
         actions: RowActions,
-        now: Date = Date(),
         selectedId: String? = nil,
         grouping: GroupingMode = .status,
         layouts: RowLayouts = RowLayouts(),
@@ -37,7 +43,6 @@ public struct SessionListView: View {
     ) {
         self.rows = rows
         self.actions = actions
-        self.now = now
         self.selectedId = selectedId
         self.grouping = grouping
         self.layouts = layouts
@@ -54,10 +59,19 @@ public struct SessionListView: View {
     }
 
     public var body: some View {
-        listBody
+        // @Observable only re-evaluates views that read a changing property, and until this read
+        // existed nothing read the tick — so elapsed labels froze between snapshots and only moved
+        // when a poll happened to repaint the list.
+        let _ = clock.tick
+        listBody(now: Date())
+            .onChange(of: rows.map(\.id)) { _, _ in
+                // Membership or order changed under the pointer; whatever was hovered may no
+                // longer be where the pointer is. Resetting beats guessing.
+                hoveredId = nil
+            }
     }
 
-    private var listBody: some View {
+    private func listBody(now: Date) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
                 ForEach(sections, id: \.name) { section in
@@ -70,7 +84,12 @@ public struct SessionListView: View {
                                 layout: layouts.layout(for: row),
                                 port: port,
                                 workingFor: clock.elapsed(for: row),
-                                jumpLabel: jumpLabels[row.id]
+                                jumpLabel: jumpLabels[row.id],
+                                isHovered: hoveredId == row.id,
+                                onHoverChange: { inside in
+                                    if inside { hoveredId = row.id }
+                                    else if hoveredId == row.id { hoveredId = nil }
+                                }
                             )
                             .id(row.id)
                         }

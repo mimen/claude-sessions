@@ -137,6 +137,7 @@ export function createCachedStatusReader(
   ttlMs: number,
   now: () => number = () => Date.now(),
   read: typeof readClaudeStatuses = readClaudeStatuses,
+  onReplaced?: () => void,
 ): CachedStatusReader {
   const cache = createWarmCache<readonly string[], Map<string, CmuxStatusRead>>({
     ttlMs,
@@ -147,6 +148,7 @@ export function createCachedStatusReader(
     // An authoritative read failure must not erase the last truthful status. Leaving it stale makes
     // the next read retry rather than treating a failed attempt as a fresh observation.
     failure: { type: "retain-and-retry" },
+    ...(onReplaced ? { onReplaced } : {}),
   });
   return {
     read: (workspaceIds) => cache.read(workspaceIds),

@@ -13,6 +13,16 @@ export interface WarmCacheOptions<Input, Value> {
   readonly now?: () => number;
   readonly load: (input: Input) => Promise<Value>;
   readonly failure: WarmCacheFailure<Input, Value>;
+  /**
+   * Called when a refresh that began after an `invalidate` lands its value.
+   *
+   * An invalidation is usually announced to clients immediately, but the refetch it triggers still
+   * reads this cache — which serves the pre-change value while the refresh runs. Without a second
+   * announcement when the refresh lands, the new truth sits here until a poll happens to pick it
+   * up. TTL-driven refreshes deliberately do not fire this: they run on the read path, and
+   * announcing them would turn every poll into another poll.
+   */
+  readonly onReplaced?: () => void;
 }
 
 export interface WarmCache<Input, Value> {
@@ -62,12 +72,16 @@ export function createWarmCache<Input, Value>(
     if (inFlight) return inFlight;
 
     const startedAt = invalidations;
+    // A flight that starts stale was provoked by an invalidation, so its landing is the moment the
+    // announced change actually becomes servable.
+    const startedStale = stale;
     let flight: Promise<RefreshOutcome>;
     flight = Promise.resolve()
       .then(() => options.load(input))
       .then((value): RefreshOutcome => {
         cached = value;
         refreshedAt = now();
+        if (startedStale) options.onReplaced?.();
         return { status: "completed" };
       })
       .catch((error: Error): RefreshOutcome => {
@@ -75,6 +89,7 @@ export function createWarmCache<Input, Value>(
         if (failure.type === "replace") {
           cached = failure.value(input);
           refreshedAt = now();
+          if (startedStale) options.onReplaced?.();
           return { status: "completed" };
         }
         return { status: "failed", error };

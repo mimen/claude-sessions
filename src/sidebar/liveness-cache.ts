@@ -30,9 +30,12 @@ export interface SnapshotLivenessReaderOptions {
   readonly readBridge: () => Promise<Bridge>;
   readonly now?: () => number;
   readonly attemptTimeoutMs?: number;
+  /** How long failed refreshes may keep serving the last readable Bridge before failing closed. */
+  readonly maxStaleMs?: number;
 }
 
 const SNAPSHOT_LIVENESS_ATTEMPT_TIMEOUT_MS = 1_500;
+const SNAPSHOT_LIVENESS_MAX_STALE_MS = 15_000;
 
 function unreadableBridge(): Bridge {
   return buildBridge({ windows: [] }, {}, false);
@@ -52,8 +55,10 @@ export function createSnapshotLivenessReader(
 ): SnapshotLivenessReader {
   const now = options.now ?? (() => Date.now());
   const attemptTimeoutMs = options.attemptTimeoutMs ?? SNAPSHOT_LIVENESS_ATTEMPT_TIMEOUT_MS;
+  const maxStaleMs = options.maxStaleMs ?? SNAPSHOT_LIVENESS_MAX_STALE_MS;
   let cached: Bridge | null = null;
   let refreshedAt = Number.NEGATIVE_INFINITY;
+  let lastReadableAt = Number.NEGATIVE_INFINITY;
   let inFlight: Promise<void> | null = null;
   let forcedTrailingRefresh = false;
   let stale = false;
@@ -86,8 +91,17 @@ export function createSnapshotLivenessReader(
   }
 
   function completeRefresh(bridge: Bridge | null): void {
-    if (bridge !== null) cached = bridge;
-    else if (cached === null || !cached.readable) cached = unreadableBridge();
+    if (bridge !== null) {
+      cached = bridge;
+      lastReadableAt = now();
+    } else if (cached === null || !cached.readable) {
+      cached = unreadableBridge();
+    } else if (now() - lastReadableAt >= maxStaleMs) {
+      // Serving the last readable Bridge bridges a transient cmux hiccup, but past this window the
+      // frozen tree is a lie: rows keep a highlight that moved and the shelf keeps offering resumes
+      // it cannot verify. Failing closed lets the projection tell the truth about not knowing.
+      cached = unreadableBridge();
+    }
     refreshedAt = now();
   }
 

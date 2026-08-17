@@ -499,14 +499,26 @@ function dominantModel(session: IndexedSessionInput): SidebarModel | null {
 
 /**
  * cmux prefixes a workspace title with its own activity glyph (a braille spinner while a turn
- * runs, an asterisk when one ends). The sidebar already shows that state as a status pill, so
- * the glyph would be the same fact twice — and it makes titles jitter as the spinner animates.
+ * runs, an asterisk when one ends, and quarter-moon/clock glyphs on newer builds). The sidebar
+ * already shows that state as a status pill, so the glyph would be the same fact twice — and it
+ * makes titles jitter as the spinner animates.
  */
-const TITLE_ACTIVITY_GLYPHS = /^[⠀-⣿✱-❋·•\s]+/;
+const TITLE_ACTIVITY_GLYPHS = /^[⠀-⣿✱-❋◐-◓◴-◷·•\s]+/;
 
 export function cleanSessionName(title: string): string {
   const cleaned = title.replace(TITLE_ACTIVITY_GLYPHS, "").trim();
   return cleaned.length > 0 ? cleaned : title.trim();
+}
+
+/**
+ * Whether a workspace title is really a session id cmux fell back to, not a name.
+ *
+ * A resume that never re-registered its binding leaves the workspace titled with the raw session
+ * UUID (or its first segment). Showing that as the row's name tells the reader nothing; the
+ * indexed title, when one exists, is the session's actual subject.
+ */
+export function titleIsSessionIdish(title: string): boolean {
+  return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){0,3}(?:-[0-9a-f]{12})?$/i.test(title.trim());
 }
 
 /** The final path segment, which is what identifies a directory at a glance. */
@@ -550,6 +562,8 @@ export function sectionForStatus(
 interface ProjectionLookups {
   readonly indexedById: ReadonlyMap<string, IndexedSessionInput>;
   readonly liveIds: ReadonlySet<string>;
+  /** Canonical identities of every live session, for alias-proof "is this already running". */
+  readonly liveCanonicalIds: ReadonlySet<string>;
   readonly liveById: ReadonlyMap<string, LiveSessionInput>;
   readonly lifecycleFor: (
     sessionId: string,
@@ -682,6 +696,14 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
     if (!liveById.has(indexed.resumeId)) liveById.set(indexed.resumeId, live);
   }
 
+  // The catalogue learns a resume's identity before the index re-scans, so canonical ids are the
+  // join that works in the window where a freshly resumed session and its predecessor are still
+  // two different index rows.
+  const liveCanonicalIds = new Set<string>();
+  for (const liveId of liveIds) {
+    liveCanonicalIds.add(canonicalSessionIdFor(liveId, indexedById.get(liveId)));
+  }
+
   const faviconDirectories = input.faviconDirectories ?? new Set<string>();
   const unreadByWorkspaceId = input.unreadByWorkspaceId ?? new Map<string, number>();
   const preferredTitles = input.preferredTitles ?? new Map<string, string>();
@@ -725,6 +747,7 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
     lookups: {
       indexedById,
       liveIds,
+      liveCanonicalIds,
       liveById,
       lifecycleFor,
       catalogueLifecycleFor,
@@ -782,7 +805,10 @@ function buildLiveSessionRow(
     lifecycle: liveLifecycle,
     name: cleanSessionName(
       lookups.preferredTitleFor(live.sessionId, indexed?.resumeId)
-        ?? live.workspaceTitle ?? indexed?.title ?? "Untitled session",
+        ?? (live.workspaceTitle !== null && !titleIsSessionIdish(live.workspaceTitle)
+          ? live.workspaceTitle
+          : null)
+        ?? indexed?.title ?? live.workspaceTitle ?? "Untitled session",
     ),
     directory: lookups.projectFor(cwd),
     directoryPath: cwd,
@@ -915,6 +941,11 @@ function selectActiveRows(context: ProjectionContext): SidebarRow[] {
     if (added >= limit) break;
     if (!shelfLifecycles.has(lookups.lifecycleFor(session.sessionId, session))) continue;
     if (lookups.liveIds.has(session.sessionId) || lookups.liveIds.has(session.resumeId)) continue;
+    // A predecessor whose resumed incarnation is running shares its canonical id with a live row;
+    // shelving it would offer a second "resume" for work that is already on screen.
+    if (lookups.liveCanonicalIds.has(lookups.canonicalSessionIdFor(session.sessionId, session))) {
+      continue;
+    }
     if (seen.has(session.sessionId)) continue;
     seen.add(session.sessionId);
     rows.push(buildIndexedSessionRow(context, session, false));

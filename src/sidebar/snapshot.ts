@@ -574,13 +574,18 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   });
   const readStatuses = options.readStatuses ?? readClaudeStatuses;
   const readExactMessageCount = options.readExactMessageCount ?? exactMessageCount;
-  // Requests read this cache rather than spawning a subprocess per workspace.
+  // Requests read this cache rather than spawning a subprocess per workspace. When an
+  // invalidation-provoked refresh lands, the revision bumps again: the announcement at
+  // invalidation time reaches clients before these caches hold the new value, so without this
+  // second bump the refetch it triggers serves the pre-change state and the truth waits for a
+  // poll. `bumpRevision` is declared below; the lambda defers the reference until it exists.
+  const announceReplaced = (): void => bumpRevision();
   const statusReader: CachedStatusReader = options.statusReader
-    ?? createCachedStatusReader(cmuxBin, STATUS_TTL_MS, now, readStatuses);
+    ?? createCachedStatusReader(cmuxBin, STATUS_TTL_MS, now, readStatuses, announceReplaced);
   const workspaceStateReader: CachedWorkspaceStateReader = options.workspaceStateReader
-    ?? createCachedWorkspaceStateReader(cmuxBin, WORKSPACE_STATE_TTL_MS, now);
+    ?? createCachedWorkspaceStateReader(cmuxBin, WORKSPACE_STATE_TTL_MS, now, undefined, announceReplaced);
   const notificationReader: CachedNotificationReader = options.notificationReader
-    ?? createCachedNotificationReader(cmuxBin, NOTIFICATION_TTL_MS, now);
+    ?? createCachedNotificationReader(cmuxBin, NOTIFICATION_TTL_MS, now, undefined, announceReplaced);
   const processAdapter = options.processAdapter ?? bunAsyncProcessAdapter;
   const closeCmux = options.closeCmuxWorkspace ?? (async (workspaceId: string) =>
     (await processAdapter.run(

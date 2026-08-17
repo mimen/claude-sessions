@@ -33,10 +33,15 @@ public struct SessionRowView: View {
     public let port: Int
     public let workingFor: String?
     public let jumpLabel: String?
+    /// Hover is owned by the list, not this view: per-row `@State` latched whenever a row moved
+    /// out from under a stationary pointer without receiving its exit event, leaving it painted
+    /// as hovered until the view was destroyed.
+    public let isHovered: Bool
+    public let onHoverChange: (Bool) -> Void
 
-    @State private var hovering = false
     @State private var showingSummary = false
 
+    private var hovering: Bool { isHovered }
 
     public init(
         row: SidebarRow,
@@ -45,7 +50,9 @@ public struct SessionRowView: View {
         layout: RowLayout = .wide,
         port: Int = 8788,
         workingFor: String? = nil,
-        jumpLabel: String? = nil
+        jumpLabel: String? = nil,
+        isHovered: Bool = false,
+        onHoverChange: @escaping (Bool) -> Void = { _ in }
     ) {
         self.row = row
         self.age = age
@@ -54,6 +61,8 @@ public struct SessionRowView: View {
         self.port = port
         self.workingFor = workingFor
         self.jumpLabel = jumpLabel
+        self.isHovered = isHovered
+        self.onHoverChange = onHoverChange
     }
 
     private var titleWeight: Font.Weight { row.section == "needs-you" ? .medium : .regular }
@@ -63,7 +72,7 @@ public struct SessionRowView: View {
             .contentShape(Rectangle())
             .onTapGesture { actions.open(row) }
             .onHover { inside in
-                hovering = inside
+                onHoverChange(inside)
                 if !inside { showingSummary = false }
             }
             // A native menu, so it is free to extend past the sidebar's edge — the constraint the

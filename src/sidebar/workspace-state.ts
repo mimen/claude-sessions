@@ -261,6 +261,7 @@ export function createCachedWorkspaceStateReader(
   ttlMs: number,
   now: () => number = () => Date.now(),
   read: typeof readWorkspaceStates = readWorkspaceStates,
+  onReplaced?: () => void,
 ): CachedWorkspaceStateReader {
   const cache = createWarmCache<readonly string[], Map<string, WorkspaceState | null>>({
     ttlMs,
@@ -272,6 +273,7 @@ export function createCachedWorkspaceStateReader(
       return completeStates(requested, await read(requested, cmuxBin));
     },
     failure: { type: "replace", value: nullStates },
+    ...(onReplaced ? { onReplaced } : {}),
   });
   return {
     read: (workspaceIds) => cache.read(workspaceIds),

@@ -36,6 +36,8 @@ export interface CmuxVersion {
 export interface AsyncCmuxCommandResult {
   ok: boolean;
   stdout: string;
+  /** Diagnostic channel for failed reads; optional so test fakes stay minimal. */
+  stderr?: string;
 }
 
 /** Narrow TUI-test seam. Production uses callback execFile plus node:fs promises. */
@@ -132,10 +134,14 @@ function execFileAsync(file: string, args: readonly string[], timeoutMs: number)
   return new Promise((resolve) => {
     let termTimer: ReturnType<typeof setTimeout> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
-    const child = execFile(file, [...args], { encoding: "utf8", windowsHide: true }, (error, stdout) => {
+    const child = execFile(file, [...args], { encoding: "utf8", windowsHide: true }, (error, stdout, stderr) => {
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
-      resolve({ ok: error === null, stdout: typeof stdout === "string" ? stdout : "" });
+      resolve({
+        ok: error === null,
+        stdout: typeof stdout === "string" ? stdout : "",
+        stderr: typeof stderr === "string" ? stderr : "",
+      });
     });
     termTimer = setTimeout(() => {
       child.kill("SIGTERM");
@@ -175,15 +181,39 @@ async function boundedAsync<T>(work: Promise<T>, timeoutMs: number): Promise<T |
   }
 }
 
+/**
+ * The last logged tree-failure signature. A cmux outage makes every 2.5s liveness refresh fail the
+ * same way; logging the reason once per distinct failure keeps the log readable while still
+ * explaining WHY the sidebar froze instead of silently serving stale liveness forever.
+ */
+let lastTreeFailureSignature: string | null = null;
+
+function noteTreeFailure(reason: string, stderr: string | undefined): void {
+  const detail = (stderr ?? "").trim().slice(0, 300);
+  const signature = `${reason}:${detail}`;
+  if (signature === lastTreeFailureSignature) return;
+  lastTreeFailureSignature = signature;
+  log.warn("cmux tree read failed — liveness is now stale", {
+    reason,
+    ...(detail ? { stderr: detail } : {}),
+  });
+}
+
 async function readTreeAsync(io: AsyncCmuxIo, cmuxBin: string): Promise<TreeResult> {
   const result = await boundedAsync(
     io.execFile(cmuxBin, ["tree", "--all", "--json", "--id-format", "both"], TREE_TIMEOUT_MS),
     processBoundMs(TREE_TIMEOUT_MS),
   );
-  if (!result || !result.ok) return { tree: { windows: [] }, ok: false };
+  if (!result || !result.ok) {
+    noteTreeFailure(result ? "command-failed" : "timed-out", result?.stderr);
+    return { tree: { windows: [] }, ok: false };
+  }
   try {
-    return { tree: JSON.parse(result.stdout) as CmuxTree, ok: true };
+    const tree = JSON.parse(result.stdout) as CmuxTree;
+    lastTreeFailureSignature = null;
+    return { tree, ok: true };
   } catch {
+    noteTreeFailure("unparseable-json", result.stderr);
     return { tree: { windows: [] }, ok: false };
   }
 }
