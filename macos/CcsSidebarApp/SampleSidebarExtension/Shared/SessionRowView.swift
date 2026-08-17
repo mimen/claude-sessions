@@ -33,15 +33,18 @@ public struct SessionRowView: View {
     public let port: Int
     public let workingFor: String?
     public let jumpLabel: String?
-    /// Hover is owned by the list, not this view: per-row `@State` latched whenever a row moved
-    /// out from under a stationary pointer without receiving its exit event, leaving it painted
-    /// as hovered until the view was destroyed.
+    /// Hover is computed by the list from the pointer's polled position, never from this view's
+    /// own enter/exit events — those are droppable inside an ExtensionKit remote view, and a
+    /// dropped exit latched the row in its hover appearance until the view was destroyed.
     public let isHovered: Bool
-    public let onHoverChange: (Bool) -> Void
+    /// The list's override of the snapshot's focus, carried while a click awaits confirmation.
+    /// nil means the snapshot's own `focused` stands.
+    public let isFocused: Bool?
 
     @State private var showingSummary = false
 
     private var hovering: Bool { isHovered }
+    private var focused: Bool { isFocused ?? row.focused }
 
     public init(
         row: SidebarRow,
@@ -52,7 +55,7 @@ public struct SessionRowView: View {
         workingFor: String? = nil,
         jumpLabel: String? = nil,
         isHovered: Bool = false,
-        onHoverChange: @escaping (Bool) -> Void = { _ in }
+        isFocused: Bool? = nil
     ) {
         self.row = row
         self.age = age
@@ -62,7 +65,7 @@ public struct SessionRowView: View {
         self.workingFor = workingFor
         self.jumpLabel = jumpLabel
         self.isHovered = isHovered
-        self.onHoverChange = onHoverChange
+        self.isFocused = isFocused
     }
 
     private var titleWeight: Font.Weight { row.section == "needs-you" ? .medium : .regular }
@@ -70,17 +73,7 @@ public struct SessionRowView: View {
     public var body: some View {
         content
             .contentShape(Rectangle())
-            .onTapGesture {
-                // ExtensionKit can switch workspaces without delivering the hover-exit event for
-                // the row that initiated it. Clear before the action so the old row cannot remain
-                // painted as hovered after the sidebar is reattached to the new workspace.
-                onHoverChange(false)
-                actions.open(row)
-            }
-            .onHover { inside in
-                onHoverChange(inside)
-                if !inside { showingSummary = false }
-            }
+            .onTapGesture { actions.open(row) }
             // A native menu, so it is free to extend past the sidebar's edge — the constraint the
             // web version could never escape, being painted inside a web view's own viewport.
             .contextMenu { RowContextMenu(row: row, actions: actions) }
@@ -224,7 +217,7 @@ public struct SessionRowView: View {
         Group {
             // Wide apart on purpose. Focused sat at 0.12 against a resting 0.06, which is a
             // difference you cannot see, so the one state that says where you are read as noise.
-            if row.focused { Color.primary.opacity(0.22) }
+            if focused { Color.primary.opacity(0.22) }
             else if hovering { Color.primary.opacity(0.11) }
             else if row.isGhost { Color.clear }
             else { Color.primary.opacity(0.05) }
@@ -233,7 +226,7 @@ public struct SessionRowView: View {
 
     @ViewBuilder
     private var edge: some View {
-        if row.focused {
+        if focused {
             Rectangle().fill(.primary).frame(width: 3)
         } else if row.unread > 0 {
             Rectangle().fill(Color(hex: "#4C8DFF") ?? .blue).frame(width: 2)
