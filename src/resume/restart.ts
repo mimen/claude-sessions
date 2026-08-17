@@ -51,6 +51,13 @@ export function planRestart(
   if (!proven.ok) return proven;
 
   const origin = originLauncher(launchers, history);
+  const certain = originIsCertain(launchers, history);
+  if (!opts.on && origin && !certain) {
+    return refuse(
+      "origin-unknown",
+      `model history matches multiple launchers; pass --on to name the current harness before restarting`,
+    );
+  }
 
   let target: Launcher;
   if (opts.on) {
@@ -72,11 +79,6 @@ export function planRestart(
       "this session has no model history to infer its current harness from — pass --on to name it",
     );
   }
-
-  // A bare restart aims at the INFERRED origin. When several launchers can replay this history the
-  // inference is a preference, not an observation, so the plan says so and the two-phase preflight
-  // gives the operator the chance to pin `--on` before anything is replaced.
-  const certain = originIsCertain(launchers, history);
 
   if (!opts.model) return respawnPlan(proven.value, origin, target, null, certain);
   const compiled = compileRespawnModel(opts.model, target);

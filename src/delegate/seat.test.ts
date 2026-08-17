@@ -222,20 +222,16 @@ effort: high
 });
 
 describe("routing and compilation", () => {
-  test("applies the context marker per LAUNCHER, not per model family, exactly once", () => {
-    // Gateway launchers declare the window for BOTH vendors. Applying this to gpt-* only
-    // silently gave delegated Claude seats a narrower context than an identical location
-    // birth on the same launcher (review finding, 2026-07-28).
-    expect(compileLaunchModel("gpt-5.6-sol", "claudex")).toBe("gpt-5.6-sol[1m]");
+  test("compiles each model for the launcher's real context envelope", () => {
+    expect(compileLaunchModel("gpt-5.6-sol", "claudex")).toBe("gpt-5.6-sol");
     expect(compileLaunchModel("claude-opus-5", "claudex")).toBe("claude-opus-5[1m]");
-    expect(compileLaunchModel("claude-fable-5", "claude-gpt")).toBe("claude-fable-5[1m]");
 
-    // idempotent
-    expect(compileLaunchModel("gpt-5.6-sol[1m]", "claudex")).toBe("gpt-5.6-sol[1m]");
+    // Obsolete GPT markers are removed; Claude's marker is idempotent.
+    expect(compileLaunchModel("gpt-5.6-sol[1m]", "claudex")).toBe("gpt-5.6-sol");
     expect(compileLaunchModel("claude-opus-5[1m]", "claudex")).toBe("claude-opus-5[1m]");
 
-    // direct-to-Anthropic launchers take the canonical ID verbatim
-    expect(compileLaunchModel("claude-opus-5", "claude-native")).toBe("claude-opus-5");
+    // Direct-to-Anthropic launchers take the canonical ID verbatim.
+    expect(compileLaunchModel("claude-opus-5[1m]", "claude-native")).toBe("claude-opus-5");
   });
 
   test("compiles primary and fallback with their route-local models and efforts", () => {
@@ -251,7 +247,7 @@ describe("routing and compilation", () => {
         provider: "gpt",
         launcher: "claudex",
         requestedModel: "gpt-5.6-sol",
-        compiledModel: "gpt-5.6-sol[1m]",
+        compiledModel: "gpt-5.6-sol",
         effort: "high",
       },
     });
@@ -261,7 +257,7 @@ describe("routing and compilation", () => {
     if (!fallback.ok) return;
     expect(fallback.value).toMatchObject({
       route: "fallback",
-      compiledModel: "gpt-5.6-terra[1m]",
+      compiledModel: "gpt-5.6-terra",
       effort: "xhigh",
     });
     expect(compileAgent(loaded.value, fallback.value)).toEqual({
@@ -269,7 +265,7 @@ describe("routing and compilation", () => {
         description: "Primary implementation review",
         prompt: "Review the implementation.",
         tools: ["Bash", "Read"],
-        model: "gpt-5.6-terra[1m]",
+        model: "gpt-5.6-terra",
         skills: ["review"],
         effort: "xhigh",
       },

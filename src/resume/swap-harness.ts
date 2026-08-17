@@ -3,9 +3,9 @@
  *
  * A harness is a launcher binary: `claudex` (one gateway process reaching both vendors),
  * `claude-native` (real Anthropic, the only one with claude.ai connectors and Remote Control), or
- * `claude-gpt` (the GPT-only gateway wrapper it replaced). Transcripts are stored in Anthropic
- * format regardless of which one wrote them, so any of them can replay another's history — a swap
- * is a launcher change, not a data migration.
+ * `claude-gpt` (GPT-5.6), `claude-gpt55` (GPT-5.5), or `local-mlx` (Qwen). Transcripts are stored
+ * in Anthropic format regardless of which one wrote them, so a swap is a launcher change, not a
+ * data migration.
  *
  * Now that one launcher reaches both vendors, changing MODEL no longer needs a swap (`/model` does
  * it in-session); what a swap still changes is the CAPABILITY ENVELOPE of the process.
@@ -16,7 +16,7 @@
 import type { Bridge } from "../cmux/bridge.ts";
 import { ok, type Result } from "../result.ts";
 import { launcherByName, type Launcher } from "./launchers.ts";
-import { compileRoleModelValue } from "./role-model-launch.ts";
+import { parseBirthModel } from "./role-model-launch.ts";
 import {
   compileRespawnModel,
   describeRespawn,
@@ -43,6 +43,8 @@ export const DEFAULT_SWAP_MODEL: Readonly<Record<string, string>> = {
   claudex: "opus",
   "claude-native": "opus",
   "claude-gpt": "gpt-5.6-sol",
+  "claude-gpt55": "gpt-5.5",
+  "local-mlx": "qwen3.8-local",
 };
 
 export function planSwap(
@@ -107,12 +109,12 @@ export function planSwap(
   // A swap always pins a model: the point is to land on a specific backend's model, and the
   // settings alias would resolve to the harness you just left. User overrides are canonical model
   // IDs and always compile through the birth-model contract. The native `opus` default deliberately
-  // remains a settings alias; the canonical GPT default compiles to its launcher-only `[1m]` form.
+  // remains a settings alias; canonical gateway models compile for the target context envelope.
   const requestedModel = opts.model ?? DEFAULT_SWAP_MODEL[target.name];
   if (!requestedModel) {
     return refuse("model-unknown", `no default model for launcher "${target.name}" — pass --model`);
   }
-  const shouldCompile = opts.model !== undefined || compileRoleModelValue(requestedModel) !== null;
+  const shouldCompile = opts.model !== undefined || parseBirthModel(requestedModel) !== null;
   const compiled = shouldCompile ? compileRespawnModel(requestedModel, target) : ok(requestedModel);
   if (!compiled.ok) return compiled;
 

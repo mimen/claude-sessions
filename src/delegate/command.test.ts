@@ -167,7 +167,7 @@ describe("delegateCommand", () => {
       seat: "primary-review",
       delegation_route: "primary",
       requested_model: "gpt-5.6-sol",
-      compiled_model: "gpt-5.6-sol[1m]",
+      compiled_model: "gpt-5.6-sol",
       effective_effort: "high",
     });
 
@@ -312,12 +312,12 @@ writeFileSync(process.env.OBSERVATION_PATH, JSON.stringify({
     );
     expect(code).toBe(0);
     const observation = JSON.parse(readFileSync(f.observation, "utf8")) as { argv: string[]; row: { meta: string } };
-    expect(observation.argv.join(" ")).toContain('"model":"gpt-5.6-terra[1m]"');
+    expect(observation.argv.join(" ")).toContain('"model":"gpt-5.6-terra"');
     expect(observation.argv.join(" ")).toContain('"effort":"xhigh"');
     expect(JSON.parse(observation.row.meta) as Record<string, string>).toMatchObject({
       delegation_route: "fallback",
       requested_model: "gpt-5.6-terra",
-      compiled_model: "gpt-5.6-terra[1m]",
+      compiled_model: "gpt-5.6-terra",
       effective_effort: "xhigh",
     });
     expect(childRows(f.root)).toHaveLength(1);

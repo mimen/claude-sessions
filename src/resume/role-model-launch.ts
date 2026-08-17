@@ -1,4 +1,4 @@
-import type { Launcher } from "./launchers.ts";
+import { type Launcher, matchesModel } from "./launchers.ts";
 import { type Result, err, ok } from "../result.ts";
 
 /** Canonical model IDs that CCS can compile for a fresh managed birth. */
@@ -10,6 +10,7 @@ export const BIRTH_MODEL_IDS = [
   "gpt-5.6-terra",
   "gpt-5.6-luna",
   "gpt-5.5",
+  "qwen3.8-local",
 ] as const;
 
 export type BirthModelId = (typeof BIRTH_MODEL_IDS)[number];
@@ -23,57 +24,60 @@ export const ROLE_MODEL_IDS = [
 
 export type RoleModelId = (typeof ROLE_MODEL_IDS)[number];
 
-/** The vendor a canonical birth-model ID belongs to, read off its prefix. */
-export type ModelFamily = "claude" | "gpt";
+/** The provider family a canonical birth-model ID belongs to. */
+export type ModelFamily = "claude" | "gpt" | "local";
 
 /**
- * Every launcher a managed birth may be routed to, and the model families each one can REACH.
- *
- * `claudex` is one gateway process holding OAuth credentials for both vendors, so it reaches
- * Claude and GPT alike; `claude-native` and the bare updater-managed `claude` reach Anthropic only;
- * `claude-gpt` is the GPT-only gateway wrapper `claudex` supersedes. This is the single table both
- * the birth compiler and the delegate seat loader validate against — one launcher can no longer be
- * derived from a model, because two of them serve the same one.
+ * Every launcher a managed birth may use, and the exact model IDs each process envelope can safely
+ * host. Context limits are process-wide in Claude Code, so sharing a provider is not sufficient:
+ * GPT-5.6, GPT-5.5, and local MLX each need a launcher with their own real window.
  */
-export const LAUNCHER_FAMILIES = {
-  claudex: ["claude", "gpt"],
-  claude: ["claude"],
-  "claude-native": ["claude"],
-  "claude-gpt": ["gpt"],
-} as const satisfies Readonly<Record<string, readonly ModelFamily[]>>;
+export const LAUNCHER_MODEL_PATTERNS = {
+  claudex: ["claude-*", "gpt-5.6-*"],
+  claude: ["claude-*"],
+  "claude-native": ["claude-*"],
+  "claude-gpt": ["gpt-5.6-*"],
+  "claude-gpt55": ["gpt-5.5"],
+  "local-mlx": ["qwen3.8-local"],
+} as const satisfies Readonly<Record<string, readonly string[]>>;
 
-export type LauncherName = keyof typeof LAUNCHER_FAMILIES;
+export type LauncherName = keyof typeof LAUNCHER_MODEL_PATTERNS;
 
-export const LAUNCHER_NAMES = Object.keys(LAUNCHER_FAMILIES) as readonly LauncherName[];
+export const LAUNCHER_NAMES = Object.keys(LAUNCHER_MODEL_PATTERNS) as readonly LauncherName[];
 
-/**
- * Launchers that reach models through the local CLIProxyAPI gateway. They need the `[1m]` context
- * declaration on a full model ID (Claude Code reads it; the gateway strips it); the direct-to-
- * Anthropic launchers take the canonical ID verbatim. This is a property of the LAUNCHER, not of
- * the model — the same `claude-opus-5` is spelled differently on `claudex` and on `claude-native`.
- */
-export const GATEWAY_LAUNCHERS: ReadonlySet<LauncherName> = new Set<LauncherName>(["claudex", "claude-gpt"]);
+/** The gateway launcher whose Claude model IDs need Claude Code's client-side 1M marker. */
+export const ONE_MILLION_MARKER_LAUNCHERS: ReadonlySet<LauncherName> = new Set<LauncherName>(["claudex"]);
 
 export function parseLauncherName(value: string): LauncherName | null {
   return (LAUNCHER_NAMES as readonly string[]).includes(value) ? value as LauncherName : null;
 }
 
 export function modelFamily(model: BirthModelId): ModelFamily {
-  return model.startsWith("gpt-") ? "gpt" : "claude";
+  if (model.startsWith("gpt-")) return "gpt";
+  if (model.startsWith("qwen")) return "local";
+  return "claude";
 }
 
-/** Whether a launcher can physically reach a vendor at all. The one authority on the pairing. */
+/** Whether a launcher has at least one safe model in a provider family. */
 export function launcherServesFamily(launcher: LauncherName, family: ModelFamily): boolean {
-  return (LAUNCHER_FAMILIES[launcher] as readonly ModelFamily[]).includes(family);
+  return BIRTH_MODEL_IDS.some(
+    (model) => modelFamily(model) === family && launcherReachesModel(launcher, model),
+  );
 }
 
-/** The launchers that reach a vendor, in table order — used to make refusals actionable. */
+/** The launchers that reach a provider family, in table order. */
 export function launchersServingFamily(family: ModelFamily): LauncherName[] {
   return LAUNCHER_NAMES.filter((launcher) => launcherServesFamily(launcher, family));
 }
 
+/** Whether a launcher's process envelope can safely host this exact model. */
 export function launcherReachesModel(launcher: LauncherName, model: BirthModelId): boolean {
-  return launcherServesFamily(launcher, modelFamily(model));
+  return LAUNCHER_MODEL_PATTERNS[launcher].some((pattern) => matchesModel(pattern, model));
+}
+
+/** The launchers that can safely host one exact model, in table order. */
+export function launchersServingModel(model: BirthModelId): LauncherName[] {
+  return LAUNCHER_NAMES.filter((launcher) => launcherReachesModel(launcher, model));
 }
 
 export interface ModelLaunch {
@@ -90,7 +94,7 @@ export interface RoleModelLaunch extends ModelLaunch {
 const BIRTH_MODELS = new Set<string>(BIRTH_MODEL_IDS);
 const ROLE_MODELS = new Set<string>(ROLE_MODEL_IDS);
 
-/** Parse only exact, canonical fresh-birth model IDs. Aliases and gateway suffixes fail closed. */
+/** Parse only exact, canonical fresh-birth model IDs. Aliases and launcher suffixes fail closed. */
 export function parseBirthModel(value: unknown): BirthModelId | null {
   return typeof value === "string" && BIRTH_MODELS.has(value) ? value as BirthModelId : null;
 }
@@ -102,44 +106,43 @@ export function parseRoleModel(value: unknown): RoleModelId | null {
 
 /**
  * The executable descriptor for a launcher name. `serves` stays `["*"]` deliberately: this is an
- * EXECUTION descriptor (what to run), not a registry routing entry — resume eligibility is decided
- * by the `[[launcher]]` fleet in config.toml, never by a synthesized birth launcher.
+ * EXECUTION descriptor (what to run), not a registry routing entry. Resume eligibility is decided by
+ * the authored `[[launcher]]` fleet, never by a synthesized birth launcher.
  */
 export function birthLauncher(name: LauncherName): Launcher {
   return { name, binary: name, serves: ["*"], env: {}, clears: [] };
 }
 
 /** The model spelling a given launcher accepts for a canonical birth-model ID. */
-function launchModelFor(launcher: LauncherName, model: BirthModelId): string {
-  if (!GATEWAY_LAUNCHERS.has(launcher)) return model;
-  return model === "gpt-5.6-luna" ? `${model}(low)[1m]` : `${model}[1m]`;
+export function launchModelFor(launcher: LauncherName, model: BirthModelId): string {
+  if (model === "gpt-5.6-luna" && (launcher === "claudex" || launcher === "claude-gpt")) {
+    return `${model}(low)`;
+  }
+  if (modelFamily(model) === "claude" && ONE_MILLION_MARKER_LAUNCHERS.has(launcher)) {
+    return `${model}[1m]`;
+  }
+  return model;
 }
 
-/**
- * Compile a provider-neutral model declaration into its executable and launch spelling, with NO
- * harness declared. This is the implicit default and is deliberately unchanged by the `claudex`
- * consolidation: a caller that names only a model still lands on the direct Anthropic binary for
- * Claude models and on `claude-gpt` for GPT ones. Moving the fleet onto `claudex` is an explicit
- * `default_harness` decision in the location registry, not a silent rewrite of every birth.
- */
+function defaultLauncherFor(model: BirthModelId): LauncherName {
+  if (model === "qwen3.8-local") return "local-mlx";
+  if (model === "gpt-5.5") return "claude-gpt55";
+  if (model.startsWith("gpt-5.6-")) return "claude-gpt";
+  return "claudex";
+}
+
+/** Compile a provider-neutral model declaration onto its dedicated default process envelope. */
 export function compileModelLaunch(model: BirthModelId): ModelLaunch {
-  const launcher: LauncherName = modelFamily(model) === "gpt" ? "claude-gpt" : "claude";
+  const launcher = defaultLauncherFor(model);
   return { model, launcher: birthLauncher(launcher), launchModel: launchModelFor(launcher, model) };
 }
 
-/** Compile a model onto an EXPLICITLY declared launcher, once it is known to reach it. */
+/** Compile a model onto an explicitly declared launcher, once it is known to reach it. */
 export function compileModelLaunchOn(launcher: LauncherName, model: BirthModelId): ModelLaunch {
   return { model, launcher: birthLauncher(launcher), launchModel: launchModelFor(launcher, model) };
 }
 
-/**
- * Validate and compile one registry-authored default_harness/default_model pair.
- *
- * The harness is HONORED, not re-derived: the pair is the fleet's declared default launch route
- * (`~/.ccs/config.toml`'s launcher fleet says what exists; the location registry says which one a
- * birth lands on). The check is reachability — does this launcher serve this model's vendor at all
- * — because a launcher can no longer be inferred from a model now that `claudex` serves both.
- */
+/** Validate and compile one registry-authored default_harness/default_model pair. */
 export function compileLocationModelLaunch(harness: string, model: string): Result<ModelLaunch> {
   const parsed = parseBirthModel(model);
   if (!parsed) {
@@ -155,7 +158,7 @@ export function compileLocationModelLaunch(harness: string, model: string): Resu
   }
   if (!launcherReachesModel(launcher, parsed)) {
     return err(new Error(
-      `location default_harness "${harness}" cannot reach model "${model}"; launchers that can: ${launchersServingFamily(modelFamily(parsed)).join(", ")}`,
+      `location default_harness "${harness}" cannot reach model "${model}"; launchers that can: ${launchersServingModel(parsed).join(", ")}`,
     ));
   }
   return ok(compileModelLaunchOn(launcher, parsed));
@@ -166,7 +169,7 @@ export function compileRoleModelLaunch(model: RoleModelId): RoleModelLaunch {
   return compileModelLaunch(model) as RoleModelLaunch;
 }
 
-/** Parse and compile one untrusted canonical model value through the birth-model contract. */
+/** Parse and compile one untrusted canonical role-model value. */
 export function compileRoleModelValue(value: string): RoleModelLaunch | null {
   const model = parseRoleModel(value);
   return model ? compileRoleModelLaunch(model) : null;

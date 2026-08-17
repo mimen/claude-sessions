@@ -23,7 +23,12 @@ import {
   resolveRoutes,
   type Launcher,
 } from "./launchers.ts";
-import { ROLE_MODEL_IDS, compileRoleModelValue } from "./role-model-launch.ts";
+import {
+  BIRTH_MODEL_IDS,
+  compileModelLaunchOn,
+  parseBirthModel,
+  parseLauncherName,
+} from "./role-model-launch.ts";
 
 /** Process-side facts a plan is built from — all injected so planning stays pure. */
 export interface RespawnEnv {
@@ -192,27 +197,34 @@ export function originIsCertain(
 
 /**
  * Validate a user-authored canonical model through the birth-model compiler, then return the
- * launcher spelling. Canonical IDs remain provider-neutral at the boundary; GPT's required `[1m]`
- * suffix is compiler-owned and appears only in the executable plan.
+ * spelling for the TARGET process envelope. Canonical IDs stay provider-neutral at the boundary;
+ * the selected launcher owns context markers and effort suffixes.
  */
 export function compileRespawnModel(
   model: string,
   target: Launcher,
 ): Result<string, RespawnRefusal> {
-  const compiled = compileRoleModelValue(model);
-  if (!compiled) {
+  const canonical = parseBirthModel(model);
+  if (!canonical) {
     return refuse(
       "model-unknown",
-      `unknown model "${model}" — canonical models: ${ROLE_MODEL_IDS.join(", ")}`,
+      `unknown model "${model}" — canonical models: ${BIRTH_MODEL_IDS.join(", ")}`,
     );
   }
-  if (!target.serves.some((pattern) => matchesModel(pattern, compiled.model))) {
+  if (!target.serves.some((pattern) => matchesModel(pattern, canonical))) {
     return refuse(
       "model-unknown",
       `model "${model}" is not served by launcher "${target.name}"`,
     );
   }
-  return ok(compiled.launchModel);
+  const launcher = parseLauncherName(target.name);
+  if (!launcher) {
+    return refuse(
+      "model-unknown",
+      `launcher "${target.name}" has no canonical context compiler`,
+    );
+  }
+  return ok(compileModelLaunchOn(launcher, canonical).launchModel);
 }
 
 /**
