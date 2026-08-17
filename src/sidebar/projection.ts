@@ -564,6 +564,8 @@ interface ProjectionLookups {
   readonly liveIds: ReadonlySet<string>;
   /** Canonical identities of every live session, for alias-proof "is this already running". */
   readonly liveCanonicalIds: ReadonlySet<string>;
+  /** First indexed row per canonical id, for live sessions whose own id has no index row yet. */
+  readonly indexedByCanonicalId: ReadonlyMap<string, IndexedSessionInput>;
   readonly liveById: ReadonlyMap<string, LiveSessionInput>;
   readonly lifecycleFor: (
     sessionId: string,
@@ -704,6 +706,14 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
     liveCanonicalIds.add(canonicalSessionIdFor(liveId, indexedById.get(liveId)));
   }
 
+  // A freshly resumed session's live id has no index row yet, but its predecessor's row carries
+  // the title and model that describe the same underlying session. Canonical identity is the join.
+  const indexedByCanonicalId = new Map<string, IndexedSessionInput>();
+  for (const session of input.indexed) {
+    const canonical = canonicalSessionIdFor(session.sessionId, session);
+    if (!indexedByCanonicalId.has(canonical)) indexedByCanonicalId.set(canonical, session);
+  }
+
   const faviconDirectories = input.faviconDirectories ?? new Set<string>();
   const unreadByWorkspaceId = input.unreadByWorkspaceId ?? new Map<string, number>();
   const preferredTitles = input.preferredTitles ?? new Map<string, string>();
@@ -748,6 +758,7 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
       indexedById,
       liveIds,
       liveCanonicalIds,
+      indexedByCanonicalId,
       liveById,
       lifecycleFor,
       catalogueLifecycleFor,
@@ -781,13 +792,16 @@ function buildLiveSessionRow(
   indexed: IndexedSessionInput | undefined,
 ): SidebarSessionRow {
   const { lookups } = context;
-  const cwd = live.cwd ?? indexed?.cwd ?? null;
+  const canonicalId = lookups.canonicalSessionIdFor(live.sessionId, indexed);
+  // A resumed session may predate its own index row; the predecessor's row is the same session.
+  const canonicalIndexed = indexed ?? lookups.indexedByCanonicalId.get(canonicalId);
+  const cwd = live.cwd ?? canonicalIndexed?.cwd ?? null;
   const cmuxActivity = live.updatedAt === null ? null : live.updatedAt * 1000;
   const liveSummary = lookups.summaryFor(live.sessionId, indexed);
   const liveLifecycle = lookups.lifecycleFor(live.sessionId, indexed);
   return {
     kind: "session",
-    id: lookups.canonicalSessionIdFor(live.sessionId, indexed),
+    id: canonicalId,
     workspaceId: live.workspaceId,
     windowId: live.windowId,
     windowRef: live.windowRef,
@@ -801,23 +815,27 @@ function buildLiveSessionRow(
     membership: lookups.membershipFor(live.sessionId, indexed?.resumeId),
     category: lookups.categoryFor(live.sessionId, indexed?.resumeId),
     density: densityFor(true, liveLifecycle),
-    sessionId: lookups.canonicalSessionIdFor(live.sessionId, indexed),
+    sessionId: canonicalId,
     lifecycle: liveLifecycle,
     name: cleanSessionName(
       lookups.preferredTitleFor(live.sessionId, indexed?.resumeId)
-        ?? (live.workspaceTitle !== null && !titleIsSessionIdish(live.workspaceTitle)
+        ?? lookups.preferredTitleFor(canonicalId, canonicalIndexed?.resumeId)
+        // The idish test runs on the cleaned title: cmux prefixes an activity glyph, and
+        // "◐ <uuid>" is still a placeholder, not a name.
+        ?? (live.workspaceTitle !== null
+            && !titleIsSessionIdish(cleanSessionName(live.workspaceTitle))
           ? live.workspaceTitle
           : null)
-        ?? indexed?.title ?? live.workspaceTitle ?? "Untitled session",
+        ?? canonicalIndexed?.title ?? live.workspaceTitle ?? "Untitled session",
     ),
     directory: lookups.projectFor(cwd),
     directoryPath: cwd,
     faviconUrl: lookups.faviconUrlFor(cwd),
     worktree: lookups.worktreeFor(cwd),
-    model: indexed ? dominantModel(indexed) : null,
+    model: canonicalIndexed ? dominantModel(canonicalIndexed) : null,
     status: live.status,
     statusAvailability: live.statusAvailability,
-    lastActivityAt: cmuxActivity ?? parseTimestamp(indexed?.lastTs ?? null),
+    lastActivityAt: cmuxActivity ?? parseTimestamp(canonicalIndexed?.lastTs ?? null),
     // Incognito overrides the lifecycle section rather than sitting beside it: a marked session
     // must appear in exactly one place, and "Working" plus "Incognito" would be two.
     section: lookups.isIncognito(live.sessionId, indexed?.resumeId)
@@ -917,10 +935,21 @@ function buildSessionlessWorkspaceRow(
 function selectActiveRows(context: ProjectionContext): SidebarRow[] {
   const { input, lookups } = context;
   const rows: SidebarRow[] = [];
+  // Two live aliases of one session would publish the same canonical row id — duplicate SwiftUI
+  // identities, and any per-id client state (hover, selection) painting both at once.
+  const liveRowIndexById = new Map<string, number>();
   for (const live of input.live) {
     const indexed = lookups.indexedById.get(live.sessionId);
     if (lookups.lifecycleFor(live.sessionId, indexed) !== "active") continue;
-    rows.push(buildLiveSessionRow(context, live, indexed));
+    const row = buildLiveSessionRow(context, live, indexed);
+    const existingAt = liveRowIndexById.get(row.id);
+    if (existingAt === undefined) {
+      liveRowIndexById.set(row.id, rows.length);
+      rows.push(row);
+    } else if (row.focused && rows[existingAt]?.focused === false) {
+      // Of two aliases, the one cmux says is focused is the one the person is looking at.
+      rows[existingAt] = row;
+    }
   }
 
   for (const workspace of input.workspaces ?? []) {
