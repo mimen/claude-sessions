@@ -1558,6 +1558,14 @@ describe("createSidebarSource focus under degraded tree reads", () => {
     expect(sessionRows(informed.rows).filter((row) => row.focused).map((row) => row.id))
       .toEqual(["session-one"]);
 
+    // The zero-TTL cache is stale-while-revalidate: this read serves the informed bridge and
+    // only KICKS OFF the degraded read. Without it (and the flush below) the final assertion
+    // would run against the informed bridge and pass whatever focusedFor does.
+    await source.snapshot("active");
+    while (reads < 2) await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reads).toBeGreaterThanOrEqual(2);
+
     // Every window's selected workspace used to claim focus here — one lit row per open window.
     const degraded = await source.snapshot("active");
     expect(sessionRows(degraded.rows).filter((row) => row.focused).map((row) => row.id))

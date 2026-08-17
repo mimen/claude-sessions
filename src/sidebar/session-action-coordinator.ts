@@ -62,6 +62,7 @@ export interface SessionActionCoordinator {
 export interface SessionIdentityAuthority {
   locate(bridge: Bridge, sessionId: string): SurfaceLocation | null;
   aliasesFor(sessionId: string): readonly string[];
+  canonicalFor(sessionId: string): string;
   noteResumed(sessionIds: readonly string[], target: WorkspaceFocusTarget): void;
   recentResumeTarget(sessionIds: readonly string[]): WorkspaceFocusTarget | null;
 }
@@ -282,8 +283,19 @@ export function createSessionActionCoordinator(
       return openOutcomeFromFocus(focused);
     }
 
-    if (lookup.status === "absent") return { status: "not-found" };
-    if (lookup.status === "unreadable") return { status: "index-unreadable" };
+    if (lookup.status !== "found") {
+      // The resume hint's whole reason to exist is the window where the index has no row yet: a
+      // resume this coordinator just performed, before the indexer's next scan. Consult it before
+      // declaring the session unknown, or the second click on a freshly resumed row 404s.
+      const hinted = recentTargetFor(options.identity?.aliasesFor(sessionId) ?? [sessionId]);
+      if (hinted) {
+        const focused = await focusTarget(hinted);
+        return openOutcomeFromFocus(focused);
+      }
+      return lookup.status === "absent"
+        ? { status: "not-found" }
+        : { status: "index-unreadable" };
+    }
     const sessionIds = identityIds(sessionId, lookup.row);
     const recent = recentTargetFor(sessionIds);
     if (recent) {
@@ -291,7 +303,10 @@ export function createSessionActionCoordinator(
       return openOutcomeFromFocus(focused);
     }
 
-    const existingFlight = resumeFlights.get(lookup.row.sessionId);
+    // Flights key on the canonical id so two concurrent clicks arriving under two aliases of one
+    // session join one resume instead of both entering it.
+    const resumeKey = options.identity?.canonicalFor(lookup.row.sessionId) ?? lookup.row.sessionId;
+    const existingFlight = resumeFlights.get(resumeKey);
     if (existingFlight) {
       const outcome = await existingFlight;
       if (outcome.status !== "resumed") {
@@ -314,7 +329,7 @@ export function createSessionActionCoordinator(
     }
 
     const flight = resume(bridge, lookup.row, sessionIds);
-    resumeFlights.set(lookup.row.sessionId, flight);
+    resumeFlights.set(resumeKey, flight);
     try {
       const outcome = await flight;
       switch (outcome.status) {
@@ -335,8 +350,8 @@ export function createSessionActionCoordinator(
           return outcome;
       }
     } finally {
-      if (resumeFlights.get(lookup.row.sessionId) === flight) {
-        resumeFlights.delete(lookup.row.sessionId);
+      if (resumeFlights.get(resumeKey) === flight) {
+        resumeFlights.delete(resumeKey);
       }
     }
     return { status: "failed", reason: "resume action returned no outcome" };
@@ -355,15 +370,16 @@ export function createSessionActionCoordinator(
   }
 
   async function open(sessionId: string): Promise<OpenSessionOutcome> {
-    const existingFlight = openFlights.get(sessionId);
+    const flightKey = options.identity?.canonicalFor(sessionId) ?? sessionId;
+    const existingFlight = openFlights.get(flightKey);
     if (existingFlight) return joinOpenFlight(existingFlight);
 
     const flight = openOnce(sessionId);
-    openFlights.set(sessionId, flight);
+    openFlights.set(flightKey, flight);
     try {
       return await flight;
     } finally {
-      if (openFlights.get(sessionId) === flight) openFlights.delete(sessionId);
+      if (openFlights.get(flightKey) === flight) openFlights.delete(flightKey);
     }
   }
 
