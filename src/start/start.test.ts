@@ -189,9 +189,14 @@ printf '%s\\n' 'workspace:901'
   expect(calls[focusIndex + 1]).toBe("true");
   const commandIndex = calls.indexOf("--command");
   const launchCommand = calls[commandIndex + 1] ?? "";
-  expect(launchCommand).toContain("claude");
-  expect(launchCommand).toContain("--session-id");
-  expect(launchCommand).not.toContain("--resume");
+  // The typed command is only the short transport source line; the real launcher invocation
+  // travels in the transport's launch.sh, which the fake cmux never consumed.
+  expect(launchCommand).toStartWith("builtin . ");
+  const launchScript = readFileSync(launchCommand.slice("builtin . ".length), "utf8");
+  expect(launchScript).toContain("claude");
+  expect(launchScript).toContain("--session-id");
+  expect(launchScript).not.toContain("--resume");
+  expect(launchScript).not.toContain("/ccs:new");
   expect(launchCommand).not.toContain("/ccs:new");
 });
 

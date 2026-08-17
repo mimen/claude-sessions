@@ -27,10 +27,16 @@ import { shellQuote } from "./command.ts";
  * session in ~/.cmuxterm/claude-hook-sessions.json (surfaceId → sessionId). Explicit launcher env
  * is transported through a protected, single-use source file instead of cmux workspace env or the
  * command text. The integrated shell sources that file only inside a subshell, deletes the task's
- * file and directory before starting the launcher, and gives only the real names to the launcher
+ * files and directory before starting the launcher, and gives only the real names to the launcher
  * through `env`. A restored workspace therefore has neither values nor a reusable transport. An
  * independent no-secret janitor removes an unconsumed transport after 30 seconds, and each launch
  * prunes stale task-owned transports left by an interrupted process.
+ *
+ * IMPORTANT (command length): cmux delivers `--command` by writing it into the workspace pty as
+ * typed input, and a macOS tty in canonical mode accepts at most 1024 bytes per line (MAX_CANON) —
+ * anything longer is silently truncated and never executes. The full launch script therefore also
+ * travels through the transport directory (`launch.sh`, which holds staging names and paths but no
+ * values), and the typed command is only a short, constant-shape `builtin . <launch.sh>` line.
  * We deliberately DO NOT `exec` or scrub CMUX_SURFACE_ID/CMUX_WORKSPACE_ID: the cmux shim needs
  * those to bind the session to its surface.
  */
@@ -39,6 +45,7 @@ const ENVIRONMENT_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const STAGING_ENV_PREFIX = "CCS_CMUX_STAGED_ENV_";
 const TEMP_DIRECTORY_PREFIX = "ccs-cmux-launch-";
 const TEMP_ENVIRONMENT_FILE = "environment.sh";
+const TEMP_LAUNCH_FILE = "launch.sh";
 const TEMP_CLEANUP_DELAY_MS = 30_000;
 const STALE_TEMPORARY_ENVIRONMENT_AGE_MS = 5 * 60_000;
 
@@ -75,6 +82,7 @@ interface StagedEnvironmentEntry {
 interface TemporaryEnvironment {
   readonly directoryPath: string;
   readonly filePath: string;
+  readonly launchFilePath: string;
 }
 
 interface PreparedCmuxInvocation {
@@ -88,12 +96,14 @@ interface CmuxInvocationOutput {
 }
 
 function cleanupTemporaryEnvironment(temporaryEnvironment: TemporaryEnvironment): void {
-  // Remove only the exact task-owned file, then its directory if empty. Never recursively remove
+  // Remove only the exact task-owned files, then the directory if empty. Never recursively remove
   // a temp path: an unexpected extra entry must fail closed rather than broaden cleanup scope.
-  try {
-    rmSync(temporaryEnvironment.filePath, { force: true });
-  } catch {
-    // Best effort: the integrated shell may already have consumed it.
+  for (const filePath of [temporaryEnvironment.filePath, temporaryEnvironment.launchFilePath]) {
+    try {
+      rmSync(filePath, { force: true });
+    } catch {
+      // Best effort: the integrated shell may already have consumed it.
+    }
   }
   try {
     rmdirSync(temporaryEnvironment.directoryPath);
@@ -123,6 +133,7 @@ function cleanupStaleTemporaryEnvironments(rootPath: string, now = Date.now()): 
     cleanupTemporaryEnvironment({
       directoryPath,
       filePath: join(directoryPath, TEMP_ENVIRONMENT_FILE),
+      launchFilePath: join(directoryPath, TEMP_LAUNCH_FILE),
     });
   }
 }
@@ -133,13 +144,14 @@ function scheduleTemporaryEnvironmentCleanup(
 ): boolean {
   const delaySeconds = Math.max(1, Math.ceil(delayMs / 1000));
   const filePath = shellQuote(temporaryEnvironment.filePath);
+  const launchFilePath = shellQuote(temporaryEnvironment.launchFilePath);
   const directoryPath = shellQuote(temporaryEnvironment.directoryPath);
   try {
     const cleanup = Bun.spawn(
       [
         "/bin/sh",
         "-c",
-        `/bin/sleep ${delaySeconds}; /bin/rm -f -- ${filePath}; ` +
+        `/bin/sleep ${delaySeconds}; /bin/rm -f -- ${filePath} ${launchFilePath}; ` +
           `/bin/rmdir -- ${directoryPath} 2>/dev/null || true`,
       ],
       {
@@ -172,7 +184,11 @@ function createTemporaryEnvironment(
       .join("\n")}\n`;
     writeFileSync(filePath, contents, { encoding: "utf8", flag: "wx", mode: 0o600 });
     chmodSync(filePath, 0o600);
-    const temporaryEnvironment = { directoryPath, filePath };
+    const temporaryEnvironment = {
+      directoryPath,
+      filePath,
+      launchFilePath: join(directoryPath, TEMP_LAUNCH_FILE),
+    };
     if (!scheduleTemporaryEnvironmentCleanup(temporaryEnvironment, cleanupDelayMs)) {
       cleanupTemporaryEnvironment(temporaryEnvironment);
       return err(new Error("failed to schedule launcher environment cleanup"));
@@ -183,6 +199,7 @@ function createTemporaryEnvironment(
       cleanupTemporaryEnvironment({
         directoryPath,
         filePath: join(directoryPath, TEMP_ENVIRONMENT_FILE),
+        launchFilePath: join(directoryPath, TEMP_LAUNCH_FILE),
       });
     }
     return err(new Error("failed to create protected launcher environment transport"));
@@ -230,12 +247,28 @@ function prepareCmuxInvocation(
     const stagingKeys = staged.map((entry) => entry.stagingKey).join(" ");
     const realAssignments = staged.map((entry) => `${entry.key}="$${entry.stagingKey}"`);
     const sourceFile = shellQuote(temporaryEnvironment.filePath);
+    const launchFile = shellQuote(temporaryEnvironment.launchFilePath);
     const removeDirectory = shellQuote(temporaryEnvironment.directoryPath);
-    command =
+    const launchScript =
       `(set +a; unset ${stagingKeys}; builtin . ${sourceFile} && ` +
-      `/bin/rm -f -- ${sourceFile} && ` +
+      `/bin/rm -f -- ${sourceFile} ${launchFile} && ` +
       `{ /bin/rmdir -- ${removeDirectory} 2>/dev/null || true; } && ` +
-      `/usr/bin/env ${[...unsetFlags, ...realAssignments].join(" ")} ${launcher})`;
+      `/usr/bin/env ${[...unsetFlags, ...realAssignments].join(" ")} ${launcher})\n`;
+    // The full script travels through the transport, never through the typed command: the pty's
+    // canonical-mode line buffer drops everything past 1024 bytes, so the typed command must stay
+    // short no matter how many variables the launcher declares.
+    try {
+      writeFileSync(temporaryEnvironment.launchFilePath, launchScript, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+      chmodSync(temporaryEnvironment.launchFilePath, 0o600);
+    } catch {
+      cleanupTemporaryEnvironment(temporaryEnvironment);
+      return err(new Error("failed to create protected launcher command transport"));
+    }
+    command = `builtin . ${launchFile}`;
   }
 
   const argv = ["new-workspace", "--cwd", opts.cwd, "--name", opts.name, "--command", command];

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ResumeCommand } from "./command.ts";
 import { openInCmux } from "./cmux.ts";
 
@@ -38,18 +38,16 @@ function valueAfter(argv: readonly string[], flag: string): string {
 }
 
 function environmentFileFromCommand(command: string): string {
-  const sourcePrefix = "; builtin . ";
-  const sourceStart = command.indexOf(sourcePrefix);
-  const sourceEnd = command.indexOf(" && /bin/rm -f -- ", sourceStart + sourcePrefix.length);
-  if (sourceStart < 0 || sourceEnd < 0) throw new Error("missing environment source step");
-
-  const sourceToken = command.slice(sourceStart + sourcePrefix.length, sourceEnd);
+  const sourcePrefix = "builtin . ";
+  if (!command.startsWith(sourcePrefix)) {
+    throw new Error("command is not a short transport source line");
+  }
   const parsed = Bun.spawnSync(
-    ["/bin/bash", "-c", `set -- ${sourceToken}; printf '%s' "$1"`],
+    ["/bin/bash", "-c", `set -- ${command.slice(sourcePrefix.length)}; printf '%s' "$1"`],
     { stdout: "pipe", stderr: "pipe" },
   );
-  if (!parsed.success) throw new Error("failed to parse environment file path");
-  return parsed.stdout.toString();
+  if (!parsed.success) throw new Error("failed to parse launch file path");
+  return join(dirname(parsed.stdout.toString()), "environment.sh");
 }
 
 describe("openInCmux", () => {
