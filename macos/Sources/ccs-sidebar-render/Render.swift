@@ -14,7 +14,7 @@ import SwiftUI
 /// is verified against the running extension instead.
 struct Harness {
     static func fetchRows(limit: Int) throws -> [SidebarRow] {
-        let url = URL(string: "http://127.0.0.1:8788/api/snapshot?limit=\(limit)")!
+        let url = URL(string: "http://127.0.0.1:\(SidebarServer.defaultPort)/api/snapshot?limit=\(limit)")!
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(SidebarSnapshot.self, from: data).rows
     }

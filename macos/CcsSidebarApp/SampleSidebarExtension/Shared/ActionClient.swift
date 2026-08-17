@@ -51,6 +51,11 @@ public enum SidebarAction: Sendable {
     }
 }
 
+public enum SidebarServer {
+    /// Production server for the ordinary cmux socket. Port 8788 is the isolated staging instance.
+    public static let defaultPort = 8787
+}
+
 public struct ActionFailure: Error, Sendable {
     public let message: String
 }
@@ -58,7 +63,7 @@ public struct ActionFailure: Error, Sendable {
 public struct ActionClient: Sendable {
     private let base: URL
 
-    public init(port: Int = 8788) {
+    public init(port: Int = SidebarServer.defaultPort) {
         base = URL(string: "http://127.0.0.1:\(port)")!
     }
 

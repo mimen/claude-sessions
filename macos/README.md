@@ -5,7 +5,7 @@ happens now; the web sidebar in `src/sidebar/web` is frozen and kept as the fall
 without the extensions beta, another machine, or a plain browser tab.
 
 It is a client of the sidebar server, not a second implementation. Rows come from
-`http://127.0.0.1:8788/api/snapshot`, which already projects, orders and enriches them, so the
+`http://127.0.0.1:8787/api/snapshot`, which already projects, orders and enriches them, so the
 catalogue, index, cmux bridge and every action stay in one place with the tests that hold them.
 That also keeps the sandbox simple: the extension needs `com.apple.security.network.client` and
 nothing else.
