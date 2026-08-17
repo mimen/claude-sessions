@@ -70,7 +70,13 @@ public struct SessionRowView: View {
     public var body: some View {
         content
             .contentShape(Rectangle())
-            .onTapGesture { actions.open(row) }
+            .onTapGesture {
+                // ExtensionKit can switch workspaces without delivering the hover-exit event for
+                // the row that initiated it. Clear before the action so the old row cannot remain
+                // painted as hovered after the sidebar is reattached to the new workspace.
+                onHoverChange(false)
+                actions.open(row)
+            }
             .onHover { inside in
                 onHoverChange(inside)
                 if !inside { showingSummary = false }
