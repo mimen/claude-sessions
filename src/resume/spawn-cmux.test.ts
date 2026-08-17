@@ -59,21 +59,21 @@ function valueAfter(argv: readonly string[], flag: string): string {
   return value;
 }
 
-function environmentFileFromCommand(command: string): string {
-  const sourcePrefix = "; builtin . ";
-  const sourceStart = command.indexOf(sourcePrefix);
-  const sourceEnd = command.indexOf(" && /bin/rm -f -- ", sourceStart + sourcePrefix.length);
-  if (sourceStart < 0 || sourceEnd < 0) {
-    throw new Error("command does not contain the temporary environment source step");
+function launchFileFromCommand(command: string): string {
+  const sourcePrefix = "builtin . ";
+  if (!command.startsWith(sourcePrefix)) {
+    throw new Error("command is not a short transport source line");
   }
-
-  const sourceToken = command.slice(sourceStart + sourcePrefix.length, sourceEnd);
   const parsed = Bun.spawnSync(
-    ["/bin/bash", "-c", `set -- ${sourceToken}; printf '%s' "$1"`],
+    ["/bin/bash", "-c", `set -- ${command.slice(sourcePrefix.length)}; printf '%s' "$1"`],
     { stdout: "pipe", stderr: "pipe" },
   );
-  if (!parsed.success) throw new Error("failed to parse temporary environment path");
+  if (!parsed.success) throw new Error("failed to parse launch file path");
   return parsed.stdout.toString();
+}
+
+function environmentFileFromCommand(command: string): string {
+  return join(dirname(launchFileFromCommand(command)), "environment.sh");
 }
 
 function withoutLauncherEnvironment(keys: readonly string[]): NodeJS.ProcessEnv {
@@ -198,8 +198,10 @@ exit 0
     withFakeCmux((cmuxPath, callsFile, root) => {
       const launcherPath = join(root, "fake-launcher");
       const capturedEnvironmentPath = join(root, "captured-environment.sh");
+      const capturedLaunchPath = join(root, "captured-launch.sh");
       const directoryModePath = join(root, "directory-mode.txt");
       const fileModePath = join(root, "file-mode.txt");
+      const launchFileModePath = join(root, "launch-file-mode.txt");
       writeFileSync(launcherPath, "#!/bin/bash\nexit 0\n", { mode: 0o755 });
       writeFileSync(
         cmuxPath,
@@ -213,13 +215,15 @@ while (($#)); do
   fi
   shift
 done
-source_token="\${command#*; builtin . }"
-source_token="\${source_token%% && /bin/rm -f -- *}"
-eval "set -- $source_token"
-environment_file="$1"
+launch_token="\${command#builtin . }"
+eval "set -- $launch_token"
+launch_file="$1"
+environment_file="$(/usr/bin/dirname "$launch_file")/environment.sh"
 /bin/cp "$environment_file" "${capturedEnvironmentPath}"
+/bin/cp "$launch_file" "${capturedLaunchPath}"
 /usr/bin/stat -f '%Lp' "$(dirname "$environment_file")" > "${directoryModePath}"
 /usr/bin/stat -f '%Lp' "$environment_file" > "${fileModePath}"
+/usr/bin/stat -f '%Lp' "$launch_file" > "${launchFileModePath}"
 /bin/bash -c "$command" || exit 1
 echo "workspace:101"
 `,
@@ -249,12 +253,19 @@ echo "workspace:101"
 
       const calls = readCmuxArgv(callsFile);
       const command = valueAfter(calls, "--command");
+      const launchFile = launchFileFromCommand(command);
       const environmentFile = environmentFileFromCommand(command);
+      const launchScript = readFileSync(capturedLaunchPath, "utf8");
       expect(calls).not.toContain("--env");
       expect(calls).not.toContain("--env-file");
       expect(calls.join("\0")).not.toContain(longPath);
       expect(command).not.toContain(longPath);
-      expect(command).toContain(
+      // cmux types --command into the workspace pty, whose canonical-mode line buffer drops
+      // everything past 1024 bytes — the typed line must stay far below that no matter how many
+      // variables the launcher declares.
+      expect(command.length).toBeLessThan(200);
+      expect(launchScript).not.toContain(longPath);
+      expect(launchScript).toContain(
         `/usr/bin/env PATH="$CCS_CMUX_STAGED_ENV_0" ${launcherPath} --model gpt-5.6-sol ` +
           "--session-id 12345678-1234-4123-8123-123456789abc " +
           "'finish the complete launch'",
@@ -262,11 +273,13 @@ echo "workspace:101"
 
       expect(readFileSync(directoryModePath, "utf8").trim()).toBe("700");
       expect(readFileSync(fileModePath, "utf8").trim()).toBe("600");
+      expect(readFileSync(launchFileModePath, "utf8").trim()).toBe("600");
       expect(readFileSync(capturedEnvironmentPath, "utf8")).toBe(
         `CCS_CMUX_STAGED_ENV_0=${shellQuote(longPath)}\n`,
       );
       expect(readFileSync(capturedEnvironmentPath, "utf8")).not.toContain("export");
       expect(existsSync(environmentFile)).toBe(false);
+      expect(existsSync(launchFile)).toBe(false);
       expect(existsSync(dirname(environmentFile))).toBe(false);
     });
   });
@@ -335,6 +348,7 @@ echo "workspace:103"
       const rmOverridePath = join(root, "rm-override-called");
       const rmdirOverridePath = join(root, "rmdir-override-called");
       const envOverridePath = join(root, "env-override-called");
+      const capturedLaunchPath = join(root, "captured-launch.sh");
       writeFileSync(
         cmuxPath,
         `#!/bin/bash
@@ -347,11 +361,12 @@ while (($#)); do
   fi
   shift
 done
-source_token="\${command#*; builtin . }"
-source_token="\${source_token%% && /bin/rm -f -- *}"
-eval "set -- $source_token"
-environment_file="$1"
+launch_token="\${command#builtin . }"
+eval "set -- $launch_token"
+launch_file="$1"
+environment_file="$(/usr/bin/dirname "$launch_file")/environment.sh"
 /bin/cp "$environment_file" "${capturedEnvironmentPath}"
+/bin/cp "$launch_file" "${capturedLaunchPath}"
 /usr/bin/stat -f '%Lp' "$(dirname "$environment_file")" > "${directoryModePath}"
 /usr/bin/stat -f '%Lp' "$environment_file" > "${fileModePath}"
 rm() { : > "${rmOverridePath}"; /bin/rm "$@"; }
@@ -388,8 +403,10 @@ printf 'launch\\n' >> "$2"
 
       const calls = readCmuxArgv(callsFile);
       const command = valueAfter(calls, "--command");
+      const launchFile = launchFileFromCommand(command);
       const environmentFile = environmentFileFromCommand(command);
       const environmentDirectory = dirname(environmentFile);
+      const launchScript = readFileSync(capturedLaunchPath, "utf8");
       const scrubbedKeys = [
         "CCS_TEST_EMPTY",
         "CCS_TEST_SPECIAL",
@@ -401,8 +418,9 @@ printf 'launch\\n' >> "$2"
       expect(calls).not.toContain("--env-file");
       expect(calls.join("\0")).not.toContain(specialValue);
       expect(command).not.toContain(specialValue);
-      expect(command).toContain("(set +a; unset CCS_CMUX_STAGED_ENV_0 CCS_CMUX_STAGED_ENV_1;");
-      expect(command).toContain(
+      expect(launchScript).not.toContain(specialValue);
+      expect(launchScript).toContain("(set +a; unset CCS_CMUX_STAGED_ENV_0 CCS_CMUX_STAGED_ENV_1;");
+      expect(launchScript).toContain(
         '/usr/bin/env CCS_TEST_EMPTY="$CCS_CMUX_STAGED_ENV_0" ' +
           'CCS_TEST_SPECIAL="$CCS_CMUX_STAGED_ENV_1" ',
       );
@@ -428,6 +446,7 @@ printf 'launch\\n' >> "$2"
       expect(existsSync(rmdirOverridePath)).toBe(false);
       expect(existsSync(envOverridePath)).toBe(false);
       expect(existsSync(environmentFile)).toBe(false);
+      expect(existsSync(launchFile)).toBe(false);
       expect(existsSync(environmentDirectory)).toBe(false);
 
       const restoredSurface = Bun.spawnSync(
@@ -634,10 +653,12 @@ exit 1
 
       const calls = readCmuxArgv(callsFile);
       const command = valueAfter(calls, "--command");
+      const launchFile = launchFileFromCommand(command);
       const environmentFile = environmentFileFromCommand(command);
       expect(calls).not.toContain("--env");
       expect(calls).not.toContain("--env-file");
       expect(existsSync(environmentFile)).toBe(false);
+      expect(existsSync(launchFile)).toBe(false);
       expect(existsSync(dirname(environmentFile))).toBe(false);
     });
   });
@@ -669,10 +690,13 @@ exit 0
       ).not.toBeNull();
 
       const command = valueAfter(readCmuxArgv(callsFile), "--command");
+      const launchFile = launchFileFromCommand(command);
       const environmentFile = environmentFileFromCommand(command);
       expect(existsSync(environmentFile)).toBe(true);
+      expect(existsSync(launchFile)).toBe(true);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200);
       expect(existsSync(environmentFile)).toBe(false);
+      expect(existsSync(launchFile)).toBe(false);
       expect(existsSync(dirname(environmentFile))).toBe(false);
     });
   }, 5000);
