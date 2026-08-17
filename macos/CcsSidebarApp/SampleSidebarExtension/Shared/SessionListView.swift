@@ -58,6 +58,10 @@ public struct SessionListView: View {
         Grouping.group(rows: rows, by: grouping, clusterFirst: clusterFirst)
     }
 
+    private var focusedId: String? {
+        rows.first(where: \.focused)?.id
+    }
+
     public var body: some View {
         // @Observable only re-evaluates views that read a changing property, and until this read
         // existed nothing read the tick — so elapsed labels froze between snapshots and only moved
@@ -67,6 +71,12 @@ public struct SessionListView: View {
             .onChange(of: rows.map(\.id)) { _, _ in
                 // Membership or order changed under the pointer; whatever was hovered may no
                 // longer be where the pointer is. Resetting beats guessing.
+                hoveredId = nil
+            }
+            .onChange(of: focusedId) { _, _ in
+                // A workspace switch can reattach the extension before AppKit delivers the old
+                // row's hover-exit event. Focus truth is authoritative, so any hover surviving a
+                // focus change is stale until the pointer moves and enters a row again.
                 hoveredId = nil
             }
     }
