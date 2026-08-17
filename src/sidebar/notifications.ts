@@ -188,6 +188,7 @@ export function createCachedNotificationReader(
   ttlMs: number,
   now: () => number = () => Date.now(),
   read: typeof readNotifications = readNotifications,
+  onReplaced?: () => void,
 ): CachedNotificationReader {
   const cache = createWarmCache<void, CmuxNotificationState>({
     ttlMs,
@@ -196,6 +197,7 @@ export function createCachedNotificationReader(
     now,
     load: () => read(cmuxBin),
     failure: { type: "replace", value: emptyNotificationState },
+    ...(onReplaced ? { onReplaced } : {}),
   });
   return {
     read: () => cache.read(),

@@ -87,6 +87,43 @@ describe("snapshot liveness cache", () => {
     expect((await reader.read()).readable).toBeTrue();
   });
 
+  test("fails closed once failed refreshes outlive the stale window", async () => {
+    let clock = 0;
+    let reads = 0;
+    let failing = false;
+    const reader = createSnapshotLivenessReader({
+      ttlMs: 10,
+      maxStaleMs: 100,
+      now: () => clock,
+      readBridge: async () => {
+        reads += 1;
+        if (failing) throw new Error("cmux is gone");
+        return readableBridge();
+      },
+    });
+
+    expect((await reader.read()).readable).toBeTrue();
+
+    // A transient failure inside the window keeps serving the last readable tree.
+    failing = true;
+    clock = 50;
+    expect((await reader.read()).readable).toBeTrue();
+    await Bun.sleep(0);
+    expect((await reader.read()).readable).toBeTrue();
+
+    // Past the window the frozen tree is a lie; the projection must be told it does not know.
+    clock = 200;
+    await reader.read();
+    await waitFor(() => reads >= 4);
+    await Bun.sleep(0);
+    expect((await reader.read()).readable).toBeFalse();
+
+    // Recovery is immediate once cmux answers again.
+    failing = false;
+    reader.invalidate();
+    expect((await reader.read()).readable).toBeTrue();
+  });
+
   test("coalesces explicit hints into one refresh trailing an older in-flight read", async () => {
     let clock = 0;
     let reads = 0;

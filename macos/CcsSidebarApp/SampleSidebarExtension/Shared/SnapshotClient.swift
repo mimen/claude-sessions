@@ -39,6 +39,10 @@ public final class SnapshotClient {
     private var changeTask: Task<Void, Never>?
     /// The last revision the server reported, so a reconnection can tell whether it slept through one.
     private var lastRevision: Int?
+    /// Issue number of the newest refresh. URLSession answers in whatever order the network allows,
+    /// so without this a slow older response can land after a faster newer one and put rows that
+    /// were already replaced back on screen — stale highlights that stay until the next poll.
+    private var refreshGeneration = 0
 
     public init(
         port: Int = 8788,
@@ -166,12 +170,16 @@ public final class SnapshotClient {
     }
 
     private func refresh(freshLiveness: Bool = false) async {
+        refreshGeneration += 1
+        let generation = refreshGeneration
         do {
             var request = URLRequest(url: endpoint)
             // The server drops this query's cached representation and re-reads liveness rather
             // than serving the previous projection.
             if freshLiveness { request.setValue("1", forHTTPHeaderField: "x-ccs-refresh-liveness") }
             let (data, _) = try await URLSession.shared.data(for: request)
+            // A newer refresh was issued while this one was on the wire; its answer is the past.
+            guard generation == refreshGeneration else { return }
             let snapshot = try JSONDecoder().decode(SidebarSnapshot.self, from: data)
             rows = snapshot.rows
             counts = snapshot.lifecycleCounts ?? [:]
@@ -179,6 +187,7 @@ public final class SnapshotClient {
             livenessReadable = snapshot.livenessReadable
             lastError = nil
         } catch {
+            guard generation == refreshGeneration else { return }
             // Retained on purpose: the rows already on screen stay true until contradicted.
             lastError = error.localizedDescription
         }

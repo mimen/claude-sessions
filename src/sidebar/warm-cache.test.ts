@@ -234,4 +234,43 @@ describe("createWarmCache invalidation", () => {
     expect(calls).toBe(3);
     await expect(cache.read()).resolves.toBe("after the change");
   });
+
+  test("announces when an invalidation-provoked refresh lands, and not for TTL refreshes", async () => {
+    let clock = 100;
+    let calls = 0;
+    let replaced = 0;
+    const cache = createWarmCache<void, string>({
+      ttlMs: 10,
+      initialValue: "initial",
+      coldRead: "block",
+      now: () => clock,
+      load: () => {
+        calls += 1;
+        return Promise.resolve(`value ${calls}`);
+      },
+      failure: { type: "retain-and-retry" },
+      onReplaced: () => {
+        replaced += 1;
+      },
+    });
+
+    // Cold read and a TTL-expired refresh: routine reads, nothing to announce.
+    await expect(cache.read()).resolves.toBe("value 1");
+    clock = 120;
+    await expect(cache.read()).resolves.toBe("value 1");
+    await settleRefresh();
+    await settleRefresh();
+    expect(calls).toBe(2);
+    expect(replaced).toBe(0);
+
+    // An invalidation already told clients something changed; the announcement here is the
+    // moment the refetch they make would actually see it.
+    cache.invalidate();
+    await expect(cache.read()).resolves.toBe("value 2");
+    await settleRefresh();
+    await settleRefresh();
+    expect(calls).toBe(3);
+    expect(replaced).toBe(1);
+    await expect(cache.read()).resolves.toBe("value 3");
+  });
 });
