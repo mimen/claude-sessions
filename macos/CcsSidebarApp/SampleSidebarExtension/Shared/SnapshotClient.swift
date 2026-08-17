@@ -52,7 +52,7 @@ public final class SnapshotClient {
     private var refreshGeneration = 0
 
     public init(
-        port: Int = 8788,
+        port: Int = SidebarServer.defaultPort,
         limit: Int = 2_000,
         interval: Duration = .seconds(1),
         backstopInterval: Duration = .seconds(5)
@@ -76,7 +76,7 @@ public final class SnapshotClient {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                let wait = await self?.pollWait ?? .seconds(1)
+                let wait = self?.pollWait ?? .seconds(1)
                 try? await Task.sleep(for: wait)
             }
         }

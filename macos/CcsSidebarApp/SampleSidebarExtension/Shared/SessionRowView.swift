@@ -48,7 +48,7 @@ public struct SessionRowView: View {
         age: String,
         actions: RowActions,
         layout: RowLayout = .wide,
-        port: Int = 8788,
+        port: Int = SidebarServer.defaultPort,
         workingFor: String? = nil,
         jumpLabel: String? = nil,
         isHovered: Bool = false,

@@ -34,7 +34,7 @@ public struct SessionListView: View {
         selectedId: String? = nil,
         grouping: GroupingMode = .status,
         layouts: RowLayouts = RowLayouts(),
-        port: Int = 8788,
+        port: Int = SidebarServer.defaultPort,
         clusterFirst: Bool = false,
         truncated: Bool = false,
         clock: WorkingClock,

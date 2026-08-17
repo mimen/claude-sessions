@@ -22,7 +22,7 @@ public struct SidebarRootView: View {
     private let actionClient: ActionClient
     private let port: Int
 
-    public init(port: Int = 8788) {
+    public init(port: Int = SidebarServer.defaultPort) {
         _client = State(initialValue: SnapshotClient(port: port))
         actionClient = ActionClient(port: port)
         self.port = port
