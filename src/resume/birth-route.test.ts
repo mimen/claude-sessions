@@ -24,7 +24,10 @@ test("--model still derives its own launcher without consulting the registry", (
 
   const claude = compileExactBirthRoute({ locationKey: "home", model: "claude-fable-5" });
   expect(claude.ok).toBe(true);
-  if (claude.ok) expect(claude.value.launcher).toBe("claude");
+  if (claude.ok) {
+    expect(claude.value.launcher).toBe("claudex");
+    expect(claude.value.launchModel).toBe("claude-fable-5[1m]");
+  }
 });
 
 // The fleet-wide daily driver is the location registry's default_harness/default_model pair, so
@@ -48,7 +51,8 @@ test("a location-declared claudex default survives BOTH compile and resolve", ()
   const resolved = resolveBirthRoute(request, registry);
   expect(resolved.ok).toBe(true);
   if (!resolved.ok) return;
-  // Re-deriving the launcher from the model here would silently send the birth to `claude`.
+  // Resolution preserves the registry-authored launcher instead of replacing it with another
+  // process envelope that happens to serve the same model.
   expect(resolved.value.launcher).toMatchObject({ name: "claudex", binary: "claudex" });
 });
 

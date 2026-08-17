@@ -459,7 +459,19 @@ describe("launcher environment materialization", () => {
 [[launcher]]
 name = "claude-gpt"
 binary = "claude-gpt"
-serves = ["gpt-*"]
+serves = ["gpt-5.6-*"]
+env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@file:${key}" }
+
+[[launcher]]
+name = "claude-gpt55"
+binary = "claude-gpt55"
+serves = ["gpt-5.5"]
+env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@file:${key}" }
+
+[[launcher]]
+name = "local-mlx"
+binary = "local-mlx"
+serves = ["qwen3.8-local"]
 env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@file:${key}" }
 `;
     const installed = installClaudeShim({
@@ -469,7 +481,13 @@ env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@f
     });
     expect(installed.ok).toBe(true);
     if (!installed.ok) return;
-    expect(installed.value.wrappers).toEqual(["claude-gpt", "claude-native", "claudex"]);
+    expect(installed.value.wrappers).toEqual([
+      "claude-gpt",
+      "claude-gpt55",
+      "claude-native",
+      "claudex",
+      "local-mlx",
+    ]);
 
     for (const name of installed.value.wrappers) {
       const wrapper = readFileSync(join(runtime, "bin", name), "utf8");

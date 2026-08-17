@@ -35,7 +35,7 @@ import {
   type RespawnPlan,
   type RespawnRefusal,
 } from "./respawn.ts";
-import { ROLE_MODEL_IDS, compileRoleModelValue } from "./role-model-launch.ts";
+import { BIRTH_MODEL_IDS, parseBirthModel } from "./role-model-launch.ts";
 import { describeSwap, planSwap } from "./swap-harness.ts";
 
 interface ParsedRespawnArgs {
@@ -77,8 +77,8 @@ function parseRespawnArgs(
     }
 
     if (model !== undefined) return err(new Error("--model may be specified only once"));
-    if (!compileRoleModelValue(value)) {
-      return err(new Error(`--model must be one of: ${ROLE_MODEL_IDS.join(", ")}`));
+    if (!parseBirthModel(value)) {
+      return err(new Error(`--model must be one of: ${BIRTH_MODEL_IDS.join(", ")}`));
     }
     model = value;
   }

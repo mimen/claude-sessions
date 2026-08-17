@@ -1,28 +1,19 @@
 #!/bin/zsh -f
-# claude-gpt — Claude Code on GPT-5.6 through the local CLIProxyAPI gateway. The launcher registry
-# declares the exact 921K context window; GPT IDs must not carry Claude Code's false `[1m]` marker.
-export CCS_FORCE_HARNESS=claude-gpt
-
-model_base() {
-  local value="${1//\[1m\]/}"
-  value="${value%%\(*}"
-  print -r -- "$value"
-}
+# local-mlx — Claude Code on the local qwen3.8-local MLX model through CLIProxyAPI. The launcher
+# registry declares the backend's exact 262,144-token context window.
+export CCS_FORCE_HARNESS=local-mlx
 
 normalize_model() {
   print -r -- "${1//\[1m\]/}"
 }
 
 validate_model() {
-  local base="$(model_base "$1")"
+  local value="$(normalize_model "$1")"
+  local base="${value%%\(*}"
   case "$base" in
-    gpt-5.6-*|opus|fable|sonnet|haiku|best|default) return 0 ;;
-    gpt-5.5)
-      print -u2 -- "claude-gpt: gpt-5.5 requires the 272K claude-gpt55 launcher"
-      return 2
-      ;;
+    qwen3.8-local|opus|fable|sonnet|haiku|best|default) return 0 ;;
     *)
-      print -u2 -- "claude-gpt: model $base is outside this GPT-5.6 context envelope"
+      print -u2 -- "local-mlx: model $base is outside this local context envelope"
       return 2
       ;;
   esac

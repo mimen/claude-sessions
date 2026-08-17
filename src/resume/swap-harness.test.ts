@@ -86,15 +86,15 @@ test("a gpt session swaps to claude-native on opus", () => {
   expect(res.value.model).toBe("opus");
 });
 
-test("a claude session swaps to claude-gpt with the canonical default compiled to [1m]", () => {
+test("a claude session swaps to claude-gpt with the canonical 921K model spelling", () => {
   const res = plan(env(), stubBridge(surfaceSession()), FLEET, claudeHistory);
   expect(res.ok).toBe(true);
   if (!res.ok) throw new Error("unreachable");
   expect(res.value.from?.name).toBe("claude-native");
   expect(res.value.to.name).toBe("claude-gpt");
   expect(DEFAULT_SWAP_MODEL["claude-gpt"]).toBe("gpt-5.6-sol");
-  expect(res.value.model).toBe("gpt-5.6-sol[1m]");
-  expect(res.value.command).toContain("--model 'gpt-5.6-sol[1m]'");
+  expect(res.value.model).toBe("gpt-5.6-sol");
+  expect(res.value.command).toContain("--model gpt-5.6-sol");
 });
 
 test("a session already swapped once can swap back (mixed history routes on its last model)", () => {
@@ -118,7 +118,7 @@ test("...but an explicit --to swaps it anyway, with the origin left unclaimed", 
   if (!res.ok) throw new Error("unreachable");
   expect(res.value.from).toBeNull();
   expect(res.value.to.name).toBe("claude-gpt");
-  expect(res.value.model).toBe("gpt-5.6-sol[1m]");
+  expect(res.value.model).toBe("gpt-5.6-sol");
 });
 
 // --- the cwd trap ---------------------------------------------------------------
@@ -154,8 +154,8 @@ test("--model accepts a canonical override and compiles its launcher spelling", 
     model: "gpt-5.6-terra",
   });
   if (!res.ok) throw new Error("unreachable");
-  expect(res.value.model).toBe("gpt-5.6-terra[1m]");
-  expect(res.value.command).toContain(`--model 'gpt-5.6-terra[1m]'`);
+  expect(res.value.model).toBe("gpt-5.6-terra");
+  expect(res.value.command).toContain("--model gpt-5.6-terra");
 });
 
 test("--model rejects launcher spellings instead of bypassing the canonical compiler", () => {

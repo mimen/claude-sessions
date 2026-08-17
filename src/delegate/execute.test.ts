@@ -110,7 +110,7 @@ describe("executeDelegate", () => {
         provider: "gpt",
         launcher: "claudex",
         requestedModel: "gpt-5.6-sol",
-        compiledModel: "gpt-5.6-sol[1m]",
+        compiledModel: "gpt-5.6-sol",
         effort: "high",
       },
     ]);
@@ -145,11 +145,11 @@ describe("executeDelegate", () => {
     expect(h.reservations[0]).toMatchObject({
       route: "fallback",
       requestedModel: "gpt-5.6-terra",
-      compiledModel: "gpt-5.6-terra[1m]",
+      compiledModel: "gpt-5.6-terra",
       effort: "xhigh",
     });
     expect(h.launches).toHaveLength(1);
-    expect(h.launches[0]!.argv.join(" ")).toContain('"model":"gpt-5.6-terra[1m]"');
+    expect(h.launches[0]!.argv.join(" ")).toContain('"model":"gpt-5.6-terra"');
     expect(h.launches[0]!.argv.join(" ")).toContain('"effort":"xhigh"');
   });
 

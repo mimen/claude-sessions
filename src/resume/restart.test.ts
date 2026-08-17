@@ -11,8 +11,20 @@ const native: Launcher = {
   env: {},
   clears: [],
 };
-const gpt: Launcher = { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] };
-const claudex: Launcher = { name: "claudex", binary: "claudex", serves: ["*"], env: {}, clears: [] };
+const gpt: Launcher = {
+  name: "claude-gpt",
+  binary: "claude-gpt",
+  serves: ["gpt-5.6-*"],
+  env: {},
+  clears: [],
+};
+const claudex: Launcher = {
+  name: "claudex",
+  binary: "claudex",
+  serves: ["claude-*", "gpt-5.6-*"],
+  env: {},
+  clears: [],
+};
 const FLEET = [native, gpt];
 
 const SURFACE = "surface-uuid-1";
@@ -99,8 +111,8 @@ test("--model pins a canonical model with its compiled launcher spelling", () =>
     model: "gpt-5.6-terra",
   });
   if (!res.ok) throw new Error("unreachable");
-  expect(res.value.model).toBe("gpt-5.6-terra[1m]");
-  expect(res.value.command).toContain("--model 'gpt-5.6-terra[1m]'");
+  expect(res.value.model).toBe("gpt-5.6-terra");
+  expect(res.value.command).toContain("--model gpt-5.6-terra");
 });
 
 test("--model rejects aliases before constructing a restart command", () => {
@@ -169,18 +181,18 @@ test("restart refuses without a transcript-resolved launch dir", () => {
 
 const CONSOLIDATED = [claudex, native, gpt];
 
-test("a bare restart still aims at the most specific launcher for the history", () => {
+test("a bare Claude restart refuses when claudex and claude-native can both replay the history", () => {
   const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, claudeHistory);
-  expect(res.ok).toBe(true);
-  if (!res.ok) throw new Error("unreachable");
-  expect(res.value.to.name).toBe("claude-native");
+  if (res.ok) throw new Error("unreachable");
+  expect(res.error.code).toBe("origin-unknown");
+  expect(res.error.message).toContain("pass --on");
 });
 
-test("...but flags the origin as INFERRED, because claudex could have written the same history", () => {
-  const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, claudeHistory);
-  if (!res.ok) throw new Error("unreachable");
-  expect(res.value.originCertain).toBe(false);
-  expect(describeRestart(res.value)).toContain("current harness INFERRED as claude-native");
+test("a bare GPT restart refuses when claudex and claude-gpt can both replay the history", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, gptHistory);
+  if (res.ok) throw new Error("unreachable");
+  expect(res.error.code).toBe("origin-unknown");
+  expect(res.error.message).toContain("pass --on");
 });
 
 test("a disjoint two-launcher fleet still OBSERVES the origin and says nothing extra", () => {
@@ -190,11 +202,31 @@ test("a disjoint two-launcher fleet still OBSERVES the origin and says nothing e
   expect(describeRestart(res.value)).not.toContain("INFERRED");
 });
 
-test("--on pins the harness in the consolidated fleet, keeping the settings alias unpinned", () => {
+test("--on claudex pins the shared launcher while keeping the settings alias unpinned", () => {
   const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, claudeHistory, { on: "claudex" });
   expect(res.ok).toBe(true);
   if (!res.ok) throw new Error("unreachable");
   expect(res.value.to.name).toBe("claudex");
   expect(res.value.model).toBeNull();
   expect(res.value.command).not.toContain("--model");
+});
+
+test("--on claude-native pins the native launcher despite the overlapping Claude history", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, claudeHistory, {
+    on: "claude-native",
+  });
+  expect(res.ok).toBe(true);
+  if (!res.ok) throw new Error("unreachable");
+  expect(res.value.to.name).toBe("claude-native");
+  expect(res.value.command).toContain("claude-native --resume");
+});
+
+test("--on claude-gpt pins the GPT-5.6 launcher despite the overlapping GPT history", () => {
+  const res = plan(env(), stubBridge(surfaceSession()), CONSOLIDATED, gptHistory, {
+    on: "claude-gpt",
+  });
+  expect(res.ok).toBe(true);
+  if (!res.ok) throw new Error("unreachable");
+  expect(res.value.to.name).toBe("claude-gpt");
+  expect(res.value.command).toContain("claude-gpt --resume");
 });

@@ -435,7 +435,7 @@ test("newSession: production JSON receipt reports a successful detached birth", 
     cwd: root,
     harness: "claude-gpt",
     model: "gpt-5.6-sol",
-    launch_model: "gpt-5.6-sol[1m]",
+    launch_model: "gpt-5.6-sol",
     workspace_ref: "workspace:777",
     error: null,
   });
@@ -675,7 +675,7 @@ test("newSession: model-policy reservation records resolved launch provenance", 
   try {
     const row = check.query("SELECT session_id FROM catalogue").get() as { session_id: string };
     const stored = getRow(check, row.session_id)!;
-    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-sol[1m]");
+    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-sol");
     expect(getMeta(stored, "launch_launcher")).toBe("claude-gpt");
   } finally { check.close(); }
 });
@@ -779,7 +779,7 @@ test("newSession: location route compiles exact model and launcher provenance", 
     const row = db.query("SELECT session_id FROM catalogue").get() as { session_id: string };
     const stored = getRow(db, row.session_id)!;
     expect(getMeta(stored, "launch_location_model")).toBe("gpt-5.6-sol");
-    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-sol[1m]");
+    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-sol");
     expect(getMeta(stored, "launch_launcher")).toBe("claude-gpt");
   } finally {
     db.close();
@@ -804,7 +804,7 @@ test("newSession: registry-wide route default compiles when a location has no ov
     const row = db.query("SELECT session_id FROM catalogue").get() as { session_id: string };
     const stored = getRow(db, row.session_id)!;
     expect(getMeta(stored, "launch_location_model")).toBe("gpt-5.6-sol");
-    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-sol[1m]");
+    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-sol");
     expect(getMeta(stored, "launch_launcher")).toBe("claude-gpt");
   } finally {
     db.close();
@@ -870,7 +870,7 @@ test("newSession: explicit canonical model outranks an invalid location default"
     const row = db.query("SELECT session_id FROM catalogue").get() as { session_id: string };
     const stored = getRow(db, row.session_id)!;
     expect(getMeta(stored, "launch_location_model")).toBe("claude-opus-4-8");
-    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-terra[1m]");
+    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-terra");
     expect(getMeta(stored, "launch_launcher")).toBe("claude-gpt");
   } finally {
     db.close();
@@ -948,7 +948,7 @@ test("newSession: role model policy outranks location defaults while preserving 
     const stored = getRow(db, row.session_id)!;
     expect(stored.customTitle).toBe("CCS");
     expect(getMeta(stored, "launch_location_model")).toBe("gpt-5.6-sol");
-    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-terra[1m]");
+    expect(getMeta(stored, "launch_model")).toBe("gpt-5.6-terra");
     expect(getMeta(stored, "launch_launcher")).toBe("claude-gpt");
   } finally {
     db.close();
@@ -1007,7 +1007,7 @@ test("newSession: remote host uses preflight and one cmux transport without loca
     route: {
       launcher: "claude-gpt",
       model: "gpt-5.6-sol",
-      launchModel: "gpt-5.6-sol[1m]",
+      launchModel: "gpt-5.6-sol",
     },
     via: undefined,
     model: "gpt-5.6-sol",
@@ -1070,7 +1070,7 @@ test("newSession: remote explicit routes outrank an invalid location default", (
   ], dependencies)).toBe(0);
   expect(preflights).toHaveLength(2);
   expect(preflights[0]).toMatchObject({
-    route: { launcher: "claude", model: "claude-fable-5", launchModel: "claude-fable-5" },
+    route: { launcher: "claudex", model: "claude-fable-5", launchModel: "claude-fable-5[1m]" },
     model: "claude-fable-5",
     via: undefined,
   });

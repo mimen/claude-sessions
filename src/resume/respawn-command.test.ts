@@ -19,7 +19,12 @@ const SURFACE = "surface-1";
 const WORKSPACE = "workspace-1";
 const FLEET: Launcher[] = [
   { name: "claude-native", binary: "claude-native", serves: ["claude-*"], env: {}, clears: [] },
-  { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] },
+  { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-5.6-*"], env: {}, clears: [] },
+];
+const CONTEXT_FLEET: Launcher[] = [
+  ...FLEET,
+  { name: "claude-gpt55", binary: "claude-gpt55", serves: ["gpt-5.5"], env: {}, clears: [] },
+  { name: "local-mlx", binary: "local-mlx", serves: ["qwen3.8-local"], env: {}, clears: [] },
 ];
 const ENVIRONMENT: RespawnEnv = {
   sessionId: SESSION,
@@ -89,9 +94,10 @@ function dependencies(
   bridge: Bridge,
   respawnIo: RespawnIo,
   errors: string[] = [],
+  fleet: readonly Launcher[] = FLEET,
 ): RespawnCommandDependencies {
   return {
-    loadLauncherFleet: () => ok(FLEET),
+    loadLauncherFleet: () => ok([...fleet]),
     readBridge: () => bridge,
     respawnIo,
     environment: ENVIRONMENT,
@@ -334,7 +340,38 @@ test("a valid canonical command override reaches respawn as current GPT launch s
     );
     expect(exit).toBe(0);
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain("--model 'gpt-5.6-sol[1m]'");
+    expect(calls[0]).toContain("--model gpt-5.6-sol");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("command parsing admits the dedicated GPT-5.5 and Qwen context families", async () => {
+  const f = fixture();
+  const calls: string[] = [];
+  const io: RespawnIo = {
+    respawn: (_surfaceId, command) => {
+      calls.push(command);
+      return { ok: true };
+    },
+  };
+  try {
+    expect(await swapHarnessCommand(
+      ["--to", "claude-gpt55", "--model", "gpt-5.5", "--do"],
+      f.dbPath,
+      dependencies(f.bridge, io, [], CONTEXT_FLEET),
+    )).toBe(0);
+    expect(await swapHarnessCommand(
+      ["--to", "local-mlx", "--model", "qwen3.8-local", "--do"],
+      f.dbPath,
+      dependencies(f.bridge, io, [], CONTEXT_FLEET),
+    )).toBe(0);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain("claude-gpt55 --resume");
+    expect(calls[0]).toContain("--model gpt-5.5");
+    expect(calls[1]).toContain("local-mlx --resume");
+    expect(calls[1]).toContain("--model qwen3.8-local");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

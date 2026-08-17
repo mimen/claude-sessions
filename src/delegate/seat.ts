@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { err, ok, type Result } from "../result.ts";
-import { GATEWAY_LAUNCHERS } from "../resume/role-model-launch.ts";
+import { ONE_MILLION_MARKER_LAUNCHERS } from "../resume/role-model-launch.ts";
 import type { LauncherName, ModelFamily } from "../resume/role-model-launch.ts";
 
 const SeatNameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]*$/);
@@ -53,8 +53,8 @@ export type SeatRouteKind = "primary" | "fallback";
  * An agent definition declares a MODEL and never a launcher, so the launcher stopped being a
  * per-seat authoring decision — and with it the provider/launcher pairing invariant the old
  * manifest had to validate. `claudex` is the birth route default and the one launcher in the fleet
- * that reaches Anthropic and OpenAI alike (`LAUNCHER_FAMILIES`), which is precisely what lets one
- * definition name either vendor's model.
+ * whose process envelope safely reaches the Claude 1M and GPT-5.6 921K families, which is precisely
+ * what lets one definition name either provider's model.
  */
 export const DELEGATE_LAUNCHER: LauncherName = "claudex";
 
@@ -121,24 +121,22 @@ function errorMessage(error: object): string {
  * authored string so the registry can name a model this binary has never heard of.
  */
 function providerFor(model: string): ModelFamily {
-  return model.startsWith("gpt-") ? "gpt" : "claude";
+  if (model.startsWith("gpt-")) return "gpt";
+  if (model.startsWith("qwen")) return "local";
+  return "claude";
 }
 
 /**
- * `[1m]` is a property of the LAUNCHER, not of the model family. Claude Code strips it client-side
- * and uses it as the context-window declaration, so on a gateway launcher `claude-opus-5[1m]` and
- * `claude-opus-5` are the same upstream request with DIFFERENT declared windows. Omitting it on a
- * Claude model does not fail — it silently declares the smaller window.
- *
- * An earlier revision applied the suffix to `gpt-*` only, on the theory that Claude IDs are
- * accepted verbatim everywhere. They are, which is why the bug was quiet: delegated Claude seats
- * ran on a narrower context than an otherwise identical location birth through the same launcher.
- * Caught in review 2026-07-28 as a disagreement between this compiler and `launchModelFor` in
- * `resume/role-model-launch.ts`. The launcher rule there is authoritative; this mirrors it.
+ * Compile a seat model for its process envelope. Claude Code strips `[1m]` client-side, so Claude
+ * models routed through `claudex` need it to declare their real 1M window. GPT-5.6 uses the
+ * launcher's exact 921K environment and must not carry a false 1M declaration.
  */
 export function compileLaunchModel(model: string, launcher: LauncherName): string {
-  if (!GATEWAY_LAUNCHERS.has(launcher)) return model;
-  return model.endsWith("[1m]") ? model : `${model}[1m]`;
+  const canonical = model.endsWith("[1m]") ? model.slice(0, -4) : model;
+  if (canonical.startsWith("claude-") && ONE_MILLION_MARKER_LAUNCHERS.has(launcher)) {
+    return `${canonical}[1m]`;
+  }
+  return canonical;
 }
 
 export function loadSeat(agentsRoot: string, seatName: string): Result<SeatDefinition> {

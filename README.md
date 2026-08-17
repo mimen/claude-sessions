@@ -108,8 +108,8 @@ override the directory). Claude Code ignores frontmatter keys it does not know, 
 `ccs delegate` reads `name`, `description`, `tools`, `model`, `effort`, and the optional
 `fallback_model`, `fallback_effort`, `skills`, and `permission_mode`, ignores every other key, and
 compiles them into process-local `--agents` JSON for that one delegation. A definition declares no
-launcher: children are born on the both-vendor `claudex` gateway, and the `[1m]` context marker is
-appended to `gpt-*` models only.
+launcher: children are born on `claudex`. Claude models receive the client-side `[1m]` declaration;
+GPT-5.6 models stay unsuffixed and use the launcher's exact 921K context environment.
 
 `--model` accepts a canonical birth-model ID and derives the matching launcher; it cannot be combined
 with legacy `--via`. Registered location overrides inherit the registry-wide exact route when omitted.
@@ -222,43 +222,44 @@ runs on a single hardcoded `claude` and the feature is invisible — the fleet i
 **config, not code**, because launcher names are per-host facts (a binary that is not installed
 must not be offered as a route).
 
-The reference fleet:
+The reference fleet separates process-wide context envelopes while keeping Claude and GPT-5.6 on
+the daily mixed-vendor launcher:
 
 ```toml
-# The daily driver: one gateway process (CLIProxyAPI) holding OAuth for BOTH vendors, so a
-# session changes model with /model instead of changing binary. No claude.ai connectors, no
-# Remote Control. Listed FIRST — config order is the only tie-break for a session with no model
-# history yet, which is how a launcher becomes the default without touching route specificity.
 [[launcher]]
 name = "claudex"
 binary = "claudex"
-serves = ["*"]
+serves = ["claude-*", "gpt-5.6-*"]
 
-# Real Anthropic. The only launcher with claude.ai connectors and Remote Control, and the
-# ToS/gateway escape hatch.
 [[launcher]]
 name = "claude-native"
 binary = "claude-native"
 serves = ["claude-*", "anthropic.*"]
 
-# The GPT-only gateway wrapper claudex supersedes. Kept so existing gpt-* transcripts stay
-# resumable on the harness that wrote them; deprecated out of the hot paths.
 [[launcher]]
 name = "claude-gpt"
 binary = "claude-gpt"
-serves = ["gpt-*"]
+serves = ["gpt-5.6-*"]
+
+[[launcher]]
+name = "claude-gpt55"
+binary = "claude-gpt55"
+serves = ["gpt-5.5"]
+
+[[launcher]]
+name = "local-mlx"
+binary = "local-mlx"
+serves = ["qwen3.8-local"]
 ```
 
-`serves` decides *eligibility and preselection*, not permission: routing keys on a session's LAST
-model, and the most specific matching glob wins, so a `claude-*` history still prefers
-`claude-native` over the catch-all. A launcher whose globs match everything is what keeps a
-mixed-history transcript resumable at all.
+`serves` decides eligibility and preselection. Routing keys on a session's last model, and the most
+specific matching glob wins. The model-specific patterns are also a safety boundary: a 272K GPT-5.5
+session must not restart inside GPT-5.6's 921K process envelope, and Qwen's 262,144-token process must
+not inherit either GPT limit.
 
-**Which launcher a NEW session is born on** is a different question, answered by the location
-registry's `default_harness` / `default_model` pair (`[routing].registry`), not by this fleet. That
-pair is validated for reachability — `claudex` may be declared for either vendor, `claude-gpt` only
-for `gpt-*`, `claude-native` and `claude` only for Claude models — so moving the whole fleet onto a
-different daily driver, or back, is a one-line edit in that registry.
+**Which launcher a new session is born on** is answered by the location registry's
+`default_harness` / `default_model` pair (`[routing].registry`), not by fleet order. The pair is
+validated against the exact context-safe model patterns above.
 
 #### Launcher environment
 
@@ -271,19 +272,36 @@ is a write to that one file, and config.toml never holds it:
 [[launcher]]
 name = "claudex"
 binary = "claudex"
-serves = ["*"]
+serves = ["claude-*", "gpt-5.6-*"]
 [launcher.env]
 ANTHROPIC_BASE_URL = "http://127.0.0.1:8317"
 ANTHROPIC_AUTH_TOKEN = "@file:~/.cli-proxy-api-key"
 ANTHROPIC_DEFAULT_OPUS_MODEL = "claude-opus-5[1m]"
+CLAUDE_CODE_MAX_CONTEXT_TOKENS = "921000"
+CLAUDE_CODE_AUTO_COMPACT_WINDOW = "1000000"
 
-# The gateway escape hatch: applies no gateway env and actively strips any it inherited, so it
-# still reaches real Anthropic when launched from inside a gateway session.
+[[launcher]]
+name = "claude-gpt55"
+binary = "claude-gpt55"
+serves = ["gpt-5.5"]
+[launcher.env]
+ANTHROPIC_BASE_URL = "http://127.0.0.1:8317"
+ANTHROPIC_AUTH_TOKEN = "@file:~/.cli-proxy-api-key"
+CLAUDE_CODE_MAX_CONTEXT_TOKENS = "272000"
+CLAUDE_CODE_AUTO_COMPACT_WINDOW = "272000"
+
+# The gateway escape hatch strips inherited route and context variables before reaching Anthropic.
 [[launcher]]
 name = "claude-native"
 binary = "claude-native"
 serves = ["claude-*", "anthropic.*"]
-clears = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
+clears = [
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+  "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+]
 ```
 
 `ccs launcher install` materializes each launcher's `env`/`clears` into `~/.ccs/launcher-env/`
@@ -319,16 +337,24 @@ version = 1
 [[launcher]]
 name = "claudex"
 binary = "claudex"
-serves = ["*"]
+serves = ["claude-*", "gpt-5.6-*"]
 [launcher.env]
 ANTHROPIC_BASE_URL = "http://127.0.0.1:8317"
 ANTHROPIC_AUTH_TOKEN = "@file:~/.cli-proxy-api-key"
+CLAUDE_CODE_MAX_CONTEXT_TOKENS = "921000"
+CLAUDE_CODE_AUTO_COMPACT_WINDOW = "1000000"
 
 [[launcher]]
 name = "claude-native"
 binary = "claude-native"
 serves = ["claude-*", "anthropic.*"]
-clears = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
+clears = [
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+  "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+]
 ```
 
 Link it into place with `ln -s <vault>/ClaudeConfig/session-routing/launchers.toml

@@ -166,7 +166,8 @@ Resume & tabs:
                                                   preflight; --to is required once more than two
                                                   launchers are configured. Model defaults: claudex
                                                   → opus, claude-native → opus, claude-gpt →
-                                                  gpt-5.6-sol
+                                                  gpt-5.6-sol, claude-gpt55 → gpt-5.5,
+                                                  local-mlx → qwen3.8-local
   ccs restart [--on <launcher>] [--model <canonical-id>] [--do]
                                                   Relaunch THIS session on the SAME harness, in
                                                   place — picks up a newly released model, a newer

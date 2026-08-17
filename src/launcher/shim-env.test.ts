@@ -115,6 +115,7 @@ describe("shim launcher environment", () => {
         "clear ANTHROPIC_AUTH_TOKEN",
         "clear ANTHROPIC_DEFAULT_OPUS_MODEL",
         "clear CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+        "clear CLAUDE_CODE_MAX_CONTEXT_TOKENS",
         "",
       ].join("\n"),
     );
@@ -127,7 +128,8 @@ describe("shim launcher environment", () => {
       ANTHROPIC_BASE_URL: "http://127.0.0.1:8317",
       ANTHROPIC_AUTH_TOKEN: "gateway-token",
       ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-5[1m]",
-      CLAUDE_CODE_AUTO_COMPACT_WINDOW: "372000",
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: "1000000",
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: "921000",
       KEEP_ME: "untouched",
     });
 
@@ -135,6 +137,7 @@ describe("shim launcher environment", () => {
     expect(result.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     expect(result.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBeUndefined();
     expect(result.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+    expect(result.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBeUndefined();
     // Clearing is scoped to what the launcher declares; unrelated variables survive.
     expect(result.env.KEEP_ME).toBe("untouched");
   });
