@@ -38,9 +38,10 @@ function runWrapper(binary: string, args: readonly string[]): Observation {
 
 describe("context-family launcher wrappers", () => {
   test("claudex declares 1M only for Claude and preserves GPT-5.6 at 921K", () => {
-    const claude = runWrapper("claudex", ["claude-opus-5", "-p", "hello"]);
+    const claude = runWrapper("claudex", ["--model", "claude-opus-5", "-p", "hello"]);
     expect(claude.exitCode).toBe(0);
     expect(claude.stdout).toContain("selector=claudex");
+    expect(claude.stdout).toContain("arg=--model");
     expect(claude.stdout).toContain("arg=claude-opus-5[1m]");
 
     const gpt = runWrapper("claudex", ["--model=gpt-5.6-sol[1m]", "-p", "hello"]);
@@ -60,9 +61,10 @@ describe("context-family launcher wrappers", () => {
   });
 
   test("claude-gpt strips obsolete 1M markers and refuses GPT-5.5", () => {
-    const gpt56 = runWrapper("claude-gpt", ["gpt-5.6-terra[1m]"]);
+    const gpt56 = runWrapper("claude-gpt", ["--model", "gpt-5.6-terra[1m]"]);
     expect(gpt56.exitCode).toBe(0);
     expect(gpt56.stdout).toContain("selector=claude-gpt");
+    expect(gpt56.stdout).toContain("arg=--model");
     expect(gpt56.stdout).toContain("arg=gpt-5.6-terra");
     expect(gpt56.stdout).not.toContain("[1m]");
 
@@ -72,15 +74,17 @@ describe("context-family launcher wrappers", () => {
   });
 
   test("dedicated smaller-window wrappers accept only their own model", () => {
-    const gpt55 = runWrapper("claude-gpt55", ["gpt-5.5[1m]"]);
+    const gpt55 = runWrapper("claude-gpt55", ["--model", "gpt-5.5[1m]"]);
     expect(gpt55.exitCode).toBe(0);
     expect(gpt55.stdout).toContain("selector=claude-gpt55");
+    expect(gpt55.stdout).toContain("arg=--model");
     expect(gpt55.stdout).toContain("arg=gpt-5.5");
     expect(gpt55.stdout).not.toContain("[1m]");
 
-    const qwen = runWrapper("local-mlx", ["qwen3.8-local"]);
+    const qwen = runWrapper("local-mlx", ["--model", "qwen3.8-local"]);
     expect(qwen.exitCode).toBe(0);
     expect(qwen.stdout).toContain("selector=local-mlx");
+    expect(qwen.stdout).toContain("arg=--model");
     expect(qwen.stdout).toContain("arg=qwen3.8-local");
 
     expect(runWrapper("claude-gpt55", ["gpt-5.6-sol"]).exitCode).toBe(2);

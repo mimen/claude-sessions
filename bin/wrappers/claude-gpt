@@ -38,8 +38,9 @@ fi
 
 for (( i = 1; i <= ${#args}; i++ )); do
   if [[ "${args[i]}" == "--model" ]] && (( i < ${#args} )); then
-    validate_model "${args[i + 1]}" || exit $?
-    args[i + 1]="$(normalize_model "${args[i + 1]}")"
+    next=$(( i + 1 ))
+    validate_model "${args[$next]}" || exit $?
+    args[$next]="$(normalize_model "${args[$next]}")"
     MODEL=""
     (( i++ ))
   elif [[ "${args[i]}" == --model=* ]]; then
