@@ -21,6 +21,9 @@ public final class SnapshotClient {
     public private(set) var rows: [SidebarRow] = []
     public private(set) var lastError: String?
     public private(set) var livenessReadable = true
+    /// The version the server last ANSWERED with — not fetched separately, so a footer that stops
+    /// tracking a redeploy is also evidence that snapshots have stopped arriving.
+    public private(set) var serverVersion: String?
 
     public private(set) var counts: [String: Int] = [:]
     public private(set) var truncated = false
@@ -192,6 +195,7 @@ public final class SnapshotClient {
             counts = snapshot.lifecycleCounts ?? [:]
             truncated = snapshot.hasMoreRows ?? false
             livenessReadable = snapshot.livenessReadable
+            serverVersion = snapshot.serverVersion
             lastError = nil
         } catch {
             guard generation == refreshGeneration else { return }

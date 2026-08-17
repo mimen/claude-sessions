@@ -83,6 +83,8 @@ public struct SidebarSnapshot: Decodable, Sendable {
     public let livenessReadable: Bool
     public let hasMoreRows: Bool?
     public let lifecycleCounts: [String: Int]?
+    /// Release SHA of the server that answered; absent from servers predating the stamp.
+    public let serverVersion: String?
 }
 
 /// The scopes the server will project, matching the web sidebar's own picker.

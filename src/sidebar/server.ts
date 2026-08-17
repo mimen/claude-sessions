@@ -46,6 +46,20 @@ const MAX_SNAPSHOT_REPRESENTATION_BYTES = 4 * 1024 * 1024;
  * projections a second on even a pathological event storm.
  */
 const CHANGE_ANNOUNCE_DELAY_MS = 250;
+
+/**
+ * Which release this process is actually executing, for the client to display so a stale deploy is
+ * visible instead of argued about. The installer stamps the launchd plist; a process launched any
+ * other way still answers from its release path, and only a repo checkout says "dev".
+ */
+function resolveServerVersion(): string {
+  const stamped = process.env["CCS_SIDEBAR_RELEASE"];
+  if (stamped) return stamped;
+  const fromPath = /\/sidebar-releases\/([0-9a-f]{6,40})\//.exec(process.argv[1] ?? "");
+  return fromPath?.[1] ?? "dev";
+}
+
+const SERVER_VERSION = resolveServerVersion();
 /**
  * How often a silent change stream says it is still there.
  *
@@ -584,7 +598,9 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         measured.value = seen;
       });
       const serializationStartedAt = performance.now();
-      const body = JSON.stringify(snapshot);
+      // Stamped at the transport rather than in the projection: which build is answering is a
+      // deployment fact, and the client shows it so a stale process is visible at a glance.
+      const body = JSON.stringify({ ...snapshot, serverVersion: SERVER_VERSION });
       const serializationMs = performance.now() - serializationStartedAt;
       const byteLength = Buffer.byteLength(body);
       const representation = {
@@ -712,7 +728,10 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       if (url.pathname === "/api/ledger" && request.method === "GET") {
         // Introspection for debugging identity/liveness drift: alias components, live hints, the
         // sticky active window. Shape is for eyes, not for programs.
-        return Response.json(source.ledger?.debugState() ?? { ledger: "absent" });
+        return Response.json({
+          serverVersion: SERVER_VERSION,
+          ...(source.ledger?.debugState() ?? { ledger: "absent" }),
+        });
       }
 
       if (url.pathname === "/api/events" && request.method === "GET") {

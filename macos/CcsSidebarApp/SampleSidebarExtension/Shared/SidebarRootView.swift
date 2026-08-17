@@ -31,29 +31,7 @@ public struct SidebarRootView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            SidebarHeader(
-                scope: $scope,
-                grouping: $grouping,
-                query: $query,
-                layouts: $layouts,
-                clusterFirst: $clusterFirst,
-                counts: client.counts
-            )
-            Divider()
-            if !client.livenessReadable {
-                NoticeBar(
-                    symbol: "bolt.horizontal.circle",
-                    message: "cmux liveness unreadable — showing stored sessions only."
-                )
-            }
-            if let failure {
-                FailureBanner(message: failure) { self.failure = nil }
-            }
-            content
-                // The list takes whatever is left, so the stack always fills the panel.
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        }
+        stack
         // Without this the stack asks for only as much height as its contents need, and a panel
         // taller than that centres the difference — which is how the header ends up floating in
         // the middle with the list running off the bottom. It depends on whether rows arrive
@@ -92,6 +70,36 @@ public struct SidebarRootView: View {
             // The preflight says what else goes with it, because "and its descendants" is the part
             // a person cannot see from the row.
             Text(destroyDetail ?? "This erases the transcript and every record of it. It cannot be undone.")
+        }
+    }
+
+    /// The panel's vertical skeleton, split out of `body` so its modifier chain stays within the
+    /// type checker's patience.
+    @ViewBuilder
+    private var stack: some View {
+        VStack(spacing: 0) {
+            SidebarHeader(
+                scope: $scope,
+                grouping: $grouping,
+                query: $query,
+                layouts: $layouts,
+                clusterFirst: $clusterFirst,
+                counts: client.counts
+            )
+            Divider()
+            if !client.livenessReadable {
+                NoticeBar(
+                    symbol: "bolt.horizontal.circle",
+                    message: "cmux liveness unreadable — showing stored sessions only."
+                )
+            }
+            if let failure {
+                FailureBanner(message: failure) { self.failure = nil }
+            }
+            content
+                // The list takes whatever is left, so the stack always fills the panel.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            VersionFooter(clientVersion: BuildStamp.version, serverVersion: client.serverVersion)
         }
     }
 
@@ -225,6 +233,27 @@ public struct SidebarRootView: View {
         ].compactMap { $0 }.joined(separator: "\n")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+/// Which build is actually running, on both sides of the wire. The client half is stamped at
+/// compile time; the server half rides every snapshot, so a footer that stops moving after a
+/// deploy is itself a finding — either the appex is executing an old build, or snapshots have
+/// stopped arriving. Exists to end "are we running old code?" with a glance instead of an argument.
+struct VersionFooter: View {
+    let clientVersion: String
+    let serverVersion: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("client \(clientVersion) · server \(serverVersion ?? "—")")
+                .font(.system(size: 9, design: .monospaced))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 3)
+        .foregroundStyle(.tertiary)
+        .background(.black.opacity(0.12))
     }
 }
 

@@ -200,6 +200,8 @@ cat > "$NEW_PLIST" <<PLIST
         <string>${SOCKET}</string>
         <key>PROCID_REF</key>
         <string>${INSTANCE}</string>
+        <key>CCS_SIDEBAR_RELEASE</key>
+        <string>${SHA}</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
