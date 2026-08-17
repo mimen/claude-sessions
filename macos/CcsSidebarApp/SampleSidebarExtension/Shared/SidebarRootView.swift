@@ -19,6 +19,8 @@ public struct SidebarRootView: View {
     @State private var clusterFirst = false
     @State private var clock = WorkingClock()
     @State private var modifiers = ModifierMonitor()
+    /// The row the user just clicked, painted focused ahead of the server's confirmation.
+    @State private var pendingFocus: FocusOverride?
     private let actionClient: ActionClient
     private let port: Int
 
@@ -73,6 +75,11 @@ public struct SidebarRootView: View {
         }
         .onChange(of: client.rows) { _, rows in
             clock.observe(rows: rows)
+            // The server confirming the click's focus retires the optimistic claim; from here the
+            // snapshot is the only authority again.
+            if let pending = pendingFocus, rows.first(where: \.focused)?.id == pending.id {
+                pendingFocus = nil
+            }
         }
         .confirmationDialog(
             "Destroy this session?",
@@ -106,6 +113,7 @@ public struct SidebarRootView: View {
             SessionListView(
                 rows: visible,
                 actions: actions,
+                focusOverride: pendingFocus,
                 grouping: grouping,
                 layouts: layouts,
                 port: port,
@@ -121,6 +129,9 @@ public struct SidebarRootView: View {
     private var actions: RowActions {
         RowActions(
             open: { row in
+                // The click is the best predictor of where focus lands next, so the highlight
+                // moves now; the snapshot confirms or, on failure, expiry hands it back.
+                pendingFocus = FocusOverride(id: row.id)
                 // A workspace row has no session to resume, so opening it means focusing the tab.
                 // Posting its row id to /api/open asked for a session that never existed.
                 if row.isWorkspaceOnly, let workspaceId = row.workspaceId {
