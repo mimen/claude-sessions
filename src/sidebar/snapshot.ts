@@ -92,6 +92,7 @@ import {
 } from "./projection.ts";
 import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 import { createSessionActionCoordinator } from "./session-action-coordinator.ts";
+import { createLivenessLedger, type LivenessLedger } from "./liveness-ledger.ts";
 import { readSidebarCategoryProjection } from "./category-projection.ts";
 import type { OpenSessionOutcome } from "./session-action-coordinator.ts";
 import { paintResumedWorkspace } from "./cosmetic-paint.ts";
@@ -243,6 +244,8 @@ export interface SidebarSource {
   revision?(): number;
   /** Called when the revision moves. Returns the unsubscribe. */
   onRevision?(listener: (revision: number) => void): () => void;
+  /** The identity/liveness authority, exposed for the debug endpoint's introspection. */
+  ledger?: LivenessLedger;
   /** Record that the reader refused a verdict, so the same one stops being offered. */
   declineSuggestion(sessionId: string, verb: string): Promise<DeclineOutcome>;
   open(sessionId: string): Promise<OpenSessionOutcome>;
@@ -320,7 +323,11 @@ function focusedFor(
   activeWindowId: string | null,
 ): boolean {
   if (workspaceActive !== true) return false;
-  if (activeWindowId === null) return true;
+  // An unknown active window must claim NOTHING focused, not everything: every window has a
+  // selected workspace, so answering true here painted one focused row per open window whenever a
+  // degraded tree read arrived without its `active` pointer. The ledger keeps the last known
+  // active window precisely so this case is a one-refresh blink, not a standing lie.
+  if (activeWindowId === null) return false;
   return windowId === activeWindowId;
 }
 
@@ -338,6 +345,7 @@ function liveSessionsFrom(
   bridge: Bridge,
   pinnedWorkspaces: ReadonlySet<string>,
   statuses: ReadonlyMap<string, CmuxStatusRead>,
+  activeWindowId: string | null,
 ): LiveSessionInput[] {
   const sessions: LiveSessionInput[] = [];
   const claimedWorkspaces = new Set<string>();
@@ -363,8 +371,8 @@ function liveSessionsFrom(
       windowRef: surface.windowRef,
       workspaceTitle: surface.workspaceTitle,
       pinned: pinnedWorkspaces.has(surface.workspaceId),
-      focused: focusedFor(surface.workspaceActive, surface.windowId, bridge.activeWindowId),
-      shortcut: shortcutFor(surface.workspaceIndex ?? null, surface.windowId, bridge.activeWindowId),
+      focused: focusedFor(surface.workspaceActive, surface.windowId, activeWindowId),
+      shortcut: shortcutFor(surface.workspaceIndex ?? null, surface.windowId, activeWindowId),
       cwd: info.cwd,
       status: statusRead.state === "published" || statusRead.state === "derived"
         ? statusRead.status
@@ -395,9 +403,9 @@ function liveSessionsFrom(
 function liveWorkspacesFrom(
   bridge: Bridge,
   pinnedWorkspaces: ReadonlySet<string>,
+  activeWindowId: string | null,
 ): LiveWorkspaceInput[] {
   const workspaces: LiveWorkspaceInput[] = [];
-  const activeWindowId = bridge.activeWindowId;
   for (const workspaceId of bridge.workspaceIds()) {
     const surfaces = bridge.surfacesInWorkspace(workspaceId);
     if (surfaces.some((surface) => bridge.surfaceInfo(surface.surfaceId) !== null)) continue;
@@ -545,6 +553,8 @@ export interface SidebarSourceOptions {
   readonly directoryFacts?: DirectoryFactsReader;
   /** Structured timing seam for benchmarks and slow-request diagnostics. */
   readonly observeSnapshot?: (measurement: SidebarSnapshotMeasurement) => void;
+  /** Test seam for the identity/liveness authority; production builds its own. */
+  readonly ledger?: LivenessLedger;
 }
 
 /** The production source, reading live cmux state and the local session index. */
@@ -566,6 +576,11 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const categoryRegistryPath = options.categoryRegistryPath ?? CATEGORY_REGISTRY_PATH();
   const readCategories = options.readCategories ?? readSidebarCategoryProjection;
   const recentlyResumedMs = options.recentlyResumedMs ?? RECENTLY_RESUMED_MS;
+  // The single authority on session identity and short-horizon liveness: projection, the action
+  // coordinator, and the close path all consult this one object, so they cannot disagree about
+  // which ids name the same session or which sessions just opened or closed.
+  const ledger: LivenessLedger = options.ledger
+    ?? createLivenessLedger({ now, resumeHintTtlMs: recentlyResumedMs });
   const readBridge = options.readBridge ?? createLiveBridgeReader({ cmuxBin });
   const snapshotLiveness = createSnapshotLivenessReader({
     ttlMs: options.snapshotLivenessTtlMs ?? SNAPSHOT_LIVENESS_TTL_MS,
@@ -729,9 +744,12 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   }
 
   function closeCandidateIds(sessionId: string): readonly string[] {
-    const index = readIndexedSessionsSafely(1, [sessionId]);
+    // Query by the whole identity set: the row on screen may carry a canonical id the index
+    // knows only through an alias, and a close that misses the live alias closes nothing.
+    const aliases = ledger.aliasesFor(sessionId);
+    const index = readIndexedSessionsSafely(1, aliases);
     const row = index.sessions[0];
-    return [...new Set([sessionId, row?.sessionId, row?.resumeId].filter(
+    return [...new Set([...aliases, row?.sessionId, row?.resumeId].filter(
       (candidate): candidate is string => candidate !== undefined,
     ))];
   }
@@ -745,15 +763,23 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     };
   }
 
-  function closeThroughPrimitive(
+  async function closeThroughPrimitive(
     sessionId: string,
     mutate: boolean,
   ): Promise<PrimitiveCloseOutcome> {
-    return closeSessionWorkspaces(
-      closeCandidateIds(sessionId),
+    const candidates = closeCandidateIds(sessionId);
+    const outcome = await closeSessionWorkspaces(
+      candidates,
       mutate,
       primitiveCloseDependencies(),
     );
+    if (mutate && outcome.status === "closed") {
+      // The hook store forgets a closed binding on its own schedule; the ledger knows now, so
+      // the next snapshot demotes the row instead of showing a tab that no longer exists.
+      ledger.noteClosed(candidates);
+      bumpRevision();
+    }
+    return outcome;
   }
 
   function closeFailureReason(outcome: PrimitiveCloseOutcome): string {
@@ -775,12 +801,24 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     recentlyResumedMs,
     readBridge,
     lookupIndexedSession(sessionId) {
-      const index = readIndexedSessionsSafely(1, [sessionId]);
+      // The whole identity set, so a row displayed under a canonical id the index knows only by
+      // alias still resolves — displayed-but-unopenable was the defect class this closes.
+      const index = readIndexedSessionsSafely(1, ledger.aliasesFor(sessionId));
       const row = index.sessions[0];
       if (row) return { status: "found", row };
       return index.readable
         ? { status: "absent" }
         : { status: "unreadable", reason: "session index read failed" };
+    },
+    identity: {
+      locate: (bridge, sessionId) => ledger.locate(bridge, sessionId),
+      aliasesFor: (sessionId) => ledger.aliasesFor(sessionId),
+      noteResumed: (sessionIds, target) => {
+        ledger.noteResumed(sessionIds, target);
+        // Announce so every client refetches into the hint window, not after it.
+        bumpRevision();
+      },
+      recentResumeTarget: (sessionIds) => ledger.recentResumeTarget(sessionIds),
     },
     loadLaunchers: launcherLoader,
     resumeSession: resumeAction,
@@ -809,8 +847,12 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const incognitoOnly = view === "incognito";
       const bridge = await snapshotLiveness.read();
       const bridgeMs = performance.now() - phaseStartedAt;
+      // Sticky: a degraded tree read without an `active` pointer inherits the last known one
+      // instead of un-knowing which window the user is in.
+      const activeWindowId = ledger.observeActiveWindow(bridge.activeWindowId);
       phaseStartedAt = performance.now();
       const catalogue = readCatalogueLifecyclesSafely();
+      ledger.observeCatalogue(catalogue.canonicalSessionIds);
       const catalogueMs = performance.now() - phaseStartedAt;
       // Which lifecycles this response carries rows for: the view's own, plus any section the
       // client has expanded. A collapsed section is simply not asked for, so shelving one costs
@@ -866,6 +908,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         ],
         readable: primaryIndex.readable && extraIndex.readable,
       };
+      ledger.observeIndex(index.sessions);
 
       // Delegated seats never reach the shelf or the history scopes; a live one still shows,
       // because a running agent is something you may need to act on.
@@ -876,6 +919,15 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       // sidebar that decides it, which is why the projection is left to route the survivors rather
       // than to re-derive who they are.
       const liveSessionIds = allLiveSessionIdsFrom(bridge);
+      // The ledger's short-horizon knowledge adjusts liveness before anything consumes it: a
+      // resume the action layer just performed vouches for ids the hook store has not bound yet,
+      // and a close it just performed retires ids the hook store has not forgotten yet.
+      for (const hintedId of ledger.activeResumeHints().keys()) {
+        for (const alias of ledger.aliasesFor(hintedId)) liveSessionIds.add(alias);
+      }
+      for (const id of [...liveSessionIds]) {
+        if (ledger.isRecentlyClosed(id)) liveSessionIds.delete(id);
+      }
       const incognitoAndClosed = (session: { sessionId: string; resumeId: string }): boolean =>
         (catalogue.incognito.has(session.sessionId) || catalogue.incognito.has(session.resumeId))
         && !liveSessionIds.has(session.sessionId)
@@ -928,10 +980,39 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const statusMs = performance.now() - phaseStartedAt;
 
       const pinnedWorkspaces = pinnedWorkspacesFrom(bridge);
-      const live = liveSessionsFrom(bridge, pinnedWorkspaces, statuses);
+      const boundLive = liveSessionsFrom(bridge, pinnedWorkspaces, statuses, activeWindowId)
+        .filter((session) => !ledger.isRecentlyClosed(session.sessionId));
+      // A resumed session's workspace exists in the tree before the hook store binds its session,
+      // and the click that resumed it deserves a live row now, not after the binding catches up.
+      // The hint synthesizes the binding; the real one replaces it within the hint's TTL.
+      const claimedWorkspaces = new Set(boundLive.map((session) => session.workspaceId));
+      const hintedLive: LiveSessionInput[] = [];
+      for (const [hintedId, target] of ledger.activeResumeHints()) {
+        if (boundLive.some((session) => ledger.canonicalFor(session.sessionId) === hintedId)) continue;
+        const surface = bridge.surfaces.find((s) => s.workspaceRef === target.workspaceRef);
+        if (!surface || claimedWorkspaces.has(surface.workspaceId)) continue;
+        claimedWorkspaces.add(surface.workspaceId);
+        hintedLive.push({
+          sessionId: hintedId,
+          workspaceId: surface.workspaceId,
+          workspaceRef: surface.workspaceRef,
+          windowId: surface.windowId,
+          windowRef: surface.windowRef,
+          workspaceTitle: surface.workspaceTitle,
+          pinned: pinnedWorkspaces.has(surface.workspaceId),
+          focused: focusedFor(surface.workspaceActive, surface.windowId, activeWindowId),
+          shortcut: shortcutFor(surface.workspaceIndex ?? null, surface.windowId, activeWindowId),
+          cwd: null,
+          status: null,
+          statusAvailability: "unreadable",
+          updatedAt: null,
+        });
+      }
+      const live = [...boundLive, ...hintedLive];
       // Sessionless workspaces have no hook-store cwd, so cmux's own per-workspace record is the
       // only truthful source for the directory their row names.
-      const sessionless = liveWorkspacesFrom(bridge, pinnedWorkspaces);
+      const sessionless = liveWorkspacesFrom(bridge, pinnedWorkspaces, activeWindowId)
+        .filter((workspace) => !claimedWorkspaces.has(workspace.workspaceId));
       phaseStartedAt = performance.now();
       const workspaceStates = sessionless.length > 0
         ? await workspaceStateReader.read(sessionless.map((entry) => entry.workspaceId))
@@ -968,7 +1049,11 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         indexed,
         lifecycles: catalogue.lifecycles,
         catalogueLifecycles: catalogue.catalogueLifecycles,
-        canonicalSessionIds: catalogue.canonicalSessionIds,
+        // The ledger's map is a superset of the catalogue's: it also carries identity the index
+        // taught, and identity accreted from earlier reads that this read's sources have not
+        // re-confirmed. One authority here and in the action layer, so a row's id is always an id
+        // the actions can resolve.
+        canonicalSessionIds: ledger.canonicalMap(),
         scope,
         checkouts: facts.checkouts,
         faviconDirectories: new Set(facts.favicons.keys()),
@@ -1072,6 +1157,8 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         revisionListeners.delete(listener);
       };
     },
+
+    ledger,
 
     faviconFor(directory: string): string | null {
       return favicons.get(directory) ?? null;

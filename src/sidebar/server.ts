@@ -709,6 +709,12 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         }
       }
 
+      if (url.pathname === "/api/ledger" && request.method === "GET") {
+        // Introspection for debugging identity/liveness drift: alias components, live hints, the
+        // sticky active window. Shape is for eyes, not for programs.
+        return Response.json(source.ledger?.debugState() ?? { ledger: "absent" });
+      }
+
       if (url.pathname === "/api/events" && request.method === "GET") {
         // Bun closes a request that has been idle for ten seconds, which for a stream that is
         // supposed to be quiet when nothing is happening means being disconnected constantly. The

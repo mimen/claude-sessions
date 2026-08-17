@@ -53,12 +53,26 @@ export interface SessionActionCoordinator {
   focusWorkspace(workspaceId: string): Promise<SessionFocusResult>;
 }
 
+/**
+ * The identity/liveness authority the coordinator shares with the projection. When present it
+ * answers alias resolution, live location, and resume memory, so an id the sidebar displayed is
+ * always an id the actions can resolve. Absent (tests, legacy callers), the coordinator falls
+ * back to its private index-only resolution.
+ */
+export interface SessionIdentityAuthority {
+  locate(bridge: Bridge, sessionId: string): SurfaceLocation | null;
+  aliasesFor(sessionId: string): readonly string[];
+  noteResumed(sessionIds: readonly string[], target: WorkspaceFocusTarget): void;
+  recentResumeTarget(sessionIds: readonly string[]): WorkspaceFocusTarget | null;
+}
+
 export interface SessionActionCoordinatorOptions {
   readonly cmuxBin: string;
   readonly now?: () => number;
   readonly recentlyResumedMs?: number;
   readonly readBridge: () => Promise<Bridge>;
   readonly lookupIndexedSession: (sessionId: string) => IndexedSessionLookup;
+  readonly identity?: SessionIdentityAuthority;
   readonly loadLaunchers: () => Result<readonly Launcher[]>;
   readonly resumeSession: SidebarResumeAction;
   readonly processAdapter: AsyncProcessAdapter;
@@ -102,10 +116,15 @@ export function createSessionActionCoordinator(
   >();
 
   function identityIds(requestedId: string, row: IndexedSessionInput): readonly string[] {
-    return [...new Set([requestedId, row.sessionId, row.resumeId])];
+    return [...new Set([
+      ...(options.identity?.aliasesFor(requestedId) ?? [requestedId]),
+      row.sessionId,
+      row.resumeId,
+    ])];
   }
 
   function recentTargetFor(sessionIds: readonly string[]): WorkspaceFocusTarget | null {
+    if (options.identity) return options.identity.recentResumeTarget(sessionIds);
     const current = now();
     for (const [rememberedId, recent] of recentlyResumed) {
       if (recent.until <= current) recentlyResumed.delete(rememberedId);
@@ -118,6 +137,10 @@ export function createSessionActionCoordinator(
   }
 
   function rememberResume(sessionIds: readonly string[], target: WorkspaceFocusTarget): void {
+    if (options.identity) {
+      options.identity.noteResumed(sessionIds, target);
+      return;
+    }
     const until = now() + Math.max(0, recentlyResumedMs);
     for (const sessionId of sessionIds) recentlyResumed.set(sessionId, { until, target });
   }
@@ -236,10 +259,13 @@ export function createSessionActionCoordinator(
     const bridge = await options.readBridge();
     if (!bridge.readable) return { status: "liveness-unreadable" };
 
-    // The row clicked by the sidebar carries the live hook-store id. Resolve that direct path
-    // before touching SQLite: the index is only needed for a resume-id alias or a closed session.
-    // This keeps ordinary focus actions free of synchronous database work on Bun's event loop.
-    const directLocation = bridge.locateSession(sessionId);
+    // The row clicked by the sidebar carries the projection's canonical id. Resolve the direct
+    // path — through the shared identity authority when present, so every alias the projection
+    // could have joined on is tried — before touching SQLite: the index is only needed for an
+    // alias identity has not learned yet, or a closed session.
+    const directLocation = options.identity
+      ? options.identity.locate(bridge, sessionId)
+      : bridge.locateSession(sessionId);
     if (directLocation) {
       const focused = await focusTarget(focusTargetFromLocation(directLocation, bridge.activeWindowId));
       return openOutcomeFromFocus(focused);

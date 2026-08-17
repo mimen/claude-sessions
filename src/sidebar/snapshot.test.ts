@@ -1493,3 +1493,84 @@ describe("createSidebarSource invalidation", () => {
     expect(heard).toHaveLength(1);
   });
 });
+
+describe("createSidebarSource focus under degraded tree reads", () => {
+  function twoWindowTree(withActivePointer: boolean): Parameters<typeof buildBridge>[0] {
+    return {
+      ...(withActivePointer ? { active: { window_id: "window-one" } } : {}),
+      windows: [
+        {
+          id: "window-one",
+          ref: "window:1",
+          workspaces: [{
+            id: "workspace-one",
+            ref: "workspace:1",
+            title: "First",
+            active: true,
+            panes: [{
+              id: "pane-one",
+              ref: "pane:1",
+              index: 0,
+              surfaces: [{ id: "surface-one", ref: "surface:1", index_in_pane: 0 }],
+            }],
+          }],
+        },
+        {
+          id: "window-two",
+          ref: "window:2",
+          workspaces: [{
+            id: "workspace-two",
+            ref: "workspace:2",
+            title: "Second",
+            active: true,
+            panes: [{
+              id: "pane-two",
+              ref: "pane:2",
+              index: 0,
+              surfaces: [{ id: "surface-two", ref: "surface:2", index_in_pane: 0 }],
+            }],
+          }],
+        },
+      ],
+    };
+  }
+
+  const store = {
+    sessions: {
+      "session-one": { surfaceId: "surface-one", workspaceId: "workspace-one" },
+      "session-two": { surfaceId: "surface-two", workspaceId: "workspace-two" },
+    },
+  };
+
+  test("a read without an active pointer keeps the last known focus instead of lighting every window", async () => {
+    const bridges = [
+      buildBridge(twoWindowTree(true), store),
+      buildBridge(twoWindowTree(false), store),
+    ];
+    let reads = 0;
+    const source = createSidebarSource(sourceOptions({
+      snapshotLivenessTtlMs: 0,
+      readBridge: async () => bridges[Math.min(reads++, bridges.length - 1)]!,
+      indexedSessions: () => [],
+    }));
+
+    const informed = await source.snapshot("active");
+    expect(sessionRows(informed.rows).filter((row) => row.focused).map((row) => row.id))
+      .toEqual(["session-one"]);
+
+    // Every window's selected workspace used to claim focus here — one lit row per open window.
+    const degraded = await source.snapshot("active");
+    expect(sessionRows(degraded.rows).filter((row) => row.focused).map((row) => row.id))
+      .toEqual(["session-one"]);
+  });
+
+  test("with no active window ever observed nothing claims focus", async () => {
+    const source = createSidebarSource(sourceOptions({
+      snapshotLivenessTtlMs: 0,
+      readBridge: async () => buildBridge(twoWindowTree(false), store),
+      indexedSessions: () => [],
+    }));
+    const snapshot = await source.snapshot("active");
+    expect(sessionRows(snapshot.rows).some((row) => row.focused)).toBe(false);
+  });
+});
