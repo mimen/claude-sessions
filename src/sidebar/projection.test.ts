@@ -659,6 +659,49 @@ describe("projectSidebar", () => {
     expect(snapshot.rows[0]?.name).toBe("Real work title");
   });
 
+  test("demotes a glyph-prefixed session-id title the same way", () => {
+    const snapshot = projectSidebar(input({
+      live: [live({ workspaceTitle: "◐ 0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9" })],
+      indexed: [indexed({ title: "Real work title" })],
+    }));
+
+    expect(snapshot.rows[0]?.name).toBe("Real work title");
+  });
+
+  test("names a resumed session from its predecessor's index row via canonical identity", () => {
+    // The live resume id has no index row yet; the predecessor's row describes the same session.
+    const snapshot = projectSidebar(input({
+      live: [live({ sessionId: "new-run", workspaceTitle: "0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9" })],
+      indexed: [
+        indexed({ sessionId: "old-run", resumeId: "old-run", title: "Original work", models: ["claude-opus-5"] }),
+      ],
+      canonicalSessionIds: new Map([
+        ["new-run", "canonical"],
+        ["old-run", "canonical"],
+      ]),
+    }));
+
+    expect(snapshot.rows).toHaveLength(1);
+    expect(snapshot.rows[0]?.name).toBe("Original work");
+    expect(sessionRows(snapshot.rows)[0]?.model).toMatchObject({ label: "Opus" });
+  });
+
+  test("collapses simultaneous live aliases of one session into the focused row", () => {
+    const snapshot = projectSidebar(input({
+      live: [
+        live({ sessionId: "alias-a", workspaceId: "ws-a", workspaceTitle: "First alias" }),
+        live({ sessionId: "alias-b", workspaceId: "ws-b", workspaceTitle: "Second alias", focused: true }),
+      ],
+      canonicalSessionIds: new Map([
+        ["alias-a", "canonical"],
+        ["alias-b", "canonical"],
+      ]),
+    }));
+
+    expect(snapshot.rows).toHaveLength(1);
+    expect(snapshot.rows[0]).toMatchObject({ id: "canonical", focused: true });
+  });
+
   test("keeps the session-id title when nothing better is known", () => {
     const snapshot = projectSidebar(input({
       live: [live({ workspaceTitle: "0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9" })],

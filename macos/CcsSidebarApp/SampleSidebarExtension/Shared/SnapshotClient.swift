@@ -25,7 +25,14 @@ public final class SnapshotClient {
     public private(set) var counts: [String: Int] = [:]
     public private(set) var truncated = false
     public var scope: SidebarScope = .active {
-        didSet { if scope != oldValue { Task { await refresh(freshLiveness: true) } } }
+        didSet {
+            guard scope != oldValue else { return }
+            // Retire in-flight requests for the old scope now, not when the new refresh happens to
+            // start — otherwise an old-scope response landing in that window paints the previous
+            // scope's rows under the new header.
+            refreshGeneration += 1
+            Task { await refresh(freshLiveness: true) }
+        }
     }
 
     /// Whether the server's change channel is currently carrying us. Drives the poll interval.

@@ -273,4 +273,45 @@ describe("createWarmCache invalidation", () => {
     expect(replaced).toBe(1);
     await expect(cache.read()).resolves.toBe("value 3");
   });
+
+  test("an invalidation during a TTL flight is chased immediately, not left for the next poll", async () => {
+    let clock = 100;
+    let calls = 0;
+    let replaced = 0;
+    const ttlFlight = deferred<string>();
+    const cache = createWarmCache<void, string>({
+      ttlMs: 10,
+      initialValue: "initial",
+      coldRead: "block",
+      now: () => clock,
+      load: () => {
+        calls += 1;
+        if (calls === 1) return Promise.resolve("value 1");
+        if (calls === 2) return ttlFlight.promise;
+        return Promise.resolve("post-change truth");
+      },
+      failure: { type: "retain-and-retry" },
+      onReplaced: () => {
+        replaced += 1;
+      },
+    });
+
+    await expect(cache.read()).resolves.toBe("value 1");
+    clock = 120;
+    // Starts the TTL flight, which is on the wire when the change below arrives.
+    await expect(cache.read()).resolves.toBe("value 1");
+    expect(calls).toBe(2);
+
+    cache.invalidate();
+    ttlFlight.resolve("state the change replaced");
+    await ttlFlight.promise;
+    await settleRefresh();
+    await settleRefresh();
+    await settleRefresh();
+
+    // The trailing flight ran without any further read, and its landing was announced.
+    expect(calls).toBe(3);
+    expect(replaced).toBe(1);
+    await expect(cache.read()).resolves.toBe("post-change truth");
+  });
 });

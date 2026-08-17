@@ -97,7 +97,16 @@ export function createWarmCache<Input, Value>(
       .finally(() => {
         // A completed older flight must never clear a newer one if refresh scheduling changes later.
         if (inFlight === flight) inFlight = null;
-        if (invalidations === startedAt) stale = false;
+        if (invalidations === startedAt) {
+          stale = false;
+        } else {
+          // A change arrived while this flight was on the wire, so what it fetched may already be
+          // the replaced state. The refetch that change triggered joined THIS flight, so nothing
+          // else will chase the new truth until the next poll — start the chase here. The chained
+          // flight starts stale, announces via onReplaced when it lands, and (absent yet another
+          // invalidation) clears staleness, so the chain is bounded by real invalidations.
+          void refresh(input);
+        }
       });
     inFlight = flight;
     return flight;
