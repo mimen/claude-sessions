@@ -190,6 +190,14 @@ export interface SidebarMembership {
   readonly cluster: string;
   readonly role: string;
   readonly kind: "core" | "fleet";
+  /**
+   * The work item this fleet member is on, read off the identity key's third segment -- the event
+   * for an event-watch worker, the epic for a pr-watch agent. Null for a core identity, which IS
+   * its role rather than one unit of work. The slug is the stable grouping key; the label is what
+   * a person reads, humanized here so both sidebars say the same words.
+   */
+  readonly workRef: string | null;
+  readonly workLabel: string | null;
 }
 
 export type SidebarLifecycle = "active" | "completed" | "saved";

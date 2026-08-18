@@ -54,6 +54,7 @@ public struct SidebarHeader: View {
     @Binding var query: String
     @Binding var layouts: RowLayouts
     @Binding var clusterFirst: Bool
+    @Binding var clusterSplit: ClusterSplit
     let counts: [String: Int]
 
     public init(
@@ -62,6 +63,7 @@ public struct SidebarHeader: View {
         query: Binding<String>,
         layouts: Binding<RowLayouts>,
         clusterFirst: Binding<Bool>,
+        clusterSplit: Binding<ClusterSplit>,
         counts: [String: Int]
     ) {
         _scope = scope
@@ -69,6 +71,7 @@ public struct SidebarHeader: View {
         _query = query
         _layouts = layouts
         _clusterFirst = clusterFirst
+        _clusterSplit = clusterSplit
         self.counts = counts
     }
 
@@ -116,6 +119,18 @@ public struct SidebarHeader: View {
                     .controlSize(.small)
                     .fixedSize()
                     .help("Lift cluster sessions into their own groups at the top")
+
+                // Only while clusters are lifted: splitting a cluster that is not on screen as a
+                // cluster is a setting with nothing to act on.
+                if clusterFirst {
+                    Picker("", selection: $clusterSplit) {
+                        ForEach(ClusterSplit.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("Break each cluster into per-event or per-role groups")
+                }
 
                 Spacer(minLength: 0)
 

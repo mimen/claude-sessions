@@ -9,6 +9,7 @@
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import type { Lifecycle } from "../catalogue/db-schema.ts";
+import { humanizeSlug, workRefOfIdentityKey } from "../catalogue/identity-key.ts";
 import {
   hydrateStoredEnrichment,
   OPTIONAL_ENRICHMENT_COLUMNS,
@@ -170,11 +171,14 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
       && row.identity_role
       && row.identity_kind
     ) {
+      const workRef = workRefOfIdentityKey(row.identity_key);
       const membership: SidebarMembership = {
         identityKey: row.identity_key,
         cluster: row.identity_cluster,
         role: row.identity_role,
         kind: row.identity_kind === "core" ? "core" : "fleet",
+        workRef,
+        workLabel: workRef === null ? null : humanizeSlug(workRef),
       };
       memberships.set(row.session_id, membership);
       if (row.resume_id) memberships.set(row.resume_id, membership);

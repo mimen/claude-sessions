@@ -22,6 +22,10 @@ public struct SidebarRow: Decodable, Identifiable, Sendable, Equatable {
     public struct Membership: Decodable, Sendable, Equatable {
         public let cluster: String?
         public let role: String?
+        /// The work item a fleet member is on — the event for an event-watch worker. Null for a
+        /// core identity, which is its role rather than one unit of work.
+        public let workRef: String?
+        public let workLabel: String?
     }
 
     public struct Category: Decodable, Sendable, Equatable {

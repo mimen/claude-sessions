@@ -47,6 +47,7 @@ public struct SessionListView: View {
     private let layouts: RowLayouts
     private let port: Int
     private let clusterFirst: Bool
+    private let clusterSplit: ClusterSplit
     private let truncated: Bool
     private let clock: WorkingClock
     private let jumpLabels: [String: String]
@@ -67,6 +68,7 @@ public struct SessionListView: View {
         layouts: RowLayouts = RowLayouts(),
         port: Int = SidebarServer.defaultPort,
         clusterFirst: Bool = false,
+        clusterSplit: ClusterSplit = .none,
         truncated: Bool = false,
         clock: WorkingClock,
         jumpLabels: [String: String] = [:],
@@ -79,6 +81,7 @@ public struct SessionListView: View {
         self.layouts = layouts
         self.port = port
         self.clusterFirst = clusterFirst
+        self.clusterSplit = clusterSplit
         self.truncated = truncated
         self.clock = clock
         self.jumpLabels = jumpLabels
@@ -86,7 +89,7 @@ public struct SessionListView: View {
     }
 
     private var sections: [(name: String, rows: [SidebarRow])] {
-        Grouping.group(rows: rows, by: grouping, clusterFirst: clusterFirst)
+        Grouping.group(rows: rows, by: grouping, clusterFirst: clusterFirst, clusterSplit: clusterSplit)
     }
 
     /// The row under the pointer right now — a lookup, not a stored answer. Iterates `rows`
