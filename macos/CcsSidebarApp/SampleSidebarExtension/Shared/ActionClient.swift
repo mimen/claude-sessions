@@ -6,7 +6,7 @@ import Foundation
 /// action means: closing a workspace, refusing a verdict, or destroying a session is decided in one
 /// place, with the catalogue writes and cmux calls that go with it.
 public enum SidebarAction: Sendable {
-    case open(sessionId: String)
+    case open(sessionId: String, reopenCompleted: Bool = false)
     case lifecycle(sessionId: String, action: String)
     case declineSuggestion(sessionId: String, verb: String)
     case incognito(sessionId: String, incognito: Bool)
@@ -32,7 +32,12 @@ public enum SidebarAction: Sendable {
 
     var body: [String: Any] {
         switch self {
-        case let .open(sessionId): return ["sessionId": sessionId]
+        case let .open(sessionId, reopenCompleted):
+            // The flag only travels when set: a plain open must keep the server's refusal for
+            // completed sessions, which is what makes the confirmation dialog the only way in.
+            return reopenCompleted
+                ? ["sessionId": sessionId, "reopenCompleted": true]
+                : ["sessionId": sessionId]
         case let .lifecycle(sessionId, action): return ["sessionId": sessionId, "action": action]
         case let .declineSuggestion(sessionId, verb): return ["sessionId": sessionId, "verb": verb]
         case let .incognito(sessionId, incognito): return ["sessionId": sessionId, "incognito": incognito]

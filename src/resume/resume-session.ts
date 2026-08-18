@@ -97,7 +97,7 @@ export type ResumeSessionResult =
   /** Completed sessions are terminal until the lifecycle is explicitly cleared. */
   | { status: "completed" }
   | { status: "spawn-failed" }
-  /** The workspace opened, but Saved could not be cleared from the catalogue. */
+  /** The workspace opened, but Saved/Completed could not be cleared from the catalogue. */
   | { status: "reactivation-failed"; workspaceRef: string | null }
   /** liveness sources were unreadable — we fail closed and spawn nothing (ADR-0054) */
   | { status: "liveness-unreadable" }
@@ -188,6 +188,11 @@ export interface ResumeSessionOptions {
   readonly clusterManifestLookup?: (cluster: string) => ClusterManifest | null;
   /** Clear Saved after a successful explicit resume. Bulk resume never selects Saved sessions. */
   readonly reactivateSaved?: (sessionId: string) => boolean;
+  /**
+   * Clear Completed after a resume the user explicitly confirmed. Absent, completed stays
+   * terminal and the resume refuses — which is every path except a confirmed sidebar reopen.
+   */
+  readonly reactivateCompleted?: (sessionId: string) => boolean;
 }
 
 type PreparedResumeSession =
@@ -196,6 +201,7 @@ type PreparedResumeSession =
     readonly ready: true;
     readonly plan: Extract<ResumePlan, { readonly action: "resume" }>;
     readonly saved: boolean;
+    readonly completed: boolean;
   };
 
 function prepareResumeSession(
@@ -215,7 +221,9 @@ function prepareResumeSession(
   if (!bridge.readable) return { ready: false, result: { status: "liveness-unreadable" } };
   if (sessionIsOpen(bridge, row)) return { ready: false, result: { status: "already-open" } };
   const lifecycle = lifecycleOf(cat);
-  if (lifecycle === "completed") return { ready: false, result: { status: "completed" } };
+  if (lifecycle === "completed" && !opts.reactivateCompleted) {
+    return { ready: false, result: { status: "completed" } };
+  }
   const launchers = opts.launchers ?? DEFAULT_LAUNCHERS;
   const chosen = chooseLauncher(launchers, row.models, {
     via: opts.via,
@@ -258,7 +266,7 @@ function prepareResumeSession(
     return { ready: false, result: { status: "cwd-unreadable", error: plan.error } };
   }
   if (cat) warnLiveSiblings(catalogueDb, bridge, cat.sessionId, identityKey(cat));
-  return { ready: true, plan, saved: lifecycle === "saved" };
+  return { ready: true, plan, saved: lifecycle === "saved", completed: lifecycle === "completed" };
 }
 
 export function resumeSessionEntry(
@@ -273,6 +281,9 @@ export function resumeSessionEntry(
   const ref = executeResumePlan(prepared.plan, { cmuxBin: opts.cmuxBin, focus: opts.focus });
   if (ref === null) return { status: "spawn-failed" };
   if (prepared.saved && !opts.reactivateSaved?.(sessionId)) {
+    return { status: "reactivation-failed", workspaceRef: ref };
+  }
+  if (prepared.completed && !opts.reactivateCompleted?.(sessionId)) {
     return { status: "reactivation-failed", workspaceRef: ref };
   }
   return { status: "resumed", note: prepared.plan.note, workspaceRef: ref };
@@ -300,6 +311,9 @@ export async function resumeSessionEntryAsync(
   }, processAdapter);
   if (ref === null) return { status: "spawn-failed" };
   if (prepared.saved && !opts.reactivateSaved?.(sessionId)) {
+    return { status: "reactivation-failed", workspaceRef: ref };
+  }
+  if (prepared.completed && !opts.reactivateCompleted?.(sessionId)) {
     return { status: "reactivation-failed", workspaceRef: ref };
   }
   return { status: "resumed", note: prepared.plan.note, workspaceRef: ref };

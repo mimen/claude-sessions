@@ -94,10 +94,10 @@ import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 import { createSessionActionCoordinator } from "./session-action-coordinator.ts";
 import { createLivenessLedger, type LivenessLedger } from "./liveness-ledger.ts";
 import { readSidebarCategoryProjection } from "./category-projection.ts";
-import type { OpenSessionOutcome } from "./session-action-coordinator.ts";
+import type { OpenSessionOptions, OpenSessionOutcome } from "./session-action-coordinator.ts";
 import { paintResumedWorkspace } from "./cosmetic-paint.ts";
 import { createSnapshotLivenessReader } from "./liveness-cache.ts";
-export type { OpenSessionOutcome } from "./session-action-coordinator.ts";
+export type { OpenSessionOptions, OpenSessionOutcome } from "./session-action-coordinator.ts";
 
 /** How many indexed sessions are considered before the resume shelf is filled. */
 const INDEX_SCAN_LIMIT = 200;
@@ -250,7 +250,7 @@ export interface SidebarSource {
   ledger?: LivenessLedger;
   /** Record that the reader refused a verdict, so the same one stops being offered. */
   declineSuggestion(sessionId: string, verb: string): Promise<DeclineOutcome>;
-  open(sessionId: string): Promise<OpenSessionOutcome>;
+  open(sessionId: string, options?: OpenSessionOptions): Promise<OpenSessionOutcome>;
   setLifecycle(
     sessionId: string,
     action: SessionLifecycleAction,
@@ -1363,8 +1363,11 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       return destroySessionTree(sessionId, destroyOptions());
     },
 
-    async open(sessionId: string): Promise<OpenSessionOutcome> {
-      return actionCoordinator.open(sessionId);
+    async open(
+      sessionId: string,
+      openOptions?: OpenSessionOptions,
+    ): Promise<OpenSessionOutcome> {
+      return actionCoordinator.open(sessionId, openOptions);
     },
   };
 }

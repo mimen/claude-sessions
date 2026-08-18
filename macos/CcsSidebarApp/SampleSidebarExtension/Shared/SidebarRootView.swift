@@ -12,6 +12,8 @@ public struct SidebarRootView: View {
     @State private var failure: String?
     @State private var pendingDestroy: SidebarRow?
     @State private var destroyDetail: String?
+    /// The completed row the user clicked, held until they confirm bringing it back to Active.
+    @State private var pendingResume: SidebarRow?
     @State private var scope: SidebarScope = .active
     @State private var grouping: GroupingMode = .status
     @State private var query = ""
@@ -44,6 +46,7 @@ public struct SidebarRootView: View {
             modifiers.start()
         }
         .onChange(of: scope) { _, next in client.scope = next }
+        .onChange(of: query) { _, next in client.searchIncludesFinished = !next.isEmpty }
         .onChange(of: grouping) { _, next in Preferences.grouping = next }
         .onChange(of: layouts) { _, next in Preferences.layouts = next }
         .onDisappear {
@@ -70,6 +73,20 @@ public struct SidebarRootView: View {
             // The preflight says what else goes with it, because "and its descendants" is the part
             // a person cannot see from the row.
             Text(destroyDetail ?? "This erases the transcript and every record of it. It cannot be undone.")
+        }
+        .confirmationDialog(
+            "Resume this session?",
+            isPresented: Binding(get: { pendingResume != nil }, set: { if !$0 { pendingResume = nil } }),
+            presenting: pendingResume
+        ) { row in
+            Button("Resume") {
+                pendingFocus = FocusOverride(id: row.id)
+                run(.open(sessionId: row.sessionId ?? row.id, reopenCompleted: true))
+                pendingResume = nil
+            }
+            Button("Cancel", role: .cancel) { pendingResume = nil }
+        } message: { row in
+            Text("“\(row.name)” is marked done. Resuming moves it back to Active and reopens it in cmux.")
         }
     }
 
@@ -105,7 +122,11 @@ public struct SidebarRootView: View {
 
     @ViewBuilder
     private var content: some View {
-        let visible = client.rows.filter { $0.matches(query) }
+        // Search reaches every state except incognito: a marked session stays visible in its own
+        // section but is never surfaced by a query.
+        let visible = client.rows.filter {
+            $0.matches(query) && (query.isEmpty || $0.section != "incognito")
+        }
         if visible.isEmpty {
             ContentUnavailableView {
                 Label(client.rows.isEmpty ? "No sessions" : "No matches", systemImage: "rectangle.stack")
@@ -137,6 +158,12 @@ public struct SidebarRootView: View {
     private var actions: RowActions {
         RowActions(
             open: { row in
+                // A completed session is terminal on the server, so opening it is a real decision:
+                // confirm first, then resume with the flag that clears Completed.
+                if row.isCompleted {
+                    pendingResume = row
+                    return
+                }
                 // The click is the best predictor of where focus lands next, so the highlight
                 // moves now; the snapshot confirms or, on failure, expiry hands it back.
                 pendingFocus = FocusOverride(id: row.id)

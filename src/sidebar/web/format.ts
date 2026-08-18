@@ -36,6 +36,8 @@ export const SECTION_LABELS: Readonly<Record<SidebarSection, string>> = {
 };
 
 /** Fixed order: the queue reads top to bottom by how much it wants attention. */
+// The waiting states lead together: "needs you" and "ready" are both sessions holding for a
+// human, so they sit above "working", which is handled and only needs watching.
 // Live sessionless tabs outrank closed sessions: they are still on screen, "recent" is not.
 // Finished work sits last: it is the least likely to need you, and collapsing it there keeps
 // the live groups at the top where the eye starts.
@@ -43,7 +45,7 @@ export const SECTION_LABELS: Readonly<Record<SidebarSection, string>> = {
 // it does not belong under "recent", but it is deliberately not competing with the sections that
 // are asking for attention either.
 export const SECTION_ORDER: readonly SidebarSection[] =
-  ["needs-you", "working", "ready", "other", "incognito", "recent", "saved", "completed"];
+  ["needs-you", "ready", "working", "other", "incognito", "recent", "saved", "completed"];
 
 /** A response may update the view only when it belongs to the selected scope and is newest. */
 export function shouldApplySnapshotResponse(

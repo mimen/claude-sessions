@@ -747,16 +747,30 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
           return errorJson("denied");
         }
         let sessionId: JsonValue | undefined;
+        let reopenCompleted: JsonValue | undefined;
         try {
-          sessionId = ((await request.json()) as JsonObject).sessionId;
+          const body = (await request.json()) as JsonObject;
+          sessionId = body.sessionId;
+          reopenCompleted = body.reopenCompleted;
         } catch {
           return errorJson("bad_request");
         }
         if (typeof sessionId !== "string" || sessionId.length === 0) {
           return errorJson("bad_request");
         }
+        // Only the literal `true` opts in: clearing Completed rides a resume the user confirmed,
+        // so anything less explicit keeps the terminal-lifecycle refusal.
+        if (reopenCompleted !== undefined && typeof reopenCompleted !== "boolean") {
+          return errorJson("bad_request");
+        }
         try {
-          return actionJson(logger, "open", await source.open(sessionId), { sessionId }, invalidateSnapshots);
+          return actionJson(
+            logger,
+            "open",
+            await source.open(sessionId, reopenCompleted === true ? { reopenCompleted: true } : undefined),
+            { sessionId },
+            invalidateSnapshots,
+          );
         } catch (error) {
           logUnexpected(logger, "sidebar open request failed", error, { sessionId });
           return errorJson("internal_failure");

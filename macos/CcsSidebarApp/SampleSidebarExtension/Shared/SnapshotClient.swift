@@ -38,6 +38,17 @@ public final class SnapshotClient {
         }
     }
 
+    /// While a search is typed, the active view also asks for the finished lifecycles so the
+    /// query can find completed and saved sessions; cleared with the query so the everyday
+    /// snapshot stays small.
+    public var searchIncludesFinished = false {
+        didSet {
+            guard searchIncludesFinished != oldValue else { return }
+            refreshGeneration += 1
+            Task { await refresh() }
+        }
+    }
+
     /// Whether the server's change channel is currently carrying us. Drives the poll interval.
     public private(set) var changeStreamConnected = false
 
@@ -70,7 +81,9 @@ public final class SnapshotClient {
     /// was asked for, which is what keeps the active view from carrying hundreds of finished rows.
     private var endpoint: URL {
         var url = "http://127.0.0.1:\(port)/api/snapshot?limit=\(limit)&scope=\(scope.rawValue)"
-        if scope == .active { url += "&include=saved" }
+        if scope == .active {
+            url += searchIncludesFinished ? "&include=saved,completed" : "&include=saved"
+        }
         return URL(string: url)!
     }
 
