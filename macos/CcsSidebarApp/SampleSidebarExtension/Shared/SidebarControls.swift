@@ -120,21 +120,22 @@ public struct SidebarHeader: View {
                     .fixedSize()
                     .help("Lift cluster sessions into their own groups at the top")
 
-                // Only while clusters are lifted: splitting a cluster that is not on screen as a
-                // cluster is a setting with nothing to act on.
-                if clusterFirst {
-                    Picker("", selection: $clusterSplit) {
-                        ForEach(ClusterSplit.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .fixedSize()
-                    .help("Break each cluster into per-event or per-role groups")
-                }
-
                 Spacer(minLength: 0)
 
                 Menu {
+                    // In the menu rather than beside the toggle: a fourth control on the header
+                    // row overflows the panel at its usual width and shunts the list sideways.
+                    // Offered only while clusters are lifted — splitting a cluster that is not on
+                    // screen as a cluster is a setting with nothing to act on.
+                    if clusterFirst {
+                        Section("Split clusters") {
+                            Picker("", selection: $clusterSplit) {
+                                ForEach(ClusterSplit.allCases, id: \.self) { Text($0.title).tag($0) }
+                            }
+                            .pickerStyle(.inline)
+                            .labelsHidden()
+                        }
+                    }
                     Section("Open sessions") {
                         Picker("", selection: $layouts.open) {
                             ForEach(RowLayout.allCases, id: \.self) { Text($0.title).tag($0) }
