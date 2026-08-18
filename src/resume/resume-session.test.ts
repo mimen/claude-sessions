@@ -259,6 +259,79 @@ test("completed sessions remain terminal until explicitly reactivated", () => {
   }
 });
 
+test("a confirmed reopen resumes a completed session and clears Completed", async () => {
+  const idx = openIndex(":memory:");
+  const cat = openCatalogue(":memory:");
+  const NOW = "2026-08-11T00:00:00Z";
+  const processAdapter: AsyncProcessAdapter = {
+    async run(): Promise<{ ok: boolean; stdout: string; stderr: string; timedOut: boolean }> {
+      return { ok: true, stdout: "OK workspace:92", stderr: "", timedOut: false };
+    },
+  };
+  try {
+    idx.query(
+      `INSERT INTO sessions (session_id, host, path, cwd, project_root, project_name,
+         fallback_label, first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id)
+       VALUES ('done', 'h', '/store/done.jsonl', '/tmp', '/tmp', 'p', 'done', $now, $now, 1, 0, 0, 0, 'done')`,
+    ).run({ $now: NOW });
+    setResumeId(cat, "done", "done", NOW);
+    setCompleted(cat, "done", true, NOW);
+
+    const result = await resumeSessionEntryAsync(
+      idx,
+      cat,
+      "done",
+      {
+        bridge: stubBridge([]),
+        reactivateCompleted(sessionId): boolean {
+          setCompleted(cat, sessionId, false, NOW);
+          return true;
+        },
+      },
+      processAdapter,
+    );
+
+    expect(result.status).toBe("resumed");
+    expect(getRow(cat, "done")?.completed).toBeFalse();
+  } finally {
+    idx.close();
+    cat.close();
+  }
+});
+
+test("a reopen whose Completed clear fails reports reactivation-failed with the workspace", async () => {
+  const idx = openIndex(":memory:");
+  const cat = openCatalogue(":memory:");
+  const NOW = "2026-08-11T00:00:00Z";
+  const processAdapter: AsyncProcessAdapter = {
+    async run(): Promise<{ ok: boolean; stdout: string; stderr: string; timedOut: boolean }> {
+      return { ok: true, stdout: "OK workspace:93", stderr: "", timedOut: false };
+    },
+  };
+  try {
+    idx.query(
+      `INSERT INTO sessions (session_id, host, path, cwd, project_root, project_name,
+         fallback_label, first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id)
+       VALUES ('done', 'h', '/store/done.jsonl', '/tmp', '/tmp', 'p', 'done', $now, $now, 1, 0, 0, 0, 'done')`,
+    ).run({ $now: NOW });
+    setResumeId(cat, "done", "done", NOW);
+    setCompleted(cat, "done", true, NOW);
+
+    const result = await resumeSessionEntryAsync(
+      idx,
+      cat,
+      "done",
+      { bridge: stubBridge([]), reactivateCompleted: () => false },
+      processAdapter,
+    );
+
+    expect(result).toEqual({ status: "reactivation-failed", workspaceRef: "workspace:93" });
+  } finally {
+    idx.close();
+    cat.close();
+  }
+});
+
 test("successfully resuming a saved session reactivates it", async () => {
   const idx = openIndex(":memory:");
   const cat = openCatalogue(":memory:");

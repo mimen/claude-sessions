@@ -91,3 +91,75 @@ describe("sidebar resume action diagnostics", () => {
     }
   });
 });
+
+describe("sidebar resume action completed reopen", () => {
+  test("reopenCompleted clears Completed through the catalogue; without it the resume refuses", async () => {
+    const { openIndex } = await import("../index/schema.ts");
+    const { openCatalogue } = await import("../catalogue/db-schema.ts");
+    const { getRow } = await import("../catalogue/db-queries.ts");
+    const { setCompleted, setResumeId } = await import("../catalogue/db-mutations.ts");
+    const { DEFAULT_LAUNCHERS } = await import("./launchers.ts");
+    const directory = mkdtempSync(join(tmpdir(), "ccs-sidebar-resume-reopen-"));
+    const indexPath = join(directory, "index.db");
+    const cataloguePath = join(directory, "catalogue.db");
+    const NOW = "2026-08-11T00:00:00Z";
+    const idx = openIndex(indexPath);
+    const cat = openCatalogue(cataloguePath);
+    try {
+      idx.query(
+        `INSERT INTO sessions (session_id, host, path, cwd, project_root, project_name,
+           fallback_label, first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id)
+         VALUES ('done', 'h', '/store/done.jsonl', '/tmp', '/tmp', 'p', 'done', $now, $now, 1, 0, 0, 0, 'done')`,
+      ).run({ $now: NOW });
+      setResumeId(cat, "done", "done", NOW);
+      setCompleted(cat, "done", true, NOW);
+
+      const bridge = {
+        surfaces: [],
+        surfaceToWorkspace: new Map(),
+        workspaceIds: () => [],
+        surfacesInWorkspace: () => [],
+        surfaceInfo: () => null,
+        locateSession: () => null,
+        isOpen: () => false,
+        primarySurface: () => null,
+        activeWindowId: null,
+        readable: true,
+      } as unknown as Bridge;
+      const action = createSidebarResumeAction({
+        processAdapter: {
+          async run(): Promise<{ ok: boolean; stdout: string; stderr: string; timedOut: boolean }> {
+            return { ok: true, stdout: "OK workspace:94", stderr: "", timedOut: false };
+          },
+        },
+        indexPath,
+        cataloguePath,
+        logger: logger([]),
+      });
+
+      const refused = await action({
+        bridge,
+        sessionId: "done",
+        cmuxBin: "cmux",
+        launchers: DEFAULT_LAUNCHERS,
+      });
+      expect(refused.status).toBe("ok");
+      if (refused.status === "ok") expect(refused.result.status).toBe("completed");
+
+      const reopened = await action({
+        bridge,
+        sessionId: "done",
+        cmuxBin: "cmux",
+        launchers: DEFAULT_LAUNCHERS,
+        reopenCompleted: true,
+      });
+      expect(reopened.status).toBe("ok");
+      if (reopened.status === "ok") expect(reopened.result.status).toBe("resumed");
+      expect(getRow(cat, "done")?.completed).toBeFalse();
+    } finally {
+      idx.close();
+      cat.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});

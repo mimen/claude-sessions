@@ -48,8 +48,13 @@ export type IndexedSessionLookup =
   | { readonly status: "absent" }
   | { readonly status: "unreadable"; readonly reason: string };
 
+export interface OpenSessionOptions {
+  /** The user confirmed reopening a completed session: clear Completed as part of the resume. */
+  readonly reopenCompleted?: boolean;
+}
+
 export interface SessionActionCoordinator {
-  open(sessionId: string): Promise<OpenSessionOutcome>;
+  open(sessionId: string, options?: OpenSessionOptions): Promise<OpenSessionOutcome>;
   focusWorkspace(workspaceId: string): Promise<SessionFocusResult>;
 }
 
@@ -202,6 +207,7 @@ export function createSessionActionCoordinator(
     bridge: Bridge,
     row: IndexedSessionInput,
     sessionIds: readonly string[],
+    openOptions: OpenSessionOptions,
   ): Promise<SessionResumeResult> {
     const launchers = options.loadLaunchers();
     if (!launchers.ok) {
@@ -216,6 +222,7 @@ export function createSessionActionCoordinator(
       sessionId: row.sessionId,
       cmuxBin: options.cmuxBin,
       launchers: launchers.value,
+      ...(openOptions.reopenCompleted ? { reopenCompleted: true } : {}),
     });
     if (resumed.status !== "ok") return resumed;
 
@@ -239,7 +246,7 @@ export function createSessionActionCoordinator(
       case "reactivation-failed":
         return {
           status: "failed",
-          reason: "the session resumed but could not move from Saved to Active",
+          reason: "the session resumed but could not be moved back to Active",
         };
       case "liveness-unreadable":
         return { status: "liveness-unreadable" };
@@ -256,7 +263,10 @@ export function createSessionActionCoordinator(
     return focusTarget(focusTargetFromLocation(location, bridge.activeWindowId));
   }
 
-  async function openOnce(sessionId: string): Promise<OpenSessionOutcome> {
+  async function openOnce(
+    sessionId: string,
+    openOptions: OpenSessionOptions,
+  ): Promise<OpenSessionOutcome> {
     const bridge = await options.readBridge();
     if (!bridge.readable) return { status: "liveness-unreadable" };
 
@@ -328,7 +338,7 @@ export function createSessionActionCoordinator(
       return openOutcomeFromFocus(focused);
     }
 
-    const flight = resume(bridge, lookup.row, sessionIds);
+    const flight = resume(bridge, lookup.row, sessionIds, openOptions);
     resumeFlights.set(resumeKey, flight);
     try {
       const outcome = await flight;
@@ -369,12 +379,15 @@ export function createSessionActionCoordinator(
     }));
   }
 
-  async function open(sessionId: string): Promise<OpenSessionOutcome> {
+  async function open(
+    sessionId: string,
+    openOptions: OpenSessionOptions = {},
+  ): Promise<OpenSessionOutcome> {
     const flightKey = options.identity?.canonicalFor(sessionId) ?? sessionId;
     const existingFlight = openFlights.get(flightKey);
     if (existingFlight) return joinOpenFlight(existingFlight);
 
-    const flight = openOnce(sessionId);
+    const flight = openOnce(sessionId, openOptions);
     openFlights.set(flightKey, flight);
     try {
       return await flight;

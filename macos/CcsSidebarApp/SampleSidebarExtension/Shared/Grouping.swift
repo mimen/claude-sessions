@@ -7,8 +7,10 @@ import Foundation
 /// not have to know which one is on screen.
 public enum Grouping {
     /// Section order for status grouping, taken from the web sidebar so both read alike.
+    /// The waiting states lead together: "needs you" and "ready" are both holding for a human,
+    /// so they sit above "working", which is handled and only needs watching.
     static let statusOrder = [
-        "needs-you", "working", "ready", "other", "incognito", "recent", "saved", "completed",
+        "needs-you", "ready", "working", "other", "incognito", "recent", "saved", "completed",
     ]
 
     public static func group(

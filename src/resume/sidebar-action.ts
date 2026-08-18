@@ -26,6 +26,8 @@ export interface SidebarResumeActionInput {
   readonly sessionId: string;
   readonly cmuxBin: string;
   readonly launchers: readonly Launcher[];
+  /** The user confirmed reopening a completed session: clear Completed as part of the resume. */
+  readonly reopenCompleted?: boolean;
 }
 
 export type SidebarResumeAction = (
@@ -98,6 +100,18 @@ export function createSidebarResumeAction(
               logger,
             }).status === "ok";
           },
+          // Only a confirmed reopen carries the callback; without it resume-session keeps
+          // refusing completed sessions, so an unconfirmed path cannot quietly revive one.
+          ...(input.reopenCompleted
+            ? {
+              reactivateCompleted(resumedSessionId: string): boolean {
+                return setExistingSessionLifecycle(resumedSessionId, "uncomplete", {
+                  cataloguePath,
+                  logger,
+                }).status === "ok";
+              },
+            }
+            : {}),
         },
         options.processAdapter,
       );
