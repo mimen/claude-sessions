@@ -19,6 +19,7 @@ public struct SidebarRootView: View {
     @State private var query = ""
     @State private var layouts = RowLayouts()
     @State private var clusterFirst = false
+    @State private var clusterSplit: ClusterSplit = .none
     @State private var clock = WorkingClock()
     @State private var modifiers = ModifierMonitor()
     /// The row the user just clicked, painted focused ahead of the server's confirmation.
@@ -49,6 +50,8 @@ public struct SidebarRootView: View {
         .onChange(of: query) { _, next in client.searchIncludesFinished = !next.isEmpty }
         .onChange(of: grouping) { _, next in Preferences.grouping = next }
         .onChange(of: layouts) { _, next in Preferences.layouts = next }
+        .onChange(of: clusterFirst) { _, next in Preferences.clusterFirst = next }
+        .onChange(of: clusterSplit) { _, next in Preferences.clusterSplit = next }
         .onDisappear {
             client.stop()
             clock.stop()
@@ -101,6 +104,7 @@ public struct SidebarRootView: View {
                 query: $query,
                 layouts: $layouts,
                 clusterFirst: $clusterFirst,
+                clusterSplit: $clusterSplit,
                 counts: client.counts
             )
             Divider()
@@ -147,6 +151,7 @@ public struct SidebarRootView: View {
                 layouts: layouts,
                 port: port,
                 clusterFirst: clusterFirst,
+                clusterSplit: clusterSplit,
                 truncated: client.truncated,
                 clock: clock,
                 jumpLabels: jumpLabels(for: visible),
@@ -218,6 +223,8 @@ public struct SidebarRootView: View {
     private func restorePreferences() {
         grouping = Preferences.grouping
         layouts = Preferences.layouts
+        clusterFirst = Preferences.clusterFirst
+        clusterSplit = Preferences.clusterSplit
         client.scope = scope
     }
 

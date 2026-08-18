@@ -66,6 +66,8 @@ describe("readCatalogueReadOnly", () => {
         cluster: "sidebar",
         role: "worker",
         kind: "fleet",
+        workRef: "one",
+        workLabel: "One",
       });
       expect(outcome.facts.sessionIds.get("completed")).toEqual(["canonical"]);
       expect(outcome.facts.auxiliary.has("auxiliary")).toBeTrue();

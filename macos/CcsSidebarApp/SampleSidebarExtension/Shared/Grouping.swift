@@ -17,6 +17,7 @@ public enum Grouping {
         rows: [SidebarRow],
         by mode: GroupingMode,
         clusterFirst: Bool = false,
+        clusterSplit: ClusterSplit = .none,
         now: Date = Date()
     ) -> [(name: String, rows: [SidebarRow])] {
         // Pinned work leads the list under every grouping, above clusters too.
@@ -29,7 +30,7 @@ public enum Grouping {
         if !pinned.isEmpty {
             let rest = rows.filter { !$0.pinned }
             return [("Pinned", pinned)]
-                + group(rows: rest, by: mode, clusterFirst: clusterFirst, now: now)
+                + group(rows: rest, by: mode, clusterFirst: clusterFirst, clusterSplit: clusterSplit, now: now)
         }
 
         // Clusters are a lens, not an arrangement: when it is on, a fleet is lifted out of the
@@ -38,9 +39,12 @@ public enum Grouping {
             let clustered = rows.filter { $0.membership?.cluster != nil }
             if !clustered.isEmpty {
                 let rest = rows.filter { $0.membership?.cluster == nil }
+                // One fleet is a lot of rows — thirty event workers under a single "event-watch"
+                // header is a list, not a grouping. The split breaks it along whichever axis the
+                // reader picked, and the composite key keeps each cluster's parts together.
                 let byCluster = ordered(
                     clustered,
-                    keyed: { $0.membership?.cluster ?? "Cluster" },
+                    keyed: { clusterKey(for: $0, split: clusterSplit) },
                     order: nil,
                     title: { $0 }
                 )
@@ -91,6 +95,14 @@ public enum Grouping {
             guard let bucket = grouped[key], !bucket.isEmpty else { return nil }
             return (title(key), bucket)
         }
+    }
+
+    /// The group a clustered row lands in: the cluster alone, or the cluster and the part of it
+    /// the chosen split names.
+    private static func clusterKey(for row: SidebarRow, split: ClusterSplit) -> String {
+        let cluster = row.membership?.cluster ?? "Cluster"
+        guard let part = split.part(of: row) else { return cluster }
+        return "\(cluster) · \(part)"
     }
 
     static func statusTitle(_ key: String) -> String {
