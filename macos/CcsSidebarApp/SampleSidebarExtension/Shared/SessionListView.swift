@@ -52,7 +52,9 @@ public struct SessionListView: View {
     private let clock: WorkingClock
     private let jumpLabels: [String: String]
     private let onJump: (Int) -> Void
-    @State private var collapsed: Set<String> = []
+    /// Which groups are shelved, seeded from the stored choice: a section you closed should still
+    /// be closed after cmux rebuilds the panel, which it does several times a day.
+    @State private var collapsed: Set<String> = Preferences.collapsedGroups
     /// Where the pointer is over the list, in the list's coordinate space; nil when outside.
     @State private var pointer: CGPoint?
     /// Each materialised row's frame in the list's coordinate space, refreshed by layout.
@@ -88,7 +90,7 @@ public struct SessionListView: View {
         self.onJump = onJump
     }
 
-    private var sections: [(name: String, rows: [SidebarRow])] {
+    private var sections: [SidebarGroup] {
         Grouping.group(rows: rows, by: grouping, clusterFirst: clusterFirst, clusterSplit: clusterSplit)
     }
 
@@ -124,10 +126,23 @@ public struct SessionListView: View {
         let hovered = hoveredId
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
-                ForEach(sections, id: \.name) { section in
+                ForEach(sections) { section in
                     Section {
-                        ForEach(collapsed.contains(section.name) ? [] : section.rows) { row in
-                            rowView(row, now: now, hovered: hovered, override: override)
+                        if !collapsed.contains(section.key) {
+                            ForEach(section.rows) { row in
+                                rowView(row, now: now, hovered: hovered, override: override)
+                            }
+                            // Nested bands come after the group's own rows: a cluster's core
+                            // identities are the way in, and its events hang below them.
+                            ForEach(section.children) { child in
+                                sectionHeader(child, depth: 1)
+                                if !collapsed.contains(child.key) {
+                                    ForEach(child.rows) { row in
+                                        rowView(row, now: now, hovered: hovered, override: override)
+                                            .padding(.leading, 8)
+                                    }
+                                }
+                            }
                         }
                     } header: {
                         sectionHeader(section)
@@ -176,29 +191,40 @@ public struct SessionListView: View {
         .id(row.id)
     }
 
-    private func sectionHeader(_ section: (name: String, rows: [SidebarRow])) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: collapsed.contains(section.name) ? "chevron.right" : "chevron.down")
-                .font(.system(size: 8, weight: .semibold))
-            Text(section.name.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.8)
-            Spacer()
-            Text("\(section.rows.count)")
-                .font(.system(size: 10))
-                .monospacedDigit()
+    private func sectionHeader(_ section: SidebarGroup, depth: Int = 0) -> some View {
+        // A Button, not `.onTapGesture`: the tap gesture hit-tests whatever sits under the pointer
+        // when the click lands, and collapsing a band slides the next one up into that exact spot
+        // — so one click walked down the list shelving every section it uncovered. A button binds
+        // press and release to the same view, so a header that arrives under a stationary cursor
+        // mid-click is never the one that fires.
+        Button {
+            if collapsed.contains(section.key) { collapsed.remove(section.key) }
+            else { collapsed.insert(section.key) }
+            // Shelving a section is a standing choice about how much you want to see, so it
+            // outlives the panel cmux rebuilds several times a day.
+            Preferences.collapsedGroups = collapsed
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: collapsed.contains(section.key) ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                Text(section.name.uppercased())
+                    .font(.system(size: depth == 0 ? 10 : 9, weight: .semibold))
+                    .tracking(0.8)
+                Spacer()
+                // The count covers everything the group holds, nested rows included, so a collapsed
+                // cluster still says how much is inside it.
+                Text("\(section.totalRows)")
+                    .font(.system(size: 10))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(depth == 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+            .padding(.leading, CGFloat(10 + depth * 10))
+            .padding(.trailing, 10)
+            .padding(.top, depth == 0 ? 10 : 6)
+            .padding(.bottom, 2)
+            .contentShape(Rectangle())
         }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 10)
-        .padding(.top, 10)
-        .padding(.bottom, 2)
-        .contentShape(Rectangle())
-        // Shelving a section is a standing choice about how much you want to see,
-        // so its count stays visible while its rows are away.
-        .onTapGesture {
-            if collapsed.contains(section.name) { collapsed.remove(section.name) }
-            else { collapsed.insert(section.name) }
-        }
+        .buttonStyle(.plain)
     }
 }
 /// Coarse ages. The bands match the web sidebar's so the two read the same at a glance.

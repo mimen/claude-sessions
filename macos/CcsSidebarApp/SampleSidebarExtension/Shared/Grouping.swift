@@ -1,5 +1,25 @@
 import Foundation
 
+/// One band of the list: a name, the rows directly under it, and any nested bands beneath.
+///
+/// A flat grouping produces groups with no children. Clusters produce one group per cluster whose
+/// children are its events or roles, so the fleet reads as a thing with parts rather than as a run
+/// of sibling headers that happen to share a prefix.
+public struct SidebarGroup: Identifiable, Sendable {
+    /// Stable across renders and unique among siblings; also the key collapse state is filed under.
+    public let key: String
+    public let name: String
+    /// Rows belonging to this group itself — a cluster's core identities, or every row of a flat
+    /// group.
+    public let rows: [SidebarRow]
+    public let children: [SidebarGroup]
+
+    public var id: String { key }
+
+    /// What the header counts: everything the group is responsible for, nested rows included.
+    public var totalRows: Int { rows.count + children.reduce(0) { $0 + $1.totalRows } }
+}
+
 /// Arranging rows into the groups the header asked for.
 ///
 /// Grouping is done here rather than on the server because it is a view question: the same rows
@@ -19,7 +39,7 @@ public enum Grouping {
         clusterFirst: Bool = false,
         clusterSplit: ClusterSplit = .none,
         now: Date = Date()
-    ) -> [(name: String, rows: [SidebarRow])] {
+    ) -> [SidebarGroup] {
         // Pinned work leads the list under every grouping, above clusters too.
         //
         // A pin says "keep this where I can find it", which only holds if its position does not
@@ -29,7 +49,7 @@ public enum Grouping {
         let pinned = rows.filter(\.pinned)
         if !pinned.isEmpty {
             let rest = rows.filter { !$0.pinned }
-            return [("Pinned", pinned)]
+            return [SidebarGroup(key: "pinned", name: "Pinned", rows: pinned, children: [])]
                 + group(rows: rest, by: mode, clusterFirst: clusterFirst, clusterSplit: clusterSplit, now: now)
         }
 
@@ -39,15 +59,14 @@ public enum Grouping {
             let clustered = rows.filter { $0.membership?.cluster != nil }
             if !clustered.isEmpty {
                 let rest = rows.filter { $0.membership?.cluster == nil }
-                // One fleet is a lot of rows — thirty event workers under a single "event-watch"
-                // header is a list, not a grouping. The split breaks it along whichever axis the
-                // reader picked, and the composite key keeps each cluster's parts together.
                 let byCluster = ordered(
                     clustered,
-                    keyed: { clusterKey(for: $0, split: clusterSplit) },
+                    keyed: { $0.membership?.cluster ?? "Cluster" },
                     order: nil,
                     title: { $0 }
-                )
+                ).map { cluster in
+                    split(cluster, by: clusterSplit)
+                }
                 return byCluster + group(rows: rest, by: mode, clusterFirst: false, now: now)
             }
         }
@@ -65,8 +84,37 @@ public enum Grouping {
             )
         case .recent:
             // A flat list: recency is already the sort, so a band per day would only interrupt it.
-            return rows.isEmpty ? [] : [("All", rows)]
+            return rows.isEmpty ? [] : [SidebarGroup(key: "all", name: "All", rows: rows, children: [])]
         }
+    }
+
+    /// Break one cluster into nested parts, leaving whatever the axis cannot place directly under
+    /// the cluster itself.
+    ///
+    /// Nested rather than flattened into "cluster · part" siblings: the fleet is one thing with
+    /// parts, and collapsing the cluster should take its events with it.
+    private static func split(_ cluster: SidebarGroup, by split: ClusterSplit) -> SidebarGroup {
+        guard split != .none else { return cluster }
+        var direct: [SidebarRow] = []
+        var parts: [String: [SidebarRow]] = [:]
+        var appearance: [String] = []
+        for row in cluster.rows {
+            guard let part = split.part(of: row) else {
+                direct.append(row)
+                continue
+            }
+            if parts[part] == nil { appearance.append(part) }
+            parts[part, default: []].append(row)
+        }
+        guard !appearance.isEmpty else { return cluster }
+        return SidebarGroup(
+            key: cluster.key,
+            name: cluster.name,
+            rows: direct,
+            children: appearance.map { part in
+                SidebarGroup(key: "\(cluster.key)/\(part)", name: part, rows: parts[part] ?? [], children: [])
+            }
+        )
     }
 
     private static func ordered(
@@ -74,7 +122,7 @@ public enum Grouping {
         keyed key: (SidebarRow) -> String,
         order: [String]?,
         title: (String) -> String
-    ) -> [(name: String, rows: [SidebarRow])] {
+    ) -> [SidebarGroup] {
         var grouped: [String: [SidebarRow]] = [:]
         var appearance: [String] = []
         for row in rows {
@@ -93,16 +141,8 @@ public enum Grouping {
         }
         return keys.compactMap { key in
             guard let bucket = grouped[key], !bucket.isEmpty else { return nil }
-            return (title(key), bucket)
+            return SidebarGroup(key: key, name: title(key), rows: bucket, children: [])
         }
-    }
-
-    /// The group a clustered row lands in: the cluster alone, or the cluster and the part of it
-    /// the chosen split names.
-    private static func clusterKey(for row: SidebarRow, split: ClusterSplit) -> String {
-        let cluster = row.membership?.cluster ?? "Cluster"
-        guard let part = split.part(of: row) else { return cluster }
-        return "\(cluster) · \(part)"
     }
 
     static func statusTitle(_ key: String) -> String {

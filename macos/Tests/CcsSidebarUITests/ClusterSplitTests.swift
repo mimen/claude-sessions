@@ -35,8 +35,9 @@ final class ClusterSplitTests: XCTestCase {
             rows: [operations, closeout], by: .status, clusterFirst: true, clusterSplit: .work
         )
 
-        XCTAssertEqual(groups.map(\.name), ["event-watch · Kiki Factory"])
-        XCTAssertEqual(groups.first?.rows.count, 2)
+        XCTAssertEqual(groups.map(\.name), ["event-watch"])
+        XCTAssertEqual(groups.first?.children.map(\.name), ["Kiki Factory"])
+        XCTAssertEqual(groups.first?.children.first?.rows.count, 2)
     }
 
     func testEventSplitKeepsDistinctEventsApart() {
@@ -48,7 +49,11 @@ final class ClusterSplitTests: XCTestCase {
             by: .status, clusterFirst: true, clusterSplit: .work
         )
 
-        XCTAssertEqual(groups.map(\.name), ["event-watch · Freakuency", "event-watch · Kiki Factory"])
+        XCTAssertEqual(groups.map(\.name), ["event-watch"])
+        XCTAssertEqual(groups.first?.children.map(\.name), ["Freakuency", "Kiki Factory"])
+        // The nested key is scoped by its parent, so two clusters may hold a part of the same name
+        // without sharing one collapse state.
+        XCTAssertEqual(groups.first?.children.map(\.key), ["event-watch/Freakuency", "event-watch/Kiki Factory"])
     }
 
     func testRoleSplitSeparatesCoreRolesFromWorkerPhases() {
@@ -62,12 +67,12 @@ final class ClusterSplitTests: XCTestCase {
             by: .status, clusterFirst: true, clusterSplit: .role
         )
 
-        XCTAssertEqual(groups.map(\.name), [
-            "event-watch · Coordinator",
-            "event-watch · Operations",
-            "event-watch · Closeout",
-            "event-watch · Workers",
-        ])
+        XCTAssertEqual(groups.map(\.name), ["event-watch"])
+        // Core roles get their own bands here — this axis is "what kind of session is this", and a
+        // coordinator is a kind. Under the event axis they instead sit directly under the cluster,
+        // because a core identity is on no single event.
+        XCTAssertEqual(groups.first?.children.map(\.name), ["Coordinator", "Operations", "Closeout", "Workers"])
+        XCTAssertTrue(groups.first?.rows.isEmpty == true)
     }
 
     func testNoSplitLeavesTheClusterWhole() {
@@ -90,6 +95,22 @@ final class ClusterSplitTests: XCTestCase {
         )
 
         XCTAssertEqual(groups.map(\.name), ["event-watch"])
+        XCTAssertEqual(groups.first?.rows.count, 1)
+        XCTAssertTrue(groups.first?.children.isEmpty == true)
+    }
+
+    func testTheParentCountsEveryNestedRow() {
+        let groups = Grouping.group(
+            rows: [
+                row("event-watch · scout", role: "scout"),
+                row("a", workRef: "freakuency", workLabel: "Freakuency"),
+                row("b", workRef: "kiki-factory", workLabel: "Kiki Factory"),
+            ],
+            by: .status, clusterFirst: true, clusterSplit: .work
+        )
+
+        // A collapsed cluster still has to say how much is inside it.
+        XCTAssertEqual(groups.first?.totalRows, 3)
         XCTAssertEqual(groups.first?.rows.count, 1)
     }
 
