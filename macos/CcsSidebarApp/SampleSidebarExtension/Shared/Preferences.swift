@@ -27,6 +27,14 @@ public enum Preferences {
         set { defaults.set(newValue.rawValue, forKey: "ccs.clusterSplit") }
     }
 
+    /// Which groups are shelved. Keyed by group key, so a section collapsed under one grouping
+    /// stays collapsed when you come back to it and does not shelve an unrelated section that
+    /// happens to sit in the same position.
+    public static var collapsedGroups: Set<String> {
+        get { Set(defaults.stringArray(forKey: "ccs.collapsedGroups") ?? []) }
+        set { defaults.set(Array(newValue).sorted(), forKey: "ccs.collapsedGroups") }
+    }
+
     public static var layouts: RowLayouts {
         get {
             RowLayouts(
