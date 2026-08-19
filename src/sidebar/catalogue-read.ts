@@ -60,6 +60,9 @@ interface CatalogueQueryRow {
   readonly incognito: number | null;
   readonly identity_key: string | null;
   readonly identity_cluster: string | null;
+  readonly grouping_label?: string | null;
+  readonly grouping_short_name?: string | null;
+  readonly grouping_meta?: string | null;
   readonly identity_role: string | null;
   readonly identity_kind: string | null;
   readonly identity_completed: number | null;
@@ -172,13 +175,17 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
       && row.identity_kind
     ) {
       const workRef = workRefOfIdentityKey(row.identity_key);
+      // The grouping's own short name beats a humanized slug: "Umbrellavation By The Bay" is what
+      // the night is called, "Ubtb Bay August" is what its folder is called.
+      const groupingName = text(row.grouping_short_name ?? null) ?? text(row.grouping_label ?? null);
       const membership: SidebarMembership = {
         identityKey: row.identity_key,
         cluster: row.identity_cluster,
         role: row.identity_role,
         kind: row.identity_kind === "core" ? "core" : "fleet",
         workRef,
-        workLabel: workRef === null ? null : humanizeSlug(workRef),
+        workLabel: workRef === null ? null : groupingName ?? humanizeSlug(workRef),
+        workStartsAt: startsAtOf(row.grouping_meta),
       };
       memberships.set(row.session_id, membership);
       if (row.resume_id) memberships.set(row.resume_id, membership);
@@ -251,10 +258,21 @@ export function readCatalogueDatabase(db: Database): CatalogueReadOutcome {
       identitySelection("archived", "0"),
       identitySelection("saved", "0"),
       identitySelection("parked_task_id"),
+      identitySelection("grouping_id"),
     ];
-    const join = canJoinIdentity
-      ? "LEFT JOIN identities i ON i.identity_key = c.identity_key"
-      : "";
+    // The grouping is what a fleet member's work is ABOUT — the event, the epic — and it owns the
+    // display name and whatever dates the cluster recorded. Joined optionally, like the identity
+    // itself: an older catalogue without the table still projects, just without the nicety.
+    const canJoinGrouping = canJoinIdentity
+      && identityColumns.has("grouping_id")
+      && tables.has("groupings");
+    const groupingSelections = canJoinGrouping
+      ? ["g.label AS grouping_label", "g.short_name AS grouping_short_name", "g.meta AS grouping_meta"]
+      : ["NULL AS grouping_label", "NULL AS grouping_short_name", "NULL AS grouping_meta"];
+    const join = [
+      canJoinIdentity ? "LEFT JOIN identities i ON i.identity_key = c.identity_key" : "",
+      canJoinGrouping ? "LEFT JOIN groupings g ON g.grouping_id = i.grouping_id" : "",
+    ].filter(Boolean).join("\n         ");
     const enrichmentSelections = OPTIONAL_ENRICHMENT_COLUMNS
       .map((name) => selected(catalogueColumns, name, name === "enrichment_junk" ? "0" : "NULL"));
 
@@ -270,6 +288,7 @@ export function readCatalogueDatabase(db: Database): CatalogueReadOutcome {
               ${selected(catalogueColumns, "incognito", "0")},
               ${selected(catalogueColumns, "identity_key")},
               ${identitySelections.join(",\n              ")},
+              ${groupingSelections.join(",\n              ")},
               ${enrichmentSelections.join(",\n              ")}
          FROM catalogue c
          ${join}`,
@@ -281,6 +300,25 @@ export function readCatalogueDatabase(db: Database): CatalogueReadOutcome {
       status: "unreadable",
       error: error instanceof Error ? error : new Error(String(error)),
     };
+  }
+}
+
+/**
+ * When the grouping's work happens, as epoch milliseconds, or null when nothing recorded it.
+ *
+ * Milliseconds rather than the stored ISO string because every consumer sorts by it, and a string
+ * that fails to parse is a fact the sidebar does not have — not a date at the epoch.
+ */
+function startsAtOf(meta: string | null | undefined): number | null {
+  if (!meta) return null;
+  try {
+    const parsed = JSON.parse(meta) as Record<string, unknown>;
+    const startsAt = parsed.startsAt;
+    if (typeof startsAt !== "string") return null;
+    const at = Date.parse(startsAt);
+    return Number.isFinite(at) ? at : null;
+  } catch {
+    return null;
   }
 }
 

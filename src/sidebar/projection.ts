@@ -198,6 +198,8 @@ export interface SidebarMembership {
    */
   readonly workRef: string | null;
   readonly workLabel: string | null;
+  /** When the work happens, epoch ms, when the cluster recorded a date for it. */
+  readonly workStartsAt: number | null;
 }
 
 export type SidebarLifecycle = "active" | "completed" | "saved";

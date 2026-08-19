@@ -238,6 +238,7 @@ function mixedProjectionInput(overrides: Partial<ProjectionInput> = {}): Project
       kind: "core",
       workRef: null,
       workLabel: null,
+      workStartsAt: null,
     }]]),
     checkouts: new Map([[root, { project: "mixed", worktree: "projection", branch: "phase-5" }]]),
     faviconDirectories: new Set([root]),
@@ -851,7 +852,7 @@ describe("projectSidebar", () => {
       projectSidebar(mixedProjectionInput({ scope: "completed", livenessReadable: false })),
     ]);
 
-    expect(createHash("sha256").update(serialized).digest("hex")).toBe("f163807b0d55fece1bccbf6b7d20a55c32b202a307a98794c3a364c974e8d1d5");
+    expect(createHash("sha256").update(serialized).digest("hex")).toBe("3e86904758be8b9f16ea2245fbca75ab9401cead69bdffd7d731d351fcc69b5c");
   });
 });
 

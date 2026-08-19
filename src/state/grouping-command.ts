@@ -46,6 +46,31 @@ function parseFlags(args: string[]): { flags: Record<string, string>; bools: Set
   return { flags, bools, positional };
 }
 
+/**
+ * Merge `--meta.<key>=<value>` flags over a grouping's existing meta.
+ *
+ * The blessed columns cover what every cluster has; anything a particular cluster needs about its
+ * own groupings lives here, the way `ccs identity set` already takes `meta.*`. An empty value
+ * removes the key, so a sync that stops knowing a fact can say so. Returns undefined when no meta
+ * flag was passed, which the upsert reads as "leave meta alone".
+ */
+function mergedMeta(
+  flags: Record<string, string>,
+  existing: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const keys = Object.keys(flags).filter((key) => key.startsWith("meta."));
+  if (keys.length === 0) return undefined;
+  const merged: Record<string, unknown> = { ...existing };
+  for (const key of keys) {
+    const name = key.slice("meta.".length);
+    if (!name) continue;
+    const value = flags[key] ?? "";
+    if (value === "") delete merged[name];
+    else merged[name] = value;
+  }
+  return merged;
+}
+
 /** Resolve `@filename` to file contents; passthrough otherwise. Used for --context=@notes.md */
 function resolveFileRef(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
@@ -84,7 +109,7 @@ function usage(rc = 1): number {
   console.error("  ccs grouping <id>                              show one grouping");
   console.error("  ccs grouping list [--cluster=c] [--role=r] [--closed|--open]");
   console.error("  ccs grouping upsert <id> --cluster=c --role=r [--label=… --url=… --short_name=… --context=@file]");
-  console.error("  ccs grouping set <id> --label=… --url=…        update fields");
+  console.error("  ccs grouping set <id> --label=… --url=… --meta.<key>=…   update fields (empty meta value clears)");
   console.error("  ccs grouping unset <id> --label                clear one field");
   console.error("  ccs grouping note-add <id> \"note text\"         append project memory");
   console.error("  ccs grouping close|reopen <id>                 lifecycle");
@@ -161,6 +186,7 @@ function doUpsert(db: Database, rest: string[]): number {
       url: flags.url,
       shortName: flags.short_name,
       context: resolveFileRef(flags.context),
+      meta: mergedMeta(flags, existing?.meta ?? {}),
     },
     now(),
   );
@@ -190,6 +216,7 @@ function doSet(db: Database, rest: string[]): number {
       url: flags.url,
       shortName: flags.short_name,
       context: resolveFileRef(flags.context),
+      meta: mergedMeta(flags, existing.meta),
     },
     now(),
   );
