@@ -107,12 +107,27 @@ public enum Grouping {
             parts[part, default: []].append(row)
         }
         guard !appearance.isEmpty else { return cluster }
+        // Sorted by the axis's own idea of order — a timeline for events — with arrival order as
+        // the tiebreak so bands the axis ranks equally never shuffle between snapshots.
+        let ordered = appearance.enumerated()
+            .map { (index, part) -> (part: String, rank: (Int, Double), index: Int) in
+                (part, split.sortKey(for: part, rows: parts[part] ?? []), index)
+            }
+            .sorted { left, right in
+                if left.rank != right.rank { return left.rank < right.rank }
+                return left.index < right.index
+            }
         return SidebarGroup(
             key: cluster.key,
             name: cluster.name,
             rows: direct,
-            children: appearance.map { part in
-                SidebarGroup(key: "\(cluster.key)/\(part)", name: part, rows: parts[part] ?? [], children: [])
+            children: ordered.map { entry in
+                SidebarGroup(
+                    key: "\(cluster.key)/\(entry.part)",
+                    name: entry.part,
+                    rows: parts[entry.part] ?? [],
+                    children: []
+                )
             }
         )
     }

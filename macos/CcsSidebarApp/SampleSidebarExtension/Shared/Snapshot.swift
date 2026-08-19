@@ -26,6 +26,8 @@ public struct SidebarRow: Decodable, Identifiable, Sendable, Equatable {
         /// core identity, which is its role rather than one unit of work.
         public let workRef: String?
         public let workLabel: String?
+        /// When the work happens, epoch milliseconds, when the cluster recorded a date.
+        public let workStartsAt: Double?
     }
 
     public struct Category: Decodable, Sendable, Equatable {

@@ -68,6 +68,7 @@ describe("readCatalogueReadOnly", () => {
         kind: "fleet",
         workRef: "one",
         workLabel: "One",
+        workStartsAt: null,
       });
       expect(outcome.facts.sessionIds.get("completed")).toEqual(["canonical"]);
       expect(outcome.facts.auxiliary.has("auxiliary")).toBeTrue();

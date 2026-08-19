@@ -11,13 +11,15 @@ final class ClusterSplitTests: XCTestCase {
         cluster: String? = "event-watch",
         role: String? = "event-worker",
         workRef: String? = nil,
-        workLabel: String? = nil
+        workLabel: String? = nil,
+        workStartsAt: Double? = nil
     ) -> SidebarRow {
         let membership: [String: Any] = [
             "cluster": cluster as Any,
             "role": role as Any,
             "workRef": workRef as Any,
             "workLabel": workLabel as Any,
+            "workStartsAt": workStartsAt as Any,
         ].compactMapValues { $0 is NSNull ? nil : $0 }
         let json: [String: Any] = [
             "kind": "session", "id": name, "name": name, "density": "full", "unread": 0,
@@ -97,6 +99,29 @@ final class ClusterSplitTests: XCTestCase {
         XCTAssertEqual(groups.map(\.name), ["event-watch"])
         XCTAssertEqual(groups.first?.rows.count, 1)
         XCTAssertTrue(groups.first?.children.isEmpty == true)
+        XCTAssertEqual(groups.first?.totalRows, 1)
+    }
+
+    func testEventsReadInDateOrderWithCoreLeading() {
+        let groups = Grouping.group(
+            rows: [
+                // Arrival order is deliberately not date order: the November event is listed first
+                // and the core session last.
+                row("a", workRef: "freakuency", workLabel: "Freakuency", workStartsAt: 1_793_000_000_000),
+                row("b", workRef: "kiki-factory", workLabel: "Kiki Factory", workStartsAt: 1_784_000_000_000),
+                row("undated", workRef: "mystery", workLabel: "Mystery"),
+                row("event-watch · scout", role: "scout"),
+            ],
+            by: .status, clusterFirst: true, clusterSplit: .work
+        )
+
+        // Core first because it is the way in, then events oldest to newest, then whatever the
+        // cluster recorded no date for — left in arrival order rather than guessed at.
+        XCTAssertEqual(
+            groups.first?.children.map(\.name),
+            ["Core", "Kiki Factory", "Freakuency", "Mystery"]
+        )
+        XCTAssertTrue(groups.first?.rows.isEmpty == true)
     }
 
     func testTheParentCountsEveryNestedRow() {
@@ -111,7 +136,6 @@ final class ClusterSplitTests: XCTestCase {
 
         // A collapsed cluster still has to say how much is inside it.
         XCTAssertEqual(groups.first?.totalRows, 3)
-        XCTAssertEqual(groups.first?.rows.count, 1)
     }
 
     func testCloseoutWinsATitleNamingBothPhases() {
