@@ -18,6 +18,7 @@ public struct SidebarGroup: Identifiable, Sendable {
 
     /// What the header counts: everything the group is responsible for, nested rows included.
     public var totalRows: Int { rows.count + children.reduce(0) { $0 + $1.totalRows } }
+
 }
 
 /// Arranging rows into the groups the header asked for.

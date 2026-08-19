@@ -35,6 +35,12 @@ public enum Preferences {
         set { defaults.set(Array(newValue).sorted(), forKey: "ccs.collapsedGroups") }
     }
 
+    /// Whether the list carries finished sessions at all — independent of which groups are shelved.
+    public static var rowVisibility: RowVisibility {
+        get { RowVisibility(rawValue: defaults.string(forKey: "ccs.rowVisibility") ?? "") ?? .all }
+        set { defaults.set(newValue.rawValue, forKey: "ccs.rowVisibility") }
+    }
+
     public static var layouts: RowLayouts {
         get {
             RowLayouts(
