@@ -55,6 +55,7 @@ public struct SidebarHeader: View {
     @Binding var layouts: RowLayouts
     @Binding var clusterFirst: Bool
     @Binding var clusterSplit: ClusterSplit
+    @Binding var visibility: RowVisibility
     let counts: [String: Int]
 
     public init(
@@ -64,6 +65,7 @@ public struct SidebarHeader: View {
         layouts: Binding<RowLayouts>,
         clusterFirst: Binding<Bool>,
         clusterSplit: Binding<ClusterSplit>,
+        visibility: Binding<RowVisibility>,
         counts: [String: Int]
     ) {
         _scope = scope
@@ -72,6 +74,7 @@ public struct SidebarHeader: View {
         _layouts = layouts
         _clusterFirst = clusterFirst
         _clusterSplit = clusterSplit
+        _visibility = visibility
         self.counts = counts
     }
 
@@ -123,6 +126,16 @@ public struct SidebarHeader: View {
                 Spacer(minLength: 0)
 
                 Menu {
+                    // What the list is about, independent of which groups are shelved: a fleet
+                    // that keeps its finished workers is mostly closed rows, and reading past them
+                    // is the problem this removes.
+                    Section("Show") {
+                        Picker("", selection: $visibility) {
+                            ForEach(RowVisibility.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.inline)
+                        .labelsHidden()
+                    }
                     // In the menu rather than beside the toggle: a fourth control on the header
                     // row overflows the panel at its usual width and shunts the list sideways.
                     // Offered only while clusters are lifted — splitting a cluster that is not on
