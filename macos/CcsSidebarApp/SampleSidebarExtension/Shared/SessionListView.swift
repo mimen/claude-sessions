@@ -121,7 +121,6 @@ public struct SessionListView: View {
             candidate.active(now: now) && rows.contains(where: { $0.id == candidate.id })
                 ? candidate.id : nil
         }
-        let hovered = hoveredRowId
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
                 // Headers are emitted as ordinary rows rather than through `Section(header:)`:
@@ -133,7 +132,7 @@ public struct SessionListView: View {
                     sectionHeader(section)
                     if !isCollapsed(section) {
                         ForEach(shown.filter(section.rows)) { row in
-                            rowView(row, now: now, hovered: hovered, override: override)
+                            rowView(row, now: now, override: override)
                         }
                         // Nested bands come after the group's own rows: a cluster's core
                         // identities are the way in, and its events hang below them.
@@ -149,7 +148,7 @@ public struct SessionListView: View {
                                 sectionHeader(child, depth: 1, inherited: shown)
                                 if !isCollapsed(child) {
                                     ForEach(childRows) { row in
-                                        rowView(row, now: now, hovered: hovered, override: override)
+                                        rowView(row, now: now, override: override)
                                             .padding(.leading, 8)
                                     }
                                 }
@@ -175,7 +174,6 @@ public struct SessionListView: View {
     private func rowView(
         _ row: SidebarRow,
         now: Date,
-        hovered: String?,
         override: String?
     ) -> some View {
         SessionRowView(
@@ -186,29 +184,19 @@ public struct SessionListView: View {
             port: port,
             workingFor: clock.elapsed(for: row),
             jumpLabel: jumpLabels[row.id],
-            isHovered: hovered == row.id,
-            isFocused: override.map { $0 == row.id }
+            // The row answers this for itself; see `trackedHovering` in SessionRowView.
+            isHovered: false,
+            isFocused: override.map { $0 == row.id },
+            onHoverChanged: { inside in
+                if inside {
+                    probe.noteEntered()
+                    hoveredRowId = row.id
+                } else {
+                    probe.noteExited()
+                    if hoveredRowId == row.id { hoveredRowId = nil }
+                }
+            }
         )
-        // Two sources, because inside this remote view each one drops events the other catches.
-        // The tracking area is authoritative — it is the only one that can say a row was LEFT —
-        // while hover phases only ever claim a row. A missed entry is covered by the phases; a
-        // missed exit is covered by the tracker; and neither can leave a highlight stranded on a
-        // row the pointer is nowhere near.
-        .background(HoverTracker { inside in
-            if inside {
-                probe.noteEntered()
-                hoveredRowId = row.id
-            } else {
-                probe.noteExited()
-                if hoveredRowId == row.id { hoveredRowId = nil }
-            }
-        })
-        .onContinuousHover { phase in
-            if case .active = phase {
-                if hoveredRowId != row.id { probe.notePhase() }
-                hoveredRowId = row.id
-            }
-        }
         .id(row.id)
     }
 

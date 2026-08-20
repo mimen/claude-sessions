@@ -38,9 +38,24 @@ struct Render {
         let count = CommandLine.arguments.count > 2 ? Int(CommandLine.arguments[2]) ?? 14 : 14
         let rows = try Harness.fetchRows(limit: 60).prefix(count)
 
+        // Every row twice: at rest, then hovered. The hover controls only ever appear on a live
+        // pointer, which makes them the hardest part of the row to see changes in; rendering the
+        // state directly is the only way to check them without a mouse.
         let view = VStack(spacing: 6) {
             ForEach(Array(rows), id: \.id) { row in
-                SessionRowView(row: row, age: Harness.age(from: row.lastActivityAt), actions: RowActions())
+                SessionRowView(
+                    row: row,
+                    age: Harness.age(from: row.lastActivityAt),
+                    actions: RowActions(),
+                    tracksHover: false
+                )
+                SessionRowView(
+                    row: row,
+                    age: Harness.age(from: row.lastActivityAt),
+                    actions: RowActions(),
+                    isHovered: true,
+                    tracksHover: false
+                )
             }
         }
         .padding(8)

@@ -33,17 +33,29 @@ public struct SessionRowView: View {
     public let port: Int
     public let workingFor: String?
     public let jumpLabel: String?
-    /// Hover is computed by the list from the pointer's polled position, never from this view's
-    /// own enter/exit events — those are droppable inside an ExtensionKit remote view, and a
-    /// dropped exit latched the row in its hover appearance until the view was destroyed.
+    /// Forces the hover appearance regardless of the pointer. Only the offline renderer sets it;
+    /// live rows answer for themselves through `trackedHovering` below.
     public let isHovered: Bool
+    /// Told to the list when this row gains or loses the pointer.
+    public var onHoverChanged: ((Bool) -> Void)?
+    /// Off for the offline renderer: `ImageRenderer` cannot snapshot an `NSViewRepresentable` and
+    /// paints a placeholder over the row instead of the row.
+    public var tracksHover: Bool = true
     /// The list's override of the snapshot's focus, carried while a click awaits confirmation.
     /// nil means the snapshot's own `focused` stands.
     public let isFocused: Bool?
 
     @State private var showingSummary = false
+    /// This row's own answer, from its own tracking area.
+    ///
+    /// Owned here rather than handed down by the list on purpose. The list holds its rows in a
+    /// `LazyVStack`, which does not re-evaluate a row that is already on screen just because the
+    /// list's state changed — so a row could be the hovered one as far as the list was concerned
+    /// while continuing to draw itself un-hovered, until some unrelated change to its own data
+    /// rebuilt it. State the row owns is state the row redraws for.
+    @State private var trackedHovering = false
 
-    private var hovering: Bool { isHovered }
+    private var hovering: Bool { isHovered || trackedHovering }
     private var focused: Bool { isFocused ?? row.focused }
 
     public init(
@@ -55,7 +67,9 @@ public struct SessionRowView: View {
         workingFor: String? = nil,
         jumpLabel: String? = nil,
         isHovered: Bool = false,
-        isFocused: Bool? = nil
+        isFocused: Bool? = nil,
+        onHoverChanged: ((Bool) -> Void)? = nil,
+        tracksHover: Bool = true
     ) {
         self.row = row
         self.age = age
@@ -66,12 +80,22 @@ public struct SessionRowView: View {
         self.jumpLabel = jumpLabel
         self.isHovered = isHovered
         self.isFocused = isFocused
+        self.onHoverChanged = onHoverChanged
+        self.tracksHover = tracksHover
     }
 
     private var titleWeight: Font.Weight { row.section == "needs-you" ? .medium : .regular }
 
     public var body: some View {
         content
+            .background {
+                if tracksHover {
+                    HoverTracker { inside in
+                        trackedHovering = inside
+                        onHoverChanged?(inside)
+                    }
+                }
+            }
             .contentShape(Rectangle())
             .onTapGesture { actions.open(row) }
             // A native menu, so it is free to extend past the sidebar's edge — the constraint the
