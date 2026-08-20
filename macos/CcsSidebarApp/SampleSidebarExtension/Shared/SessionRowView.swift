@@ -76,7 +76,13 @@ public struct SessionRowView: View {
             .onTapGesture { actions.open(row) }
             // A native menu, so it is free to extend past the sidebar's edge — the constraint the
             // web version could never escape, being painted inside a web view's own viewport.
-            .contextMenu { RowContextMenu(row: row, actions: actions) }
+            // `.titleAndIcon` is not decoration: without it AppKit measures these labels as if
+            // they were icon-only, sizes the menu to the shortest few, and middle-truncates the
+            // rest — "Save for later" arrived as "Sav…later". Stating the style makes the title
+            // part of the measured width.
+            .contextMenu {
+                RowContextMenu(row: row, actions: actions).labelStyle(.titleAndIcon)
+            }
     }
 
     private var content: some View {

@@ -16,7 +16,11 @@ struct RowContextMenu: View {
                     Button {
                         actions.lifecycle(row, "complete")
                     } label: {
-                        Label("Mark done", systemImage: "checkmark")
+                        // "Accept", not "Mark done": every actionable verdict lands on the same
+                        // lifecycle command as the Lifecycle section below, so naming it twice put
+                        // two identical items in one menu with no way to tell them apart. The
+                        // section header already says which verdict is being accepted.
+                        Label("Accept", systemImage: "checkmark")
                     }
                 }
                 Button {
