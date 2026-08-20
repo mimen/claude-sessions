@@ -59,6 +59,8 @@ public struct SessionListView: View {
     @State private var visibility: [String: RowVisibility] = Preferences.groupVisibility
     /// The row AppKit says the pointer is inside, or nil.
     @State private var hoveredRowId: String?
+    /// Reports what hover is doing, for the footer readout.
+    private let probe: HoverProbe
 
     public init(
         rows: [SidebarRow],
@@ -70,6 +72,7 @@ public struct SessionListView: View {
         clusterFirst: Bool = false,
         clusterSplit: ClusterSplit = .none,
         searching: Bool = false,
+        probe: HoverProbe,
         truncated: Bool = false,
         clock: WorkingClock,
         jumpLabels: [String: String] = [:],
@@ -84,6 +87,7 @@ public struct SessionListView: View {
         self.clusterFirst = clusterFirst
         self.clusterSplit = clusterSplit
         self.searching = searching
+        self.probe = probe
         self.truncated = truncated
         self.clock = clock
         self.jumpLabels = jumpLabels
@@ -104,6 +108,9 @@ public struct SessionListView: View {
             .onChange(of: rows.map(\.id)) { _, ids in
                 // A row that leaves the list cannot still be the hovered one.
                 if let hoveredRowId, !ids.contains(hoveredRowId) { self.hoveredRowId = nil }
+            }
+            .onChange(of: hoveredRowId) { _, id in
+                probe.hovered = id.flatMap { hoveredId in rows.first { $0.id == hoveredId }?.name }
             }
     }
 
@@ -188,11 +195,19 @@ public struct SessionListView: View {
         // missed exit is covered by the tracker; and neither can leave a highlight stranded on a
         // row the pointer is nowhere near.
         .background(HoverTracker { inside in
-            if inside { hoveredRowId = row.id }
-            else if hoveredRowId == row.id { hoveredRowId = nil }
+            if inside {
+                probe.noteEntered()
+                hoveredRowId = row.id
+            } else {
+                probe.noteExited()
+                if hoveredRowId == row.id { hoveredRowId = nil }
+            }
         })
         .onContinuousHover { phase in
-            if case .active = phase { hoveredRowId = row.id }
+            if case .active = phase {
+                if hoveredRowId != row.id { probe.notePhase() }
+                hoveredRowId = row.id
+            }
         }
         .id(row.id)
     }
