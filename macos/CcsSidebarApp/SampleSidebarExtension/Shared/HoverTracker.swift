@@ -47,7 +47,10 @@ struct HoverTracker: NSViewRepresentable {
             addTrackingArea(
                 NSTrackingArea(
                     rect: .zero,
-                    options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                    // `.mouseMoved` as well as entry/exit: an entry event that never arrives —
+                    // and in this remote view they do go missing — would otherwise leave the row
+                    // unhoverable until something rebuilt it. Any movement inside claims it.
+                    options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
                     owner: self
                 )
             )
@@ -59,6 +62,7 @@ struct HoverTracker: NSViewRepresentable {
         }
 
         override func mouseEntered(with event: NSEvent) { report(true) }
+        override func mouseMoved(with event: NSEvent) { report(true) }
         override func mouseExited(with event: NSEvent) { report(false) }
 
         func reportExitIfInside() {
