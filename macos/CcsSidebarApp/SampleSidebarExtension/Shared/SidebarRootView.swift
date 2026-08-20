@@ -114,6 +114,16 @@ public struct SidebarRootView: View {
                     message: "cmux liveness unreadable — showing stored sessions only."
                 )
             }
+            // A failed refresh with rows already on screen used to say nothing at all: the list
+            // kept the last good answer and went quiet, which is indistinguishable from a fleet
+            // that simply stopped changing. The empty-list case has always explained itself; this
+            // is the case where the sidebar looks fine and is lying.
+            if let staleness = client.lastError, !client.rows.isEmpty {
+                NoticeBar(
+                    symbol: "clock.badge.exclamationmark",
+                    message: "Not refreshing — showing the last good list. \(staleness)"
+                )
+            }
             if let failure {
                 FailureBanner(message: failure) { self.failure = nil }
             }
