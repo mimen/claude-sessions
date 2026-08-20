@@ -20,7 +20,6 @@ public struct SidebarRootView: View {
     @State private var layouts = RowLayouts()
     @State private var clusterFirst = false
     @State private var clusterSplit: ClusterSplit = .none
-    @State private var visibility: RowVisibility = .all
     @State private var clock = WorkingClock()
     @State private var modifiers = ModifierMonitor()
     /// The row the user just clicked, painted focused ahead of the server's confirmation.
@@ -53,7 +52,6 @@ public struct SidebarRootView: View {
         .onChange(of: layouts) { _, next in Preferences.layouts = next }
         .onChange(of: clusterFirst) { _, next in Preferences.clusterFirst = next }
         .onChange(of: clusterSplit) { _, next in Preferences.clusterSplit = next }
-        .onChange(of: visibility) { _, next in Preferences.rowVisibility = next }
         .onDisappear {
             client.stop()
             clock.stop()
@@ -107,7 +105,6 @@ public struct SidebarRootView: View {
                 layouts: $layouts,
                 clusterFirst: $clusterFirst,
                 clusterSplit: $clusterSplit,
-                visibility: $visibility,
                 counts: client.counts
             )
             Divider()
@@ -131,16 +128,9 @@ public struct SidebarRootView: View {
     private var content: some View {
         // Search reaches every state except incognito: a marked session stays visible in its own
         // section but is never surfaced by a query.
-        //
-        // The open-sessions filter is applied here rather than inside the grouping so a group with
-        // nothing running never renders an empty header — which is most of what makes the filtered
-        // sidebar short. A search overrides it: typing a query means you are looking for something
-        // specific, and hiding finished sessions from a search would answer the wrong question.
-        let searching = !query.isEmpty
-        let matching = client.rows.filter {
-            $0.matches(query) && (!searching || $0.section != "incognito")
+        let visible = client.rows.filter {
+            $0.matches(query) && (query.isEmpty || $0.section != "incognito")
         }
-        let visible = searching ? matching : visibility.filter(matching)
         if visible.isEmpty {
             ContentUnavailableView {
                 Label(client.rows.isEmpty ? "No sessions" : "No matches", systemImage: "rectangle.stack")
@@ -235,7 +225,6 @@ public struct SidebarRootView: View {
         layouts = Preferences.layouts
         clusterFirst = Preferences.clusterFirst
         clusterSplit = Preferences.clusterSplit
-        visibility = Preferences.rowVisibility
         client.scope = scope
     }
 

@@ -1,10 +1,10 @@
 import XCTest
 @testable import CcsSidebarUI
 
-/// The open-sessions filter, which decides what the list carries before any group is drawn.
+/// The per-group open-sessions filter.
 ///
-/// Independent of collapse by design, so these pin what "open" means and that filtering empties a
-/// group out of existence rather than leaving a header with nothing under it.
+/// Independent of collapse by design, so these pin what "open" means, what the filtered header
+/// counts, and that toggling is a plain two-state flip rather than a cycle.
 final class RowVisibilityTests: XCTestCase {
     private func row(_ name: String, density: String) -> SidebarRow {
         let json: [String: Any] = [
@@ -40,17 +40,29 @@ final class RowVisibilityTests: XCTestCase {
         XCTAssertEqual(RowVisibility.openOnly.filter(rows).map(\.name), ["live"])
     }
 
-    func testFilteringRemovesAGroupRatherThanEmptyingIt() {
-        // Filtering before grouping is what keeps the sidebar short: an event whose sessions have
-        // all finished should not leave a header behind with nothing under it.
-        let rows = [
-            row("live worker", density: "full"),
-            row("finished worker", density: "compact"),
-        ]
+    func testTogglingIsATwoStateFlip() {
+        XCTAssertEqual(RowVisibility.all.toggled, .openOnly)
+        XCTAssertEqual(RowVisibility.openOnly.toggled, .all)
+    }
 
-        let groups = Grouping.group(rows: RowVisibility.openOnly.filter(rows), by: .recent)
+    func testFilteredHeaderCountsRunningAgainstTotal() {
+        let group = SidebarGroup(
+            key: "event-watch",
+            name: "event-watch",
+            rows: [row("core", density: "full")],
+            children: [
+                SidebarGroup(
+                    key: "event-watch/Freakuency",
+                    name: "Freakuency",
+                    rows: [row("a", density: "full"), row("b", density: "compact")],
+                    children: []
+                ),
+            ]
+        )
 
-        XCTAssertEqual(groups.map(\.totalRows), [1])
-        XCTAssertEqual(groups.first?.rows.map(\.name), ["live worker"])
+        // Both counts reach through nested bands: a filtered cluster header has to speak for its
+        // events, not just for the rows sitting directly under it.
+        XCTAssertEqual(group.totalRows, 3)
+        XCTAssertEqual(group.openRows, 2)
     }
 }

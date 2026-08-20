@@ -55,6 +55,8 @@ public struct SessionListView: View {
     /// Which groups are shelved, seeded from the stored choice: a section you closed should still
     /// be closed after cmux rebuilds the panel, which it does several times a day.
     @State private var collapsed: Set<String> = Preferences.collapsedGroups
+    /// Which groups are filtered to their open sessions. Same seeding, separate choice.
+    @State private var visibility: [String: RowVisibility] = Preferences.groupVisibility
     /// Where the pointer is over the list, in the list's coordinate space; nil when outside.
     @State private var pointer: CGPoint?
     /// Each materialised row's frame in the list's coordinate space, refreshed by layout.
@@ -126,26 +128,37 @@ public struct SessionListView: View {
         let hovered = hoveredId
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
+                // Headers are emitted as ordinary rows rather than through `Section(header:)`:
+                // a Section whose content is empty takes its header down with it, so a collapsed
+                // group vanished from the list entirely instead of leaving the header you need in
+                // order to open it again.
                 ForEach(sections) { section in
-                    Section {
-                        if !collapsed.contains(section.key) {
-                            ForEach(section.rows) { row in
-                                rowView(row, now: now, hovered: hovered, override: override)
-                            }
-                            // Nested bands come after the group's own rows: a cluster's core
-                            // identities are the way in, and its events hang below them.
-                            ForEach(section.children) { child in
-                                sectionHeader(child, depth: 1)
+                    let shown = shows(section)
+                    sectionHeader(section)
+                    if !collapsed.contains(section.key) {
+                        ForEach(shown.filter(section.rows)) { row in
+                            rowView(row, now: now, hovered: hovered, override: override)
+                        }
+                        // Nested bands come after the group's own rows: a cluster's core
+                        // identities are the way in, and its events hang below them.
+                        ForEach(section.children) { child in
+                            // Filtering a cluster means the whole cluster, its events included —
+                            // unless that event has been given its own answer, which outranks
+                            // what it inherits.
+                            let childShown = shows(child, inherited: shown)
+                            let childRows = childShown.filter(child.rows)
+                            // An event with nothing running is not worth a header while its
+                            // cluster is filtered: dropping it is the point of filtering.
+                            if !(childRows.isEmpty && childShown == .openOnly) {
+                                sectionHeader(child, depth: 1, inherited: shown)
                                 if !collapsed.contains(child.key) {
-                                    ForEach(child.rows) { row in
+                                    ForEach(childRows) { row in
                                         rowView(row, now: now, hovered: hovered, override: override)
                                             .padding(.leading, 8)
                                     }
                                 }
                             }
                         }
-                    } header: {
-                        sectionHeader(section)
                     }
                 }
             }
@@ -191,40 +204,69 @@ public struct SessionListView: View {
         .id(row.id)
     }
 
-    private func sectionHeader(_ section: SidebarGroup, depth: Int = 0) -> some View {
-        // A Button, not `.onTapGesture`: the tap gesture hit-tests whatever sits under the pointer
-        // when the click lands, and collapsing a band slides the next one up into that exact spot
-        // — so one click walked down the list shelving every section it uncovered. A button binds
-        // press and release to the same view, so a header that arrives under a stationary cursor
-        // mid-click is never the one that fires.
-        Button {
-            if collapsed.contains(section.key) { collapsed.remove(section.key) }
-            else { collapsed.insert(section.key) }
-            // Shelving a section is a standing choice about how much you want to see, so it
-            // outlives the panel cmux rebuilds several times a day.
-            Preferences.collapsedGroups = collapsed
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: collapsed.contains(section.key) ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-                Text(section.name.uppercased())
-                    .font(.system(size: depth == 0 ? 10 : 9, weight: .semibold))
-                    .tracking(0.8)
-                Spacer()
-                // The count covers everything the group holds, nested rows included, so a collapsed
-                // cluster still says how much is inside it.
-                Text("\(section.totalRows)")
-                    .font(.system(size: 10))
-                    .monospacedDigit()
+    /// What a group shows: its own answer if it has one, otherwise what it inherits from the
+    /// cluster above it, otherwise everything.
+    private func shows(_ section: SidebarGroup, inherited: RowVisibility? = nil) -> RowVisibility {
+        visibility[section.key] ?? inherited ?? .all
+    }
+
+    private func sectionHeader(
+        _ section: SidebarGroup,
+        depth: Int = 0,
+        inherited: RowVisibility? = nil
+    ) -> some View {
+        let shown = shows(section, inherited: inherited)
+        return HStack(spacing: 4) {
+            // Two controls, because they are two independent choices about the same group: the
+            // name shelves it, the mark filters it. A single control cycling through both could
+            // not express "open sessions, group expanded".
+            //
+            // A Button, not `.onTapGesture`: the tap gesture hit-tests whatever sits under the
+            // pointer when the click lands, and collapsing a band slides the next one up into that
+            // exact spot — so one click walked down the list shelving every section it uncovered.
+            // A button binds press and release to the same view, so a header that arrives under a
+            // stationary cursor mid-click is never the one that fires.
+            Button {
+                if collapsed.contains(section.key) { collapsed.remove(section.key) }
+                else { collapsed.insert(section.key) }
+                // How much of a group you want to see is a standing choice, so it outlives the
+                // panel cmux rebuilds several times a day.
+                Preferences.collapsedGroups = collapsed
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: collapsed.contains(section.key) ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                    Text(section.name.uppercased())
+                        .font(.system(size: depth == 0 ? 10 : 9, weight: .semibold))
+                        .tracking(0.8)
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
             }
-            .foregroundStyle(depth == 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
-            .padding(.leading, CGFloat(10 + depth * 10))
-            .padding(.trailing, 10)
-            .padding(.top, depth == 0 ? 10 : 6)
-            .padding(.bottom, 2)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+
+            Button {
+                visibility[section.key] = shown.toggled
+                Preferences.groupVisibility = visibility
+            } label: {
+                Image(systemName: shown.symbol).font(.system(size: 9))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(shown == .openOnly ? AnyShapeStyle(.secondary) : AnyShapeStyle(.quaternary))
+            .help(shown.title)
+
+            // The count covers everything the group holds, nested rows included, so a collapsed
+            // cluster still says how much is inside it. While it is filtered the header says how
+            // many of those are running, because that is the number the filter is about.
+            Text(shown == .openOnly ? "\(section.openRows)/\(section.totalRows)" : "\(section.totalRows)")
+                .font(.system(size: 10))
+                .monospacedDigit()
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(depth == 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+        .padding(.leading, CGFloat(10 + depth * 10))
+        .padding(.trailing, 10)
+        .padding(.top, depth == 0 ? 10 : 6)
+        .padding(.bottom, 2)
     }
 }
 /// Coarse ages. The bands match the web sidebar's so the two read the same at a glance.
