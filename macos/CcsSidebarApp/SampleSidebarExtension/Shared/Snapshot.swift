@@ -94,15 +94,17 @@ public struct SidebarSnapshot: Decodable, Sendable {
 }
 
 /// The scopes the server will project, matching the web sidebar's own picker.
+/// Mirrors the server's own `SIDEBAR_VIEWS`. A case the server does not serve is not a view the
+/// picker may offer: it answers `bad_request`, the refresh throws, and the list silently keeps the
+/// previous scope's rows under the new scope's name.
 public enum SidebarScope: String, CaseIterable, Sendable {
-    case active, saved, completed, archived, triage
+    case active, saved, completed, triage
 
     public var title: String {
         switch self {
         case .active: return "Active"
         case .saved: return "Saved"
         case .completed: return "Done"
-        case .archived: return "Archived"
         case .triage: return "Triage"
         }
     }

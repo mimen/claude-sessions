@@ -66,3 +66,31 @@ final class RowVisibilityTests: XCTestCase {
         XCTAssertEqual(group.openRows, 2)
     }
 }
+
+/// The scope picker may only offer views the server serves.
+///
+/// `archived` sat in this enum without a matching server view, so choosing it answered
+/// `bad_request`, the refresh threw, and the list kept the previous scope's rows under the new
+/// scope's name — the sidebar looked fine and was showing the wrong thing.
+final class SidebarScopeTests: XCTestCase {
+    /// The server's own list, from `SIDEBAR_VIEWS` in src/sidebar/projection.ts. `incognito` is a
+    /// server view the picker deliberately does not offer: marked sessions surface in their own
+    /// section of the active list, and a scope for them would be a second door to one room.
+    private static let serverViews: Set<String> = ["active", "triage", "completed", "saved", "incognito"]
+
+    func testEveryOfferedScopeIsAViewTheServerServes() {
+        for scope in SidebarScope.allCases {
+            XCTAssertTrue(
+                Self.serverViews.contains(scope.rawValue),
+                "scope \(scope.rawValue) is offered by the picker but the server will refuse it"
+            )
+        }
+    }
+
+    func testTheScopesWorthOfferingAreAllPresent() {
+        XCTAssertEqual(
+            Set(SidebarScope.allCases.map(\.rawValue)),
+            ["active", "triage", "completed", "saved"]
+        )
+    }
+}
