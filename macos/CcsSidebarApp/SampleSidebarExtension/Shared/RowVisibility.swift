@@ -1,12 +1,15 @@
 import Foundation
 
-/// Which sessions the list carries at all.
+/// Which of a group's sessions it shows.
 ///
 /// A fleet keeps its finished workers for their transcripts, so event-watch arrives as thirty rows
 /// of which a handful are running. Answering "what is my fleet doing" by reading past the other
-/// twenty-odd is the problem this removes. Deliberately separate from whether a group is collapsed:
-/// one says what the list is about, the other says how much of it you want on screen right now, and
-/// tangling them made a single control that could not express "open sessions, all groups showing".
+/// twenty-odd is the problem this removes — and it is a question you ask of one group at a time,
+/// which is why this is set per group rather than for the whole list.
+///
+/// Deliberately separate from whether a group is collapsed: one says what the group is about, the
+/// other says how much of it you want on screen right now, and tangling them made a single control
+/// that could not express "open sessions, all groups showing".
 public enum RowVisibility: String, CaseIterable, Sendable {
     /// Everything the scope holds, running or finished.
     case all
@@ -15,13 +18,19 @@ public enum RowVisibility: String, CaseIterable, Sendable {
 
     public var title: String {
         switch self {
-        case .all: return "All sessions"
-        case .openOnly: return "Only open sessions"
+        case .all: return "Showing all sessions"
+        case .openOnly: return "Showing only open sessions"
         }
     }
 
-    /// Applied before grouping, so a group with nothing running does not render an empty header —
-    /// which is most of what makes the filtered sidebar short.
+    var toggled: RowVisibility { self == .all ? .openOnly : .all }
+
+    /// The header's filter mark. Filled while the group is filtered, so a glance down the sidebar
+    /// says which groups are hiding something without reading any counts.
+    var symbol: String {
+        self == .openOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
+    }
+
     func filter(_ rows: [SidebarRow]) -> [SidebarRow] {
         switch self {
         case .all: return rows

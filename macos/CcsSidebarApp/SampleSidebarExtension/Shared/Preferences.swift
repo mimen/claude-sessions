@@ -35,10 +35,15 @@ public enum Preferences {
         set { defaults.set(Array(newValue).sorted(), forKey: "ccs.collapsedGroups") }
     }
 
-    /// Whether the list carries finished sessions at all — independent of which groups are shelved.
-    public static var rowVisibility: RowVisibility {
-        get { RowVisibility(rawValue: defaults.string(forKey: "ccs.rowVisibility") ?? "") ?? .all }
-        set { defaults.set(newValue.rawValue, forKey: "ccs.rowVisibility") }
+    /// Which groups are filtered to their open sessions. Keyed by group key like the collapse
+    /// state, and stored separately from it because the two are independent choices about the same
+    /// group: either can be set without disturbing the other.
+    public static var groupVisibility: [String: RowVisibility] {
+        get {
+            let stored = defaults.dictionary(forKey: "ccs.groupVisibility") as? [String: String] ?? [:]
+            return stored.compactMapValues(RowVisibility.init(rawValue:))
+        }
+        set { defaults.set(newValue.mapValues(\.rawValue), forKey: "ccs.groupVisibility") }
     }
 
     public static var layouts: RowLayouts {
