@@ -32,12 +32,15 @@ public struct FocusOverride: Equatable, Sendable {
 /// already sorted the rows into the order it wants them read. Re-sorting here would be a second
 /// opinion about priority, and the two would drift.
 ///
-/// Everything this view paints is derived, never accumulated. Rows are whatever the last snapshot
-/// said. Hover is recomputed from where the pointer actually is — `PointerWatch` polls the window
-/// server — against row frames measured this layout pass, so no dropped AppKit event can latch a
-/// row. Focus is the snapshot's word, briefly overridden by the user's own click. Recreating this
-/// view yields the same screen as one that has run for a day, which is the property the old
-/// event-accumulated hover state broke.
+/// Rows are whatever the last snapshot said. Focus is the snapshot's word, briefly overridden by
+/// the user's own click.
+///
+/// Hover is the row's own AppKit hover, with `PointerWatch` polling the window server purely to
+/// clear it: a dropped exit event can latch a highlight on, and the poll notices the pointer is no
+/// longer over the list and lets go. Hit-testing it here instead — pointer in one coordinate space,
+/// row frames measured into another — is what this replaced. The two spaces agree only while the
+/// list is scrolled to the top, so hovering a row further down highlighted a different one or
+/// nothing at all, and stayed that way until the panel was rebuilt.
 @MainActor
 public struct SessionListView: View {
     private let rows: [SidebarRow]
@@ -59,12 +62,8 @@ public struct SessionListView: View {
     @State private var collapsed: Set<String> = Preferences.collapsedGroups
     /// Which groups are filtered to their open sessions. Same seeding, separate choice.
     @State private var visibility: [String: RowVisibility] = Preferences.groupVisibility
-    /// Where the pointer is over the list, in the list's coordinate space; nil when outside.
-    @State private var pointer: CGPoint?
-    /// Each materialised row's frame in the list's coordinate space, refreshed by layout.
-    @State private var rowFrames: [String: CGRect] = [:]
-
-    private nonisolated static let space = "ccs-session-list"
+    /// The row AppKit says the pointer is inside, or nil.
+    @State private var hoveredRowId: String?
 
     public init(
         rows: [SidebarRow],
@@ -100,13 +99,6 @@ public struct SessionListView: View {
         Grouping.group(rows: rows, by: grouping, clusterFirst: clusterFirst, clusterSplit: clusterSplit)
     }
 
-    /// The row under the pointer right now — a lookup, not a stored answer. Iterates `rows`
-    /// rather than the frame dictionary so a stale frame left by a departed row can never win.
-    private var hoveredId: String? {
-        guard let pointer else { return nil }
-        return rows.first { rowFrames[$0.id]?.contains(pointer) == true }?.id
-    }
-
     public var body: some View {
         // @Observable only re-evaluates views that read a changing property, and until this read
         // existed nothing read the tick — so elapsed labels froze between snapshots and only moved
@@ -115,10 +107,8 @@ public struct SessionListView: View {
         let _ = clock.tick
         listBody(now: Date())
             .onChange(of: rows.map(\.id)) { _, ids in
-                // Frames belong to rows; a departed row's frame must not linger to shadow
-                // whatever row the layout puts in its place.
-                let live = Set(ids)
-                rowFrames = rowFrames.filter { live.contains($0.key) }
+                // A row that leaves the list cannot still be the hovered one.
+                if let hoveredRowId, !ids.contains(hoveredRowId) { self.hoveredRowId = nil }
             }
     }
 
@@ -129,7 +119,7 @@ public struct SessionListView: View {
             candidate.active(now: now) && rows.contains(where: { $0.id == candidate.id })
                 ? candidate.id : nil
         }
-        let hovered = hoveredId
+        let hovered = hoveredRowId
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
                 // Headers are emitted as ordinary rows rather than through `Section(header:)`:
@@ -177,10 +167,11 @@ public struct SessionListView: View {
                     .padding(.bottom, 10)
             }
         }
-        .coordinateSpace(name: Self.space)
-        // The overlay shares the ScrollView's bounds, so a point in its flipped view coordinates
-        // is a point in the named space the row frames were measured in.
-        .overlay(PointerWatch { pointer = $0 })
+        // The poll only ever says "the pointer left the list". Which row it is over is the rows'
+        // own business, and asking them removes the coordinate space this used to guess at.
+        .overlay(PointerWatch { point in
+            if point == nil { hoveredRowId = nil }
+        })
     }
 
     private func rowView(
@@ -200,10 +191,16 @@ public struct SessionListView: View {
             isHovered: hovered == row.id,
             isFocused: override.map { $0 == row.id }
         )
-        .onGeometryChange(for: CGRect.self) { proxy in
-            proxy.frame(in: .named(Self.space))
-        } action: { frame in
-            rowFrames[row.id] = frame
+        // Hover from the system's own hit test, in the row's own bounds: no space to convert
+        // between, nothing measured to go stale, and a group collapsing under the pointer simply
+        // ends the hover of a row that is no longer there.
+        .onContinuousHover { phase in
+            switch phase {
+            case .active:
+                hoveredRowId = row.id
+            case .ended:
+                if hoveredRowId == row.id { hoveredRowId = nil }
+            }
         }
         .id(row.id)
     }
