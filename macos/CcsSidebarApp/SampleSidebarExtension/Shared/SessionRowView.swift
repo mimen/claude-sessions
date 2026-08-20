@@ -137,6 +137,11 @@ public struct SessionRowView: View {
             .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 10)
+        // Room for the controls while they are shown, so the title truncates rather than running
+        // underneath them. They float in an overlay, which reserves nothing on its own: a title
+        // long enough to reach the trailing edge used to sit right under the glyphs, and grey
+        // icons over white text read as no hover state at all.
+        .padding(.trailing, hovering ? hoverControlsWidth : 0)
         .padding(.vertical, 6)
         .frame(height: layout == .threeLine ? 62 : 46, alignment: .center)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,6 +168,16 @@ public struct SessionRowView: View {
         .overlay(alignment: .leading) { edge }
         .clipShape(Rectangle())
 
+    }
+
+    /// How much trailing space `hoverControls` needs — each control is an 18pt square with 4pt
+    /// between them. Counted rather than measured so the row can reserve it before laying out.
+    private var hoverControlsWidth: CGFloat {
+        var controls = 0
+        if !row.isCompleted && !row.isWorkspaceOnly { controls += 2 }
+        if row.hasTab { controls += 1 }
+        if !row.isWorkspaceOnly { controls += 1 }
+        return controls == 0 ? 0 : CGFloat(controls) * 22
     }
 
     /// Only what this row can actually do: a control that is always visible and never able to act

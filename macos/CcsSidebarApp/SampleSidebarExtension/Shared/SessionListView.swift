@@ -35,12 +35,7 @@ public struct FocusOverride: Equatable, Sendable {
 /// Rows are whatever the last snapshot said. Focus is the snapshot's word, briefly overridden by
 /// the user's own click.
 ///
-/// Hover is the row's own AppKit hover, with `PointerWatch` polling the window server purely to
-/// clear it: a dropped exit event can latch a highlight on, and the poll notices the pointer is no
-/// longer over the list and lets go. Hit-testing it here instead — pointer in one coordinate space,
-/// row frames measured into another — is what this replaced. The two spaces agree only while the
-/// list is scrolled to the top, so hovering a row further down highlighted a different one or
-/// nothing at all, and stayed that way until the panel was rebuilt.
+/// Hover is an AppKit tracking area per row — see `HoverTracker`.
 @MainActor
 public struct SessionListView: View {
     private let rows: [SidebarRow]
@@ -167,11 +162,7 @@ public struct SessionListView: View {
                     .padding(.bottom, 10)
             }
         }
-        // The poll only ever says "the pointer left the list". Which row it is over is the rows'
-        // own business, and asking them removes the coordinate space this used to guess at.
-        .overlay(PointerWatch { point in
-            if point == nil { hoveredRowId = nil }
-        })
+
     }
 
     private func rowView(
@@ -191,16 +182,17 @@ public struct SessionListView: View {
             isHovered: hovered == row.id,
             isFocused: override.map { $0 == row.id }
         )
-        // Hover from the system's own hit test, in the row's own bounds: no space to convert
-        // between, nothing measured to go stale, and a group collapsing under the pointer simply
-        // ends the hover of a row that is no longer there.
+        // Two sources, because inside this remote view each one drops events the other catches.
+        // The tracking area is authoritative — it is the only one that can say a row was LEFT —
+        // while hover phases only ever claim a row. A missed entry is covered by the phases; a
+        // missed exit is covered by the tracker; and neither can leave a highlight stranded on a
+        // row the pointer is nowhere near.
+        .background(HoverTracker { inside in
+            if inside { hoveredRowId = row.id }
+            else if hoveredRowId == row.id { hoveredRowId = nil }
+        })
         .onContinuousHover { phase in
-            switch phase {
-            case .active:
-                hoveredRowId = row.id
-            case .ended:
-                if hoveredRowId == row.id { hoveredRowId = nil }
-            }
+            if case .active = phase { hoveredRowId = row.id }
         }
         .id(row.id)
     }
