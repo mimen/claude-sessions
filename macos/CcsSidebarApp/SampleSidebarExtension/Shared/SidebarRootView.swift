@@ -21,6 +21,7 @@ public struct SidebarRootView: View {
     @State private var clusterFirst = false
     @State private var clusterSplit: ClusterSplit = .none
     @State private var clock = WorkingClock()
+    @State private var probe = HoverProbe()
     @State private var modifiers = ModifierMonitor()
     /// The row the user just clicked, painted focused ahead of the server's confirmation.
     @State private var pendingFocus: FocusOverride?
@@ -130,7 +131,11 @@ public struct SidebarRootView: View {
             content
                 // The list takes whatever is left, so the stack always fills the panel.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            VersionFooter(clientVersion: BuildStamp.version, serverVersion: client.serverVersion)
+            VersionFooter(
+                clientVersion: BuildStamp.version,
+                serverVersion: client.serverVersion,
+                hoverLine: probe.line
+            )
         }
     }
 
@@ -163,6 +168,7 @@ public struct SidebarRootView: View {
                 clusterFirst: clusterFirst,
                 clusterSplit: clusterSplit,
                 searching: !query.isEmpty,
+                probe: probe,
                 truncated: client.truncated,
                 clock: clock,
                 jumpLabels: jumpLabels(for: visible),
@@ -288,12 +294,21 @@ public struct SidebarRootView: View {
 struct VersionFooter: View {
     let clientVersion: String
     let serverVersion: String?
+    /// What hover currently believes — see `HoverProbe`.
+    let hoverLine: String
 
     var body: some View {
-        HStack(spacing: 4) {
-            Text("client \(clientVersion) · server \(serverVersion ?? "—")")
-                .font(.system(size: 9, design: .monospaced))
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                Text(hoverLine)
+                    .font(.system(size: 9, design: .monospaced))
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 4) {
+                Text("client \(clientVersion) · server \(serverVersion ?? "—")")
+                    .font(.system(size: 9, design: .monospaced))
+                Spacer(minLength: 0)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.top, 3)
