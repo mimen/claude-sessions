@@ -23,6 +23,21 @@ export type SessionFocusResult =
   | { readonly status: "timeout" }
   | { readonly status: "failed"; readonly reason: string };
 
+/**
+ * Why an action refused, from a closed vocabulary the client may show verbatim.
+ *
+ * Separate from a failure's `reason`, which is free text and can carry paths or database errors,
+ * so it never leaves the server. These name conditions a person can act on — and, mostly, cannot
+ * fix by retrying, which is what the generic "refresh the list and try again" wrongly implied.
+ */
+export type ActionRefusal =
+  | "route-ineligible"
+  | "unknown-launcher"
+  | "launcher-env-unresolvable"
+  | "spawn-failed"
+  | "cwd-unreadable"
+  | "reactivation-failed";
+
 export type SessionResumeResult =
   | { readonly status: "resumed"; readonly target: WorkspaceFocusTarget }
   | { readonly status: "already-open" }
@@ -31,7 +46,7 @@ export type SessionResumeResult =
   | { readonly status: "index-unreadable" }
   | { readonly status: "catalogue-unreadable" }
   | { readonly status: "timeout" }
-  | { readonly status: "failed"; readonly reason: string };
+  | { readonly status: "failed"; readonly reason: string; readonly refusal?: ActionRefusal };
 
 export type OpenSessionOutcome =
   | { readonly status: "focused"; readonly workspaceRef: string | null }
@@ -41,7 +56,7 @@ export type OpenSessionOutcome =
   | { readonly status: "index-unreadable" }
   | { readonly status: "catalogue-unreadable" }
   | { readonly status: "timeout" }
-  | { readonly status: "failed"; readonly reason: string };
+  | { readonly status: "failed"; readonly reason: string; readonly refusal?: ActionRefusal };
 
 export type IndexedSessionLookup =
   | { readonly status: "found"; readonly row: IndexedSessionInput }
@@ -247,11 +262,20 @@ export function createSessionActionCoordinator(
         return {
           status: "failed",
           reason: "the session resumed but could not be moved back to Active",
+          refusal: "reactivation-failed",
         };
       case "liveness-unreadable":
         return { status: "liveness-unreadable" };
-      default:
-        return { status: "failed", reason: result.status };
+      // The rest are conditions a person can act on and cannot retry their way out of, so each
+      // travels as a refusal code the client turns into a sentence. Their free-text detail stays
+      // server-side: `route-ineligible` carries the launcher's own explanation, and
+      // `cwd-unreadable` carries a filesystem error and an absolute path.
+      case "route-ineligible":
+      case "unknown-launcher":
+      case "launcher-env-unresolvable":
+      case "spawn-failed":
+      case "cwd-unreadable":
+        return { status: "failed", reason: result.status, refusal: result.status };
     }
   }
 
@@ -327,11 +351,11 @@ export function createSessionActionCoordinator(
           || outcome.status === "catalogue-unreadable"
           || outcome.status === "timeout"
         ) return outcome;
-        return {
+        // A joined flight reports what the flight found, refusal included: two clicks on one row
+        // must not be told two different stories about why it would not open.
+        return outcome.status === "failed" ? outcome : {
           status: "failed",
-          reason: outcome.status === "failed"
-            ? outcome.reason
-            : "session is already open but its workspace was not in the action's liveness read",
+          reason: "session is already open but its workspace was not in the action's liveness read",
         };
       }
       const focused = await focusTarget(outcome.target);

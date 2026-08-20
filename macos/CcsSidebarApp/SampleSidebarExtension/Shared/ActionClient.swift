@@ -118,6 +118,20 @@ public struct ActionClient: Sendable {
             return "CCS could not tell which workspace this session means."
         case "session-workspace-mismatch", "session-surface-mismatch", "hook-workspace-mismatch":
             return "The session and its workspace disagree about where it lives. Refresh the list."
+        // Resume refusals. Each names something retrying cannot fix, which is why they are worth
+        // saying: the generic envelope told you to refresh the list and try again, forever.
+        case "route-ineligible":
+            return "No configured launcher can replay this session's model, so it cannot be resumed."
+        case "unknown-launcher":
+            return "This session names a launcher that is not in your CCS config."
+        case "launcher-env-unresolvable":
+            return "This session's launcher has an environment CCS could not resolve — check its secrets."
+        case "spawn-failed":
+            return "cmux would not create a workspace for this session."
+        case "cwd-unreadable":
+            return "This session's working directory could not be read, so CCS refused to spawn it."
+        case "reactivation-failed":
+            return "The session reopened but its lifecycle could not be moved back to Active."
         default:
             return nil
         }
