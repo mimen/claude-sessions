@@ -162,6 +162,7 @@ public struct SidebarRootView: View {
                 port: port,
                 clusterFirst: clusterFirst,
                 clusterSplit: clusterSplit,
+                searching: !query.isEmpty,
                 truncated: client.truncated,
                 clock: clock,
                 jumpLabels: jumpLabels(for: visible),
