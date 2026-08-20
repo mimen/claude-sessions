@@ -94,3 +94,25 @@ final class SidebarScopeTests: XCTestCase {
         )
     }
 }
+
+/// A query outranks how you had arranged the list to browse it.
+final class SearchOverridesViewStateTests: XCTestCase {
+    func testAQueryMatchesRegardlessOfHowAGroupWasLeft() {
+        // The matching itself is what the list filters on; the view choices that hid these rows
+        // (collapse, open-only) are suspended in SessionListView while a query is present, which is
+        // covered live. This pins the half that is pure: what counts as a match.
+        let row = try! JSONDecoder().decode(
+            SidebarRow.self,
+            from: try! JSONSerialization.data(withJSONObject: [
+                "kind": "session", "id": "1", "name": "Kiki Factory event closeout",
+                "density": "compact", "unread": 0, "pinned": false, "focused": false,
+            ])
+        )
+
+        XCTAssertTrue(row.matches("kiki"))
+        XCTAssertTrue(row.matches("CLOSEOUT"))
+        XCTAssertFalse(row.matches("freakuency"))
+        // A finished session still answers a search: that is the whole point of searching.
+        XCTAssertFalse(row.isOpen)
+    }
+}

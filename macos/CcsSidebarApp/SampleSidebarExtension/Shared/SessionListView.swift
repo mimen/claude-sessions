@@ -48,6 +48,8 @@ public struct SessionListView: View {
     private let port: Int
     private let clusterFirst: Bool
     private let clusterSplit: ClusterSplit
+    /// Whether a query is narrowing the list, which suspends every per-group view choice.
+    private let searching: Bool
     private let truncated: Bool
     private let clock: WorkingClock
     private let jumpLabels: [String: String]
@@ -73,6 +75,7 @@ public struct SessionListView: View {
         port: Int = SidebarServer.defaultPort,
         clusterFirst: Bool = false,
         clusterSplit: ClusterSplit = .none,
+        searching: Bool = false,
         truncated: Bool = false,
         clock: WorkingClock,
         jumpLabels: [String: String] = [:],
@@ -86,6 +89,7 @@ public struct SessionListView: View {
         self.port = port
         self.clusterFirst = clusterFirst
         self.clusterSplit = clusterSplit
+        self.searching = searching
         self.truncated = truncated
         self.clock = clock
         self.jumpLabels = jumpLabels
@@ -135,7 +139,7 @@ public struct SessionListView: View {
                 ForEach(sections) { section in
                     let shown = shows(section)
                     sectionHeader(section)
-                    if !collapsed.contains(section.key) {
+                    if !isCollapsed(section) {
                         ForEach(shown.filter(section.rows)) { row in
                             rowView(row, now: now, hovered: hovered, override: override)
                         }
@@ -151,7 +155,7 @@ public struct SessionListView: View {
                             // cluster is filtered: dropping it is the point of filtering.
                             if !(childRows.isEmpty && childShown == .openOnly) {
                                 sectionHeader(child, depth: 1, inherited: shown)
-                                if !collapsed.contains(child.key) {
+                                if !isCollapsed(child) {
                                     ForEach(childRows) { row in
                                         rowView(row, now: now, hovered: hovered, override: override)
                                             .padding(.leading, 8)
@@ -206,8 +210,18 @@ public struct SessionListView: View {
 
     /// What a group shows: its own answer if it has one, otherwise what it inherits from the
     /// cluster above it, otherwise everything.
+    ///
+    /// A query outranks all of it. Collapse and the open-sessions filter are choices about how to
+    /// BROWSE; a search is a question, and answering it with a group that quietly holds the matches
+    /// back is answering a different one. Searching a fleet you had shelved and filtered showed an
+    /// empty list with the count sitting right there in the header.
     private func shows(_ section: SidebarGroup, inherited: RowVisibility? = nil) -> RowVisibility {
-        visibility[section.key] ?? inherited ?? .all
+        searching ? .all : (visibility[section.key] ?? inherited ?? .all)
+    }
+
+    /// Whether this group is shelved right now — never while a query is narrowing the list.
+    private func isCollapsed(_ section: SidebarGroup) -> Bool {
+        !searching && collapsed.contains(section.key)
     }
 
     private func sectionHeader(
@@ -234,7 +248,7 @@ public struct SessionListView: View {
                 Preferences.collapsedGroups = collapsed
             } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: collapsed.contains(section.key) ? "chevron.right" : "chevron.down")
+                    Image(systemName: isCollapsed(section) ? "chevron.right" : "chevron.down")
                         .font(.system(size: 8, weight: .semibold))
                     Text(section.name.uppercased())
                         .font(.system(size: depth == 0 ? 10 : 9, weight: .semibold))
