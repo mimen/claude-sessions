@@ -53,32 +53,51 @@ final class GaugeBuilderTests: XCTestCase {
     func testLabelsCarrySuffixNotAccount() {
         let fable = GaugeBuilder.allowanceGauge(
             observation(entitlement: "claude-max:miladmaaan@gmail.com#Fable"))
-        XCTAssertEqual(fable.label, "claude-max #Fable")
+        XCTAssertEqual(fable.label, "Fable")
         XCTAssertEqual(fable.account, "miladmaaan")
         let plain = GaugeBuilder.allowanceGauge(observation(entitlement: "codex-pro:x@y.com"))
-        XCTAssertEqual(plain.label, "codex-pro")
+        XCTAssertEqual(plain.label, "All models")
     }
 
     func testEntitlementParts() {
         let parts = GaugeBuilder.entitlementParts("grok-super grok plus:m@x.com#build")
-        XCTAssertEqual(parts.name, "grok-super grok plus")
+        XCTAssertEqual(parts.label, "Build")
         XCTAssertEqual(parts.account, "m")
-        XCTAssertEqual(parts.suffix, " #build")
         let bare = GaugeBuilder.entitlementParts("opencode-go-zen")
-        XCTAssertEqual(bare.name, "opencode-go-zen")
+        XCTAssertEqual(bare.label, "All models")
         XCTAssertNil(bare.account)
     }
 
-    func testGrokSubRowsCollapseButAnthropicSuffixedRowsStay() {
-        let parent = observation(provider: "grok", entitlement: "grok-super plus:m@x.com", window: "weekly")
-        let sub = observation(provider: "grok", entitlement: "grok-super plus:m@x.com#build", window: "weekly")
-        let grok = GaugeBuilder.sections(from: snapshot([parent, sub]))
-        XCTAssertEqual(grok.flatMap(\.gauges).count, 1)
+    func testGrokBreakdownRowsAndFriendlyNames() {
+        let sections = GaugeBuilder.sections(from: snapshot([
+            observation(provider: "grok", entitlement: "grok-super grok plus:m@x.com", window: "weekly"),
+            observation(provider: "grok", entitlement: "grok-super grok plus:m@x.com#build", window: "weekly"),
+            observation(entitlement: "claude-max:miladmaaan@gmail.com"),
+            observation(entitlement: "claude-max:miladmaaan@gmail.com#Fable")
+        ]))
+        let grok = sections.first { $0.provider == "grok" }!
+        XCTAssertEqual(grok.gauges.map(\.label), ["All Usage", "Build"])
+        let anthropic = sections.first { $0.provider == "anthropic" }!
+        XCTAssertEqual(anthropic.gauges.map(\.label), ["All models", "Fable"])
+    }
 
-        let maxRow = observation(entitlement: "claude-max:m@a.com")
-        let fable = observation(entitlement: "claude-max:m@a.com#Fable")
-        let anthropic = GaugeBuilder.sections(from: snapshot([maxRow, fable]))
-        XCTAssertEqual(anthropic.flatMap(\.gauges).count, 2)
+    func testUnnamedAccountMergesIntoSoleNamedAccount() {
+        let sections = GaugeBuilder.sections(from: snapshot([
+            observation(provider: "codex", entitlement: "codex-pro:miladmaaan@gmail.com"),
+            observation(provider: "codex", entitlement: "codex-spark")
+        ]))
+        XCTAssertEqual(sections.count, 1)
+        XCTAssertEqual(sections[0].accountDisplay, "personal")
+        XCTAssertEqual(sections[0].gauges.count, 2)
+    }
+
+    func testOverallRemainingIsLimitWeightedAverage() {
+        let gauges = [
+            GaugeBuilder.allowanceGauge(observation(used: 100)), // 1.0
+            GaugeBuilder.allowanceGauge(observation(used: 0))    // 0.0
+        ]
+        XCTAssertEqual(GaugeBuilder.overallUsedFraction(gauges)!, 0.5)
+        XCTAssertNil(GaugeBuilder.overallUsedFraction([]))
     }
 
     func testCreditRowsKeepRateLimitsDropped() {
@@ -87,17 +106,9 @@ final class GaugeBuilderTests: XCTestCase {
             observation(provider: "venice", entitlement: "venice-model:gpt", metric: "rate_limit", window: "minute", used: nil, limit: 100),
             observation(entitlement: "codex-dollar-credit:x", metric: "credit", used: nil, limit: nil, remaining: 0)
         ]))
-        XCTAssertEqual(sections.count, 1)
-        XCTAssertEqual(sections[0].gauges.first?.remaining, 12.5)
-    }
-
-    func testTightestPicksHighestFraction() {
-        let gauges = [
-            GaugeBuilder.allowanceGauge(observation(used: 10)),
-            GaugeBuilder.allowanceGauge(observation(used: 82)),
-            GaugeBuilder.allowanceGauge(observation(used: 40))
-        ]
-        XCTAssertEqual(GaugeBuilder.tightest(gauges)?.fractionUsed, 0.82)
+        // Credits are always shown now (bank/balance rows), even at $0; rate limits stay dropped.
+        XCTAssertEqual(sections.count, 2)
+        XCTAssertEqual(sections.reduce(0) { $0 + $1.gauges.count }, 2)
     }
 
     func testFractionClamped() {

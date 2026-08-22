@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = item.button else { return }
-        let labelView = NSHostingView(rootView: MenuBarLabel(tightest: nil))
+        let labelView = NSHostingView(rootView: MenuBarLabel(remaining: nil))
         let ideal = labelView.fittingSize
         let barHeight = NSStatusBar.system.thickness
         labelView.frame = NSRect(x: 0, y: (barHeight - ideal.height) / 2,
@@ -32,10 +32,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] gauges in
                 guard let self, let button = self.statusItem?.button else { return }
-                labelView.rootView = MenuBarLabel(tightest: GaugeBuilder.tightest(gauges))
+                let remaining = GaugeBuilder.overallUsedFraction(gauges).map { 1 - $0 }
+                labelView.rootView = MenuBarLabel(remaining: remaining)
                 let width = labelView.fittingSize.width
                 labelView.frame.size.width = max(width, 20)
                 button.frame.size.width = max(width, 20) + 14
+            }
+            .store(in: &cancellables)
+
+        store.$panelHeight
+            .receive(on: RunLoop.main)
+            .sink { [weak self] height in
+                guard let self else { return }
+                self.popover.contentSize = NSSize(width: 320, height: height)
             }
             .store(in: &cancellables)
 
@@ -83,7 +92,7 @@ if CommandLine.arguments.contains("--fetch-once") {
                 print("    \(g.label) | \(g.windowLabel ?? "-") | \(g.fractionUsed.map { "\(Int($0 * 100))%" } ?? g.remaining.map { "$\($0)" } ?? "?")")
             }
         }
-        print("tightest: \(GaugeBuilder.tightest(gauges.flatMap(\.gauges))?.label ?? "nil")")
+        print("overall used avg: \(GaugeBuilder.overallUsedFraction(gauges.flatMap(\.gauges)).map { "\(Int($0 * 100))%" } ?? "nil")")
     } catch {
         print("FETCH FAILED: \(error)")
     }

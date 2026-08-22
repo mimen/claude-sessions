@@ -16,7 +16,7 @@ struct UsagePanel: View {
             }
             footer
         }
-        .frame(width: 320, height: panelHeight)
+        .frame(width: 320, height: store.panelHeight)
         .onReceive(ticker) { now = $0 }
     }
 
@@ -86,13 +86,6 @@ struct UsagePanel: View {
         GaugeBuilder.sections(from: UsageSnapshot(generatedAt: nil, observations: store.observations))
     }
 
-    private var panelHeight: CGFloat {
-        let rows = CGFloat(store.gauges.count)
-        let sectionCount = CGFloat(sections.count)
-        let accountCount = CGFloat(sections.compactMap(\.accountDisplay).count)
-        return min(520, 56 + rows * 46 + sectionCount * 28 + accountCount * 18 + 20)
-    }
-
     private var footer: some View {
         HStack(spacing: 10) {
             switch store.phase {
@@ -137,18 +130,27 @@ struct UsagePanel: View {
 }
 
 struct MenuBarLabel: View {
-    let tightest: UsageGauge?
+    /// Weighted-average remaining share across all allowance gauges.
+    let remaining: Double?
 
     var body: some View {
-        if let gauge = tightest, let fraction = gauge.fractionUsed {
+        if let remaining {
             HStack(spacing: 3) {
                 Image(systemName: "gauge.with.needle")
-                Text("\(Int((fraction * 100).rounded()))%")
+                Text("\(Int((remaining * 100).rounded()))%")
                     .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
             }
-            .foregroundStyle(GaugeRow.barColor(fraction))
+            .foregroundStyle(Self.labelColor(remaining))
         } else {
             Image(systemName: "gauge.with.needle")
+        }
+    }
+
+    static func labelColor(_ remaining: Double) -> Color {
+        switch remaining {
+        case 0.4...: .green
+        case 0.15..<0.4: .orange
+        default: .red
         }
     }
 }

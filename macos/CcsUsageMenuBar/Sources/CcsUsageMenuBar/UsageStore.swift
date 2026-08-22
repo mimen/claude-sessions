@@ -13,6 +13,11 @@ final class UsageStore: ObservableObject {
     @Published var phase: Phase = .idle
     @Published var gauges: [UsageGauge] = []
     @Published var observations: [UsageObservation] = []
+    @Published var panelHeight: CGFloat = 420
+
+    func updateHeight(from snapshot: UsageSnapshot) {
+        panelHeight = GaugeBuilder.panelHeight(for: GaugeBuilder.sections(from: snapshot))
+    }
 
     private let ccsPath: String
     private let pollInterval: TimeInterval
@@ -48,6 +53,7 @@ final class UsageStore: ObservableObject {
                 await MainActor.run {
                     self.gauges = built
                     self.observations = snapshot.observations
+                    self.updateHeight(from: snapshot)
                     self.phase = .loaded(snapshot.generatedAt ?? Date())
                 }
             } catch {
@@ -59,5 +65,7 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    var tightest: UsageGauge? { GaugeBuilder.tightest(gauges) }
+    var overallRemaining: Double? {
+        GaugeBuilder.overallUsedFraction(gauges).map { 1 - $0 }
+    }
 }

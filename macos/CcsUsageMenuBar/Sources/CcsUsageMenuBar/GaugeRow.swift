@@ -45,9 +45,15 @@ struct GaugeRow: View {
                 .font(.system(size: 9.5))
                 .foregroundStyle(.tertiary)
             } else if let balance = gauge.remaining {
-                Text("balance \(format(balance))")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
+                HStack {
+                    Text("balance \(format(balance))")
+                    if let resets = gauge.resetsAt {
+                        Text(resetText(resets, now: now))
+                    }
+                    Spacer()
+                }
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, 2)
