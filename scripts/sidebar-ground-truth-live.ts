@@ -95,7 +95,9 @@ export interface MirrorRow {
   sessionId: string;
   title: string | null;
   surfaceId: string | null;
-  /** The workspace's own name as cmux displays it on the tab. */
+  /** The tab's own name (the surface title cmux shows on the pane). */
+  surfaceTitle: string | null;
+  /** The workspace's name as cmux displays it on the tab bar. */
   workspaceTitle: string | null;
   workspaceRef: string | null;
   trackedLifecycle: string | null;
@@ -131,6 +133,7 @@ function buildMirror(
       sessionId,
       title: titlesBySession.get(sessionId) ?? null,
       surfaceId,
+      surfaceTitle: surface?.title ?? null,
       workspaceTitle: surface?.workspaceTitle ?? null,
       workspaceRef: surface?.workspaceRef ?? null,
       trackedLifecycle: entry.agentLifecycle ?? null,
@@ -347,6 +350,8 @@ const HTML = `<!DOCTYPE html>
   .cell-yes{color:var(--ok)} .cell-no{color:var(--bad)} .cell-na{color:var(--dim)}
   .row-bad td{background:rgba(229,83,75,.06)}
   .title{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .name{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+  .k{display:inline-block;min-width:44px;color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
   .sid{color:var(--dim);font-family:var(--mono);font-size:10.5px}
   .pillchip{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid var(--line);background:var(--line);white-space:nowrap}
   footer{margin-top:30px;color:var(--dim);font-size:12.5px;border-top:1px solid var(--line);padding-top:14px;line-height:1.8}
@@ -403,7 +408,9 @@ function render(d){
   for(const r of d.mirror.live){
     const bad=(r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent";
     const tr=document.createElement("tr");if(bad)tr.className="row-bad";
-    tr.innerHTML='<td><div class="title">'+esc(r.workspaceTitle||r.title||"(unnamed workspace)")+'</div><span class="sid">'+esc(r.title?r.title+" · ":"")+r.sessionId.slice(0,8)+" · "+esc(r.workspaceRef||"")+'</span></td>'+
+    tr.innerHTML='<td><div class="name"><span class="k">tab</span> '+esc(r.surfaceTitle||"(unnamed)")+'</div>'+
+      '<div class="name"><span class="k">ws</span> '+esc(r.workspaceTitle||"—")+'</div>'+
+      '<div class="sid"><span class="k">session</span> '+esc(r.title||"(untitled)")+" · "+r.sessionId.slice(0,8)+" · "+esc(r.workspaceRef||"")+"</div></td>"+
       '<td>'+yn(true)+'</td>'+
       '<td class="v"><span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span></td>'+
       '<td class="v">'+esc(r.derivedLabel??r.trackedLifecycle??"—")+'</td>'+
