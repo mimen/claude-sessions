@@ -128,6 +128,21 @@ test("sourceClassFor maps codexbar entry sources to evidence classes", async () 
   expect(sourceClassFor(undefined)).toBe("official_cli");
 });
 
+test("product breakdown rows show percentages without duplicate bars or reset countdowns", () => {
+  const reset = "2026-08-27T04:05:01Z";
+  const out = renderSnapshot(snap({
+    observations: [
+      obs({ provider: "grok", entitlement: "grok-super-grok-plus:a@b.c", used: 9, resetsAt: reset }),
+      obs({ provider: "grok", entitlement: "grok-super-grok-plus:a@b.c#build", used: 9, resetsAt: reset }),
+      obs({ provider: "grok", entitlement: "grok-super-grok-plus:a@b.c#chat", used: 0, resetsAt: reset }),
+    ],
+  }));
+  expect(out).toContain("Grok Build");
+  expect(out).toContain("Grok Chat");
+  expect(out.split("█").length - 1).toBe(1); // only the shared weekly pool has a bar
+  expect(out.split("in ").length - 1).toBe(1); // one shared reset countdown
+});
+
 test("render labels Spark, DIEM, and multi-account groups distinctly", () => {
   const out = renderSnapshot(snap({
     observations: [
