@@ -13,7 +13,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseTree, type SurfaceLocation } from "../src/cmux/bridge.ts";
 import { parseClaudeStatus, statusFromAgentLifecycle } from "../src/sidebar/status.ts";
-import { readIndexReadOnly, type IndexedSessionInput } from "../src/sidebar/index-read.ts";
+import { readIndexReadOnly } from "../src/sidebar/index-read.ts";
+import type { IndexedSessionInput } from "../src/sidebar/projection.ts";
 
 export const CLAUDE_STORE =
   process.env.CLAUDE_STORE_PATH ?? join(homedir(), ".claude", "projects");

@@ -122,7 +122,7 @@ await timed(timings, "transcript-facts-index-read", async () => {
 });
 findings.push(...auditTranscriptRows(indexRows));
 
-findings.push(catalogueOrphans());
+findings.push(...catalogueOrphans());
 
 await timed(timings, "coverage", async () => {
   const { ids, error } = indexIdSet();

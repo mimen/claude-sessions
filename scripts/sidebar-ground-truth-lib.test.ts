@@ -9,8 +9,8 @@ import {
   RECENT_WINDOW_MS,
   REINDEX_GRACE_MS,
   transcriptState,
-  type IndexedSessionInput,
 } from "./sidebar-ground-truth-lib.ts";
+import type { IndexedSessionInput } from "../src/sidebar/projection.ts";
 
 const roots: string[] = [];
 afterAll(() => {
