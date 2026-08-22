@@ -42,11 +42,12 @@ test("shortReset renders a human date and falls back to the raw string", () => {
   expect(shortReset("not-a-date")).toBe("not-a-date");
 });
 
-test("render groups by platform+account with attention groups first", () => {
+test("row order is semantic and never changes with utilization", () => {
   const out = renderSnapshot(snap({
     observations: [
-      obs({ used: 10 }), // healthy codex weekly
-      obs({ used: 99, window: "five_hour" }), // exhausted
+      obs({ used: 10, window: "weekly" }),
+      obs({ used: 99, window: "five_hour" }),
+      obs({ entitlement: "codex-pro#Fable", used: 96, window: "weekly" }),
       obs({
         provider: "codex", entitlement: "codex-reset-credit", metric: "reset_credit",
         used: null, limit: null, remaining: 1, expiresAt: "2026-09-20T23:56:16Z", exact: true,
@@ -54,13 +55,24 @@ test("render groups by platform+account with attention groups first", () => {
     ],
   }));
   const lines = out.split("\n");
-  expect(lines[0]).toBe("Codex"); // attention group first (no account suffix in fixture)
-  const exhaustedIdx = lines.findIndex((l) => l.includes("99%"));
+  const fiveHourIdx = lines.findIndex((l) => l.includes("five-hour"));
+  const weeklyIdx = lines.findIndex((l) => l.includes("weekly"));
+  const fableIdx = lines.findIndex((l) => l.includes("Fable"));
   const resetIdx = lines.findIndex((l) => l.includes("banked reset"));
-  const healthyIdx = lines.findIndex((l) => l.includes("10%"));
-  expect(exhaustedIdx).toBeGreaterThan(0);
-  expect(resetIdx).toBeGreaterThan(exhaustedIdx); // expiring after running-out within group
-  expect(healthyIdx).toBeGreaterThan(resetIdx);
+  expect(fiveHourIdx).toBeGreaterThan(0);
+  expect(weeklyIdx).toBeGreaterThan(fiveHourIdx);
+  expect(fableIdx).toBeGreaterThan(weeklyIdx);
+  expect(resetIdx).toBeGreaterThan(fableIdx);
+});
+
+test("Claude accounts preserve source order regardless of usage", () => {
+  const out = renderSnapshot(snap({
+    observations: [
+      obs({ provider: "anthropic", entitlement: "claude-max:personal@example.com", used: 5 }),
+      obs({ provider: "anthropic", entitlement: "claude-max:work@example.com", used: 99 }),
+    ],
+  }));
+  expect(out.indexOf("personal@example.com")).toBeLessThan(out.indexOf("work@example.com"));
 });
 
 test("bars align: every bar row shares the same bar column offset", () => {
