@@ -10,8 +10,8 @@ import {
   DEFAULT_SIDEBAR_PORT,
   isLoopbackSidebarHost,
 } from "./server.ts";
+import { startSidebarChangeMonitor } from "./change-monitor.ts";
 import { createSidebarSource } from "./snapshot.ts";
-import { subscribeToCmuxEvents } from "../cmux/events.ts";
 
 const HELP = `ccs sidebar — the productivity sidebar's local web host
 
@@ -26,6 +26,18 @@ Security:
 function flagValue(args: readonly string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
   return index >= 0 ? args[index + 1] : undefined;
+}
+
+function waitForTermination(): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = (): void => {
+      process.off("SIGINT", finish);
+      process.off("SIGTERM", finish);
+      resolve();
+    };
+    process.once("SIGINT", finish);
+    process.once("SIGTERM", finish);
+  });
 }
 
 function resolvePort(args: readonly string[]): number | { error: string } {
@@ -81,23 +93,27 @@ export async function sidebarCommand(args: readonly string[]): Promise<number> {
 
   try {
     const source = createSidebarSource();
-    // Only the long-lived server follows cmux. A source built for a one-shot command has no use
-    // for a subscription that outlives the answer, and would leave a child process behind.
-    subscribeToCmuxEvents({ onChange: (scopes) => source.invalidate?.(scopes) });
     const server = createSidebarServer({
       source,
       assets: assets.value,
       port,
       hostname: host,
     });
-    console.log(`ccs sidebar listening on ${server.url.href}`);
+    // Only the resident server observes change. One-shot sources remain free of child processes,
+    // timers and database probes that would outlive their answer.
+    const changes = startSidebarChangeMonitor({ source });
+    try {
+      console.log(`ccs sidebar listening on ${server.url.href}`);
+      // Serve until interrupted, then release the cmux child, timer, database handles and socket.
+      await waitForTermination();
+    } finally {
+      changes.stop();
+      server.stop(true);
+    }
+    return 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`could not listen on ${host}:${port} — ${message}`);
+    console.error(`could not start sidebar on ${host}:${port} — ${message}`);
     return 1;
   }
-
-  // Serve until interrupted; Bun keeps the process alive while the server is listening.
-  await new Promise<void>(() => {});
-  return 0;
 }

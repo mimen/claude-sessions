@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, renameSync, rmSync } from "node:fs";
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSidebarReadCache } from "./read-cache.ts";
@@ -163,6 +163,106 @@ describe("SidebarReadCache", () => {
       cache.readCatalogue();
       cache.readIndex({ limit: 20 });
       expect(cache.revision()).toEqual(changed);
+      cache.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reconciles external commits without loading derived facts", () => {
+    const root = mkdtempSync(join(tmpdir(), "sidebar-read-cache-"));
+    try {
+      const paths = createDatabases(root);
+      const cache = createSidebarReadCache(paths.cataloguePath, paths.indexPath);
+      expect(cache.reconcile()).toBe(false);
+      const before = cache.revision();
+
+      const catalogueWriter = new Database(paths.cataloguePath);
+      catalogueWriter.query("UPDATE catalogue SET custom_title = 'After'").run();
+      catalogueWriter.close();
+      const indexWriter = new Database(paths.indexPath);
+      indexWriter.query("UPDATE sessions SET native_title = 'After'").run();
+      indexWriter.close();
+
+      expect(cache.reconcile()).toBe(true);
+      expect(cache.revision()).toEqual({
+        catalogue: before.catalogue + 1,
+        index: before.index + 1,
+      });
+      expect(cache.reconcile()).toBe(false);
+      expect(catalogueTitle(cache)).toBe("After");
+      expect(cache.readIndex({ limit: 20 })[0]?.title).toBe("After");
+      cache.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("the first reconcile reports a commit that landed after a request opened the reader", () => {
+    const root = mkdtempSync(join(tmpdir(), "sidebar-read-cache-"));
+    try {
+      const paths = createDatabases(root);
+      const cache = createSidebarReadCache(paths.cataloguePath, paths.indexPath);
+      expect(cache.readCatalogue().status).toBe("ok");
+
+      const writer = new Database(paths.cataloguePath);
+      writer.query("UPDATE catalogue SET custom_title = 'After'").run();
+      writer.close();
+
+      expect(cache.reconcile()).toBe(true);
+      expect(cache.reconcile()).toBe(false);
+      expect(catalogueTitle(cache)).toBe("After");
+      cache.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reconciliation reports disappearance and replacement once", () => {
+    const root = mkdtempSync(join(tmpdir(), "sidebar-read-cache-"));
+    try {
+      const paths = createDatabases(root);
+      const cache = createSidebarReadCache(paths.cataloguePath, paths.indexPath);
+      expect(cache.reconcile()).toBe(false);
+
+      rmSync(paths.cataloguePath);
+      rmSync(paths.indexPath);
+      expect(cache.reconcile()).toBe(true);
+      expect(cache.reconcile()).toBe(false);
+
+      createCatalogue(paths.cataloguePath, "Reappeared");
+      createIndex(paths.indexPath, "Reappeared");
+      expect(cache.reconcile()).toBe(true);
+      expect(cache.reconcile()).toBe(false);
+      expect(catalogueTitle(cache)).toBe("Reappeared");
+      expect(cache.readIndex({ limit: 20 })[0]?.title).toBe("Reappeared");
+      cache.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reconciliation contains an unreadable replacement and recovers", () => {
+    const root = mkdtempSync(join(tmpdir(), "sidebar-read-cache-"));
+    try {
+      const paths = createDatabases(root);
+      const errors: string[] = [];
+      const cache = createSidebarReadCache(paths.cataloguePath, paths.indexPath, {
+        onReconcileError: (source, error) => errors.push(`${source}: ${error.message}`),
+      });
+      expect(cache.reconcile()).toBe(false);
+
+      rmSync(paths.cataloguePath);
+      writeFileSync(paths.cataloguePath, "not a sqlite database");
+      expect(cache.reconcile()).toBe(true);
+      expect(cache.reconcile()).toBe(false);
+      expect(errors).toHaveLength(1);
+
+      rmSync(paths.cataloguePath);
+      createCatalogue(paths.cataloguePath, "Recovered");
+      expect(cache.reconcile()).toBe(true);
+      expect(cache.reconcile()).toBe(false);
+      expect(catalogueTitle(cache)).toBe("Recovered");
       cache.close();
     } finally {
       rmSync(root, { recursive: true, force: true });

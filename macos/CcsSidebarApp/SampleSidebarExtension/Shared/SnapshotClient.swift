@@ -18,6 +18,8 @@ import Observation
 @Observable
 @MainActor
 public final class SnapshotClient {
+    typealias SnapshotDataLoader = @Sendable (URLRequest) async throws -> Data
+
     public private(set) var rows: [SidebarRow] = []
     public private(set) var lastError: String?
     public private(set) var livenessReadable = true
@@ -34,7 +36,7 @@ public final class SnapshotClient {
             // start — otherwise an old-scope response landing in that window paints the previous
             // scope's rows under the new header.
             refreshGeneration += 1
-            Task { await refresh(freshLiveness: true) }
+            Task { await refreshPending(freshLiveness: true) }
         }
     }
 
@@ -45,7 +47,7 @@ public final class SnapshotClient {
         didSet {
             guard searchIncludesFinished != oldValue else { return }
             refreshGeneration += 1
-            Task { await refresh() }
+            Task { await refreshPending() }
         }
     }
 
@@ -56,25 +58,48 @@ public final class SnapshotClient {
     private let limit: Int
     private let interval: Duration
     private let backstopInterval: Duration
+    private let snapshotData: SnapshotDataLoader
     private var pollTask: Task<Void, Never>?
     private var changeTask: Task<Void, Never>?
-    /// The last revision the server reported, so a reconnection can tell whether it slept through one.
+    /// The newest revision whose snapshot was successfully applied.
     private var lastRevision: Int?
+    /// A reported revision still waiting for bytes built from at least that revision.
+    private var pendingRevision: Int?
     /// Issue number of the newest refresh. URLSession answers in whatever order the network allows,
     /// so without this a slow older response can land after a faster newer one and put rows that
     /// were already replaced back on screen — stale highlights that stay until the next poll.
     private var refreshGeneration = 0
 
-    public init(
+    public convenience init(
         port: Int = SidebarServer.defaultPort,
         limit: Int = 2_000,
         interval: Duration = .seconds(1),
         backstopInterval: Duration = .seconds(5)
     ) {
+        self.init(
+            port: port,
+            limit: limit,
+            interval: interval,
+            backstopInterval: backstopInterval,
+            snapshotData: { request in
+                let (data, _) = try await URLSession.shared.data(for: request)
+                return data
+            }
+        )
+    }
+
+    init(
+        port: Int,
+        limit: Int = 2_000,
+        interval: Duration = .seconds(1),
+        backstopInterval: Duration = .seconds(5),
+        snapshotData: @escaping SnapshotDataLoader
+    ) {
         self.port = port
         self.limit = limit
         self.interval = interval
         self.backstopInterval = backstopInterval
+        self.snapshotData = snapshotData
     }
 
     /// Closed scopes need their rows requested explicitly; the server only projects a section it
@@ -91,7 +116,7 @@ public final class SnapshotClient {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refresh()
+                await self?.refreshPending()
                 let wait = self?.pollWait ?? .seconds(1)
                 try? await Task.sleep(for: wait)
             }
@@ -143,13 +168,7 @@ public final class SnapshotClient {
                 for try await line in bytes.lines {
                     if Task.isCancelled { break }
                     guard let revision = Self.revision(inFrame: line) else { continue }
-                    guard revision != lastRevision else { continue }
-                    let slept = lastRevision != nil
-                    lastRevision = revision
-                    // The opening frame only establishes where we are; the poll's own first fetch
-                    // has already asked. A later one means something actually moved -- or, after a
-                    // reconnection, that something moved while we were not listening.
-                    if slept { await refresh() }
+                    await receiveRevision(revision)
                 }
             } catch {
                 // Not shown to the reader: losing the stream costs responsiveness, not
@@ -168,6 +187,7 @@ public final class SnapshotClient {
     private static let reconnectDelays: [Duration] = [
         .milliseconds(250), .seconds(1), .seconds(2), .seconds(5),
     ]
+    private static let snapshotTimeout: TimeInterval = 5
 
     /// Pull the revision out of one SSE frame, ignoring heartbeats and anything unrecognised.
     ///
@@ -183,37 +203,79 @@ public final class SnapshotClient {
         return revision
     }
 
+    func receiveRevision(_ revision: Int) async {
+        guard revision != lastRevision, revision != pendingRevision else { return }
+        // The frame names the minimum revision the next accepted snapshot must contain. Even the
+        // opening frame is fetched: it may race start()'s poll, and only the stamped response proves
+        // which answer describes the current world.
+        pendingRevision = revision
+        await refreshPending()
+    }
+
     /// Fetch immediately, telling the server not to answer from its caches.
     ///
     /// Called after an action, because the state it changed lives behind two 2.5-second caches —
     /// the serialized snapshot and the cmux liveness read. Waiting them out is what made closing
     /// or switching a session take seconds to appear when the action itself was instant.
     public func refreshNow() async {
-        await refresh(freshLiveness: true)
+        await refreshPending(freshLiveness: true)
     }
 
-    private func refresh(freshLiveness: Bool = false) async {
-        refreshGeneration += 1
-        let generation = refreshGeneration
-        do {
-            var request = URLRequest(url: endpoint)
-            // The server drops this query's cached representation and re-reads liveness rather
-            // than serving the previous projection.
-            if freshLiveness { request.setValue("1", forHTTPHeaderField: "x-ccs-refresh-liveness") }
-            let (data, _) = try await URLSession.shared.data(for: request)
-            // A newer refresh was issued while this one was on the wire; its answer is the past.
-            guard generation == refreshGeneration else { return }
-            let snapshot = try JSONDecoder().decode(SidebarSnapshot.self, from: data)
-            rows = snapshot.rows
-            counts = snapshot.lifecycleCounts ?? [:]
-            truncated = snapshot.hasMoreRows ?? false
-            livenessReadable = snapshot.livenessReadable
-            serverVersion = snapshot.serverVersion
-            lastError = nil
-        } catch {
-            guard generation == refreshGeneration else { return }
-            // Retained on purpose: the rows already on screen stay true until contradicted.
-            lastError = error.localizedDescription
+    @discardableResult
+    func refreshPending(freshLiveness: Bool = false) async -> Bool {
+        let targetRevision = pendingRevision
+        let applied = await refresh(
+            freshLiveness: freshLiveness,
+            minimumRevision: targetRevision
+        )
+        if applied, pendingRevision == targetRevision {
+            lastRevision = targetRevision ?? lastRevision
+            pendingRevision = nil
         }
+        return applied
+    }
+
+    private func refresh(
+        freshLiveness: Bool = false,
+        minimumRevision: Int? = nil
+    ) async -> Bool {
+        for attempt in 0..<2 {
+            refreshGeneration += 1
+            let generation = refreshGeneration
+            do {
+                var request = URLRequest(url: endpoint)
+                // A wedged request must release the poll loop on its own; reopening the extension is
+                // not a recovery mechanism. The event stream remains independent and long-lived.
+                request.timeoutInterval = Self.snapshotTimeout
+                // The server drops this query's cached representation and re-reads liveness rather
+                // than serving the previous projection.
+                if freshLiveness {
+                    request.setValue("1", forHTTPHeaderField: "x-ccs-refresh-liveness")
+                }
+                let data = try await snapshotData(request)
+                // A newer refresh was issued while this one was on the wire; its answer is the past.
+                guard generation == refreshGeneration else { return false }
+                let snapshot = try JSONDecoder().decode(SidebarSnapshot.self, from: data)
+                if let minimumRevision,
+                   let snapshotRevision = snapshot.snapshotRevision,
+                   snapshotRevision < minimumRevision {
+                    if attempt == 0 { continue }
+                    return false
+                }
+                rows = snapshot.rows
+                counts = snapshot.lifecycleCounts ?? [:]
+                truncated = snapshot.hasMoreRows ?? false
+                livenessReadable = snapshot.livenessReadable
+                serverVersion = snapshot.serverVersion
+                lastError = nil
+                return true
+            } catch {
+                guard generation == refreshGeneration else { return false }
+                // Retained on purpose: the rows already on screen stay true until contradicted.
+                lastError = error.localizedDescription
+                return false
+            }
+        }
+        return false
     }
 }

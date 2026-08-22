@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { startSidebarChangeMonitor } from "./change-monitor.ts";
 import { createSidebarServer, isLoopbackSidebarHost } from "./server.ts";
 import { refusalMessage, sidebarHttpError, type SidebarHttpErrorCode } from "./http-error.ts";
 import { createSidebarSource } from "./snapshot.ts";
@@ -241,7 +242,11 @@ describe("sidebar server", () => {
 
     expect(response.status).toBe(200);
     // The transport stamps which release is answering; a repo checkout stamps "dev".
-    expect(await response.json()).toEqual({ ...EMPTY_SNAPSHOT, serverVersion: "dev" });
+    expect(await response.json()).toEqual({
+      ...EMPTY_SNAPSHOT,
+      serverVersion: "dev",
+      snapshotRevision: 0,
+    });
     expect(app.snapshotScopes).toEqual(["active"]);
   });
 
@@ -1273,15 +1278,22 @@ describe("sidebar change stream", () => {
   function changeableSource(): {
     readonly source: SidebarSource;
     readonly bump: () => void;
+    readonly replaceDurably: (snapshot: SidebarSnapshot) => void;
     readonly snapshots: () => number;
   } {
     const listeners = new Set<(revision: number) => void>();
     let revision = 0;
     let snapshots = 0;
+    let currentSnapshot = EMPTY_SNAPSHOT;
+    let durableChanged = false;
+    const notify = (): void => {
+      revision += 1;
+      for (const listener of listeners) listener(revision);
+    };
     const source: SidebarSource = {
       snapshot: async () => {
         snapshots += 1;
-        return EMPTY_SNAPSHOT;
+        return currentSnapshot;
       },
       declineSuggestion: async () => ({ status: "ok" as const }),
       setIncognito: async (_sessionId: string, incognito: boolean) =>
@@ -1297,6 +1309,11 @@ describe("sidebar change stream", () => {
         ({ status: "ok", lifecycle: "completed" }),
       retire: async (): Promise<SessionLifecycleOutcome> => ({ status: "ok", lifecycle: "completed" }),
       faviconFor: () => null,
+      reconcileDurableState: () => {
+        if (!durableChanged) return;
+        durableChanged = false;
+        notify();
+      },
       revision: () => revision,
       onRevision: (listener) => {
         listeners.add(listener);
@@ -1306,9 +1323,10 @@ describe("sidebar change stream", () => {
     return {
       source,
       snapshots: () => snapshots,
-      bump: () => {
-        revision += 1;
-        for (const listener of listeners) listener(revision);
+      bump: notify,
+      replaceDurably: (snapshot) => {
+        currentSnapshot = snapshot;
+        durableChanged = true;
       },
     };
   }
@@ -1363,6 +1381,50 @@ describe("sidebar change stream", () => {
     bump();
 
     expect((await collected)[1]).toBe('data: {"revision":1}');
+  });
+
+  test("an already-connected client sees a durable change without reopening", async () => {
+    const { source, replaceDurably } = changeableSource();
+    let reconcile: (() => void) | undefined;
+    const monitor = startSidebarChangeMonitor({
+      source,
+      subscribe: () => ({ stop: () => {} }),
+      scheduleEvery: (callback) => {
+        reconcile = callback;
+        return { stop: () => {} };
+      },
+    });
+    const server = createSidebarServer({
+      source,
+      assets: ASSETS,
+      port: 0,
+      changeAnnounceDelayMs: 1,
+      snapshotRepresentationTtlMs: 60_000,
+    });
+    running.push(server);
+
+    const first = await fetch(`${server.url.origin}/api/snapshot`);
+    const etag = first.headers.get("etag") ?? "";
+    await first.arrayBuffer();
+    const changes = await fetch(`${server.url.origin}/api/events`);
+    const announced = frames(changes, (seen) => seen.length >= 2);
+
+    replaceDurably({
+      ...EMPTY_SNAPSHOT,
+      lifecycleCounts: { ...EMPTY_SNAPSHOT.lifecycleCounts, active: 1 },
+    });
+    reconcile?.();
+    expect((await announced)[1]).toBe('data: {"revision":1}');
+
+    const changed = await fetch(`${server.url.origin}/api/snapshot`, {
+      headers: { "if-none-match": etag },
+    });
+    expect(changed.status).toBe(200);
+    expect(await changed.json()).toMatchObject({
+      lifecycleCounts: { active: 1 },
+      snapshotRevision: 1,
+    });
+    monitor.stop();
   });
 
   test("collapses a burst into one announcement", async () => {

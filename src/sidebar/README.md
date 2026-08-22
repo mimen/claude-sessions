@@ -125,7 +125,8 @@ Three endpoints, and nothing else:
 | `projection.ts` | Pure projection: sections, row anatomy, model identity, name cleaning. No I/O. |
 | `catalogue-read.ts` | Query-only catalogue adapter. Opens SQLite readonly and preserves the catalogue hydration contract needed by snapshots. |
 | `index-read.ts` | Query-only transcript-index adapter. |
-| `read-cache.ts` / `warm-cache.ts` | Reuse readonly handles and the latest complete snapshot without placing writers in request code. |
+| `read-cache.ts` / `warm-cache.ts` | Reuse readonly handles and the latest complete snapshot without placing writers in request code. The read cache also performs header-only SQLite commit reconciliation. |
+| `change-monitor.ts` | One resident observation lifecycle: cmux invalidations plus one-second durable commit probes feed the source's monotonic revision. |
 | `status.ts` | Parsing and bounded reading of cmux's `claude_code` status. |
 | `worktree.ts` | Resolving a directory to its project and, if linked, its worktree. |
 | `favicon.ts` | Finding a project's icon in conventional locations. |
@@ -142,18 +143,19 @@ catalogue mutation SQL. `catalogue/mutation-boundary.test.ts` enforces this.
 
 ## Limits
 
-The page polls every four seconds. The server keeps at most 16 exact-query serialized snapshots and four
-MiB of their bodies for 2.5 seconds: warm polls compare the cached exact-byte ETag without rebuilding, and
-stale polls serve the last complete representation while one background rebuild runs. A successful action
-invalidates all representations; a bridge-style forced liveness load invalidates only its exact query, so
-that request waits for a fresh build without discarding other views.
+Both clients follow `/api/events`. The web client keeps a one-second poll; the native client polls every
+second while disconnected and every five seconds while the stream is healthy. The server keeps at most 16
+exact-query serialized snapshots and four MiB of their bodies for 2.5 seconds: warm polls compare the cached
+exact-byte ETag without rebuilding, and stale polls serve the last complete representation while one
+background rebuild runs.
 
-Server-sent events remain unjustified by the measured transport rather than by synthetic timing alone. Live
-soaks distinguish unchanged polls as zero-body `304` responses and actual changes as `200` responses carrying
-new representation bytes. The serialized cache removes repeat build work from the unchanged path; a push
-connection would still need the same source observation to discover changes while adding reconnect and
-connection-lifecycle machinery. The UI therefore shows the last complete snapshot and labels unreadable
-sources rather than implying freshness it does not have.
+`change-monitor.ts` is the single observation seam. cmux frames invalidate short-horizon readers immediately;
+a one-second header-only probe observes catalogue/index commits made by other CCS processes. Either moves the
+same monotonic source revision, invalidates every serialized query before announcement, and wakes both clients.
+Each response is stamped with the revision captured before its build. The native client rejects and retries
+bytes older than the revision it already heard, keeps failed revisions pending for the backstop poll, and
+bounds a wedged snapshot request to five seconds. A successful action still has a forced-liveness path for the
+read-after-write case. Unreadable sources remain labelled rather than being presented as fresh.
 
 This is separate from the interpreted Swift sidebar in `integrations/cmux/`, which remains the
 compact left-sidebar navigator.

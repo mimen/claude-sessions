@@ -237,6 +237,8 @@ export interface SidebarSource {
    * beside a ten-second-old workspace state and draw a row that contradicts itself.
    */
   invalidate?(scopes: Iterable<CmuxChangeScope>): void;
+  /** Detect durable catalogue/index commits without rebuilding a snapshot. */
+  reconcileDurableState?(): void;
   /**
    * How many times anything the snapshot draws from has been declared out of date.
    *
@@ -246,6 +248,8 @@ export interface SidebarSource {
   revision?(): number;
   /** Called when the revision moves. Returns the unsubscribe. */
   onRevision?(listener: (revision: number) => void): () => void;
+  /** Close the resident source's current read handles during teardown. */
+  close?(): void;
   /** The identity/liveness authority, exposed for the debug endpoint's introspection. */
   ledger?: LivenessLedger;
   /** Record that the reader refused a verdict, so the same one stops being offered. */
@@ -623,7 +627,12 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const ensureDataDirectory = options.ensureDataDir ?? ensureDataDir;
   const readCache = options.readCache
     ?? (options.readCatalogue === undefined && options.readIndex === undefined
-      ? createSidebarReadCache(cataloguePath, indexPath)
+      ? createSidebarReadCache(cataloguePath, indexPath, {
+        onReconcileError: (source, error) => (options.logger ?? log).warn(
+          "sidebar durable-state source became unreadable",
+          { source, error: error.message },
+        ),
+      })
       : null);
   const lifecycleCommand = options.lifecycleCommand ?? setExistingSessionLifecycle;
   const declineCommand = options.declineCommand ?? declineExistingSessionRecommendation;
@@ -1177,6 +1186,10 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       if (touched) bumpRevision();
     },
 
+    reconcileDurableState(): void {
+      if (readCache?.reconcile()) bumpRevision();
+    },
+
     revision(): number {
       return revision;
     },
@@ -1186,6 +1199,11 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       return () => {
         revisionListeners.delete(listener);
       };
+    },
+
+    close(): void {
+      readCache?.close();
+      revisionListeners.clear();
     },
 
     ledger,

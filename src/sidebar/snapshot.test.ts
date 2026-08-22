@@ -16,6 +16,7 @@ import type {
 } from "./projection.ts";
 import type { StoredEnrichment } from "../catalogue/enrichment.ts";
 import type { CatalogueReadOutcome, CatalogueSnapshotFacts } from "./catalogue-read.ts";
+import type { SidebarReadCache } from "./read-cache.ts";
 import { createSidebarSource, type SidebarSourceOptions } from "./snapshot.ts";
 import type { CmuxStatusRead } from "./status.ts";
 
@@ -1443,6 +1444,34 @@ describe("createSidebarSource invalidation", () => {
 
     source.invalidate?.(["workspaceState", "notifications"]);
     expect(counts).toEqual({ status: 1, workspaceState: 1, notifications: 1 });
+  });
+
+  test("a durable commit moves the same revision exactly once", () => {
+    let durableChanged = false;
+    const readCache: SidebarReadCache = {
+      readCatalogue: () => catalogueRead([]),
+      readIndex: () => [],
+      reconcile: () => {
+        const changed = durableChanged;
+        durableChanged = false;
+        return changed;
+      },
+      revision: () => ({ catalogue: 0, index: 0 }),
+      invalidate: () => {},
+      close: () => {},
+    };
+    const source = createSidebarSource(sourceOptions({ readCache }));
+    const start = source.revision?.() ?? 0;
+
+    source.reconcileDurableState?.();
+    expect(source.revision?.()).toBe(start);
+
+    durableChanged = true;
+    source.reconcileDurableState?.();
+    expect(source.revision?.()).toBe(start + 1);
+
+    source.reconcileDurableState?.();
+    expect(source.revision?.()).toBe(start + 1);
   });
 
   test("the revision moves once per change, so a client can tell whether to refetch", () => {

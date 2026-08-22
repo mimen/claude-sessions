@@ -594,13 +594,16 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
       // A holder rather than a bare `let`: control-flow analysis cannot see the callback run,
       // so a plain variable narrows to `never` at the read and would need a cast to recover.
       const measured: { value: SidebarSnapshotMeasurement | null } = { value: null };
+      // Captured before the build: if a source changes while this request is in flight, the client can
+      // see that these bytes predate the revision it already heard and immediately ask again.
+      const snapshotRevision = source.revision?.() ?? 0;
       const snapshot = await source.snapshot(query.scope, query.limit, query.include, (seen) => {
         measured.value = seen;
       });
       const serializationStartedAt = performance.now();
       // Stamped at the transport rather than in the projection: which build is answering is a
       // deployment fact, and the client shows it so a stale process is visible at a glance.
-      const body = JSON.stringify({ ...snapshot, serverVersion: SERVER_VERSION });
+      const body = JSON.stringify({ ...snapshot, serverVersion: SERVER_VERSION, snapshotRevision });
       const serializationMs = performance.now() - serializationStartedAt;
       const byteLength = Buffer.byteLength(body);
       const representation = {

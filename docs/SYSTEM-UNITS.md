@@ -205,6 +205,16 @@ Ground truth: extracted from `src/` on 2026-07-11. `⚠` marks a known issue.
 - **Composes:** S10 (bridge), S15 (cmux-paint config), S16 (render ops).
 - **Code:** `catalogue/sync-tabs.ts`.
 
+### S17b · sidebar change monitor + snapshot transport
+- **Definition:** one resident observation lifecycle combines cmux invalidations with header-only catalogue/index
+  commit reconciliation into a monotonic sidebar revision. Every revision invalidates serialized query variants
+  before SSE announces it; snapshots carry the revision captured before their build.
+- **Inputs:** cmux event scopes, SQLite file identity + `PRAGMA data_version`, snapshot queries.
+- **Outputs:** source revisions, SSE frames, revision-stamped snapshot bytes.
+- **Composes:** S6 (catalogue), S7 (index), S10 (liveness bridge), S17 (the state the sidebar presents).
+- **Code:** `sidebar/change-monitor.ts`, `sidebar/read-cache.ts`, `sidebar/snapshot.ts`, `sidebar/server.ts`,
+  `macos/CcsSidebarApp/SampleSidebarExtension/Shared/SnapshotClient.swift`.
+
 ### S18 · selector resolution  ·  [U17, P2]
 - **Definition:** resolve a **selector** token to **sessionId**s — infer its axis (id / `#pr` / `W-id` /
   **grouping** / **role** / **cluster**) or take an explicit pin, deterministically ordered.

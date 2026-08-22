@@ -13,6 +13,8 @@ import type { IndexedSessionInput } from "./projection.ts";
 
 interface DurableReader<T> {
   read(key: string, load: (db: Database) => T): T;
+  /** Observe only file identity and SQLite commit metadata. */
+  reconcile(): boolean;
   revision(): number;
   close(): void;
 }
@@ -53,6 +55,8 @@ function dataVersion(db: Database): number {
  * an atomic rename that replaced the path with a different database. Either change clears all
  * derived facts once, on the next read.
  */
+const MAX_OBSERVE_ATTEMPTS = 3;
+
 function durableReader<T>(
   path: string,
   cacheOptions: DurableReaderCacheOptions<T>,
@@ -85,7 +89,7 @@ function durableReader<T>(
   }
 
   function openConnection(): Database {
-    while (true) {
+    for (let attempt = 0; attempt < MAX_OBSERVE_ATTEMPTS; attempt += 1) {
       const beforeOpen = fileIdentity(path);
       const candidate = new Database(path, { readonly: true });
       try {
@@ -106,13 +110,14 @@ function durableReader<T>(
         throw error;
       }
     }
+    throw new Error(`sidebar database kept changing while opening: ${path}`);
   }
 
   function observe(): Database {
-    while (true) {
+    for (let attempt = 0; attempt < MAX_OBSERVE_ATTEMPTS; attempt += 1) {
       const current = db ?? openConnection();
       const identity = openedIdentity;
-      if (identity === null) continue;
+      if (identity === null) throw new Error(`sidebar database opened without an identity: ${path}`);
       try {
         const beforeVersion = fileIdentity(path);
         if (!sameFile(identity, beforeVersion)) {
@@ -136,6 +141,7 @@ function durableReader<T>(
         throw error;
       }
     }
+    throw new Error(`sidebar database kept changing while observing: ${path}`);
   }
 
   return {
@@ -169,6 +175,11 @@ function durableReader<T>(
       retainedBytes += valueBytes;
       return value;
     },
+    reconcile(): boolean {
+      const before = revisionNumber;
+      observe();
+      return revisionNumber !== before;
+    },
     revision: () => revisionNumber,
     close: closeConnection,
   };
@@ -182,6 +193,8 @@ export interface SidebarDurableRevision {
 export interface SidebarReadCache {
   readCatalogue(): CatalogueReadOutcome;
   readIndex(options: ReadIndexOptions): readonly IndexedSessionInput[];
+  /** Observe file identity and SQLite commit headers without loading derived facts. */
+  reconcile(): boolean;
   revision(): SidebarDurableRevision;
   invalidate(): void;
   close(): void;
@@ -192,6 +205,8 @@ export interface SidebarReadCacheOptions {
   readonly maxEntries?: number;
   /** Test seam; production matches the serialized response cache's four MiB bound. */
   readonly maxBytes?: number;
+  /** Called once when a durable source enters a new unreadable state. */
+  readonly onReconcileError?: (source: "catalogue" | "index", error: Error) => void;
 }
 
 const MAX_DERIVED_VALUES = 16;
@@ -259,6 +274,65 @@ export function createSidebarReadCache(
   };
   let catalogue = durableReader(cataloguePath, catalogueOptions);
   let index = durableReader(indexPath, indexOptions);
+  interface ReconcileState {
+    initialized: boolean;
+    exists: boolean;
+    readable: boolean;
+    error: string | null;
+  }
+  const catalogueState: ReconcileState = {
+    initialized: false,
+    exists: false,
+    readable: false,
+    error: null,
+  };
+  const indexState: ReconcileState = {
+    initialized: false,
+    exists: false,
+    readable: false,
+    error: null,
+  };
+
+  function reconcileReader<T>(
+    source: "catalogue" | "index",
+    path: string,
+    reader: DurableReader<T>,
+    state: ReconcileState,
+  ): boolean {
+    const present = existsSync(path);
+    const observedBefore = reader.revision() > 0;
+    let readable = false;
+    let commitChanged = false;
+    let nextError: Error | null = null;
+    if (present) {
+      try {
+        commitChanged = reader.reconcile();
+        readable = true;
+      } catch (error) {
+        reader.close();
+        nextError = error instanceof Error ? error : new Error(String(error));
+      }
+    } else {
+      reader.close();
+    }
+    if (nextError !== null && state.error !== nextError.message) {
+      options.onReconcileError?.(source, nextError);
+    }
+
+    if (!state.initialized) {
+      state.initialized = true;
+      state.exists = present;
+      state.readable = readable;
+      state.error = nextError?.message ?? null;
+      return observedBefore && commitChanged;
+    }
+
+    const changed = commitChanged || state.exists !== present || state.readable !== readable;
+    state.exists = present;
+    state.readable = readable;
+    state.error = nextError?.message ?? null;
+    return changed;
+  }
 
   return {
     readCatalogue(): CatalogueReadOutcome {
@@ -281,6 +355,16 @@ export function createSidebarReadCache(
         throw new Error("session index is missing");
       }
       return index.read(indexKey(options), (db) => readIndexDatabase(db, options));
+    },
+    reconcile(): boolean {
+      const catalogueChanged = reconcileReader(
+        "catalogue",
+        cataloguePath,
+        catalogue,
+        catalogueState,
+      );
+      const indexChanged = reconcileReader("index", indexPath, index, indexState);
+      return catalogueChanged || indexChanged;
     },
     revision(): SidebarDurableRevision {
       return { catalogue: catalogue.revision(), index: index.revision() };
