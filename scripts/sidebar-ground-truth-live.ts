@@ -317,15 +317,24 @@ async function sweepLoop(): Promise<void> {
  */
 let lastKickAt = 0;
 const KICK_MIN_INTERVAL_MS = 250;
+/** Telemetry: when the last liveness event landed and how long its mirror took to reflect. */
+let lastEventAt = 0;
+let lastEventMirrorMs: number | null = null;
 
 function startEventKicker(): void {
   subscribeToCmuxEvents({
     onChange(scopes) {
       if (!scopes.has("liveness")) return;
       const now = Date.now();
+      lastEventAt = now;
       if (now - lastKickAt < KICK_MIN_INTERVAL_MS || sweeping) return;
       lastKickAt = now;
-      void timedCycle(cycles % ACTIVITY_EVERY_N_CYCLES === 0).catch(() => {});
+      const started = Date.now();
+      void timedCycle(cycles % ACTIVITY_EVERY_N_CYCLES === 0)
+        .then(() => {
+          lastEventMirrorMs = Date.now() - started;
+        })
+        .catch(() => {});
     },
   });
 }
@@ -336,6 +345,8 @@ interface StatePayload {
   sweeping: boolean;
   lastSweepAt: number;
   lastActivitySweepAt: number;
+  lastEventAt: number;
+  lastEventMirrorMs: number | null;
   store: string;
   mirror: Mirror;
   driftCount: number;
@@ -349,6 +360,8 @@ function statePayload(): StatePayload {
     sweeping,
     lastSweepAt,
     lastActivitySweepAt,
+    lastEventAt,
+    lastEventMirrorMs,
     store: CLAUDE_STORE,
     mirror: latestMirror,
     driftCount: [...conditions.values()].filter((c) => c.active).length,
@@ -436,8 +449,9 @@ function tstate(s){return s==="present"?'<span class="cell-yes">✓ on disk</spa
 function render(d){
   document.getElementById("dot").style.background=d.sweeping?"#d29922":"#2fae7d";
   document.getElementById("meta").textContent=
-    "cycle "+d.cycles+" · last sweep "+ago(d.lastSweepAt)+"s ago · activity pill "+ago(d.lastActivitySweepAt)+"s ago · "+
-    d.mirror.live.length+" live / "+d.mirror.ghosts.length+" ghosts · "+d.driftCount+" ledger drifts";
+    "cycle "+d.cycles+" · last sweep "+ago(d.lastSweepAt)+"s ago · activity "+ago(d.lastActivitySweepAt)+"s ago · "+
+    "event→mirror: "+(d.lastEventMirrorMs===null?"no events yet":(d.lastEventAt?ago(d.lastEventAt)+"s ago, took "+d.lastEventMirrorMs+"ms":"none"))+" · "+
+    d.mirror.live.length+" live / "+d.mirror.ghosts.length+" ghosts";
   const live=document.getElementById("live");live.innerHTML="";
   for(const r of d.mirror.live){
     const bad=(r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent";
