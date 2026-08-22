@@ -107,7 +107,8 @@ const hooks = await timed(timings, "hook-bindings", () => auditHookBindings(tree
 process.stdout.write(`  hook-bindings: ${hooks.facts.bindingsBySurface.size} bindings, ${hooks.facts.sessions.size} known sessions\n`);
 findings.push(...hooks.findings);
 
-findings.push(...(await timed(timings, "agent-activity", () => auditAgentActivity(tree.facts, hooks.facts))));
+const activity = await timed(timings, "agent-activity", () => auditAgentActivity(tree.facts, hooks.facts));
+findings.push(...activity.findings);
 
 let indexRows: ReturnType<typeof readIndexReadOnly> = [];
 await timed(timings, "transcript-facts-index-read", async () => {

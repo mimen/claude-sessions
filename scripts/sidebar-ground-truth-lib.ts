@@ -172,13 +172,22 @@ interface HookSessionEntry {
 export interface HookFacts {
   bindingsBySurface: Map<string, string>;
   sessions: Map<string, HookSessionEntry>;
+  /** Measured pid liveness per session id; only entries whose claim was checked appear. */
+  pidLiveness: Map<string, boolean>;
+  /** Measured transcript presence per session id (renamed = moved to .orphaned-*). */
+  transcriptPresence: Map<string, "present" | "renamed" | "absent">;
 }
 
 export async function auditHookBindings(
   tree: TreeFacts,
 ): Promise<{ facts: HookFacts; findings: Finding[] }> {
   const findings: Finding[] = [];
-  const facts: HookFacts = { bindingsBySurface: new Map(), sessions: new Map() };
+  const facts: HookFacts = {
+    bindingsBySurface: new Map(),
+    sessions: new Map(),
+    pidLiveness: new Map(),
+    transcriptPresence: new Map(),
+  };
   let store: {
     sessions?: Record<string, HookSessionEntry>;
     activeSessionsBySurface?: Record<string, { sessionId?: string }>;
@@ -215,6 +224,7 @@ export async function auditHookBindings(
     const sessionId = entry?.sessionId ?? key;
     facts.sessions.set(key, entry ?? {});
     const state = transcriptState(entry?.transcriptPath ?? null, sessionId);
+    facts.transcriptPresence.set(sessionId, state);
     if (state === "renamed") renamed += 1;
     if (state === "absent") {
       findings.push({
@@ -224,13 +234,17 @@ export async function auditHookBindings(
         key: `missing-transcript:${sessionId}`,
       });
     }
-    if (entry?.agentLifecycle === "running" && !(await pidAlive(entry?.pid ?? null))) {
-      findings.push({
-        primitive: "hook-bindings",
-        severity: "error",
-        detail: `session ${sessionId} claims agentLifecycle=running but pid ${entry?.pid} is not alive`,
-        key: `ghost-running:${sessionId}`,
-      });
+    if (entry?.agentLifecycle === "running") {
+      const alive = await pidAlive(entry?.pid ?? null);
+      facts.pidLiveness.set(sessionId, alive);
+      if (!alive) {
+        findings.push({
+          primitive: "hook-bindings",
+          severity: "error",
+          detail: `session ${sessionId} claims agentLifecycle=running but pid ${entry?.pid} is not alive`,
+          key: `ghost-running:${sessionId}`,
+        });
+      }
     }
   }
   if (renamed > 0) {
@@ -245,8 +259,20 @@ export async function auditHookBindings(
 
 // --- primitive 4: agent activity differential --------------------------------------
 
-export async function auditAgentActivity(tree: TreeFacts, hooks: HookFacts): Promise<Finding[]> {
+export interface ActivityMeasurement {
+  findings: Finding[];
+  /** Authoritative pill label per workspace id, only where cmux published one. */
+  pillsByWorkspace: Map<string, string>;
+  agree: number;
+  disagree: number;
+}
+
+export async function auditAgentActivity(
+  tree: TreeFacts,
+  hooks: HookFacts,
+): Promise<ActivityMeasurement> {
   const findings: Finding[] = [];
+  const pillsByWorkspace = new Map<string, string>();
   const lifecycleBySurface = new Map<string, string | null>();
   for (const [, session] of hooks.sessions) {
     if (session.surfaceId) lifecycleBySurface.set(session.surfaceId, session.agentLifecycle ?? null);
@@ -260,6 +286,7 @@ export async function auditAgentActivity(tree: TreeFacts, hooks: HookFacts): Pro
     if (output === null) continue;
     const status = parseClaudeStatus(output);
     if (status === null) continue;
+    pillsByWorkspace.set(surface.workspaceId, status.label);
     const derived = statusFromAgentLifecycle(lifecycleBySurface.get(surface.surfaceId) ?? null);
     if (derived === null) {
       derivedUnknown += 1;
@@ -283,7 +310,7 @@ export async function auditAgentActivity(tree: TreeFacts, hooks: HookFacts): Pro
     detail: `differential sample: ${agree} agree, ${disagree} disagree, ` +
       `${derivedUnknown} without derivable lifecycle (the known gap the authoritative sweep corrects)`,
   });
-  return findings;
+  return { findings, pillsByWorkspace, agree, disagree };
 }
 
 // --- primitives 6+5: transcript facts & coverage -----------------------------------

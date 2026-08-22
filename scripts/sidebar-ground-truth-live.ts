@@ -1,15 +1,16 @@
 /**
- * Live ground-truth comparator: a loopback web app that re-runs the oracles forever and
- * shows tracked state vs reality as it changes.
+ * Live ground-truth comparator: a loopback web app that mirrors what ccs tracks next to
+ * directly measured reality, refreshed forever.
  *
- * Every discrepancy becomes a keyed condition tracked across sweeps, so persistent drift is
- * distinguishable from a one-sweep race at a glance: age and consecutive-sweep count rise
- * together for real drift, while races appear and resolve within a cycle or two.
+ * The unit of display is the SESSION ROW, not the discrepancy: each row shows what cmux's
+ * hook store claims about a session beside fresh measurements (tree membership, ps on the
+ * claimed pid, the filesystem, cmux's own status pill), with per-cell agreement. Rows whose
+ * claims contradict measurements highlight and collect under Ghosts; everything else is a
+ * mirror a human can spot-check against their own open tabs.
  *
  * Read-only against live state. bun run scripts/sidebar-ground-truth-live.ts [port]
  */
 import { Database } from "bun:sqlite";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CATALOGUE_PATH, DB_PATH } from "../src/paths.ts";
 import { scanStore } from "../src/store.ts";
@@ -25,10 +26,13 @@ import {
   RECENT_WINDOW_MS,
   type Finding,
 } from "./sidebar-ground-truth-lib.ts";
+import { statusFromAgentLifecycle } from "../src/sidebar/status.ts";
 
 const PORT = Number(process.argv[2] ?? 8793);
 const FAST_CYCLE_MS = 3_000;
 const ACTIVITY_EVERY_N_CYCLES = 5;
+
+// --- condition ledger (secondary evidence; the mirror is the primary display) -------
 
 interface Condition {
   key: string;
@@ -47,10 +51,6 @@ interface ResolvedCondition extends Condition {
 
 const conditions = new Map<string, Condition>();
 const recentlyResolved: ResolvedCondition[] = [];
-let cycles = 0;
-let lastSweepAt = 0;
-let lastActivitySweepAt = 0;
-let sweeping = false;
 
 function absorb(found: readonly Finding[]): void {
   const seen = new Set<string>();
@@ -58,12 +58,11 @@ function absorb(found: readonly Finding[]): void {
     if (!f.key) continue;
     seen.add(f.key);
     const existing = conditions.get(f.key);
-    if (existing && existing.active) {
+    if (existing?.active) {
       existing.lastSeen = Date.now();
       existing.sweeps += 1;
       existing.detail = f.detail;
     } else if (existing) {
-      // Recurred after resolving: continue its history rather than resetting it.
       existing.active = true;
       existing.lastSeen = Date.now();
       existing.sweeps += 1;
@@ -90,6 +89,82 @@ function absorb(found: readonly Finding[]): void {
   }
 }
 
+// --- the mirror ----------------------------------------------------------------------
+
+export interface MirrorRow {
+  sessionId: string;
+  title: string | null;
+  surfaceId: string | null;
+  workspaceRef: string | null;
+  trackedLifecycle: string | null;
+  surfaceInTree: boolean;
+  pidAlive: boolean | null;
+  transcriptState: "present" | "renamed" | "absent";
+  authoritativePill: string | null;
+  derivedLabel: string | null;
+}
+
+export interface Mirror {
+  live: MirrorRow[];
+  ghosts: MirrorRow[];
+  unboundSurfaces: Array<{ workspaceRef: string; title: string | null }>;
+}
+
+function buildMirror(
+  treeFacts: Awaited<ReturnType<typeof auditSurfaceTree>>["facts"],
+  hooksFacts: Awaited<ReturnType<typeof auditHookBindings>>["facts"],
+  pillsByWorkspace: Map<string, string>,
+  titlesBySession: Map<string, string>,
+): Mirror {
+  const surfaceById = new Map(treeFacts.surfaces.map((s) => [s.surfaceId, s]));
+  const boundSurfaceIds = new Set<string>();
+  const rows: MirrorRow[] = [];
+  for (const [, entry] of hooksFacts.sessions) {
+    const sessionId = entry.sessionId ?? null;
+    if (!sessionId) continue;
+    const surfaceId = entry.surfaceId ?? null;
+    const surface = surfaceId !== null ? surfaceById.get(surfaceId) : undefined;
+    if (surface !== undefined) boundSurfaceIds.add(surfaceId ?? "");
+    rows.push({
+      sessionId,
+      title: titlesBySession.get(sessionId) ?? null,
+      surfaceId,
+      workspaceRef: surface?.workspaceRef ?? null,
+      trackedLifecycle: entry.agentLifecycle ?? null,
+      surfaceInTree: surface !== undefined,
+      pidAlive: hooksFacts.pidLiveness.get(sessionId) ?? null,
+      transcriptState: hooksFacts.transcriptPresence.get(sessionId) ?? "absent",
+      authoritativePill: surface ? pillsByWorkspace.get(surface.workspaceId) ?? null : null,
+      derivedLabel: statusFromAgentLifecycle(entry.agentLifecycle ?? null)?.label ?? null,
+    });
+  }
+
+  const discrepanciesOf = (r: MirrorRow): number =>
+    (r.surfaceInTree ? 0 : 1) +
+    (r.pidAlive === false ? 1 : 0) +
+    (r.transcriptState === "absent" ? 1 : 0);
+
+  const live = rows
+    .filter((r) => r.surfaceInTree)
+    .sort((a, b) => (a.workspaceRef ?? "").localeCompare(b.workspaceRef ?? ""));
+  const ghosts = rows.filter((r) => !r.surfaceInTree).sort((a, b) => discrepanciesOf(b) - discrepanciesOf(a));
+
+  const unboundSurfaces = treeFacts.surfaces
+    .filter((s) => !boundSurfaceIds.has(s.surfaceId))
+    .map((s) => ({ workspaceRef: s.workspaceRef, title: s.workspaceTitle }));
+
+  return { live, ghosts, unboundSurfaces };
+}
+
+// --- sweep loop -----------------------------------------------------------------------
+
+let cycles = 0;
+let lastSweepAt = 0;
+let lastActivitySweepAt = 0;
+let sweeping = false;
+let pillsByWorkspace = new Map<string, string>();
+let latestMirror: Mirror = { live: [], ghosts: [], unboundSurfaces: [] };
+
 async function timedCycle(includeActivity: boolean): Promise<void> {
   const nowMs = Date.now();
   const cycleFindings: Finding[] = [];
@@ -100,8 +175,12 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
   const hooks = await auditHookBindings(tree.facts);
   cycleFindings.push(...hooks.findings);
 
+  // Pills survive between authoritative sweeps: an unswept workspace keeps its last
+  // measurement rather than regressing to "not swept yet" every fast cycle.
   if (includeActivity) {
-    cycleFindings.push(...(await auditAgentActivity(tree.facts, hooks.facts)));
+    const activity = await auditAgentActivity(tree.facts, hooks.facts);
+    cycleFindings.push(...activity.findings);
+    pillsByWorkspace = activity.pillsByWorkspace;
     lastActivitySweepAt = Date.now();
   }
 
@@ -119,6 +198,12 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
   absorb(cycleFindings);
   cycles += 1;
   lastSweepAt = Date.now();
+
+  const titlesBySession = new Map<string, string>();
+  for (const row of indexRows) {
+    if (row.title) titlesBySession.set(row.sessionId, row.title);
+  }
+  latestMirror = buildMirror(tree.facts, hooks.facts, pillsByWorkspace, titlesBySession);
 }
 
 function coverageFindings(
@@ -197,7 +282,7 @@ async function sweepLoop(): Promise<void> {
       try {
         await timedCycle(cycles % ACTIVITY_EVERY_N_CYCLES === 0);
       } catch {
-        // A failed cycle leaves the previous conditions standing; the next one retries.
+        // A failed cycle leaves the previous mirror standing; the next one retries.
       } finally {
         sweeping = false;
       }
@@ -213,14 +298,12 @@ interface StatePayload {
   lastSweepAt: number;
   lastActivitySweepAt: number;
   store: string;
-  active: Condition[];
+  mirror: Mirror;
+  driftCount: number;
   resolved: ResolvedCondition[];
 }
 
 function statePayload(): StatePayload {
-  const active = [...conditions.values()]
-    .filter((c) => c.active)
-    .sort((a, b) => a.firstSeen - b.firstSeen);
   return {
     now: Date.now(),
     cycles,
@@ -228,7 +311,8 @@ function statePayload(): StatePayload {
     lastSweepAt,
     lastActivitySweepAt,
     store: CLAUDE_STORE,
-    active,
+    mirror: latestMirror,
+    driftCount: [...conditions.values()].filter((c) => c.active).length,
     resolved: recentlyResolved.slice(0, 12),
   };
 }
@@ -237,7 +321,7 @@ const HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Sidebar ground truth — live</title>
+<title>Sidebar ground truth — live mirror</title>
 <style>
   :root{--bg:#101216;--card:#181b21;--line:#262a33;--ink:#dfe3ea;--dim:#8a919e;
         --ok:#2fae7d;--bad:#e5534b;--warn:#d29922;--mono:"SF Mono",ui-monospace,Menlo,monospace}
@@ -248,100 +332,99 @@ const HTML = `<!DOCTYPE html>
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
   header h1{font-size:15px;margin:0;font-weight:600}
   header .meta{color:var(--dim);font-size:12px;font-family:var(--mono)}
-  main{padding:18px 22px 60px;max-width:1100px;margin:0 auto}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
-  .card h2{margin:0 0 2px;font-size:14px;display:flex;justify-content:space-between;align-items:center}
-  .badge{font-size:10.5px;padding:2px 9px;border-radius:99px;font-weight:600;letter-spacing:.04em}
-  .ok{background:rgba(47,174,125,.15);color:var(--ok)}
-  .bad{background:rgba(229,83,75,.15);color:var(--bad)}
-  .pending{background:var(--line);color:var(--dim)}
-  .tracks{color:var(--dim);font-size:12px;margin:2px 0 10px}
-  ul{list-style:none;margin:0;padding:0}
-  li{display:flex;gap:8px;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px;align-items:baseline}
-  .sev{width:7px;height:7px;border-radius:50%;flex:none;position:relative;top:-1px}
-  .sev.error{background:var(--bad)} .sev.warn{background:var(--warn)}
-  .age{font-family:var(--mono);color:var(--dim);flex:none;font-size:11px;min-width:74px;text-align:right}
-  .detail{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-  .clean{color:var(--dim);font-size:12.5px;font-style:italic}
+  main{padding:18px 22px 60px;max-width:1250px;margin:0 auto}
   h3{font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin:26px 0 8px}
-  .resolved li{color:var(--dim)}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;font-size:12.5px}
+  th{text-align:left;color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;padding:9px 12px;border-bottom:1px solid var(--line)}
+  td{padding:7px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  .v{font-family:var(--mono)}
+  .cell-yes{color:var(--ok)} .cell-no{color:var(--bad)} .cell-na{color:var(--dim)}
+  .row-bad td{background:rgba(229,83,75,.06)}
+  .title{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sid{color:var(--dim);font-family:var(--mono);font-size:10.5px}
+  .pillchip{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid var(--line);background:var(--line);white-space:nowrap}
   footer{margin-top:30px;color:var(--dim);font-size:12.5px;border-top:1px solid var(--line);padding-top:14px;line-height:1.8}
+  .legend{color:var(--dim);font-size:12px;margin:4px 0 14px}
 </style>
 </head>
 <body>
 <header>
   <div class="dot" id="dot"></div>
-  <h1>Sidebar ground truth</h1>
+  <h1>Sidebar ground truth — live mirror</h1>
   <span class="meta" id="meta">connecting…</span>
 </header>
 <main>
-  <div class="grid" id="grid"></div>
-  <h3>Recently resolved (races heal here)</h3>
-  <ul class="resolved card" id="resolved" style="list-style:none"></ul>
+  <h3>Live surfaces — what cmux binds, measured fresh</h3>
+  <div class="legend">Each cell is an independent measurement, not another tracked claim. Check any row against your own tabs.</div>
+  <table><thead><tr>
+    <th>Session</th><th>In tree</th><th>Pill (cmux)</th><th>Hooks say</th><th>Pid alive</th><th>Transcript</th>
+  </tr></thead><tbody id="live"></tbody></table>
+
+  <h3>Ghosts — tracked by the hook store, contradicted by measurements</h3>
+  <table><thead><tr>
+    <th>Session</th><th>Claims</th><th>Surface in tree</th><th>Pid alive</th><th>Transcript on disk</th>
+  </tr></thead><tbody id="ghosts"></tbody></table>
+
+  <h3>Unbound surfaces — exist in cmux but no session claims them</h3>
+  <div class="legend" id="unbound">…</div>
+
   <footer>
-    Spot-checks only you can run: count your open cmux tabs vs the surface count · give an agent
-    a task that ends needing you and watch the flip land within ~3s · click any row and confirm
-    the focused tab holds exactly that session. If those hold but this board shows drift, the
-    tracking is wrong; if this board is clean but the sidebar reads stale, delivery/redraw is.
+    How to verify a row by hand: the <b>tree</b> cell says whether that surface really exists among your open
+    cmux workspaces; the <b>pid</b> cell is the kernel's answer to "is that claude process alive"; the
+    <b>transcript</b> cell is the filesystem's. If a live row here and your actual tab disagree, tracking is
+    wrong — note the row's session id. If everything agrees but the real sidebar still reads stale, the bug
+    is delivery/redraw, not data.
   </footer>
 </main>
 <script>
-const PRIMS = ["surface-tree","hook-bindings","agent-activity","transcript-facts","coverage","catalogue-identity","directory-facts"];
-const TRACKS = {
-  "surface-tree":"which cmux workspaces and surfaces exist right now",
-  "hook-bindings":"which claude session lives on which surface, alive or not",
-  "agent-activity":"whether each agent is running or waiting for you",
-  "transcript-facts":"message counts, sizes, recency from the session index",
-  "coverage":"whether recent transcripts reached the index at all",
-  "catalogue-identity":"the durable registry of sessions",
-  "directory-facts":"the project directory behind each row"
-};
 function ago(t){return Math.max(0,Math.round((Date.now()-t)/1000));}
-function fmtAge(s){return s<60?s+"s":s<3600?Math.floor(s/60)+"m":Math.floor(s/3600)+"h"+Math.floor((s%3600)/60)+"m";}
-let lastData=null;
 async function tick(){
   try{
-    const r=await fetch("/api/state");lastData=await r.json();render(lastData);
-  }catch(e){document.getElementById("meta").textContent="server unreachable";document.getElementById("dot").style.background="#e5534b";}
+    const r=await fetch("/api/state");const d=await r.json();render(d);
+  }catch(e){document.getElementById("meta").textContent="server unreachable";
+    document.getElementById("dot").style.background="#e5534b";}
 }
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");}
+function yn(b){return b===null?'<span class="cell-na">—</span>':b?'<span class="cell-yes">✓ yes</span>':'<span class="cell-no">✗ no</span>';}
+function tstate(s){return s==="present"?'<span class="cell-yes">✓ on disk</span>'
+  :s==="renamed"?'<span class="cell-na">renamed</span>':'<span class="cell-no">✗ gone</span>';}
 function render(d){
   document.getElementById("dot").style.background=d.sweeping?"#d29922":"#2fae7d";
   document.getElementById("meta").textContent=
-    "cycle "+d.cycles+" · last sweep "+ago(d.lastSweepAt)+"s ago · activity "+ago(d.lastActivitySweepAt)+"s ago · "+d.active.length+" open drifts";
-  const byPrim={};for(const c of d.active){(byPrim[c.primitive]??=[]).push(c);}
-  const g=document.getElementById("grid");g.innerHTML="";
-  for(const p of PRIMS){
-    const cs=byPrim[p]||[];
-    const badge=cs.length===0?'<span class="badge ok">MATCHES REALITY</span>'
-      :'<span class="badge bad">DRIFTED ×'+cs.length+"</span>";
-    let lis="";
-    for(const c of cs.slice(0,8)){
-      lis+='<li><span class="sev '+c.severity+'"></span><span class="detail" title="'+esc(c.detail)+'">'+esc(shorten(c.key))+
-        '</span><span class="age">'+fmtAge(ago(c.firstSeen))+" · "+c.sweeps+"×</span></li>";
-    }
-    if(cs.length>8)lis+='<li><span class="detail" style="color:var(--dim)">…and '+(cs.length-8)+" more</span></li>";
-    if(cs.length===0)lis='<li class="clean">no drift observed</li>';
-    const div=document.createElement("div");div.className="card";
-    div.innerHTML="<h2>"+p+" "+badge+"</h2><div class=\\"tracks\\">"+TRACKS[p]+"</div><ul>"+lis+"</ul>";
-    g.appendChild(div);
+    "cycle "+d.cycles+" · last sweep "+ago(d.lastSweepAt)+"s ago · activity pill "+ago(d.lastActivitySweepAt)+"s ago · "+
+    d.mirror.live.length+" live / "+d.mirror.ghosts.length+" ghosts · "+d.driftCount+" ledger drifts";
+  const live=document.getElementById("live");live.innerHTML="";
+  for(const r of d.mirror.live){
+    const bad=(r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent";
+    const tr=document.createElement("tr");if(bad)tr.className="row-bad";
+    tr.innerHTML='<td><div class="title">'+esc(r.title||"(untitled)")+'</div><span class="sid">'+r.sessionId.slice(0,8)+" · "+esc(r.workspaceRef||"")+'</span></td>'+
+      '<td>'+yn(true)+'</td>'+
+      '<td class="v"><span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span></td>'+
+      '<td class="v">'+esc(r.derivedLabel??r.trackedLifecycle??"—")+'</td>'+
+      '<td>'+(r.pidAlive===null?'<span class="cell-na">idle claim</span>':yn(r.pidAlive))+'</td>'+
+      '<td>'+tstate(r.transcriptState)+"</td>";
+    live.appendChild(tr);
   }
-  const res=document.getElementById("resolved");res.innerHTML="";
-  if(d.resolved.length===0)res.innerHTML='<li class="clean">nothing has resolved yet</li>';
-  for(const c of d.resolved){
-    const li=document.createElement("li");
-    li.innerHTML='<span class="detail">'+esc(shorten(c.key))+'</span><span class="age">lived '+fmtAge(Math.round((c.resolvedAt-c.firstSeen)/1000))+"</span>";
-    res.appendChild(li);
+  if(d.mirror.live.length===0)live.innerHTML='<tr><td colspan="6" style="color:var(--dim)">no bound sessions observed yet</td></tr>';
+  const gh=document.getElementById("ghosts");gh.innerHTML="";
+  for(const r of d.mirror.ghosts){
+    const tr=document.createElement("tr");tr.className="row-bad";
+    tr.innerHTML='<td><div class="title">'+esc(r.title||"(untitled)")+'</div><span class="sid">'+r.sessionId.slice(0,8)+'</span></td>'+
+      '<td class="v">'+esc(r.trackedLifecycle??"—")+(r.surfaceId?" @ "+r.surfaceId.slice(0,8):"")+'</td>'+
+      '<td>'+yn(false)+'</td>'+
+      '<td>'+(r.pidAlive===null?'<span class="cell-na">—</span>':yn(r.pidAlive))+'</td>'+
+      "<td>"+tstate(r.transcriptState)+"</td>";
+    gh.appendChild(tr);
   }
+  if(d.mirror.ghosts.length===0)gh.innerHTML='<tr><td colspan="5" style="color:var(--ok)">no ghosts — every tracked session has a real surface</td></tr>';
+  const u=d.mirror.unboundSurfaces;
+  document.getElementById("unbound").textContent=u.length===0?"none":u.map(x=>x.workspaceRef).join(", ");
 }
-function shorten(k){return k.replace(/^[a-z-]+:/,"").slice(0,42);}
-function esc(s){return s.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");}
 tick();setInterval(tick,1000);
 </script>
 </body>
 </html>`;
-
-mkdirSync(join(import.meta.dir, "..", "docs", "evidence", "sidebar-ground-truth"), { recursive: true });
 
 const server = Bun.serve({
   hostname: "127.0.0.1",
