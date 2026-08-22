@@ -61,6 +61,37 @@ const WINDOW_LABEL: Record<string, string> = {
   monthly: "monthly",
 };
 
+/**
+ * An eight-segment usage bar, e.g. `██████░░ 83%`. Filled segments scale with use;
+ * the bar turns from quiet to loud as it fills (color applied by the caller).
+ */
+export function bar(usedPct: number | null, width = 8): string {
+  if (usedPct === null) return "─".repeat(width);
+  const filled = Math.min(width, Math.max(0, Math.round((usedPct / 100) * width)));
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
+/** ANSI colors keyed to how full a window is — green under 70, amber under 90, red past that. */
+function colorFor(pct: number | null, s: string): string {
+  if (!process.stdout.isTTY || pct === null) return s;
+  const c = pct >= 90 ? "\x1b[31m" : pct >= 70 ? "\x1b[33m" : "\x1b[32m";
+  return `${c}${s}\x1b[0m`;
+}
+
+/** "in 4h 12m"-style countdown from now; empty string when unparseable. */
+export function countdown(iso: string | null): string {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const ms = t - Date.now();
+  if (ms <= 0) return "now";
+  const m = Math.round(ms / 60_000);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.floor(m / 60), rem = m % 60;
+  if (h < 48) return `in ${h}h ${rem}m`;
+  return `in ${Math.floor(h / 24)}d ${Math.round((h % 24) / 1)}h`;
+}
+
 /** "Thu 04:05" style short reset time; falls back to the raw ISO when unparseable. */
 export function shortReset(iso: string): string {
   const t = Date.parse(iso);
@@ -75,14 +106,14 @@ function lineFor(o: UsageObservation): string {
   const bits: string[] = [];
   switch (o.metric) {
     case "allowance": {
-      const w = o.window ? ` ${WINDOW_LABEL[o.window]}` : "";
+      const w = o.window ? `${WINDOW_LABEL[o.window]} ` : "";
       if (o.used !== null && o.limit !== null && o.limit > 0) {
-        const pct = Math.round((o.used / o.limit) * 100);
-        bits.push(pct >= 99 ? `${w} exhausted` : `${pct}% used${w}`);
+        const pct = Math.round(o.used);
+        const visual = colorFor(pct, bar(pct));
+        bits.push(`${visual} ${String(pct).padStart(3)}% ${w}${countdown(o.resetsAt) || `resets ${shortReset(o.resetsAt ?? "")}`}`.trimEnd());
       } else {
-        bits.push(`allowance unknown${w}`);
+        bits.push(`allowance unknown${w ? ` (${w.trim()})` : ""}`);
       }
-      if (o.resetsAt) bits.push(`resets ${shortReset(o.resetsAt)}`);
       break;
     }
     case "reset_credit":

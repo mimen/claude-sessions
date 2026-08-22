@@ -17,6 +17,7 @@ import type {
   UsageSnapshot,
 } from "./types.ts";
 import { codexBarVersion, entryErrorHealth, runCodexBar, sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
+import { runCswap, type CswapWindow } from "./cswap.ts";
 
 export interface AdapterResult {
   observations: UsageObservation[];
@@ -236,24 +237,58 @@ function codexAdapter(): AdapterResult {
 // Anthropic (CodexBar's Claude reader)
 // ---------------------------------------------------------------------------
 
+function windowFromCswap(
+  w: CswapWindow | null | undefined,
+  observedAt: string,
+  stale: boolean,
+): UsageObservation | null {
+  if (!w || typeof w.pct !== "number") return null;
+  return {
+    provider: "anthropic",
+    entitlement: "", // set by caller
+    metric: "allowance",
+    scope: "account",
+    window: null,
+    used: w.pct,
+    limit: 100,
+    remaining: Math.max(0, 100 - w.pct),
+    resetsAt: w.resetsAt ?? null,
+    expiresAt: null,
+    observedAt,
+    source: "official_api",
+    exact: false,
+    // stale marks lastGoodUsage fallbacks (cswap could not refresh this account).
+  } as UsageObservation & { stale?: boolean };
+}
+
 function anthropicAdapter(): AdapterResult {
-  return collectCodexBarProvider("claude", "anthropic", (entry) => {
-    const usage = entry.usage as CodexUsage | undefined;
-    if (!usage) return [];
-    const observedAt = usage.updatedAt ?? now();
-    // One entitlement PER ENTRY: personal and AUF subscriptions must stay separate, and
-    // the email in each entry's identity is what distinguishes them.
-    return windowObservations(
-      "anthropic", accountEntitlement("claude-max", usage.identity, entry), "account",
-      [
-        ["primary", usage.primary ?? null],
-        ["secondary", usage.secondary ?? null],
-        ["tertiary", usage.tertiary ?? null],
-      ],
-      observedAt,
-      sourceClassFor(entry.source),
-    );
-  }, () => "no claude usage entries returned");
+  const res = runCswap();
+  if (!res.ok) return { observations: [], health: res.error };
+  const observations: UsageObservation[] = [];
+  let okCount = 0;
+  for (const acct of res.value.report.accounts ?? []) {
+    if (!acct.email) continue;
+    const base = `claude-max:${acct.email}`;
+    const live = acct.usageStatus === "ok";
+    const usage = (live ? acct.usage : acct.lastGoodUsage) ?? {};
+    const observedAt = now();
+    for (const [w, win] of [
+      ["five_hour", usage.fiveHour],
+      ["weekly", usage.sevenDay],
+    ] as const) {
+      const o = windowFromCswap(win, observedAt, !live);
+      if (!o) continue;
+      o.entitlement = base;
+      o.window = w;
+      observations.push(o);
+      okCount++;
+    }
+  }
+  const health: AdapterHealth =
+    okCount === 0
+      ? { provider: "anthropic", status: "unavailable", detail: "cswap returned no usable windows" }
+      : { provider: "anthropic", status: "ok", detail: null };
+  return { observations, health };
 }
 
 // ---------------------------------------------------------------------------
@@ -282,22 +317,87 @@ function grokAdapter(): AdapterResult {
 // OpenCode Go
 // ---------------------------------------------------------------------------
 
-function opencodeGoAdapter(): AdapterResult {
-  return collectCodexBarProvider("opencodego", "opencode-go", (entry) => {
-    const usage = entry.usage as CodexUsage | undefined;
-    if (!usage) return [];
-    const observedAt = usage.updatedAt ?? now();
-    return windowObservations(
-      "opencode-go", accountEntitlement("opencode-go-zen", usage.identity, entry), "account",
-      [
-        ["primary", usage.primary ?? null],
-        ["secondary", usage.secondary ?? null],
-        ["tertiary", usage.tertiary ?? null],
-      ],
+interface GoUsageResponse {
+  usage?: {
+    rolling?: { status?: string; percent?: number; resetsAt?: string };
+    weekly?: { status?: string; percent?: number; resetsAt?: string };
+    monthly?: { status?: string; percent?: number; resetsAt?: string };
+  };
+}
+
+let cachedGoKey: string | null = null;
+
+/** Read the OpenCode Go API key from 1Password. Never logged or embedded. */
+async function opencodeGoKey(): Promise<string> {
+  if (cachedGoKey) return cachedGoKey;
+  const proc = Bun.spawnSync(["op", "read", "op://Sol/OpenCode Go/credential"], {
+    stdout: "pipe", stderr: "pipe",
+  });
+  if (proc.exitCode !== 0) throw new Error("could not read OpenCode Go credential from 1Password");
+  cachedGoKey = new TextDecoder().decode(proc.stdout).trim();
+  return cachedGoKey;
+}
+
+const GO_TIMEOUT_MS = 15_000;
+
+/**
+ * Official Go usage endpoint (GET /zen/go/v1/usage, Bearer key): rolling 5h, weekly,
+ * and monthly value-window percentages with exact reset timestamps. Replaces the
+ * CodexBar reader, which needed browser cookies this machine does not have.
+ */
+async function opencodeGoAdapter(): Promise<AdapterResult> {
+  const observedAt = now();
+  let data: GoUsageResponse;
+  try {
+    const key = await opencodeGoKey();
+    const res = await fetch("https://opencode.ai/zen/go/v1/usage", {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(GO_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      return {
+        observations: [],
+        health: { provider: "opencode-go", status: "unavailable", detail: `go/v1/usage HTTP ${res.status}` },
+      };
+    }
+    data = (await res.json()) as GoUsageResponse;
+  } catch (e) {
+    return {
+      observations: [],
+      health: { provider: "opencode-go", status: "unavailable", detail: e instanceof Error ? e.message : String(e) },
+    };
+  }
+  const u = data.usage ?? {};
+  const windows: Array<[UsageObservation["window"], typeof u.rolling]> = [
+    ["five_hour", u.rolling],
+    ["weekly", u.weekly],
+    ["monthly", u.monthly],
+  ];
+  const observations: UsageObservation[] = [];
+  for (const [window, w] of windows) {
+    if (!w || typeof w.percent !== "number") continue;
+    observations.push({
+      provider: "opencode-go",
+      entitlement: "opencode-go-zen",
+      metric: "allowance",
+      scope: "account",
+      window,
+      used: w.percent,
+      limit: 100,
+      remaining: Math.max(0, 100 - w.percent),
+      resetsAt: w.resetsAt ?? null,
+      expiresAt: null,
       observedAt,
-      sourceClassFor(entry.source),
-    );
-  }, () => "no opencodego usage entries returned");
+      source: "official_api",
+      exact: true,
+    });
+  }
+  return {
+    observations,
+    health: observations.length === 0
+      ? { provider: "opencode-go", status: "degraded", detail: "endpoint returned no window data" }
+      : { provider: "opencode-go", status: "ok", detail: null },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -448,8 +548,9 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
         case "codex": return codexAdapter();
         case "anthropic": return anthropicAdapter();
         case "grok": return grokAdapter();
-        case "opencode-go": return opencodeGoAdapter();
-        case "venice": return { observations: [], health: { provider: p, status: "unavailable", detail: "venice adapter is async" } };
+        case "opencode-go":
+        case "venice":
+          return { observations: [], health: { provider: p, status: "unavailable", detail: "async adapter" } };
       }
     } catch (e) {
       return {
@@ -460,13 +561,14 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
   };
   const results: AdapterResult[] = [];
   for (const p of wanted) {
-    if (p === "venice") {
+    if (p === "venice" || p === "opencode-go") {
+      // The two direct-API adapters are async; contain their throws like the sync ones.
       try {
-        results.push(await veniceAdapter());
+        results.push(p === "venice" ? await veniceAdapter() : await opencodeGoAdapter());
       } catch (e) {
         results.push({
           observations: [],
-          health: { provider: "venice", status: "unavailable", detail: e instanceof Error ? e.message : String(e) },
+          health: { provider: p, status: "unavailable", detail: e instanceof Error ? e.message : String(e) },
         });
       }
     } else {
