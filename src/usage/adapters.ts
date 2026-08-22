@@ -285,6 +285,17 @@ function anthropicAdapter(): AdapterResult {
       observations.push(o);
       okCount++;
     }
+    // Anthropic may add model-family limits alongside the account windows. cswap
+    // currently exposes Fable here; keep each named scope as its own full quota row.
+    for (const scoped of usage.scoped ?? []) {
+      if (!scoped.name) continue;
+      const o = windowFromCswap(scoped, observedAt, !live);
+      if (!o) continue;
+      o.entitlement = `${base}#${scoped.name}`;
+      o.window = "weekly";
+      observations.push(o);
+      okCount++;
+    }
   }
   const health: AdapterHealth =
     okCount === 0

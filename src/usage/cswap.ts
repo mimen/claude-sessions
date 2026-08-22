@@ -10,6 +10,8 @@ import { err, ok, type Result } from "../result.ts";
 import type { AdapterHealth } from "./types.ts";
 
 export interface CswapWindow {
+  /** Present on scoped model-family windows such as Fable. */
+  name?: string;
   pct?: number | null;
   resetsAt?: string | null;
   expectedPct?: number | null;
@@ -26,10 +28,12 @@ export interface CswapAccount {
   usage?: {
     fiveHour?: CswapWindow | null;
     sevenDay?: CswapWindow | null;
+    scoped?: CswapWindow[];
   } | null;
   lastGoodUsage?: {
     fiveHour?: CswapWindow | null;
     sevenDay?: CswapWindow | null;
+    scoped?: CswapWindow[];
   } | null;
 }
 

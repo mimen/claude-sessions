@@ -7,15 +7,44 @@
 import type { UsageObservation, UsageSnapshot } from "./types.ts";
 import { formatCost } from "../cost.ts";
 
-/** Sort key: running out first, then expiring credits, then everything else. */
-function urgency(o: UsageObservation): number {
-  if (o.metric === "reset_credit" && o.expiresAt) return 1;
-  if (o.remaining !== null && o.limit !== null && o.limit > 0 && o.used !== null) {
-    const frac = o.used / o.limit;
-    if (frac >= 0.99) return 0;
-    if (frac >= 0.7) return 1;
+const PROVIDER_ORDER: Readonly<Record<string, number>> = {
+  anthropic: 0,
+  codex: 1,
+  grok: 2,
+  "opencode-go": 3,
+  venice: 4,
+};
+
+/**
+ * Fixed semantic order. Utilization never participates: rows do not jump when usage changes.
+ * Account windows → scoped/product breakdowns → reset grants → credits → reference limits.
+ */
+function rowOrder(o: UsageObservation): number {
+  const product = productOf(o.entitlement)?.toLowerCase();
+  if (o.metric === "allowance") {
+    if (!product) {
+      const byWindow: Readonly<Record<string, number>> = {
+        five_hour: 10,
+        daily: 20,
+        weekly: 30,
+        monthly: 40,
+        minute: 50,
+      };
+      return o.window ? (byWindow[o.window] ?? 60) : 60;
+    }
+    const productRank: Readonly<Record<string, number>> = {
+      build: 31,
+      chat: 32,
+      imagine: 33,
+      api: 34,
+      fable: 40,
+    };
+    return productRank[product] ?? 45;
   }
-  return 2;
+  if (o.metric === "reset_credit") return 70;
+  if (o.metric === "credit") return 80;
+  if (o.metric === "rate_limit") return 90;
+  return 100;
 }
 
 const WINDOW_LABEL: Record<string, string> = {
@@ -68,6 +97,8 @@ function limitName(o: UsageObservation): string {
   if (product) {
     const named = PRODUCT_LABEL[product.toLowerCase()];
     if (named) return named;
+    // Scoped provider quotas preserve their source name (currently Anthropic's Fable).
+    return product;
   }
   const base = baseEntitlement(o.entitlement);
   const override = ENTITLEMENT_LABEL[base];
@@ -156,7 +187,7 @@ interface Group {
   provider: string;
   account: string | null;
   title: string;
-  rows: Array<{ obs: UsageObservation; name: string; attention: boolean }>;
+  rows: Array<{ obs: UsageObservation; name: string }>;
 }
 
 /** Column width so limit names align within their group blocks. */
@@ -210,17 +241,15 @@ export function renderSnapshot(snap: UsageSnapshot): string {
         rows: [],
       });
     }
-    groups.get(key)!.rows.push({ obs: o, name: limitName(o), attention: urgency(o) < 2 });
+    groups.get(key)!.rows.push({ obs: o, name: limitName(o) });
   }
   const sortedGroups = [...groups.values()].map((g) => ({
     ...g,
-    rows: [...g.rows].sort((a, b) => urgency(a.obs) - urgency(b.obs)),
+    rows: [...g.rows].sort((a, b) => rowOrder(a.obs) - rowOrder(b.obs)),
   }));
-  // Groups holding an attention row surface first; then alphabetical.
+  // Fixed platform order; stable sort preserves cswap's account order within Claude.
   sortedGroups.sort(
-    (a, b) =>
-      (b.rows.some((r) => r.attention) ? 1 : 0) - (a.rows.some((r) => r.attention) ? 1 : 0)
-      || a.title.localeCompare(b.title),
+    (a, b) => (PROVIDER_ORDER[a.provider] ?? 99) - (PROVIDER_ORDER[b.provider] ?? 99),
   );
 
   const { limitPad } = layoutWidths(sortedGroups);
