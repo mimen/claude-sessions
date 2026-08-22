@@ -1,56 +1,21 @@
 /**
- * Terminal rendering for `ccs usage`. Default output is an availability instrument:
- * ATTENTION (running out / expiring / exhausted) before AVAILABLE, unknowns stated
- * plainly, never one flattened percentage.
+ * Terminal rendering for `ccs usage`. The view groups by platform + account, one block
+ * per subscription with aligned limit rows beneath it — bars line up across the whole
+ * run. Unknowns state themselves plainly; quota kinds never merge into one percentage.
  */
 
 import type { UsageObservation, UsageSnapshot } from "./types.ts";
 import { formatCost } from "../cost.ts";
 
-/** Sort key: the operational question order — running out first, then expiry, then rest. */
+/** Sort key: running out first, then expiring credits, then everything else. */
 function urgency(o: UsageObservation): number {
-  if (o.metric === "reset_credit" && o.expiresAt) return 1; // expires if ignored
+  if (o.metric === "reset_credit" && o.expiresAt) return 1;
   if (o.remaining !== null && o.limit !== null && o.limit > 0 && o.used !== null) {
     const frac = o.used / o.limit;
-    if (frac >= 0.99) return 0; // exhausted
+    if (frac >= 0.99) return 0;
     if (frac >= 0.7) return 1;
   }
   return 2;
-}
-
-const PROVIDER_LABEL: Record<string, string> = {
-  codex: "Codex Pro",
-  anthropic: "Claude",
-  grok: "Grok",
-  "opencode-go": "OpenCode Go",
-  venice: "Venice",
-};
-
-/** Entitlement overrides so distinct allowances never share one provider label. */
-const ENTITLEMENT_LABEL: Record<string, string> = {
-  "codex-spark": "Codex Spark",
-  "codex-spark-weekly": "Codex Spark Weekly",
-  "codex-reset-credit": "Codex reset",
-  "codex-dollar-credit": "Codex credits",
-  "venice-usd-balance": "Venice USD",
-  "venice-diem-balance": "Venice DIEM",
-  "venice-model-caps": "Venice caps",
-};
-
-function labelFor(o: UsageObservation): string {
-  const override = ENTITLEMENT_LABEL[o.entitlement];
-  if (override) return override;
-  const base = PROVIDER_LABEL[o.provider] ?? o.provider;
-  // Multi-account entitlements carry ":<email>" — surface which account, not just the provider.
-  if (o.entitlement.includes(":")) return `${base} (${o.entitlement.slice(o.entitlement.indexOf(":") + 1)})`;
-  return base;
-}
-
-/** Credit rendering is currency-aware: DIEM is not dollars. */
-function creditAmount(entitlement: string, remaining: number | null): string {
-  if (remaining === null) return "?";
-  if (entitlement === "venice-diem-balance") return `${remaining} DIEM`;
-  return remaining === 0 ? "$0" : formatCost(remaining);
 }
 
 const WINDOW_LABEL: Record<string, string> = {
@@ -61,9 +26,63 @@ const WINDOW_LABEL: Record<string, string> = {
   monthly: "monthly",
 };
 
+const PROVIDER_TITLE: Record<string, string> = {
+  codex: "Codex",
+  anthropic: "Claude",
+  grok: "Grok",
+  "opencode-go": "OpenCode Go",
+  venice: "Venice",
+};
+
+const ENTITLEMENT_LABEL: Record<string, string> = {
+  "codex-spark": "Spark",
+  "codex-spark-weekly": "Spark weekly",
+};
+
+/** Entitlement id without any ":<account>" suffix. */
+function baseEntitlement(entitlement: string): string {
+  const i = entitlement.indexOf(":");
+  return i === -1 ? entitlement : entitlement.slice(0, i);
+}
+
+/** Short limit name shown under a provider/account group. */
+function limitName(o: UsageObservation): string {
+  const base = baseEntitlement(o.entitlement);
+  const override = ENTITLEMENT_LABEL[base];
+  if (override) return override;
+  switch (o.metric) {
+    case "reset_credit": return "banked reset";
+    case "credit":
+      if (base.includes("diem")) return "DIEM balance";
+      if (base.includes("usd")) return "USD balance";
+      return "dollar credits";
+    case "rate_limit": return "per-model RPM";
+    case "allowance":
+      return o.window ? (WINDOW_LABEL[o.window] ?? "allowance") : "allowance";
+    default: return base;
+  }
+}
+
+/** Account qualifier: the part after ":" in a multi-account entitlement. */
+function accountOf(o: UsageObservation): string | null {
+  const i = o.entitlement.indexOf(":");
+  return i === -1 ? null : o.entitlement.slice(i + 1);
+}
+
+/** Group key: platform + account; rate-limit caps fold into the plain provider group. */
+function groupKey(o: UsageObservation): string {
+  if (o.metric === "rate_limit") return o.provider;
+  const acct = accountOf(o);
+  return acct ? `${o.provider}:${acct}` : o.provider;
+}
+
+function groupTitle(provider: string, account: string | null): string {
+  const base = PROVIDER_TITLE[provider] ?? provider;
+  return account ? `${base} · ${account}` : base;
+}
+
 /**
- * An eight-segment usage bar, e.g. `██████░░ 83%`. Filled segments scale with use;
- * the bar turns from quiet to loud as it fills (color applied by the caller).
+ * An eight-segment usage bar, e.g. `███████░`. Filled segments scale with use.
  */
 export function bar(usedPct: number | null, width = 8): string {
   if (usedPct === null) return "─".repeat(width);
@@ -87,89 +106,145 @@ export function countdown(iso: string | null): string {
   if (ms <= 0) return "now";
   const m = Math.round(ms / 60_000);
   if (m < 60) return `in ${m}m`;
-  const h = Math.floor(m / 60), rem = m % 60;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
   if (h < 48) return `in ${h}h ${rem}m`;
-  return `in ${Math.floor(h / 24)}d ${Math.round((h % 24) / 1)}h`;
+  return `in ${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
-/** "Thu 04:05" style short reset time; falls back to the raw ISO when unparseable. */
+/** "Aug 25 13:59" style short timestamp; falls back to the raw ISO when unparseable. */
 export function shortReset(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return iso;
   return new Date(t).toLocaleString(undefined, {
-    weekday: "short", hour: "2-digit", minute: "2-digit", month: "short", day: "numeric",
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
 }
 
-function lineFor(o: UsageObservation): string {
-  const label = `${labelFor(o).padEnd(14)}`;
-  const bits: string[] = [];
-  switch (o.metric) {
-    case "allowance": {
-      const w = o.window ? `${WINDOW_LABEL[o.window]} ` : "";
-      if (o.used !== null && o.limit !== null && o.limit > 0) {
-        const pct = Math.round(o.used);
-        const visual = colorFor(pct, bar(pct));
-        bits.push(`${visual} ${String(pct).padStart(3)}% ${w}${countdown(o.resetsAt) || `resets ${shortReset(o.resetsAt ?? "")}`}`.trimEnd());
-      } else {
-        bits.push(`allowance unknown${w ? ` (${w.trim()})` : ""}`);
-      }
-      break;
-    }
-    case "reset_credit":
-      bits.push(
-        o.remaining === 1
-          ? "banked full reset available"
-          : "reset credit consumed",
-      );
-      if (o.expiresAt) bits.push(`expires ${shortReset(o.expiresAt)}`);
-      break;
-    case "credit":
-      bits.push(`${creditAmount(o.entitlement, o.remaining)} remaining`);
-      if (o.resetsAt) bits.push(`epoch resets ${shortReset(o.resetsAt)}`);
-      break;
-    default:
-      bits.push(o.entitlement);
-  }
-  if (o.source === "local_estimate") bits.push("(estimate)");
-  else if (!o.exact && o.metric === "allowance") bits.push("provider-rounded");
-  return `  ${label} ${bits.join(" · ")}`;
+/** Credit rendering is currency-aware: DIEM is not dollars. */
+function creditAmount(entitlement: string, remaining: number | null): string {
+  if (remaining === null) return "?";
+  const base = baseEntitlement(entitlement);
+  if (base.includes("diem")) return `${remaining} DIEM`;
+  return remaining === 0 ? "$0" : formatCost(remaining);
 }
 
+interface Group {
+  provider: string;
+  account: string | null;
+  title: string;
+  rows: Array<{ obs: UsageObservation; name: string; attention: boolean }>;
+}
+
+/** Column width so limit names align within their group blocks. */
+function layoutWidths(groups: Group[]): { limitPad: number } {
+  let maxLimit = 6;
+  for (const g of groups) for (const r of g.rows) maxLimit = Math.max(maxLimit, r.name.length);
+  return { limitPad: Math.min(maxLimit, 18) };
+}
 
 export function renderSnapshot(snap: UsageSnapshot): string {
   const lines: string[] = [];
-  const sorted = [...snap.observations].sort(
-    (a, b) => urgency(a) - urgency(b) || a.provider.localeCompare(b.provider),
-  );
-  const attention = sorted.filter((o) => urgency(o) < 2);
-  const rest = sorted.filter((o) => urgency(o) === 2);
-  // Per-model rate-limit caps are reference data — summarize them to one line instead of
-  // flooding the availability view; `--json` still carries every entry.
-  const caps = rest.filter((o) => o.metric === "rate_limit");
-  const available = rest.filter((o) => o.metric !== "rate_limit");
-  if (attention.length) {
-    lines.push("ATTENTION");
-    lines.push(...attention.map(lineFor));
-    lines.push("");
-  }
-  if (available.length) {
-    lines.push("AVAILABLE");
-    lines.push(...available.map(lineFor));
-  }
+
+  // Per-model rate-limit caps are reference data — collapse to ONE summary observation
+  // before grouping, so the view stays a screen; --json still carries every entry.
+  const caps = snap.observations.filter((o) => o.metric === "rate_limit");
+  const rest = snap.observations.filter((o) => o.metric !== "rate_limit");
+  let observations = rest;
+  let capSummary: string | null = null;
   if (caps.length) {
-    // One summary line for reference-data caps; --json carries every per-model entry.
     const lo = Math.min(...caps.map((o) => o.limit ?? Infinity));
     const hi = Math.max(...caps.map((o) => o.limit ?? 0));
-    lines.push(`  ${"Venice caps".padEnd(14)} ${caps.length} models · ${lo}–${hi} req/min (full detail in --json)`);
+    capSummary = `${caps.length} models · ${lo}–${hi} req/min (detail in --json)`;
+    observations = [...rest, {
+      provider: "venice" as const,
+      entitlement: "venice-model-caps",
+      metric: "rate_limit" as const,
+      scope: "account" as const,
+      window: "minute" as const,
+      used: null,
+      limit: null,
+      remaining: null,
+      resetsAt: null,
+      expiresAt: null,
+      observedAt: caps[0]!.observedAt,
+      source: "official_api" as const,
+      exact: true,
+    }];
+    void lo; void hi;
   }
+
+  // Group by platform + account. Within a group, limits sort running-out first.
+  const groups = new Map<string, Group>();
+  for (const o of observations) {
+    const key = groupKey(o);
+    if (!groups.has(key)) {
+      const account = accountOf(o);
+      groups.set(key, {
+        provider: o.provider,
+        account,
+        title: groupTitle(o.provider, account),
+        rows: [],
+      });
+    }
+    groups.get(key)!.rows.push({ obs: o, name: limitName(o), attention: urgency(o) < 2 });
+  }
+  const sortedGroups = [...groups.values()].map((g) => ({
+    ...g,
+    rows: [...g.rows].sort((a, b) => urgency(a.obs) - urgency(b.obs)),
+  }));
+  // Groups holding an attention row surface first; then alphabetical.
+  sortedGroups.sort(
+    (a, b) =>
+      (b.rows.some((r) => r.attention) ? 1 : 0) - (a.rows.some((r) => r.attention) ? 1 : 0)
+      || a.title.localeCompare(b.title),
+  );
+
+  const { limitPad } = layoutWidths(sortedGroups);
+
+  for (const g of sortedGroups) {
+    lines.push(g.title);
+    for (const { obs, name } of g.rows) lines.push(rowFor(obs, name, limitPad, capSummary));
+    lines.push("");
+  }
+
+  // Adapter failures close the view — after the data, where they read as footnotes.
   const unhealthy = snap.adapters.filter((a) => a.status !== "ok");
   if (unhealthy.length) {
-    if (lines.length && lines[lines.length - 1] !== "") lines.push("");
-    lines.push("UNAVAILABLE");
+    lines.push("unavailable");
     for (const a of unhealthy) {
-      lines.push(`  ${(PROVIDER_LABEL[a.provider] ?? a.provider).padEnd(14)} ${a.detail ?? a.status}`);
+      lines.push(`  ${PROVIDER_TITLE[a.provider] ?? a.provider} — ${a.detail ?? a.status}`);
     }
+    lines.push("");
   }
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
   return lines.join("\n");
+}
+
+/** One aligned row inside a group: limit name, bar, percent, countdown. */
+function rowFor(o: UsageObservation, name: string, limitPad: number, capSummary: string | null): string {
+  const indent = "  ";
+  const label = `${name.padEnd(limitPad)} `;
+  switch (o.metric) {
+    case "allowance": {
+      if (o.used !== null && o.limit !== null && o.limit > 0) {
+        const pct = Math.round(o.used);
+        const barText = colorFor(pct, label + colorFor(pct, bar(pct)));
+        const when = countdown(o.resetsAt) || shortReset(o.resetsAt ?? "");
+        return `${indent}${barText} ${String(pct).padStart(3)}%  ${when}`;
+      }
+      return `${indent}${label}— unknown`;
+    }
+    case "reset_credit":
+      return `${indent}${label}${o.remaining === 1 ? "available" : "consumed"}${o.expiresAt ? ` · expires ${shortReset(o.expiresAt)}` : ""}`;
+    case "credit": {
+      const epoch = o.resetsAt ? ` · epoch ${shortReset(o.resetsAt)}` : "";
+      const amount = creditAmount(o.entitlement, o.remaining);
+      return `${indent}${label}${amount === "$0" ? "none" : `${amount} remaining`}${epoch}`;
+    }
+    case "rate_limit":
+      return `${indent}${label}${capSummary ?? `${o.limit ?? "?"} req/min cap`}`;
+    default:
+      return `${indent}${label}${o.entitlement}`;
+  }
 }

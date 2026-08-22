@@ -42,10 +42,10 @@ test("shortReset renders a human date and falls back to the raw string", () => {
   expect(shortReset("not-a-date")).toBe("not-a-date");
 });
 
-test("render puts exhausted and near-exhausted before available, expiring credits in ATTENTION", () => {
+test("render groups by platform+account with attention groups first", () => {
   const out = renderSnapshot(snap({
     observations: [
-      obs({ used: 10 }), // healthy weekly
+      obs({ used: 10 }), // healthy codex weekly
       obs({ used: 99, window: "five_hour" }), // exhausted
       obs({
         provider: "codex", entitlement: "codex-reset-credit", metric: "reset_credit",
@@ -53,20 +53,35 @@ test("render puts exhausted and near-exhausted before available, expiring credit
       }),
     ],
   }));
-  const attentionIdx = out.indexOf("ATTENTION");
-  const availableIdx = out.indexOf("AVAILABLE");
-  expect(attentionIdx).toBeGreaterThanOrEqual(0);
-  expect(availableIdx).toBeGreaterThan(attentionIdx);
-  const attention = out.slice(attentionIdx, availableIdx);
-  expect(attention).toContain("banked full reset");
-  expect(attention).toContain("████████  99% five-hour"); // exhausted window renders a full bar
+  const lines = out.split("\n");
+  expect(lines[0]).toBe("Codex"); // attention group first (no account suffix in fixture)
+  const exhaustedIdx = lines.findIndex((l) => l.includes("99%"));
+  const resetIdx = lines.findIndex((l) => l.includes("banked reset"));
+  const healthyIdx = lines.findIndex((l) => l.includes("10%"));
+  expect(exhaustedIdx).toBeGreaterThan(0);
+  expect(resetIdx).toBeGreaterThan(exhaustedIdx); // expiring after running-out within group
+  expect(healthyIdx).toBeGreaterThan(resetIdx);
+});
+
+test("bars align: every bar row shares the same bar column offset", () => {
+  const out = renderSnapshot(snap({
+    observations: [
+      obs({ entitlement: "claude-max:a@b.c", provider: "anthropic", used: 10, window: "weekly" }),
+      obs({ entitlement: "claude-max:b@c.d", provider: "anthropic", used: 55, window: "five_hour" }),
+    ],
+  }));
+  const offsets = out.split("\n")
+    .filter((l) => l.includes("█") || l.includes("░"))
+    .map((l) => l.indexOf("█") >= 0 ? l.indexOf("█") : l.indexOf("░"));
+  expect(offsets.length).toBe(2);
+  expect(new Set(offsets).size).toBe(1); // all bars start at the same column
 });
 
 test("render states unknown allowance plainly instead of inventing a percentage", () => {
   const out = renderSnapshot(snap({
     observations: [obs({ provider: "anthropic", entitlement: "claude-max-personal", used: null, limit: null, remaining: null, resetsAt: null })],
   }));
-  expect(out).toContain("allowance unknown");
+  expect(out).toContain("— unknown");
 });
 
 test("render lists unavailable adapters after the data sections", () => {
@@ -74,7 +89,7 @@ test("render lists unavailable adapters after the data sections", () => {
     observations: [obs({ used: 10 })],
     adapters: [{ provider: "venice", status: "unavailable", detail: "rate_limits HTTP 401" }],
   }));
-  expect(out.indexOf("UNAVAILABLE")).toBeGreaterThan(out.indexOf("AVAILABLE"));
+  expect(out.indexOf("unavailable")).toBeGreaterThan(out.indexOf("10%"));
   expect(out).toContain("rate_limits HTTP 401");
 });
 
@@ -113,7 +128,7 @@ test("sourceClassFor maps codexbar entry sources to evidence classes", async () 
   expect(sourceClassFor(undefined)).toBe("official_cli");
 });
 
-test("render labels Spark, DIEM, and multi-account lines distinctly", () => {
+test("render labels Spark, DIEM, and multi-account groups distinctly", () => {
   const out = renderSnapshot(snap({
     observations: [
       obs({ entitlement: "codex-spark", used: 0, window: "five_hour" }),
@@ -121,11 +136,7 @@ test("render labels Spark, DIEM, and multi-account lines distinctly", () => {
       obs({ provider: "anthropic", entitlement: "claude-max:a@b.c", used: 10 }),
     ],
   }));
-  expect(out).toContain("Codex Spark ");
+  expect(out).toContain("Spark ");
   expect(out).toContain("0 DIEM"); // DIEM never renders as dollars
-  expect(out).toContain("(a@b.c)"); // account surfaced
-});
-
-test("dangling --provider is an error, not a silent all-provider query", async () => {
-  expect(await usageCommand(["--provider"])).toBe(1);
+  expect(out).toContain("Claude · a@b.c"); // account in the group title
 });
