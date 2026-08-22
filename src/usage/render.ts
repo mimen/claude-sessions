@@ -252,6 +252,12 @@ function rowFor(o: UsageObservation, name: string, limitPad: number, capSummary:
     case "allowance": {
       if (o.used !== null && o.limit !== null && o.limit > 0) {
         const pct = Math.round(o.used);
+        // Product rows are a breakdown of their parent's shared allowance — a second
+        // full bar and duplicate reset countdown imply separate quotas. Show percentages only.
+        const product = productOf(o.entitlement);
+        if (product && ["build", "chat", "imagine", "api"].includes(product.toLowerCase())) {
+          return `${indent}  ${label}${String(pct).padStart(3)}%`;
+        }
         const barText = colorFor(pct, label + colorFor(pct, bar(pct)));
         const when = countdown(o.resetsAt) || shortReset(o.resetsAt ?? "");
         return `${indent}${barText} ${String(pct).padStart(3)}%  ${when}`;
