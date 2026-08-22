@@ -1,0 +1,298 @@
+{
+  "generatedAt": "2026-08-22T20:05:06.212Z",
+  "store": "/Users/mimen/.claude/projects",
+  "surfaces": 14,
+  "hookBindings": 79,
+  "hookSessionsKnown": 106,
+  "indexRowsSampled": 200,
+  "timings": [
+    {
+      "section": "surface-tree",
+      "ms": 33
+    },
+    {
+      "section": "hook-bindings",
+      "ms": 160
+    },
+    {
+      "section": "agent-activity",
+      "ms": 2095
+    },
+    {
+      "section": "transcript-facts-index-read",
+      "ms": 4
+    },
+    {
+      "section": "coverage",
+      "ms": 16
+    },
+    {
+      "section": "directory-facts",
+      "ms": 0
+    }
+  ],
+  "findings": [
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "66 active bindings name surfaces absent from the fresh tree (hook store never pruned them): 00C606DE-062F-4B2C-83C5-943829007FEB -> 98325fdd-e93a-4c82-b765-7fe91ba830d4, 01F1573F-45FA-4069-A1D3-487D5C963DA3 -> 8a49a1e7-b98b-4bbd-b36a-890d8b429b0b, 08F75062-97C2-4E24-89DD-03B2E30C012E -> cd63fd86-4306-4cba-a486-db01041ab483, 0AAEA1C0-D830-462F-B578-928243B20748 -> 45971609-f27f-4233-a477-c5a6c835124b"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 02bcd768-0fb1-43d9-b294-f9ae67f7e1e3 claims agentLifecycle=running but pid 9597 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 058dc4f1-cb31-4a1f-873d-5eefe03da9f2 claims agentLifecycle=running but pid 87989 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 2464475e-adfa-4a9b-8f1f-e112096bcf86 claims agentLifecycle=running but pid 92691 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 2efd81d0-af92-4b17-8a1c-1c69d978543e claims agentLifecycle=running but pid 84881 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 315f6966-f788-41de-be46-d4cdcf5fb20a claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/315f6966-f788-41de-be46-d4cdcf5fb20a.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 3192eb9e-1272-4355-a1a8-32d2928343b9 claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/3192eb9e-1272-4355-a1a8-32d2928343b9.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 34f7357e-50d8-4c59-aec0-adad1ac12a09 claims agentLifecycle=running but pid 47442 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 393c3aed-6aca-410a-9d67-1f139f21bc29 claims agentLifecycle=running but pid 85917 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 3caa24b5-3de5-4121-bb91-2a154c2e32de claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/3caa24b5-3de5-4121-bb91-2a154c2e32de.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 41a41e9b-5c8b-4cd9-a5b5-f3091cf8b060 claims transcript /Users/mimen/.claude/projects/-Users-mimen/41a41e9b-5c8b-4cd9-a5b5-f3091cf8b060.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 41cdeffd-6c76-42d5-bc32-d0524a7a32be claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/41cdeffd-6c76-42d5-bc32-d0524a7a32be.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 43a1abea-3f59-4380-90ae-691728e46d9d claims agentLifecycle=running but pid 99672 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 45e4c13e-d628-4438-b464-0e45311d5942 claims agentLifecycle=running but pid 86981 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 45ea1a22-ac96-4d80-b08b-66b37cd0c19e claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/45ea1a22-ac96-4d80-b08b-66b37cd0c19e.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 4610270b-1b1a-46da-bfaf-b6befdc5aca4 claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/4610270b-1b1a-46da-bfaf-b6befdc5aca4.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 51fa41e9-1cba-4168-8587-e665664895aa claims transcript /Users/mimen/.claude/projects/-Users-mimen/51fa41e9-1cba-4168-8587-e665664895aa.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 527da0c5-548a-4f8a-b722-d274aa65b71d claims transcript /Users/mimen/.claude/projects/-Users-mimen/527da0c5-548a-4f8a-b722-d274aa65b71d.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 53a2d8d9-4f77-4745-8b1e-9c4dc202ac8c claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/53a2d8d9-4f77-4745-8b1e-9c4dc202ac8c.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 5708c2cb-2433-4b88-8101-bb770f8adf48 claims agentLifecycle=running but pid 92797 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 573537d7-2cdb-4847-bfd2-2bda59c08581 claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/573537d7-2cdb-4847-bfd2-2bda59c08581.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 5f0e76e3-643e-464a-a497-1ddc755ada88 claims agentLifecycle=running but pid 56183 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 63eef96f-ad21-4299-a290-8276d6bcf5bf claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/63eef96f-ad21-4299-a290-8276d6bcf5bf.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 6a14539b-34cb-4615-8840-e5a77b60a379 claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/6a14539b-34cb-4615-8840-e5a77b60a379.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 757a9038-3335-4ad8-8438-de915bd28333 claims agentLifecycle=running but pid 86239 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 7637a338-60e2-494d-a788-fa1f6dd4ab30 claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/7637a338-60e2-494d-a788-fa1f6dd4ab30.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 7e895ee0-2f1e-4825-8b86-053e5dfb5799 claims agentLifecycle=running but pid 62936 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 7ecc75bd-79f4-416d-9a76-92cb33e40647 claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/7ecc75bd-79f4-416d-9a76-92cb33e40647.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 8a49a1e7-b98b-4bbd-b36a-890d8b429b0b claims agentLifecycle=running but pid 46754 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 8aeb1371-ac56-4694-8629-6e5de55c86df claims agentLifecycle=running but pid 40853 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 8b7c457e-03f9-405f-a643-3eb60da0935a claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/8b7c457e-03f9-405f-a643-3eb60da0935a.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 95ac8076-11ae-406c-9e42-a74a59abc0d0 claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/95ac8076-11ae-406c-9e42-a74a59abc0d0.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 95ac8076-11ae-406c-9e42-a74a59abc0d0 claims agentLifecycle=running but pid 49335 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session 97eff75d-bc7b-4a5e-9fe9-5f9c43982f0c claims agentLifecycle=running but pid 13579 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session b181d247-9148-4238-8fef-4ad78d37b2e2 claims agentLifecycle=running but pid 52399 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session b673fce9-7443-47cc-8406-12f2679c3239 claims agentLifecycle=running but pid 86603 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session b8e61d76-daa8-49c6-ae5b-999f58882dfe claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/b8e61d76-daa8-49c6-ae5b-999f58882dfe.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session b9c15f8c-0bd9-4580-96b3-dd8d5d3b00dc claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/b9c15f8c-0bd9-4580-96b3-dd8d5d3b00dc.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session c6e9555e-9ac6-4788-9c3b-582e1ccc561c claims agentLifecycle=running but pid 87333 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session cfce976b-8bf0-49ed-a129-1a836a14040b claims agentLifecycle=running but pid 12423 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session d2fea9f5-ce18-4779-a34b-a494e8522e68 claims agentLifecycle=running but pid 22272 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session de3f05d2-1863-4e8b-88ed-737fc905e287 claims agentLifecycle=running but pid 24468 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session efbd581a-9824-42b2-87de-7367d628a726 claims agentLifecycle=running but pid 88120 is not alive"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session f7bb5bd4-ab3c-4d68-a1e6-51868f1fd2ac claims transcript /Users/mimen/.claude/projects/-Users-mimen/f7bb5bd4-ab3c-4d68-a1e6-51868f1fd2ac.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session fba4c4ec-4468-4103-be7c-6aeed7f5b132 claims transcript /Users/mimen/.claude/projects/-Users-mimen-Programming-Worktrees-openbot-setup-local/fba4c4ec-4468-4103-be7c-6aeed7f5b132.jsonl which does not exist on disk"
+    },
+    {
+      "primitive": "hook-bindings",
+      "severity": "error",
+      "detail": "session fca5ec10-58ef-4bbd-8ece-2e94de24740d claims agentLifecycle=running but pid 45423 is not alive"
+    },
+    {
+      "primitive": "agent-activity",
+      "severity": "info",
+      "detail": "differential sample: 11 agree, 0 disagree, 1 without derivable lifecycle (the known gap the authoritative sweep corrects)"
+    },
+    {
+      "primitive": "transcript-facts",
+      "severity": "info",
+      "detail": "checked 200 byte-sizes, 200 recencies, 40 line counts against the Store"
+    },
+    [
+      {
+        "primitive": "catalogue-identity",
+        "severity": "warn",
+        "detail": "17/285 catalogue rows have no transcript file on disk (destroyed elsewhere, or tracking drift)"
+      }
+    ],
+    {
+      "primitive": "coverage",
+      "severity": "info",
+      "detail": "2/152 recent store files not found in the index id set(grace-windowed examples only become errors)"
+    },
+    {
+      "primitive": "directory-facts",
+      "severity": "warn",
+      "detail": "1/40 distinct cwd values no longer exist on disk"
+    },
+    {
+      "primitive": "directory-facts",
+      "severity": "info",
+      "detail": "checked existence of 40 distinct cwd values"
+    }
+  ]
+}

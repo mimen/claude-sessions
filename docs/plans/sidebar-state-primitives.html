@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="30">
+<title>Sidebar State Primitives — Rebuilding Live State From the Source Up</title>
+<script>
+try{const k=document.location.pathname+"|scroll";const y=sessionStorage.getItem(k);if(y!==null)addEventListener("load",()=>scrollTo(0,+y));addEventListener("scroll",()=>sessionStorage.setItem(k,scrollY),{passive:true});}catch(e){}
+</script>
+<style>
+  :root{
+    --ink:#1a1d23; --ink-soft:#4a5058; --ink-faint:#8a919b;
+    --paper:#fbfaf7; --card:#ffffff; --line:#e5e2da;
+    --accent:#0b6e4f; --accent-soft:#e6f2ed;
+    --warn:#9a3412; --warn-soft:#fdf0e7;
+    --code-bg:#f3f1ec;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:-apple-system,"SF Pro Text","Helvetica Neue",sans-serif;
+    font-size:15px; line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  main{max-width:880px; margin:0 auto; padding:48px 32px 96px}
+  h1{font-size:30px; line-height:1.2; margin:0 0 6px; letter-spacing:-.02em}
+  h2{font-size:21px; margin:56px 0 14px; letter-spacing:-.01em; padding-top:18px; border-top:1px solid var(--line)}
+  h3{font-size:16px; margin:28px 0 8px}
+  p{margin:10px 0}
+  .lede{font-size:17px; color:var(--ink-soft); max-width:44em}
+  code,.mono{font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:.86em; background:var(--code-bg); padding:2px 5px; border-radius:4px}
+  table{border-collapse:collapse; width:100%; margin:18px 0; font-size:13.5px}
+  th{text-align:left; font-weight:600; color:var(--ink-faint); text-transform:uppercase; font-size:11px; letter-spacing:.06em; padding:8px 12px 6px; border-bottom:1px solid var(--ink)}
+  td{padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  .statusbar{
+    display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+    background:var(--warn-soft); border:1px solid #eccdb5; border-radius:8px;
+    padding:10px 16px; margin:22px 0 8px; font-size:13px; color:var(--warn);
+  }
+  .path{color:var(--ink-faint); font-size:12px; word-break:break-all}
+  .callout{background:var(--accent-soft); border-radius:8px; padding:14px 18px; margin:16px 0}
+  .callout.warn{background:var(--warn-soft)}
+  .num{display:inline-block; width:20px; height:20px; border-radius:50%; background:var(--accent); color:#fff; font-size:12px; text-align:center; line-height:20px; margin-right:8px; vertical-align:1px}
+  .diagram{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:22px; margin:20px 0; overflow-x:auto}
+  .diagram pre{margin:0; font-family:"SF Mono",ui-monospace,Menlo,monospace; font-size:12px; line-height:1.55; color:var(--ink)}
+  .pill{display:inline-block; font-size:11px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); background:var(--code-bg); color:var(--ink-soft); white-space:nowrap}
+  footer{margin-top:72px; padding-top:16px; border-top:1px solid var(--line); font-size:12px; color:var(--ink-faint)}
+</style>
+</head>
+<body>
+<main>
+
+<h1>The sidebar's state layer, rebuilt from primitives up</h1>
+<p class="lede">Break the sidebar's "current state" into eight independently owned, independently tested <strong>state primitives</strong>, give each one a monotonic revision and a cheap change signal, and only then reassemble them — first behind the existing snapshot API, then into a new native SwiftUI sidebar built in parallel. The web sidebar keeps working throughout.</p>
+
+<div class="statusbar">Status: awaiting implementation authorization · decisions settled 2026-08-22</div>
+<p class="path">Artifact: /Users/mimen/Programming/Repos/claude-sessions-sidebar-state/docs/plans/sidebar-state-primitives.html · branch <span class="mono">sidebar-state-primitives</span> (fresh from origin/master)</p>
+
+<h2>Why it never feels live — the structure, not a bug</h2>
+
+<p>One snapshot build (<span class="mono">src/sidebar/snapshot.ts</span>) runs seven sequential phases, and each phase carries its own independent cache with its own expiry:</p>
+
+<table>
+<tr><th>Phase</th><th>Source</th><th>Cost when cold</th><th>Staleness window</th></tr>
+<tr><td>Liveness bridge</td><td><span class="mono">cmux tree</span> (cmux's JSON of what surfaces exist) + the hook store (cmux's file binding each surface to its session id)</td><td>one subprocess + file read</td><td>≤ 2.5 s served-warm, longer under refresh</td></tr>
+<tr><td>Catalogue identity/lifecycle</td><td><span class="mono">catalogue.db</span></td><td>SQL read</td><td>trails its launchd refresh agent</td></tr>
+<tr><td>Index facts (title, cost, recency)</td><td><span class="mono">index.db</span></td><td>SQL read</td><td>trails reindex timer — a session typing right now isn't reflected</td></tr>
+<tr><td>Status pills</td><td><span class="mono">cmux list-status</span> × workspace</td><td><strong>one subprocess per workspace</strong>, measured 503 ms across 19 — 90% of a whole snapshot</td><td>2.5 s TTL; between sweeps, inferred from hook store and labelled <span class="mono">derived</span></td></tr>
+<tr><td>Workspace state / notifications</td><td>more cmux subprocesses</td><td>subprocess fan-out</td><td>2–10 s TTLs</td></tr>
+<tr><td>Message counts</td><td>synchronous <span class="mono">statSync</span>/read per enriched row</td><td>measured blocking the event loop <strong>6.2 s</strong> at ~400 rows before being narrowed</td><td>whatever the index last knew</td></tr>
+<tr><td>Projection</td><td>pure function</td><td>negligible</td><td>none</td></tr>
+</table>
+
+<p>Three consequences fall straight out of this shape:</p>
+<p><span class="num">1</span> No component knows <em>that something changed</em> — only how old its answer is. Freshness is bought by re-running everything on a timer.</p>
+<p><span class="num">2</span> A change anywhere either pays the full multi-subprocess rebuild or serves every column stale together, even the ones that were free to refresh.</p>
+<p><span class="num">3</span> Correctness rules are smeared across the orchestrator instead of living with their data — which is exactly why identity disagreements between catalogue and index produced dead clicks and doubled hover paint before the liveness ledger landed.</p>
+
+<h2>What master already fixed — carried forward, not rewritten</h2>
+
+<p>The last week of work on <span class="mono">origin/master</span> (local checkout is 71 commits behind) already built real pieces of the target:</p>
+<ul>
+<li><strong><span class="mono">src/cmux/events.ts</span></strong> — a scoped subscription to cmux's own change events. The push signal for short-horizon state exists.</li>
+<li><strong><span class="mono">src/sidebar/change-monitor.ts</span></strong> — converges cmux events and SQLite header probes onto "each source exposes one monotonic revision". This is the seed of the revision contract below.</li>
+<li><strong>The liveness ledger</strong> (commit <span class="mono">8e2f98b</span>) — one alias graph joining catalogue + index identities so projection, open, and close answer with a single voice, plus action-vouched short-horizon liveness.</li>
+<li><strong>A native client exists</strong> — <span class="mono">macos/CcsSidebarApp/</span> on master ships the SwiftUI ExtensionKit shell whose <span class="mono">SnapshotClient</span> consumes the production snapshot API. The Swift renderer is not greenfield.</li>
+</ul>
+
+<div class="callout">The rebuild therefore keeps these mechanisms and promotes their pattern: today the revision idea lives inside one monitor feeding one monolithic snapshot builder. The work is extracting it into named primitives that each own their own signal, contract, and tests.</div>
+
+<h2>The eight primitives</h2>
+
+<p>Each primitive is a module with the same shape: an idempotent <span class="mono">read()</span>, a monotonic <span class="mono">revision</span> that advances iff the value could have changed, a change signal appropriate to its source's cost, a written freshness budget, and an explicit failure posture. Nothing else may read its source directly — that rule, enforced like the existing mutation-boundary test, is what makes each piece reliably testable in isolation.</p>
+
+<table>
+<tr><th>#</th><th>Primitive</th><th>Answers</th><th>Change signal</th><th>Freshness budget</th><th>Fails</th></tr>
+<tr><td>1</td><td><strong>Surface tree</strong></td><td>What workspaces/surfaces exist right now</td><td>cmux event subscription; full sweep only on event or cold start</td><td>&lt; 500 ms after cmux emits</td><td>closed — no invented surfaces</td></tr>
+<tr><td>2</td><td><strong>Hook bindings</strong></td><td>Which session lives in which surface</td><td>fswatch on <span class="mono">~/.cmuxterm/claude-hook-sessions.json</span> (file mtime)</td><td>&lt; 200 ms</td><td>closed — unreadable ⇒ not readable</td></tr>
+<tr><td>3</td><td><strong>Liveness</strong> <span class="pill">derived</span></td><td>Is this session embodied, focused, recently vouched</td><td>recomputed from 1+2+the liveness ledger's action vouches (a resume/close the sidebar itself just performed, trusted briefly until the sources confirm); revision = max of inputs</td><td>instant once inputs are</td><td>inherits inputs</td></tr>
+<tr><td>4</td><td><strong>Agent activity</strong></td><td>Running / needs input / idle</td><td>layered: hook-store lifecycle free and instant; authoritative <span class="mono">list-status</span> sweep corrects it, scheduled only when revisions elsewhere moved</td><td>derived ≤ 300 ms; corrected ≤ 3 s</td><td>open — stale pill beats blank pill, labelled</td></tr>
+<tr><td>5</td><td><strong>Catalogue identity</strong></td><td>Lifecycle, canonical ids, titles, memberships</td><td><span class="mono">PRAGMA data_version</span> probe (cheap header read)</td><td>&lt; 1 s after commit</td><td>degraded-all-active, labelled</td></tr>
+<tr><td>6</td><td><strong>Transcript facts</strong></td><td>Recency, cost, message counts, titles</td><td><span class="mono">data_version</span> probe + incremental reindex kick; per-row tail-count only for rows visible on screen</td><td>&lt; 1 s after commit; tail ≤ 1 s for visible rows</td><td>degraded, labelled</td></tr>
+<tr><td>7</td><td><strong>Workspace extras</strong></td><td>Notifications, pane counts</td><td>cmux events scope the sweep; batched single call where the CLI allows it</td><td>≤ 5 s</td><td>open — omit field, keep row</td></tr>
+<tr><td>8</td><td><strong>Directory facts</strong></td><td>Worktree, branch, favicon, project</td><td>none needed — effectively immutable per cwd; LRU keyed by path</td><td>forever until eviction</td><td>open — blank project cell</td></tr>
+</table>
+
+<h2>The revision contract — how composition stays cheap</h2>
+
+<p>The snapshot stops being "seven caches and a timer" and becomes a pure fold over primitive values, memoized on a composite revision:</p>
+
+<div class="diagram"><pre>
+primitive      revision   change signal            cost of noticing
+─────────────  ────────   ────────────────────     ────────────────
+surface tree     r₃ ─┐    cmux events (push)       ~0
+hook bindings    r₂ ─┼─►  fswatch (push)           ~0
+liveness         r₅ ◄─┘    derived                  ~0
+agent activity   r₁ ─┐    hook store + sweep       ~0 / subprocess on demand
+catalogue        r₄ │    PRAGMA data_version      ~µs
+transcripts      r₆ ─┴─►  PRAGMA data_version      ~µs
+workspace extras r₇       scoped events + TTL      subprocess, batched
+directory facts  r₈       immutable LRU            ~0
+                     │
+                     ▼
+        composite = (r₁..r₈) ──► memoized snapshot bytes
+                     │                    ▲ rebuild ONLY if any rᵢ moved
+                     ▼                    └── ETag compare unchanged otherwise
+             Swift / web clients</pre></div>
+
+<p>Polling a revision vector is microseconds — header probes and integers, no subprocesses — so the server notices any change within ~100 ms and rebuilds only the parts that moved. Clients (both) stay on conditional GET against the ETag they already use; nothing about the transport changes. This is the "layered watchers" decision applied literally: instant where the kernel gives it to us free, scheduled sweeps only where a subprocess is unavoidable, and never a poll that re-reads what a revision proved unchanged.</p>
+
+<h2>Ground truth first — assume the tracking is wrong</h2>
+
+<p>Every primitive above is validated not just for internal consistency but against <strong>an oracle measured independently of ccs</strong>. The working assumption is that some of the eight are tracking reality inaccurately today — possibly all of them, and the UX problem may be a redraw bug sitting on top of correct data. Both get tested, and the harness separates them:</p>
+
+<table>
+<tr><th>#</th><th>Primitive</th><th>Oracle (reality, measured without ccs)</th><th>Differential check</th></tr>
+<tr><td>1</td><td>Surface tree</td><td>What cmux itself displays: independent <span class="mono">cmux tree</span> invocation + visible windows</td><td>every surface we show exists; every real surface we list</td></tr>
+<tr><td>2</td><td>Hook bindings</td><td>The bound session's transcript file exists and a claude process is actually running on that surface (<span class="mono">ps</span> by tty/pid)</td><td>binding ⇔ live process</td></tr>
+<tr><td>3</td><td>Liveness</td><td>Human-visible: the pane a row claims is live really holds that session; a dead row's workspace holds nothing</td><td>spot-check script over all rows</td></tr>
+<tr><td>4</td><td>Agent activity</td><td>Scripted sessions driven through known states (mid-run, stopped-and-waiting, idle) while sampled</td><td>"Needs input" fires exactly when the agent actually waits</td></tr>
+<tr><td>5</td><td>Catalogue identity</td><td>Behavioral: clicking the row focuses the tab that actually owns the session; resume lands on the right lineage</td><td>resolve-then-act equals intent</td></tr>
+<tr><td>6</td><td>Transcript facts</td><td>The Store files themselves: line count vs our message counts, direct usage-line math vs our cost, file mtime vs our recency</td><td>within stated tolerance</td></tr>
+<tr><td>7</td><td>Workspace extras</td><td>Actual unread content in the pane</td><td>badge ⇔ real unread</td></tr>
+<tr><td>8</td><td>Directory facts</td><td><span class="mono">git</span> run in that directory</td><td>branch/worktree exact</td></tr>
+</table>
+
+<p>This runs as a continuous differential harness during soak (a <span class="mono">ccs sidebar verify</span> mode), logging every disagreement into a discrepancy ledger. Each discrepancy is classified four ways — because "the data is wrong" and "the data was right but never reached the screen" have opposite fixes:</p>
+
+<div class="diagram"><pre>
+discrepancy class        meaning                              fix lives in
+───────────────────────  ───────────────────────────────────  ─────────────────
+A  source wrong          primitive misreads its source         the primitive's parser/read path
+B  signal wrong          source changed, revision didn't move   the change signal / watcher
+C  composition stale     revision moved, snapshot not rebuilt   the fold / memoization
+D  render stale          client got fresh bytes, drew nothing    the client redraw path</pre></div>
+
+<p>Class D gets its own cheap instrumentation regardless: both clients log the last revision they received and a hash of the bytes they rendered, so "server advanced but screen didn't change" is provable from logs rather than argued from vibes. If the soak comes back clean across all eight, we'll know the tracking was accurate and the liveness complaint was purely classes C/D — which the revision contract then eliminates by construction.</p>
+
+<h2>The testing ladder — reliability before reincorporation</h2>
+
+<p>Each primitive must clear all five rungs before anything consumes it again:</p>
+<p><span class="num">0</span><strong>Ground-truth oracle.</strong> Differential validation against reality measured without ccs (table above) — run first, since a perfectly tested primitive tracking the wrong thing is worse than an untested one.</p>
+<p><span class="num">1</span><strong>Parser units.</strong> Fixture-based, no I/O — the pattern <span class="mono">status.ts</span> already uses, applied everywhere.</p>
+<p><span class="num">2</span><strong>Fake-source behaviour tests.</strong> Each primitive takes its source as an injectable interface; tests drive real sequences (bind → resume → close; commit → probe → miss) under a fake clock, asserting both value and revision movement.</p>
+<p><span class="num">3</span><strong>Fault injection.</strong> For every primitive, scripted hostility: subprocess timeout, torn/partial file write, unreadable DB, source vanishing mid-read. Assert the documented failure posture and that revision never advances on a failed read (a failed read must never look like a change).</p>
+<p><span class="num">4</span><strong>Live soak + bench.</strong> Extend the existing <span class="mono">src/sidebar/bench</span>: record real cmux event streams and DB traces, replay them, and assert (a) end-to-end perceived latency under budget, (b) zero rebuilds when nothing changed, (c) no event-loop blocks, (d) a clean discrepancy ledger against the oracle. The bench numbers become the acceptance evidence on this page.</p>
+
+<p>One cross-cutting guard joins them: a <strong>contract test</strong> compiling the TypeScript snapshot type against the Swift <span class="mono">Snapshot.swift</span> Codable struct in CI, so the native client and the state layer cannot drift silently.</p>
+
+<h2>Build order</h2>
+
+<p><span class="num">1</span><strong>Baseline instrumentation + ground-truth sweep.</strong> Measure today's numbers (per-phase latency, staleness windows, rebuild frequency) and run the differential oracle across all eight primitives against live state — this is where we learn which tracking is actually inaccurate before extracting anything.</p>
+<p><span class="num">2</span><strong>Primitives 1–2–3</strong> (tree, bindings, liveness). Highest correctness stakes — this is where the historical dead clicks and doubled rows came from. Extract from the existing bridge + ledger code, add fault-injection suites.</p>
+<p><span class="num">3</span><strong>Primitives 5–6</strong> (catalogue, transcripts) including killing the synchronous message-count pass permanently with the visible-row tail-counter.</p>
+<p><span class="num">4</span><strong>Primitives 4, 7, 8</strong> (activity, extras, directory) with the layered activity watcher replacing the unconditional status fan-out.</p>
+<p><span class="num">5</span><strong>Recomposition.</strong> <span class="mono">snapshot.ts</span> shrinks to the revision-fold; change-monitor becomes the driver; endpoints and ETag semantics unchanged. Web sidebar rides the new engine without knowing.</p>
+<p><span class="num">6</span><strong>Native SwiftUI build, in parallel from step 2 onward.</strong> The renderer consumes the unchanged snapshot API from day one; feature work happens there, the web app freezes as fallback. Dock cut-over when the soak ladder passes against the native client.</p>
+
+<h2>Decisions settled</h2>
+<table>
+<tr><th>Decision</th><th>Choice</th><th>Runner-up and why it lost</th></tr>
+<tr><td>Target surface</td><td>Native SwiftUI sidebar</td><td>Web-first — rejected because the direction to native was already declared on the branch and the native shell exists on master; building primitives surface-agnostically makes web the free fallback rather than the goal.</td></tr>
+<tr><td>Liveness mechanism</td><td>Layered watchers per primitive</td><td>Central push bus + SSE — rejected because the measured transport shows unchanged polls are already zero-body 304s; push adds reconnect machinery before the cheaper win (revision-probe polling) is exhausted.</td></tr>
+<tr><td>Rollout</td><td>New parallel Swift build; web keeps running on the recomposed engine</td><td>Big-bang replacement — rejected: loses the working Dock sidebar for the arc and concentrates all reliability learning at the end instead of per-primitive.</td></tr>
+<tr><td>Where state logic lives</td><td>TypeScript server owns all state; Swift only renders</td><td>Native Swift reading SQLite/hook store directly — rejected: duplicates four battle-tested adapters behind one IPC boundary and splits correctness rules across two languages.</td></tr>
+</table>
+
+<h2>Risks stated plainly</h2>
+<ul>
+<li><strong>Some of the eight probably track reality inaccurately today.</strong> That is the working assumption, not a risk: the ground-truth sweep in phase 1 exists to find out which, and no primitive graduates its ladder while its oracle disagrees with it.</li>
+<li><strong>cmux event coverage is unproven for every field.</strong> If events miss a transition (e.g. a status flip with no emitted event), the layered design catches it on the next reconcile sweep — but the freshness budget for that field is then a lie (a class-B discrepancy). The soak ladder measures this per field.</li>
+<li><strong>Revision-probe polling still wakes the process 10×/s.</strong> Measured in baseline instrumentation; if it shows up in energy, the probes collapse into fewer timers without changing the contract.</li>
+<li><strong>The local checkout is 71 behind master.</strong> All work starts in this fresh worktree; the exploration numbers above come from pre-master-71 code and get re-verified during baseline instrumentation.</li>
+<li><strong>ExtensionKit sidebar constraints</strong> (sandboxing, memory limits) bound what the Swift app can do; the render-only posture keeps those limits away from the state layer by construction.</li>
+</ul>
+
+<footer>
+Plan artifact · claude-sessions · branch <span class="mono">sidebar-state-primitives</span> · awaiting implementation authorization · refreshes every 30 s
+</footer>
+
+</main>
+</body>
+</html>

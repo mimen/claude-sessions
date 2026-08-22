@@ -22,6 +22,7 @@
     "cmux:sidebar:open": "bun run scripts/cmux-sidebar.ts open",
     "benchmark:sidebar": "bun run scripts/sidebar-performance-benchmark.ts",
     "benchmark:sidebar:actions": "bun run scripts/sidebar-action-benchmark.ts",
+    "ground-truth:sidebar": "bun run scripts/sidebar-ground-truth.ts",
     "report:detached-children": "bun run scripts/report-detached-children.ts",
     "report:detached-children:dossier": "bun run scripts/render-detached-child-dossier.ts",
     "lint:exports": "ts-prune -e",
