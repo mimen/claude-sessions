@@ -36,6 +36,11 @@ export interface Finding {
   readonly primitive: string;
   readonly severity: "error" | "warn" | "info";
   readonly detail: string;
+  /**
+   * Stable identity for live tracking: the same flaw observed on consecutive sweeps must map
+   * to the same key so a watcher can distinguish persistent drift from a one-sweep race.
+   */
+  readonly key?: string;
 }
 
 export async function run(
@@ -189,22 +194,20 @@ export async function auditHookBindings(
     return { facts, findings };
   }
 
-  const staleBindings: string[] = [];
   for (const [surfaceId, binding] of Object.entries(store.activeSessionsBySurface ?? {})) {
     const sessionId = binding?.sessionId;
     if (!sessionId) continue;
     facts.bindingsBySurface.set(surfaceId, sessionId);
     const surfaceExists =
       tree.workspaceIds.has(surfaceId) || tree.surfaces.some((s) => s.surfaceId === surfaceId);
-    if (!surfaceExists) staleBindings.push(`${surfaceId} -> ${sessionId}`);
-  }
-  if (staleBindings.length > 0) {
-    findings.push({
-      primitive: "hook-bindings",
-      severity: "error",
-      detail: `${staleBindings.length} active bindings name surfaces absent from the fresh tree ` +
-        `(hook store never pruned them): ${staleBindings.slice(0, 4).join(", ")}`,
-    });
+    if (!surfaceExists) {
+      findings.push({
+        primitive: "hook-bindings",
+        severity: "error",
+        detail: `active binding ${surfaceId} -> ${sessionId} names a surface absent from the fresh tree (never pruned)`,
+        key: `stale-binding:${surfaceId}`,
+      });
+    }
   }
 
   let renamed = 0;
@@ -218,6 +221,7 @@ export async function auditHookBindings(
         primitive: "hook-bindings",
         severity: "error",
         detail: `session ${sessionId} claims transcript ${entry?.transcriptPath ?? "(unrecorded path)"} which does not exist on disk`,
+        key: `missing-transcript:${sessionId}`,
       });
     }
     if (entry?.agentLifecycle === "running" && !(await pidAlive(entry?.pid ?? null))) {
@@ -225,6 +229,7 @@ export async function auditHookBindings(
         primitive: "hook-bindings",
         severity: "error",
         detail: `session ${sessionId} claims agentLifecycle=running but pid ${entry?.pid} is not alive`,
+        key: `ghost-running:${sessionId}`,
       });
     }
   }
@@ -249,7 +254,7 @@ export async function auditAgentActivity(tree: TreeFacts, hooks: HookFacts): Pro
   let agree = 0;
   let disagree = 0;
   let derivedUnknown = 0;
-  const examples: string[] = [];
+
   for (const surface of tree.surfaces) {
     const output = await run(CMUX_BIN, ["list-status", "--workspace", surface.workspaceId], 4_000);
     if (output === null) continue;
@@ -264,21 +269,13 @@ export async function auditAgentActivity(tree: TreeFacts, hooks: HookFacts): Pro
       agree += 1;
     } else {
       disagree += 1;
-      if (examples.length < 8) {
-        examples.push(
-          `${surface.workspaceRef}: hook-store "${derived.label}" vs authoritative "${status.label}"`,
-        );
-      }
+      findings.push({
+        primitive: "agent-activity",
+        severity: "warn",
+        detail: `${surface.workspaceRef}: hook-store "${derived.label}" vs authoritative "${status.label}"`,
+        key: `status-mismatch:${surface.workspaceId}`,
+      });
     }
-  }
-  if (disagree > 0) {
-    findings.push({
-      primitive: "agent-activity",
-      severity: "warn",
-      detail:
-        `${disagree}/${agree + disagree} sampled surfaces: hook-store-derived activity disagrees ` +
-        `with cmux's authoritative pill (${examples.join("; ")})`,
-    });
   }
   findings.push({
     primitive: "agent-activity",
@@ -304,6 +301,7 @@ export function auditTranscriptRows(rows: readonly IndexedSessionInput[]): Findi
         primitive: "transcript-facts",
         severity: "error",
         detail: `${row.sessionId}: index claims ${row.indexedBytes}B but the file holds ${stat.size}B (index ahead of an append-only file)`,
+        key: `index-bytes-ahead:${row.sessionId}`,
       });
     }
     recencyChecked += 1;
@@ -314,6 +312,7 @@ export function auditTranscriptRows(rows: readonly IndexedSessionInput[]): Findi
           primitive: "transcript-facts",
           severity: "error",
           detail: `${row.sessionId}: last_ts ${row.lastTs} exceeds the file's mtime beyond slack`,
+          key: `ts-ahead:${row.sessionId}`,
         });
       }
     }
@@ -332,6 +331,7 @@ export function auditTranscriptRows(rows: readonly IndexedSessionInput[]): Findi
         primitive: "transcript-facts",
         severity: "error",
         detail: `${row.sessionId}: msg_count ${messageCount} exceeds the transcript's ${lines} lines`,
+        key: `msgcount-ahead:${row.sessionId}`,
       });
     }
   }
@@ -354,27 +354,24 @@ export interface CoverageInput {
 export function auditCoverage(input: CoverageInput): Finding[] {
   const findings: Finding[] = [];
   let missingFromIndex = 0;
-  const examples: string[] = [];
   for (const [sessionId, file] of input.recentFiles) {
     if (!input.indexedIds.has(sessionId)) {
       missingFromIndex += 1;
-      if (examples.length < 6 && input.nowMs - file.mtimeMs > REINDEX_GRACE_MS) {
-        examples.push(`${sessionId} (${Math.round((input.nowMs - file.mtimeMs) / 60_000)}m old)`);
+      if (input.nowMs - file.mtimeMs > REINDEX_GRACE_MS) {
+        findings.push({
+          primitive: "coverage",
+          severity: "error",
+          detail: `transcript ${sessionId} absent from the index ${Math.round((input.nowMs - file.mtimeMs) / 60_000)}m after last write`,
+          key: `coverage-missing:${sessionId}`,
+        });
       }
     }
-  }
-  if (examples.length > 0) {
-    findings.push({
-      primitive: "coverage",
-      severity: "error",
-      detail: `recent transcripts absent from the index beyond reindex grace: ${examples.join(", ")}`,
-    });
   }
   findings.push({
     primitive: "coverage",
     severity: "info",
     detail: `${missingFromIndex}/${input.recentFiles.size} recent store files not found in the index id set` +
-      `(grace-windowed examples only become errors)`,
+      `(beyond the reindex grace these become per-session errors)`,
   });
   return findings;
 }
@@ -388,18 +385,17 @@ export async function auditDirectories(rows: readonly IndexedSessionInput[]): Pr
   for (const cwd of cwds) {
     if (existsSync(cwd)) continue;
     missing += 1;
-  }
-  if (missing > 0) {
     findings.push({
       primitive: "directory-facts",
       severity: "warn",
-      detail: `${missing}/${cwds.length} distinct cwd values no longer exist on disk`,
+      detail: `cwd ${cwd} no longer exists on disk`,
+      key: `cwd-missing:${cwd}`,
     });
   }
   findings.push({
     primitive: "directory-facts",
     severity: "info",
-    detail: `checked existence of ${cwds.length} distinct cwd values`,
+    detail: `checked existence of ${cwds.length} distinct cwd values (${missing} missing)`,
   });
   return findings;
 }
