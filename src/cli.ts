@@ -55,6 +55,7 @@ import { launchGoTui } from "./tui-go/launch.ts";
 import { getAllCategoryAssignments, resolveEffectiveCategory } from "./categories/assignment.ts";
 import { categoryCommand } from "./categories/command.ts";
 import { categoryBySlug, loadCategoryRegistry } from "./categories/registry.ts";
+import { usageCommand } from "./usage/command.ts";
 
 const HELP = `ccs — find and resume any Claude Code session
 
@@ -81,6 +82,9 @@ Usage:
                          Reserve and synchronously run an auxiliary seat (fallback is explicit; never automatic)
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
   ccs launcher install  Install the CCS shim, named wrappers, and shell initialization
+  ccs usage [--provider <id>] [--json]     Point-in-time usage across Codex, Anthropic,
+                                           Grok, OpenCode Go, Venice (--json = snapshot contract)
+  ccs usage sources|doctor                 Adapter provenance, or adapter health only
   ccs doctor sessions [--json]  Report post-rollout unclassified or provenance-missing sessions
   ccs doctor launcher [--json]  Report deployed-vs-origin and installed-vs-config launcher drift
   ccs doctor categories [--json] [--deep]  Report life-domain category drift across every surface
@@ -264,6 +268,8 @@ export async function main(argv: string[]): Promise<number> {
       return locationCommand(args.slice(1));
     case "delegate":
       return delegateCommand(args.slice(1));
+    case "usage":
+      return usageCommand(args.slice(1));
     case "doctor":
       return doctorCommand(args.slice(1));
     case "launcher":
