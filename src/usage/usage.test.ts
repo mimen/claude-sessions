@@ -59,7 +59,7 @@ test("render puts exhausted and near-exhausted before available, expiring credit
   expect(availableIdx).toBeGreaterThan(attentionIdx);
   const attention = out.slice(attentionIdx, availableIdx);
   expect(attention).toContain("banked full reset");
-  expect(attention).toContain("five-hour exhausted"); // exhausted window
+  expect(attention).toContain("████████  99% five-hour"); // exhausted window renders a full bar
 });
 
 test("render states unknown allowance plainly instead of inventing a percentage", () => {
