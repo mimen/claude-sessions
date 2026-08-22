@@ -299,7 +299,7 @@ export function auditTranscriptRows(rows: readonly IndexedSessionInput[]): Findi
     const stat = statOf(row.transcriptPath);
     if (stat === null) continue;
     bytesChecked += 1;
-    if (row.indexedBytes !== null && row.indexedBytes > stat.size) {
+    if (row.indexedBytes != null && row.indexedBytes > stat.size) {
       findings.push({
         primitive: "transcript-facts",
         severity: "error",
@@ -322,15 +322,16 @@ export function auditTranscriptRows(rows: readonly IndexedSessionInput[]): Findi
   let counted = 0;
   for (const row of rows) {
     if (counted >= LINE_SAMPLE_COUNT) break;
-    if (row.messageCount === null || row.transcriptPath === null) continue;
+    if (row.messageCount == null || row.transcriptPath == null) continue;
     const lines = lineCountOf(row.transcriptPath);
     if (lines === null) continue;
     counted += 1;
-    if (row.messageCount > lines + 2) {
+    const messageCount: number = row.messageCount;
+    if (messageCount > lines + 2) {
       findings.push({
         primitive: "transcript-facts",
         severity: "error",
-        detail: `${row.sessionId}: msg_count ${row.messageCount} exceeds the transcript's ${lines} lines`,
+        detail: `${row.sessionId}: msg_count ${messageCount} exceeds the transcript's ${lines} lines`,
       });
     }
   }
