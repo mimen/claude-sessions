@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { CATALOGUE_PATH, DB_PATH } from "../src/paths.ts";
 import { scanStore } from "../src/store.ts";
 import { readIndexReadOnly } from "../src/sidebar/index-read.ts";
+import { subscribeToCmuxEvents } from "../src/cmux/events.ts";
 import {
   auditAgentActivity,
   auditCoverage,
@@ -308,6 +309,27 @@ async function sweepLoop(): Promise<void> {
   }
 }
 
+/**
+ * Event-driven fast path: cmux announces window/workspace/agent changes on its event stream,
+ * and focus is a window-category change. One kick runs an immediate cycle so the highlight
+ * tracks tab switches in tens of milliseconds rather than one poll interval. The 3s loop
+ * remains as the fallback that catches whatever the stream misses.
+ */
+let lastKickAt = 0;
+const KICK_MIN_INTERVAL_MS = 250;
+
+function startEventKicker(): void {
+  subscribeToCmuxEvents({
+    onChange(scopes) {
+      if (!scopes.has("liveness")) return;
+      const now = Date.now();
+      if (now - lastKickAt < KICK_MIN_INTERVAL_MS || sweeping) return;
+      lastKickAt = now;
+      void timedCycle(cycles % ACTIVITY_EVERY_N_CYCLES === 0).catch(() => {});
+    },
+  });
+}
+
 interface StatePayload {
   now: number;
   cycles: number;
@@ -469,6 +491,7 @@ const server = Bun.serve({
 });
 
 process.stdout.write(`sidebar ground truth live at http://127.0.0.1:${PORT}/\n`);
+startEventKicker();
 void sweepLoop();
 
 export { server };
