@@ -61,13 +61,16 @@ Probe: `curl -s 'http://127.0.0.1:8787/api/snapshot?limit=2000&scope=active&incl
 
 Server: SSE `/api/events` + revision-stamped snapshots. Client: `SnapshotClient.swift` — SSE
 follow with backoff, 1s poll disconnected / 5s poll connected, a five-second request timeout,
-refresh-generation guard against out-of-order responses, and `refreshNow` after every action.
-A snapshot older than the announced revision is retried once and never replaces newer rows;
-a failed refresh leaves that revision pending for the backstop poll.
+and `refreshNow` after every action. Snapshot reads are single-flight: later triggers collapse
+into one queued follow-up, forced liveness survives ordinary SSE/poll triggers, and a query change
+cannot paint the previous scope. A revision wakes the client but is not a transaction barrier:
+readers can advance it while a snapshot is assembling, so the latest completed response is applied
+even when its diagnostic stamp predates the announcement. A failed ordinary refresh leaves the
+current rows in place for the backstop poll; a failed forced refresh retries once.
 
 Failure shapes: the extension polling a dead port (the port-8788 staging misbuild), SSE
 zombie connections (poll backstop bounds the damage at 5s), or a snapshot request timing out.
-None requires a remount: both loops retry and pending revisions survive request failure.
+None requires a remount: both loops retry independently.
 
 Probe: `tail ~/Library/Containers/com.milad.ccs.sidebar.Extension/Data/Library/Caches/ccs-sidebar.log` — look for "connected to port 8787".
 

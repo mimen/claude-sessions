@@ -91,8 +91,6 @@ public struct SidebarSnapshot: Decodable, Sendable {
     public let lifecycleCounts: [String: Int]?
     /// Release SHA of the server that answered; absent from servers predating the stamp.
     public let serverVersion: String?
-    /// Source revision captured before these bytes were built; absent from older servers.
-    public let snapshotRevision: Int?
 }
 
 /// The scopes the server will project, matching the web sidebar's own picker.

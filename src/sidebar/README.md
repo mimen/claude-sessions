@@ -152,10 +152,13 @@ background rebuild runs.
 `change-monitor.ts` is the single observation seam. cmux frames invalidate short-horizon readers immediately;
 a one-second header-only probe observes catalogue/index commits made by other CCS processes. Either moves the
 same monotonic source revision, invalidates every serialized query before announcement, and wakes both clients.
-Each response is stamped with the revision captured before its build. The native client rejects and retries
-bytes older than the revision it already heard, keeps failed revisions pending for the backstop poll, and
-bounds a wedged snapshot request to five seconds. A successful action still has a forced-liveness path for the
-read-after-write case. Unreadable sources remain labelled rather than being presented as fresh.
+Each response is stamped with the revision captured before its build for diagnostics. A revision is a wake-up
+hint, not a transaction barrier: the heterogeneous readers can advance it while a snapshot is assembling, so
+the native client always applies the latest completed response. Snapshot reads are single-flight; later
+triggers collapse into one queued follow-up, forced liveness cannot be downgraded by an SSE/poll trigger, and a
+query change cannot paint the previous scope. Failed ordinary requests remain on screen for the backstop poll;
+a failed forced request retries once, and every request is bounded to five seconds. Unreadable sources remain
+labelled rather than being presented as fresh.
 
 This is separate from the interpreted Swift sidebar in `integrations/cmux/`, which remains the
 compact left-sidebar navigator.

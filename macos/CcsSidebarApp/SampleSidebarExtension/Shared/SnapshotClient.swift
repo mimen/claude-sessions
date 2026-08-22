@@ -35,8 +35,7 @@ public final class SnapshotClient {
             // Retire in-flight requests for the old scope now, not when the new refresh happens to
             // start — otherwise an old-scope response landing in that window paints the previous
             // scope's rows under the new header.
-            refreshGeneration += 1
-            Task { await refreshPending(freshLiveness: true) }
+            Task { await refreshLatest(freshLiveness: true) }
         }
     }
 
@@ -46,8 +45,7 @@ public final class SnapshotClient {
     public var searchIncludesFinished = false {
         didSet {
             guard searchIncludesFinished != oldValue else { return }
-            refreshGeneration += 1
-            Task { await refreshPending() }
+            Task { await refreshLatest() }
         }
     }
 
@@ -61,14 +59,14 @@ public final class SnapshotClient {
     private let snapshotData: SnapshotDataLoader
     private var pollTask: Task<Void, Never>?
     private var changeTask: Task<Void, Never>?
-    /// The newest revision whose snapshot was successfully applied.
+    /// The newest change announcement handled by this client.
     private var lastRevision: Int?
-    /// A reported revision still waiting for bytes built from at least that revision.
-    private var pendingRevision: Int?
-    /// Issue number of the newest refresh. URLSession answers in whatever order the network allows,
-    /// so without this a slow older response can land after a faster newer one and put rows that
-    /// were already replaced back on screen — stale highlights that stay until the next poll.
-    private var refreshGeneration = 0
+    /// One request owns the transport; later triggers collapse into one queued follow-up. This keeps
+    /// a plain SSE refresh from cancelling the forced read-after-write request an action is awaiting.
+    private var refreshInFlight = false
+    private var refreshQueued = false
+    private var queuedFreshLiveness = false
+    private var acceptsResponses = true
 
     public convenience init(
         port: Int = SidebarServer.defaultPort,
@@ -114,9 +112,10 @@ public final class SnapshotClient {
 
     public func start() {
         guard pollTask == nil else { return }
+        acceptsResponses = true
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refreshPending()
+                await self?.refreshLatest()
                 let wait = self?.pollWait ?? .seconds(1)
                 try? await Task.sleep(for: wait)
             }
@@ -131,6 +130,9 @@ public final class SnapshotClient {
         pollTask = nil
         changeTask?.cancel()
         changeTask = nil
+        refreshQueued = false
+        queuedFreshLiveness = false
+        acceptsResponses = false
         changeStreamConnected = false
     }
 
@@ -204,78 +206,86 @@ public final class SnapshotClient {
     }
 
     func receiveRevision(_ revision: Int) async {
-        guard revision != lastRevision, revision != pendingRevision else { return }
-        // The frame names the minimum revision the next accepted snapshot must contain. Even the
-        // opening frame is fetched: it may race start()'s poll, and only the stamped response proves
-        // which answer describes the current world.
-        pendingRevision = revision
-        await refreshPending()
+        guard revision != lastRevision else { return }
+        lastRevision = revision
+        // A revision is a wake-up hint, not a transaction barrier: the heterogeneous readers can
+        // advance it while a snapshot is being assembled. The latest completed response is always
+        // more truthful than retaining the rows already on screen.
+        await refreshLatest()
     }
 
     /// Fetch immediately, telling the server not to answer from its caches.
     ///
     /// Called after an action, because the state it changed lives behind two 2.5-second caches —
     /// the serialized snapshot and the cmux liveness read. Waiting them out is what made closing
-    /// or switching a session take seconds to appear when the action itself was instant.
+    /// or switching a session take seconds to appear when the action itself was instant. If another
+    /// request is active, this queues the forced read rather than cancelling either request.
     public func refreshNow() async {
-        await refreshPending(freshLiveness: true)
+        await refreshLatest(freshLiveness: true)
     }
 
     @discardableResult
-    func refreshPending(freshLiveness: Bool = false) async -> Bool {
-        let targetRevision = pendingRevision
-        let applied = await refresh(
-            freshLiveness: freshLiveness,
-            minimumRevision: targetRevision
-        )
-        if applied, pendingRevision == targetRevision {
-            lastRevision = targetRevision ?? lastRevision
-            pendingRevision = nil
+    func refreshLatest(freshLiveness: Bool = false) async -> Bool {
+        guard acceptsResponses else { return false }
+        refreshQueued = true
+        queuedFreshLiveness = queuedFreshLiveness || freshLiveness
+        guard !refreshInFlight else { return false }
+
+        refreshInFlight = true
+        defer { refreshInFlight = false }
+        var applied = false
+        var forcedRetryUsed = false
+        while refreshQueued && acceptsResponses && !Task.isCancelled {
+            let useFreshLiveness = queuedFreshLiveness
+            refreshQueued = false
+            queuedFreshLiveness = false
+            let appliedThisRequest = await performRefresh(freshLiveness: useFreshLiveness)
+            applied = appliedThisRequest || applied
+            if useFreshLiveness && !appliedThisRequest && !forcedRetryUsed {
+                // Preserve read-after-write once across a timeout or a query change that discarded
+                // the response. One retry is bounded; a broken server must not create a tight loop.
+                forcedRetryUsed = true
+                refreshQueued = true
+                queuedFreshLiveness = true
+            }
         }
         return applied
     }
 
-    private func refresh(
-        freshLiveness: Bool = false,
-        minimumRevision: Int? = nil
-    ) async -> Bool {
-        for attempt in 0..<2 {
-            refreshGeneration += 1
-            let generation = refreshGeneration
-            do {
-                var request = URLRequest(url: endpoint)
-                // A wedged request must release the poll loop on its own; reopening the extension is
-                // not a recovery mechanism. The event stream remains independent and long-lived.
-                request.timeoutInterval = Self.snapshotTimeout
-                // The server drops this query's cached representation and re-reads liveness rather
-                // than serving the previous projection.
-                if freshLiveness {
-                    request.setValue("1", forHTTPHeaderField: "x-ccs-refresh-liveness")
-                }
-                let data = try await snapshotData(request)
-                // A newer refresh was issued while this one was on the wire; its answer is the past.
-                guard generation == refreshGeneration else { return false }
-                let snapshot = try JSONDecoder().decode(SidebarSnapshot.self, from: data)
-                if let minimumRevision,
-                   let snapshotRevision = snapshot.snapshotRevision,
-                   snapshotRevision < minimumRevision {
-                    if attempt == 0 { continue }
-                    return false
-                }
-                rows = snapshot.rows
-                counts = snapshot.lifecycleCounts ?? [:]
-                truncated = snapshot.hasMoreRows ?? false
-                livenessReadable = snapshot.livenessReadable
-                serverVersion = snapshot.serverVersion
-                lastError = nil
-                return true
-            } catch {
-                guard generation == refreshGeneration else { return false }
-                // Retained on purpose: the rows already on screen stay true until contradicted.
-                lastError = error.localizedDescription
-                return false
+    private func performRefresh(freshLiveness: Bool) async -> Bool {
+        let requestedScope = scope
+        let requestedSearchIncludesFinished = searchIncludesFinished
+        do {
+            var request = URLRequest(url: endpoint)
+            // A wedged request must release the poll loop on its own; reopening the extension is
+            // not a recovery mechanism. The event stream remains independent and long-lived.
+            request.timeoutInterval = Self.snapshotTimeout
+            // The server drops this query's cached representation and re-reads liveness rather
+            // than serving the previous projection.
+            if freshLiveness {
+                request.setValue("1", forHTTPHeaderField: "x-ccs-refresh-liveness")
             }
+            let data = try await snapshotData(request)
+            guard acceptsResponses, !Task.isCancelled else { return false }
+            let snapshot = try JSONDecoder().decode(SidebarSnapshot.self, from: data)
+            // Scope/search changes queue their own request. Never paint the previous query under the
+            // new controls while that follow-up is on its way.
+            guard requestedScope == scope,
+                  requestedSearchIncludesFinished == searchIncludesFinished
+            else { return false }
+            // A forced read queued while this ordinary request was in flight supersedes these bytes.
+            guard freshLiveness || !queuedFreshLiveness else { return false }
+            rows = snapshot.rows
+            counts = snapshot.lifecycleCounts ?? [:]
+            truncated = snapshot.hasMoreRows ?? false
+            livenessReadable = snapshot.livenessReadable
+            serverVersion = snapshot.serverVersion
+            lastError = nil
+            return true
+        } catch {
+            // Retained on purpose: the rows already on screen stay true until contradicted.
+            lastError = error.localizedDescription
+            return false
         }
-        return false
     }
 }
