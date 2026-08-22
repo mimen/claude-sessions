@@ -295,28 +295,30 @@ function catalogueOrphanFindings(): Finding[] {
 
 async function sweepLoop(): Promise<void> {
   while (true) {
-    if (!sweeping) {
+    const due = kickPending || Date.now() - lastSweepAt >= FAST_CYCLE_MS;
+    if (!sweeping && due) {
+      kickPending = false;
       sweeping = true;
       try {
         await timedCycle(cycles % ACTIVITY_EVERY_N_CYCLES === 0);
+        if (lastEventAt > 0) lastEventMirrorMs = Date.now() - lastEventAt;
       } catch {
         // A failed cycle leaves the previous mirror standing; the next one retries.
       } finally {
         sweeping = false;
       }
     }
-    await Bun.sleep(FAST_CYCLE_MS);
+    await Bun.sleep(250);
   }
 }
 
 /**
  * Event-driven fast path: cmux announces window/workspace/agent changes on its event stream,
- * and focus is a window-category change. One kick runs an immediate cycle so the highlight
- * tracks tab switches in tens of milliseconds rather than one poll interval. The 3s loop
- * remains as the fallback that catches whatever the stream misses.
+ * and focus is a window-category change. Events only set a pending flag — never dropped
+ * because a sweep happens to be running, which is exactly when several land at once. The
+ * loop notices the flag within 250ms and sweeps immediately after whatever it was doing.
  */
-let lastKickAt = 0;
-const KICK_MIN_INTERVAL_MS = 250;
+let kickPending = false;
 /** Telemetry: when the last liveness event landed and how long its mirror took to reflect. */
 let lastEventAt = 0;
 let lastEventMirrorMs: number | null = null;
@@ -325,16 +327,8 @@ function startEventKicker(): void {
   subscribeToCmuxEvents({
     onChange(scopes) {
       if (!scopes.has("liveness")) return;
-      const now = Date.now();
-      lastEventAt = now;
-      if (now - lastKickAt < KICK_MIN_INTERVAL_MS || sweeping) return;
-      lastKickAt = now;
-      const started = Date.now();
-      void timedCycle(cycles % ACTIVITY_EVERY_N_CYCLES === 0)
-        .then(() => {
-          lastEventMirrorMs = Date.now() - started;
-        })
-        .catch(() => {});
+      lastEventAt = Date.now();
+      kickPending = true;
     },
   });
 }
