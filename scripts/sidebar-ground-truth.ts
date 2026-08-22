@@ -24,6 +24,7 @@ import {
   RECENT_WINDOW_MS,
   type Finding,
 } from "./sidebar-ground-truth-lib.ts";
+import { renderHumanReport } from "./sidebar-ground-truth-report.ts";
 
 interface SectionTiming {
   readonly section: string;
@@ -163,23 +164,25 @@ const report = {
   findings,
 };
 
+const human = renderHumanReport(
+  {
+    surfaces: report.surfaces,
+    hookBindings: report.hookBindings,
+    hookSessionsKnown: report.hookSessionsKnown,
+    indexRowsSampled: report.indexRowsSampled,
+  },
+  findings,
+);
+
 if (!process.argv.includes("--dry-run-to-stdout")) {
   const outDir = join(import.meta.dir, "..", "docs", "evidence", "sidebar-ground-truth");
   mkdirSync(outDir, { recursive: true });
-  const outFile = join(outDir, `${report.generatedAt.replaceAll(/[:.]/g, "-")}.json`);
+  const stamp = report.generatedAt.replaceAll(/[:.]/g, "-");
+  const outFile = join(outDir, `${stamp}.json`);
   writeFileSync(outFile, `${JSON.stringify(report, null, 2)}\n`);
-  process.stdout.write(`report: ${outFile}\n\n`);
+  const outFileMd = join(outDir, `${stamp}.md`);
+  writeFileSync(outFileMd, `${human}\n`);
+  process.stdout.write(`evidence: ${outFile}\n`);
 }
 
-process.stdout.write(
-  `surfaces=${report.surfaces} bindings=${report.hookBindings} hookSessions=${report.hookSessionsKnown} indexSampled=${report.indexRowsSampled}\n`,
-);
-process.stdout.write("timings:\n");
-for (const t of timings) process.stdout.write(`  ${t.section.padEnd(30)} ${String(t.ms).padStart(6)} ms\n`);
-
-const errors = findings.filter((f) => f.severity === "error");
-const warns = findings.filter((f) => f.severity === "warn");
-process.stdout.write(`\n${errors.length} errors, ${warns.length} warnings:\n`);
-for (const f of [...errors, ...warns]) {
-  process.stdout.write(`  [${f.severity}] ${f.primitive}: ${f.detail}\n`);
-}
+process.stdout.write(`\n${human}\n`);
