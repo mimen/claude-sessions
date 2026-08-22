@@ -102,6 +102,8 @@ export interface MirrorRow {
   workspaceRef: string | null;
   trackedLifecycle: string | null;
   surfaceInTree: boolean;
+  /** cmux's own pointer: this surface's workspace is the one currently focused. */
+  workspaceFocused: boolean;
   pidAlive: boolean | null;
   transcriptState: "present" | "renamed" | "absent";
   authoritativePill: string | null;
@@ -138,6 +140,7 @@ function buildMirror(
       workspaceRef: surface?.workspaceRef ?? null,
       trackedLifecycle: entry.agentLifecycle ?? null,
       surfaceInTree: surface !== undefined,
+      workspaceFocused: surface?.workspaceActive === true,
       pidAlive: hooksFacts.pidLiveness.get(sessionId) ?? null,
       transcriptState: hooksFacts.transcriptPresence.get(sessionId) ?? "absent",
       authoritativePill: surface ? pillsByWorkspace.get(surface.workspaceId) ?? null : null,
@@ -150,10 +153,16 @@ function buildMirror(
     (r.pidAlive === false ? 1 : 0) +
     (r.transcriptState === "absent" ? 1 : 0);
 
+  // Live rows follow the TREE's traversal order — window → workspace → pane — which is the
+  // order cmux displays them in, so the mirror is comparable against the tab bar. The hook
+  // store's own iteration order is irrelevant here.
+  const orderInTree = new Map(treeFacts.surfaces.map((s, i) => [s.surfaceId, i]));
   const live = rows
     .filter((r) => r.surfaceInTree)
-    .sort((a, b) =>
-      (a.workspaceTitle ?? a.workspaceRef ?? "").localeCompare(b.workspaceTitle ?? b.workspaceRef ?? ""),
+    .sort(
+      (a, b) =>
+        (orderInTree.get(a.surfaceId ?? "") ?? Number.MAX_SAFE_INTEGER) -
+        (orderInTree.get(b.surfaceId ?? "") ?? Number.MAX_SAFE_INTEGER),
     );
   const ghosts = rows.filter((r) => !r.surfaceInTree).sort((a, b) => discrepanciesOf(b) - discrepanciesOf(a));
 
@@ -349,9 +358,12 @@ const HTML = `<!DOCTYPE html>
   .v{font-family:var(--mono)}
   .cell-yes{color:var(--ok)} .cell-no{color:var(--bad)} .cell-na{color:var(--dim)}
   .row-bad td{background:rgba(229,83,75,.06)}
+  tr.focused td{border-left:3px solid var(--ok);background:rgba(47,174,125,.07)}
+  tr.focused td:first-child{padding-left:9px}
   .title{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .name{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
   .k{display:inline-block;min-width:44px;color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+  .foc{color:var(--ok);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
   .sid{color:var(--dim);font-family:var(--mono);font-size:10.5px}
   .pillchip{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid var(--line);background:var(--line);white-space:nowrap}
   footer{margin-top:30px;color:var(--dim);font-size:12.5px;border-top:1px solid var(--line);padding-top:14px;line-height:1.8}
@@ -407,8 +419,8 @@ function render(d){
   const live=document.getElementById("live");live.innerHTML="";
   for(const r of d.mirror.live){
     const bad=(r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent";
-    const tr=document.createElement("tr");if(bad)tr.className="row-bad";
-    tr.innerHTML='<td><div class="name"><span class="k">tab</span> '+esc(r.surfaceTitle||"(unnamed)")+'</div>'+
+    const tr=document.createElement("tr");if(bad)tr.className="row-bad";if(r.workspaceFocused)tr.classList.add("focused");
+    tr.innerHTML='<td><div class="name"><span class="k">tab</span> '+esc(r.surfaceTitle||"(unnamed)")+(r.workspaceFocused?' <span class="foc">◀ focused</span>':"")+'</div>'+
       '<div class="name"><span class="k">ws</span> '+esc(r.workspaceTitle||"—")+'</div>'+
       '<div class="sid"><span class="k">session</span> '+esc(r.title||"(untitled)")+" · "+r.sessionId.slice(0,8)+" · "+esc(r.workspaceRef||"")+"</div></td>"+
       '<td>'+yn(true)+'</td>'+
