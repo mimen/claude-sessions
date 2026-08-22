@@ -12,6 +12,7 @@ final class UsageStore: ObservableObject {
 
     @Published var phase: Phase = .idle
     @Published var gauges: [UsageGauge] = []
+    @Published var observations: [UsageObservation] = []
 
     private let ccsPath: String
     private let pollInterval: TimeInterval
@@ -43,9 +44,10 @@ final class UsageStore: ObservableObject {
         Task { [ccsPath] in
             do {
                 let snapshot = try await UsageFetcher.fetch(ccsPath: ccsPath)
-                let built = GaugeBuilder.build(from: snapshot)
+                let built = GaugeBuilder.sections(from: snapshot).flatMap(\.gauges)
                 await MainActor.run {
                     self.gauges = built
+                    self.observations = snapshot.observations
                     self.phase = .loaded(snapshot.generatedAt ?? Date())
                 }
             } catch {

@@ -19,6 +19,10 @@ final class GaugeBuilderTests: XCTestCase {
         )
     }
 
+    private func snapshot(_ observations: [UsageObservation]) -> UsageSnapshot {
+        UsageSnapshot(generatedAt: nil, observations: observations)
+    }
+
     func testDecodesFractionalAndPlainTimestamps() throws {
         let json = """
         {"generatedAt":"2026-08-22T20:22:31.810Z","observations":[
@@ -26,40 +30,65 @@ final class GaugeBuilderTests: XCTestCase {
           {"provider":"a","entitlement":"e","metric":"allowance","scope":"s","window":"five_hour","used":1,"limit":2,"remaining":1,"resetsAt":"2026-08-21T04:59:59.608363+00:00","expiresAt":null,"observedAt":"2026-08-22T20:22:30.051Z","source":"api","exact":true}
         ]}
         """.data(using: .utf8)!
-        let snapshot = try SnapshotDecoder.decode(json)
-        XCTAssertEqual(snapshot.observations.count, 2)
-        XCTAssertNotNil(snapshot.generatedAt)
-        XCTAssertNotNil(snapshot.observations[0].resetsAt)
-        XCTAssertNotNil(snapshot.observations[1].resetsAt)
+        let parsed = try SnapshotDecoder.decode(json)
+        XCTAssertEqual(parsed.observations.count, 2)
+        XCTAssertNotNil(parsed.generatedAt)
+        XCTAssertNotNil(parsed.observations[0].resetsAt)
+        XCTAssertNotNil(parsed.observations[1].resetsAt)
     }
 
-    func testBuildKeepsAllowancesAndCreditsDropsRateLimits() {
-        let snapshot = UsageSnapshot(generatedAt: nil, observations: [
-            observation(),
+    func testSectionsGroupByProviderAndAccount() {
+        let sections = GaugeBuilder.sections(from: snapshot([
+            observation(entitlement: "claude-max:miladmaaan@gmail.com", window: "five_hour"),
+            observation(entitlement: "claude-max:milad@auf.com", window: "weekly"),
+            observation(entitlement: "claude-max:miladmaaan@gmail.com", window: "weekly")
+        ]))
+        XCTAssertEqual(sections.count, 2)
+        XCTAssertEqual(sections[0].provider, "anthropic")
+        XCTAssertEqual(sections[0].accountDisplay, "personal")
+        XCTAssertEqual(sections[0].gauges.map(\.windowLabel), ["5h", "wk"])
+        XCTAssertEqual(sections[1].accountDisplay, "auf")
+    }
+
+    func testLabelsCarrySuffixNotAccount() {
+        let fable = GaugeBuilder.allowanceGauge(
+            observation(entitlement: "claude-max:miladmaaan@gmail.com#Fable"))
+        XCTAssertEqual(fable.label, "claude-max #Fable")
+        XCTAssertEqual(fable.account, "miladmaaan")
+        let plain = GaugeBuilder.allowanceGauge(observation(entitlement: "codex-pro:x@y.com"))
+        XCTAssertEqual(plain.label, "codex-pro")
+    }
+
+    func testEntitlementParts() {
+        let parts = GaugeBuilder.entitlementParts("grok-super grok plus:m@x.com#build")
+        XCTAssertEqual(parts.name, "grok-super grok plus")
+        XCTAssertEqual(parts.account, "m")
+        XCTAssertEqual(parts.suffix, " #build")
+        let bare = GaugeBuilder.entitlementParts("opencode-go-zen")
+        XCTAssertEqual(bare.name, "opencode-go-zen")
+        XCTAssertNil(bare.account)
+    }
+
+    func testGrokSubRowsCollapseButAnthropicSuffixedRowsStay() {
+        let parent = observation(provider: "grok", entitlement: "grok-super plus:m@x.com", window: "weekly")
+        let sub = observation(provider: "grok", entitlement: "grok-super plus:m@x.com#build", window: "weekly")
+        let grok = GaugeBuilder.sections(from: snapshot([parent, sub]))
+        XCTAssertEqual(grok.flatMap(\.gauges).count, 1)
+
+        let maxRow = observation(entitlement: "claude-max:m@a.com")
+        let fable = observation(entitlement: "claude-max:m@a.com#Fable")
+        let anthropic = GaugeBuilder.sections(from: snapshot([maxRow, fable]))
+        XCTAssertEqual(anthropic.flatMap(\.gauges).count, 2)
+    }
+
+    func testCreditRowsKeepRateLimitsDropped() {
+        let sections = GaugeBuilder.sections(from: snapshot([
             observation(metric: "credit", used: nil, limit: nil, remaining: 12.5),
             observation(provider: "venice", entitlement: "venice-model:gpt", metric: "rate_limit", window: "minute", used: nil, limit: 100),
             observation(entitlement: "codex-dollar-credit:x", metric: "credit", used: nil, limit: nil, remaining: 0)
-        ])
-        let gauges = GaugeBuilder.build(from: snapshot)
-        XCTAssertEqual(gauges.count, 2)
-        XCTAssertTrue(gauges.contains { $0.remaining == 12.5 })
-    }
-
-    func testGrokSubRowsCollapseWhenParentPresent() {
-        let parent = observation(provider: "grok", entitlement: "grok-super plus:m@x.com", window: "weekly")
-        let sub = observation(provider: "grok", entitlement: "grok-super plus:m@x.com#build", window: "weekly")
-        let withParent = GaugeBuilder.build(from: .init(generatedAt: nil, observations: [parent, sub]))
-        XCTAssertEqual(withParent.count, 1)
-        let withoutParent = GaugeBuilder.build(from: .init(generatedAt: nil, observations: [sub]))
-        XCTAssertEqual(withoutParent.count, 1)
-    }
-
-    func testLabels() {
-        let gauge = GaugeBuilder.allowanceGauge(observation(entitlement: "claude-max:milad@example.com"))
-        XCTAssertEqual(gauge.label, "claude-max · milad")
-        XCTAssertEqual(gauge.windowLabel, "wk")
-        let fable = GaugeBuilder.allowanceGauge(observation(entitlement: "claude-max:m@x.com#Fable"))
-        XCTAssertEqual(fable.label, "claude-max · m #Fable")
+        ]))
+        XCTAssertEqual(sections.count, 1)
+        XCTAssertEqual(sections[0].gauges.first?.remaining, 12.5)
     }
 
     func testTightestPicksHighestFraction() {

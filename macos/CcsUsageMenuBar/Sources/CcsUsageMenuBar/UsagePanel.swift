@@ -66,22 +66,31 @@ struct UsagePanel: View {
 
     @ViewBuilder
     private var gaugeList: some View {
-        ForEach(groupedByProvider.sorted(by: { $0.key < $1.key }), id: \.key) { provider, gauges in
-            ProviderSectionHeader(provider: provider)
-            ForEach(gauges) { gauge in
+        ForEach(sections) { section in
+            ProviderSectionHeader(provider: section.provider)
+            if let account = section.accountDisplay {
+                Text(account)
+                    .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                    .textCase(.uppercase)
+                    .kerning(0.5)
+                    .foregroundStyle(.tertiary)
+                    .padding(.bottom, 2)
+            }
+            ForEach(section.gauges) { gauge in
                 GaugeRow(gauge: gauge, now: now)
             }
         }
     }
 
-    private var groupedByProvider: [String: [UsageGauge]] {
-        Dictionary(grouping: store.gauges, by: \.provider)
+    private var sections: [UsageSection] {
+        GaugeBuilder.sections(from: UsageSnapshot(generatedAt: nil, observations: store.observations))
     }
 
     private var panelHeight: CGFloat {
         let rows = CGFloat(store.gauges.count)
-        let providers = CGFloat(groupedByProvider.count)
-        return min(520, 56 + rows * 46 + providers * 28 + 20)
+        let sectionCount = CGFloat(sections.count)
+        let accountCount = CGFloat(sections.compactMap(\.accountDisplay).count)
+        return min(520, 56 + rows * 46 + sectionCount * 28 + accountCount * 18 + 20)
     }
 
     private var footer: some View {

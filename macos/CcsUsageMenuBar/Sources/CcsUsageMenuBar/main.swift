@@ -55,8 +55,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if popover.contentViewController == nil {
             popover.contentViewController = NSHostingController(rootView: UsagePanel(store: store))
         }
+        // The popover only auto-dismisses (.transient) when our app is active;
+        // an accessory app stays inactive otherwise and the panel sticks.
+        NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        popover.performClose(nil)
     }
 }
 
@@ -69,10 +75,15 @@ enum AppStore {
 if CommandLine.arguments.contains("--fetch-once") {
     do {
         let snapshot = try UsageFetcher.runBlocking(ccsPath: CcsLocator.resolve(), timeout: 30)
-        let gauges = GaugeBuilder.build(from: snapshot)
-        print("decoded \(snapshot.observations.count) observations -> \(gauges.count) gauges")
-        for g in gauges.prefix(5) { print("  \(g.provider) | \(g.label) | \(g.windowLabel ?? "-") | \(g.fractionUsed.map { "\(Int($0 * 100))%" } ?? g.remaining.map { "$\($0)" } ?? "?")") }
-        print("tightest: \(GaugeBuilder.tightest(gauges)?.label ?? "nil")")
+        let gauges = GaugeBuilder.sections(from: snapshot)
+        print("decoded \(snapshot.observations.count) observations -> \(gauges.reduce(0) { $0 + $1.gauges.count }) gauges in \(gauges.count) sections")
+        for s in gauges {
+            print("  [\(s.provider)\(s.accountDisplay.map { " · \($0)" } ?? "")]")
+            for g in s.gauges {
+                print("    \(g.label) | \(g.windowLabel ?? "-") | \(g.fractionUsed.map { "\(Int($0 * 100))%" } ?? g.remaining.map { "$\($0)" } ?? "?")")
+            }
+        }
+        print("tightest: \(GaugeBuilder.tightest(gauges.flatMap(\.gauges))?.label ?? "nil")")
     } catch {
         print("FETCH FAILED: \(error)")
     }
