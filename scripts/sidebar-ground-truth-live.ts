@@ -95,6 +95,8 @@ export interface MirrorRow {
   sessionId: string;
   title: string | null;
   surfaceId: string | null;
+  /** The workspace's own name as cmux displays it on the tab. */
+  workspaceTitle: string | null;
   workspaceRef: string | null;
   trackedLifecycle: string | null;
   surfaceInTree: boolean;
@@ -129,6 +131,7 @@ function buildMirror(
       sessionId,
       title: titlesBySession.get(sessionId) ?? null,
       surfaceId,
+      workspaceTitle: surface?.workspaceTitle ?? null,
       workspaceRef: surface?.workspaceRef ?? null,
       trackedLifecycle: entry.agentLifecycle ?? null,
       surfaceInTree: surface !== undefined,
@@ -146,7 +149,9 @@ function buildMirror(
 
   const live = rows
     .filter((r) => r.surfaceInTree)
-    .sort((a, b) => (a.workspaceRef ?? "").localeCompare(b.workspaceRef ?? ""));
+    .sort((a, b) =>
+      (a.workspaceTitle ?? a.workspaceRef ?? "").localeCompare(b.workspaceTitle ?? b.workspaceRef ?? ""),
+    );
   const ghosts = rows.filter((r) => !r.surfaceInTree).sort((a, b) => discrepanciesOf(b) - discrepanciesOf(a));
 
   const unboundSurfaces = treeFacts.surfaces
@@ -398,7 +403,7 @@ function render(d){
   for(const r of d.mirror.live){
     const bad=(r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent";
     const tr=document.createElement("tr");if(bad)tr.className="row-bad";
-    tr.innerHTML='<td><div class="title">'+esc(r.title||"(untitled)")+'</div><span class="sid">'+r.sessionId.slice(0,8)+" · "+esc(r.workspaceRef||"")+'</span></td>'+
+    tr.innerHTML='<td><div class="title">'+esc(r.workspaceTitle||r.title||"(unnamed workspace)")+'</div><span class="sid">'+esc(r.title?r.title+" · ":"")+r.sessionId.slice(0,8)+" · "+esc(r.workspaceRef||"")+'</span></td>'+
       '<td>'+yn(true)+'</td>'+
       '<td class="v"><span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span></td>'+
       '<td class="v">'+esc(r.derivedLabel??r.trackedLifecycle??"—")+'</td>'+
