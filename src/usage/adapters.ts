@@ -18,6 +18,7 @@ import type {
 } from "./types.ts";
 import { codexBarVersion, entryErrorHealth, runCodexBar, sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
 import { runCswap, type CswapWindow } from "./cswap.ts";
+import { fetchGrokBilling } from "./grok.ts";
 
 export interface AdapterResult {
   observations: UsageObservation[];
@@ -295,22 +296,79 @@ function anthropicAdapter(): AdapterResult {
 // Grok
 // ---------------------------------------------------------------------------
 
-function grokAdapter(): AdapterResult {
-  return collectCodexBarProvider("grok", "grok", (entry) => {
-    const usage = entry.usage as CodexUsage | undefined;
-    if (!usage) return [];
-    const observedAt = usage.updatedAt ?? now();
-    return windowObservations(
-      "grok", accountEntitlement("grok-consumer-oidc", usage.identity, entry), "organization",
-      [
-        ["primary", usage.primary ?? null],
-        ["secondary", usage.secondary ?? null],
-        ["tertiary", usage.tertiary ?? null],
-      ],
+async function grokAdapter(): Promise<AdapterResult> {
+  const res = await fetchGrokBilling();
+  if (!res.ok) return { observations: [], health: res.error };
+  const { credits, tier, email } = res.value;
+  const c = credits.config;
+  const observedAt = now();
+  const entitlement =
+    accountEntitlement(tier ? `grok-${tier}` : "grok-consumer-oidc", { accountEmail: email }, { provider: "grok" });
+  const out: UsageObservation[] = [];
+
+  // The shared weekly pool — one allowance across Build, Chat, and Imagine.
+  if (typeof c?.creditUsagePercent === "number") {
+    out.push({
+      provider: "grok",
+      entitlement,
+      metric: "allowance",
+      scope: "organization",
+      window: "weekly",
+      used: c.creditUsagePercent,
+      limit: 100,
+      remaining: Math.max(0, 100 - c.creditUsagePercent),
+      resetsAt: c.currentPeriod?.end ?? null,
+      expiresAt: null,
       observedAt,
-      sourceClassFor(entry.source),
-    );
-  }, () => "no grok usage entries returned");
+      source: "official_api",
+      exact: true,
+    });
+    // Product breakdown rows under the same pool.
+    for (const p of c.productUsage ?? []) {
+      if (!p.product || typeof p.usagePercent !== "number") continue;
+      out.push({
+        provider: "grok",
+        // "#" suffix = product sub-row of the same pool; renderer names it, grouping ignores it.
+        entitlement: `${entitlement}#${p.product.replace("Grok", "").toLowerCase()}`,
+        metric: "allowance",
+        scope: "organization",
+        window: "weekly",
+        used: p.usagePercent,
+        limit: 100,
+        remaining: Math.max(0, 100 - p.usagePercent),
+        resetsAt: c.currentPeriod?.end ?? null,
+        expiresAt: null,
+        observedAt,
+        source: "official_api",
+        exact: true,
+      });
+    }
+  }
+  // Prepaid (Extra Usage) credit balance in cents.
+  const prepaid = c?.prepaidBalance?.val;
+  if (typeof prepaid === "number" && prepaid > 0) {
+    out.push({
+      provider: "grok",
+      entitlement: `${entitlement}:prepaid`,
+      metric: "credit",
+      scope: "organization",
+      window: null,
+      used: null,
+      limit: null,
+      remaining: prepaid / 100,
+      resetsAt: null,
+      expiresAt: null,
+      observedAt,
+      source: "official_api",
+      exact: true,
+    });
+  }
+  return {
+    observations: out,
+    health: out.length === 0
+      ? { provider: "grok", status: "degraded", detail: "billing returned no usable fields" }
+      : { provider: "grok", status: "ok", detail: null },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -547,8 +605,8 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
       switch (p) {
         case "codex": return codexAdapter();
         case "anthropic": return anthropicAdapter();
-        case "grok": return grokAdapter();
         case "opencode-go":
+        case "grok":
         case "venice":
           return { observations: [], health: { provider: p, status: "unavailable", detail: "async adapter" } };
       }
@@ -561,10 +619,14 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
   };
   const results: AdapterResult[] = [];
   for (const p of wanted) {
-    if (p === "venice" || p === "opencode-go") {
+    if (p === "venice" || p === "opencode-go" || p === "grok") {
       // The two direct-API adapters are async; contain their throws like the sync ones.
       try {
-        results.push(p === "venice" ? await veniceAdapter() : await opencodeGoAdapter());
+        results.push(
+          p === "venice" ? await veniceAdapter()
+          : p === "grok" ? await grokAdapter()
+          : await opencodeGoAdapter(),
+        );
       } catch (e) {
         results.push({
           observations: [],

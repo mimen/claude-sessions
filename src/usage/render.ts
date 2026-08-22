@@ -39,14 +39,34 @@ const ENTITLEMENT_LABEL: Record<string, string> = {
   "codex-spark-weekly": "Spark weekly",
 };
 
-/** Entitlement id without any ":<account>" suffix. */
+/** Entitlement id without any ":<account>" or "#<product>" suffix. */
 function baseEntitlement(entitlement: string): string {
-  const i = entitlement.indexOf(":");
-  return i === -1 ? entitlement : entitlement.slice(0, i);
+  const cut = Math.min(
+    ...["#", ":"].map((c) => { const i = entitlement.indexOf(c); return i === -1 ? entitlement.length : i; })
+  );
+  return entitlement.slice(0, cut);
 }
+
+/** Product sub-row qualifier: the part after "#", when present. */
+function productOf(entitlement: string): string | null {
+  const i = entitlement.indexOf("#");
+  return i === -1 ? null : entitlement.slice(i + 1);
+}
+
+const PRODUCT_LABEL: Record<string, string> = {
+  build: "Grok Build",
+  chat: "Grok Chat",
+  imagine: "Imagine",
+  api: "API",
+};
 
 /** Short limit name shown under a provider/account group. */
 function limitName(o: UsageObservation): string {
+  const product = productOf(o.entitlement);
+  if (product) {
+    const named = PRODUCT_LABEL[product.toLowerCase()];
+    if (named) return named;
+  }
   const base = baseEntitlement(o.entitlement);
   const override = ENTITLEMENT_LABEL[base];
   if (override) return override;
@@ -63,10 +83,11 @@ function limitName(o: UsageObservation): string {
   }
 }
 
-/** Account qualifier: the part after ":" in a multi-account entitlement. */
+/** Account qualifier: the part after ":" (before any "#") in a multi-account entitlement. */
 function accountOf(o: UsageObservation): string | null {
-  const i = o.entitlement.indexOf(":");
-  return i === -1 ? null : o.entitlement.slice(i + 1);
+  const stripped = o.entitlement.split("#")[0] ?? o.entitlement;
+  const i = stripped.indexOf(":");
+  return i === -1 ? null : stripped.slice(i + 1);
 }
 
 /** Group key: platform + account; rate-limit caps fold into the plain provider group. */
