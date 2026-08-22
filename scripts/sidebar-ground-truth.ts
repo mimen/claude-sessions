@@ -97,11 +97,13 @@ function catalogueOrphans(): Finding[] {
 const timings: SectionTiming[] = [];
 const findings: Finding[] = [];
 const nowMs = Date.now();
+process.stdout.write(`sidebar ground-truth sweep starting\nstore: ${CLAUDE_STORE}\n\n`);
 
 const tree = await timed(timings, "surface-tree", auditSurfaceTree);
-findings.push(...tree.findings);
+process.stdout.write(`  surface-tree: ${tree.facts.surfaces.length} surfaces\n`);
 
 const hooks = await timed(timings, "hook-bindings", () => auditHookBindings(tree.facts));
+process.stdout.write(`  hook-bindings: ${hooks.facts.bindingsBySurface.size} bindings, ${hooks.facts.sessions.size} known sessions\n`);
 findings.push(...hooks.findings);
 
 findings.push(...(await timed(timings, "agent-activity", () => auditAgentActivity(tree.facts, hooks.facts))));
