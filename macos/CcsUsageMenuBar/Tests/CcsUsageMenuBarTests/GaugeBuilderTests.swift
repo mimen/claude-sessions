@@ -76,8 +76,11 @@ final class GaugeBuilderTests: XCTestCase {
             observation(entitlement: "claude-max:miladmaaan@gmail.com#Fable")
         ]))
         let grok = sections.first { $0.provider == "grok" }!
-        XCTAssertEqual(grok.gauges.map(\.label), ["All Usage", "Build"])
+        // Grok sub-pools fold into the parent's stacked bar.
+        XCTAssertEqual(grok.gauges.map(\.label), ["All Usage"])
+        XCTAssertEqual(grok.gauges[0].breakdown?.map(\.name), ["Build"])
         let anthropic = sections.first { $0.provider == "anthropic" }!
+        // Anthropic suffixed rows stay as their own rows.
         XCTAssertEqual(anthropic.gauges.map(\.label), ["All models", "Fable"])
     }
 
@@ -96,8 +99,23 @@ final class GaugeBuilderTests: XCTestCase {
             GaugeBuilder.allowanceGauge(observation(used: 100)), // 1.0
             GaugeBuilder.allowanceGauge(observation(used: 0))    // 0.0
         ]
-        XCTAssertEqual(GaugeBuilder.overallUsedFraction(gauges)!, 0.5)
+        let section = UsageSection(provider: "anthropic", account: nil,
+                                   plan: PlanInfo(name: "", dollars: 100), gauges: gauges)
+        XCTAssertEqual(GaugeBuilder.overallUsedFraction([section])!, 0.5)
         XCTAssertNil(GaugeBuilder.overallUsedFraction([]))
+    }
+
+    func testDollarWeightingFavorsExpensivePlan() {
+        // Max ($200, 50% used) should dominate Pro ($20, 100% used).
+        let maxSection = UsageSection(
+            provider: "anthropic", account: "a", plan: PlanInfo(name: "Max 20x", dollars: 200),
+            gauges: [GaugeBuilder.allowanceGauge(observation(used: 50))])
+        let proSection = UsageSection(
+            provider: "anthropic", account: "b", plan: PlanInfo(name: "Pro", dollars: 20),
+            gauges: [GaugeBuilder.allowanceGauge(observation(used: 100))])
+        let overall = GaugeBuilder.overallUsedFraction([maxSection, proSection])!
+        XCTAssertGreaterThan(overall, 0.5)
+        XCTAssertLessThan(overall, 0.6)
     }
 
     func testCreditRowsKeepRateLimitsDropped() {

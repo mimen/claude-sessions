@@ -4,6 +4,8 @@ struct GaugeRow: View {
     let gauge: UsageGauge
     let now: Date
 
+    static let segmentPalette: [Color] = [.blue, .mint, .orange, .purple, .pink]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline) {
@@ -27,18 +29,48 @@ struct GaugeRow: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.secondary.opacity(0.18))
-                        Capsule()
-                            .fill(Self.barColor(fraction))
-                            .frame(width: max(geo.size.width * CGFloat(fraction), 4))
+                        if let segments = gauge.breakdown, !segments.isEmpty,
+                           let totalUsed = sumOf(segments) {
+                            // One bar filled with a colored slice per sub-pool.
+                            HStack(spacing: 1) {
+                                ForEach(segments) { segment in
+                                    Capsule()
+                                        .fill(Self.segmentPalette[segment.colorIndex % Self.segmentPalette.count])
+                                        .frame(width: max(geo.size.width * CGFloat(fraction) * CGFloat(segmentWidth(segment, total: totalUsed)), 3))
+                                }
+                            }
+                            .padding(.horizontal, 1.5)
+                            .frame(width: max(geo.size.width * CGFloat(fraction), 6), height: geo.size.height, alignment: .leading)
+                            .background(Capsule().fill(Self.barColor(fraction).opacity(0.35)))
+                            .clipShape(Capsule())
+                        } else {
+                            Capsule()
+                                .fill(Self.barColor(fraction))
+                                .frame(width: max(geo.size.width * CGFloat(fraction), 4))
+                        }
                     }
                 }
                 .frame(height: 5)
 
+                if let segments = gauge.breakdown, !segments.isEmpty {
+                    legend(segments)
+                } else {
+                    HStack {
+                        if let resets = gauge.resetsAt {
+                            Text(resetText(resets, now: now))
+                        } else {
+                            Text(gauge.exact ? "exact" : "estimated")
+                        }
+                        Spacer()
+                    }
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+                }
+            } else if gauge.label == "Banked reset" {
                 HStack {
-                    if let resets = gauge.resetsAt {
-                        Text(resetText(resets, now: now))
-                    } else {
-                        Text(gauge.exact ? "exact" : "estimated")
+                    Text((gauge.remaining ?? 0) >= 1 ? "ready to redeem" : "none banked")
+                    if let expiry = gauge.resetsAt {
+                        Text("· expires \(expiryText(expiry, now: now))")
                     }
                     Spacer()
                 }
@@ -59,12 +91,42 @@ struct GaugeRow: View {
         .padding(.vertical, 2)
     }
 
+    private func legend(_ segments: [UsageBreakdownSegment]) -> some View {
+        HStack(spacing: 8) {
+            ForEach(segments) { segment in
+                HStack(spacing: 3) {
+                    Circle()
+                        .fill(Self.segmentPalette[segment.colorIndex % Self.segmentPalette.count])
+                        .frame(width: 5, height: 5)
+                    Text("\(segment.name) \(segment.fractionUsed.map { "\(Int(($0 * 100).rounded()))%" } ?? "–")")
+                }
+            }
+            Spacer()
+        }
+        .font(.system(size: 9))
+        .foregroundStyle(.secondary)
+    }
+
+    private func sumOf(_ segments: [UsageBreakdownSegment]) -> Double? {
+        let values = segments.compactMap(\.fractionUsed)
+        return values.isEmpty ? nil : values.reduce(0, +)
+    }
+
+    private func segmentWidth(_ segment: UsageBreakdownSegment, total: Double) -> Double {
+        guard total > 0, let f = segment.fractionUsed else { return 0 }
+        return f / total
+    }
+
     @ViewBuilder
     private var percentOrBalance: some View {
         if let fraction = gauge.fractionUsed {
             Text("\(Int((fraction * 100).rounded()))%")
                 .font(.system(size: 11.5, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle(Self.barColor(fraction))
+        } else if gauge.label == "Banked reset", (gauge.remaining ?? 0) >= 1 {
+            Text("ready")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(.green)
         } else if let balance = gauge.remaining {
             Text("$\(format(balance))")
                 .font(.system(size: 11.5, weight: .bold, design: .rounded).monospacedDigit())
@@ -81,13 +143,21 @@ struct GaugeRow: View {
     }
 
     private func resetText(_ date: Date, now: Date) -> String {
+        "resets in \(relative(date, now: now))"
+    }
+
+    private func expiryText(_ date: Date, now: Date) -> String {
+        relative(date, now: now)
+    }
+
+    private func relative(_ date: Date, now: Date) -> String {
         let interval = date.timeIntervalSince(now)
         let formatter = DateComponentsFormatter()
         formatter.allowedUnits = interval > 172_800 ? [.day, .hour] : [.hour, .minute]
         formatter.maximumUnitCount = 2
         formatter.unitsStyle = .abbreviated
-        if interval <= 0 { return "reset" }
-        return "resets in \(formatter.string(from: interval) ?? "soon")"
+        if interval <= 0 { return "now" }
+        return formatter.string(from: interval) ?? "soon"
     }
 
     private func format(_ value: Double) -> String {

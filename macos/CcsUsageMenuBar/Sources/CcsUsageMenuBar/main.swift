@@ -32,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] gauges in
                 guard let self, let button = self.statusItem?.button else { return }
-                let remaining = GaugeBuilder.overallUsedFraction(gauges).map { 1 - $0 }
+                let remaining = AppStore.shared.overallRemaining
                 labelView.rootView = MenuBarLabel(remaining: remaining)
                 let width = labelView.fittingSize.width
                 labelView.frame.size.width = max(width, 20)
@@ -64,6 +64,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if popover.contentViewController == nil {
             popover.contentViewController = NSHostingController(rootView: UsagePanel(store: store))
         }
+        Task { @MainActor in
+            AppStore.shared.loadCswapAccountsIfNeeded()
+        }
         // The popover only auto-dismisses (.transient) when our app is active;
         // an accessory app stays inactive otherwise and the panel sticks.
         NSApp.activate(ignoringOtherApps: true)
@@ -92,7 +95,7 @@ if CommandLine.arguments.contains("--fetch-once") {
                 print("    \(g.label) | \(g.windowLabel ?? "-") | \(g.fractionUsed.map { "\(Int($0 * 100))%" } ?? g.remaining.map { "$\($0)" } ?? "?")")
             }
         }
-        print("overall used avg: \(GaugeBuilder.overallUsedFraction(gauges.flatMap(\.gauges)).map { "\(Int($0 * 100))%" } ?? "nil")")
+        print("overall used avg: \(GaugeBuilder.overallUsedFraction(gauges).map { "\(Int($0 * 100))%" } ?? "nil")")
     } catch {
         print("FETCH FAILED: \(error)")
     }

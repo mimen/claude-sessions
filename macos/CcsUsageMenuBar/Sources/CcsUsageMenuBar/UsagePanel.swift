@@ -10,14 +10,53 @@ struct UsagePanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     content
+                    if !store.cswapAccounts.isEmpty {
+                        accountSwitcher
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 4)
             }
             footer
         }
-        .frame(width: 320, height: store.panelHeight)
+        .frame(width: 320, height: store.panelHeight + (store.cswapAccounts.isEmpty ? 0 : CGFloat(store.cswapAccounts.count) * 26 + 24))
         .onReceive(ticker) { now = $0 }
+    }
+
+    private var accountSwitcher: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("CLAUDE ACCOUNT")
+                .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                .textCase(.uppercase)
+                .kerning(0.8)
+                .foregroundStyle(.secondary)
+                .padding(.top, 12)
+            ForEach(store.cswapAccounts) { account in
+                Button {
+                    guard !account.isActive else { return }
+                    store.switchClaudeAccount(account)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: account.isActive ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(account.isActive ? Color.accentColor : Color.secondary.opacity(0.5))
+                        Text(account.displayName)
+                            .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                        if store.switchingTo == account {
+                            ProgressView().controlSize(.mini)
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(account.isActive || store.switchingTo != nil)
+            }
+            if let error = store.switchError {
+                Text(error)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.orange)
+            }
+        }
     }
 
     @ViewBuilder
@@ -69,12 +108,23 @@ struct UsagePanel: View {
         ForEach(sections) { section in
             ProviderSectionHeader(provider: section.provider)
             if let account = section.accountDisplay {
-                Text(account)
-                    .font(.system(size: 9.5, weight: .medium, design: .rounded))
-                    .textCase(.uppercase)
-                    .kerning(0.5)
-                    .foregroundStyle(.tertiary)
-                    .padding(.bottom, 2)
+                HStack(spacing: 5) {
+                    Text(account)
+                        .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                        .textCase(.uppercase)
+                        .kerning(0.5)
+                        .foregroundStyle(.tertiary)
+                    if let plan = section.plan {
+                        Text(plan.name)
+                            .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.secondary.opacity(0.14)))
+                    }
+                    Spacer()
+                }
+                .padding(.bottom, 2)
             }
             ForEach(section.gauges) { gauge in
                 GaugeRow(gauge: gauge, now: now)

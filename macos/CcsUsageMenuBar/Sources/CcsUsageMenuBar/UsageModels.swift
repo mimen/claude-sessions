@@ -23,6 +23,15 @@ struct UsageObservation: Decodable, Equatable {
     }
 }
 
+/// One colored segment of a stacked breakdown bar.
+struct UsageBreakdownSegment: Identifiable, Equatable {
+    let name: String
+    let fractionUsed: Double?
+    let colorIndex: Int
+
+    var id: String { name }
+}
+
 struct SnapshotDecoder {
     static let iso8601Fractional: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()

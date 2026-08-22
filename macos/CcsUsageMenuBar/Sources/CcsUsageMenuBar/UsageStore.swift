@@ -14,9 +14,45 @@ final class UsageStore: ObservableObject {
     @Published var gauges: [UsageGauge] = []
     @Published var observations: [UsageObservation] = []
     @Published var panelHeight: CGFloat = 420
+    @Published var cswapAccounts: [CswapAccount] = []
+    @Published var switchingTo: CswapAccount?
+    @Published var switchError: String?
+
+    private var hasLoadedCswap = false
 
     func updateHeight(from snapshot: UsageSnapshot) {
         panelHeight = GaugeBuilder.panelHeight(for: GaugeBuilder.sections(from: snapshot))
+    }
+
+    func loadCswapAccountsIfNeeded() {
+        guard !hasLoadedCswap, Cswap.isAvailable() else { return }
+        hasLoadedCswap = true
+        Task {
+            if let accounts = try? Cswap.accounts() {
+                await MainActor.run { self.cswapAccounts = accounts }
+            }
+        }
+    }
+
+    func switchClaudeAccount(_ account: CswapAccount) {
+        guard switchingTo == nil else { return }
+        switchingTo = account
+        switchError = nil
+        Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                try Cswap.switchTo(account)
+                let accounts = try? Cswap.accounts()
+                await MainActor.run {
+                    self?.switchingTo = nil
+                    if let accounts { self?.cswapAccounts = accounts }
+                }
+            } catch {
+                await MainActor.run {
+                    self?.switchingTo = nil
+                    self?.switchError = error.localizedDescription
+                }
+            }
+        }
     }
 
     private let ccsPath: String
@@ -65,7 +101,11 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    var sections: [UsageSection] {
+        GaugeBuilder.sections(from: UsageSnapshot(generatedAt: nil, observations: observations))
+    }
+
     var overallRemaining: Double? {
-        GaugeBuilder.overallUsedFraction(gauges).map { 1 - $0 }
+        GaugeBuilder.overallUsedFraction(sections).map { 1 - $0 }
     }
 }

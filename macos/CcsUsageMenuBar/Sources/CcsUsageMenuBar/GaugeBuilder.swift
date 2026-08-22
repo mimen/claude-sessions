@@ -1,8 +1,14 @@
 import Foundation
 
+struct PlanInfo: Equatable {
+    let name: String
+    let dollars: Double
+}
+
 struct UsageSection: Identifiable, Equatable {
     let provider: String
     let account: String?
+    var plan: PlanInfo?
     let gauges: [UsageGauge]
 
     var id: String { "\(provider)|\(account ?? "")" }
@@ -11,6 +17,10 @@ struct UsageSection: Identifiable, Equatable {
     var accountDisplay: String? {
         guard let account else { return nil }
         return GaugeBuilder.accountAlias[account.lowercased()] ?? account
+    }
+
+    var allowanceGauges: [UsageGauge] {
+        gauges.filter { $0.fractionUsed != nil }
     }
 }
 
@@ -25,6 +35,7 @@ struct UsageGauge: Identifiable, Equatable {
     let remaining: Double?
     let resetsAt: Date?
     let exact: Bool
+    var breakdown: [UsageBreakdownSegment]?
 
     static let windowRank = ["five_hour": 0, "daily": 1, "weekly": 2, "monthly": 3]
     static let windowShort = ["five_hour": "5h", "weekly": "wk", "monthly": "mo",
@@ -41,6 +52,23 @@ enum GaugeBuilder {
         "grok-super grok plus": "All Usage"
     ]
 
+    /// Known subscription dollar values, keyed provider|accountAlias. Edit freely;
+    /// unknown combos fall back to even weighting via `fallbackDollars`.
+    static let planTable: [String: PlanInfo] = [
+        "anthropic|personal": PlanInfo(name: "Max 20x", dollars: 200),
+        "anthropic|auf": PlanInfo(name: "Pro", dollars: 20),
+        "grok|personal": PlanInfo(name: "SuperGrok", dollars: 100),
+        "codex|personal": PlanInfo(name: "Codex Pro", dollars: 200),
+        "opencode-go|": PlanInfo(name: "Go", dollars: 10)
+    ]
+
+    static let fallbackDollars = 50.0
+
+    static func plan(provider: String, account: String?) -> PlanInfo {
+        let key = "\(provider)|\(account.flatMap { accountAlias[$0.lowercased()]?.lowercased() } ?? "")"
+        return planTable[key] ?? PlanInfo(name: "", dollars: fallbackDollars)
+    }
+
     static func sections(from snapshot: UsageSnapshot) -> [UsageSection] {
         var gauges: [UsageGauge] = []
         for o in snapshot.observations {
@@ -49,10 +77,13 @@ enum GaugeBuilder {
                 gauges.append(allowanceGauge(o))
             case "credit":
                 if let balance = o.remaining { gauges.append(creditGauge(o, balance: balance)) }
+            case "reset_credit":
+                gauges.append(resetCreditGauge(o))
             default:
                 break
             }
         }
+        gauges = foldBreakdowns(gauges)
 
         // Group by provider+account; provider-level rows with no account join the
         // provider's sole named account when there is exactly one.
@@ -75,8 +106,47 @@ enum GaugeBuilder {
 
         return order.map { key in
             let rows = grouped[key]!.sorted { rank($0.windowLabel) < rank($1.windowLabel) }
-            return UsageSection(provider: rows[0].provider, account: rows[0].account, gauges: rows)
+            let section = UsageSection(
+                provider: rows[0].provider,
+                account: rows[0].account,
+                plan: nil,
+                gauges: rows
+            )
+            return section
+        }.map { s in
+            var s = s
+            let p = plan(provider: s.provider, account: s.account)
+            s.plan = p.dollars > 0 ? p : nil
+            return s
         }
+    }
+
+    /// Grok-style #sub-pool rows become colored segments on their parent gauge.
+    static func foldBreakdowns(_ gauges: [UsageGauge]) -> [UsageGauge] {
+        let parents = Dictionary(uniqueKeysWithValues: gauges.map { ($0.id, $0) })
+        var childrenByParent: [String: [UsageGauge]] = [:]
+        var foldedIds = Set<String>()
+        // Only Grok reports sub-pool breakdowns as stacked-bar segments;
+        // other providers' suffixed rows (#Fable) stay as their own rows.
+        for g in gauges where g.provider == "grok" && g.isBreakdownChild {
+            guard let parentId = g.parentGaugeId, parents[parentId] != nil else { continue }
+            childrenByParent[parentId, default: []].append(g)
+            foldedIds.insert(g.id)
+        }
+        var result: [UsageGauge] = []
+        for g in gauges {
+            if foldedIds.contains(g.id) { continue }
+            if var parent = parents[g.id], var children = childrenByParent[g.id] {
+                children.sort { ($0.fractionUsed ?? 0) > ($1.fractionUsed ?? 0) }
+                parent.breakdown = children.enumerated().map { i, c in
+                    UsageBreakdownSegment(name: c.label, fractionUsed: c.fractionUsed, colorIndex: i)
+                }
+                result.append(parent)
+            } else {
+                result.append(g)
+            }
+        }
+        return result
     }
 
     private static func rank(_ window: String?) -> Int {
@@ -96,7 +166,8 @@ enum GaugeBuilder {
             limit: o.limit,
             remaining: nil,
             resetsAt: o.resetsAt,
-            exact: o.exact ?? false
+            exact: o.exact ?? false,
+            breakdown: nil
         )
     }
 
@@ -112,29 +183,52 @@ enum GaugeBuilder {
             limit: nil,
             remaining: balance,
             resetsAt: o.resetsAt,
-            exact: o.exact ?? true
+            exact: o.exact ?? true,
+            breakdown: nil
         )
+    }
+
+    /// A banked full-reset token: binary (redeemable or not), with an expiry.
+    static func resetCreditGauge(_ o: UsageObservation) -> UsageGauge {
+        UsageGauge(
+            id: "reset|\(o.provider)|\(o.entitlement)",
+            provider: o.provider,
+            account: entitlementParts(o.entitlement).account,
+            label: "Banked reset",
+            windowLabel: nil,
+            fractionUsed: nil,
+            limit: nil,
+            remaining: o.remaining,
+            resetsAt: o.resetsAt,
+            exact: true,
+            breakdown: nil
+        )
+    }
+
+    /// Limit-weighted average used fraction across sections, weighted by each
+    /// account's plan's dollar value (each account counts once).
+    static func overallUsedFraction(_ sections: [UsageSection]) -> Double? {
+        var total = 0.0, weight = 0.0
+        for s in sections {
+            let allowances = s.allowanceGauges
+            guard !allowances.isEmpty else { continue }
+            let dollars = s.plan?.dollars ?? fallbackDollars
+            let mean = allowances.compactMap(\.fractionUsed).reduce(0, +) / Double(allowances.count)
+            total += mean * dollars
+            weight += dollars
+        }
+        guard weight > 0 else { return nil }
+        return total / weight
     }
 
     /// Single source of truth for the panel's height so the popover window can match it.
     static func panelHeight(for sections: [UsageSection]) -> CGFloat {
-        let rows = CGFloat(sections.reduce(0) { $0 + $1.gauges.count })
+        var rows = CGFloat(sections.reduce(0) { $0 + $1.gauges.count })
+        rows -= CGFloat(sections.reduce(0) { $0 + ($1.gauges.first?.breakdown?.isEmpty == false ? $1.gauges.first!.breakdown!.count : 0) })
         let sectionHeaders = CGFloat(sections.count)
         let accountSubheaders = CGFloat(sections.compactMap(\.accountDisplay).count)
-        return min(520, 56 + rows * 46 + sectionHeaders * 28 + accountSubheaders * 18 + 20)
-    }
-
-    /// Weighted-average used fraction across all allowance gauges (weight = limit).
-    static func overallUsedFraction(_ gauges: [UsageGauge]) -> Double? {
-        var total = 0.0, weight = 0.0
-        for g in gauges {
-            guard let f = g.fractionUsed else { continue }
-            let w = (g.limit ?? 100)
-            total += f * w
-            weight += w
-        }
-        guard weight > 0 else { return nil }
-        return total / weight
+        let legends = CGFloat(sections.reduce(0) { $0 + (($1.gauges.first?.breakdown?.isEmpty == false) ? 1 : 0) })
+        return min(560, 56 + rows * 46 - legends * 12 + sectionHeaders * 28 + accountSubheaders * 18 + 20)
     }
 
     /// Splits "claude-max:milad@x.com#Fable" into friendly label/account.
@@ -153,7 +247,7 @@ enum GaugeBuilder {
             body = String(body[..<colon])
         }
         if !suffix.isEmpty {
-            // "#Fable" -> "Fable"; sub-pools render under their own name alone.
+            // "#Fable" renders as its own name alone.
             return (suffix.prefix(1).uppercased() + suffix.dropFirst(), account)
         }
         return (nameLabel[body.lowercased()] ?? body, account)
@@ -163,6 +257,25 @@ enum GaugeBuilder {
         entitlement
             .replacingOccurrences(of: "-usd-balance", with: " USD")
             .replacingOccurrences(of: "-diem-balance", with: " Diem")
+            .replacingOccurrences(of: "-dollar-credit", with: " credit")
             .replacingOccurrences(of: "venice-", with: "")
+    }
+}
+
+private extension UsageGauge {
+    /// A "#sub-pool" child of a family that also reports a parent aggregate row.
+    var isBreakdownChild: Bool { parentGaugeId != nil }
+
+    /// The parent allowance gauge's id: same id with the "#suffix" removed.
+    /// Ids look like "provider|entitlement#suffix|window".
+    var parentGaugeId: String? {
+        // Strip suffix between "#" and the final "|".
+        guard let hash = id.firstIndex(of: "#"),
+              let lastPipe = id.lastIndex(of: "|"), hash < lastPipe else { return nil }
+        let start = id.distance(from: id.startIndex, to: hash)
+        let end = id.distance(from: id.startIndex, to: lastPipe)
+        var chars = Array(id)
+        chars.removeSubrange(start..<end)
+        return String(chars)
     }
 }
