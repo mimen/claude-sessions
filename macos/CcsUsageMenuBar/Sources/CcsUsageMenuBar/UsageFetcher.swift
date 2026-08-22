@@ -92,18 +92,40 @@ enum UsageFetcher {
             throw UsageFetchError.launchFailed(error.localizedDescription)
         }
 
-        let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
+        // Read both pipes concurrently — output can exceed the 64KB pipe buffer
+        // and would deadlock the child if we only read after exit.
+        let group = DispatchGroup()
+        var outData = Data()
+        var errData = Data()
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            outData = stdout.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            errData = stderr.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+
+        let result = group.wait(timeout: .now() + timeout)
+        if result == .timedOut {
+            if process.isRunning { process.terminate() }
+            throw UsageFetchError.nonZeroExit(-1, "timed out after \(Int(timeout))s")
+        }
+        while process.isRunning && Date() < Date().addingTimeInterval(5) {
+            Thread.sleep(forTimeInterval: 0.02)
         }
         if process.isRunning {
             process.terminate()
-            throw UsageFetchError.nonZeroExit(-1, "timed out after \(Int(timeout))s")
+            throw UsageFetchError.nonZeroExit(-1, "did not exit after pipes closed")
         }
 
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        guard process.terminationStatus == 0 else {
-            let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let data = outData
+        let err = String(data: errData, encoding: .utf8) ?? ""
+        // ccs usage can exit non-zero on partial adapter degradation while still
+        // emitting the complete snapshot on stdout — parse whenever we got data.
+        guard !data.isEmpty else {
             throw UsageFetchError.nonZeroExit(process.terminationStatus, err)
         }
         return try SnapshotDecoder.decode(data)
