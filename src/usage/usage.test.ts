@@ -95,3 +95,37 @@ test("usageCommand sources prints the provenance table and exits 0", () => {
   expect(logs.join("\n")).toContain("official_api");
   expect(logs.join("\n")).toContain("venice");
 });
+
+// --- Review-fix regressions ---
+
+test("accountEntitlement suffixes multi-account entries with their email", async () => {
+  const { accountEntitlement } = await import("./adapters.ts");
+  const entry = {} as Parameters<typeof accountEntitlement>[2];
+  expect(accountEntitlement("claude-max", { accountEmail: "a@b.c" }, entry)).toBe("claude-max:a@b.c");
+  expect(accountEntitlement("claude-max", undefined, entry)).toBe("claude-max");
+});
+
+test("sourceClassFor maps codexbar entry sources to evidence classes", async () => {
+  const { sourceClassFor } = await import("./codexbar.ts");
+  expect(sourceClassFor("oauth")).toBe("official_api");
+  expect(sourceClassFor("web")).toBe("official_ui");
+  expect(sourceClassFor("cli")).toBe("official_cli");
+  expect(sourceClassFor(undefined)).toBe("official_cli");
+});
+
+test("render labels Spark, DIEM, and multi-account lines distinctly", () => {
+  const out = renderSnapshot(snap({
+    observations: [
+      obs({ entitlement: "codex-spark", used: 0, window: "five_hour" }),
+      obs({ provider: "venice", entitlement: "venice-diem-balance", metric: "credit", used: null, limit: null, remaining: 0 }),
+      obs({ provider: "anthropic", entitlement: "claude-max:a@b.c", used: 10 }),
+    ],
+  }));
+  expect(out).toContain("Codex Spark ");
+  expect(out).toContain("0 DIEM"); // DIEM never renders as dollars
+  expect(out).toContain("(a@b.c)"); // account surfaced
+});
+
+test("dangling --provider is an error, not a silent all-provider query", async () => {
+  expect(await usageCommand(["--provider"])).toBe(1);
+});

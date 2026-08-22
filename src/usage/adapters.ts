@@ -16,7 +16,7 @@ import type {
   UsageObservation,
   UsageSnapshot,
 } from "./types.ts";
-import { entryErrorHealth, runCodexBar, type RawCodexBarEntry } from "./codexbar.ts";
+import { codexBarVersion, entryErrorHealth, runCodexBar, sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
 
 export interface AdapterResult {
   observations: UsageObservation[];
@@ -60,6 +60,17 @@ export function accountLabel(identity: Identity | undefined): string {
   return identity?.accountEmail ?? identity?.loginMethod ?? "unknown";
 }
 
+/**
+ * Entitlement id per CodexBar ENTRY, not per adapter: Anthropic runs two separate
+ * subscriptions (personal + AUF), and CodexBar returns one entry per account. The email
+ * distinguishes them; without it every entry collapses into the base entitlement.
+ */
+export function accountEntitlement(base: string, identity: Identity | undefined, entry: RawCodexBarEntry): string {
+  const email = identity?.accountEmail;
+  if (!email || entry.error) return base;
+  return `${base}:${email}`;
+}
+
 function windowObservations(
   provider: ProviderId,
   entitlement: string,
@@ -99,7 +110,6 @@ function windowObservations(
 function collectCodexBarProvider(
   providerArg: string,
   providerId: ProviderId,
-  entitlement: string,
   perEntry: (entry: RawCodexBarEntry) => UsageObservation[],
   failureDetail: (entries: RawCodexBarEntry[]) => string,
 ): AdapterResult {
@@ -116,6 +126,7 @@ function collectCodexBarProvider(
     }
     observations.push(...perEntry(entry));
   }
+  const version = codexBarVersion();
   const health: AdapterHealth =
     hadError && observations.length === 0
       ? entryErrorHealth(providerId, lastError)
@@ -127,7 +138,7 @@ function collectCodexBarProvider(
               provider: providerId,
               status: "ok",
               detail: null,
-              ...(res.value.version ? { helper: { name: "codexbar", version: res.value.version } } : {}),
+              ...(version ? { helper: { name: "codexbar", version } } : {}),
             };
   return { observations, health };
 }
@@ -155,61 +166,65 @@ interface CodexUsage {
 }
 
 function codexAdapter(): AdapterResult {
-  return collectCodexBarProvider("codex", "codex", "codex-pro", (entry) => {
+  return collectCodexBarProvider("codex", "codex", (entry) => {
     const usage = entry.usage as CodexUsage | undefined;
     if (!usage) return [];
     const observedAt = usage.updatedAt ?? now();
+    const srcClass = sourceClassFor(entry.source);
+    const entitlement = accountEntitlement("codex-pro", usage.identity, entry);
     const out: UsageObservation[] = windowObservations(
-      "codex", "codex-pro", "account",
+      "codex", entitlement, "account",
       [
         ["primary", usage.primary ?? null],
         ["secondary", usage.secondary ?? null],
         ["tertiary", usage.tertiary ?? null],
       ],
       observedAt,
-      "official_cli",
+      srcClass,
     );
-    // Spark windows ride in extraRateWindows but are still ordinary allowance windows.
+    // Spark windows ride in extraRateWindows but consume a distinct Spark allowance —
+    // they keep their own entitlement so the view never mislabels them as Codex Pro.
     for (const extra of usage.extraRateWindows ?? []) {
       if (!extra.window) continue;
-      out.push(...windowObservations("codex", "codex-spark", "account", [[extra.title ?? extra.id ?? "spark", extra.window]], observedAt, "official_cli"));
+      const id = extra.id ?? extra.title ?? "codex-spark";
+      out.push(...windowObservations("codex", id, "account", [[extra.title ?? id, extra.window]], observedAt, srcClass));
     }
-    // Banked reset credits: lifecycle state, grant and expiry — never merged with windows.
+    // Banked reset credits carry full lifecycle state; "redeeming" is pending, not consumed.
     const rc = usage.codexResetCredits;
     if (rc?.credits) {
       for (const c of rc.credits) {
         out.push({
           provider: "codex",
-          entitlement: "codex-reset-credit",
+          entitlement: accountEntitlement("codex-reset-credit", usage.identity, entry),
           metric: "reset_credit",
           scope: "account",
           window: null,
           used: null,
           limit: null,
-          remaining: c.status === "available" ? 1 : 0,
+          remaining: c.status === "available" ? 1 : null,
           resetsAt: null,
           expiresAt: c.expires_at ?? null,
           observedAt: rc.updatedAt ?? observedAt,
-          source: "official_cli",
+          source: srcClass,
           exact: true,
         });
       }
     }
-    // Paid dollar credits stay separate from reset credits.
-    if (typeof usage.credits?.remaining === "number") {
+    // Paid dollar credits are a TOP-LEVEL entry sibling of `usage` in CodexBar output.
+    if (typeof entry.credits?.remaining === "number") {
       out.push({
         provider: "codex",
-        entitlement: "codex-dollar-credit",
+        entitlement: accountEntitlement("codex-dollar-credit", usage.identity, entry),
         metric: "credit",
         scope: "account",
         window: null,
         used: null,
         limit: null,
-        remaining: usage.credits.remaining,
+        remaining: entry.credits.remaining,
         resetsAt: null,
         expiresAt: null,
-        observedAt: usage.credits.updatedAt ?? observedAt,
-        source: "official_cli",
+        observedAt: entry.credits.updatedAt ?? observedAt,
+        source: srcClass,
         exact: true,
       });
     }
@@ -222,19 +237,21 @@ function codexAdapter(): AdapterResult {
 // ---------------------------------------------------------------------------
 
 function anthropicAdapter(): AdapterResult {
-  return collectCodexBarProvider("claude", "anthropic", "claude-max-personal", (entry) => {
+  return collectCodexBarProvider("claude", "anthropic", (entry) => {
     const usage = entry.usage as CodexUsage | undefined;
     if (!usage) return [];
     const observedAt = usage.updatedAt ?? now();
+    // One entitlement PER ENTRY: personal and AUF subscriptions must stay separate, and
+    // the email in each entry's identity is what distinguishes them.
     return windowObservations(
-      "anthropic", "claude-max-personal", "account",
+      "anthropic", accountEntitlement("claude-max", usage.identity, entry), "account",
       [
         ["primary", usage.primary ?? null],
         ["secondary", usage.secondary ?? null],
         ["tertiary", usage.tertiary ?? null],
       ],
       observedAt,
-      "official_ui",
+      sourceClassFor(entry.source),
     );
   }, () => "no claude usage entries returned");
 }
@@ -244,21 +261,20 @@ function anthropicAdapter(): AdapterResult {
 // ---------------------------------------------------------------------------
 
 function grokAdapter(): AdapterResult {
-  return collectCodexBarProvider("grok", "grok", "grok-consumer-oidc", (entry) => {
+  return collectCodexBarProvider("grok", "grok", (entry) => {
     const usage = entry.usage as CodexUsage | undefined;
     if (!usage) return [];
     const observedAt = usage.updatedAt ?? now();
-    const out = windowObservations(
-      "grok", "grok-consumer-oidc", "organization",
+    return windowObservations(
+      "grok", accountEntitlement("grok-consumer-oidc", usage.identity, entry), "organization",
       [
         ["primary", usage.primary ?? null],
         ["secondary", usage.secondary ?? null],
         ["tertiary", usage.tertiary ?? null],
       ],
       observedAt,
-      "official_ui",
+      sourceClassFor(entry.source),
     );
-    return out;
   }, () => "no grok usage entries returned");
 }
 
@@ -267,19 +283,19 @@ function grokAdapter(): AdapterResult {
 // ---------------------------------------------------------------------------
 
 function opencodeGoAdapter(): AdapterResult {
-  return collectCodexBarProvider("opencodego", "opencode-go", "opencode-go-zen", (entry) => {
+  return collectCodexBarProvider("opencodego", "opencode-go", (entry) => {
     const usage = entry.usage as CodexUsage | undefined;
     if (!usage) return [];
     const observedAt = usage.updatedAt ?? now();
     return windowObservations(
-      "opencode-go", "opencode-go-zen", "account",
+      "opencode-go", accountEntitlement("opencode-go-zen", usage.identity, entry), "account",
       [
         ["primary", usage.primary ?? null],
         ["secondary", usage.secondary ?? null],
         ["tertiary", usage.tertiary ?? null],
       ],
       observedAt,
-      "official_cli",
+      sourceClassFor(entry.source),
     );
   }, () => "no opencodego usage entries returned");
 }
@@ -299,10 +315,13 @@ interface VeniceRateLimits {
   };
 }
 
+const VENICE_TIMEOUT_MS = 15_000;
+
 async function veniceFetch(path: string): Promise<Response> {
   const key = await veniceApiKey();
   return fetch(`https://api.venice.ai/api/v1/${path}`, {
     headers: { Authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(VENICE_TIMEOUT_MS),
   });
 }
 
@@ -421,14 +440,37 @@ async function veniceAdapter(): Promise<AdapterResult> {
 
 export async function collectSnapshot(opts: { providers?: readonly ProviderId[] }): Promise<UsageSnapshot> {
   const wanted = opts.providers ?? PROVIDERS;
+  // Final containment boundary: an adapter that throws despite its own error handling
+  // degrades to AdapterHealth here — one broken adapter never collapses the command.
+  const run = (p: ProviderId): AdapterResult => {
+    try {
+      switch (p) {
+        case "codex": return codexAdapter();
+        case "anthropic": return anthropicAdapter();
+        case "grok": return grokAdapter();
+        case "opencode-go": return opencodeGoAdapter();
+        case "venice": return { observations: [], health: { provider: p, status: "unavailable", detail: "venice adapter is async" } };
+      }
+    } catch (e) {
+      return {
+        observations: [],
+        health: { provider: p, status: "unavailable", detail: e instanceof Error ? e.message : String(e) },
+      };
+    }
+  };
   const results: AdapterResult[] = [];
   for (const p of wanted) {
-    switch (p) {
-      case "codex": results.push(codexAdapter()); break;
-      case "anthropic": results.push(anthropicAdapter()); break;
-      case "grok": results.push(grokAdapter()); break;
-      case "opencode-go": results.push(opencodeGoAdapter()); break;
-      case "venice": results.push(await veniceAdapter()); break;
+    if (p === "venice") {
+      try {
+        results.push(await veniceAdapter());
+      } catch (e) {
+        results.push({
+          observations: [],
+          health: { provider: "venice", status: "unavailable", detail: e instanceof Error ? e.message : String(e) },
+        });
+      }
+    } else {
+      results.push(run(p));
     }
   }
   return {

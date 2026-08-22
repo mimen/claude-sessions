@@ -33,17 +33,22 @@ official_cli, observed_private, local_estimate. Unknown beats fake precision.`;
 
 function parseProviders(args: readonly string[]): ProviderId[] | null {
   const out = new Set<ProviderId>();
+  let sawFlag = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] !== "--provider") continue;
+    sawFlag = true;
     const v = args[i + 1];
-    if (!v || v.startsWith("--")) continue;
+    // A dangling --provider is a caller error, not "all providers" — the Venice path
+    // reads credentials, so silently broadening scope would be worse than failing.
+    if (!v || v.startsWith("--")) return null;
     for (const p of v.split(",")) {
       const id = p.trim() as ProviderId;
       if (!VALID.includes(id)) return null;
       out.add(id);
     }
   }
-  return out.size ? [...out] : []; // [] = no flag given (all providers); null = invalid id
+  // null = invalid/dangling flag; otherwise the selected set (empty = all providers).
+  return sawFlag && out.size === 0 ? null : [...out];
 }
 
 function snapshotWithDefaults(snap: UsageSnapshot): UsageSnapshot {
