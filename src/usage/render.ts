@@ -58,6 +58,8 @@ const PRODUCT_LABEL: Record<string, string> = {
   chat: "Grok Chat",
   imagine: "Imagine",
   api: "API",
+  reset: "Usage reset",
+  prepaid: "Extra credits",
 };
 
 /** Short limit name shown under a provider/account group. */

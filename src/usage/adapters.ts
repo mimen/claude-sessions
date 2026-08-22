@@ -4,10 +4,11 @@
  * adapter cannot collapse the command (plan commitment).
  *
  * Sources, per plan:
- *  - codex / grok / opencode-go → CodexBar CLI JSON (official_cli class)
- *  - anthropic → CodexBar's Claude reader when it works; explicit degradation otherwise
- *    (consumer allowance has no supported public API; unknown beats fake precision)
- *  - venice → official billing balance + api_keys/rate_limits APIs (official_api class)
+ *  - codex → CodexBar CLI JSON
+ *  - anthropic → cswap's per-account Anthropic OAuth usage snapshots
+ *  - grok → xAI billing/subscription JSON + reset-grant gRPC-Web surfaces
+ *  - opencode-go → official Go usage API
+ *  - venice → official billing balance + api_keys/rate_limits APIs
  */
 
 import type {
@@ -299,7 +300,7 @@ function anthropicAdapter(): AdapterResult {
 async function grokAdapter(): Promise<AdapterResult> {
   const res = await fetchGrokBilling();
   if (!res.ok) return { observations: [], health: res.error };
-  const { credits, tier, email } = res.value;
+  const { credits, resets, resetError, tier, email } = res.value;
   const c = credits.config;
   const observedAt = now();
   const entitlement =
@@ -325,7 +326,9 @@ async function grokAdapter(): Promise<AdapterResult> {
     });
     // Product breakdown rows under the same pool.
     for (const p of c.productUsage ?? []) {
-      if (!p.product || typeof p.usagePercent !== "number") continue;
+      if (!p.product) continue;
+      // proto3 omits zero-valued usagePercent, but the product is still an explicit 0% row.
+      const productPercent = p.usagePercent ?? 0;
       out.push({
         provider: "grok",
         // "#" suffix = product sub-row of the same pool; renderer names it, grouping ignores it.
@@ -333,9 +336,9 @@ async function grokAdapter(): Promise<AdapterResult> {
         metric: "allowance",
         scope: "organization",
         window: "weekly",
-        used: p.usagePercent,
+        used: productPercent,
         limit: 100,
-        remaining: Math.max(0, 100 - p.usagePercent),
+        remaining: Math.max(0, 100 - productPercent),
         resetsAt: c.currentPeriod?.end ?? null,
         expiresAt: null,
         observedAt,
@@ -344,12 +347,30 @@ async function grokAdapter(): Promise<AdapterResult> {
       });
     }
   }
-  // Prepaid (Extra Usage) credit balance in cents.
-  const prepaid = c?.prepaidBalance?.val;
-  if (typeof prepaid === "number" && prepaid > 0) {
+  // Redeemable full-reset grants — distinct from the automatic weekly reset.
+  for (const grant of resets) {
     out.push({
       provider: "grok",
-      entitlement: `${entitlement}:prepaid`,
+      entitlement: `${entitlement}#reset`,
+      metric: "reset_credit",
+      scope: "organization",
+      window: null,
+      used: null,
+      limit: null,
+      remaining: 1,
+      resetsAt: null,
+      expiresAt: grant.expiresAt,
+      observedAt,
+      source: "official_api",
+      exact: true,
+    });
+  }
+  // Prepaid Extra Usage Credits in cents. Emit zero too: explicit "none" is useful detail.
+  const prepaid = c?.prepaidBalance?.val;
+  if (typeof prepaid === "number") {
+    out.push({
+      provider: "grok",
+      entitlement: `${entitlement}#prepaid`,
       metric: "credit",
       scope: "organization",
       window: null,
@@ -366,8 +387,10 @@ async function grokAdapter(): Promise<AdapterResult> {
   return {
     observations: out,
     health: out.length === 0
-      ? { provider: "grok", status: "degraded", detail: "billing returned no usable fields" }
-      : { provider: "grok", status: "ok", detail: null },
+      ? { provider: "grok", status: "unavailable", detail: "billing returned no usable fields" }
+      : resetError
+        ? { provider: "grok", status: "degraded", detail: `usage available; reset grants unavailable: ${resetError}` }
+        : { provider: "grok", status: "ok", detail: null },
   };
 }
 

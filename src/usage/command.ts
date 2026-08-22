@@ -19,12 +19,12 @@ const SOURCES_HELP = `ccs usage sources — what each adapter reads
 
   codex        CodexBar CLI (official_cli). Ordinary 5h/weekly windows, Spark windows,
                banked reset credits (lifecycle + expiry), dollar credits as separate state.
-  anthropic    CodexBar's Claude reader where it works (official_ui). Consumer Max
-               allowance has no supported public API; explicit unknown when it can't.
-  grok         Grok web surface via CodexBar (official_ui). Consumer/team OIDC allowance,
-               weekly reset. No xAI API billing.
-  opencode-go  CodexBar CLI (official_cli). Value-window usage; exact reset timestamps are
-               console/private data and stay unknown rather than guessed.
+  anthropic    cswap list --json (official_api): each managed Claude account's live
+               five-hour and weekly OAuth windows, resets, and last-good fallback.
+  grok         xAI billing/subscription JSON plus GetRemainingResets gRPC-Web
+               (official_api): weekly pool, Build/Chat/Imagine, plan, reset grants, credits.
+  opencode-go  Official GET /zen/go/v1/usage API: five-hour, weekly, monthly percentages
+               with exact reset timestamps.
   venice       Official APIs (official_api): api_keys/rate_limits for balances, tier,
                per-model caps, next epoch. USD and DIEM never merged.
 
