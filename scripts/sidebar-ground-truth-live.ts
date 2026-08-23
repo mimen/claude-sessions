@@ -11,7 +11,7 @@
  * Read-only against live state. bun run scripts/sidebar-ground-truth-live.ts [port]
  */
 import { Database } from "bun:sqlite";
-import { watch } from "node:fs";
+import { closeSync, openSync, readSync, statSync, watch } from "node:fs";
 import { join } from "node:path";
 import { CATALOGUE_PATH, DB_PATH } from "../src/paths.ts";
 import { scanStore } from "../src/store.ts";
@@ -343,7 +343,75 @@ let directoryByCwd = new Map<string, { project: string | null; worktree: string 
 let catalogueKickPending = false;
 let statusKickIds = new Set<string>();
 let extrasKickPending = false;
+let lastWorkingIds = new Set<string>();
+let lastBilledKickIds = new Set<string>();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
+
+function rowIsWorking(row: MirrorRow): boolean {
+  const label = (row.authoritativePill ?? row.derivedLabel ?? row.trackedLifecycle ?? "").toLowerCase();
+  return label === "running" || label === "working";
+}
+
+function peekLastAssistantModel(transcriptPath: string): string | null {
+  let fd: number;
+  try {
+    fd = openSync(transcriptPath, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const size = statSync(transcriptPath).size;
+    const window = Math.min(size, 256 * 1024);
+    const buf = Buffer.alloc(window);
+    readSync(fd, buf, 0, window, size - window);
+    const text = buf.toString("utf8");
+    let last: string | null = null;
+    for (const line of text.split("\n")) {
+      if (!line.includes("model")) continue;
+      try {
+        const parsed = JSON.parse(line) as {
+          type?: string;
+          message?: { model?: string };
+          model?: string;
+        };
+        const model = parsed.message?.model ?? parsed.model ?? "";
+        if (parsed.type === "assistant" && model && model !== "<synthetic>") last = model;
+      } catch {
+        // partial first line from the window is expected
+      }
+    }
+    return last;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function noteWorkingStops(): void {
+  const nowWorking = new Set(
+    latestMirror.live.filter((row) => row.sessionId && rowIsWorking(row)).map((row) => row.sessionId),
+  );
+  for (const id of lastWorkingIds) {
+    if (!nowWorking.has(id)) lastBilledKickIds.add(id);
+  }
+  lastWorkingIds = nowWorking;
+}
+
+function refreshLastBilled(sessionId: string): void {
+  const entry = lastHooksFacts?.sessions.get(sessionId);
+  const path = entry?.transcriptPath;
+  if (!path) return;
+  const model = peekLastAssistantModel(path);
+  if (!model) return;
+  const prev = indexFactsBySession.get(sessionId);
+  const next = {
+    lastActivityAt: prev?.lastActivityAt ?? Date.now(),
+    messageCount: prev?.messageCount ?? null,
+    models: prev?.models ?? [model],
+    lastModel: model,
+    cwd: prev?.cwd ?? null,
+  };
+  indexFactsBySession.set(sessionId, next);
+}
 
 function catalogueLifecycleOf(sessionId: string): string | null {
   return catalogueBySession.get(sessionId) ?? null;
@@ -407,6 +475,7 @@ function reloadCatalogue(): void {
 function paintMirrorFromCache(): void {
   if (lastTreeFacts === null || lastHooksFacts === null) return;
   latestMirror = buildMirror(lastTreeFacts, lastHooksFacts, pillsByWorkspace, lastTitles);
+  noteWorkingStops();
   broadcastState();
 }
 
@@ -434,6 +503,7 @@ async function fastMirrorCycle(): Promise<void> {
   lastTreeFacts = tree.facts;
   if (lastHooksFacts !== null) {
     latestMirror = buildMirror(tree.facts, lastHooksFacts, pillsByWorkspace, lastTitles);
+    noteWorkingStops();
   }
   if (lastEventAt > 0) lastEventMirrorMs = Date.now() - lastEventAt;
   cycles += 1;
@@ -664,6 +734,12 @@ async function sweepLoop(): Promise<void> {
     if (catalogueKickPending) {
       catalogueKickPending = false;
       reloadCatalogue();
+      paintMirrorFromCache();
+    }
+    if (lastBilledKickIds.size > 0) {
+      const ids = [...lastBilledKickIds];
+      lastBilledKickIds.clear();
+      for (const id of ids) refreshLastBilled(id);
       paintMirrorFromCache();
     }
     if (extrasKickPending && lastTreeFacts) {
