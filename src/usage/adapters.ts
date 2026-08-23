@@ -19,6 +19,7 @@ import type {
 } from "./types.ts";
 import { codexBarVersion, entryErrorHealth, runCodexBar, sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
 import { runCswap, type CswapWindow } from "./cswap.ts";
+import { fetchOauthUsage, planFromTier, readKeychainOauth, SCOPED_WINDOWS } from "./anthropic-oauth.ts";
 import { fetchGrokBilling } from "./grok.ts";
 
 export interface AdapterResult {
@@ -264,16 +265,61 @@ function windowFromCswap(
 }
 
 function anthropicAdapter(): AdapterResult {
+  throw new Error("sync anthropicAdapter removed; use anthropicAdapterLive");
+}
+
+async function anthropicAdapterLive(): Promise<AdapterResult> {
   const res = runCswap();
   if (!res.ok) return { observations: [], health: res.error };
   const observations: UsageObservation[] = [];
   let okCount = 0;
+  let staleCount = 0;
   for (const acct of res.value.report.accounts ?? []) {
     if (!acct.email) continue;
     const base = `claude-max:${acct.email}`;
-    const live = acct.usageStatus === "ok";
-    const usage = (live ? acct.usage : acct.lastGoodUsage) ?? {};
     const observedAt = now();
+
+    // Preferred path: live OAuth fetch using the account's keychain token.
+    // Falls back to cswap's (often stale) usage cache on any failure.
+    const oauth = acct.number != null ? readKeychainOauth(acct.number, acct.email) : null;
+    if (oauth) {
+      try {
+        const usage = await fetchOauthUsage(oauth.accessToken);
+        const tier = planFromTier(oauth.rateLimitTier);
+        const emit = (w: { utilization?: number | null; resets_at?: string | null } | null | undefined, window: UsageWindow, suffix = "") => {
+          if (!w || typeof w.utilization !== "number") return;
+          observations.push({
+            provider: "anthropic",
+            entitlement: `${base}${suffix}`,
+            metric: "allowance",
+            scope: "account",
+            window,
+            used: w.utilization,
+            limit: 100,
+            remaining: Math.max(0, 100 - w.utilization),
+            resetsAt: w.resets_at ?? null,
+            expiresAt: null,
+            observedAt,
+            source: "official_api",
+            exact: true,
+            tier: tier?.name ?? null,
+          } as UsageObservation & { tier?: string | null });
+          okCount++;
+        };
+        emit(usage.five_hour, "five_hour");
+        emit(usage.seven_day, "weekly");
+        for (const scoped of SCOPED_WINDOWS) {
+          emit(usage[scoped.key] as typeof usage.five_hour | null | undefined, "weekly", scoped.suffix);
+        }
+        continue;
+      } catch {
+        // token revoked/expired or endpoint down — fall through to cswap cache
+      }
+    }
+
+    const live = acct.usageStatus === "ok";
+    if (!live) staleCount++;
+    const usage = (live ? acct.usage : acct.lastGoodUsage) ?? {};
     for (const [w, win] of [
       ["five_hour", usage.fiveHour],
       ["weekly", usage.sevenDay],
@@ -299,8 +345,10 @@ function anthropicAdapter(): AdapterResult {
   }
   const health: AdapterHealth =
     okCount === 0
-      ? { provider: "anthropic", status: "unavailable", detail: "cswap returned no usable windows" }
-      : { provider: "anthropic", status: "ok", detail: null };
+      ? { provider: "anthropic", status: "unavailable", detail: "no usable anthropic windows" }
+      : staleCount > 0
+        ? { provider: "anthropic", status: "degraded", detail: `${staleCount} account(s) on cached usage — token revoked or missing; re-auth via cswap` }
+        : { provider: "anthropic", status: "ok", detail: null };
   return { observations, health };
 }
 
@@ -638,8 +686,8 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
     try {
       switch (p) {
         case "codex": return codexAdapter();
-        case "anthropic": return anthropicAdapter();
         case "opencode-go":
+        case "anthropic":
         case "grok":
         case "venice":
           return { observations: [], health: { provider: p, status: "unavailable", detail: "async adapter" } };
@@ -653,12 +701,13 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
   };
   const results: AdapterResult[] = [];
   for (const p of wanted) {
-    if (p === "venice" || p === "opencode-go" || p === "grok") {
-      // The two direct-API adapters are async; contain their throws like the sync ones.
+    if (p === "venice" || p === "opencode-go" || p === "grok" || p === "anthropic") {
+      // The direct-API adapters are async; contain their throws like the sync ones.
       try {
         results.push(
           p === "venice" ? await veniceAdapter()
           : p === "grok" ? await grokAdapter()
+          : p === "anthropic" ? await anthropicAdapterLive()
           : await opencodeGoAdapter(),
         );
       } catch (e) {
