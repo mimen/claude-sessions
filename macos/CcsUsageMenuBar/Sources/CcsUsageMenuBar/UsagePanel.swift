@@ -122,7 +122,7 @@ struct UsagePanel: View {
                             .padding(.vertical, 1)
                             .background(Capsule().fill(Color.secondary.opacity(0.14)))
                     }
-                    if let account = section.account, store.staleAccounts.contains("anthropic|\(account)") {
+                    if section.isStale {
                         Text("stale")
                             .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                             .foregroundStyle(.orange)

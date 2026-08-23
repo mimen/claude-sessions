@@ -32,6 +32,11 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Stable signature so Keychain ACLs (claude-swap token access) survive rebuilds —
+# ad-hoc signatures change every build and re-trigger the permission prompt.
+codesign --force --sign "Apple Development" "$APP_DIR" 2>/dev/null \
+  || echo "warn: no signing identity found; keychain will re-prompt"
+
 if [[ "$1" == "--install" ]]; then
   pkill -f "CcsUsage.app/Contents/MacOS/CcsUsage" 2>/dev/null || true
   rm -rf "/Applications/$APP_NAME.app"

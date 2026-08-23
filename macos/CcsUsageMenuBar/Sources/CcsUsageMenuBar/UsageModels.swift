@@ -17,6 +17,8 @@ struct UsageObservation: Decodable, Equatable {
     let resetsAt: Date?
     let expiresAt: Date?
     let exact: Bool?
+    let stale: Bool?
+    let tier: String?
 
     var fractionUsed: Double? {
         guard let used, let limit, limit > 0 else { return nil }

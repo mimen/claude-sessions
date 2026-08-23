@@ -11,6 +11,9 @@ struct UsageSection: Identifiable, Equatable {
     var plan: PlanInfo?
     let gauges: [UsageGauge]
 
+    /// True when any observation behind this section came from a stale cache.
+    var isStale: Bool { gauges.contains { $0.stale } }
+
     var id: String { "\(provider)|\(account ?? "")" }
 
     /// "personal", "auf", or the raw local part as fallback.
@@ -35,6 +38,8 @@ struct UsageGauge: Identifiable, Equatable {
     let remaining: Double?
     let resetsAt: Date?
     let exact: Bool
+    var stale: Bool = false
+    var tier: String? = nil
     var breakdown: [UsageBreakdownSegment]?
 
     static let windowRank = ["five_hour": 0, "daily": 1, "weekly": 2, "monthly": 3]
@@ -69,7 +74,7 @@ enum GaugeBuilder {
         return planTable[key] ?? PlanInfo(name: "", dollars: fallbackDollars)
     }
 
-    static func sections(from snapshot: UsageSnapshot, planOverrides: [String: PlanInfo] = [:]) -> [UsageSection] {
+    static func sections(from snapshot: UsageSnapshot) -> [UsageSection] {
         var gauges: [UsageGauge] = []
         for o in snapshot.observations {
             switch o.metric {
@@ -115,7 +120,8 @@ enum GaugeBuilder {
             return section
         }.map { s in
             var s = s
-            let p = planOverrides["\(s.provider)|\(s.account ?? "")"] ?? plan(provider: s.provider, account: s.account)
+            let tierPlan = s.gauges.compactMap(\ .tier).first.flatMap(Self.planFromTier)
+            let p = tierPlan ?? plan(provider: s.provider, account: s.account)
             s.plan = p.dollars > 0 ? p : nil
             return s
         }
@@ -167,6 +173,8 @@ enum GaugeBuilder {
             remaining: nil,
             resetsAt: o.resetsAt,
             exact: o.exact ?? false,
+            stale: o.stale ?? false,
+            tier: o.tier,
             breakdown: nil
         )
     }
@@ -252,6 +260,15 @@ enum GaugeBuilder {
             return (suffix.prefix(1).uppercased() + suffix.dropFirst(), account)
         }
         return (nameLabel[body.lowercased()] ?? body, account)
+    }
+
+    static func planFromTier(_ tier: String) -> PlanInfo? {
+        let t = tier.lowercased()
+        if t.contains("max_20") { return PlanInfo(name: "Max 20x", dollars: 200) }
+        if t.contains("max_5") { return PlanInfo(name: "Max 5x", dollars: 100) }
+        if t.contains("pro") { return PlanInfo(name: "Pro", dollars: 20) }
+        if t.contains("max") { return PlanInfo(name: "Max", dollars: 100) }
+        return nil
     }
 
     static func shortEntitlement(_ entitlement: String) -> String {

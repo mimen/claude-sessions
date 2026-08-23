@@ -92,34 +92,43 @@ enum UsageFetcher {
             throw UsageFetchError.launchFailed(error.localizedDescription)
         }
 
-        // Read both pipes concurrently — output can exceed the 64KB pipe buffer
-        // and would deadlock the child if we only read after exit.
-        let group = DispatchGroup()
+        // Collect pipe output via handlers: a grandchild inheriting the write-end
+        // would keep readDataToEndOfFile blocked on EOF long after ccs exits.
         var outData = Data()
         var errData = Data()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            outData = stdout.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
+        let queue = DispatchQueue(label: "usage-pipes")
+        stdout.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty { handle.readabilityHandler = nil; return }
+            queue.async { outData.append(chunk) }
         }
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            errData = stderr.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
+        stderr.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty { handle.readabilityHandler = nil; return }
+            queue.async { errData.append(chunk) }
         }
 
-        let result = group.wait(timeout: .now() + timeout)
-        if result == .timedOut {
-            if process.isRunning { process.terminate() }
-            throw UsageFetchError.nonZeroExit(-1, "timed out after \(Int(timeout))s")
+        // Collect the exit status on a side thread so isRunning flips false
+        // (without waitUntilExit the child lingers as a zombie).
+        DispatchQueue.global(qos: .default).async {
+            process.waitUntilExit()
         }
-        while process.isRunning && Date() < Date().addingTimeInterval(5) {
-            Thread.sleep(forTimeInterval: 0.02)
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
         }
         if process.isRunning {
             process.terminate()
-            throw UsageFetchError.nonZeroExit(-1, "did not exit after pipes closed")
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+            throw UsageFetchError.nonZeroExit(-1, "timed out after \(Int(timeout))s")
         }
+        // Grace period for the handlers to flush trailing chunks.
+        Thread.sleep(forTimeInterval: 0.3)
+        stdout.fileHandleForReading.readabilityHandler = nil
+        stderr.fileHandleForReading.readabilityHandler = nil
+        queue.sync {}
 
         let data = outData
         let err = String(data: errData, encoding: .utf8) ?? ""
