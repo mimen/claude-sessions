@@ -143,6 +143,9 @@ export interface WorkspaceGroup {
   workspaceRef: string;
   workspaceTitle: string | null;
   workspaceFocused: boolean;
+  pinned: boolean;
+  shortcut: number | null;
+  unread: number;
   tabs: MirrorRow[];
 }
 
@@ -249,6 +252,9 @@ function buildMirror(
         workspaceRef: key,
         workspaceTitle: surface.workspaceTitle,
         workspaceFocused: surface.workspaceSelected === true,
+        pinned: surface.workspacePinned === true,
+        shortcut: shortcutForSurface(surface, treeFacts),
+        unread: 0,
         tabs: [],
       };
       win.workspaces.push(group);
@@ -294,6 +300,7 @@ function buildMirror(
     } else if (group.tabs[0]) {
       group.tabs[0].primary = true;
     }
+    group.unread = group.tabs.reduce((n, t) => Math.max(n, t.unread), 0);
   }
   return {
     live,
@@ -865,7 +872,11 @@ function render(d){
     live.appendChild(whead);
     for(const g of win.workspaces){
     const head=document.createElement("tr");head.className="ws-head";
-    head.innerHTML='<td colspan="6"><span class="ws">'+esc(g.workspaceTitle||"(unnamed workspace)")+(g.workspaceFocused?' <span class="foc">selected</span>':"")+'</span><span class="ref">'+esc(g.workspaceRef)+"</span></td>";
+    const wsBadges=[];
+    if(g.pinned)wsBadges.push('<span class="pri">pinned</span>');
+    if(g.shortcut)wsBadges.push('<span class="pri">⌘'+g.shortcut+"</span>");
+    if(g.unread)wsBadges.push('<span class="foc">'+g.unread+" unread</span>");
+    head.innerHTML='<td colspan="6"><span class="ws">'+esc(g.workspaceTitle||"(unnamed workspace)")+(g.workspaceFocused?' <span class="foc">selected</span>':"")+'</span>'+wsBadges.join(" ")+'<span class="ref">'+esc(g.workspaceRef)+"</span></td>";
     live.appendChild(head);
     for(const r of g.tabs){
       const unbound=r.kind==="unbound";
@@ -874,9 +885,6 @@ function render(d){
       const badges=[];
       if(r.primary)badges.push('<span class="pri">primary</span>');
       if(r.surfaceFocused)badges.push('<span class="foc">focused tab</span>');
-      if(r.pinned)badges.push('<span class="pri">pinned</span>');
-      if(r.shortcut)badges.push('<span class="pri">⌘'+r.shortcut+"</span>");
-      if(r.unread)badges.push('<span class="foc">'+r.unread+" unread</span>");
       const extras=[];
       if(r.project)extras.push("<span><b>project</b>"+esc(r.project)+"</span>");
       if(r.worktree)extras.push("<span><b>worktree</b>"+esc(r.worktree)+"</span>");
