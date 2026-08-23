@@ -917,9 +917,9 @@ function render(d){
       if(r.branch)extras.push("<span><b>branch</b>"+esc(r.branch)+"</span>");
       if(r.cwd)extras.push("<span><b>cwd</b>"+esc(r.cwd)+"</span>");
       if(r.messageCount!=null)extras.push("<span><b>msgs</b>"+r.messageCount+"</span>");
-      const working=r.sessionId?fmtElapsed(Date.now()-(workingStarted[r.sessionId]||Date.now())):null;
-      if(isWorking(r)&&working)extras.push("<span><b>working</b>"+working+"</span>");
-      else if(r.lastActivityAt)extras.push("<span><b>indexed</b>"+ago(r.lastActivityAt)+"s</span>");
+      const working=r.sessionId&&isWorking(r)?fmtElapsed(Date.now()-(workingStarted[r.sessionId]||Date.now())):null;
+      if(working)extras.push("<span><b>working</b>"+working+"</span>");
+      if(r.lastActivityAt)extras.push("<span><b>indexed</b>"+ago(r.lastActivityAt)+"s</span>");
       if(r.models&&r.models.length)extras.push("<span><b>model</b>"+esc(r.models[r.models.length-1])+"</span>");
       if(r.enrichmentState)extras.push("<span><b>state</b>"+esc(r.enrichmentState)+"</span>");
       if(r.enrichmentNext)extras.push("<span><b>next</b>"+esc(r.enrichmentNext)+"</span>");
