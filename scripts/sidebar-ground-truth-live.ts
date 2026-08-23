@@ -175,8 +175,36 @@ function buildMirror(
     authoritativePill: r.workspaceId ? pillsByWorkspace.get(r.workspaceId) ?? null : null,
     derivedLabel: statusFromAgentLifecycle(r.trackedLifecycle)?.label ?? null,
   });
+  const liveBySurface = new Map(
+    joined.live.filter((r) => r.surfaceId).map((r) => [r.surfaceId as string, r]),
+  );
+  // Tab-bar order: every surface in the tree, Claude-bound or not. Unbound rows are
+  // workspaces with no hook-store session (browser, terminal, markdown, …).
+  const live: MirrorRow[] = [];
+  for (const surface of treeFacts.surfaces) {
+    const bound = liveBySurface.get(surface.surfaceId);
+    if (bound) {
+      live.push(decorate(bound));
+      continue;
+    }
+    live.push({
+      sessionId: "",
+      title: null,
+      surfaceId: surface.surfaceId,
+      surfaceTitle: surface.title,
+      workspaceTitle: surface.workspaceTitle,
+      workspaceRef: surface.workspaceRef,
+      trackedLifecycle: null,
+      surfaceInTree: true,
+      workspaceFocused: surface.workspaceActive === true,
+      pidAlive: null,
+      transcriptState: "present",
+      authoritativePill: null,
+      derivedLabel: null,
+    });
+  }
   return {
-    live: joined.live.map(decorate),
+    live,
     ghosts: joined.ghosts.map(decorate),
     unboundSurfaces: joined.unboundSurfaces.map((s) => ({
       workspaceRef: s.workspaceRef,
@@ -477,8 +505,7 @@ const HTML = `<!DOCTYPE html>
     <th>Session</th><th>Claims</th><th>Surface in tree</th><th>Pid alive</th><th>Transcript on disk</th>
   </tr></thead><tbody id="ghosts"></tbody></table>
 
-  <h3>Unbound surfaces — exist in cmux but no session claims them</h3>
-  <div class="legend" id="unbound">…</div>
+  <p class="legend" id="unbound"></p>
 
   <footer>
     How to verify a row by hand: the <b>tree</b> cell says whether that surface really exists among your open
@@ -516,16 +543,20 @@ function render(d){
     d.mirror.live.length+" live / "+d.mirror.ghosts.length+" ghosts";
   const live=document.getElementById("live");live.innerHTML="";
   for(const r of d.mirror.live){
-    const bad=(r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent";
+    const unbound=!r.sessionId;
+    const bad=!unbound&&((r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent");
     const tr=document.createElement("tr");if(bad)tr.className="row-bad";if(r.workspaceFocused)tr.classList.add("focused");
+    const sessionLine=unbound
+      ?'<span class="k">session</span> <span class="cell-na">no Claude session</span> · '+esc(r.workspaceRef||"")
+      :'<span class="k">session</span> '+esc(r.title||"(untitled)")+" · "+r.sessionId.slice(0,8)+" · "+esc(r.workspaceRef||"");
     tr.innerHTML='<td><div class="name"><span class="k">tab</span> '+esc(r.surfaceTitle||"(unnamed)")+(r.workspaceFocused?' <span class="foc">◀ focused</span>':"")+'</div>'+
       '<div class="name"><span class="k">ws</span> '+esc(r.workspaceTitle||"—")+'</div>'+
-      '<div class="sid"><span class="k">session</span> '+esc(r.title||"(untitled)")+" · "+r.sessionId.slice(0,8)+" · "+esc(r.workspaceRef||"")+"</div></td>"+
+      '<div class="sid">'+sessionLine+"</div></td>"+
       '<td>'+yn(true)+'</td>'+
-      '<td class="v"><span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span></td>'+
-      '<td class="v">'+esc(r.derivedLabel??r.trackedLifecycle??"—")+'</td>'+
-      '<td>'+(r.pidAlive===null?'<span class="cell-na">idle claim</span>':yn(r.pidAlive))+'</td>'+
-      '<td>'+tstate(r.transcriptState)+"</td>";
+      '<td class="v">'+(unbound?'<span class="cell-na">—</span>':'<span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span>')+'</td>'+
+      '<td class="v">'+(unbound?'<span class="cell-na">—</span>':esc(r.derivedLabel??r.trackedLifecycle??"—"))+'</td>'+
+      '<td>'+(unbound?'<span class="cell-na">—</span>':(r.pidAlive===null?'<span class="cell-na">idle claim</span>':yn(r.pidAlive)))+'</td>'+
+      '<td>'+(unbound?'<span class="cell-na">—</span>':tstate(r.transcriptState))+"</td>";
     live.appendChild(tr);
   }
   if(d.mirror.live.length===0)live.innerHTML='<tr><td colspan="6" style="color:var(--dim)">no bound sessions observed yet</td></tr>';
@@ -540,8 +571,8 @@ function render(d){
     gh.appendChild(tr);
   }
   if(d.mirror.ghosts.length===0)gh.innerHTML='<tr><td colspan="5" style="color:var(--ok)">no ghosts — every tracked session has a real surface</td></tr>';
-  const u=d.mirror.unboundSurfaces;
-  document.getElementById("unbound").textContent=u.length===0?"none":u.map(x=>x.workspaceRef).join(", ");
+  const unboundN=d.mirror.live.filter(r=>!r.sessionId).length;
+  document.getElementById("unbound").textContent=unboundN===0?"":(unboundN+" workspace"+(unboundN===1?"":"s")+" in the table have no Claude session (browser / terminal / other).");
 }
 tick();connectSSE();setInterval(tick,3000);
 </script>
