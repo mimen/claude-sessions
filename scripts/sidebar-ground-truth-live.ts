@@ -482,7 +482,7 @@ const HTML = `<!DOCTYPE html>
   tr.focused td:first-child{padding-left:9px}
   .title{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .name{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
-  .k{display:inline-block;min-width:44px;color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+  .k{display:inline-block;min-width:9.5em;color:var(--dim);font-size:10px;letter-spacing:.02em}
   .foc{color:var(--ok);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
   .sid{color:var(--dim);font-family:var(--mono);font-size:10.5px}
   .pillchip{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid var(--line);background:var(--line);white-space:nowrap}
@@ -551,12 +551,12 @@ function render(d){
     const tr=document.createElement("tr");if(bad)tr.className="row-bad";if(r.workspaceFocused)tr.classList.add("focused");
     const identity=unbound
       ?'<div class="sid"><span class="k">kind</span> <span class="cell-na">not a Claude Code session</span></div>'+
-       '<div class="sid"><span class="k">ws id</span> '+esc(r.workspaceRef||"—")+"</div>"
-      :'<div class="sid"><span class="k">title</span> '+esc(r.title||"(no ccs title yet)")+"</div>"+
-       '<div class="sid"><span class="k">id</span> '+esc(r.sessionId)+"</div>"+
-       '<div class="sid"><span class="k">ws id</span> '+esc(r.workspaceRef||"—")+"</div>";
-    tr.innerHTML='<td><div class="name"><span class="k">tab</span> '+esc(r.surfaceTitle||"(unnamed)")+(r.workspaceFocused?' <span class="foc">◀ focused</span>':"")+'</div>'+
-      '<div class="name"><span class="k">ws</span> '+esc(r.workspaceTitle||"—")+'</div>'+
+       '<div class="sid"><span class="k">cmux ws ref</span> '+esc(r.workspaceRef||"—")+"</div>"
+      :'<div class="sid"><span class="k">ccs session title</span> '+esc(r.title||"(none yet)")+"</div>"+
+       '<div class="sid"><span class="k">claude session uuid</span> '+esc(r.sessionId)+"</div>"+
+       '<div class="sid"><span class="k">cmux ws ref</span> '+esc(r.workspaceRef||"—")+"</div>";
+    tr.innerHTML='<td><div class="name"><span class="k">cmux tab</span> '+esc(r.surfaceTitle||"(unnamed)")+(r.workspaceFocused?' <span class="foc">◀ focused</span>':"")+'</div>'+
+      '<div class="name"><span class="k">cmux ws</span> '+esc(r.workspaceTitle||"—")+'</div>'+
       identity+"</td>"+
       '<td>'+yn(true)+'</td>'+
       '<td class="v">'+(unbound?'<span class="cell-na">—</span>':'<span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span>')+'</td>'+
