@@ -1,0 +1,109 @@
+{
+  "port": 8793,
+  "trials": 16,
+  "budgetP95Ms": 800,
+  "ok": 16,
+  "failed": 0,
+  "meanMs": 186,
+  "p50Ms": 188,
+  "p95Ms": 201,
+  "passed": true,
+  "results": [
+    {
+      "trial": 1,
+      "target": "workspace:2",
+      "ms": 200.957291,
+      "ok": true
+    },
+    {
+      "trial": 2,
+      "target": "workspace:1",
+      "ms": 181.05283299999996,
+      "ok": true
+    },
+    {
+      "trial": 3,
+      "target": "workspace:4",
+      "ms": 192.86195799999996,
+      "ok": true
+    },
+    {
+      "trial": 4,
+      "target": "workspace:1",
+      "ms": 186.4898330000001,
+      "ok": true
+    },
+    {
+      "trial": 5,
+      "target": "workspace:6",
+      "ms": 195.00641600000017,
+      "ok": true
+    },
+    {
+      "trial": 6,
+      "target": "workspace:1",
+      "ms": 193.67091700000037,
+      "ok": true
+    },
+    {
+      "trial": 7,
+      "target": "workspace:8",
+      "ms": 187.9414999999999,
+      "ok": true
+    },
+    {
+      "trial": 8,
+      "target": "workspace:3",
+      "ms": 158.2065419999999,
+      "ok": true
+    },
+    {
+      "trial": 9,
+      "target": "workspace:5",
+      "ms": 197.52999999999975,
+      "ok": true
+    },
+    {
+      "trial": 10,
+      "target": "workspace:6",
+      "ms": 186.7074160000002,
+      "ok": true
+    },
+    {
+      "trial": 11,
+      "target": "workspace:7",
+      "ms": 177.48716700000023,
+      "ok": true
+    },
+    {
+      "trial": 12,
+      "target": "workspace:8",
+      "ms": 189.22870800000055,
+      "ok": true
+    },
+    {
+      "trial": 13,
+      "target": "workspace:9",
+      "ms": 192.1314169999987,
+      "ok": true
+    },
+    {
+      "trial": 14,
+      "target": "workspace:10",
+      "ms": 177.3420840000017,
+      "ok": true
+    },
+    {
+      "trial": 15,
+      "target": "workspace:11",
+      "ms": 177.7924579999999,
+      "ok": true
+    },
+    {
+      "trial": 16,
+      "target": "workspace:12",
+      "ms": 184.9970830000002,
+      "ok": true
+    }
+  ]
+}

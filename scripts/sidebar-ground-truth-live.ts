@@ -30,7 +30,6 @@ import {
 import { statusFromAgentLifecycle } from "../src/sidebar/status.ts";
 
 const PORT = Number(process.argv[2] ?? 8793);
-const FAST_CYCLE_MS = 3_000;
 const ACTIVITY_EVERY_N_CYCLES = 5;
 
 // --- condition ledger (secondary evidence; the mirror is the primary display) -------
@@ -179,9 +178,44 @@ function buildMirror(
 let cycles = 0;
 let lastSweepAt = 0;
 let lastActivitySweepAt = 0;
+let lastFullCycleAt = 0;
 let sweeping = false;
+let fullRunning = false;
 let pillsByWorkspace = new Map<string, string>();
 let latestMirror: Mirror = { live: [], ghosts: [], unboundSurfaces: [] };
+let lastHooksFacts: Awaited<ReturnType<typeof auditHookBindings>>["facts"] | null = null;
+let lastTitles = new Map<string, string>();
+const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
+
+function broadcastState(): void {
+  if (sseClients.size === 0) return;
+  const payload = `data: ${JSON.stringify(statePayload())}\n\n`;
+  const bytes = new TextEncoder().encode(payload);
+  for (const c of [...sseClients]) {
+    try {
+      c.enqueue(bytes);
+    } catch {
+      sseClients.delete(c);
+    }
+  }
+}
+
+/**
+ * The fast mirror path: only the tree is re-read, so a focus flip needs one ~35ms
+ * subprocess instead of waiting behind the heavyweight pill sweep. Rows render with the
+ * last full cycle's hook facts and pills; their pid/transcript cells follow on the next
+ * full cycle. The focus highlight and row order are fresh, which is what the tail was about.
+ */
+async function fastMirrorCycle(): Promise<void> {
+  const tree = await auditSurfaceTree();
+  if (lastHooksFacts !== null) {
+    latestMirror = buildMirror(tree.facts, lastHooksFacts, pillsByWorkspace, lastTitles);
+  }
+  if (lastEventAt > 0) lastEventMirrorMs = Date.now() - lastEventAt;
+  cycles += 1;
+  lastSweepAt = Date.now();
+  broadcastState();
+}
 
 async function timedCycle(includeActivity: boolean): Promise<void> {
   const nowMs = Date.now();
@@ -191,6 +225,7 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
   cycleFindings.push(...tree.findings);
 
   const hooks = await auditHookBindings(tree.facts);
+  lastHooksFacts = hooks.facts;
   cycleFindings.push(...hooks.findings);
 
   // Pills survive between authoritative sweeps: an unswept workspace keeps its last
@@ -216,12 +251,15 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
   absorb(cycleFindings);
   cycles += 1;
   lastSweepAt = Date.now();
+  lastFullCycleAt = Date.now();
 
   const titlesBySession = new Map<string, string>();
   for (const row of indexRows) {
     if (row.title) titlesBySession.set(row.sessionId, row.title);
   }
+  lastTitles = titlesBySession;
   latestMirror = buildMirror(tree.facts, hooks.facts, pillsByWorkspace, titlesBySession);
+  broadcastState();
 }
 
 function coverageFindings(
@@ -294,32 +332,39 @@ function catalogueOrphanFindings(): Finding[] {
 }
 
 async function sweepLoop(): Promise<void> {
+  const FAST_CYCLE_MS = 1_500;
   while (true) {
-    const due = kickPending || Date.now() - lastSweepAt >= FAST_CYCLE_MS;
-    if (!sweeping && due) {
+    const now = Date.now();
+    // Fast path: any liveness kick or a stale mirror triggers a cheap tree-only re-read.
+    if (!sweeping && (kickPending || now - lastSweepAt >= FAST_CYCLE_MS)) {
       kickPending = false;
       sweeping = true;
       try {
-        await timedCycle(cycles % ACTIVITY_EVERY_N_CYCLES === 0);
-        if (lastEventAt > 0) lastEventMirrorMs = Date.now() - lastEventAt;
+        await fastMirrorCycle();
       } catch {
-        // A failed cycle leaves the previous mirror standing; the next one retries.
+        // A failed fast cycle leaves the previous mirror standing; the next one retries.
       } finally {
         sweeping = false;
       }
     }
-    await Bun.sleep(250);
+    // Full cycle on its own cadence, never overlapping the fast path.
+    if (!fullRunning && now - lastFullCycleAt >= 3_000) {
+      fullRunning = true;
+      void timedCycle(cycles % ACTIVITY_EVERY_N_CYCLES === 0).finally(() => {
+        fullRunning = false;
+      });
+    }
+    await Bun.sleep(150);
   }
 }
 
 /**
  * Event-driven fast path: cmux announces window/workspace/agent changes on its event stream,
  * and focus is a window-category change. Events only set a pending flag — never dropped
- * because a sweep happens to be running, which is exactly when several land at once. The
- * loop notices the flag within 250ms and sweeps immediately after whatever it was doing.
+ * because a sweep happens to be running. The server computes event→mirror latency on the
+ * fast path and records it for the header and the measure harness.
  */
 let kickPending = false;
-/** Telemetry: when the last liveness event landed and how long its mirror took to reflect. */
 let lastEventAt = 0;
 let lastEventMirrorMs: number | null = null;
 
@@ -430,11 +475,19 @@ const HTML = `<!DOCTYPE html>
 </main>
 <script>
 function ago(t){return Math.max(0,Math.round((Date.now()-t)/1000));}
+let sse=null;
 async function tick(){
   try{
     const r=await fetch("/api/state");const d=await r.json();render(d);
   }catch(e){document.getElementById("meta").textContent="server unreachable";
     document.getElementById("dot").style.background="#e5534b";}
+}
+function connectSSE(){
+  try{
+    sse=new EventSource("/api/events");
+    sse.onmessage=e=>{try{render(JSON.parse(e.data));}catch{}};
+    sse.onerror=()=>{try{sse.close();}catch{};sse=null;};
+  }catch{}
 }
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");}
 function yn(b){return b===null?'<span class="cell-na">—</span>':b?'<span class="cell-yes">✓ yes</span>':'<span class="cell-no">✗ no</span>';}
@@ -475,7 +528,7 @@ function render(d){
   const u=d.mirror.unboundSurfaces;
   document.getElementById("unbound").textContent=u.length===0?"none":u.map(x=>x.workspaceRef).join(", ");
 }
-tick();setInterval(tick,1000);
+tick();connectSSE();setInterval(tick,3000);
 </script>
 </body>
 </html>`;
@@ -487,6 +540,33 @@ const server = Bun.serve({
     const url = new URL(req.url);
     if (url.pathname === "/api/state") {
       return Response.json(statePayload());
+    }
+    if (url.pathname === "/api/events") {
+      let closed = false;
+      let controller!: ReadableStreamDefaultController<Uint8Array>;
+      const enc = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+          sseClients.add(controller);
+          c.enqueue(enc.encode(`: connected\n\n`));
+        },
+        cancel() {
+          closed = true;
+          sseClients.delete(controller);
+        },
+      });
+      // Bun closes the response when the request is aborted; hook that to clean up.
+      req.signal.addEventListener("abort", () => {
+        if (!closed) sseClients.delete(controller);
+      });
+      return new Response(stream, {
+        headers: {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+        },
+      });
     }
     if (url.pathname === "/healthz") {
       return new Response("ok");
