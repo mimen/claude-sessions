@@ -13,7 +13,7 @@ swift build -c release
 
 rm -rf "$APP_DIR"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
-cp Sources/CcsUsageMenuBar/Resources/AppIcon.icns "$CONTENTS/Resources/AppIcon.icns"
+cp Sources/CcsUsageMenuBar/Resources/AppIcon2.icns "$CONTENTS/Resources/AppIcon2.icns"
 
 cp .build/release/CcsUsageMenuBar "$CONTENTS/MacOS/$APP_NAME"
 
@@ -29,7 +29,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleIconFile</key><string>AppIcon2</string>
 </dict>
 </plist>
 PLIST

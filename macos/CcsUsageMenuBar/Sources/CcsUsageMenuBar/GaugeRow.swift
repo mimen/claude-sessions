@@ -54,13 +54,17 @@ struct GaugeRow: View {
 
                 if let segments = gauge.breakdown, !segments.isEmpty {
                     legend(segments)
+                }
+                if let resets = gauge.resetsAt {
+                    HStack {
+                        Text(resetText(resets, now: now))
+                        Spacer()
+                    }
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
                 } else {
                     HStack {
-                        if let resets = gauge.resetsAt {
-                            Text(resetText(resets, now: now))
-                        } else {
-                            Text(gauge.exact ? "exact" : "estimated")
-                        }
+                        Text(gauge.exact ? "exact" : "estimated")
                         Spacer()
                     }
                     .font(.system(size: 9.5))
