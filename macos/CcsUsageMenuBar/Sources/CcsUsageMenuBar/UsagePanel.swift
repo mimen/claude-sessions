@@ -19,7 +19,7 @@ struct UsagePanel: View {
             }
             footer
         }
-        .frame(width: 320, height: store.panelHeight + (store.cswapAccounts.isEmpty ? 0 : CGFloat(store.cswapAccounts.count) * 26 + 24))
+        .frame(width: 320, height: store.panelHeight)
         .onReceive(ticker) { now = $0 }
     }
 

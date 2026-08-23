@@ -15,7 +15,7 @@ final class GaugeBuilderTests: XCTestCase {
         UsageObservation(
             provider: provider, entitlement: entitlement, metric: metric,
             scope: "account", window: window, used: used, limit: limit,
-            remaining: remaining, resetsAt: resetsAt, exact: true
+            remaining: remaining, resetsAt: resetsAt, expiresAt: nil, exact: true
         )
     }
 

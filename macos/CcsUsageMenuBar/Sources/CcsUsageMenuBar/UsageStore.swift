@@ -19,9 +19,18 @@ final class UsageStore: ObservableObject {
     @Published var switchError: String?
 
     private var hasLoadedCswap = false
+    private var basePanelHeight: CGFloat = 420
 
     func updateHeight(from snapshot: UsageSnapshot) {
-        panelHeight = GaugeBuilder.panelHeight(for: GaugeBuilder.sections(from: snapshot))
+        basePanelHeight = GaugeBuilder.panelHeight(for: GaugeBuilder.sections(from: snapshot))
+        syncPanelHeight()
+    }
+
+    /// One number for how tall the panel is — usage gauges plus the account
+    /// switcher — so the popover window always matches its content.
+    func syncPanelHeight() {
+        let switcher = cswapAccounts.isEmpty ? 0 : CGFloat(cswapAccounts.count) * 26 + 30
+        panelHeight = min(basePanelHeight + switcher, 620)
     }
 
     func loadCswapAccountsIfNeeded() {
@@ -29,7 +38,10 @@ final class UsageStore: ObservableObject {
         hasLoadedCswap = true
         Task {
             if let accounts = try? Cswap.accounts() {
-                await MainActor.run { self.cswapAccounts = accounts }
+                await MainActor.run {
+                    self.cswapAccounts = accounts
+                    self.syncPanelHeight()
+                }
             }
         }
     }

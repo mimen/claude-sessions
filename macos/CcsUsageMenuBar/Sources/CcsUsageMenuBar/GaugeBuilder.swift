@@ -199,7 +199,8 @@ enum GaugeBuilder {
             fractionUsed: nil,
             limit: nil,
             remaining: o.remaining,
-            resetsAt: o.resetsAt,
+            // The grant's lifecycle is availability -> expiry; show expiry as the countdown.
+            resetsAt: o.expiresAt ?? o.resetsAt,
             exact: true,
             breakdown: nil
         )

@@ -55,7 +55,7 @@ enum UsageFetchError: LocalizedError {
 }
 
 enum UsageFetcher {
-    static func fetch(ccsPath: String, timeout: TimeInterval = 30) async throws -> UsageSnapshot {
+    static func fetch(ccsPath: String, timeout: TimeInterval = 60) async throws -> UsageSnapshot {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
