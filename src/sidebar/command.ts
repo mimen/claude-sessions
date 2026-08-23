@@ -12,6 +12,7 @@ import {
 } from "./server.ts";
 import { startSidebarChangeMonitor } from "./change-monitor.ts";
 import { createSidebarSource } from "./snapshot.ts";
+import { syncT3Associations } from "../t3/association-sync.ts";
 
 const HELP = `ccs sidebar — the productivity sidebar's local web host
 
@@ -92,7 +93,19 @@ export async function sidebarCommand(args: readonly string[]): Promise<number> {
   }
 
   try {
+    // Positive T3 provenance is durable. Observe immediately after binding, then at a slow cadence;
+    // optional enrichment must never delay or prevent the sidebar from serving existing state.
     const source = createSidebarSource();
+    let t3SyncFlight: Promise<void> | null = null;
+    const syncT3 = (): void => {
+      if (t3SyncFlight) return;
+      t3SyncFlight = syncT3Associations()
+        .then((result) => {
+          if (result.tagged > 0) source.reconcileDurableState?.();
+        })
+        .catch(() => undefined)
+        .finally(() => { t3SyncFlight = null; });
+    };
     const server = createSidebarServer({
       source,
       assets: assets.value,
@@ -102,12 +115,16 @@ export async function sidebarCommand(args: readonly string[]): Promise<number> {
     // Only the resident server observes change. One-shot sources remain free of child processes,
     // timers and database probes that would outlive their answer.
     const changes = startSidebarChangeMonitor({ source });
+    syncT3();
+    const t3SyncTimer = setInterval(syncT3, 30_000);
     try {
       console.log(`ccs sidebar listening on ${server.url.href}`);
       // Serve until interrupted, then release the cmux child, timer, database handles and socket.
       await waitForTermination();
     } finally {
+      clearInterval(t3SyncTimer);
       changes.stop();
+      source.close?.();
       server.stop(true);
     }
     return 0;

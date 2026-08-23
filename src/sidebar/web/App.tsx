@@ -5,10 +5,9 @@
  * Claude status, then by whether the session is still live. Clicking a row focuses it when it
  * is running and resumes it through CCS when it is not; the browser never decides which.
  *
- * FROZEN. `macos/` carries the same sidebar as a native cmux extension, and that is where new
- * work goes. This one stays because a web view runs anywhere the extension cannot — a cmux
- * without the extensions beta, another machine, a browser tab — so it remains the fallback and
- * keeps working. Fix it when it breaks; add features to the native one.
+ * `macos/` is the primary native cmux extension. This web view remains the complete fallback for
+ * a cmux without the extensions beta, another machine, or a browser tab, including any safety or
+ * reachability behavior that would otherwise make a class of session disappear or become unusable.
  *
  * Both are clients of the same server. Anything that belongs to the projection, the actions or
  * the catalogue goes in `src/sidebar/*.ts` and both surfaces get it at once; only presentation
@@ -59,6 +58,7 @@ import {
   postSidebarAction,
 } from "./action-transport.ts";
 import { DestroyDialog } from "./components/destroy-dialog.tsx";
+import { ResumeDialog } from "./components/resume-dialog.tsx";
 import { focusWorkspaceRow } from "./focus-bridge.ts";
 import { createSnapshotTransport, snapshotPollDelay } from "./snapshot-transport.ts";
 
@@ -139,12 +139,17 @@ export function App(): React.ReactElement {
     readonly sessionId: string;
     readonly name: string;
   } | null>(null);
+  const [resumeTarget, setResumeTarget] = useState<{
+    readonly row: SidebarSessionRow;
+    readonly phase: "completed" | "t3";
+    readonly reopenCompleted: boolean;
+  } | null>(null);
   const [scope, setScope] = useState<SidebarView>(() => {
     const stored = localStorage.getItem(SCOPE_STORAGE_KEY);
     // Incognito is deliberately absent from the restore list. Every other view is a place you
     // meant to be, worth returning to; reopening the sidebar into a list of hidden sessions is
     // not, because the one thing a marked session should never do is be on screen unasked.
-    return stored === "completed" || stored === "saved" || stored === "triage"
+    return stored === "completed" || stored === "saved" || stored === "triage" || stored === "t3"
       ? stored
       : "active";
   });
@@ -210,6 +215,7 @@ export function App(): React.ReactElement {
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const openingIdsRef = useRef(new Set<string>());
   const selectedScopeRef = useRef(scope);
+  const queryRef = useRef(query);
   const snapshotLoadInFlightRef = useRef(false);
   const snapshotReloadQueuedRef = useRef(false);
   const nextSnapshotRequestIdRef = useRef(0);
@@ -236,7 +242,10 @@ export function App(): React.ReactElement {
           requestScope = selectedScopeRef.current;
           const requestId = ++nextSnapshotRequestIdRef.current;
           try {
-            const requestUrl = `/api/snapshot?scope=${requestScope}&limit=${ROW_LIMIT}`;
+            const include = queryRef.current.trim() === ""
+              ? ""
+              : "&include=active,saved,completed,t3";
+            const requestUrl = `/api/snapshot?scope=${requestScope}&limit=${ROW_LIMIT}${include}`;
             const result = await snapshotTransportRef.current.load(requestUrl, refreshLiveness);
             if (result.kind === "failure") throw result.error;
             consecutiveSnapshotFailuresRef.current = 0;
@@ -395,6 +404,9 @@ export function App(): React.ReactElement {
       // A sessionless workspace has no lifecycle to browse by, so it belongs to the live view
       // only — it would be dishonest to list a running browser pane under Done or Saved.
     }).filter((row) => {
+      // Search is global across lifecycle and T3 provenance. Incognito remains deliberately absent.
+      if (query.trim() !== "") return row.kind !== "session" || row.section !== "incognito";
+      if (scope === "t3") return row.kind === "session" && row.t3Associated === true;
       // The incognito view is already exactly its rows: the server narrowed the response to the
       // marked sessions that are open, and they keep whatever lifecycle they had, so filtering by
       // lifecycle here would drop a marked session that happened to be completed.
@@ -465,7 +477,10 @@ export function App(): React.ReactElement {
     rowRefs.current[next]?.scrollIntoView({ block: "nearest" });
   }, [flatRows, selected]);
 
-  const open = useCallback(async (row: SidebarRow): Promise<void> => {
+  const performOpen = useCallback(async (
+    row: SidebarRow,
+    options: { readonly reopenCompleted?: boolean; readonly resumeT3Anyway?: boolean } = {},
+  ): Promise<void> => {
     // The ref closes the same-tick gap before disabled state reaches the button.
     if (openingIdsRef.current.has(row.id)) return;
     openingIdsRef.current.add(row.id);
@@ -474,10 +489,9 @@ export function App(): React.ReactElement {
 
     try {
       // Inside cmux's own web view the host can focus the workspace directly, which is the whole
-      // action for a row that is already live. Anything else — no bridge, a stale host, a
-      // workspace it does not know — falls through once to the request that always worked.
+      // action for a row that is already live. Anything else falls through to the server, which is
+      // the authority on whether this click focuses or needs the T3 spawn confirmation.
       const { fallback } = await focusWorkspaceRow(row, async () =>
-        // A workspace row has no session to resume — clicking it is purely "show me that tab".
         row.kind === "workspace"
           ? await postSidebarAction<FocusResponse>(
             "/api/workspace/focus",
@@ -485,12 +499,29 @@ export function App(): React.ReactElement {
           )
           : await postSidebarAction<OpenResponse>(
             "/api/open",
-            { sessionId: row.sessionId },
+            {
+              sessionId: row.sessionId,
+              ...(options.reopenCompleted ? { reopenCompleted: true } : {}),
+              ...(options.resumeT3Anyway ? { resumeT3Anyway: true } : {}),
+            },
           ));
       if (fallback.performed) {
         const result = fallback.value;
-        if (!result.ok) setActionError(actionErrorMessage(result.error));
-        else if (result.value.status !== "focused" && result.value.status !== "resumed") {
+        if (!result.ok) {
+          if (
+            row.kind === "session"
+            && result.error.kind === "server"
+            && result.error.refusal === "t3-confirmation-required"
+          ) {
+            setResumeTarget({
+              row,
+              phase: "t3",
+              reopenCompleted: options.reopenCompleted === true,
+            });
+          } else {
+            setActionError(actionErrorMessage(result.error));
+          }
+        } else if (result.value.status !== "focused" && result.value.status !== "resumed") {
           setActionError("CCS did not confirm that the session opened. Refresh the list and try again.");
         }
       }
@@ -500,6 +531,14 @@ export function App(): React.ReactElement {
       setOpeningIds(new Set(openingIdsRef.current));
     }
   }, [load]);
+
+  const open = useCallback((row: SidebarRow): void => {
+    if (row.kind === "session" && row.lifecycle === "completed") {
+      setResumeTarget({ row, phase: "completed", reopenCompleted: true });
+      return;
+    }
+    void performOpen(row);
+  }, [performOpen]);
 
   /**
    * Open the card the moment a control is under the pointer; close it just after one is left.
@@ -700,7 +739,11 @@ export function App(): React.ReactElement {
           <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             className="h-7 border-transparent bg-muted/50 pl-7 text-xs shadow-none focus-visible:border-ring dark:bg-muted/50"
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              queryRef.current = event.target.value;
+              setQuery(event.target.value);
+              load(true);
+            }}
             placeholder="Filter"
             type="search"
             value={query}
@@ -826,6 +869,24 @@ export function App(): React.ReactElement {
         categoryProjectionError={snapshot?.categoryProjectionError ?? null}
         target={hoverTarget}
       />
+
+      {resumeTarget ? (
+        <ResumeDialog
+          name={resumeTarget.row.name}
+          onCancel={() => setResumeTarget(null)}
+          onConfirm={() => {
+            const target = resumeTarget;
+            setResumeTarget(null);
+            void performOpen(target.row, target.phase === "completed"
+              ? { reopenCompleted: true }
+              : {
+                reopenCompleted: target.reopenCompleted,
+                resumeT3Anyway: true,
+              });
+          }}
+          phase={resumeTarget.phase}
+        />
+      ) : null}
 
       {destroyTarget ? (
         <DestroyDialog

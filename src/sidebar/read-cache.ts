@@ -239,6 +239,8 @@ function catalogueRetainedBytes(outcome: CatalogueReadOutcome): number {
     memberships: [...facts.memberships],
     sessionIds: [...facts.sessionIds],
     auxiliary: [...facts.auxiliary],
+    t3Associated: [...facts.t3Associated],
+    t3SessionIds: facts.t3SessionIds,
     summaries: [...facts.summaries],
   });
 }

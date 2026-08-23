@@ -89,6 +89,36 @@ export function setParked(db: Database, sessionId: string, taskId: string | null
 export function setIncognito(db: Database, sessionId: string, incognito: boolean, now: string): void {
   set(db, sessionId, "incognito", incognito ? 1 : 0, now);
 }
+
+/**
+ * Record positive T3 provenance and the index alias atomically. The flag is monotonic: no automatic
+ * path clears it, and a conflicting existing alias is rejected instead of weakening identity.
+ */
+export function markT3Associated(
+  db: Database,
+  sessionId: string,
+  resumeId: string,
+  now: string,
+): "changed" | "unchanged" | "conflict" | "not-found" | "ambiguous" {
+  type Candidate = { session_id: string; resume_id: string | null; t3_associated: number };
+  const aliasCandidates = db.query(
+    "SELECT session_id, resume_id, t3_associated FROM catalogue WHERE resume_id = $resume",
+  ).all({ $resume: resumeId }) as Candidate[];
+  if (aliasCandidates.length > 1) return "ambiguous";
+  const current = aliasCandidates[0] ?? db.query(
+    "SELECT session_id, resume_id, t3_associated FROM catalogue WHERE session_id = $id",
+  ).get({ $id: sessionId }) as Candidate | null;
+  if (!current) return "not-found";
+  if (current.resume_id && current.resume_id !== resumeId) return "conflict";
+  if (current.t3_associated === 1 && current.resume_id === resumeId) return "unchanged";
+  db.query(
+    `UPDATE catalogue
+       SET resume_id = COALESCE(resume_id, $resume), t3_associated = 1, updated_at = $now
+     WHERE session_id = $id`,
+  ).run({ $id: current.session_id, $resume: resumeId, $now: now });
+  return "changed";
+}
+
 export function setResumeId(db: Database, sessionId: string, resumeId: string, now: string): void {
   set(db, sessionId, "resume_id", resumeId, now);
 }

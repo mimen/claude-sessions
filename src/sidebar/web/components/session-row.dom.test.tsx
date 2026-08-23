@@ -152,6 +152,13 @@ mounted("session row, mounted", () => {
     }
   });
 
+  test("durable T3 provenance renders as a passive mark", () => {
+    mount(session({ t3Associated: true }));
+    const mark = [...container.querySelectorAll("span")]
+      .find((element) => element.textContent === "T3");
+    expect(mark?.getAttribute("title")).toBe("Associated with T3 Code");
+  });
+
   test("the close action appears only on rows that have a tab to close", () => {
     // It used to render disabled on every row, which put a control that could never do anything on
     // all but a handful of a four-hundred row list.

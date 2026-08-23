@@ -36,7 +36,8 @@ export type ActionRefusal =
   | "launcher-env-unresolvable"
   | "spawn-failed"
   | "cwd-unreadable"
-  | "reactivation-failed";
+  | "reactivation-failed"
+  | "t3-confirmation-required";
 
 export type SessionResumeResult =
   | { readonly status: "resumed"; readonly target: WorkspaceFocusTarget }
@@ -66,6 +67,8 @@ export type IndexedSessionLookup =
 export interface OpenSessionOptions {
   /** The user confirmed reopening a completed session: clear Completed as part of the resume. */
   readonly reopenCompleted?: boolean;
+  /** One-request approval to bypass the direct-resume warning for T3 provenance. */
+  readonly resumeT3Anyway?: boolean;
 }
 
 export interface SessionActionCoordinator {
@@ -238,6 +241,7 @@ export function createSessionActionCoordinator(
       cmuxBin: options.cmuxBin,
       launchers: launchers.value,
       ...(openOptions.reopenCompleted ? { reopenCompleted: true } : {}),
+      ...(openOptions.resumeT3Anyway ? { resumeT3Anyway: true } : {}),
     });
     if (resumed.status !== "ok") return resumed;
 
@@ -258,6 +262,12 @@ export function createSessionActionCoordinator(
         return { status: "not-found" };
       case "completed":
         return { status: "failed", reason: "the session is done; reopen it before resuming" };
+      case "t3-confirmation-required":
+        return {
+          status: "failed",
+          reason: "direct resume of a T3-associated session needs confirmation",
+          refusal: "t3-confirmation-required",
+        };
       case "reactivation-failed":
         return {
           status: "failed",

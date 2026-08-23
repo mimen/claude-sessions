@@ -104,6 +104,8 @@ export interface CatalogueRow {
   prHeadSha: string | null;
   /** ADR-0089: FK to identities.identity_key. Nullable for "loose" sessions with no cluster/role. */
   identityKey: string | null;
+  /** Positively observed in T3 Code. Monotonic provenance: once true, automatic sync never clears it. */
+  t3Associated?: boolean;
   /** Agent runtime that hosted this body. Null reads as the default `claude-code`. Salvage
    *  from origin's v5 — makes ccs honest about hosting non-Claude agents (grok, codex, …)
    *  when we decide to. Optional for test fixtures constructed before v34. */
@@ -1065,6 +1067,13 @@ function applyMigrations(db: Database): void {
   if (!hasColumn(db, "catalogue", "incognito")) {
     db.exec("ALTER TABLE catalogue ADD COLUMN incognito INTEGER NOT NULL DEFAULT 0;");
   }
+  // T3 provenance is orthogonal to lifecycle and monotonic. It lives outside the user_version ladder
+  // because v41 is reserved by the enrichment-column retirement; presence-guarded additive DDL is
+  // safe on every open and cannot skip that independent migration.
+  if (!hasColumn(db, "catalogue", "t3_associated")) {
+    db.exec("ALTER TABLE catalogue ADD COLUMN t3_associated INTEGER NOT NULL DEFAULT 0;");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_t3_associated ON catalogue(session_id) WHERE t3_associated = 1;");
   // Partial: the incognito set is tiny by construction, and every read is "exclude these", so the
   // index only ever needs to enumerate the few rows that are excluded.
   db.exec("CREATE INDEX IF NOT EXISTS idx_catalogue_incognito ON catalogue(session_id) WHERE incognito = 1;");

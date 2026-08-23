@@ -204,6 +204,7 @@ export interface SidebarMembership {
 
 export type SidebarLifecycle = "active" | "completed" | "saved";
 export type SidebarScope = SidebarLifecycle;
+export type SidebarInclude = SidebarLifecycle | "t3";
 
 /**
  * What the list is showing.
@@ -213,10 +214,10 @@ export type SidebarScope = SidebarLifecycle;
  * `SidebarLifecycle` means no lifecycle-typed value can ever be handed one, and the catalogue
  * never has to answer a question it has no column for.
  */
-export type SidebarView = SidebarScope | "triage" | "incognito";
+export type SidebarView = SidebarScope | "triage" | "incognito" | "t3";
 
 export const SIDEBAR_VIEWS: readonly SidebarView[] =
-  ["active", "triage", "incognito", "completed", "saved"];
+  ["active", "saved", "t3", "completed", "triage", "incognito"];
 
 /**
  * The lifecycle a view browses. Triage reads the active list, then filters it.
@@ -226,7 +227,7 @@ export const SIDEBAR_VIEWS: readonly SidebarView[] =
  * The rows it wants are live ones, and live rows come from cmux rather than from those lists.
  */
 export function lifecycleForView(view: SidebarView): SidebarScope {
-  return view === "triage" || view === "incognito" ? "active" : view;
+  return view === "triage" || view === "incognito" || view === "t3" ? "active" : view;
 }
 
 export interface ProjectionInput {
@@ -259,6 +260,12 @@ export interface ProjectionInput {
    * job, because the caller is where liveness is read.
    */
   readonly incognitoSessionIds?: ReadonlySet<string>;
+  /** Durable T3 provenance keyed by canonical session id and resume alias. */
+  readonly t3AssociatedSessionIds?: ReadonlySet<string>;
+  /** Keep only T3-associated rows, across all lifecycles. */
+  readonly t3Only?: boolean;
+  /** Include T3 rows in an otherwise ordinary view, used by global search. */
+  readonly includeT3?: boolean;
   /** Enrichment records keyed by canonical session id and resume alias. */
   readonly summaries?: ReadonlyMap<string, StoredEnrichment>;
   /** Versioned category projection keyed by canonical session id and resume alias. */
@@ -292,6 +299,8 @@ export interface ProjectionInput {
   readonly incognitoOnly?: boolean;
   /** Totals per lifecycle, from the catalogue rather than from the rows in view. */
   readonly lifecycleCounts?: Readonly<Record<SidebarLifecycle, number>>;
+  /** Canonical non-incognito, non-auxiliary rows in the overlapping T3 view. */
+  readonly t3Count?: number;
   /**
    * Whether the index scan hit its limit, and so may have more rows behind it.
    *
@@ -384,6 +393,8 @@ export interface SidebarSessionRow extends SidebarRowShared {
   readonly kind: "session";
   readonly sessionId: string;
   readonly lifecycle: SidebarLifecycle;
+  /** Durable provenance: this session has been positively associated with a T3 Code thread. */
+  readonly t3Associated?: boolean;
   /** Bottom right: the model behind the session. */
   readonly model: SidebarModel | null;
   /**
@@ -439,6 +450,8 @@ export interface SidebarSnapshot {
    * flag above already qualifies.
    */
   readonly lifecycleCounts: Readonly<Record<SidebarLifecycle, number>>;
+  /** T3 is provenance, not a lifecycle, so its overlapping view count travels separately. */
+  readonly t3Count?: number;
   /** True while the index scan is still limit-bound: a larger request may return more rows. */
   readonly hasMoreRows: boolean;
   /** Compatibility field retained for older clients; stable because no shipped client consumes it. */
@@ -586,6 +599,7 @@ interface ProjectionLookups {
     indexed: IndexedSessionInput | undefined,
   ) => Lifecycle;
   readonly isIncognito: (sessionId: string, resumeId?: string) => boolean;
+  readonly isT3Associated: (sessionId: string, resumeId?: string) => boolean;
   readonly canonicalSessionIdFor: (
     sessionId: string,
     indexed: IndexedSessionInput | undefined,
@@ -684,6 +698,7 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
         : "idle");
 
   const incognitoSessionIds = input.incognitoSessionIds ?? new Set<string>();
+  const t3AssociatedSessionIds = input.t3AssociatedSessionIds ?? new Set<string>();
   const canonicalSessionIds = input.canonicalSessionIds ?? new Map<string, string>();
   const canonicalSessionIdFor = (
     sessionId: string,
@@ -775,6 +790,9 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
       canonicalSessionIdFor,
       isIncognito: (sessionId: string, resumeId?: string): boolean =>
         incognitoSessionIds.has(sessionId) || (resumeId !== undefined && incognitoSessionIds.has(resumeId)),
+      isT3Associated: (sessionId: string, resumeId?: string): boolean =>
+        t3AssociatedSessionIds.has(sessionId)
+          || (resumeId !== undefined && t3AssociatedSessionIds.has(resumeId)),
       unreadFor: (workspaceId: string | null): number =>
         (workspaceId ? unreadByWorkspaceId.get(workspaceId) : 0) ?? 0,
       preferredTitleFor: (sessionId: string, resumeId?: string): string | null =>
@@ -827,6 +845,7 @@ function buildLiveSessionRow(
     density: densityFor(true, liveLifecycle),
     sessionId: canonicalId,
     lifecycle: liveLifecycle,
+    t3Associated: lookups.isT3Associated(live.sessionId, indexed?.resumeId),
     name: cleanSessionName(
       lookups.preferredTitleFor(live.sessionId, indexed?.resumeId)
         ?? lookups.preferredTitleFor(canonicalId, canonicalIndexed?.resumeId)
@@ -887,6 +906,7 @@ function buildIndexedSessionRow(
     density: densityFor(knownLive, lifecycle),
     sessionId: lookups.canonicalSessionIdFor(session.sessionId, session),
     lifecycle,
+    t3Associated: lookups.isT3Associated(session.sessionId, session.resumeId),
     name: cleanSessionName(
       lookups.preferredTitleFor(session.sessionId, session.resumeId) ?? session.title,
     ),
@@ -945,12 +965,22 @@ function buildSessionlessWorkspaceRow(
 function selectActiveRows(context: ProjectionContext): SidebarRow[] {
   const { input, lookups } = context;
   const rows: SidebarRow[] = [];
+  const shelfLifecycles = new Set<SidebarLifecycle>([
+    "active",
+    ...(input.includeLifecycles ?? []),
+  ]);
   // Two live aliases of one session would publish the same canonical row id — duplicate SwiftUI
   // identities, and any per-id client state (hover, selection) painting both at once.
   const liveRowIndexById = new Map<string, number>();
   for (const live of input.live) {
     const indexed = lookups.indexedById.get(live.sessionId);
-    if (lookups.lifecycleFor(live.sessionId, indexed) !== "active") continue;
+    const lifecycle = lookups.lifecycleFor(live.sessionId, indexed);
+    if (!shelfLifecycles.has(lifecycle)) continue;
+    if (
+      lookups.isT3Associated(live.sessionId, indexed?.resumeId)
+      && !lookups.isIncognito(live.sessionId, indexed?.resumeId)
+      && !input.includeT3
+    ) continue;
     const row = buildLiveSessionRow(context, live, indexed);
     const existingAt = liveRowIndexById.get(row.id);
     if (existingAt === undefined) {
@@ -972,13 +1002,14 @@ function selectActiveRows(context: ProjectionContext): SidebarRow[] {
   const limit = input.recentLimit ?? DEFAULT_RECENT_LIMIT;
   const seen = new Set<string>();
   let added = 0;
-  const shelfLifecycles = new Set<SidebarLifecycle>([
-    "active",
-    ...(input.includeLifecycles ?? []),
-  ]);
   for (const session of input.indexed) {
     if (added >= limit) break;
     if (!shelfLifecycles.has(lookups.lifecycleFor(session.sessionId, session))) continue;
+    if (
+      lookups.isT3Associated(session.sessionId, session.resumeId)
+      && !lookups.isIncognito(session.sessionId, session.resumeId)
+      && !input.includeT3
+    ) continue;
     if (lookups.liveIds.has(session.sessionId) || lookups.liveIds.has(session.resumeId)) continue;
     // A predecessor whose resumed incarnation is running shares its canonical id with a live row;
     // shelving it would offer a second "resume" for work that is already on screen.
@@ -1049,6 +1080,48 @@ function selectHistoryRows(context: ProjectionContext): SidebarRow[] {
   return selected.map((candidate) => candidate.row);
 }
 
+/** Select every T3-associated lifecycle into one provenance view, newest first. */
+function selectT3Rows(context: ProjectionContext): SidebarRow[] {
+  const { input, lookups } = context;
+  const candidates: HistoryCandidate[] = [];
+  const seen = new Set<string>();
+
+  for (const [order, live] of input.live.entries()) {
+    const indexed = lookups.indexedById.get(live.sessionId);
+    if (lookups.isIncognito(live.sessionId, indexed?.resumeId)) continue;
+    if (!lookups.isT3Associated(live.sessionId, indexed?.resumeId)) continue;
+    const row = buildLiveSessionRow(context, live, indexed);
+    if (seen.has(row.sessionId)) continue;
+    seen.add(row.sessionId);
+    candidates.push({ row, timestamp: row.lastActivityAt, order });
+  }
+
+  for (const [index, session] of input.indexed.entries()) {
+    if (lookups.isIncognito(session.sessionId, session.resumeId)) continue;
+    if (!lookups.isT3Associated(session.sessionId, session.resumeId)) continue;
+    const live = lookups.liveById.get(session.sessionId) ?? lookups.liveById.get(session.resumeId);
+    const knownLive = live !== undefined
+      || lookups.liveIds.has(session.sessionId)
+      || lookups.liveIds.has(session.resumeId);
+    const row = live
+      ? buildLiveSessionRow(context, live, session)
+      : buildIndexedSessionRow(context, session, knownLive);
+    if (seen.has(row.sessionId)) continue;
+    if (!input.livenessReadable && !knownLive) continue;
+    seen.add(row.sessionId);
+    candidates.push({
+      row,
+      timestamp: row.lastActivityAt,
+      order: input.live.length + index,
+    });
+  }
+
+  candidates.sort(compareHistory);
+  return candidates
+    .slice(0, input.historyLimit ?? DEFAULT_HISTORY_LIMIT)
+    .map((candidate) => candidate.row);
+}
+
 /** Apply the final view filter only after selection and capacity decisions are complete. */
 function selectVisibleRows(context: ProjectionContext, rows: readonly SidebarRow[]): SidebarRow[] {
   if (context.input.incognitoOnly) {
@@ -1075,6 +1148,7 @@ function assembleSidebarSnapshot(
     categoryProjectionVersion: 1,
     categoryProjectionError: input.categoryProjectionError ?? null,
     lifecycleCounts: input.lifecycleCounts ?? { active: 0, completed: 0, saved: 0 },
+    t3Count: input.t3Count ?? 0,
     hasMoreRows: input.hasMoreRows ?? false,
     // The browser does not consume this field. Keep it byte-stable so an unchanged representation
     // can share one strong ETag instead of changing merely because another poll happened later.
@@ -1091,7 +1165,9 @@ function assembleSidebarSnapshot(
  */
 export function projectSidebar(input: ProjectionInput): SidebarSnapshot {
   const context = buildProjectionContext(input);
-  const selected = context.scope === "active"
+  const selected = input.t3Only
+    ? selectT3Rows(context)
+    : context.scope === "active"
     ? selectActiveRows(context)
     : selectHistoryRows(context);
   const visible = selectVisibleRows(context, selected);

@@ -13,8 +13,8 @@ import SwiftUI
 /// rasterise blank here, which is a limit of the renderer, not of the views. Scrolling behaviour
 /// is verified against the running extension instead.
 struct Harness {
-    static func fetchRows(limit: Int) throws -> [SidebarRow] {
-        let url = URL(string: "http://127.0.0.1:\(SidebarServer.defaultPort)/api/snapshot?limit=\(limit)")!
+    static func fetchRows(limit: Int, scope: String, port: Int) throws -> [SidebarRow] {
+        let url = URL(string: "http://127.0.0.1:\(port)/api/snapshot?limit=\(limit)&scope=\(scope)")!
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(SidebarSnapshot.self, from: data).rows
     }
@@ -36,7 +36,9 @@ struct Render {
     static func main() throws {
         let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "/tmp/ccs-sidebar.png"
         let count = CommandLine.arguments.count > 2 ? Int(CommandLine.arguments[2]) ?? 14 : 14
-        let rows = try Harness.fetchRows(limit: 60).prefix(count)
+        let scope = CommandLine.arguments.count > 3 ? CommandLine.arguments[3] : "active"
+        let port = CommandLine.arguments.count > 4 ? Int(CommandLine.arguments[4]) ?? SidebarServer.defaultPort : SidebarServer.defaultPort
+        let rows = try Harness.fetchRows(limit: 60, scope: scope, port: port).prefix(count)
 
         // Every row twice: at rest, then hovered. The hover controls only ever appear on a live
         // pointer, which makes them the hardest part of the row to see changes in; rendering the

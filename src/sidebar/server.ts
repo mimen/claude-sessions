@@ -12,7 +12,7 @@ import { log } from "../logger.ts";
 import { err, ok, type Result } from "../result.ts";
 import { loadFavicon } from "./favicon.ts";
 import { RECOMMENDATIONS } from "../catalogue/enrichment-schema.ts";
-import { SIDEBAR_VIEWS, type SidebarLifecycle, type SidebarView } from "./projection.ts";
+import { SIDEBAR_VIEWS, type SidebarInclude, type SidebarView } from "./projection.ts";
 import type {
   SessionLifecycleAction,
   SidebarSnapshotMeasurement,
@@ -248,7 +248,7 @@ function etagMatches(header: string | null, etag: string): boolean {
 interface SnapshotQuery {
   readonly scope: SidebarView;
   readonly limit: number | undefined;
-  readonly include: readonly SidebarLifecycle[];
+  readonly include: readonly SidebarInclude[];
 }
 
 interface SnapshotRepresentation {
@@ -686,8 +686,8 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         const include = (url.searchParams.get("include") ?? "")
           .split(",")
           .map((value) => value.trim())
-          .filter((value): value is SidebarLifecycle =>
-            value === "completed" || value === "saved");
+          .filter((value): value is SidebarInclude =>
+            value === "active" || value === "completed" || value === "saved" || value === "t3");
         const query: SnapshotQuery = { scope, limit, include };
         const key = snapshotQueryKey(query);
         try {
@@ -751,10 +751,12 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         }
         let sessionId: JsonValue | undefined;
         let reopenCompleted: JsonValue | undefined;
+        let resumeT3Anyway: JsonValue | undefined;
         try {
           const body = (await request.json()) as JsonObject;
           sessionId = body.sessionId;
           reopenCompleted = body.reopenCompleted;
+          resumeT3Anyway = body.resumeT3Anyway;
         } catch {
           return errorJson("bad_request");
         }
@@ -763,14 +765,20 @@ export function createSidebarServer(options: SidebarServerOptions): Bun.Server<u
         }
         // Only the literal `true` opts in: clearing Completed rides a resume the user confirmed,
         // so anything less explicit keeps the terminal-lifecycle refusal.
-        if (reopenCompleted !== undefined && typeof reopenCompleted !== "boolean") {
+        if (
+          (reopenCompleted !== undefined && typeof reopenCompleted !== "boolean")
+          || (resumeT3Anyway !== undefined && typeof resumeT3Anyway !== "boolean")
+        ) {
           return errorJson("bad_request");
         }
         try {
           return actionJson(
             logger,
             "open",
-            await source.open(sessionId, reopenCompleted === true ? { reopenCompleted: true } : undefined),
+            await source.open(sessionId, {
+              ...(reopenCompleted === true ? { reopenCompleted: true } : {}),
+              ...(resumeT3Anyway === true ? { resumeT3Anyway: true } : {}),
+            }),
             { sessionId },
             invalidateSnapshots,
           );

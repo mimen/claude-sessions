@@ -20,6 +20,7 @@ const SCOPES: ReadonlyArray<{ readonly value: SidebarView; readonly label: strin
   { value: "triage", label: "Triage" },
   { value: "incognito", label: "Incognito" },
   { value: "saved", label: "Saved" },
+  { value: "t3", label: "T3 Code" },
   { value: "completed", label: "Done" },
 ];
 

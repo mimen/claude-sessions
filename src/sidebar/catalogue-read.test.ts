@@ -37,13 +37,18 @@ describe("readCatalogueReadOnly", () => {
              (session_id, resume_id, custom_title, completed, identity_key, session_class,
               enrichment_title, enrichment_state, enrichment_history, enrichment_next,
               enrichment_remaining, enrichment_recommendation, enrichment_reason,
-              enrichment_junk, enrichment_at_messages, enrichment_at, enrichment_declined)
+              enrichment_junk, enrichment_at_messages, enrichment_at, enrichment_declined,
+              t3_associated)
            VALUES
              ('canonical', 'resume', ' Human title ', 1, 'sidebar:worker:one', 'work_body',
               'Generated title', 'Current state', 'History', 'Next action', 'Remaining',
-              'archive', 'Reason', 1, 42, '2026-08-05T12:00:00.000Z', 'archive'),
+              'archive', 'Reason', 1, 42, '2026-08-05T12:00:00.000Z', 'archive', 0),
              ('auxiliary', 'aux-resume', NULL, 0, NULL, 'auxiliary',
-              NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL)`,
+              NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, 0),
+             ('t3-active', 't3-resume', NULL, 0, NULL, 'work_body',
+              NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, 1),
+             ('t3-resume', 'unrelated-resume', NULL, 0, NULL, 'work_body',
+              NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, 0)`,
         ).run();
       } finally {
         db.close();
@@ -73,6 +78,33 @@ describe("readCatalogueReadOnly", () => {
       expect(outcome.facts.sessionIds.get("completed")).toEqual(["canonical"]);
       expect(outcome.facts.auxiliary.has("auxiliary")).toBeTrue();
       expect(outcome.facts.auxiliary.has("aux-resume")).toBeTrue();
+      expect(outcome.facts.t3Associated.has("t3-active")).toBeTrue();
+      expect(outcome.facts.t3Associated.has("t3-resume")).toBeFalse();
+      expect(outcome.facts.t3SessionIds).toEqual(["t3-active"]);
+      expect(outcome.facts.sessionIds.get("active")).not.toContain("t3-active");
+      const collisionProjection = projectSidebar({
+        live: [],
+        indexed: [{
+          sessionId: "t3-resume",
+          resumeId: "unrelated-resume",
+          title: "Unrelated canonical row",
+          cwd: "/repo",
+          lastTs: "2026-08-05T12:00:00.000Z",
+          models: [],
+          costByModel: {},
+        }],
+        lifecycles: outcome.facts.lifecycles,
+        canonicalSessionIds: outcome.facts.canonicalSessionIds,
+        t3AssociatedSessionIds: outcome.facts.t3Associated,
+        checkouts: new Map(),
+        scope: "active",
+        livenessReadable: true,
+        now: Date.parse("2026-08-05T12:00:00.000Z"),
+      });
+      expect(collisionProjection.rows[0]).toMatchObject({
+        id: "t3-resume",
+        t3Associated: false,
+      });
       expect(outcome.facts.summaries.get("resume")).toEqual({
         title: "Generated title",
         state: "Current state",

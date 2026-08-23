@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+private struct PendingT3Resume {
+    let row: SidebarRow
+    let reopenCompleted: Bool
+}
+
 /// The sidebar itself: polls, renders, and turns row intents into server calls.
 ///
 /// Actions are optimistic only in the sense that the poll is a second away — nothing is mutated
@@ -14,7 +19,9 @@ public struct SidebarRootView: View {
     @State private var destroyDetail: String?
     /// The completed row the user clicked, held until they confirm bringing it back to Active.
     @State private var pendingResume: SidebarRow?
-    @State private var scope: SidebarScope = .active
+    /// The second guard for a closed T3-associated row; approval applies to one request only.
+    @State private var pendingT3Resume: PendingT3Resume?
+    @State private var scope: SidebarScope = Preferences.scope
     @State private var grouping: GroupingMode = .status
     @State private var query = ""
     @State private var layouts = RowLayouts()
@@ -47,8 +54,11 @@ public struct SidebarRootView: View {
             clock.start()
             modifiers.start()
         }
-        .onChange(of: scope) { _, next in client.scope = next }
-        .onChange(of: query) { _, next in client.searchIncludesFinished = !next.isEmpty }
+        .onChange(of: scope) { _, next in
+            Preferences.scope = next
+            client.scope = next
+        }
+        .onChange(of: query) { _, next in client.searchIncludesAll = !next.isEmpty }
         .onChange(of: grouping) { _, next in Preferences.grouping = next }
         .onChange(of: layouts) { _, next in Preferences.layouts = next }
         .onChange(of: clusterFirst) { _, next in Preferences.clusterFirst = next }
@@ -84,13 +94,39 @@ public struct SidebarRootView: View {
             presenting: pendingResume
         ) { row in
             Button("Resume") {
-                pendingFocus = FocusOverride(id: row.id)
-                run(.open(sessionId: row.sessionId ?? row.id, reopenCompleted: true))
                 pendingResume = nil
+                pendingFocus = FocusOverride(id: row.id)
+                // The server decides whether this is focus or spawn. If it would spawn a T3-tagged
+                // transcript, its typed refusal opens the second confirmation without stale-row guesses.
+                run(.open(sessionId: row.sessionId ?? row.id, reopenCompleted: true), row: row)
             }
             Button("Cancel", role: .cancel) { pendingResume = nil }
         } message: { row in
             Text("“\(row.name)” is marked done. Resuming moves it back to Active and reopens it in cmux.")
+        }
+        .confirmationDialog(
+            "Resume this T3 Code session directly?",
+            isPresented: Binding(
+                get: { pendingT3Resume != nil },
+                set: { if !$0 { pendingT3Resume = nil } }
+            ),
+            presenting: pendingT3Resume
+        ) { pending in
+            Button("Resume anyway") {
+                pendingFocus = FocusOverride(id: pending.row.id)
+                run(
+                    .open(
+                        sessionId: pending.row.sessionId ?? pending.row.id,
+                        reopenCompleted: pending.reopenCompleted,
+                        resumeT3Anyway: true
+                    ),
+                    row: pending.row
+                )
+                pendingT3Resume = nil
+            }
+            Button("Cancel", role: .cancel) { pendingT3Resume = nil }
+        } message: { pending in
+            Text("“\(pending.row.name)” is associated with T3 Code. Resuming here opens another Claude Code runtime; the T3 tag will remain.")
         }
     }
 
@@ -194,7 +230,7 @@ public struct SidebarRootView: View {
                 if row.isWorkspaceOnly, let workspaceId = row.workspaceId {
                     run(.focusWorkspace(workspaceId: workspaceId))
                 } else {
-                    run(.open(sessionId: row.sessionId ?? row.id))
+                    run(.open(sessionId: row.sessionId ?? row.id), row: row)
                 }
             },
             lifecycle: { row, action in run(.lifecycle(sessionId: row.sessionId ?? row.id, action: action)) },
@@ -238,6 +274,7 @@ public struct SidebarRootView: View {
     }
 
     private func restorePreferences() {
+        scope = Preferences.scope
         grouping = Preferences.grouping
         layouts = Preferences.layouts
         clusterFirst = Preferences.clusterFirst
@@ -245,7 +282,7 @@ public struct SidebarRootView: View {
         client.scope = scope
     }
 
-    private func run(_ action: SidebarAction) {
+    private func run(_ action: SidebarAction, row: SidebarRow? = nil) {
         Task {
             do {
                 try await actionClient.perform(action)
@@ -254,7 +291,16 @@ public struct SidebarRootView: View {
                 // The list should catch up with the action, not with the next poll.
                 await client.refreshNow()
             } catch let error as ActionFailure {
-                failure = error.message
+                if error.refusal == "t3-confirmation-required", let row {
+                    let reopenCompleted: Bool
+                    if case let .open(_, reopen, _) = action { reopenCompleted = reopen }
+                    else { reopenCompleted = false }
+                    pendingFocus = nil
+                    pendingT3Resume = PendingT3Resume(row: row, reopenCompleted: reopenCompleted)
+                    failure = nil
+                } else {
+                    failure = error.message
+                }
             } catch {
                 failure = error.localizedDescription
             }

@@ -84,6 +84,7 @@ import {
   type IndexedSessionInput,
   type LiveSessionInput,
   type LiveWorkspaceInput,
+  type SidebarInclude,
   type SidebarLifecycle,
   type SidebarScope,
   type SidebarSnapshot,
@@ -213,7 +214,7 @@ export interface SidebarSource {
   snapshot(
     view?: SidebarView,
     rowLimit?: number,
-    include?: readonly SidebarLifecycle[],
+    include?: readonly SidebarInclude[],
     /**
      * Receives this call's phase timings before the promise settles.
      *
@@ -730,6 +731,8 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       memberships: new Map<string, SidebarMembership>(),
       // Nothing is known to be auxiliary when the catalogue is unreadable, so nothing is hidden.
       auxiliary: new Set<string>(),
+      t3Associated: new Set<string>(),
+      t3SessionIds: [],
       // Incognito degrades the same way, and cannot do better: the catalogue is the only record of
       // which sessions are marked, so an unreadable one leaves the sidebar with nothing to filter
       // on. This is a broken-machine state, not a routine one -- the warning above is the signal.
@@ -860,7 +863,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     async snapshot(
       view: SidebarView = "active",
       rowLimit?: number,
-      include: readonly SidebarLifecycle[] = [],
+      include: readonly SidebarInclude[] = [],
       observe?: (measurement: SidebarSnapshotMeasurement) => void,
     ): Promise<SidebarSnapshot> {
       const snapshotStartedAt = performance.now();
@@ -869,6 +872,14 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const scope = lifecycleForView(view);
       const triageOnly = view === "triage";
       const incognitoOnly = view === "incognito";
+      const t3Only = view === "t3";
+      const includeT3 = include.includes("t3");
+      const globalSearch = includeT3
+        && include.includes("active")
+        && include.includes("saved")
+        && include.includes("completed");
+      const effectiveT3Only = t3Only && !globalSearch;
+      const projectionScope: SidebarScope = globalSearch ? "active" : scope;
       const bridge = await snapshotLiveness.read();
       const bridgeMs = performance.now() - phaseStartedAt;
       // Sticky: a degraded tree read without an `active` pointer inherits the last known one
@@ -888,13 +899,14 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       // Which lifecycles this response carries rows for: the view's own, plus any section the
       // client has expanded. A collapsed section is simply not asked for, so shelving one costs
       // nothing to project while its header keeps a count from `lifecycleCounts`.
-      const lifecycles: readonly SidebarLifecycle[] = [
+      const requestedLifecycles = include.filter(
+        (value): value is SidebarLifecycle => value !== "t3",
+      );
+      const lifecycles: readonly SidebarLifecycle[] = [...new Set<SidebarLifecycle>([
         scope,
-        ...include.filter((lifecycle) => lifecycle !== scope),
-      ];
-      const explicitIds = lifecycles
-        .filter((lifecycle) => lifecycle !== "active")
-        .flatMap((lifecycle) => catalogue.sessionIds.get(lifecycle) ?? []);
+        ...requestedLifecycles,
+        ...(effectiveT3Only ? ["active", "saved", "completed"] as const : []),
+      ])];
       // Triage discards most of what it projects, so a window sized for the visible rows would
       // come back nearly empty. Widened here rather than by the client, which cannot know the
       // hit rate.
@@ -907,28 +919,37 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       // readable.
       // Live rows come from cmux, not the index, so the active scan has to cover the shelf plus
       // the live sessions it must skip over; a flat multiple is enough and stays cheap.
-      const primaryScan = scope === "active"
+      const primaryScan = projectionScope === "active" && !effectiveT3Only
         ? Math.max(INDEX_SCAN_LIMIT, recentLimit * 4)
         : historyLimit;
+      const primaryIds = effectiveT3Only
+        ? catalogue.t3SessionIds
+        : projectionScope === "active"
+        ? undefined
+        : catalogue.sessionIds.get(scope) ?? [];
       phaseStartedAt = performance.now();
-      const primaryIndex = readIndexedSessionsSafely(
-        primaryScan,
-        scope === "active" ? undefined : catalogue.sessionIds.get(scope) ?? [],
-      );
+      const primaryIndex = readIndexedSessionsSafely(primaryScan, primaryIds);
       indexMs += performance.now() - phaseStartedAt;
       // A scan that came back short has reached the end of the index; one that filled its window
       // has not, whatever survives filtering afterwards. This is the only place that distinction
       // is observable, so it travels to the client rather than being guessed there.
       const hasMoreRows = primaryIndex.sessions.length >= primaryScan;
-      // A second, purely additive read for sections the client has expanded. They are addressed by
-      // id because finished sessions are old enough to fall outside a recency-ordered scan, so one
-      // combined query could not serve both halves.
-      const extraIds = lifecycles
-        .filter((lifecycle) => lifecycle !== scope)
-        .flatMap((lifecycle) => catalogue.sessionIds.get(lifecycle) ?? []);
+      // A second, purely additive read for sections the client has expanded. T3 is addressed by its
+      // own canonical id set because Active deliberately excludes those rows.
+      const extraIds = effectiveT3Only
+        ? []
+        : [
+          ...lifecycles
+            .filter((lifecycle) => lifecycle !== projectionScope)
+            .flatMap((lifecycle) => catalogue.sessionIds.get(lifecycle) ?? []),
+          ...(includeT3 ? catalogue.t3SessionIds : []),
+        ];
       phaseStartedAt = performance.now();
       const extraIndex = extraIds.length > 0
-        ? readIndexedSessionsSafely(historyLimit, extraIds)
+        ? readIndexedSessionsSafely(
+          Math.max(historyLimit, includeT3 ? catalogue.t3SessionIds.length : 0),
+          extraIds,
+        )
         : { sessions: [], readable: primaryIndex.readable };
       indexMs += performance.now() - phaseStartedAt;
       const seenIndexIds = new Set(primaryIndex.sessions.map((session) => session.sessionId));
@@ -1062,13 +1083,16 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         cwd: workspaceStates.get(entry.workspaceId)?.cwd ?? null,
       }));
       const indexedForScope = indexed.filter((session) =>
-        lifecycles.includes(lifecycleForIndexedSession(session, catalogue.lifecycles)));
+        lifecycles.includes(lifecycleForIndexedSession(session, catalogue.lifecycles))
+          || ((effectiveT3Only || includeT3)
+            && (catalogue.t3Associated.has(session.sessionId)
+              || catalogue.t3Associated.has(session.resumeId))));
       phaseStartedAt = performance.now();
       const facts = await directoryFacts.lookup([
         ...directoriesToResolve(
           live,
           indexedForScope,
-          scope === "active" ? RECENT_LIMIT : HISTORY_LIMIT,
+          projectionScope === "active" ? RECENT_LIMIT : HISTORY_LIMIT,
         ),
         ...workspaces.flatMap((entry) => (entry.cwd ? [entry.cwd] : [])),
       ]);
@@ -1093,7 +1117,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         // re-confirmed. One authority here and in the action layer, so a row's id is always an id
         // the actions can resolve.
         canonicalSessionIds: ledger.canonicalMap(),
-        scope,
+        scope: projectionScope,
         checkouts: facts.checkouts,
         faviconDirectories: new Set(facts.favicons.keys()),
         unreadByWorkspaceId: notifications?.unreadCountsByWorkspaceId,
@@ -1101,16 +1125,20 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         preferredTitles: catalogue.preferredTitles,
         memberships: catalogue.memberships,
         incognitoSessionIds: catalogue.incognito,
+        t3AssociatedSessionIds: catalogue.t3Associated,
         categories: categoryProjection.status === "ok" ? categoryProjection.categories : new Map(),
         categoryProjectionError: categoryProjection.status === "unavailable" ? categoryProjection.error : null,
         triageOnly,
         incognitoOnly,
+        t3Only: effectiveT3Only,
+        includeT3,
         includeLifecycles: lifecycles.filter((lifecycle) => lifecycle !== "active"),
         lifecycleCounts: {
           active: catalogue.sessionIds.get("active")?.length ?? 0,
           completed: catalogue.sessionIds.get("completed")?.length ?? 0,
           saved: catalogue.sessionIds.get("saved")?.length ?? 0,
         },
+        t3Count: catalogue.t3SessionIds.length,
         livenessReadable: bridge.readable,
         indexReadable: index.readable,
         catalogueReadable: catalogue.readable,

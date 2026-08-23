@@ -43,6 +43,7 @@ public extension SidebarRow {
     var isWorkspaceOnly: Bool { kind == "workspace" }
     var isSaved: Bool { lifecycle == "saved" }
     var isCompleted: Bool { lifecycle == "completed" }
+    var isT3Associated: Bool { t3Associated == true }
     var isJunk: Bool { summary?.junk == true }
     /// Only a row cmux actually has a tab for can have that tab closed.
     var hasTab: Bool { workspaceRef != nil }

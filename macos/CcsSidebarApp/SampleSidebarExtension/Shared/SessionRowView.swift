@@ -140,6 +140,15 @@ public struct SessionRowView: View {
                         .frame(width: 7, height: 7)
                     Text(label).lineLimit(1)
                 }
+                if row.isT3Associated {
+                    Text("·").foregroundStyle(.quaternary)
+                    Text("T3")
+                        .font(.system(size: 8, weight: .semibold, design: .rounded))
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 1)
+                        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(.quaternary))
+                        .help("Associated with T3 Code")
+                }
                 if let model = row.model, !row.isGhost {
                     Text("·").foregroundStyle(.quaternary)
                     Text(model.label).foregroundStyle(Color(hex: model.color) ?? .secondary)

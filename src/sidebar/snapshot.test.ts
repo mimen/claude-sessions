@@ -136,6 +136,8 @@ function catalogueRead(rows: ReadonlyArray<{
     memberships: new Map(),
     sessionIds,
     auxiliary: new Set(),
+    t3Associated: new Set(),
+    t3SessionIds: [],
     incognito,
     summaries: new Map(),
   };

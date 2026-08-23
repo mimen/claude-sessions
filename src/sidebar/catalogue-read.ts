@@ -26,6 +26,10 @@ export interface CatalogueSnapshotFacts {
   readonly memberships: ReadonlyMap<string, SidebarMembership>;
   readonly sessionIds: ReadonlyMap<SidebarLifecycle, readonly string[]>;
   readonly auxiliary: ReadonlySet<string>;
+  /** Sessions positively observed in T3, keyed by canonical id and resume alias. */
+  readonly t3Associated: ReadonlySet<string>;
+  /** Canonical ids for the dedicated T3 view. */
+  readonly t3SessionIds: readonly string[];
   /**
    * Sessions marked incognito, by canonical id and resume alias.
    *
@@ -58,6 +62,7 @@ interface CatalogueQueryRow {
   readonly enrichment_title: string | null;
   readonly session_class: string | null;
   readonly incognito: number | null;
+  readonly t3_associated: number | null;
   readonly identity_key: string | null;
   readonly identity_cluster: string | null;
   readonly grouping_label?: string | null;
@@ -128,8 +133,11 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
   const memberships = new Map<string, SidebarMembership>();
   const sessionIds = emptyLifecycleIds();
   const auxiliary = new Set<string>();
+  const t3Associated = new Set<string>();
+  const t3SessionIds: string[] = [];
   const incognito = new Set<string>();
   const summaries = new Map<string, StoredEnrichment>();
+  const canonicalOwners = new Set(rows.map((row) => row.session_id));
 
   // Canonical ids win when a historical resume alias collides with another canonical row.
   for (const row of rows) {
@@ -142,6 +150,12 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
     if (isIncognito) {
       incognito.add(row.session_id);
       if (row.resume_id) incognito.add(row.resume_id);
+    }
+    const isT3Associated = row.t3_associated === 1;
+    if (isT3Associated) {
+      t3Associated.add(row.session_id);
+      if (row.resume_id && !canonicalOwners.has(row.resume_id)) t3Associated.add(row.resume_id);
+      if (!isIncognito && row.session_class !== "auxiliary") t3SessionIds.push(row.session_id);
     }
     // Match full CatalogueRow hydration exactly: session-scoped non-default flags win, while the
     // joined identity supplies durable lifecycle for rows whose session flags remain at defaults.
@@ -200,7 +214,9 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
     if (row.session_class === "auxiliary") {
       auxiliary.add(row.session_id);
       if (row.resume_id) auxiliary.add(row.resume_id);
-    } else if (!isIncognito) {
+    } else if (!isIncognito && !(lifecycle === "active" && isT3Associated)) {
+      // T3 provenance replaces ordinary Active membership, but Saved and Done remain overlapping
+      // lifecycle views by design.
       sessionIds.get(lifecycle)?.push(row.session_id);
     }
   }
@@ -223,6 +239,8 @@ function factsFromRows(rows: readonly CatalogueQueryRow[]): CatalogueSnapshotFac
     memberships,
     sessionIds,
     auxiliary,
+    t3Associated,
+    t3SessionIds,
     incognito,
     summaries,
   };
@@ -286,6 +304,7 @@ export function readCatalogueDatabase(db: Database): CatalogueReadOutcome {
               ${selected(catalogueColumns, "custom_title")},
               ${selected(catalogueColumns, "session_class")},
               ${selected(catalogueColumns, "incognito", "0")},
+              ${selected(catalogueColumns, "t3_associated", "0")},
               ${selected(catalogueColumns, "identity_key")},
               ${identitySelections.join(",\n              ")},
               ${groupingSelections.join(",\n              ")},

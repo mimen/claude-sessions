@@ -6,7 +6,7 @@ import Foundation
 /// action means: closing a workspace, refusing a verdict, or destroying a session is decided in one
 /// place, with the catalogue writes and cmux calls that go with it.
 public enum SidebarAction: Sendable {
-    case open(sessionId: String, reopenCompleted: Bool = false)
+    case open(sessionId: String, reopenCompleted: Bool = false, resumeT3Anyway: Bool = false)
     case lifecycle(sessionId: String, action: String)
     case declineSuggestion(sessionId: String, verb: String)
     case incognito(sessionId: String, incognito: Bool)
@@ -32,12 +32,11 @@ public enum SidebarAction: Sendable {
 
     var body: [String: Any] {
         switch self {
-        case let .open(sessionId, reopenCompleted):
-            // The flag only travels when set: a plain open must keep the server's refusal for
-            // completed sessions, which is what makes the confirmation dialog the only way in.
-            return reopenCompleted
-                ? ["sessionId": sessionId, "reopenCompleted": true]
-                : ["sessionId": sessionId]
+        case let .open(sessionId, reopenCompleted, resumeT3Anyway):
+            var body: [String: Any] = ["sessionId": sessionId]
+            if reopenCompleted { body["reopenCompleted"] = true }
+            if resumeT3Anyway { body["resumeT3Anyway"] = true }
+            return body
         case let .lifecycle(sessionId, action): return ["sessionId": sessionId, "action": action]
         case let .declineSuggestion(sessionId, verb): return ["sessionId": sessionId, "verb": verb]
         case let .incognito(sessionId, incognito): return ["sessionId": sessionId, "incognito": incognito]
@@ -63,6 +62,7 @@ public enum SidebarServer {
 
 public struct ActionFailure: Error, Sendable {
     public let message: String
+    public let refusal: String?
 }
 
 public struct ActionClient: Sendable {
@@ -98,9 +98,11 @@ public struct ActionClient: Sendable {
                 ?? json["message"] as? String
                 ?? json["error"] as? String
                 ?? "HTTP \(code)"
-            throw ActionFailure(message: reason)
+            throw ActionFailure(message: reason, refusal: json["refusal"] as? String)
         }
-        if let failure = json["closeFailed"] as? String { throw ActionFailure(message: failure) }
+        if let failure = json["closeFailed"] as? String {
+            throw ActionFailure(message: failure, refusal: nil)
+        }
         return json
     }
 
@@ -132,6 +134,8 @@ public struct ActionClient: Sendable {
             return "This session's working directory could not be read, so CCS refused to spawn it."
         case "reactivation-failed":
             return "The session reopened but its lifecycle could not be moved back to Active."
+        case "t3-confirmation-required":
+            return "This session is associated with T3 Code. Resume it directly only if you intend to open another Claude Code runtime."
         default:
             return nil
         }

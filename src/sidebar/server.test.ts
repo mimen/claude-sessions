@@ -22,7 +22,7 @@ import type {
 import {
   projectSidebar,
   type IndexedSessionInput,
-  type SidebarLifecycle,
+  type SidebarInclude,
   type SidebarSnapshot,
   type SidebarView,
 } from "./projection.ts";
@@ -35,6 +35,7 @@ const EMPTY_SNAPSHOT: SidebarSnapshot = {
   categoryProjectionVersion: 1,
   categoryProjectionError: null,
   lifecycleCounts: { active: 0, completed: 0, saved: 0 },
+  t3Count: 0,
   hasMoreRows: false,
   generatedAt: 0,
 };
@@ -476,7 +477,7 @@ describe("sidebar server", () => {
     const calls: Array<{
       readonly scope: SidebarView;
       readonly limit: number | undefined;
-      readonly include: readonly SidebarLifecycle[];
+      readonly include: readonly SidebarInclude[];
     }> = [];
     const app = harness({
       snapshot: async (scope = "active", limit, include = []) => {
@@ -490,12 +491,14 @@ describe("sidebar server", () => {
     await (await fetch(`${app.url}/api/snapshot?scope=completed&limit=20`)).arrayBuffer();
     await (await fetch(`${app.url}/api/snapshot?scope=active&limit=21`)).arrayBuffer();
     await (await fetch(`${app.url}/api/snapshot?scope=active&limit=20&include=completed`)).arrayBuffer();
+    await (await fetch(`${app.url}/api/snapshot?scope=active&limit=20&include=t3,saved`)).arrayBuffer();
 
     expect(calls).toEqual([
       { scope: "active", limit: 20, include: [] },
       { scope: "completed", limit: 20, include: [] },
       { scope: "active", limit: 21, include: [] },
       { scope: "active", limit: 20, include: ["completed"] },
+      { scope: "active", limit: 20, include: ["t3", "saved"] },
     ]);
   });
 

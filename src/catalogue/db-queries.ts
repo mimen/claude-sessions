@@ -123,6 +123,7 @@ function rowFrom(r: Record<string, unknown> | null, db?: Database): CatalogueRow
     prState: (idAttrs.pr_state as PrState) ?? null,
     prHeadSha: (idAttrs.pr_head_sha as string) ?? null,
     identityKey,
+    t3Associated: r.t3_associated === 1,
     substrate: (r.substrate as string) ?? null,
     launcherIdentity: (r.launcher_identity as string) ?? null,
     enrichment: enrichmentFrom(r),
@@ -169,6 +170,16 @@ export function getRow(db: Database, sessionId: string): CatalogueRow | null {
     > | null,
     db,
   );
+}
+
+/** Canonical ownership wins; a resume alias is accepted only when exactly one row owns it. */
+export function getRowBySessionOrResumeId(db: Database, id: string): CatalogueRow | null {
+  const exact = getRow(db, id);
+  if (exact) return exact;
+  const aliases = db.query("SELECT * FROM catalogue WHERE resume_id = $id LIMIT 2").all({
+    $id: id,
+  }) as Record<string, unknown>[];
+  return aliases.length === 1 ? rowFrom(aliases[0] ?? null, db) : null;
 }
 
 /** All catalogue rows keyed by session_id, for joining against the Index in one pass. */

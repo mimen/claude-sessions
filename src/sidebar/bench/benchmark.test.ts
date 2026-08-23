@@ -17,6 +17,15 @@ function benchmarkDistribution(value: number, min = value) {
   return { samples: [value], min, p50: value, p95: value, max: value, mean: value };
 }
 
+/** Additive wire defaults do not rewrite the historical semantic golden. Dedicated T3 tests pin them. */
+function omitT3Defaults<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value, (key, item) => {
+    if (key === "t3Associated" && item === false) return undefined;
+    if (key === "t3Count" && item === 0) return undefined;
+    return item;
+  })) as T;
+}
+
 async function withFixture<T>(
   options: { readonly sessionCount: number; readonly liveSessionCount: number },
   run: (fixture: ReturnType<typeof createSidebarFixture>) => Promise<T>,
@@ -68,8 +77,8 @@ describe("sidebar performance characterization", () => {
         "unreadableIndex",
         "unreadableLiveness",
       ]);
-      expect(normalizeRecommendationAlignment(result.snapshots)).toEqual(
-        normalizeRecommendationAlignment(baseline.golden.snapshots),
+      expect(omitT3Defaults(normalizeRecommendationAlignment(result.snapshots))).toEqual(
+        omitT3Defaults(normalizeRecommendationAlignment(baseline.golden.snapshots)),
       );
       expect(result.safeFocus.focusCalls).toBe(3);
       expect(result.safeFocus.outcomes).toEqual(["focused", "focused", "focused"]);

@@ -278,6 +278,7 @@ export function resumeMany(
       case "already-open": summary.alreadyOpen++; pinAlreadyOpen(p.sessionId, p.row?.cluster ?? null, p.row?.role ?? null); break;
       case "not-indexed":  summary.notIndexed++;  break;
       case "completed":    summary.failed++;      break;
+      case "t3-confirmation-required": summary.failed++; break;
       case "spawn-failed": summary.failed++;      break;
       case "reactivation-failed": summary.failed++; break;
       // A member whose history the requested launcher can't replay is SKIPPED, not failed —

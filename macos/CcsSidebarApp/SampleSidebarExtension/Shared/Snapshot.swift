@@ -62,6 +62,7 @@ public struct SidebarRow: Decodable, Identifiable, Sendable, Equatable {
     public let density: String
     public let section: String?
     public let lifecycle: String?
+    public let t3Associated: Bool?
     public let status: Status?
     public let model: Model?
     public let category: Category?
@@ -89,6 +90,7 @@ public struct SidebarSnapshot: Decodable, Sendable {
     public let livenessReadable: Bool
     public let hasMoreRows: Bool?
     public let lifecycleCounts: [String: Int]?
+    public let t3Count: Int?
     /// Release SHA of the server that answered; absent from servers predating the stamp.
     public let serverVersion: String?
 }
@@ -98,12 +100,13 @@ public struct SidebarSnapshot: Decodable, Sendable {
 /// picker may offer: it answers `bad_request`, the refresh throws, and the list silently keeps the
 /// previous scope's rows under the new scope's name.
 public enum SidebarScope: String, CaseIterable, Sendable {
-    case active, saved, completed, triage
+    case active, saved, t3, completed, triage
 
     public var title: String {
         switch self {
         case .active: return "Active"
         case .saved: return "Saved"
+        case .t3: return "T3 Code"
         case .completed: return "Done"
         case .triage: return "Triage"
         }

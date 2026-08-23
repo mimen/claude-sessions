@@ -39,12 +39,11 @@ public final class SnapshotClient {
         }
     }
 
-    /// While a search is typed, the active view also asks for the finished lifecycles so the
-    /// query can find completed and saved sessions; cleared with the query so the everyday
-    /// snapshot stays small.
-    public var searchIncludesFinished = false {
+    /// While a search is typed, ask for every lifecycle plus the orthogonal T3 view so the query is
+    /// global; cleared with the query so the everyday snapshot stays small.
+    public var searchIncludesAll = false {
         didSet {
-            guard searchIncludesFinished != oldValue else { return }
+            guard searchIncludesAll != oldValue else { return }
             Task { await refreshLatest() }
         }
     }
@@ -104,8 +103,10 @@ public final class SnapshotClient {
     /// was asked for, which is what keeps the active view from carrying hundreds of finished rows.
     private var endpoint: URL {
         var url = "http://127.0.0.1:\(port)/api/snapshot?limit=\(limit)&scope=\(scope.rawValue)"
-        if scope == .active {
-            url += searchIncludesFinished ? "&include=saved,completed" : "&include=saved"
+        if searchIncludesAll {
+            url += "&include=active,saved,completed,t3"
+        } else if scope == .active {
+            url += "&include=saved"
         }
         return URL(string: url)!
     }
@@ -254,7 +255,7 @@ public final class SnapshotClient {
 
     private func performRefresh(freshLiveness: Bool) async -> Bool {
         let requestedScope = scope
-        let requestedSearchIncludesFinished = searchIncludesFinished
+        let requestedSearchIncludesFinished = searchIncludesAll
         do {
             var request = URLRequest(url: endpoint)
             // A wedged request must release the poll loop on its own; reopening the extension is
@@ -271,12 +272,13 @@ public final class SnapshotClient {
             // Scope/search changes queue their own request. Never paint the previous query under the
             // new controls while that follow-up is on its way.
             guard requestedScope == scope,
-                  requestedSearchIncludesFinished == searchIncludesFinished
+                  requestedSearchIncludesFinished == searchIncludesAll
             else { return false }
             // A forced read queued while this ordinary request was in flight supersedes these bytes.
             guard freshLiveness || !queuedFreshLiveness else { return false }
             rows = snapshot.rows
             counts = snapshot.lifecycleCounts ?? [:]
+            counts["t3"] = snapshot.t3Count ?? 0
             truncated = snapshot.hasMoreRows ?? false
             livenessReadable = snapshot.livenessReadable
             serverVersion = snapshot.serverVersion

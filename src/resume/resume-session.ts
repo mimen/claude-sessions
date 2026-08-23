@@ -13,7 +13,7 @@ import { sessionById, type SessionRow } from "../index/index.ts";
 import type { Bridge } from "../cmux/bridge.ts";
 import { liveBridge } from "../cmux/live.ts";
 import { type RoleDef } from "../catalogue/db-schema.ts";
-import { getRow, getAll, lifecycleOf } from "../catalogue/db-queries.ts";
+import { getRowBySessionOrResumeId, getAll, lifecycleOf } from "../catalogue/db-queries.ts";
 import { isIncognito } from "../catalogue/incognito.ts";
 import { identityKey } from "../catalogue/lineage.ts";
 import { resolveRole } from "../roles/role-files.ts";
@@ -96,6 +96,8 @@ export type ResumeSessionResult =
   | { status: "not-indexed" }
   /** Completed sessions are terminal until the lifecycle is explicitly cleared. */
   | { status: "completed" }
+  /** Sidebar-only guard: direct Claude resume of durable T3 provenance needs one-shot approval. */
+  | { status: "t3-confirmation-required" }
   | { status: "spawn-failed" }
   /** The workspace opened, but Saved/Completed could not be cleared from the catalogue. */
   | { status: "reactivation-failed"; workspaceRef: string | null }
@@ -193,6 +195,17 @@ export interface ResumeSessionOptions {
    * terminal and the resume refuses — which is every path except a confirmed sidebar reopen.
    */
   readonly reactivateCompleted?: (sessionId: string) => boolean;
+  /** Enforce T3 provenance before CCS spawns another resume runtime. Defaults on. */
+  readonly guardT3DirectResume?: boolean;
+  /** One-request approval; never persisted and never clears the durable T3 mark. */
+  readonly resumeT3Anyway?: boolean;
+}
+
+export function isDirectCcsResume(command: ResumeCommand): boolean {
+  // "Direct" means CCS is spawning another Claude Code runtime rather than focusing an existing
+  // surface. Launcher wrappers (`claudex`, `claude-native`, gateway aliases) still execute this same
+  // transcript resume and therefore need the same T3 provenance guard.
+  return command.argv[1] === "--resume";
 }
 
 type PreparedResumeSession =
@@ -202,6 +215,7 @@ type PreparedResumeSession =
     readonly plan: Extract<ResumePlan, { readonly action: "resume" }>;
     readonly saved: boolean;
     readonly completed: boolean;
+    readonly catalogueSessionId: string;
   };
 
 function prepareResumeSession(
@@ -213,7 +227,8 @@ function prepareResumeSession(
   const row = sessionById(indexDb, sessionId);
   if (!row) return { ready: false, result: { status: "not-indexed" } };
 
-  const cat = getRow(catalogueDb, sessionId);
+  const cat = getRowBySessionOrResumeId(catalogueDb, row.sessionId)
+    ?? getRowBySessionOrResumeId(catalogueDb, row.resumeId);
   const bridge = opts.bridge ?? liveBridge();
   // FAIL CLOSED: if we can't read liveness we can't tell "already open" from "closed". Treating
   // unreadable as closed would re-spawn a session that's actually running → duplicate-fleet
@@ -265,8 +280,22 @@ function prepareResumeSession(
   if (plan.action === "fail") {
     return { ready: false, result: { status: "cwd-unreadable", error: plan.error } };
   }
+  if (
+    opts.guardT3DirectResume !== false
+    && cat?.t3Associated === true
+    && isDirectCcsResume(plan.command)
+    && !opts.resumeT3Anyway
+  ) {
+    return { ready: false, result: { status: "t3-confirmation-required" } };
+  }
   if (cat) warnLiveSiblings(catalogueDb, bridge, cat.sessionId, identityKey(cat));
-  return { ready: true, plan, saved: lifecycle === "saved", completed: lifecycle === "completed" };
+  return {
+    ready: true,
+    plan,
+    saved: lifecycle === "saved",
+    completed: lifecycle === "completed",
+    catalogueSessionId: cat?.sessionId ?? row.sessionId,
+  };
 }
 
 export function resumeSessionEntry(
@@ -280,10 +309,10 @@ export function resumeSessionEntry(
   if (opts.dryRun) return { status: "resumed", note: prepared.plan.note, workspaceRef: null };
   const ref = executeResumePlan(prepared.plan, { cmuxBin: opts.cmuxBin, focus: opts.focus });
   if (ref === null) return { status: "spawn-failed" };
-  if (prepared.saved && !opts.reactivateSaved?.(sessionId)) {
+  if (prepared.saved && !opts.reactivateSaved?.(prepared.catalogueSessionId)) {
     return { status: "reactivation-failed", workspaceRef: ref };
   }
-  if (prepared.completed && !opts.reactivateCompleted?.(sessionId)) {
+  if (prepared.completed && !opts.reactivateCompleted?.(prepared.catalogueSessionId)) {
     return { status: "reactivation-failed", workspaceRef: ref };
   }
   return { status: "resumed", note: prepared.plan.note, workspaceRef: ref };
@@ -310,10 +339,10 @@ export async function resumeSessionEntryAsync(
     cmuxBin: opts.cmuxBin,
   }, processAdapter);
   if (ref === null) return { status: "spawn-failed" };
-  if (prepared.saved && !opts.reactivateSaved?.(sessionId)) {
+  if (prepared.saved && !opts.reactivateSaved?.(prepared.catalogueSessionId)) {
     return { status: "reactivation-failed", workspaceRef: ref };
   }
-  if (prepared.completed && !opts.reactivateCompleted?.(sessionId)) {
+  if (prepared.completed && !opts.reactivateCompleted?.(prepared.catalogueSessionId)) {
     return { status: "reactivation-failed", workspaceRef: ref };
   }
   return { status: "resumed", note: prepared.plan.note, workspaceRef: ref };

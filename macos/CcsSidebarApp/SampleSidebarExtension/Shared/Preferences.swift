@@ -6,9 +6,14 @@ import Foundation
 /// the web sidebar remembers them too, and a native surface that forgot would feel broken beside
 /// it. The panel is torn down and rebuilt whenever cmux swaps providers, so anything held only in
 /// view state is lost several times a day; a toggle you have to set again on every reopen is not
-/// a toggle. Scope is deliberately not remembered: it is where you are looking right now.
+/// a toggle. The selected view is a standing choice too, including the dedicated T3 Code view.
 public enum Preferences {
     private static let defaults = UserDefaults.standard
+
+    public static var scope: SidebarScope {
+        get { SidebarScope(rawValue: defaults.string(forKey: "ccs.scope") ?? "") ?? .active }
+        set { defaults.set(newValue.rawValue, forKey: "ccs.scope") }
+    }
 
     public static var grouping: GroupingMode {
         get { GroupingMode(rawValue: defaults.string(forKey: "ccs.grouping") ?? "") ?? .status }

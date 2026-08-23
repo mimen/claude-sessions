@@ -33,6 +33,7 @@ const SANCTIONED_MUTATION_IMPORTERS: Record<string, string> = {
   "src/hooks/register.ts": "the SessionStart hook stamps the session heartbeat",
   "src/hooks/worker-stop-command.ts": "the Stop hook stamps the session heartbeat",
   "src/enrich/enrich.ts": "the enrichment worker atomically stores observations and retry failures",
+  "src/t3/association-sync.ts": "the ambiguity-safe monotonic T3 provenance observer",
   "scripts/backfill-identity-from-cwd.ts": "the one-time identity-from-cwd maintenance script",
   "scripts/dedup-sessions-per-identity.ts": "the reviewed identity deduplication maintenance script",
 };

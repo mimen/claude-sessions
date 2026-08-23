@@ -76,7 +76,7 @@ final class SidebarScopeTests: XCTestCase {
     /// The server's own list, from `SIDEBAR_VIEWS` in src/sidebar/projection.ts. `incognito` is a
     /// server view the picker deliberately does not offer: marked sessions surface in their own
     /// section of the active list, and a scope for them would be a second door to one room.
-    private static let serverViews: Set<String> = ["active", "triage", "completed", "saved", "incognito"]
+    private static let serverViews: Set<String> = ["active", "saved", "t3", "completed", "triage", "incognito"]
 
     func testEveryOfferedScopeIsAViewTheServerServes() {
         for scope in SidebarScope.allCases {
@@ -89,8 +89,8 @@ final class SidebarScopeTests: XCTestCase {
 
     func testTheScopesWorthOfferingAreAllPresent() {
         XCTAssertEqual(
-            Set(SidebarScope.allCases.map(\.rawValue)),
-            ["active", "triage", "completed", "saved"]
+            SidebarScope.allCases.map(\.rawValue),
+            ["active", "saved", "t3", "completed", "triage"]
         )
     }
 }

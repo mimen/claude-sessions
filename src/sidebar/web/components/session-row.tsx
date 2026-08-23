@@ -195,6 +195,17 @@ export function SessionRow({
           </span>
         </>
       ) : null}
+      {session?.t3Associated ? (
+        <>
+          <span aria-hidden="true">·</span>
+          <span
+            className="shrink-0 rounded-[3px] border border-border px-1 font-medium text-[8px] leading-[12px]"
+            title="Associated with T3 Code"
+          >
+            T3
+          </span>
+        </>
+      ) : null}
       {session?.model && !ghost ? (
         <>
           <span aria-hidden="true">·</span>

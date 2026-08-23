@@ -852,7 +852,7 @@ describe("projectSidebar", () => {
       projectSidebar(mixedProjectionInput({ scope: "completed", livenessReadable: false })),
     ]);
 
-    expect(createHash("sha256").update(serialized).digest("hex")).toBe("3e86904758be8b9f16ea2245fbca75ab9401cead69bdffd7d731d351fcc69b5c");
+    expect(createHash("sha256").update(serialized).digest("hex")).toBe("b4bbf748cafe3a96432561838b9b3895858b8a5c5d0b93ed99db74d9aad3409f");
   });
 });
 

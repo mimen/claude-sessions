@@ -187,6 +187,21 @@ final class SnapshotClientTests: XCTestCase {
         XCTAssertEqual(client.serverVersion, "saved")
     }
 
+    func testSearchRequestsEveryLifecycleAndT3FromAnyView() async {
+        let loader = ControlledSnapshotLoader()
+        let client = SnapshotClient(port: 8787, snapshotData: { request in
+            try await loader.load(request)
+        })
+        client.scope = .completed
+        client.searchIncludesAll = true
+        await loader.waitForRequestCount(1)
+        let request = await loader.request(at: 0)
+        XCTAssertTrue(request.url?.query?.contains("scope=completed") == true)
+        XCTAssertTrue(request.url?.query?.contains("include=active,saved,completed,t3") == true)
+        await loader.resolveNext(with: snapshotData(serverVersion: "search"))
+        for _ in 0..<20 { await Task.yield() }
+    }
+
     func testBackstopPollRecoversAfterARevisionRefreshFails() async {
         let queue = SnapshotQueue([
             .failure(LoaderFailure.unavailable),

@@ -155,7 +155,7 @@ Clusters & board:
   ccs decide <c> record|reopen|check|list ...     Decision ledger (dispositions)
 
 Resume & tabs:
-  ccs resume-session <id>                         Re-embody one identity (loops come back running)
+  ccs resume-session <id> [--t3-anyway]           Re-embody one identity (loops come back running)
   ccs resume-cluster <c>                          Resume every not-open identity in a cluster
   ccs resume <selector>                           id | #pr | owner/repo#pr | W-number | epic | role | cluster
                                                   (pin axis with --role|--pr|--gus|--epic|--cluster|--key; --dry-run)
@@ -447,7 +447,13 @@ export async function main(argv: string[]): Promise<number> {
       return boardCommand(args.slice(1));
     case "resume-session": {
       const f = viaFlags(args);
-      return resumeSession(args[1], args.includes("--dry-run"), f.via, f.force);
+      return resumeSession(
+        args[1],
+        args.includes("--dry-run"),
+        f.via,
+        f.force,
+        args.includes("--t3-anyway"),
+      );
     }
     case "resume-cluster": {
       const f = viaFlags(args);
@@ -797,9 +803,10 @@ function resumeSession(
   dryRun: boolean,
   via?: string,
   force?: boolean,
+  resumeT3Anyway = false,
 ): number {
   if (!sessionId) {
-    console.error("ccs: missing session id. Usage: ccs resume-session <id> [--dry-run] [--via <launcher>] [--force]");
+    console.error("ccs: missing session id. Usage: ccs resume-session <id> [--dry-run] [--via <launcher>] [--force] [--t3-anyway]");
     return 1;
   }
   const launchers = fleetOrNull();
@@ -812,6 +819,7 @@ function resumeSession(
       via,
       force,
       launchers,
+      ...(resumeT3Anyway ? { resumeT3Anyway: true } : {}),
       reactivateSaved: (resumedSessionId): boolean =>
         setExistingSessionLifecycle(resumedSessionId, "unsave").status === "ok",
     });
@@ -827,6 +835,9 @@ function resumeSession(
         return 1;
       case "completed":
         console.error(`ccs: ${sessionId} is done; mark it active before resuming`);
+        return 1;
+      case "t3-confirmation-required":
+        console.error(`ccs: ${sessionId} is associated with T3 Code; pass --t3-anyway to resume it directly`);
         return 1;
       case "spawn-failed":
         console.error(`ccs: failed to spawn cmux workspace for ${sessionId}`);

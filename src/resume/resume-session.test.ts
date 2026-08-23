@@ -1,9 +1,9 @@
 import { test, expect } from "bun:test";
-import { chooseLauncher, planResumeSession, resumeSessionEntry, resumeSessionEntryAsync } from "./resume-session.ts";
+import { chooseLauncher, isDirectCcsResume, planResumeSession, resumeSessionEntry, resumeSessionEntryAsync } from "./resume-session.ts";
 import { openIndex } from "../index/schema.ts";
 import { openCatalogue } from "../catalogue/db-schema.ts";
 import { getRow } from "../catalogue/db-queries.ts";
-import { setCluster, setCompleted, setResumeId, setRole, setSaved } from "../catalogue/db-mutations.ts";
+import { markT3Associated, setCluster, setCompleted, setResumeId, setRole, setSaved } from "../catalogue/db-mutations.ts";
 import type { AsyncProcessAdapter } from "../process/async.ts";
 import type { SessionRow } from "../index/index.ts";
 import type { Bridge } from "../cmux/bridge.ts";
@@ -39,6 +39,17 @@ function stubBridge(openIds: string[], readable = true): Bridge {
 test("already-open session is skipped (idempotent, no duplicate pane)", () => {
   const plan = planResumeSession(stubBridge(["resume-1"]), row({ resumeId: "resume-1" }), null);
   expect(plan.action).toBe("skip");
+});
+
+test("T3 guard treats launcher wrappers as direct CCS resume runtimes", () => {
+  const direct = planResumeSession(stubBridge([]), row(), { resumeCommand: null });
+  const routed = planResumeSession(stubBridge([]), row(), {
+    resumeCommand: null,
+    binary: "claudex",
+  });
+  if (direct.action !== "resume" || routed.action !== "resume") throw new Error("unreachable");
+  expect(isDirectCcsResume(direct.command)).toBeTrue();
+  expect(isDirectCcsResume(routed.command)).toBeTrue();
 });
 
 test("closed loop session resumes RUNNING (resume_command replayed as trailing prompt)", () => {
@@ -193,6 +204,33 @@ test("resumed status carries workspaceRef so callers can act on the workspace pr
   }
 });
 
+test("every shared resume entry refuses durable T3 provenance without one-shot approval", () => {
+  const idx = openIndex(":memory:");
+  const cat = openCatalogue(":memory:");
+  const now = "2026-08-22T00:00:00Z";
+  try {
+    idx.query(
+      `INSERT INTO sessions (session_id, host, path, cwd, project_root, project_name,
+         fallback_label, first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id)
+       VALUES ('t3-core', 'h', '/store/t3-core.jsonl', '/tmp', '/tmp', 'p', 't3-core', $now, $now, 1, 0, 0, 0, 't3-core')`,
+    ).run({ $now: now });
+    setResumeId(cat, "canonical-t3", "t3-core", now);
+    expect(markT3Associated(cat, "t3-core", "t3-core", now)).toBe("changed");
+
+    expect(resumeSessionEntry(idx, cat, "t3-core", { dryRun: true, bridge: stubBridge([]) })).toEqual({
+      status: "t3-confirmation-required",
+    });
+    expect(resumeSessionEntry(idx, cat, "t3-core", {
+      dryRun: true,
+      bridge: stubBridge([]),
+      resumeT3Anyway: true,
+    }).status).toBe("resumed");
+  } finally {
+    idx.close();
+    cat.close();
+  }
+});
+
 test("ADR-0094: resume policy FAILS OPEN — a deleted config package never strands history", () => {
   // Deliberate asymmetry with birth: a fresh session refuses to launch under a broken policy, but
   // an existing transcript must stay reachable even after its cluster package is gone or renamed.
@@ -259,7 +297,7 @@ test("completed sessions remain terminal until explicitly reactivated", () => {
   }
 });
 
-test("a confirmed reopen resumes a completed session and clears Completed", async () => {
+test("a confirmed alias reopen clears Completed on the canonical catalogue row", async () => {
   const idx = openIndex(":memory:");
   const cat = openCatalogue(":memory:");
   const NOW = "2026-08-11T00:00:00Z";
@@ -272,15 +310,15 @@ test("a confirmed reopen resumes a completed session and clears Completed", asyn
     idx.query(
       `INSERT INTO sessions (session_id, host, path, cwd, project_root, project_name,
          fallback_label, first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id)
-       VALUES ('done', 'h', '/store/done.jsonl', '/tmp', '/tmp', 'p', 'done', $now, $now, 1, 0, 0, 0, 'done')`,
+       VALUES ('done-alias', 'h', '/store/done.jsonl', '/tmp', '/tmp', 'p', 'done', $now, $now, 1, 0, 0, 0, 'done-resume')`,
     ).run({ $now: NOW });
-    setResumeId(cat, "done", "done", NOW);
-    setCompleted(cat, "done", true, NOW);
+    setResumeId(cat, "done-canonical", "done-alias", NOW);
+    setCompleted(cat, "done-canonical", true, NOW);
 
     const result = await resumeSessionEntryAsync(
       idx,
       cat,
-      "done",
+      "done-alias",
       {
         bridge: stubBridge([]),
         reactivateCompleted(sessionId): boolean {
@@ -292,7 +330,8 @@ test("a confirmed reopen resumes a completed session and clears Completed", asyn
     );
 
     expect(result.status).toBe("resumed");
-    expect(getRow(cat, "done")?.completed).toBeFalse();
+    expect(getRow(cat, "done-canonical")?.completed).toBeFalse();
+    expect(getRow(cat, "done-alias")).toBeNull();
   } finally {
     idx.close();
     cat.close();
@@ -332,7 +371,7 @@ test("a reopen whose Completed clear fails reports reactivation-failed with the 
   }
 });
 
-test("successfully resuming a saved session reactivates it", async () => {
+test("successfully resuming a saved alias reactivates the canonical catalogue row", async () => {
   const idx = openIndex(":memory:");
   const cat = openCatalogue(":memory:");
   const NOW = "2026-08-11T00:00:00Z";
@@ -345,15 +384,15 @@ test("successfully resuming a saved session reactivates it", async () => {
     idx.query(
       `INSERT INTO sessions (session_id, host, path, cwd, project_root, project_name,
          fallback_label, first_ts, last_ts, msg_count, file_mtime, file_size, is_subagent, resume_id)
-       VALUES ('saved', 'h', '/store/saved.jsonl', '/tmp', '/tmp', 'p', 'saved', $now, $now, 1, 0, 0, 0, 'saved')`,
+       VALUES ('saved-alias', 'h', '/store/saved.jsonl', '/tmp', '/tmp', 'p', 'saved', $now, $now, 1, 0, 0, 0, 'saved-resume')`,
     ).run({ $now: NOW });
-    setResumeId(cat, "saved", "saved", NOW);
-    setSaved(cat, "saved", true, NOW);
+    setResumeId(cat, "saved-canonical", "saved-alias", NOW);
+    setSaved(cat, "saved-canonical", true, NOW);
 
     const result = await resumeSessionEntryAsync(
       idx,
       cat,
-      "saved",
+      "saved-alias",
       {
         bridge: stubBridge([]),
         reactivateSaved(sessionId): boolean {
@@ -365,7 +404,8 @@ test("successfully resuming a saved session reactivates it", async () => {
     );
 
     expect(result.status).toBe("resumed");
-    expect(getRow(cat, "saved")?.saved).toBeFalse();
+    expect(getRow(cat, "saved-canonical")?.saved).toBeFalse();
+    expect(getRow(cat, "saved-alias")).toBeNull();
   } finally {
     idx.close();
     cat.close();

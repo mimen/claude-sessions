@@ -28,6 +28,8 @@ export interface SidebarResumeActionInput {
   readonly launchers: readonly Launcher[];
   /** The user confirmed reopening a completed session: clear Completed as part of the resume. */
   readonly reopenCompleted?: boolean;
+  /** One-request approval to resume durable T3 provenance directly through Claude Code. */
+  readonly resumeT3Anyway?: boolean;
 }
 
 export type SidebarResumeAction = (
@@ -94,6 +96,8 @@ export function createSidebarResumeAction(
           focus: true,
           cmuxBin: input.cmuxBin,
           launchers: input.launchers,
+          guardT3DirectResume: true,
+          ...(input.resumeT3Anyway ? { resumeT3Anyway: true } : {}),
           reactivateSaved(resumedSessionId): boolean {
             return setExistingSessionLifecycle(resumedSessionId, "unsave", {
               cataloguePath,
