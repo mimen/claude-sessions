@@ -530,10 +530,11 @@ const HTML = `<!DOCTYPE html>
   .v{font-family:var(--mono)}
   .cell-yes{color:var(--ok)} .cell-no{color:var(--bad)} .cell-na{color:var(--dim)}
   .row-bad td{background:rgba(229,83,75,.06)}
-  tr.focused td{border-left:3px solid var(--ok);background:rgba(47,174,125,.07)}
-  tr.focused td:first-child{padding-left:9px}
+  tr.tab-focused td{border-left:3px solid var(--ok);background:rgba(47,174,125,.09)}
+  tr.tab-focused td:first-child{padding-left:25px}
   .ident{min-width:280px;max-width:460px}
-  .win-head td{background:#0c0e12;padding:12px 12px 8px;border-bottom:1px solid var(--line);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+  .win-gap td{height:18px;padding:0;background:var(--bg);border:none}
+  .win-head td{background:#0c0e12;padding:14px 12px 10px;border-bottom:1px solid var(--line);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
   .win-head .foc{text-transform:none;letter-spacing:0}
   .ws-head td{background:#14171d;padding:10px 12px 6px;border-bottom:none}
   .ws-head .ws{font-size:13.5px;font-weight:550}
@@ -609,18 +610,25 @@ function render(d){
   const windows=d.mirror.windows&&d.mirror.windows.length
     ?d.mirror.windows
     :[{windowRef:"",windowFocused:false,workspaces:d.mirror.groups&&d.mirror.groups.length?d.mirror.groups:[{workspaceRef:"",workspaceTitle:null,workspaceFocused:false,tabs:d.mirror.live}]}];
+  let winIndex=0;
   for(const win of windows){
-    const whead=document.createElement("tr");whead.className="win-head"+(win.windowFocused?" focused":"");
+    if(winIndex>0){
+      const gap=document.createElement("tr");gap.className="win-gap";
+      gap.innerHTML='<td colspan="6"></td>';
+      live.appendChild(gap);
+    }
+    winIndex+=1;
+    const whead=document.createElement("tr");whead.className="win-head";
     whead.innerHTML='<td colspan="6">'+esc(win.windowRef||"window")+(win.windowFocused?' <span class="foc">focused window</span>':"")+"</td>";
     live.appendChild(whead);
     for(const g of win.workspaces){
-    const head=document.createElement("tr");head.className="ws-head"+(g.workspaceFocused?" focused":"");
-    head.innerHTML='<td colspan="6"><span class="ws">'+esc(g.workspaceTitle||"(unnamed workspace)")+(g.workspaceFocused?' <span class="foc">focused</span>':"")+'</span><span class="ref">'+esc(g.workspaceRef)+"</span></td>";
+    const head=document.createElement("tr");head.className="ws-head";
+    head.innerHTML='<td colspan="6"><span class="ws">'+esc(g.workspaceTitle||"(unnamed workspace)")+(g.workspaceFocused?' <span class="foc">selected</span>':"")+'</span><span class="ref">'+esc(g.workspaceRef)+"</span></td>";
     live.appendChild(head);
     for(const r of g.tabs){
       const unbound=r.kind==="unbound";
       const bad=!unbound&&((r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent");
-      const tr=document.createElement("tr");tr.className="tab-row"+(bad?" row-bad":"")+(g.workspaceFocused?" focused":"");
+      const tr=document.createElement("tr");tr.className="tab-row"+(bad?" row-bad":"")+(r.surfaceFocused?" tab-focused":"");
       const ident=unbound
         ?'<div class="kind-tag">not a Claude Code session</div>'
         :'<div class="tab">ccs · '+esc(r.title||"no title yet")+"</div>"+
