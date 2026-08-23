@@ -333,6 +333,7 @@ let indexFactsBySession = new Map<string, {
   lastActivityAt: number | null;
   messageCount: number | null;
   models: readonly string[];
+  lastModel: string | null;
   cwd: string | null;
 }>();
 let unreadByWorkspaceId = new Map<string, number>();
@@ -386,7 +387,7 @@ function extrasFor(sessionId: string | null, workspaceId: string | null): Pick<
     branch: dir?.branch ?? ws?.branch ?? null,
     lastActivityAt: index?.lastActivityAt ?? null,
     messageCount: index?.messageCount ?? null,
-    models: index?.models ?? [],
+    models: index?.lastModel ? [index.lastModel] : index?.models ?? [],
     enrichmentState: enrichment?.state ?? null,
     enrichmentNext: enrichment?.next ?? null,
     enrichmentRecommendation: enrichment?.recommendation ?? null,
@@ -508,7 +509,8 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
   const nextIndex = new Map<string, {
     lastActivityAt: number | null;
     messageCount: number | null;
-    models: readonly string[];
+  models: readonly string[];
+  lastModel: string | null;
     cwd: string | null;
   }>();
   for (const row of indexRows) {
@@ -516,6 +518,7 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
       lastActivityAt: row.lastTs ? Date.parse(row.lastTs) : null,
       messageCount: row.messageCount ?? null,
       models: row.models,
+      lastModel: row.lastModel ?? null,
       cwd: row.cwd,
     };
     nextIndex.set(row.sessionId, fact);
@@ -920,7 +923,7 @@ function render(d){
       const working=r.sessionId&&isWorking(r)?fmtElapsed(Date.now()-(workingStarted[r.sessionId]||Date.now())):null;
       if(working)extras.push("<span><b>working</b>"+working+"</span>");
       if(r.lastActivityAt)extras.push("<span><b>indexed</b>"+ago(r.lastActivityAt)+"s</span>");
-      if(r.models&&r.models.length)extras.push("<span><b>model</b>"+esc(r.models[r.models.length-1])+"</span>");
+      if(r.models&&r.models.length)extras.push("<span><b>last billed</b>"+esc(r.models[r.models.length-1])+"</span>");
       if(r.enrichmentState)extras.push("<span><b>state</b>"+esc(r.enrichmentState)+"</span>");
       if(r.enrichmentNext)extras.push("<span><b>next</b>"+esc(r.enrichmentNext)+"</span>");
       if(r.enrichmentRecommendation)extras.push("<span><b>rec</b>"+esc(r.enrichmentRecommendation)+"</span>");

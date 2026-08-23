@@ -89,6 +89,8 @@ export interface IndexedSessionInput {
   /** ISO timestamp of the session's last recorded activity. */
   readonly lastTs: string | null;
   readonly models: readonly string[];
+  /** Last model that billed a turn, when the index recorded it. */
+  readonly lastModel?: string | null;
   readonly costByModel: Readonly<Record<string, number>>;
   /**
    * Transcript message count, used to age the enrichment summary.

@@ -34,6 +34,7 @@ interface IndexRow {
   cwd: string | null;
   last_ts: string | null;
   models: string | null;
+  last_model: string | null;
   cost_by_model: string | null;
   msg_count: number | null;
   path: string | null;
@@ -94,6 +95,7 @@ export function readIndexDatabase(
   // The offset `msg_count` is true at. With it, a reader can count the appended bytes and know
   // exactly how far the session has moved; without it, only that it has. Optional like the rest.
   const sizeExpression = available.has("file_size") ? "file_size" : "NULL AS file_size";
+  const lastModelExpression = available.has("last_model") ? "last_model" : "NULL AS last_model";
   const titleSources = TITLE_COLUMNS.filter((column) => available.has(column));
   // COALESCE keeps the index's own title priority; with no title column at all the row still
   // has an id, and the caller falls back to cmux's workspace title.
@@ -102,7 +104,7 @@ export function readIndexDatabase(
     : titleSources[0] ?? "NULL";
 
   const select =
-    `SELECT session_id, resume_id, ${titleExpression} AS title, cwd, last_ts, models, cost_by_model,
+    `SELECT session_id, resume_id, ${titleExpression} AS title, cwd, last_ts, models, ${lastModelExpression}, cost_by_model,
             ${messageCountExpression}, ${pathExpression}, ${sizeExpression}
        FROM sessions`;
   let rows: IndexRow[];
@@ -147,6 +149,7 @@ export function readIndexDatabase(
     cwd: row.cwd,
     lastTs: row.last_ts,
     models: parseJson<string[]>(row.models, []),
+    lastModel: row.last_model,
     costByModel: parseJson<Record<string, number>>(row.cost_by_model, {}),
     messageCount: row.msg_count ?? null,
     transcriptPath: row.path ?? null,
