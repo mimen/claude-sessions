@@ -480,11 +480,13 @@ const HTML = `<!DOCTYPE html>
   .row-bad td{background:rgba(229,83,75,.06)}
   tr.focused td{border-left:3px solid var(--ok);background:rgba(47,174,125,.07)}
   tr.focused td:first-child{padding-left:9px}
-  .title{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .name{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
-  .k{display:inline-block;min-width:9.5em;color:var(--dim);font-size:10px;letter-spacing:.02em}
-  .foc{color:var(--ok);font-size:10px;text-transform:uppercase;letter-spacing:.05em}
-  .sid{color:var(--dim);font-family:var(--mono);font-size:10.5px}
+  .ident{min-width:280px;max-width:420px}
+  .ws{font-size:13.5px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tab{font-size:12px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .meta-line{display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:3px;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+  .meta-line b{font-weight:500;color:#6b7280;margin-right:4px}
+  .foc{color:var(--ok);font-size:10px;font-weight:600;margin-left:6px}
+  .kind-tag{color:var(--warn);font-size:11px}
   .pillchip{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid var(--line);background:var(--line);white-space:nowrap}
   footer{margin-top:30px;color:var(--dim);font-size:12.5px;border-top:1px solid var(--line);padding-top:14px;line-height:1.8}
   .legend{color:var(--dim);font-size:12px;margin:4px 0 14px}
@@ -549,15 +551,12 @@ function render(d){
     const unbound=r.kind==="unbound";
     const bad=!unbound&&((r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent");
     const tr=document.createElement("tr");if(bad)tr.className="row-bad";if(r.workspaceFocused)tr.classList.add("focused");
-    const identity=unbound
-      ?'<div class="sid"><span class="k">kind</span> <span class="cell-na">not a Claude Code session</span></div>'+
-       '<div class="sid"><span class="k">cmux ws ref</span> '+esc(r.workspaceRef||"—")+"</div>"
-      :'<div class="sid"><span class="k">ccs session title</span> '+esc(r.title||"(none yet)")+"</div>"+
-       '<div class="sid"><span class="k">claude session uuid</span> '+esc(r.sessionId)+"</div>"+
-       '<div class="sid"><span class="k">cmux ws ref</span> '+esc(r.workspaceRef||"—")+"</div>";
-    tr.innerHTML='<td><div class="name"><span class="k">cmux tab</span> '+esc(r.surfaceTitle||"(unnamed)")+(r.workspaceFocused?' <span class="foc">◀ focused</span>':"")+'</div>'+
-      '<div class="name"><span class="k">cmux ws</span> '+esc(r.workspaceTitle||"—")+'</div>'+
-      identity+"</td>"+
+    const wsName=esc(r.workspaceTitle||r.surfaceTitle||"(unnamed)");
+    const tabName=r.surfaceTitle&&r.surfaceTitle!==r.workspaceTitle?'<div class="tab">tab · '+esc(r.surfaceTitle)+"</div>":"";
+    const ident=unbound
+      ?'<div class="kind-tag">not a Claude Code session</div><div class="meta-line"><span><b>ref</b>'+esc(r.workspaceRef||"—")+"</span></div>"
+      :'<div class="tab">ccs · '+esc(r.title||"no title yet")+'</div><div class="meta-line"><span><b>uuid</b>'+esc(r.sessionId)+'</span><span><b>ref</b>'+esc(r.workspaceRef||"—")+"</span></div>";
+    tr.innerHTML='<td class="ident"><div class="ws">'+wsName+(r.workspaceFocused?' <span class="foc">focused</span>':"")+"</div>"+tabName+ident+"</td>"+
       '<td>'+yn(true)+'</td>'+
       '<td class="v">'+(unbound?'<span class="cell-na">—</span>':'<span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span>')+'</td>'+
       '<td class="v">'+(unbound?'<span class="cell-na">—</span>':esc(r.derivedLabel??r.trackedLifecycle??"—"))+'</td>'+
