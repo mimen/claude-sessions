@@ -218,7 +218,7 @@ function buildMirror(
       group = {
         workspaceRef: key,
         workspaceTitle: surface.workspaceTitle,
-        workspaceFocused: surface.workspaceActive === true,
+        workspaceFocused: surface.windowActive === true && surface.workspaceActive === true,
         tabs: [],
       };
       win.workspaces.push(group);
