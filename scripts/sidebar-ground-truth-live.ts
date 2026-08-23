@@ -239,7 +239,7 @@ function buildMirror(
           trackedLifecycle: null,
           surfaceInTree: true,
           workspaceFocused: surface.workspaceSelected === true,
-          surfaceFocused: surface.surfaceSelected === true,
+          surfaceFocused: surface.workspaceSelected === true && surface.surfaceSelected === true,
           pidAlive: null,
           transcriptState: "present",
           authoritativePill: null,

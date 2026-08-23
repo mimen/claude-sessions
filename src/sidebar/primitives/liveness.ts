@@ -49,7 +49,7 @@ function rowFor(
     trackedLifecycle: entry.agentLifecycle,
     surfaceInTree: surface !== undefined,
     workspaceFocused: surface?.workspaceSelected === true,
-    surfaceFocused: surface?.surfaceSelected === true,
+    surfaceFocused: surface?.workspaceSelected === true && surface?.surfaceSelected === true,
     pidAlive,
     transcriptState,
   };
