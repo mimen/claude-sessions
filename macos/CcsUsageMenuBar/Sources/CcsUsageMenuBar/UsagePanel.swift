@@ -122,6 +122,14 @@ struct UsagePanel: View {
                             .padding(.vertical, 1)
                             .background(Capsule().fill(Color.secondary.opacity(0.14)))
                     }
+                    if let account = section.account, store.staleAccounts.contains("anthropic|\(account)") {
+                        Text("stale")
+                            .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.orange.opacity(0.14)))
+                    }
                     Spacer()
                 }
                 .padding(.bottom, 2)
@@ -133,7 +141,7 @@ struct UsagePanel: View {
     }
 
     private var sections: [UsageSection] {
-        GaugeBuilder.sections(from: UsageSnapshot(generatedAt: nil, observations: store.observations))
+        store.sections
     }
 
     private var footer: some View {

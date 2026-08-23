@@ -69,7 +69,7 @@ enum GaugeBuilder {
         return planTable[key] ?? PlanInfo(name: "", dollars: fallbackDollars)
     }
 
-    static func sections(from snapshot: UsageSnapshot) -> [UsageSection] {
+    static func sections(from snapshot: UsageSnapshot, planOverrides: [String: PlanInfo] = [:]) -> [UsageSection] {
         var gauges: [UsageGauge] = []
         for o in snapshot.observations {
             switch o.metric {
@@ -115,7 +115,7 @@ enum GaugeBuilder {
             return section
         }.map { s in
             var s = s
-            let p = plan(provider: s.provider, account: s.account)
+            let p = planOverrides["\(s.provider)|\(s.account ?? "")"] ?? plan(provider: s.provider, account: s.account)
             s.plan = p.dollars > 0 ? p : nil
             return s
         }

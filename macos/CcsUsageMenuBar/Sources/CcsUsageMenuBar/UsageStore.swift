@@ -17,6 +17,10 @@ final class UsageStore: ObservableObject {
     @Published var cswapAccounts: [CswapAccount] = []
     @Published var switchingTo: CswapAccount?
     @Published var switchError: String?
+    /// Account local-parts whose live Anthropic fetch failed — data shown is stale.
+    @Published var staleAccounts: Set<String> = []
+    /// Live plan tiers read from the keychain, keyed "provider|account".
+    @Published var planOverrides: [String: PlanInfo] = [:]
 
     private var hasLoadedCswap = false
     private var basePanelHeight: CGFloat = 420
@@ -42,6 +46,40 @@ final class UsageStore: ObservableObject {
                     self.cswapAccounts = accounts
                     self.syncPanelHeight()
                 }
+                await self.refreshAnthropicLive(accounts: accounts)
+            }
+        }
+    }
+
+    /// Fetch live usage straight from Anthropic's OAuth endpoint per account,
+    /// bypassing cswap's (often stale) usage cache. Falls back to the ccs data
+    /// when a token is missing or revoked, marking the account stale.
+    private func refreshAnthropicLive(accounts: [CswapAccount]) async {
+        for account in accounts {
+            let key = "anthropic|\(account.email.split(separator: "@").first.map(String.init) ?? account.email)"
+            guard let creds = Keychain.claudeOauth(account: account) else {
+                await MainActor.run { _ = self.staleAccounts.insert(key) }
+                continue
+            }
+            do {
+                let usage = try AnthropicDirect.fetchUsage(token: creds.token)
+                let fresh = AnthropicDirect.observations(email: account.email, usage: usage)
+                await MainActor.run {
+                    self.staleAccounts.remove(key)
+                    if let tierPlan = AnthropicDirect.plan(forTier: creds.tier) {
+                        self.planOverrides[key] = tierPlan
+                    }
+                    // Replace this account's anthropic rows with live ones.
+                    self.observations.removeAll {
+                        $0.provider == "anthropic" && $0.entitlement.contains(account.email)
+                    }
+                    self.observations.append(contentsOf: fresh)
+                    self.gauges = GaugeBuilder.sections(from: UsageSnapshot(generatedAt: nil, observations: self.observations)).flatMap(\.gauges)
+                    self.updateHeight(from: UsageSnapshot(generatedAt: nil, observations: self.observations))
+                    self.phase = .loaded(Date())
+                }
+            } catch {
+                await MainActor.run { _ = self.staleAccounts.insert(key) }
             }
         }
     }
@@ -114,7 +152,10 @@ final class UsageStore: ObservableObject {
     }
 
     var sections: [UsageSection] {
-        GaugeBuilder.sections(from: UsageSnapshot(generatedAt: nil, observations: observations))
+        GaugeBuilder.sections(
+            from: UsageSnapshot(generatedAt: nil, observations: observations),
+            planOverrides: planOverrides
+        )
     }
 
     var overallRemaining: Double? {
