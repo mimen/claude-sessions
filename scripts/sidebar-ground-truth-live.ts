@@ -28,6 +28,9 @@ import {
   type Finding,
 } from "./sidebar-ground-truth-lib.ts";
 import { statusFromAgentLifecycle } from "../src/sidebar/status.ts";
+import { joinLiveness } from "../src/sidebar/primitives/liveness.ts";
+import type { HookBindingsRead, HookSessionEntry } from "../src/sidebar/primitives/hook-bindings.ts";
+import type { SurfaceTreeRead } from "../src/sidebar/primitives/surface-tree.ts";
 
 const PORT = Number(process.argv[2] ?? 8793);
 const ACTIVITY_EVERY_N_CYCLES = 5;
@@ -116,61 +119,70 @@ export interface Mirror {
   unboundSurfaces: Array<{ workspaceRef: string; title: string | null }>;
 }
 
+function toTreeRead(treeFacts: Awaited<ReturnType<typeof auditSurfaceTree>>["facts"]): SurfaceTreeRead {
+  return {
+    surfaces: treeFacts.surfaces,
+    workspaceIds: treeFacts.workspaceIds,
+    focusedWorkspaceId: treeFacts.surfaces.find((s) => s.workspaceActive)?.workspaceId ?? null,
+    readable: true,
+    revision: 0,
+  };
+}
+
+function toBindingsRead(
+  hooksFacts: Awaited<ReturnType<typeof auditHookBindings>>["facts"],
+): HookBindingsRead {
+  const sessions = new Map<string, HookSessionEntry>();
+  for (const [key, entry] of hooksFacts.sessions) {
+    const sessionId = entry.sessionId ?? key;
+    sessions.set(key, {
+      sessionId,
+      surfaceId: entry.surfaceId ?? null,
+      agentLifecycle: entry.agentLifecycle ?? null,
+      pid: entry.pid ?? null,
+      transcriptPath: entry.transcriptPath ?? null,
+    });
+  }
+  return {
+    bindingsBySurface: hooksFacts.bindingsBySurface,
+    sessions,
+    pidLiveness: hooksFacts.pidLiveness,
+    transcriptPresence: hooksFacts.transcriptPresence,
+    readable: true,
+    revision: 0,
+  };
+}
+
 function buildMirror(
   treeFacts: Awaited<ReturnType<typeof auditSurfaceTree>>["facts"],
   hooksFacts: Awaited<ReturnType<typeof auditHookBindings>>["facts"],
   pillsByWorkspace: Map<string, string>,
   titlesBySession: Map<string, string>,
 ): Mirror {
-  const surfaceById = new Map(treeFacts.surfaces.map((s) => [s.surfaceId, s]));
-  const boundSurfaceIds = new Set<string>();
-  const rows: MirrorRow[] = [];
-  for (const [, entry] of hooksFacts.sessions) {
-    const sessionId = entry.sessionId ?? null;
-    if (!sessionId) continue;
-    const surfaceId = entry.surfaceId ?? null;
-    const surface = surfaceId !== null ? surfaceById.get(surfaceId) : undefined;
-    if (surface !== undefined) boundSurfaceIds.add(surfaceId ?? "");
-    rows.push({
-      sessionId,
-      title: titlesBySession.get(sessionId) ?? null,
-      surfaceId,
-      surfaceTitle: surface?.title ?? null,
-      workspaceTitle: surface?.workspaceTitle ?? null,
-      workspaceRef: surface?.workspaceRef ?? null,
-      trackedLifecycle: entry.agentLifecycle ?? null,
-      surfaceInTree: surface !== undefined,
-      workspaceFocused: surface?.workspaceActive === true,
-      pidAlive: hooksFacts.pidLiveness.get(sessionId) ?? null,
-      transcriptState: hooksFacts.transcriptPresence.get(sessionId) ?? "absent",
-      authoritativePill: surface ? pillsByWorkspace.get(surface.workspaceId) ?? null : null,
-      derivedLabel: statusFromAgentLifecycle(entry.agentLifecycle ?? null)?.label ?? null,
-    });
-  }
-
-  const discrepanciesOf = (r: MirrorRow): number =>
-    (r.surfaceInTree ? 0 : 1) +
-    (r.pidAlive === false ? 1 : 0) +
-    (r.transcriptState === "absent" ? 1 : 0);
-
-  // Live rows follow the TREE's traversal order — window → workspace → pane — which is the
-  // order cmux displays them in, so the mirror is comparable against the tab bar. The hook
-  // store's own iteration order is irrelevant here.
-  const orderInTree = new Map(treeFacts.surfaces.map((s, i) => [s.surfaceId, i]));
-  const live = rows
-    .filter((r) => r.surfaceInTree)
-    .sort(
-      (a, b) =>
-        (orderInTree.get(a.surfaceId ?? "") ?? Number.MAX_SAFE_INTEGER) -
-        (orderInTree.get(b.surfaceId ?? "") ?? Number.MAX_SAFE_INTEGER),
-    );
-  const ghosts = rows.filter((r) => !r.surfaceInTree).sort((a, b) => discrepanciesOf(b) - discrepanciesOf(a));
-
-  const unboundSurfaces = treeFacts.surfaces
-    .filter((s) => !boundSurfaceIds.has(s.surfaceId))
-    .map((s) => ({ workspaceRef: s.workspaceRef, title: s.workspaceTitle }));
-
-  return { live, ghosts, unboundSurfaces };
+  const joined = joinLiveness(toTreeRead(treeFacts), toBindingsRead(hooksFacts));
+  const decorate = (r: (typeof joined.live)[number]): MirrorRow => ({
+    sessionId: r.sessionId,
+    title: titlesBySession.get(r.sessionId) ?? null,
+    surfaceId: r.surfaceId,
+    surfaceTitle: r.surfaceTitle,
+    workspaceTitle: r.workspaceTitle,
+    workspaceRef: r.workspaceRef,
+    trackedLifecycle: r.trackedLifecycle,
+    surfaceInTree: r.surfaceInTree,
+    workspaceFocused: r.workspaceFocused,
+    pidAlive: r.pidAlive,
+    transcriptState: r.transcriptState,
+    authoritativePill: r.workspaceId ? pillsByWorkspace.get(r.workspaceId) ?? null : null,
+    derivedLabel: statusFromAgentLifecycle(r.trackedLifecycle)?.label ?? null,
+  });
+  return {
+    live: joined.live.map(decorate),
+    ghosts: joined.ghosts.map(decorate),
+    unboundSurfaces: joined.unboundSurfaces.map((s) => ({
+      workspaceRef: s.workspaceRef,
+      title: s.workspaceTitle,
+    })),
+  };
 }
 
 // --- sweep loop -----------------------------------------------------------------------
