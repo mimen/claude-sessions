@@ -68,6 +68,7 @@ interface TreeWorkspace {
 interface TreeWindow {
   id: string;
   ref: string;
+  active?: boolean;
   workspaces?: TreeWorkspace[];
 }
 /** cmux's own pointer at whatever currently has focus, across every window. */
@@ -101,6 +102,8 @@ export interface SurfaceLocation {
   surfaceActive?: boolean;
   windowId: string;
   windowRef: string;
+  /** True when this surface's window is the one cmux currently has focused. */
+  windowActive?: boolean;
 }
 
 /** The claude session cmux bound to a surface (keyed by surface UUID). */
@@ -160,6 +163,7 @@ export function parseTree(tree: CmuxTree): SurfaceLocation[] {
             surfaceActive: s.active === true || s.focused === true || s.selected === true,
             windowId: win.id,
             windowRef: win.ref,
+            windowActive: win.active === true,
           });
         }
       }

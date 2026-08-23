@@ -123,9 +123,16 @@ export interface WorkspaceGroup {
   tabs: MirrorRow[];
 }
 
+export interface WindowGroup {
+  windowRef: string;
+  windowFocused: boolean;
+  workspaces: WorkspaceGroup[];
+}
+
 export interface Mirror {
   live: MirrorRow[];
   groups: WorkspaceGroup[];
+  windows: WindowGroup[];
   ghosts: MirrorRow[];
   unboundSurfaces: Array<{ workspaceRef: string; title: string | null }>;
 }
@@ -192,11 +199,21 @@ function buildMirror(
   const liveBySurface = new Map(
     joined.live.filter((r) => r.surfaceId).map((r) => [r.surfaceId as string, r]),
   );
+  const byWindow: WindowGroup[] = [];
   const byWorkspace: WorkspaceGroup[] = [];
   const live: MirrorRow[] = [];
   for (const surface of treeFacts.surfaces) {
+    let win = byWindow.find((w) => w.windowRef === surface.windowRef);
+    if (!win) {
+      win = {
+        windowRef: surface.windowRef,
+        windowFocused: surface.windowActive === true,
+        workspaces: [],
+      };
+      byWindow.push(win);
+    }
     const key = surface.workspaceRef;
-    let group = byWorkspace.find((g) => g.workspaceRef === key);
+    let group = win.workspaces.find((g) => g.workspaceRef === key);
     if (!group) {
       group = {
         workspaceRef: key,
@@ -204,6 +221,7 @@ function buildMirror(
         workspaceFocused: surface.workspaceActive === true,
         tabs: [],
       };
+      win.workspaces.push(group);
       byWorkspace.push(group);
     }
     const bound = liveBySurface.get(surface.surfaceId);
@@ -241,6 +259,7 @@ function buildMirror(
   return {
     live,
     groups: byWorkspace,
+    windows: byWindow,
     ghosts: joined.ghosts.map((r) => decorate(r, false)),
     unboundSurfaces: joined.unboundSurfaces.map((s) => ({
       workspaceRef: s.workspaceRef,
@@ -258,7 +277,7 @@ let lastFullCycleAt = 0;
 let sweeping = false;
 let fullRunning = false;
 let pillsByWorkspace = new Map<string, string>();
-let latestMirror: Mirror = { live: [], groups: [], ghosts: [], unboundSurfaces: [] };
+let latestMirror: Mirror = { live: [], groups: [], windows: [], ghosts: [], unboundSurfaces: [] };
 let lastHooksFacts: Awaited<ReturnType<typeof auditHookBindings>>["facts"] | null = null;
 let lastTitles = new Map<string, string>();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -514,6 +533,8 @@ const HTML = `<!DOCTYPE html>
   tr.focused td{border-left:3px solid var(--ok);background:rgba(47,174,125,.07)}
   tr.focused td:first-child{padding-left:9px}
   .ident{min-width:280px;max-width:460px}
+  .win-head td{background:#0c0e12;padding:12px 12px 8px;border-bottom:1px solid var(--line);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+  .win-head .foc{text-transform:none;letter-spacing:0}
   .ws-head td{background:#14171d;padding:10px 12px 6px;border-bottom:none}
   .ws-head .ws{font-size:13.5px;font-weight:550}
   .ws-head .ref{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-left:8px}
@@ -585,8 +606,14 @@ function render(d){
     "event→mirror: "+(d.lastEventMirrorMs===null?"no events yet":(d.lastEventAt?ago(d.lastEventAt)+"s ago, took "+d.lastEventMirrorMs+"ms":"none"))+" · "+
     d.mirror.live.length+" live / "+d.mirror.ghosts.length+" ghosts";
   const live=document.getElementById("live");live.innerHTML="";
-  const groups=d.mirror.groups&&d.mirror.groups.length?d.mirror.groups:[{workspaceRef:"",workspaceTitle:null,workspaceFocused:false,tabs:d.mirror.live}];
-  for(const g of groups){
+  const windows=d.mirror.windows&&d.mirror.windows.length
+    ?d.mirror.windows
+    :[{windowRef:"",windowFocused:false,workspaces:d.mirror.groups&&d.mirror.groups.length?d.mirror.groups:[{workspaceRef:"",workspaceTitle:null,workspaceFocused:false,tabs:d.mirror.live}]}];
+  for(const win of windows){
+    const whead=document.createElement("tr");whead.className="win-head"+(win.windowFocused?" focused":"");
+    whead.innerHTML='<td colspan="6">'+esc(win.windowRef||"window")+(win.windowFocused?' <span class="foc">focused window</span>':"")+"</td>";
+    live.appendChild(whead);
+    for(const g of win.workspaces){
     const head=document.createElement("tr");head.className="ws-head"+(g.workspaceFocused?" focused":"");
     head.innerHTML='<td colspan="6"><span class="ws">'+esc(g.workspaceTitle||"(unnamed workspace)")+(g.workspaceFocused?' <span class="foc">focused</span>':"")+'</span><span class="ref">'+esc(g.workspaceRef)+"</span></td>";
     live.appendChild(head);
@@ -605,6 +632,7 @@ function render(d){
         '<td>'+(unbound?'<span class="cell-na">—</span>':(r.pidAlive===null?'<span class="cell-na">idle claim</span>':yn(r.pidAlive)))+'</td>'+
         '<td>'+(unbound?'<span class="cell-na">—</span>':tstate(r.transcriptState))+"</td>";
       live.appendChild(tr);
+    }
     }
   }
   if(d.mirror.live.length===0)live.innerHTML='<tr><td colspan="6" style="color:var(--dim)">no bound sessions observed yet</td></tr>';
