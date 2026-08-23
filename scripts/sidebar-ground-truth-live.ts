@@ -831,17 +831,39 @@ const HTML = `<!DOCTYPE html>
 </main>
 <script>
 function ago(t){return Math.max(0,Math.round((Date.now()-t)/1000));}
+function fmtElapsed(ms){
+  const s=Math.floor(ms/1000);
+  if(s<1)return null;
+  if(s<60)return s+"s";
+  if(s<3600)return Math.floor(s/60)+"m "+(s%60)+"s";
+  return Math.floor(s/3600)+"h "+Math.floor((s%3600)/60)+"m";
+}
+function isWorking(r){
+  const label=(r.authoritativePill||r.derivedLabel||r.trackedLifecycle||"").toLowerCase();
+  return label==="running"||label==="working";
+}
+const workingStarted={};
+function observeWorking(rows){
+  const ids=new Set();
+  for(const r of rows){
+    if(!r.sessionId||!isWorking(r))continue;
+    ids.add(r.sessionId);
+    if(workingStarted[r.sessionId]==null)workingStarted[r.sessionId]=Date.now();
+  }
+  for(const id of Object.keys(workingStarted)) if(!ids.has(id)) delete workingStarted[id];
+}
+let lastState=null;
 let sse=null;
 async function tick(){
   try{
-    const r=await fetch("/api/state");const d=await r.json();render(d);
+    const r=await fetch("/api/state");const d=await r.json();lastState=d;render(d);
   }catch(e){document.getElementById("meta").textContent="server unreachable";
     document.getElementById("dot").style.background="#e5534b";}
 }
 function connectSSE(){
   try{
     sse=new EventSource("/api/events");
-    sse.onmessage=e=>{try{render(JSON.parse(e.data));}catch{}};
+    sse.onmessage=e=>{try{const d=JSON.parse(e.data);lastState=d;render(d);}catch{}};
     sse.onerror=()=>{try{sse.close();}catch{};sse=null;};
   }catch{}
 }
@@ -850,6 +872,10 @@ function yn(b){return b===null?'<span class="cell-na">—</span>':b?'<span class
 function tstate(s){return s==="present"?'<span class="cell-yes">✓ on disk</span>'
   :s==="renamed"?'<span class="cell-na">renamed</span>':'<span class="cell-no">✗ gone</span>';}
 function render(d){
+  const allTabs=[];
+  for(const w of d.mirror.windows||[]) for(const g of w.workspaces||[]) allTabs.push.apply(allTabs,g.tabs||[]);
+  if(allTabs.length===0) allTabs.push.apply(allTabs,d.mirror.live||[]);
+  observeWorking(allTabs);
   document.getElementById("dot").style.background=d.sweeping?"#d29922":"#2fae7d";
   document.getElementById("meta").textContent=
     "cycle "+d.cycles+" · last sweep "+ago(d.lastSweepAt)+"s ago · activity "+ago(d.lastActivitySweepAt)+"s ago · "+
@@ -891,7 +917,9 @@ function render(d){
       if(r.branch)extras.push("<span><b>branch</b>"+esc(r.branch)+"</span>");
       if(r.cwd)extras.push("<span><b>cwd</b>"+esc(r.cwd)+"</span>");
       if(r.messageCount!=null)extras.push("<span><b>msgs</b>"+r.messageCount+"</span>");
-      if(r.lastActivityAt)extras.push("<span><b>last</b>"+ago(r.lastActivityAt)+"s</span>");
+      const working=r.sessionId?fmtElapsed(Date.now()-(workingStarted[r.sessionId]||Date.now())):null;
+      if(isWorking(r)&&working)extras.push("<span><b>working</b>"+working+"</span>");
+      else if(r.lastActivityAt)extras.push("<span><b>indexed</b>"+ago(r.lastActivityAt)+"s</span>");
       if(r.models&&r.models.length)extras.push("<span><b>model</b>"+esc(r.models[r.models.length-1])+"</span>");
       if(r.enrichmentState)extras.push("<span><b>state</b>"+esc(r.enrichmentState)+"</span>");
       if(r.enrichmentNext)extras.push("<span><b>next</b>"+esc(r.enrichmentNext)+"</span>");
@@ -926,7 +954,7 @@ function render(d){
   const unboundN=d.mirror.live.filter(r=>r.kind==="unbound").length;
   document.getElementById("unbound").textContent=unboundN===0?"":(unboundN+" workspace"+(unboundN===1?"":"s")+" in the table have no Claude session (browser / terminal / other).");
 }
-tick();connectSSE();setInterval(tick,3000);
+tick();connectSSE();setInterval(tick,3000);setInterval(function(){if(lastState)render(lastState);},1000);
 </script>
 </body>
 </html>`;
