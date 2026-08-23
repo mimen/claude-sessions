@@ -6,6 +6,7 @@ import {
   type CmuxEventStreamProcess,
   scopesForFrame,
   subscribeToCmuxEvents,
+  workspaceIdFromFrame,
 } from "./events.ts";
 
 function event(category: string, name: string): string {
@@ -51,6 +52,12 @@ describe("scopesForFrame", () => {
   test("cmux's own status publication invalidates the status pill", () => {
     expect([...(scopesForFrame(JSON.parse(event("sidebar", "sidebar.metadata.updated"))) ?? [])])
       .toEqual(["status"]);
+  });
+
+  test("workspaceIdFromFrame reads common nested keys and ignores missing ones", () => {
+    expect(workspaceIdFromFrame({ type: "event", workspace_id: "WS-1" })).toBe("WS-1");
+    expect(workspaceIdFromFrame({ type: "event", payload: { workspaceRef: "workspace:3" } })).toBe("workspace:3");
+    expect(workspaceIdFromFrame({ type: "event", category: "sidebar" })).toBeNull();
   });
 
   test("window and notification frames each invalidate their own source", () => {

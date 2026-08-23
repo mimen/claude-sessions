@@ -11,11 +11,13 @@
  * Read-only against live state. bun run scripts/sidebar-ground-truth-live.ts [port]
  */
 import { Database } from "bun:sqlite";
+import { watch } from "node:fs";
 import { join } from "node:path";
 import { CATALOGUE_PATH, DB_PATH } from "../src/paths.ts";
 import { scanStore } from "../src/store.ts";
 import { readIndexReadOnly } from "../src/sidebar/index-read.ts";
-import { subscribeToCmuxEvents } from "../src/cmux/events.ts";
+import { readCatalogueReadOnly } from "../src/sidebar/catalogue-read.ts";
+import { subscribeToCmuxEvents, workspaceIdFromFrame } from "../src/cmux/events.ts";
 import {
   auditAgentActivity,
   auditCoverage,
@@ -25,6 +27,7 @@ import {
   auditTranscriptRows,
   CLAUDE_STORE,
   RECENT_WINDOW_MS,
+  readWorkspacePill,
   type Finding,
 } from "./sidebar-ground-truth-lib.ts";
 import { statusFromAgentLifecycle } from "../src/sidebar/status.ts";
@@ -114,6 +117,8 @@ export interface MirrorRow {
   transcriptState: "present" | "renamed" | "absent";
   authoritativePill: string | null;
   derivedLabel: string | null;
+  /** CCS catalogue: active / saved / completed / incognito. Null if unbound or unknown. */
+  catalogueLifecycle: string | null;
 }
 
 export interface WorkspaceGroup {
@@ -193,8 +198,11 @@ function buildMirror(
     surfaceFocused: r.surfaceFocused,
     pidAlive: r.pidAlive,
     transcriptState: r.transcriptState,
-    authoritativePill: r.workspaceId ? pillsByWorkspace.get(r.workspaceId) ?? null : null,
+    authoritativePill: r.workspaceId
+      ? pillsByWorkspace.get(r.workspaceId) ?? pillsByWorkspace.get(r.workspaceRef ?? "") ?? null
+      : null,
     derivedLabel: statusFromAgentLifecycle(r.trackedLifecycle)?.label ?? null,
+    catalogueLifecycle: catalogueLifecycleOf(r.sessionId),
   });
   const liveBySurface = new Map(
     joined.live.filter((r) => r.surfaceId).map((r) => [r.surfaceId as string, r]),
@@ -244,6 +252,7 @@ function buildMirror(
           transcriptState: "present",
           authoritativePill: null,
           derivedLabel: null,
+          catalogueLifecycle: null,
         };
     group.tabs.push(row);
     live.push(row);
@@ -280,7 +289,30 @@ let pillsByWorkspace = new Map<string, string>();
 let latestMirror: Mirror = { live: [], groups: [], windows: [], ghosts: [], unboundSurfaces: [] };
 let lastHooksFacts: Awaited<ReturnType<typeof auditHookBindings>>["facts"] | null = null;
 let lastTitles = new Map<string, string>();
+let lastTreeFacts: Awaited<ReturnType<typeof auditSurfaceTree>>["facts"] | null = null;
+let catalogueBySession = new Map<string, string>();
+let catalogueKickPending = false;
+let statusKickIds = new Set<string>();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
+
+function catalogueLifecycleOf(sessionId: string): string | null {
+  return catalogueBySession.get(sessionId) ?? null;
+}
+
+function reloadCatalogue(): void {
+  const outcome = readCatalogueReadOnly(CATALOGUE_PATH());
+  if (outcome.status !== "ok") return;
+  const next = new Map<string, string>();
+  for (const [id, lifecycle] of outcome.facts.lifecycles) next.set(id, lifecycle);
+  for (const id of outcome.facts.incognito) next.set(id, "incognito");
+  catalogueBySession = next;
+}
+
+function paintMirrorFromCache(): void {
+  if (lastTreeFacts === null || lastHooksFacts === null) return;
+  latestMirror = buildMirror(lastTreeFacts, lastHooksFacts, pillsByWorkspace, lastTitles);
+  broadcastState();
+}
 
 function broadcastState(): void {
   if (sseClients.size === 0) return;
@@ -303,6 +335,7 @@ function broadcastState(): void {
  */
 async function fastMirrorCycle(): Promise<void> {
   const tree = await auditSurfaceTree();
+  lastTreeFacts = tree.facts;
   if (lastHooksFacts !== null) {
     latestMirror = buildMirror(tree.facts, lastHooksFacts, pillsByWorkspace, lastTitles);
   }
@@ -310,6 +343,27 @@ async function fastMirrorCycle(): Promise<void> {
   cycles += 1;
   lastSweepAt = Date.now();
   broadcastState();
+}
+
+async function refreshWorkspacePills(workspaceKeys: Iterable<string>): Promise<void> {
+  const keys = [...new Set(workspaceKeys)].filter((k) => k.length > 0);
+  if (keys.length === 0) return;
+  await Promise.all(
+    keys.map(async (key) => {
+      const label = await readWorkspacePill(key);
+      if (label === null) return;
+      pillsByWorkspace.set(key, label);
+      const surface = lastTreeFacts?.surfaces.find(
+        (s) => s.workspaceId === key || s.workspaceRef === key,
+      );
+      if (surface) {
+        pillsByWorkspace.set(surface.workspaceId, label);
+        pillsByWorkspace.set(surface.workspaceRef, label);
+      }
+    }),
+  );
+  lastActivitySweepAt = Date.now();
+  paintMirrorFromCache();
 }
 
 async function timedCycle(includeActivity: boolean): Promise<void> {
@@ -353,6 +407,8 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
     if (row.title) titlesBySession.set(row.sessionId, row.title);
   }
   lastTitles = titlesBySession;
+  lastTreeFacts = tree.facts;
+  reloadCatalogue();
   // Never paint from this cycle's tree: it may be seconds old by the time activity
   // and index work finish, and would clobber a rename/focus the fast path already showed.
   kickPending = true;
@@ -450,6 +506,16 @@ async function sweepLoop(): Promise<void> {
         fullRunning = false;
       });
     }
+    if (statusKickIds.size > 0) {
+      const ids = [...statusKickIds];
+      statusKickIds.clear();
+      void refreshWorkspacePills(ids);
+    }
+    if (catalogueKickPending) {
+      catalogueKickPending = false;
+      reloadCatalogue();
+      paintMirrorFromCache();
+    }
     await Bun.sleep(150);
   }
 }
@@ -469,11 +535,33 @@ function startEventKicker(): void {
     onChange(scopes) {
       // workspace.renamed is category `workspace` → liveness + workspaceState.
       // Focus is window → liveness. Either must kick the tree-only path.
-      if (!scopes.has("liveness") && !scopes.has("workspaceState")) return;
-      lastEventAt = Date.now();
-      kickPending = true;
+      if (scopes.has("liveness") || scopes.has("workspaceState")) {
+        lastEventAt = Date.now();
+        kickPending = true;
+      }
+    },
+    onFrame(frame, scopes) {
+      if (!scopes.has("status")) return;
+      const workspace = workspaceIdFromFrame(frame);
+      if (workspace) statusKickIds.add(workspace);
+      else {
+        for (const surface of lastTreeFacts?.surfaces ?? []) {
+          statusKickIds.add(surface.workspaceId);
+        }
+      }
     },
   });
+}
+
+function startCatalogueWatch(): void {
+  reloadCatalogue();
+  try {
+    watch(CATALOGUE_PATH(), { persistent: false }, () => {
+      catalogueKickPending = true;
+    });
+  } catch {
+    // Missing catalogue is fine; the slow cycle still polls it.
+  }
 }
 
 interface StatePayload {
@@ -631,7 +719,7 @@ function render(d){
       const tr=document.createElement("tr");tr.className="tab-row"+(bad?" row-bad":"")+(r.surfaceFocused?" tab-focused":"");
       const ident=unbound
         ?'<div class="kind-tag">not a Claude Code session</div>'
-        :'<div class="tab">ccs · '+esc(r.title||"no title yet")+"</div>"+
+        :'<div class="tab">ccs · '+esc(r.title||"no title yet")+(r.catalogueLifecycle?' · '+esc(r.catalogueLifecycle):"")+"</div>"+
          '<div class="meta-line"><span><b>uuid</b>'+esc(r.sessionId)+"</span></div>";
       tr.innerHTML='<td class="ident"><div class="tab">'+esc(r.surfaceTitle||"(unnamed tab)")+(r.primary?' <span class="pri">primary</span>':"")+(r.surfaceFocused?' <span class="foc">focused tab</span>':"")+"</div>"+ident+"</td>"+
         '<td>'+yn(true)+'</td>'+
@@ -710,6 +798,7 @@ const server = Bun.serve({
 
 process.stdout.write(`sidebar ground truth live at http://127.0.0.1:${PORT}/\n`);
 startEventKicker();
+startCatalogueWatch();
 void sweepLoop();
 
 export { server };

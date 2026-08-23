@@ -58,6 +58,11 @@ export interface CmuxEventSubscriptionOptions {
    * different behaviour.
    */
   readonly onChange: (scopes: ReadonlySet<CmuxChangeScope>) => void;
+  /**
+   * Optional raw frame, so a caller that can do a scoped refresh (one workspace's
+   * status pill) is not forced into a fleet-wide sweep.
+   */
+  readonly onFrame?: (frame: unknown, scopes: ReadonlySet<CmuxChangeScope>) => void;
   readonly io?: CmuxEventStreamIo;
   readonly logger?: Pick<typeof log, "warn" | "info">;
   /** Test seam for the respawn backoff, which is otherwise measured in seconds. */
@@ -115,6 +120,33 @@ interface EventFrame {
   readonly name?: unknown;
   readonly category?: unknown;
   readonly resume?: { readonly gap?: unknown };
+}
+
+/**
+ * Best-effort workspace id or ref on a cmux event frame.
+ * Frames are not a documented schema; missing fields just mean "refresh all".
+ */
+export function workspaceIdFromFrame(frame: unknown): string | null {
+  if (typeof frame !== "object" || frame === null) return null;
+  const record = frame as Record<string, unknown>;
+  const direct = pickWorkspaceToken(record);
+  if (direct) return direct;
+  for (const nested of ["payload", "data", "workspace", "target"]) {
+    const value = record[nested];
+    if (typeof value === "object" && value !== null) {
+      const inner = pickWorkspaceToken(value as Record<string, unknown>);
+      if (inner) return inner;
+    }
+  }
+  return null;
+}
+
+function pickWorkspaceToken(record: Record<string, unknown>): string | null {
+  for (const key of ["workspace_id", "workspaceId", "workspace_ref", "workspaceRef"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
 }
 
 /** What one frame invalidates, or null if it changes nothing the sidebar shows. */
@@ -241,7 +273,10 @@ export function subscribeToCmuxEvents(
           continue;
         }
         const scopes = scopesForFrame(frame);
-        if (scopes !== null) options.onChange(scopes);
+        if (scopes !== null) {
+          options.onChange(scopes);
+          options.onFrame?.(frame, scopes);
+        }
       }
       return outcome();
     } finally {

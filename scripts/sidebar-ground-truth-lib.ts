@@ -313,6 +313,13 @@ export async function auditAgentActivity(
   return { findings, pillsByWorkspace, agree, disagree };
 }
 
+/** One-workspace authoritative pill — the live path, not the fleet fan-out. */
+export async function readWorkspacePill(workspaceId: string): Promise<string | null> {
+  const output = await run(CMUX_BIN, ["list-status", "--workspace", workspaceId], 4_000);
+  if (output === null) return null;
+  return parseClaudeStatus(output)?.label ?? null;
+}
+
 // --- primitives 6+5: transcript facts & coverage -----------------------------------
 
 export function auditTranscriptRows(rows: readonly IndexedSessionInput[]): Finding[] {
