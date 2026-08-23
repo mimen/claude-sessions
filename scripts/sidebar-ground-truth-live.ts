@@ -270,8 +270,9 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
     if (row.title) titlesBySession.set(row.sessionId, row.title);
   }
   lastTitles = titlesBySession;
-  latestMirror = buildMirror(tree.facts, hooks.facts, pillsByWorkspace, titlesBySession);
-  broadcastState();
+  // Never paint from this cycle's tree: it may be seconds old by the time activity
+  // and index work finish, and would clobber a rename/focus the fast path already showed.
+  kickPending = true;
 }
 
 function coverageFindings(
@@ -383,7 +384,9 @@ let lastEventMirrorMs: number | null = null;
 function startEventKicker(): void {
   subscribeToCmuxEvents({
     onChange(scopes) {
-      if (!scopes.has("liveness")) return;
+      // workspace.renamed is category `workspace` → liveness + workspaceState.
+      // Focus is window → liveness. Either must kick the tree-only path.
+      if (!scopes.has("liveness") && !scopes.has("workspaceState")) return;
       lastEventAt = Date.now();
       kickPending = true;
     },
