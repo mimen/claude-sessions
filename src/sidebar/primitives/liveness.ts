@@ -19,6 +19,7 @@ export interface LivenessRow {
   readonly trackedLifecycle: string | null;
   readonly surfaceInTree: boolean;
   readonly workspaceFocused: boolean;
+  readonly surfaceFocused: boolean;
   readonly pidAlive: boolean | null;
   readonly transcriptState: TranscriptPresence;
 }
@@ -48,6 +49,7 @@ function rowFor(
     trackedLifecycle: entry.agentLifecycle,
     surfaceInTree: surface !== undefined,
     workspaceFocused: surface?.workspaceActive === true,
+    surfaceFocused: surface?.surfaceActive === true,
     pidAlive,
     transcriptState,
   };

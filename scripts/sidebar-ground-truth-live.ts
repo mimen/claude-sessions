@@ -109,6 +109,7 @@ export interface MirrorRow {
   surfaceInTree: boolean;
   /** cmux's own pointer: this surface's workspace is the one currently focused. */
   workspaceFocused: boolean;
+  surfaceFocused: boolean;
   pidAlive: boolean | null;
   transcriptState: "present" | "renamed" | "absent";
   authoritativePill: string | null;
@@ -182,6 +183,7 @@ function buildMirror(
     trackedLifecycle: r.trackedLifecycle,
     surfaceInTree: r.surfaceInTree,
     workspaceFocused: r.workspaceFocused,
+    surfaceFocused: r.surfaceFocused,
     pidAlive: r.pidAlive,
     transcriptState: r.transcriptState,
     authoritativePill: r.workspaceId ? pillsByWorkspace.get(r.workspaceId) ?? null : null,
@@ -219,6 +221,7 @@ function buildMirror(
           trackedLifecycle: null,
           surfaceInTree: true,
           workspaceFocused: surface.workspaceActive === true,
+          surfaceFocused: surface.surfaceActive === true,
           pidAlive: null,
           transcriptState: "present",
           authoritativePill: null,
@@ -595,7 +598,7 @@ function render(d){
         ?'<div class="kind-tag">not a Claude Code session</div>'
         :'<div class="tab">ccs · '+esc(r.title||"no title yet")+"</div>"+
          '<div class="meta-line"><span><b>uuid</b>'+esc(r.sessionId)+"</span></div>";
-      tr.innerHTML='<td class="ident"><div class="tab">'+esc(r.surfaceTitle||"(unnamed tab)")+(r.primary?' <span class="pri">primary</span>':"")+"</div>"+ident+"</td>"+
+      tr.innerHTML='<td class="ident"><div class="tab">'+esc(r.surfaceTitle||"(unnamed tab)")+(r.primary?' <span class="pri">primary</span>':"")+(r.surfaceFocused?' <span class="foc">focused tab</span>':"")+"</div>"+ident+"</td>"+
         '<td>'+yn(true)+'</td>'+
         '<td class="v">'+(unbound?'<span class="cell-na">—</span>':'<span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span>')+'</td>'+
         '<td class="v">'+(unbound?'<span class="cell-na">—</span>':esc(r.derivedLabel??r.trackedLifecycle??"—"))+'</td>'+
