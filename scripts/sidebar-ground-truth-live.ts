@@ -95,6 +95,7 @@ function absorb(found: readonly Finding[]): void {
 // --- the mirror ----------------------------------------------------------------------
 
 export interface MirrorRow {
+  kind: "claude" | "unbound";
   sessionId: string;
   title: string | null;
   surfaceId: string | null;
@@ -161,6 +162,7 @@ function buildMirror(
 ): Mirror {
   const joined = joinLiveness(toTreeRead(treeFacts), toBindingsRead(hooksFacts));
   const decorate = (r: (typeof joined.live)[number]): MirrorRow => ({
+    kind: "claude",
     sessionId: r.sessionId,
     title: titlesBySession.get(r.sessionId) ?? null,
     surfaceId: r.surfaceId,
@@ -188,6 +190,7 @@ function buildMirror(
       continue;
     }
     live.push({
+      kind: "unbound",
       sessionId: "",
       title: null,
       surfaceId: surface.surfaceId,
@@ -543,11 +546,11 @@ function render(d){
     d.mirror.live.length+" live / "+d.mirror.ghosts.length+" ghosts";
   const live=document.getElementById("live");live.innerHTML="";
   for(const r of d.mirror.live){
-    const unbound=!r.sessionId;
+    const unbound=r.kind==="unbound";
     const bad=!unbound&&((r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent");
     const tr=document.createElement("tr");if(bad)tr.className="row-bad";if(r.workspaceFocused)tr.classList.add("focused");
     const sessionLine=unbound
-      ?'<span class="k">session</span> <span class="cell-na">no Claude session</span> · '+esc(r.workspaceRef||"")
+      ?'<span class="k">kind</span> <span class="cell-na">not a Claude Code session</span> · '+esc(r.workspaceRef||"")
       :'<span class="k">session</span> '+esc(r.title||"(untitled)")+" · "+r.sessionId.slice(0,8)+" · "+esc(r.workspaceRef||"");
     tr.innerHTML='<td><div class="name"><span class="k">tab</span> '+esc(r.surfaceTitle||"(unnamed)")+(r.workspaceFocused?' <span class="foc">◀ focused</span>':"")+'</div>'+
       '<div class="name"><span class="k">ws</span> '+esc(r.workspaceTitle||"—")+'</div>'+
@@ -571,7 +574,7 @@ function render(d){
     gh.appendChild(tr);
   }
   if(d.mirror.ghosts.length===0)gh.innerHTML='<tr><td colspan="5" style="color:var(--ok)">no ghosts — every tracked session has a real surface</td></tr>';
-  const unboundN=d.mirror.live.filter(r=>!r.sessionId).length;
+  const unboundN=d.mirror.live.filter(r=>r.kind==="unbound").length;
   document.getElementById("unbound").textContent=unboundN===0?"":(unboundN+" workspace"+(unboundN===1?"":"s")+" in the table have no Claude session (browser / terminal / other).");
 }
 tick();connectSSE();setInterval(tick,3000);
