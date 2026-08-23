@@ -194,13 +194,13 @@ struct MenuBarLabel: View {
     var body: some View {
         if let remaining {
             HStack(spacing: 3) {
-                Image(systemName: "gauge.with.needle")
+                Image(systemName: "sparkles")
                 Text("\(Int((remaining * 100).rounded()))%")
                     .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
             }
             .foregroundStyle(Self.labelColor(remaining))
         } else {
-            Image(systemName: "gauge.with.needle")
+            Image(systemName: "sparkles")
         }
     }
 

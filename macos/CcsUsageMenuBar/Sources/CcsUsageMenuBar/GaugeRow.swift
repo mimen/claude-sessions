@@ -153,7 +153,8 @@ struct GaugeRow: View {
     private func relative(_ date: Date, now: Date) -> String {
         let interval = date.timeIntervalSince(now)
         let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = interval > 172_800 ? [.day, .hour] : [.hour, .minute]
+        // Days+hours for anything a day or longer; hours+minutes below that.
+        formatter.allowedUnits = interval >= 86_400 ? [.day, .hour] : [.hour, .minute]
         formatter.maximumUnitCount = 2
         formatter.unitsStyle = .abbreviated
         if interval <= 0 { return "now" }
