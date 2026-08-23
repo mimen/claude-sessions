@@ -549,12 +549,15 @@ function render(d){
     const unbound=r.kind==="unbound";
     const bad=!unbound&&((r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent");
     const tr=document.createElement("tr");if(bad)tr.className="row-bad";if(r.workspaceFocused)tr.classList.add("focused");
-    const sessionLine=unbound
-      ?'<span class="k">kind</span> <span class="cell-na">not a Claude Code session</span> · '+esc(r.workspaceRef||"")
-      :'<span class="k">session</span> '+esc(r.title||"(untitled)")+" · "+r.sessionId.slice(0,8)+" · "+esc(r.workspaceRef||"");
+    const identity=unbound
+      ?'<div class="sid"><span class="k">kind</span> <span class="cell-na">not a Claude Code session</span></div>'+
+       '<div class="sid"><span class="k">ws id</span> '+esc(r.workspaceRef||"—")+"</div>"
+      :'<div class="sid"><span class="k">title</span> '+esc(r.title||"(no ccs title yet)")+"</div>"+
+       '<div class="sid"><span class="k">id</span> '+esc(r.sessionId)+"</div>"+
+       '<div class="sid"><span class="k">ws id</span> '+esc(r.workspaceRef||"—")+"</div>";
     tr.innerHTML='<td><div class="name"><span class="k">tab</span> '+esc(r.surfaceTitle||"(unnamed)")+(r.workspaceFocused?' <span class="foc">◀ focused</span>':"")+'</div>'+
       '<div class="name"><span class="k">ws</span> '+esc(r.workspaceTitle||"—")+'</div>'+
-      '<div class="sid">'+sessionLine+"</div></td>"+
+      identity+"</td>"+
       '<td>'+yn(true)+'</td>'+
       '<td class="v">'+(unbound?'<span class="cell-na">—</span>':'<span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span>')+'</td>'+
       '<td class="v">'+(unbound?'<span class="cell-na">—</span>':esc(r.derivedLabel??r.trackedLifecycle??"—"))+'</td>'+
