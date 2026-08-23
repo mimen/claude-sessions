@@ -345,6 +345,8 @@ let statusKickIds = new Set<string>();
 let extrasKickPending = false;
 let lastWorkingIds = new Set<string>();
 let lastBilledKickIds = new Set<string>();
+/** Session ids whose last billed model was peeked from the transcript after a stop. */
+const peekedLastBilled = new Map<string, { model: string; at: number }>();
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 
 function rowIsWorking(row: MirrorRow): boolean {
@@ -361,13 +363,16 @@ function peekLastAssistantModel(transcriptPath: string): string | null {
   }
   try {
     const size = statSync(transcriptPath).size;
-    const window = Math.min(size, 256 * 1024);
+    const window = Math.min(size, 1024 * 1024);
     const buf = Buffer.alloc(window);
     readSync(fd, buf, 0, window, size - window);
     const text = buf.toString("utf8");
-    let last: string | null = null;
-    for (const line of text.split("\n")) {
-      if (!line.includes("model")) continue;
+    const lines = text.split("\n");
+    // First fragment is a truncated line when we did not start at byte 0.
+    const start = size > window ? 1 : 0;
+    for (let i = lines.length - 1; i >= start; i--) {
+      const line = lines[i];
+      if (!line || !line.includes("model")) continue;
       try {
         const parsed = JSON.parse(line) as {
           type?: string;
@@ -375,12 +380,12 @@ function peekLastAssistantModel(transcriptPath: string): string | null {
           model?: string;
         };
         const model = parsed.message?.model ?? parsed.model ?? "";
-        if (parsed.type === "assistant" && model && model !== "<synthetic>") last = model;
+        if (parsed.type === "assistant" && model && model !== "<synthetic>") return model;
       } catch {
-        // partial first line from the window is expected
+        continue;
       }
     }
-    return last;
+    return null;
   } finally {
     closeSync(fd);
   }
@@ -402,15 +407,15 @@ function refreshLastBilled(sessionId: string): void {
   if (!path) return;
   const model = peekLastAssistantModel(path);
   if (!model) return;
+  peekedLastBilled.set(sessionId, { model, at: Date.now() });
   const prev = indexFactsBySession.get(sessionId);
-  const next = {
+  indexFactsBySession.set(sessionId, {
     lastActivityAt: prev?.lastActivityAt ?? Date.now(),
     messageCount: prev?.messageCount ?? null,
     models: prev?.models ?? [model],
     lastModel: model,
     cwd: prev?.cwd ?? null,
-  };
-  indexFactsBySession.set(sessionId, next);
+  });
 }
 
 function catalogueLifecycleOf(sessionId: string): string | null {
@@ -455,7 +460,12 @@ function extrasFor(sessionId: string | null, workspaceId: string | null): Pick<
     branch: dir?.branch ?? ws?.branch ?? null,
     lastActivityAt: index?.lastActivityAt ?? null,
     messageCount: index?.messageCount ?? null,
-    models: index?.lastModel ? [index.lastModel] : index?.models ?? [],
+    models: (() => {
+      const peeked = sessionId ? peekedLastBilled.get(sessionId) : undefined;
+      if (peeked) return [peeked.model];
+      if (index?.lastModel) return [index.lastModel];
+      return index?.models ?? [];
+    })(),
     enrichmentState: enrichment?.state ?? null,
     enrichmentNext: enrichment?.next ?? null,
     enrichmentRecommendation: enrichment?.recommendation ?? null,
@@ -584,11 +594,16 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
     cwd: string | null;
   }>();
   for (const row of indexRows) {
+    const peeked = peekedLastBilled.get(row.sessionId);
+    const indexedLast = row.lastModel ?? null;
+    const indexedAt = row.lastTs ? Date.parse(row.lastTs) : 0;
+    const lastModel = peeked && peeked.at >= indexedAt ? peeked.model : indexedLast ?? peeked?.model ?? null;
+    if (indexedLast && peeked && indexedAt > peeked.at) peekedLastBilled.delete(row.sessionId);
     const fact = {
       lastActivityAt: row.lastTs ? Date.parse(row.lastTs) : null,
       messageCount: row.messageCount ?? null,
       models: row.models,
-      lastModel: row.lastModel ?? null,
+      lastModel,
       cwd: row.cwd,
     };
     nextIndex.set(row.sessionId, fact);
@@ -741,6 +756,12 @@ async function sweepLoop(): Promise<void> {
       lastBilledKickIds.clear();
       for (const id of ids) refreshLastBilled(id);
       paintMirrorFromCache();
+      // Transcript flush can lag the pill drop; peek again shortly so we don't lock in the previous model.
+      void (async () => {
+        await Bun.sleep(400);
+        for (const id of ids) refreshLastBilled(id);
+        paintMirrorFromCache();
+      })();
     }
     if (extrasKickPending && lastTreeFacts) {
       extrasKickPending = false;
