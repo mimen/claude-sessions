@@ -17,7 +17,11 @@ import { CATALOGUE_PATH, DB_PATH } from "../src/paths.ts";
 import { scanStore } from "../src/store.ts";
 import { readIndexReadOnly } from "../src/sidebar/index-read.ts";
 import { readCatalogueReadOnly } from "../src/sidebar/catalogue-read.ts";
+import { readNotifications } from "../src/sidebar/notifications.ts";
+import { readWorkspaceStates } from "../src/sidebar/workspace-state.ts";
+import { createDirectoryFactsCache } from "../src/sidebar/directory-facts.ts";
 import { subscribeToCmuxEvents, workspaceIdFromFrame } from "../src/cmux/events.ts";
+import type { StoredEnrichment } from "../src/catalogue/enrichment.ts";
 import {
   auditAgentActivity,
   auditCoverage,
@@ -119,6 +123,20 @@ export interface MirrorRow {
   derivedLabel: string | null;
   /** CCS catalogue: active / saved / completed / incognito. Null if unbound or unknown. */
   catalogueLifecycle: string | null;
+  workspaceId: string | null;
+  pinned: boolean;
+  shortcut: number | null;
+  unread: number;
+  cwd: string | null;
+  project: string | null;
+  worktree: string | null;
+  branch: string | null;
+  lastActivityAt: number | null;
+  messageCount: number | null;
+  models: readonly string[];
+  enrichmentState: string | null;
+  enrichmentNext: string | null;
+  enrichmentRecommendation: string | null;
 }
 
 export interface WorkspaceGroup {
@@ -203,6 +221,10 @@ function buildMirror(
       : null,
     derivedLabel: statusFromAgentLifecycle(r.trackedLifecycle)?.label ?? null,
     catalogueLifecycle: catalogueLifecycleOf(r.sessionId),
+    workspaceId: r.workspaceId,
+    pinned: false,
+    shortcut: null,
+    ...extrasFor(r.sessionId, r.workspaceId),
   });
   const liveBySurface = new Map(
     joined.live.filter((r) => r.surfaceId).map((r) => [r.surfaceId as string, r]),
@@ -253,7 +275,15 @@ function buildMirror(
           authoritativePill: null,
           derivedLabel: null,
           catalogueLifecycle: null,
+          workspaceId: surface.workspaceId,
+          pinned: surface.workspacePinned === true,
+          shortcut: shortcutForSurface(surface, treeFacts),
+          ...extrasFor(null, surface.workspaceId),
         };
+    if (bound) {
+      row.pinned = surface.workspacePinned === true;
+      row.shortcut = shortcutForSurface(surface, treeFacts);
+    }
     group.tabs.push(row);
     live.push(row);
   }
@@ -291,12 +321,69 @@ let lastHooksFacts: Awaited<ReturnType<typeof auditHookBindings>>["facts"] | nul
 let lastTitles = new Map<string, string>();
 let lastTreeFacts: Awaited<ReturnType<typeof auditSurfaceTree>>["facts"] | null = null;
 let catalogueBySession = new Map<string, string>();
+let enrichmentBySession = new Map<string, StoredEnrichment>();
+let indexFactsBySession = new Map<string, {
+  lastActivityAt: number | null;
+  messageCount: number | null;
+  models: readonly string[];
+  cwd: string | null;
+}>();
+let unreadByWorkspaceId = new Map<string, number>();
+let workspaceStateById = new Map<string, { cwd: string; branch: string | null }>();
+const directoryFacts = createDirectoryFactsCache();
+let directoryByCwd = new Map<string, { project: string | null; worktree: string | null; branch: string | null }>();
 let catalogueKickPending = false;
 let statusKickIds = new Set<string>();
+let extrasKickPending = false;
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 
 function catalogueLifecycleOf(sessionId: string): string | null {
   return catalogueBySession.get(sessionId) ?? null;
+}
+
+function shortcutForSurface(
+  surface: { windowRef: string; workspaceIndex?: number | null },
+  treeFacts: Awaited<ReturnType<typeof auditSurfaceTree>>["facts"],
+): number | null {
+  const focusedWindow = treeFacts.surfaces.find((s) => s.windowActive)?.windowRef ?? null;
+  if (focusedWindow === null || surface.windowRef !== focusedWindow) return null;
+  const index = surface.workspaceIndex;
+  if (typeof index !== "number" || index < 0 || index > 8) return null;
+  return index + 1;
+}
+
+function extrasFor(sessionId: string | null, workspaceId: string | null): Pick<
+  MirrorRow,
+  | "unread"
+  | "cwd"
+  | "project"
+  | "worktree"
+  | "branch"
+  | "lastActivityAt"
+  | "messageCount"
+  | "models"
+  | "enrichmentState"
+  | "enrichmentNext"
+  | "enrichmentRecommendation"
+> {
+  const index = sessionId ? indexFactsBySession.get(sessionId) : undefined;
+  const ws = workspaceId ? workspaceStateById.get(workspaceId) : undefined;
+  const cwd = ws?.cwd ?? index?.cwd ?? null;
+  const dir = cwd ? directoryByCwd.get(cwd) : undefined;
+  const enrichment = sessionId ? enrichmentBySession.get(sessionId) : undefined;
+  return {
+    unread: workspaceId ? unreadByWorkspaceId.get(workspaceId) ?? 0 : 0,
+    cwd,
+    project: dir?.project ?? null,
+    worktree: dir?.worktree ?? null,
+    branch: dir?.branch ?? ws?.branch ?? null,
+    lastActivityAt: index?.lastActivityAt ?? null,
+    messageCount: index?.messageCount ?? null,
+    models: index?.models ?? [],
+    enrichmentState: enrichment?.state ?? null,
+    enrichmentNext: enrichment?.next ?? null,
+    enrichmentRecommendation: enrichment?.recommendation ?? null,
+  };
 }
 
 function reloadCatalogue(): void {
@@ -306,6 +393,7 @@ function reloadCatalogue(): void {
   for (const [id, lifecycle] of outcome.facts.lifecycles) next.set(id, lifecycle);
   for (const id of outcome.facts.incognito) next.set(id, "incognito");
   catalogueBySession = next;
+  enrichmentBySession = new Map(outcome.facts.summaries);
 }
 
 function paintMirrorFromCache(): void {
@@ -409,6 +497,58 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
   lastTitles = titlesBySession;
   lastTreeFacts = tree.facts;
   reloadCatalogue();
+
+  const nextIndex = new Map<string, {
+    lastActivityAt: number | null;
+    messageCount: number | null;
+    models: readonly string[];
+    cwd: string | null;
+  }>();
+  for (const row of indexRows) {
+    const fact = {
+      lastActivityAt: row.lastTs ? Date.parse(row.lastTs) : null,
+      messageCount: row.messageCount ?? null,
+      models: row.models,
+      cwd: row.cwd,
+    };
+    nextIndex.set(row.sessionId, fact);
+    if (row.resumeId) nextIndex.set(row.resumeId, fact);
+  }
+  indexFactsBySession = nextIndex;
+
+  const workspaceIds = [...new Set(tree.facts.surfaces.map((s) => s.workspaceId))];
+  try {
+    const notes = await readNotifications();
+    unreadByWorkspaceId = new Map(notes.unreadCountsByWorkspaceId);
+  } catch {
+    // keep previous unread map
+  }
+  try {
+    const states = await readWorkspaceStates(workspaceIds);
+    const nextStates = new Map<string, { cwd: string; branch: string | null }>();
+    const cwds: string[] = [];
+    for (const [id, state] of states) {
+      if (!state) continue;
+      nextStates.set(id, { cwd: state.cwd, branch: state.branch });
+      if (state.cwd) cwds.push(state.cwd);
+    }
+    workspaceStateById = nextStates;
+    if (cwds.length > 0) {
+      const dirs = await directoryFacts.lookup(cwds);
+      const nextDir = new Map<string, { project: string | null; worktree: string | null; branch: string | null }>();
+      for (const cwd of cwds) {
+        const checkout = dirs.checkouts.get(cwd);
+        nextDir.set(cwd, {
+          project: checkout?.project ?? null,
+          worktree: checkout?.worktree ?? null,
+          branch: checkout?.branch ?? null,
+        });
+      }
+      directoryByCwd = nextDir;
+    }
+  } catch {
+    // extras stay at last known values
+  }
   // Never paint from this cycle's tree: it may be seconds old by the time activity
   // and index work finish, and would clobber a rename/focus the fast path already showed.
   kickPending = true;
@@ -516,6 +656,18 @@ async function sweepLoop(): Promise<void> {
       reloadCatalogue();
       paintMirrorFromCache();
     }
+    if (extrasKickPending && lastTreeFacts) {
+      extrasKickPending = false;
+      void (async () => {
+        try {
+          const notes = await readNotifications();
+          unreadByWorkspaceId = new Map(notes.unreadCountsByWorkspaceId);
+          paintMirrorFromCache();
+        } catch {
+          // keep previous unread map
+        }
+      })();
+    }
     await Bun.sleep(150);
   }
 }
@@ -539,6 +691,8 @@ function startEventKicker(): void {
         lastEventAt = Date.now();
         kickPending = true;
       }
+      if (scopes.has("notifications")) extrasKickPending = true;
+      if (scopes.has("workspaceState")) extrasKickPending = true;
     },
     onFrame(frame, scopes) {
       if (!scopes.has("status")) return;
@@ -717,11 +871,29 @@ function render(d){
       const unbound=r.kind==="unbound";
       const bad=!unbound&&((r.authoritativePill&&r.derivedLabel&&r.authoritativePill!==r.derivedLabel)||r.transcriptState==="absent");
       const tr=document.createElement("tr");tr.className="tab-row"+(bad?" row-bad":"")+(r.surfaceFocused?" tab-focused":"");
+      const badges=[];
+      if(r.primary)badges.push('<span class="pri">primary</span>');
+      if(r.surfaceFocused)badges.push('<span class="foc">focused tab</span>');
+      if(r.pinned)badges.push('<span class="pri">pinned</span>');
+      if(r.shortcut)badges.push('<span class="pri">⌘'+r.shortcut+"</span>");
+      if(r.unread)badges.push('<span class="foc">'+r.unread+" unread</span>");
+      const extras=[];
+      if(r.project)extras.push("<span><b>project</b>"+esc(r.project)+"</span>");
+      if(r.worktree)extras.push("<span><b>worktree</b>"+esc(r.worktree)+"</span>");
+      if(r.branch)extras.push("<span><b>branch</b>"+esc(r.branch)+"</span>");
+      if(r.cwd)extras.push("<span><b>cwd</b>"+esc(r.cwd)+"</span>");
+      if(r.messageCount!=null)extras.push("<span><b>msgs</b>"+r.messageCount+"</span>");
+      if(r.lastActivityAt)extras.push("<span><b>last</b>"+ago(r.lastActivityAt)+"s</span>");
+      if(r.models&&r.models.length)extras.push("<span><b>model</b>"+esc(r.models[r.models.length-1])+"</span>");
+      if(r.enrichmentState)extras.push("<span><b>state</b>"+esc(r.enrichmentState)+"</span>");
+      if(r.enrichmentNext)extras.push("<span><b>next</b>"+esc(r.enrichmentNext)+"</span>");
+      if(r.enrichmentRecommendation)extras.push("<span><b>rec</b>"+esc(r.enrichmentRecommendation)+"</span>");
       const ident=unbound
         ?'<div class="kind-tag">not a Claude Code session</div>'
         :'<div class="tab">ccs · '+esc(r.title||"no title yet")+(r.catalogueLifecycle?' · '+esc(r.catalogueLifecycle):"")+"</div>"+
          '<div class="meta-line"><span><b>uuid</b>'+esc(r.sessionId)+"</span></div>";
-      tr.innerHTML='<td class="ident"><div class="tab">'+esc(r.surfaceTitle||"(unnamed tab)")+(r.primary?' <span class="pri">primary</span>':"")+(r.surfaceFocused?' <span class="foc">focused tab</span>':"")+"</div>"+ident+"</td>"+
+      tr.innerHTML='<td class="ident"><div class="tab">'+esc(r.surfaceTitle||"(unnamed tab)")+badges.join(" ")+"</div>"+ident+
+        (extras.length?'<div class="meta-line">'+extras.join("")+"</div>":"")+"</td>"+
         '<td>'+yn(true)+'</td>'+
         '<td class="v">'+(unbound?'<span class="cell-na">—</span>':'<span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span>')+'</td>'+
         '<td class="v">'+(unbound?'<span class="cell-na">—</span>':esc(r.derivedLabel??r.trackedLifecycle??"—"))+'</td>'+
