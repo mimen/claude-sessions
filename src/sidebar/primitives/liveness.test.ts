@@ -24,7 +24,7 @@ function tree(surfaces: SurfaceLocation[], revision = 1): SurfaceTreeRead {
   return {
     surfaces,
     workspaceIds: new Set(surfaces.map((s) => s.workspaceId)),
-    focusedWorkspaceId: surfaces.find((s) => s.workspaceActive)?.workspaceId ?? null,
+    focusedWorkspaceId: surfaces.find((s) => s.workspaceSelected)?.workspaceId ?? null,
     readable: true,
     revision,
   };
@@ -63,7 +63,7 @@ function bindings(opts: {
 describe("joinLiveness", () => {
   test("a bound surface in the tree is live, in tree order", () => {
     const sA = loc({ surfaceId: "S-A", workspaceId: "W-A", workspaceRef: "workspace:1" });
-    const sB = loc({ surfaceId: "S-B", workspaceId: "W-B", workspaceRef: "workspace:2", workspaceActive: true });
+    const sB = loc({ surfaceId: "S-B", workspaceId: "W-B", workspaceRef: "workspace:2", workspaceSelected: true });
     const joined = joinLiveness(
       tree([sA, sB], 3),
       bindings({

@@ -49,6 +49,7 @@ interface TreeSurface {
   active?: boolean;
   focused?: boolean;
   selected?: boolean;
+  selected_in_pane?: boolean;
 }
 interface TreePane {
   id: string;
@@ -63,12 +64,14 @@ interface TreeWorkspace {
   title?: string | null;
   pinned?: boolean;
   active?: boolean;
+  selected?: boolean;
   panes?: TreePane[];
 }
 interface TreeWindow {
   id: string;
   ref: string;
   active?: boolean;
+  selected_workspace_ref?: string;
   workspaces?: TreeWorkspace[];
 }
 /** cmux's own pointer at whatever currently has focus, across every window. */
@@ -98,8 +101,12 @@ export interface SurfaceLocation {
   workspacePinned?: boolean;
   /** True for the one workspace cmux currently has focused, across every window. */
   workspaceActive?: boolean;
+  /** True when this is the selected workspace in its window (even if the window is backgrounded). */
+  workspaceSelected?: boolean;
   /** True when this surface is the focused/active pane tab inside its workspace. */
   surfaceActive?: boolean;
+  /** True when this surface is the selected tab in its pane (even if the window is backgrounded). */
+  surfaceSelected?: boolean;
   windowId: string;
   windowRef: string;
   /** True when this surface's window is the one cmux currently has focused. */
@@ -160,7 +167,9 @@ export function parseTree(tree: CmuxTree): SurfaceLocation[] {
             workspaceIndex: typeof ws.index === "number" ? ws.index : null,
             workspacePinned: ws.pinned === true,
             workspaceActive: ws.active === true,
-            surfaceActive: s.active === true || s.focused === true || s.selected === true,
+            workspaceSelected: ws.selected === true || win.selected_workspace_ref === ws.ref,
+            surfaceActive: s.active === true || s.focused === true,
+            surfaceSelected: s.selected === true || s.selected_in_pane === true,
             windowId: win.id,
             windowRef: win.ref,
             windowActive: win.active === true,

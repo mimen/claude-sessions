@@ -218,7 +218,7 @@ function buildMirror(
       group = {
         workspaceRef: key,
         workspaceTitle: surface.workspaceTitle,
-        workspaceFocused: surface.windowActive === true && surface.workspaceActive === true,
+        workspaceFocused: surface.workspaceSelected === true,
         tabs: [],
       };
       win.workspaces.push(group);
@@ -238,8 +238,8 @@ function buildMirror(
           workspaceRef: surface.workspaceRef,
           trackedLifecycle: null,
           surfaceInTree: true,
-          workspaceFocused: surface.workspaceActive === true,
-          surfaceFocused: surface.surfaceActive === true,
+          workspaceFocused: surface.workspaceSelected === true,
+          surfaceFocused: surface.surfaceSelected === true,
           pidAlive: null,
           transcriptState: "present",
           authoritativePill: null,

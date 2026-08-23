@@ -40,7 +40,7 @@ export function identityOf(surfaces: readonly SurfaceLocation[]): string {
   return surfaces
     .map(
       (s) =>
-        `${s.surfaceId}\t${s.windowRef}\t${s.windowActive === true ? "1" : "0"}\t${s.workspaceId}\t${s.workspaceActive === true ? "1" : "0"}\t${s.surfaceActive === true ? "1" : "0"}\t${s.title ?? ""}\t${s.workspaceTitle ?? ""}`,
+        `${s.surfaceId}\t${s.windowRef}\t${s.windowActive === true ? "1" : "0"}\t${s.workspaceId}\t${s.workspaceSelected === true ? "1" : "0"}\t${s.surfaceSelected === true ? "1" : "0"}\t${s.title ?? ""}\t${s.workspaceTitle ?? ""}`,
     )
     .join("\n");
 }

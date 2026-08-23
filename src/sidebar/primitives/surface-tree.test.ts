@@ -86,9 +86,9 @@ describe("identityOf / revision", () => {
   });
 
   test("a title or focus change is a new identity", () => {
-    const a = [loc({ surfaceId: "S", workspaceId: "W", title: "t", workspaceActive: false })];
-    const b = [loc({ surfaceId: "S", workspaceId: "W", title: "t!", workspaceActive: false })];
-    const c = [loc({ surfaceId: "S", workspaceId: "W", title: "t", workspaceActive: true })];
+    const a = [loc({ surfaceId: "S", workspaceId: "W", title: "t", workspaceSelected: false })];
+    const b = [loc({ surfaceId: "S", workspaceId: "W", title: "t!", workspaceSelected: false })];
+    const c = [loc({ surfaceId: "S", workspaceId: "W", title: "t", workspaceSelected: true })];
     expect(identityOf(a)).not.toBe(identityOf(b));
     expect(identityOf(a)).not.toBe(identityOf(c));
   });
