@@ -134,7 +134,7 @@ function readLocalT3SessionIds(path: string): string[] {
   if (!existsSync(path)) return [];
   const db = new Database(path, { readonly: true });
   try {
-    db.exec("PRAGMA query_only = ON;");
+    db.exec("PRAGMA busy_timeout = 100; PRAGMA query_only = ON;");
     const rows = db.query(
       `SELECT resume_cursor_json
          FROM provider_session_runtime
@@ -159,7 +159,7 @@ function readLocalT3SessionIds(path: string): string[] {
 function readIndexRows(indexPath: string): T3IndexRow[] {
   const db = new Database(indexPath, { readonly: true });
   try {
-    db.exec("PRAGMA query_only = ON;");
+    db.exec("PRAGMA busy_timeout = 100; PRAGMA query_only = ON;");
     const rows = db.query(
       `SELECT session_id, COALESCE(resume_id, session_id) AS resume_id, host, cwd
          FROM sessions

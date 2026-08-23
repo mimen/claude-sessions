@@ -115,13 +115,14 @@ export async function sidebarCommand(args: readonly string[]): Promise<number> {
     // Only the resident server observes change. One-shot sources remain free of child processes,
     // timers and database probes that would outlive their answer.
     const changes = startSidebarChangeMonitor({ source });
-    syncT3();
+    const initialT3Sync = setTimeout(syncT3, 1_000);
     const t3SyncTimer = setInterval(syncT3, 30_000);
     try {
       console.log(`ccs sidebar listening on ${server.url.href}`);
       // Serve until interrupted, then release the cmux child, timer, database handles and socket.
       await waitForTermination();
     } finally {
+      clearTimeout(initialT3Sync);
       clearInterval(t3SyncTimer);
       changes.stop();
       source.close?.();
