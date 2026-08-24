@@ -14,6 +14,7 @@
  * false` rather than invented activity.
  */
 import { Database } from "bun:sqlite";
+import { statSync } from "node:fs";
 import { readCatalogueReadOnly, type CatalogueSnapshotFacts } from "../catalogue-read.ts";
 
 export interface CatalogueRead {
@@ -23,13 +24,30 @@ export interface CatalogueRead {
 }
 
 export interface CatalogueReaderIo {
-  readonly dbPath: string;
+  /**
+   * Owned probe: probe this file's inode identity + data_version. Used when no external
+   * probe is supplied. Omit when the consumer has a change detector that already covers
+   * every file its readFacts adapter touches.
+   */
+  readonly dbPath?: string;
+  /**
+   * External change detector: return true when the sources behind readFacts may have
+   * changed. Runs every read; a false means the cached facts are still trustworthy.
+   */
+  readonly probe?: () => boolean;
   /** Re-read the full facts through the established query-only adapter. */
   readFacts(): CatalogueSnapshotFacts | null;
+  /**
+   * Failure posture on a failed re-read:
+   *   - "retain" (default): keep the last complete facts — a stale fact beats a blank one.
+   *   - "empty": degrade to empty facts — the consumer's contract is "unknown ⇒ treat as
+   *     active" so nothing is ever hidden by a broken catalogue. The snapshot's posture.
+   */
+  readonly degradeTo?: "retain" | "empty";
 }
 
 export interface CatalogueReader {
-  read(): Promise<CatalogueRead>;
+  read(): CatalogueRead;
   close(): void;
 }
 
@@ -38,8 +56,26 @@ export function createCatalogueReader(io: CatalogueReaderIo): CatalogueReader {
   let lastVersion: number | null = null;
   let revision = 0;
   let facts: CatalogueSnapshotFacts | null = null;
+  /**
+   * Device/inode identity of the file the connection was opened against. Reindex and the
+   * catalogue refresh replace the file atomically (temp + rename), so a commit can arrive as a
+   * NEW inode while this connection keeps reading the old one — data_version would never move.
+   * An identity change forces a reconnect and a full re-read regardless of the version number.
+   */
+  let lastFileIdentity: { dev: number; ino: number } | null = null;
+
+  function fileIdentity(): { dev: number; ino: number } | null {
+    if (!io.dbPath) return null;
+    try {
+      const st = statSync(io.dbPath);
+      return { dev: st.dev, ino: st.ino };
+    } catch {
+      return null;
+    }
+  }
 
   function connection(): Database | null {
+    if (!io.dbPath) return null;
     if (db) return db;
     try {
       db = new Database(io.dbPath, { readonly: true });
@@ -52,7 +88,40 @@ export function createCatalogueReader(io: CatalogueReaderIo): CatalogueReader {
   }
 
   return {
-    async read(): Promise<CatalogueRead> {
+    read(): CatalogueRead {
+      // External probe wins when supplied: the consumer knows which files its adapter reads.
+      if (io.probe) {
+        if (!io.probe() && facts !== null) {
+          return { facts, readable: true, revision };
+        }
+        const fresh = io.readFacts();
+        if (fresh === null) {
+          if (io.degradeTo === "empty") {
+            facts = emptyFacts();
+            return { facts, readable: false, revision };
+          }
+          return { facts: facts ?? emptyFacts(), readable: facts !== null, revision };
+        }
+        facts = fresh;
+        revision += 1;
+        return { facts, readable: true, revision };
+      }
+
+      // Owned probe: inode identity + data_version on io.dbPath.
+      const identity = fileIdentity();
+      const replaced =
+        identity !== null && lastFileIdentity !== null
+        && (identity.dev !== lastFileIdentity.dev || identity.ino !== lastFileIdentity.ino);
+      if (replaced) {
+        // The file was swapped under us (temp + rename); this handle reads a dead inode.
+        try {
+          db?.close();
+        } catch {
+          // already closed
+        }
+        db = null;
+      }
+      if (identity !== null) lastFileIdentity = identity;
       const conn = connection();
       if (conn === null) {
         return {
@@ -67,18 +136,22 @@ export function createCatalogueReader(io: CatalogueReaderIo): CatalogueReader {
       } catch {
         return { facts: facts ?? emptyFacts(), readable: false, revision };
       }
-      if (version === lastVersion && facts !== null) {
+      if (!replaced && version === lastVersion && facts !== null) {
         return { facts, readable: true, revision };
       }
       const fresh = io.readFacts();
       if (fresh === null) {
+        if (io.degradeTo === "empty") {
+          facts = emptyFacts();
+          return { facts, readable: false, revision };
+        }
         // The adapter could not read; keep whatever we had rather than degrading to empty.
         return { facts: facts ?? emptyFacts(), readable: facts !== null, revision };
       }
       facts = fresh;
-      const changed = lastVersion !== null && version !== lastVersion;
+      const changed = replaced || (lastVersion !== null && version !== lastVersion) || revision === 0;
       lastVersion = version;
-      if (changed || revision === 0) revision += 1;
+      if (changed) revision += 1;
       return { facts, readable: true, revision };
     },
     close() {

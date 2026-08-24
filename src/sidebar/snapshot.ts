@@ -67,6 +67,7 @@ import {
   type ActivityObservation,
   type EffectiveActivity,
 } from "./primitives/agent-activity.ts";
+import { createCatalogueReader } from "./primitives/catalogue.ts";
 import {
   createCachedNotificationReader,
   type CachedNotificationReader,
@@ -665,6 +666,30 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   };
   const readCatalogue = options.readCatalogue ?? readCatalogueReadOnly;
   const readIndex = options.readIndex ?? readIndexReadOnly;
+  let lastCatalogueReason: string | null = null;
+  const catalogueReader = createCatalogueReader({
+    // The probe must cover the same files readFacts touches: readCache tracks the durable
+    // stores' data_version itself; without it, re-read unconditionally (the prior behavior).
+    ...(readCache
+      ? { probe: () => readCache.reconcile() }
+      : { probe: () => true }),
+    degradeTo: "empty",
+    readFacts: () => {
+      const outcome: CatalogueReadOutcome = readCache
+        ? readCache.readCatalogue()
+        : readCatalogue(cataloguePath);
+      if (outcome.status === "ok") {
+        lastCatalogueReason = null;
+        return outcome.facts;
+      }
+      lastCatalogueReason = outcome.status === "missing"
+        ? "catalogue file is missing"
+        : outcome.status === "unsupported-schema"
+        ? `unsupported schema (${outcome.missing.join(", ")})`
+        : outcome.error.message;
+      return null;
+    },
+  });
   const readIndexedSessionsOverride = options.indexedSessions;
   const observeSnapshot = options.observeSnapshot;
   // Only directories the latest snapshot published can serve an icon; the map is replaced on
@@ -729,43 +754,16 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   function readCatalogueLifecyclesSafely(): CatalogueLifecycleState & {
     readonly readable: boolean;
   } {
-    const outcome: CatalogueReadOutcome = readCache
-      ? readCache.readCatalogue()
-      : readCatalogue(cataloguePath);
-    if (outcome.status === "ok") return { ...outcome.facts, readable: true };
+    // Primitive 5 owns the probe-gated reload and the revision; the failure posture here is
+    // "empty" because this consumer's contract is "unknown ⇒ treat as active", never hide work.
+    const read = catalogueReader.read();
+    if (read.readable) return { ...read.facts, readable: true };
 
-    const reason = outcome.status === "missing"
-      ? "catalogue file is missing"
-      : outcome.status === "unsupported-schema"
-      ? `unsupported schema (${outcome.missing.join(", ")})`
-      : outcome.error.message;
     log.warn("sidebar could not read the session catalogue; lifecycle degraded to active", {
-      error: reason,
-      status: outcome.status,
+      error: lastCatalogueReason ?? "catalogue unreadable",
     });
-    return {
-      lifecycles: new Map(),
-      catalogueLifecycles: new Map(),
-      canonicalSessionIds: new Map(),
-      preferredTitles: new Map<string, string>(),
-      memberships: new Map<string, SidebarMembership>(),
-      // Nothing is known to be auxiliary when the catalogue is unreadable, so nothing is hidden.
-      auxiliary: new Set<string>(),
-      t3Associated: new Set<string>(),
-      t3SessionIds: [],
-      // Incognito degrades the same way, and cannot do better: the catalogue is the only record of
-      // which sessions are marked, so an unreadable one leaves the sidebar with nothing to filter
-      // on. This is a broken-machine state, not a routine one -- the warning above is the signal.
-      incognito: new Set<string>(),
-      t3Associated: new Set<string>(),
-      summaries: new Map<string, StoredEnrichment>(),
-      sessionIds: new Map<SidebarLifecycle, readonly string[]>([
-        ["active", []],
-        ["completed", []],
-        ["saved", []],
-      ]),
-      readable: false,
-    };
+    return { ...read.facts, readable: false };
+(feat(sidebar): snapshot catalogue phase flows through primitive 5)
   }
 
   function updateLifecycle(
@@ -1255,6 +1253,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
 
     close(): void {
       readCache?.close();
+      catalogueReader.close();
       revisionListeners.clear();
     },
 

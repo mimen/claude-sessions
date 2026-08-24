@@ -80,6 +80,41 @@ describe("createCatalogueReader", () => {
     }
   });
 
+  test("degradeTo empty swaps a failed re-read for empty facts, the snapshot's posture", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { Database } = await import("bun:sqlite");
+    const root = mkdtempSync(join(tmpdir(), "ccs-cat-empty-"));
+    try {
+      const dbPath = join(root, "catalogue.db");
+      const writer = new Database(dbPath);
+      writer.exec(`CREATE TABLE catalogue (session_id TEXT PRIMARY KEY);
+        CREATE TABLE identities (identity_key TEXT PRIMARY KEY);
+        CREATE TABLE session_category_assignments (session_id TEXT, slug TEXT);`);
+      writer.close();
+      let adapterFails = false;
+      const reader = createCatalogueReader({
+        dbPath,
+        degradeTo: "empty",
+        readFacts: () => (adapterFails ? null : factsWith(["done-1"])),
+      });
+      const good = await reader.read();
+      expect(good.facts.lifecycles.get("done-1")).toBe("completed");
+      adapterFails = true;
+      // The probe only re-reads facts after a committed change moves data_version.
+      const w2 = new Database(dbPath);
+      w2.exec(`INSERT INTO catalogue (session_id) VALUES ('done-2');`);
+      w2.close();
+      const degraded = await reader.read();
+      expect(degraded.readable).toBe(false);
+      expect(degraded.facts.lifecycles.size).toBe(0);
+      reader.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("a first read against a missing database degrades to empty, readable false", async () => {
     const { mkdtempSync, rmSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
@@ -94,6 +129,50 @@ describe("createCatalogueReader", () => {
       expect(read.readable).toBe(false);
       expect(read.facts.lifecycles.size).toBe(0);
       expect(read.revision).toBe(0);
+      reader.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("an atomically replaced file (temp + rename) forces a reload, not a dead-inode read", async () => {
+    const { mkdtempSync, rmSync, renameSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { Database } = await import("bun:sqlite");
+    const root = mkdtempSync(join(tmpdir(), "ccs-cat-rename-"));
+    try {
+      const dbPath = join(root, "catalogue.db");
+      const writer = new Database(dbPath);
+      writer.exec(`CREATE TABLE catalogue (session_id TEXT PRIMARY KEY);
+        CREATE TABLE identities (identity_key TEXT PRIMARY KEY);
+        CREATE TABLE session_category_assignments (session_id TEXT, slug TEXT);`);
+      writer.close();
+      let factsVersion = 1;
+      const reader = createCatalogueReader({
+        dbPath,
+        degradeTo: "empty",
+        readFacts: () => factsWith(factsVersion === 1 ? ["done-1"] : ["done-1", "done-2"]),
+      });
+      const first = await reader.read();
+      expect(first.facts.lifecycles.get("done-2")).toBeUndefined();
+      const r1 = first.revision;
+
+      // Reindex-style commit: build a replacement file, then rename over the original. The
+      // primitive's open handle would keep reading the dead inode without inode tracking.
+      const temp = join(root, "catalogue.db.tmp");
+      const w2 = new Database(temp);
+      w2.exec(`CREATE TABLE catalogue (session_id TEXT PRIMARY KEY);
+        CREATE TABLE identities (identity_key TEXT PRIMARY KEY);
+        CREATE TABLE session_category_assignments (session_id TEXT, slug TEXT);
+        INSERT INTO catalogue (session_id) VALUES ('done-2');`);
+      w2.close();
+      factsVersion = 2;
+      renameSync(temp, dbPath);
+
+      const after = await reader.read();
+      expect(after.facts.lifecycles.get("done-2")).toBe("completed");
+      expect(after.revision).toBe(r1 + 1);
       reader.close();
     } finally {
       rmSync(root, { recursive: true, force: true });
