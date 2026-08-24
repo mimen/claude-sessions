@@ -11,8 +11,10 @@
  * Read-only against live state. bun run scripts/sidebar-ground-truth-live.ts [port]
  */
 import { Database } from "bun:sqlite";
+import { execFile } from "node:child_process";
 import { closeSync, openSync, readSync, statSync, watch } from "node:fs";
 import { join } from "node:path";
+import { closeSessionWorkspace, type CloseSessionWorkspaceOutcome } from "../src/cmux/close-current.ts";
 import { CATALOGUE_PATH, CATEGORY_REGISTRY_PATH, DB_PATH } from "../src/paths.ts";
 import { scanStore } from "../src/store.ts";
 import { readIndexReadOnly } from "../src/sidebar/index-read.ts";
@@ -43,6 +45,8 @@ import type { SurfaceTreeRead } from "../src/sidebar/primitives/surface-tree.ts"
 
 const PORT = Number(process.argv[2] ?? 8793);
 const ACTIVITY_EVERY_N_CYCLES = 5;
+const SESSION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CCS_BIN = process.env.CCS_BIN ?? "ccs";
 
 // --- condition ledger (secondary evidence; the mirror is the primary display) -------
 
@@ -433,6 +437,29 @@ function refreshLastBilled(sessionId: string): void {
 
 function catalogueLifecycleOf(sessionId: string): string | null {
   return catalogueBySession.get(sessionId) ?? null;
+}
+
+function resumeViaCcs(sessionId: string): Promise<{ ok: boolean; note: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      CCS_BIN,
+      ["resume-session", sessionId],
+      { encoding: "utf8", timeout: 30_000 },
+      (error, stdout) => {
+        if (error) {
+          resolve({ ok: false, note: `${stdout.trim() || error.message}`.slice(0, 400) });
+          return;
+        }
+        resolve({ ok: true, note: stdout.trim().slice(0, 400) });
+      },
+    );
+  });
+}
+
+function closeOutcomeSummary(outcome: CloseSessionWorkspaceOutcome): string {
+  if (outcome.status === "closed") return "closed";
+  if (outcome.status === "refused") return `refused (${outcome.reason})`;
+  return outcome.status;
 }
 
 function shortcutForSurface(
@@ -1029,6 +1056,8 @@ const HTML = `<!DOCTYPE html>
   .kind-tag{color:var(--warn);font-size:11px}
   .cat{display:inline-block;padding:1px 8px;border-radius:99px;font-size:10.5px;font-weight:600;margin-left:6px;vertical-align:1px}
   .pillchip{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid var(--line);background:var(--line);white-space:nowrap}
+  .act{font-family:inherit;font-size:11.5px;padding:3px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+  .act:hover{border-color:var(--ok);color:var(--ok)}
   footer{margin-top:30px;color:var(--dim);font-size:12.5px;border-top:1px solid var(--line);padding-top:14px;line-height:1.8}
   .legend{color:var(--dim);font-size:12px;margin:4px 0 14px}
 </style>
@@ -1043,13 +1072,13 @@ const HTML = `<!DOCTYPE html>
   <h3>Live surfaces — what cmux binds, measured fresh</h3>
   <div class="legend">Each cell is an independent measurement, not another tracked claim. Check any row against your own tabs.</div>
   <table><thead><tr>
-    <th>Session</th><th>In tree</th><th>Pill (cmux)</th><th>Hooks say</th><th>Pid alive</th><th>Transcript</th>
+    <th>Session</th><th>In tree</th><th>Pill (cmux)</th><th>Hooks say</th><th>Pid alive</th><th>Transcript</th><th></th>
   </tr></thead><tbody id="live"></tbody></table>
 
   <h3>Closed sessions — indexed, not in the live tree</h3>
   <div class="legend">Same CCS facts as live rows (title, lifecycle, category, last billed). Not in cmux right now. Newest first, cap 50.</div>
   <table><thead><tr>
-    <th>Session</th><th>In tree</th><th>Lifecycle</th><th>Last billed</th><th>Indexed</th><th>Transcript</th>
+    <th>Session</th><th>In tree</th><th>Lifecycle</th><th>Last billed</th><th>Indexed</th><th>Transcript</th><th></th>
   </tr></thead><tbody id="closed"></tbody></table>
 
   <h3>Ghosts — tracked by the hook store, contradicted by measurements</h3>
@@ -1116,6 +1145,17 @@ function connectSSE(){
   }catch{}
 }
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");}
+async function act(ev, kind, sessionId){
+  const btn=ev&&ev.target;if(btn&&btn.disabled)return;
+  if(btn)btn.disabled=true;if(btn)btn.textContent=(kind==="resume"?"resuming…":"closing…");
+  try{
+    const r=await fetch("/api/"+kind,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({sessionId})});
+    const d=await r.json();
+    if(!d.ok){alert((kind==="resume"?"resume: ":"close: ")+(d.note||d.outcome||d.error||"failed"));}
+  }catch(e){alert(kind+" failed: "+e.message);}
+  if(btn)btn.disabled=false;if(btn)btn.textContent=kind;
+  tick();
+}
 function yn(b){return b===null?'<span class="cell-na">—</span>':b?'<span class="cell-yes">✓ yes</span>':'<span class="cell-no">✗ no</span>';}
 function tstate(s){return s==="present"?'<span class="cell-yes">✓ on disk</span>'
   :s==="renamed"?'<span class="cell-na">renamed</span>':'<span class="cell-no">✗ gone</span>';}
@@ -1137,12 +1177,12 @@ function render(d){
   for(const win of windows){
     if(winIndex>0){
       const gap=document.createElement("tr");gap.className="win-gap";
-      gap.innerHTML='<td colspan="6"></td>';
+      gap.innerHTML='<td colspan="7"></td>';
       live.appendChild(gap);
     }
     winIndex+=1;
     const whead=document.createElement("tr");whead.className="win-head";
-    whead.innerHTML='<td colspan="6">'+esc(win.windowRef||"window")+(win.windowFocused?' <span class="foc">focused window</span>':"")+"</td>";
+    whead.innerHTML='<td colspan="7">'+esc(win.windowRef||"window")+(win.windowFocused?' <span class="foc">focused window</span>':"")+"</td>";
     live.appendChild(whead);
     for(const g of win.workspaces){
     const head=document.createElement("tr");head.className="ws-head";
@@ -1150,7 +1190,7 @@ function render(d){
     if(g.pinned)wsBadges.push('<span class="pri">pinned</span>');
     if(g.shortcut)wsBadges.push('<span class="pri">⌘'+g.shortcut+"</span>");
     if(g.unread)wsBadges.push('<span class="foc">'+g.unread+" unread</span>");
-    head.innerHTML='<td colspan="6"><span class="ws">'+esc(g.workspaceTitle||"(unnamed workspace)")+(g.workspaceFocused?' <span class="foc">selected</span>':"")+'</span>'+wsBadges.join(" ")+'<span class="ref">'+esc(g.workspaceRef)+"</span></td>";
+    head.innerHTML='<td colspan="7"><span class="ws">'+esc(g.workspaceTitle||"(unnamed workspace)")+(g.workspaceFocused?' <span class="foc">selected</span>':"")+'</span>'+wsBadges.join(" ")+'<span class="ref">'+esc(g.workspaceRef)+"</span></td>";
     live.appendChild(head);
     for(const r of g.tabs){
       const unbound=r.kind==="unbound";
@@ -1188,12 +1228,13 @@ function render(d){
         '<td class="v">'+(unbound?'<span class="cell-na">—</span>':'<span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span>')+'</td>'+
         '<td class="v">'+(unbound?'<span class="cell-na">—</span>':esc(r.derivedLabel??r.trackedLifecycle??"—"))+'</td>'+
         '<td>'+(unbound?'<span class="cell-na">—</span>':(r.pidAlive===null?'<span class="cell-na">idle claim</span>':yn(r.pidAlive)))+'</td>'+
-        '<td>'+(unbound?'<span class="cell-na">—</span>':tstate(r.transcriptState))+"</td>";
+        '<td>'+(unbound?'<span class="cell-na">—</span>':tstate(r.transcriptState))+"</td>"+
+        '<td>'+(unbound?'<span class="cell-na">—</span>':'<button class="act" onclick="act(event,\'close\',\''+esc(r.sessionId)+'\')">close</button>')+"</td>";
       live.appendChild(tr);
     }
     }
   }
-  if(d.mirror.live.length===0)live.innerHTML='<tr><td colspan="6" style="color:var(--dim)">no bound sessions observed yet</td></tr>';
+  if(d.mirror.live.length===0)live.innerHTML='<tr><td colspan="7" style="color:var(--dim)">no bound sessions observed yet</td></tr>';
   const closed=document.getElementById("closed");closed.innerHTML="";
   for(const r of d.mirror.closed||[]){
     const tr=document.createElement("tr");
@@ -1211,10 +1252,11 @@ function render(d){
       '<td class="v">'+esc(r.catalogueLifecycle||"—")+(r.incognito?" · incognito":"")+(r.auxiliary?" · aux":"")+"</td>"+
       '<td class="v">'+(r.models&&r.models.length?esc(r.models[r.models.length-1]):"—")+"</td>"+
       '<td class="v">'+(r.lastActivityAt?fmtDuration(Date.now()-r.lastActivityAt):"—")+"</td>"+
-      "<td>"+tstate(r.transcriptState)+"</td>";
+      "<td>"+tstate(r.transcriptState)+"</td>"+
+      '<td><button class="act" onclick="act(event,\'resume\',\''+esc(r.sessionId)+'\')">resume</button></td>';
     closed.appendChild(tr);
   }
-  if(!(d.mirror.closed||[]).length)closed.innerHTML='<tr><td colspan="6" style="color:var(--dim)">no closed indexed sessions</td></tr>';
+  if(!(d.mirror.closed||[]).length)closed.innerHTML='<tr><td colspan="7" style="color:var(--dim)">no closed indexed sessions</td></tr>';
   const gh=document.getElementById("ghosts");gh.innerHTML="";
   for(const r of d.mirror.ghosts){
     const tr=document.createElement("tr");tr.className="row-bad";
@@ -1237,8 +1279,9 @@ tick();connectSSE();setInterval(tick,3000);setInterval(function(){if(lastState)r
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: PORT,
-  fetch(req) {
+  async fetch(req) {
     const url = new URL(req.url);
+    const request = req;
     if (url.pathname === "/api/state") {
       return Response.json(statePayload());
     }
@@ -1271,6 +1314,24 @@ const server = Bun.serve({
     }
     if (url.pathname === "/healthz") {
       return new Response("ok");
+    }
+    if (url.pathname === "/api/resume" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { sessionId?: unknown } | null;
+      const sessionId = body?.sessionId;
+      if (typeof sessionId !== "string" || !SESSION_UUID.test(sessionId)) {
+        return Response.json({ ok: false, error: "invalid session id" }, { status: 400 });
+      }
+      const result = await resumeViaCcs(sessionId);
+      return Response.json(result);
+    }
+    if (url.pathname === "/api/close" && request.method === "POST") {
+      const body = await request.json().catch(() => null) as { sessionId?: unknown } | null;
+      const sessionId = body?.sessionId;
+      if (typeof sessionId !== "string" || !SESSION_UUID.test(sessionId)) {
+        return Response.json({ ok: false, error: "invalid session id" }, { status: 400 });
+      }
+      const outcome = await closeSessionWorkspace(sessionId, true);
+      return Response.json({ ok: outcome.status === "closed", outcome: closeOutcomeSummary(outcome) });
     }
     if (url.pathname === "/") {
       return new Response(HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
