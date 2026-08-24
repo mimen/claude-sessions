@@ -64,6 +64,7 @@ function session(overrides: Partial<SidebarSessionRow> = {}): SidebarSessionRow 
     windowRef: "window:1",
     windowId: "window-1",
     unread: 0,
+    t3Associated: false,
     lifecycle: "active",
     model: { id: "gpt-5.6-sol", label: "Sol", provider: "openai", color: "#74AA9C" },
     summary: null,

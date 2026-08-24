@@ -270,6 +270,8 @@ export interface ProjectionInput {
   readonly includeT3?: boolean;
   /** Enrichment records keyed by canonical session id and resume alias. */
   readonly summaries?: ReadonlyMap<string, StoredEnrichment>;
+  /** Sessions CCS has marked as attached to a T3 thread, by canonical id and resume alias. */
+  readonly t3AssociatedSessionIds?: ReadonlySet<string>;
   /** Versioned category projection keyed by canonical session id and resume alias. */
   readonly categories?: ReadonlyMap<string, SidebarCategoryProjection>;
   /** Null when projection succeeded, otherwise the fail-closed registry/read diagnostic. */
@@ -413,6 +415,8 @@ export interface SidebarSessionRow extends SidebarRowShared {
   readonly membership: SidebarMembership | null;
   /** Public category seam; null only when registry/storage projection was unavailable. */
   readonly category: SidebarCategoryProjection | null;
+  /** True when CCS has marked this session as attached to a T3 thread. */
+  readonly t3Associated: boolean;
 }
 
 /**
@@ -610,6 +614,7 @@ interface ProjectionLookups {
   readonly preferredTitleFor: (sessionId: string, resumeId?: string) => string | null;
   readonly membershipFor: (sessionId: string, resumeId?: string) => SidebarMembership | null;
   readonly categoryFor: (sessionId: string, resumeId?: string) => SidebarCategoryProjection | null;
+  readonly t3AssociatedFor: (sessionId: string, resumeId?: string) => boolean;
   readonly summaryFor: (
     sessionId: string,
     indexed: IndexedSessionInput | undefined,
@@ -746,6 +751,7 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
   const preferredTitles = input.preferredTitles ?? new Map<string, string>();
   const memberships = input.memberships ?? new Map<string, SidebarMembership>();
   const categories = input.categories ?? new Map<string, SidebarCategoryProjection>();
+  const t3Associated = input.t3AssociatedSessionIds ?? new Set<string>();
   const summaries = input.summaries ?? new Map<string, StoredEnrichment>();
 
   const summaryFor = (
@@ -803,6 +809,8 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
         memberships.get(sessionId) ?? (resumeId ? memberships.get(resumeId) ?? null : null),
       categoryFor: (sessionId: string, resumeId?: string): SidebarCategoryProjection | null =>
         categories.get(sessionId) ?? (resumeId ? categories.get(resumeId) ?? null : null),
+      t3AssociatedFor: (sessionId: string, resumeId?: string): boolean =>
+        t3Associated.has(sessionId) || (resumeId !== undefined && resumeId !== sessionId && t3Associated.has(resumeId)),
       summaryFor,
       faviconUrlFor: (cwd: string | null): string | null =>
         cwd && faviconDirectories.has(cwd) ? `/api/favicon?dir=${encodeURIComponent(cwd)}` : null,
@@ -844,6 +852,7 @@ function buildLiveSessionRow(
     ),
     membership: lookups.membershipFor(live.sessionId, indexed?.resumeId),
     category: lookups.categoryFor(live.sessionId, indexed?.resumeId),
+    t3Associated: lookups.t3AssociatedFor(live.sessionId, indexed?.resumeId),
     density: densityFor(true, liveLifecycle),
     sessionId: canonicalId,
     lifecycle: liveLifecycle,
@@ -905,6 +914,7 @@ function buildIndexedSessionRow(
     ),
     membership: lookups.membershipFor(session.sessionId, session.resumeId),
     category: lookups.categoryFor(session.sessionId, session.resumeId),
+    t3Associated: lookups.t3AssociatedFor(session.sessionId, session.resumeId),
     density: densityFor(knownLive, lifecycle),
     sessionId: lookups.canonicalSessionIdFor(session.sessionId, session),
     lifecycle,

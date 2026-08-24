@@ -1152,6 +1152,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         checkouts: facts.checkouts,
         faviconDirectories: new Set(facts.favicons.keys()),
         unreadByWorkspaceId: extras?.unreadByWorkspaceId,
+        t3AssociatedSessionIds: catalogue.t3Associated,
         summaries: catalogue.summaries,
         preferredTitles: catalogue.preferredTitles,
         memberships: catalogue.memberships,

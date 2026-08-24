@@ -44,6 +44,7 @@ const row: SidebarSessionRow = {
   windowRef: null,
   windowId: null,
   unread: 0,
+    t3Associated: false,
   lifecycle: "active",
   model: null,
   summary: {

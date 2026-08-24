@@ -73,6 +73,32 @@ private func snapshotData(serverVersion: String) -> Data {
     """.utf8)
 }
 
+/// The row wire contract: a field the server adds must decode, and its absence on older
+/// servers must decode as nil rather than failing the whole snapshot.
+final class SidebarRowDecodingTests: XCTestCase {
+    func testDecodesT3AssociationAndToleratesItsAbsence() throws {
+        let withT3 = Data("""
+        {
+          "id": "s1", "kind": "session", "name": "T3 session", "density": "full",
+          "pinned": false, "focused": false, "unread": 0,
+          "t3Associated": true,
+          "category": {"compactLabel": "AI Systems", "hex": "#2A67E2"}
+        }
+        """.utf8)
+        let row = try JSONDecoder().decode(SidebarRow.self, from: withT3)
+        XCTAssertEqual(row.t3Associated, true)
+
+        let withoutT3 = Data("""
+        {
+          "id": "s2", "kind": "session", "name": "Older server", "density": "full",
+          "pinned": false, "focused": false, "unread": 0
+        }
+        """.utf8)
+        let older = try JSONDecoder().decode(SidebarRow.self, from: withoutT3)
+        XCTAssertNil(older.t3Associated)
+    }
+}
+
 @MainActor
 final class SnapshotClientTests: XCTestCase {
     func testAppliesTheLatestCompletedSnapshotWhileRevisionsKeepAdvancing() async {
