@@ -64,7 +64,8 @@ enum GaugeBuilder {
         "anthropic|auf": PlanInfo(name: "Pro", dollars: 20),
         "grok|personal": PlanInfo(name: "SuperGrok", dollars: 100),
         "codex|personal": PlanInfo(name: "Codex Pro", dollars: 200),
-        "opencode-go|": PlanInfo(name: "Go", dollars: 10)
+        "opencode-go|": PlanInfo(name: "Go", dollars: 10),
+        "venice|": PlanInfo(name: "Pro", dollars: 68)
     ]
 
     static let fallbackDollars = 50.0
