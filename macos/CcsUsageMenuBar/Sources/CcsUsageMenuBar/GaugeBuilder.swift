@@ -217,14 +217,17 @@ enum GaugeBuilder {
 
     /// Limit-weighted average used fraction across sections, weighted by each
     /// account's plan's dollar value (each account counts once).
+    /// Dollar-weighted average of each account's binding constraint (its most-used
+    /// window): a nearly-exhausted weekly cap cancels out the same account's fresh
+    /// 5h window — effective availability is the min, so usage is the max.
     static func overallUsedFraction(_ sections: [UsageSection]) -> Double? {
         var total = 0.0, weight = 0.0
         for s in sections {
             let allowances = s.allowanceGauges
             guard !allowances.isEmpty else { continue }
             let dollars = s.plan?.dollars ?? fallbackDollars
-            let mean = allowances.compactMap(\.fractionUsed).reduce(0, +) / Double(allowances.count)
-            total += mean * dollars
+            let binding = allowances.compactMap(\.fractionUsed).max() ?? 0
+            total += binding * dollars
             weight += dollars
         }
         guard weight > 0 else { return nil }

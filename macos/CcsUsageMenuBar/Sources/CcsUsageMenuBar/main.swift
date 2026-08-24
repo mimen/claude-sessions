@@ -43,14 +43,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
-        store.$panelHeight
-            .receive(on: RunLoop.main)
-            .sink { [weak self] height in
-                guard let self else { return }
-                self.popover.contentSize = NSSize(width: 320, height: height)
-            }
-            .store(in: &cancellables)
-
         store.startPolling()
     }
 
@@ -65,7 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         if popover.contentViewController == nil {
-            popover.contentViewController = NSHostingController(rootView: UsagePanel(store: store))
+            let host = NSHostingController(rootView: UsagePanel(store: store))
+            host.sizingOptions = [.preferredContentSize]
+            popover.contentViewController = host
         }
         Task { @MainActor in
             AppStore.shared.loadCswapAccountsIfNeeded()

@@ -94,14 +94,15 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertEqual(sections[0].gauges.count, 2)
     }
 
-    func testOverallRemainingIsLimitWeightedAverage() {
+    func testOverallUsesBindingConstraintPerAccount() {
         let gauges = [
-            GaugeBuilder.allowanceGauge(observation(used: 100)), // 1.0
-            GaugeBuilder.allowanceGauge(observation(used: 0))    // 0.0
+            GaugeBuilder.allowanceGauge(observation(used: 100)), // exhausted weekly cap
+            GaugeBuilder.allowanceGauge(observation(used: 0))    // fresh 5h window
         ]
         let section = UsageSection(provider: "anthropic", account: nil,
                                    plan: PlanInfo(name: "", dollars: 100), gauges: gauges)
-        XCTAssertEqual(GaugeBuilder.overallUsedFraction([section])!, 0.5)
+        // The exhausted window cancels out the fresh one — binding constraint wins.
+        XCTAssertEqual(GaugeBuilder.overallUsedFraction([section])!, 1.0)
         XCTAssertNil(GaugeBuilder.overallUsedFraction([]))
     }
 

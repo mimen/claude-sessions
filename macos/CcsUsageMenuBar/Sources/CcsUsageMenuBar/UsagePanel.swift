@@ -156,6 +156,8 @@ struct UsagePanel: View {
                 .foregroundStyle(.tertiary)
             Spacer()
         }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
     }
 
     private var footer: some View {
