@@ -439,21 +439,30 @@ function catalogueLifecycleOf(sessionId: string): string | null {
   return catalogueBySession.get(sessionId) ?? null;
 }
 
-function resumeViaCcs(sessionId: string): Promise<{ ok: boolean; note: string }> {
+function runCcs(args: readonly string[]): Promise<{ ok: boolean; note: string }> {
   return new Promise((resolve) => {
     execFile(
       CCS_BIN,
-      ["resume-session", sessionId],
+      [...args],
       { encoding: "utf8", timeout: 30_000 },
-      (error, stdout) => {
+      (error, stdout, stderr) => {
+        const detail = `${stderr.trim() || stdout.trim() || error?.message || ""}`.slice(0, 600);
         if (error) {
-          resolve({ ok: false, note: `${stdout.trim() || error.message}`.slice(0, 400) });
+          resolve({ ok: false, note: detail });
           return;
         }
-        resolve({ ok: true, note: stdout.trim().slice(0, 400) });
+        resolve({ ok: true, note: detail });
       },
     );
   });
+}
+
+async function resumeViaCcs(sessionId: string, reopenCompleted: boolean): Promise<{ ok: boolean; note: string }> {
+  if (reopenCompleted) {
+    const reopen = await runCcs(["session", "uncomplete", sessionId]);
+    if (!reopen.ok) return reopen;
+  }
+  return runCcs(["resume-session", sessionId]);
 }
 
 function closeOutcomeSummary(outcome: CloseSessionWorkspaceOutcome): string {
@@ -1147,11 +1156,12 @@ function connectSSE(){
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");}
 async function act(kind, sessionId, btn){
   if(btn&&btn.disabled)return;
-  if(btn)btn.disabled=true;if(btn)btn.textContent=(kind==="resume"?"resuming…":"closing…");
+  const isResume=kind==="resume"||kind==="reopen";
+  if(btn)btn.disabled=true;if(btn)btn.textContent=(isResume?(kind==="reopen"?"reopening…":"resuming…"):"closing…");
   try{
     const r=await fetch("/api/"+kind,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({sessionId})});
     const d=await r.json();
-    if(!d.ok){alert((kind==="resume"?"resume: ":"close: ")+(d.note||d.outcome||d.error||"failed"));}
+    if(!d.ok){alert((isResume?(kind==="reopen"?"reopen: ":"resume: "):"close: ")+(d.note||d.outcome||d.error||"failed"));}
   }catch(e){alert(kind+" failed: "+e.message);}
   if(btn)btn.disabled=false;if(btn)btn.textContent=kind;
   tick();
@@ -1258,7 +1268,7 @@ function render(d){
       '<td class="v">'+(r.models&&r.models.length?esc(r.models[r.models.length-1]):"—")+"</td>"+
       '<td class="v">'+(r.lastActivityAt?fmtDuration(Date.now()-r.lastActivityAt):"—")+"</td>"+
       "<td>"+tstate(r.transcriptState)+"</td>"+
-      '<td><button class="act" data-act="resume" data-id="'+esc(r.sessionId)+'">resume</button></td>';
+      '<td><button class="act" data-act="'+(r.catalogueLifecycle==="completed"?"reopen":"resume")+'" data-id="'+esc(r.sessionId)+'">'+(r.catalogueLifecycle==="completed"?"reopen":"resume")+'</button></td>';
     closed.appendChild(tr);
   }
   if(!(d.mirror.closed||[]).length)closed.innerHTML='<tr><td colspan="7" style="color:var(--dim)">no closed indexed sessions</td></tr>';
@@ -1320,13 +1330,13 @@ const server = Bun.serve({
     if (url.pathname === "/healthz") {
       return new Response("ok");
     }
-    if (url.pathname === "/api/resume" && request.method === "POST") {
+    if ((url.pathname === "/api/resume" || url.pathname === "/api/reopen") && request.method === "POST") {
       const body = await request.json().catch(() => null) as { sessionId?: unknown } | null;
       const sessionId = body?.sessionId;
       if (typeof sessionId !== "string" || !SESSION_UUID.test(sessionId)) {
         return Response.json({ ok: false, error: "invalid session id" }, { status: 400 });
       }
-      const result = await resumeViaCcs(sessionId);
+      const result = await resumeViaCcs(sessionId, url.pathname === "/api/reopen");
       return Response.json(result);
     }
     if (url.pathname === "/api/close" && request.method === "POST") {
