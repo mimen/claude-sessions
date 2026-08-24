@@ -230,6 +230,13 @@ enum GaugeBuilder {
         return total / weight
     }
 
+    /// Total monthly subscription dollars. Fallback-weighted sections (providers
+    /// without a known plan, e.g. Venice) don't count — they aren't subscriptions.
+    static func monthlyBill(_ sections: [UsageSection]) -> (total: Double, planCount: Int) {
+        let withPlan = sections.filter { ($0.plan?.name.isEmpty == false) }
+        return (withPlan.reduce(0) { $0 + ($1.plan?.dollars ?? 0) }, withPlan.count)
+    }
+
     /// Single source of truth for the panel's height so the popover window can match it.
     static func panelHeight(for sections: [UsageSection]) -> CGFloat {
         var rows = CGFloat(sections.reduce(0) { $0 + $1.gauges.count })

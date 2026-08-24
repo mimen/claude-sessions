@@ -144,8 +144,24 @@ struct UsagePanel: View {
         store.sections
     }
 
+    /// Monthly subscription total, pinned above the footer controls.
+    private var billFooter: some View {
+        HStack(spacing: 4) {
+            let bill = GaugeBuilder.monthlyBill(store.sections)
+            Text("≈ \(Int(bill.total.rounded())) USD / mo")
+                .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(.primary)
+            Text("across \(bill.planCount) plans")
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+    }
+
     private var footer: some View {
-        HStack(spacing: 10) {
+        VStack(spacing: 0) {
+            billFooter
+            HStack(spacing: 10) {
             switch store.phase {
             case .loaded:
                 Text("updated \(now.formatted(.relative(presentation: .named)))")
@@ -180,9 +196,11 @@ struct UsagePanel: View {
                 Image(systemName: "power")
             }
             .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 2)
         .background(.bar)
     }
 }
