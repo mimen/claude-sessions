@@ -60,10 +60,13 @@ import { exactMessageCount } from "./tail-count.ts";
 import {
   createCachedStatusReader,
   readClaudeStatuses,
-  statusFromAgentLifecycle,
   type CachedStatusReader,
-  type CmuxStatusRead,
 } from "./status.ts";
+import {
+  createAgentActivityReader,
+  type ActivityObservation,
+  type EffectiveActivity,
+} from "./primitives/agent-activity.ts";
 import {
   createCachedNotificationReader,
   type CachedNotificationReader,
@@ -348,10 +351,27 @@ function shortcutFor(
   return workspaceIndex < 9 ? workspaceIndex + 1 : null;
 }
 
+/**
+ * One activity observation per workspace: the primary surface's hook lifecycle, which is what
+ * the derived fill-in is allowed to speak for (the same primary-surface rule liveSessionsFrom
+ * applies when it claims workspaces for rows).
+ */
+function activityObservationsFrom(bridge: Bridge): ActivityObservation[] {
+  const seen = new Set<string>();
+  const out: ActivityObservation[] = [];
+  for (const surface of bridge.surfaces) {
+    if (seen.has(surface.workspaceId)) continue;
+    seen.add(surface.workspaceId);
+    const info = bridge.surfaceInfo(surface.surfaceId);
+    out.push({ workspaceId: surface.workspaceId, agentLifecycle: info?.agentLifecycle ?? null });
+  }
+  return out;
+}
+
 function liveSessionsFrom(
   bridge: Bridge,
   pinnedWorkspaces: ReadonlySet<string>,
-  statuses: ReadonlyMap<string, CmuxStatusRead>,
+  activity: ReadonlyMap<string, EffectiveActivity>,
   activeWindowId: string | null,
 ): LiveSessionInput[] {
   const sessions: LiveSessionInput[] = [];
@@ -365,11 +385,8 @@ function liveSessionsFrom(
     if (claimedWorkspaces.has(surface.workspaceId)) continue;
     claimedWorkspaces.add(surface.workspaceId);
 
-    let statusRead = statuses.get(surface.workspaceId) ?? { state: "unreadable" as const };
-    if (statusRead.state !== "published") {
-      const derived = statusFromAgentLifecycle(info.agentLifecycle);
-      if (derived) statusRead = { state: "derived", status: derived };
-    }
+    const statusRead = activity.get(surface.workspaceId)
+      ?? { state: "unreadable" as const, status: null };
     sessions.push({
       sessionId: info.sessionId,
       workspaceId: surface.workspaceId,
@@ -604,6 +621,9 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
   const announceReplaced = (): void => bumpRevision();
   const statusReader: CachedStatusReader = options.statusReader
     ?? createCachedStatusReader(cmuxBin, STATUS_TTL_MS, now, readStatuses, announceReplaced);
+  const activityReader = createAgentActivityReader({
+    sweep: (ids) => statusReader.read(ids),
+  });
   const workspaceStateReader: CachedWorkspaceStateReader = options.workspaceStateReader
     ?? createCachedWorkspaceStateReader(cmuxBin, WORKSPACE_STATE_TTL_MS, now, undefined, announceReplaced);
   const notificationReader: CachedNotificationReader = options.notificationReader
@@ -1029,13 +1049,16 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const messageCountMs = performance.now() - phaseStartedAt;
 
       phaseStartedAt = performance.now();
-      const statuses = bridge.readable
-        ? await statusReader.read(bridge.workspaceIds())
-        : new Map<string, CmuxStatusRead>();
+      // Primitive 4 owns the layered activity read: the authoritative sweep plus the hook-store
+      // fill-in, with retain-on-failure and revision semantics. The warm status cache underneath
+      // is its sweep transport.
+      const activity = bridge.readable
+        ? await activityReader.read(activityObservationsFrom(bridge))
+        : { byWorkspace: new Map<string, EffectiveActivity>(), revision: 0 };
       const statusMs = performance.now() - phaseStartedAt;
 
       const pinnedWorkspaces = pinnedWorkspacesFrom(bridge);
-      const boundLive = liveSessionsFrom(bridge, pinnedWorkspaces, statuses, activeWindowId)
+      const boundLive = liveSessionsFrom(bridge, pinnedWorkspaces, activity.byWorkspace, activeWindowId)
         .filter((session) => !ledger.isRecentlyClosed(session.sessionId, session.workspaceId));
       // A resumed session's workspace exists in the tree before the hook store binds its session,
       // and the click that resumed it deserves a live row now, not after the binding catches up.
