@@ -1020,6 +1020,8 @@ const HTML = `<!DOCTYPE html>
   .tab-row td{padding-top:4px;padding-bottom:8px}
   .tab-row td:first-child{padding-left:28px}
   .tab{font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .title-line{font-size:12.5px;overflow-wrap:anywhere;white-space:normal}
+  .chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;align-items:center}
   .meta-line{display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:2px;font-family:var(--mono);font-size:10.5px;color:var(--dim)}
   .meta-line b{font-weight:500;color:#6b7280;margin-right:4px}
   .foc{color:var(--ok);font-size:10px;font-weight:600;margin-left:6px}
@@ -1179,7 +1181,8 @@ function render(d){
         ?'<div class="kind-tag">not a Claude Code session</div>'
         :'<div class="tab">ccs · '+esc(r.title||"no title yet")+"</div>"+
          '<div class="meta-line"><span><b>uuid</b>'+esc(r.sessionId)+"</span></div>";
-      tr.innerHTML='<td class="ident"><div class="tab">'+esc(r.surfaceTitle||"(unnamed tab)")+badges.join(" ")+"</div>"+ident+
+      tr.innerHTML='<td class="ident"><div class="title-line">'+esc(r.surfaceTitle||"(unnamed tab)")+"</div>"+
+        (badges.length?'<div class="chips">'+badges.join("")+"</div>":"")+ident+
         (extras.length?'<div class="meta-line">'+extras.join("")+"</div>":"")+"</td>"+
         '<td>'+yn(true)+'</td>'+
         '<td class="v">'+(unbound?'<span class="cell-na">—</span>':'<span class="pillchip">'+esc(r.authoritativePill??"not swept yet")+'</span>')+'</td>'+
@@ -1194,12 +1197,14 @@ function render(d){
   const closed=document.getElementById("closed");closed.innerHTML="";
   for(const r of d.mirror.closed||[]){
     const tr=document.createElement("tr");
-    const cat=r.categoryLabel?'<span class="cat" style="background:'+esc(r.categoryHex||"#6b7280")+';color:#111">'+esc(r.categoryLabel)+"</span>":"";
-    const flags=[];
-    if(r.incognito)flags.push("incognito");
-    if(r.auxiliary)flags.push("auxiliary");
-    if(r.t3)flags.push(r.t3);
-    tr.innerHTML='<td class="ident"><div class="tab">'+esc(r.title||"(untitled)")+" "+cat+(flags.length?' <span class="pri">'+esc(flags.join(" · "))+"</span>":"")+'</div><div class="meta-line"><span><b>uuid</b>'+esc(r.sessionId)+"</span>"+
+    const chips=[];
+    if(r.categoryLabel)chips.push('<span class="cat" style="background:'+esc(r.categoryHex||"#6b7280")+';color:#111">'+esc(r.categoryLabel)+"</span>");
+    if(r.incognito)chips.push('<span class="kind-tag">incognito</span>');
+    if(r.auxiliary)chips.push('<span class="pri">auxiliary</span>');
+    if(r.t3)chips.push('<span class="'+(r.t3.indexOf("running")>=0?"foc":"kind-tag")+'">'+esc(r.t3)+"</span>");
+    tr.innerHTML='<td class="ident"><div class="title-line">'+esc(r.title||"(untitled)")+"</div>"+
+      (chips.length?'<div class="chips">'+chips.join("")+"</div>":"")+
+      '<div class="meta-line"><span><b>uuid</b>'+esc(r.sessionId)+"</span>"+
       (r.project?'<span><b>project</b>'+esc(r.project)+"</span>":"")+
       (r.cwd?'<span><b>cwd</b>'+esc(r.cwd)+"</span>":"")+"</div></td>"+
       '<td>'+yn(false)+'</td>'+
