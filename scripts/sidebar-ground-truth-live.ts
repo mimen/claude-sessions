@@ -19,6 +19,7 @@ import { readIndexReadOnly } from "../src/sidebar/index-read.ts";
 import { readCatalogueReadOnly } from "../src/sidebar/catalogue-read.ts";
 import { readSidebarCategoryProjection, type SidebarCategoryProjection } from "../src/sidebar/category-projection.ts";
 import { readNotifications } from "../src/sidebar/notifications.ts";
+import { readT3AttachmentStatusSnapshot } from "../src/t3/status.ts";
 import { readWorkspaceStates } from "../src/sidebar/workspace-state.ts";
 import { createDirectoryFactsCache } from "../src/sidebar/directory-facts.ts";
 import { subscribeToCmuxEvents, workspaceIdFromFrame } from "../src/cmux/events.ts";
@@ -137,6 +138,9 @@ export interface MirrorRow {
   models: readonly string[];
   categoryLabel: string | null;
   categoryHex: string | null;
+  incognito: boolean;
+  auxiliary: boolean;
+  t3: string | null;
 }
 
 export interface WorkspaceGroup {
@@ -331,6 +335,9 @@ let lastHooksFacts: Awaited<ReturnType<typeof auditHookBindings>>["facts"] | nul
 let lastTitles = new Map<string, string>();
 let lastTreeFacts: Awaited<ReturnType<typeof auditSurfaceTree>>["facts"] | null = null;
 let catalogueBySession = new Map<string, string>();
+let incognitoIds = new Set<string>();
+let auxiliaryIds = new Set<string>();
+let t3BySession = new Map<string, string>();
 let categoryBySession = new Map<string, SidebarCategoryProjection>();
 let indexFactsBySession = new Map<string, {
   lastActivityAt: number | null;
@@ -448,6 +455,9 @@ function extrasFor(sessionId: string | null, workspaceId: string | null): Pick<
   | "models"
   | "categoryLabel"
   | "categoryHex"
+  | "incognito"
+  | "auxiliary"
+  | "t3"
 > {
   const index = sessionId ? indexFactsBySession.get(sessionId) : undefined;
   const ws = workspaceId ? workspaceStateById.get(workspaceId) : undefined;
@@ -470,6 +480,9 @@ function extrasFor(sessionId: string | null, workspaceId: string | null): Pick<
     })(),
     categoryLabel: category?.compactLabel ?? category?.fullLabel ?? category?.effectiveSlug ?? null,
     categoryHex: category?.hex ?? null,
+    incognito: sessionId ? incognitoIds.has(sessionId) : false,
+    auxiliary: sessionId ? auxiliaryIds.has(sessionId) : false,
+    t3: sessionId ? t3BySession.get(sessionId) ?? null : null,
   };
 }
 
@@ -477,9 +490,10 @@ function reloadCatalogue(): void {
   const outcome = readCatalogueReadOnly(CATALOGUE_PATH());
   if (outcome.status !== "ok") return;
   const next = new Map<string, string>();
-  for (const [id, lifecycle] of outcome.facts.lifecycles) next.set(id, lifecycle);
-  for (const id of outcome.facts.incognito) next.set(id, "incognito");
+  for (const [id, lifecycle] of outcome.facts.catalogueLifecycles) next.set(id, lifecycle);
   catalogueBySession = next;
+  incognitoIds = new Set(outcome.facts.incognito);
+  auxiliaryIds = new Set(outcome.facts.auxiliary);
   const categories = readSidebarCategoryProjection(CATALOGUE_PATH(), CATEGORY_REGISTRY_PATH());
   categoryBySession = categories.status === "ok" ? new Map(categories.categories) : new Map();
 }
@@ -627,6 +641,26 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
   lastIndexRows = indexRows;
   lastTreeFacts = tree.facts;
   reloadCatalogue();
+  try {
+    const t3 = await readT3AttachmentStatusSnapshot({ timeoutMs: 4_000 });
+    const nextT3 = new Map<string, string>();
+    if (t3.kind === "snapshot") {
+      const byNative = new Map(t3.snapshot.attachments.map((a) => [a.nativeSessionId, a]));
+      for (const row of indexRows) {
+        const attachment = byNative.get(row.sessionId) ?? byNative.get(row.resumeId);
+        if (!attachment) continue;
+        const indicator = attachment.runtimeStatus === "running" &&
+          (attachment.state === "attached" || attachment.state === "synced")
+          ? "T3 running"
+          : `T3 ${attachment.state}${attachment.runtimeStatus ? " · " + attachment.runtimeStatus : ""}`;
+        nextT3.set(row.sessionId, indicator);
+        if (row.resumeId) nextT3.set(row.resumeId, indicator);
+      }
+    }
+    t3BySession = nextT3;
+  } catch {
+    // T3 binary missing or timed out — leave previous map
+  }
 
   const nextIndex = new Map<string, {
     lastActivityAt: number | null;
@@ -1074,6 +1108,10 @@ function render(d){
         const bg=r.categoryHex||"#6b7280";
         badges.push('<span class="cat" style="background:'+esc(bg)+';color:#111">'+esc(r.categoryLabel)+"</span>");
       }
+      if(r.catalogueLifecycle)badges.push('<span class="pri">'+esc(r.catalogueLifecycle)+"</span>");
+      if(r.incognito)badges.push('<span class="kind-tag">incognito</span>');
+      if(r.auxiliary)badges.push('<span class="pri">auxiliary</span>');
+      if(r.t3)badges.push('<span class="'+(r.t3.indexOf("running")>=0?"foc":"kind-tag")+'">'+esc(r.t3)+"</span>");
       const extras=[];
       if(r.project)extras.push("<span><b>project</b>"+esc(r.project)+"</span>");
       if(r.worktree)extras.push("<span><b>worktree</b>"+esc(r.worktree)+"</span>");
@@ -1086,7 +1124,7 @@ function render(d){
       if(r.models&&r.models.length)extras.push("<span><b>last billed</b>"+esc(r.models[r.models.length-1])+"</span>");
       const ident=unbound
         ?'<div class="kind-tag">not a Claude Code session</div>'
-        :'<div class="tab">ccs · '+esc(r.title||"no title yet")+(r.catalogueLifecycle?' · '+esc(r.catalogueLifecycle):"")+"</div>"+
+        :'<div class="tab">ccs · '+esc(r.title||"no title yet")+"</div>"+
          '<div class="meta-line"><span><b>uuid</b>'+esc(r.sessionId)+"</span></div>";
       tr.innerHTML='<td class="ident"><div class="tab">'+esc(r.surfaceTitle||"(unnamed tab)")+badges.join(" ")+"</div>"+ident+
         (extras.length?'<div class="meta-line">'+extras.join("")+"</div>":"")+"</td>"+
@@ -1104,11 +1142,15 @@ function render(d){
   for(const r of d.mirror.closed||[]){
     const tr=document.createElement("tr");
     const cat=r.categoryLabel?'<span class="cat" style="background:'+esc(r.categoryHex||"#6b7280")+';color:#111">'+esc(r.categoryLabel)+"</span>":"";
-    tr.innerHTML='<td class="ident"><div class="tab">'+esc(r.title||"(untitled)")+" "+cat+'</div><div class="meta-line"><span><b>uuid</b>'+esc(r.sessionId)+"</span>"+
+    const flags=[];
+    if(r.incognito)flags.push("incognito");
+    if(r.auxiliary)flags.push("auxiliary");
+    if(r.t3)flags.push(r.t3);
+    tr.innerHTML='<td class="ident"><div class="tab">'+esc(r.title||"(untitled)")+" "+cat+(flags.length?' <span class="pri">'+esc(flags.join(" · "))+"</span>":"")+'</div><div class="meta-line"><span><b>uuid</b>'+esc(r.sessionId)+"</span>"+
       (r.project?'<span><b>project</b>'+esc(r.project)+"</span>":"")+
       (r.cwd?'<span><b>cwd</b>'+esc(r.cwd)+"</span>":"")+"</div></td>"+
       '<td>'+yn(false)+'</td>'+
-      '<td class="v">'+esc(r.catalogueLifecycle||"—")+"</td>"+
+      '<td class="v">'+esc(r.catalogueLifecycle||"—")+(r.incognito?" · incognito":"")+(r.auxiliary?" · aux":"")+"</td>"+
       '<td class="v">'+(r.models&&r.models.length?esc(r.models[r.models.length-1]):"—")+"</td>"+
       '<td class="v">'+(r.lastActivityAt?fmtDuration(Date.now()-r.lastActivityAt):"—")+"</td>"+
       "<td>"+tstate(r.transcriptState)+"</td>";
