@@ -159,6 +159,7 @@ export interface Mirror {
   live: MirrorRow[];
   groups: WorkspaceGroup[];
   windows: WindowGroup[];
+  closed: MirrorRow[];
   ghosts: MirrorRow[];
   unboundSurfaces: Array<{ workspaceRef: string; title: string | null }>;
 }
@@ -306,6 +307,7 @@ function buildMirror(
     live,
     groups: byWorkspace,
     windows: byWindow,
+    closed: [],
     ghosts: joined.ghosts.map((r) => decorate(r, false)),
     unboundSurfaces: joined.unboundSurfaces.map((s) => ({
       workspaceRef: s.workspaceRef,
@@ -323,7 +325,8 @@ let lastFullCycleAt = 0;
 let sweeping = false;
 let fullRunning = false;
 let pillsByWorkspace = new Map<string, string>();
-let latestMirror: Mirror = { live: [], groups: [], windows: [], ghosts: [], unboundSurfaces: [] };
+let latestMirror: Mirror = { live: [], groups: [], windows: [], closed: [], ghosts: [], unboundSurfaces: [] };
+let lastIndexRows: ReturnType<typeof readIndexReadOnly> = [];
 let lastHooksFacts: Awaited<ReturnType<typeof auditHookBindings>>["facts"] | null = null;
 let lastTitles = new Map<string, string>();
 let lastTreeFacts: Awaited<ReturnType<typeof auditSurfaceTree>>["facts"] | null = null;
@@ -481,9 +484,47 @@ function reloadCatalogue(): void {
   categoryBySession = categories.status === "ok" ? new Map(categories.categories) : new Map();
 }
 
+function rebuildClosed(live: MirrorRow[], ghosts: MirrorRow[]): MirrorRow[] {
+  const open = new Set(
+    [...live, ...ghosts].map((row) => row.sessionId).filter((id) => id.length > 0),
+  );
+  const rows: MirrorRow[] = [];
+  const seen = new Set<string>();
+  for (const row of lastIndexRows) {
+    if (open.has(row.sessionId) || open.has(row.resumeId) || seen.has(row.sessionId)) continue;
+    seen.add(row.sessionId);
+    rows.push({
+      kind: "claude",
+      primary: false,
+      sessionId: row.sessionId,
+      title: lastTitles.get(row.sessionId) ?? row.title,
+      surfaceId: null,
+      surfaceTitle: null,
+      workspaceTitle: null,
+      workspaceRef: null,
+      trackedLifecycle: null,
+      surfaceInTree: false,
+      workspaceFocused: false,
+      surfaceFocused: false,
+      pidAlive: null,
+      transcriptState: row.transcriptPath ? "present" : "absent",
+      authoritativePill: null,
+      derivedLabel: null,
+      catalogueLifecycle: catalogueLifecycleOf(row.sessionId),
+      workspaceId: null,
+      pinned: false,
+      shortcut: null,
+      ...extrasFor(row.sessionId, null),
+    });
+  }
+  rows.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
+  return rows.slice(0, 50);
+}
+
 function paintMirrorFromCache(): void {
   if (lastTreeFacts === null || lastHooksFacts === null) return;
   latestMirror = buildMirror(lastTreeFacts, lastHooksFacts, pillsByWorkspace, lastTitles);
+  latestMirror.closed = rebuildClosed(latestMirror.live, latestMirror.ghosts);
   noteWorkingStops();
   broadcastState();
 }
@@ -512,6 +553,7 @@ async function fastMirrorCycle(): Promise<void> {
   lastTreeFacts = tree.facts;
   if (lastHooksFacts !== null) {
     latestMirror = buildMirror(tree.facts, lastHooksFacts, pillsByWorkspace, lastTitles);
+    latestMirror.closed = rebuildClosed(latestMirror.live, latestMirror.ghosts);
     noteWorkingStops();
   }
   if (lastEventAt > 0) lastEventMirrorMs = Date.now() - lastEventAt;
@@ -582,6 +624,7 @@ async function timedCycle(includeActivity: boolean): Promise<void> {
     if (row.title) titlesBySession.set(row.sessionId, row.title);
   }
   lastTitles = titlesBySession;
+  lastIndexRows = indexRows;
   lastTreeFacts = tree.facts;
   reloadCatalogue();
 
@@ -914,6 +957,12 @@ const HTML = `<!DOCTYPE html>
     <th>Session</th><th>In tree</th><th>Pill (cmux)</th><th>Hooks say</th><th>Pid alive</th><th>Transcript</th>
   </tr></thead><tbody id="live"></tbody></table>
 
+  <h3>Closed sessions — indexed, not in the live tree</h3>
+  <div class="legend">Same CCS facts as live rows (title, lifecycle, category, last billed). Not in cmux right now. Newest first, cap 50.</div>
+  <table><thead><tr>
+    <th>Session</th><th>In tree</th><th>Lifecycle</th><th>Last billed</th><th>Indexed</th><th>Transcript</th>
+  </tr></thead><tbody id="closed"></tbody></table>
+
   <h3>Ghosts — tracked by the hook store, contradicted by measurements</h3>
   <table><thead><tr>
     <th>Session</th><th>Claims</th><th>Surface in tree</th><th>Pid alive</th><th>Transcript on disk</th>
@@ -930,13 +979,23 @@ const HTML = `<!DOCTYPE html>
   </footer>
 </main>
 <script>
+function fmtDuration(ms){
+  const s=Math.max(0,Math.floor(ms/1000));
+  const d=Math.floor(s/86400);
+  const h=Math.floor((s%86400)/3600);
+  const m=Math.floor((s%3600)/60);
+  const sec=s%60;
+  const parts=[];
+  if(d)parts.push(d+"d");
+  if(d||h)parts.push(h+"h");
+  if(d||h||m)parts.push(m+"m");
+  parts.push(sec+"s");
+  return parts.join(" ");
+}
 function ago(t){return Math.max(0,Math.round((Date.now()-t)/1000));}
 function fmtElapsed(ms){
-  const s=Math.floor(ms/1000);
-  if(s<1)return null;
-  if(s<60)return s+"s";
-  if(s<3600)return Math.floor(s/60)+"m "+(s%60)+"s";
-  return Math.floor(s/3600)+"h "+Math.floor((s%3600)/60)+"m";
+  if(ms<1000)return null;
+  return fmtDuration(ms);
 }
 function isWorking(r){
   const label=(r.authoritativePill||r.derivedLabel||r.trackedLifecycle||"").toLowerCase();
@@ -980,7 +1039,7 @@ function render(d){
   document.getElementById("meta").textContent=
     "cycle "+d.cycles+" · last sweep "+ago(d.lastSweepAt)+"s ago · activity "+ago(d.lastActivitySweepAt)+"s ago · "+
     "event→mirror: "+(d.lastEventMirrorMs===null?"no events yet":(d.lastEventAt?ago(d.lastEventAt)+"s ago, took "+d.lastEventMirrorMs+"ms":"none"))+" · "+
-    d.mirror.live.length+" live / "+d.mirror.ghosts.length+" ghosts";
+     d.mirror.live.length+" live / "+(d.mirror.closed||[]).length+" closed / "+d.mirror.ghosts.length+" ghosts";
   const live=document.getElementById("live");live.innerHTML="";
   const windows=d.mirror.windows&&d.mirror.windows.length
     ?d.mirror.windows
@@ -1023,7 +1082,7 @@ function render(d){
       if(r.messageCount!=null)extras.push("<span><b>msgs</b>"+r.messageCount+"</span>");
       const working=r.sessionId&&isWorking(r)?fmtElapsed(Date.now()-(workingStarted[r.sessionId]||Date.now())):null;
       if(working)extras.push("<span><b>working</b>"+working+"</span>");
-      if(r.lastActivityAt)extras.push("<span><b>indexed</b>"+ago(r.lastActivityAt)+"s</span>");
+      if(r.lastActivityAt)extras.push("<span><b>indexed</b>"+fmtDuration(Date.now()-r.lastActivityAt)+"</span>");
       if(r.models&&r.models.length)extras.push("<span><b>last billed</b>"+esc(r.models[r.models.length-1])+"</span>");
       const ident=unbound
         ?'<div class="kind-tag">not a Claude Code session</div>'
@@ -1041,6 +1100,21 @@ function render(d){
     }
   }
   if(d.mirror.live.length===0)live.innerHTML='<tr><td colspan="6" style="color:var(--dim)">no bound sessions observed yet</td></tr>';
+  const closed=document.getElementById("closed");closed.innerHTML="";
+  for(const r of d.mirror.closed||[]){
+    const tr=document.createElement("tr");
+    const cat=r.categoryLabel?'<span class="cat" style="background:'+esc(r.categoryHex||"#6b7280")+';color:#111">'+esc(r.categoryLabel)+"</span>":"";
+    tr.innerHTML='<td class="ident"><div class="tab">'+esc(r.title||"(untitled)")+" "+cat+'</div><div class="meta-line"><span><b>uuid</b>'+esc(r.sessionId)+"</span>"+
+      (r.project?'<span><b>project</b>'+esc(r.project)+"</span>":"")+
+      (r.cwd?'<span><b>cwd</b>'+esc(r.cwd)+"</span>":"")+"</div></td>"+
+      '<td>'+yn(false)+'</td>'+
+      '<td class="v">'+esc(r.catalogueLifecycle||"—")+"</td>"+
+      '<td class="v">'+(r.models&&r.models.length?esc(r.models[r.models.length-1]):"—")+"</td>"+
+      '<td class="v">'+(r.lastActivityAt?fmtDuration(Date.now()-r.lastActivityAt):"—")+"</td>"+
+      "<td>"+tstate(r.transcriptState)+"</td>";
+    closed.appendChild(tr);
+  }
+  if(!(d.mirror.closed||[]).length)closed.innerHTML='<tr><td colspan="6" style="color:var(--dim)">no closed indexed sessions</td></tr>';
   const gh=document.getElementById("ghosts");gh.innerHTML="";
   for(const r of d.mirror.ghosts){
     const tr=document.createElement("tr");tr.className="row-bad";
