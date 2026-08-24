@@ -13,15 +13,16 @@
 import { Database } from "bun:sqlite";
 import { closeSync, openSync, readSync, statSync, watch } from "node:fs";
 import { join } from "node:path";
-import { CATALOGUE_PATH, DB_PATH } from "../src/paths.ts";
+import { CATALOGUE_PATH, CATEGORY_REGISTRY_PATH, DB_PATH } from "../src/paths.ts";
 import { scanStore } from "../src/store.ts";
 import { readIndexReadOnly } from "../src/sidebar/index-read.ts";
 import { readCatalogueReadOnly } from "../src/sidebar/catalogue-read.ts";
+import { readSidebarCategoryProjection, type SidebarCategoryProjection } from "../src/sidebar/category-projection.ts";
 import { readNotifications } from "../src/sidebar/notifications.ts";
 import { readWorkspaceStates } from "../src/sidebar/workspace-state.ts";
 import { createDirectoryFactsCache } from "../src/sidebar/directory-facts.ts";
 import { subscribeToCmuxEvents, workspaceIdFromFrame } from "../src/cmux/events.ts";
-import type { StoredEnrichment } from "../src/catalogue/enrichment.ts";
+
 import {
   auditAgentActivity,
   auditCoverage,
@@ -134,9 +135,8 @@ export interface MirrorRow {
   lastActivityAt: number | null;
   messageCount: number | null;
   models: readonly string[];
-  enrichmentState: string | null;
-  enrichmentNext: string | null;
-  enrichmentRecommendation: string | null;
+  categoryLabel: string | null;
+  categoryHex: string | null;
 }
 
 export interface WorkspaceGroup {
@@ -328,7 +328,7 @@ let lastHooksFacts: Awaited<ReturnType<typeof auditHookBindings>>["facts"] | nul
 let lastTitles = new Map<string, string>();
 let lastTreeFacts: Awaited<ReturnType<typeof auditSurfaceTree>>["facts"] | null = null;
 let catalogueBySession = new Map<string, string>();
-let enrichmentBySession = new Map<string, StoredEnrichment>();
+let categoryBySession = new Map<string, SidebarCategoryProjection>();
 let indexFactsBySession = new Map<string, {
   lastActivityAt: number | null;
   messageCount: number | null;
@@ -443,15 +443,14 @@ function extrasFor(sessionId: string | null, workspaceId: string | null): Pick<
   | "lastActivityAt"
   | "messageCount"
   | "models"
-  | "enrichmentState"
-  | "enrichmentNext"
-  | "enrichmentRecommendation"
+  | "categoryLabel"
+  | "categoryHex"
 > {
   const index = sessionId ? indexFactsBySession.get(sessionId) : undefined;
   const ws = workspaceId ? workspaceStateById.get(workspaceId) : undefined;
   const cwd = ws?.cwd ?? index?.cwd ?? null;
   const dir = cwd ? directoryByCwd.get(cwd) : undefined;
-  const enrichment = sessionId ? enrichmentBySession.get(sessionId) : undefined;
+  const category = sessionId ? categoryBySession.get(sessionId) : undefined;
   return {
     unread: workspaceId ? unreadByWorkspaceId.get(workspaceId) ?? 0 : 0,
     cwd,
@@ -466,9 +465,8 @@ function extrasFor(sessionId: string | null, workspaceId: string | null): Pick<
       if (index?.lastModel) return [index.lastModel];
       return index?.models ?? [];
     })(),
-    enrichmentState: enrichment?.state ?? null,
-    enrichmentNext: enrichment?.next ?? null,
-    enrichmentRecommendation: enrichment?.recommendation ?? null,
+    categoryLabel: category?.compactLabel ?? category?.fullLabel ?? category?.effectiveSlug ?? null,
+    categoryHex: category?.hex ?? null,
   };
 }
 
@@ -479,7 +477,8 @@ function reloadCatalogue(): void {
   for (const [id, lifecycle] of outcome.facts.lifecycles) next.set(id, lifecycle);
   for (const id of outcome.facts.incognito) next.set(id, "incognito");
   catalogueBySession = next;
-  enrichmentBySession = new Map(outcome.facts.summaries);
+  const categories = readSidebarCategoryProjection(CATALOGUE_PATH(), CATEGORY_REGISTRY_PATH());
+  categoryBySession = categories.status === "ok" ? new Map(categories.categories) : new Map();
 }
 
 function paintMirrorFromCache(): void {
@@ -896,6 +895,7 @@ const HTML = `<!DOCTYPE html>
   .foc{color:var(--ok);font-size:10px;font-weight:600;margin-left:6px}
   .pri{color:var(--ok);font-size:10px;font-weight:600;margin-left:6px}
   .kind-tag{color:var(--warn);font-size:11px}
+  .cat{display:inline-block;padding:1px 8px;border-radius:99px;font-size:10.5px;font-weight:600;margin-left:6px;vertical-align:1px}
   .pillchip{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid var(--line);background:var(--line);white-space:nowrap}
   footer{margin-top:30px;color:var(--dim);font-size:12.5px;border-top:1px solid var(--line);padding-top:14px;line-height:1.8}
   .legend{color:var(--dim);font-size:12px;margin:4px 0 14px}
@@ -1011,6 +1011,10 @@ function render(d){
       const badges=[];
       if(r.primary)badges.push('<span class="pri">primary</span>');
       if(r.surfaceFocused)badges.push('<span class="foc">focused tab</span>');
+      if(r.categoryLabel){
+        const bg=r.categoryHex||"#6b7280";
+        badges.push('<span class="cat" style="background:'+esc(bg)+';color:#111">'+esc(r.categoryLabel)+"</span>");
+      }
       const extras=[];
       if(r.project)extras.push("<span><b>project</b>"+esc(r.project)+"</span>");
       if(r.worktree)extras.push("<span><b>worktree</b>"+esc(r.worktree)+"</span>");
@@ -1021,9 +1025,6 @@ function render(d){
       if(working)extras.push("<span><b>working</b>"+working+"</span>");
       if(r.lastActivityAt)extras.push("<span><b>indexed</b>"+ago(r.lastActivityAt)+"s</span>");
       if(r.models&&r.models.length)extras.push("<span><b>last billed</b>"+esc(r.models[r.models.length-1])+"</span>");
-      if(r.enrichmentState)extras.push("<span><b>state</b>"+esc(r.enrichmentState)+"</span>");
-      if(r.enrichmentNext)extras.push("<span><b>next</b>"+esc(r.enrichmentNext)+"</span>");
-      if(r.enrichmentRecommendation)extras.push("<span><b>rec</b>"+esc(r.enrichmentRecommendation)+"</span>");
       const ident=unbound
         ?'<div class="kind-tag">not a Claude Code session</div>'
         :'<div class="tab">ccs · '+esc(r.title||"no title yet")+(r.catalogueLifecycle?' · '+esc(r.catalogueLifecycle):"")+"</div>"+
