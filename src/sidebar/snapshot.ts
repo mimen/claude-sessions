@@ -737,6 +737,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       // which sessions are marked, so an unreadable one leaves the sidebar with nothing to filter
       // on. This is a broken-machine state, not a routine one -- the warning above is the signal.
       incognito: new Set<string>(),
+      t3Associated: new Set<string>(),
       summaries: new Map<string, StoredEnrichment>(),
       sessionIds: new Map<SidebarLifecycle, readonly string[]>([
         ["active", []],
