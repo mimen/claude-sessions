@@ -584,12 +584,7 @@ function rebuildClosed(live: MirrorRow[], ghosts: MirrorRow[]): MirrorRow[] {
         : closedRowFromIndex({ sessionId, resumeId: sessionId, title: lastTitles.get(sessionId) ?? sessionId, transcriptPath: null }),
     );
   }
-  rows.sort((a, b) => {
-    const aClosed = isCatalogueClosed(a.sessionId) ? 0 : 1;
-    const bClosed = isCatalogueClosed(b.sessionId) ? 0 : 1;
-    if (aClosed !== bClosed) return aClosed - bClosed;
-    return (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0);
-  });
+  rows.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
   return rows.slice(0, 80);
 }
 
