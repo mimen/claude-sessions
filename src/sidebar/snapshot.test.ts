@@ -139,7 +139,6 @@ function catalogueRead(rows: ReadonlyArray<{
     t3Associated: new Set(),
     t3SessionIds: [],
     incognito,
-    t3Associated: new Set(),
     summaries: new Map(),
   };
   return { status: "ok", facts };

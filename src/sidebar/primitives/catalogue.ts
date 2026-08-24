@@ -177,6 +177,7 @@ function emptyFacts(): CatalogueSnapshotFacts {
     auxiliary: new Set(),
     incognito: new Set(),
     t3Associated: new Set(),
+    t3SessionIds: [],
     summaries: new Map(),
   };
 }

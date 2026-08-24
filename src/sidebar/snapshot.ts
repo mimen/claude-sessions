@@ -773,7 +773,6 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       error: lastCatalogueReason ?? "catalogue unreadable",
     });
     return { ...read.facts, readable: false };
-(feat(sidebar): snapshot catalogue phase flows through primitive 5)
   }
 
   function updateLifecycle(
@@ -1157,7 +1156,6 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         preferredTitles: catalogue.preferredTitles,
         memberships: catalogue.memberships,
         incognitoSessionIds: catalogue.incognito,
-        t3AssociatedSessionIds: catalogue.t3Associated,
         categories: categoryProjection.status === "ok" ? categoryProjection.categories : new Map(),
         categoryProjectionError: categoryProjection.status === "unavailable" ? categoryProjection.error : null,
         triageOnly,

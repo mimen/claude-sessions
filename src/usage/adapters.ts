@@ -16,6 +16,7 @@ import type {
   ProviderId,
   UsageObservation,
   UsageSnapshot,
+  UsageWindow,
 } from "./types.ts";
 import { codexBarVersion, entryErrorHealth, runCodexBar, sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
 import { runCswap, type CswapWindow } from "./cswap.ts";
