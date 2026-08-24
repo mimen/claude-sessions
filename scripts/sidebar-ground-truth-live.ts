@@ -1145,8 +1145,8 @@ function connectSSE(){
   }catch{}
 }
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");}
-async function act(ev, kind, sessionId){
-  const btn=ev&&ev.target;if(btn&&btn.disabled)return;
+async function act(kind, sessionId, btn){
+  if(btn&&btn.disabled)return;
   if(btn)btn.disabled=true;if(btn)btn.textContent=(kind==="resume"?"resuming…":"closing…");
   try{
     const r=await fetch("/api/"+kind,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({sessionId})});
@@ -1156,6 +1156,11 @@ async function act(ev, kind, sessionId){
   if(btn)btn.disabled=false;if(btn)btn.textContent=kind;
   tick();
 }
+document.addEventListener("click", function(ev){
+  const btn=ev.target&&ev.target.closest?ev.target.closest("button[data-act]"):null;
+  if(!btn)return;
+  act(btn.getAttribute("data-act"), btn.getAttribute("data-id"), btn);
+});
 function yn(b){return b===null?'<span class="cell-na">—</span>':b?'<span class="cell-yes">✓ yes</span>':'<span class="cell-no">✗ no</span>';}
 function tstate(s){return s==="present"?'<span class="cell-yes">✓ on disk</span>'
   :s==="renamed"?'<span class="cell-na">renamed</span>':'<span class="cell-no">✗ gone</span>';}
@@ -1229,7 +1234,7 @@ function render(d){
         '<td class="v">'+(unbound?'<span class="cell-na">—</span>':esc(r.derivedLabel??r.trackedLifecycle??"—"))+'</td>'+
         '<td>'+(unbound?'<span class="cell-na">—</span>':(r.pidAlive===null?'<span class="cell-na">idle claim</span>':yn(r.pidAlive)))+'</td>'+
         '<td>'+(unbound?'<span class="cell-na">—</span>':tstate(r.transcriptState))+"</td>"+
-        '<td>'+(unbound?'<span class="cell-na">—</span>':'<button class="act" onclick="act(event,\'close\',\''+esc(r.sessionId)+'\')">close</button>')+"</td>";
+        '<td>'+(unbound?'<span class="cell-na">—</span>':'<button class="act" data-act="close" data-id="'+esc(r.sessionId)+'">close</button>')+"</td>";
       live.appendChild(tr);
     }
     }
@@ -1253,7 +1258,7 @@ function render(d){
       '<td class="v">'+(r.models&&r.models.length?esc(r.models[r.models.length-1]):"—")+"</td>"+
       '<td class="v">'+(r.lastActivityAt?fmtDuration(Date.now()-r.lastActivityAt):"—")+"</td>"+
       "<td>"+tstate(r.transcriptState)+"</td>"+
-      '<td><button class="act" onclick="act(event,\'resume\',\''+esc(r.sessionId)+'\')">resume</button></td>';
+      '<td><button class="act" data-act="resume" data-id="'+esc(r.sessionId)+'">resume</button></td>';
     closed.appendChild(tr);
   }
   if(!(d.mirror.closed||[]).length)closed.innerHTML='<tr><td colspan="7" style="color:var(--dim)">no closed indexed sessions</td></tr>';
