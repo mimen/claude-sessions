@@ -68,6 +68,8 @@ import {
   type EffectiveActivity,
 } from "./primitives/agent-activity.ts";
 import { createCatalogueReader } from "./primitives/catalogue.ts";
+import { createWorkspaceExtrasReader } from "./primitives/workspace-extras.ts";
+import { createDirectoryFactsPrimitive } from "./primitives/directory-facts.ts";
 import {
   createCachedNotificationReader,
   type CachedNotificationReader,
@@ -75,6 +77,7 @@ import {
 import {
   createCachedWorkspaceStateReader,
   type CachedWorkspaceStateReader,
+  type WorkspaceState,
 } from "./workspace-state.ts";
 import {
   createDirectoryFactsCache,
@@ -629,6 +632,14 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
     ?? createCachedWorkspaceStateReader(cmuxBin, WORKSPACE_STATE_TTL_MS, now, undefined, announceReplaced);
   const notificationReader: CachedNotificationReader = options.notificationReader
     ?? createCachedNotificationReader(cmuxBin, NOTIFICATION_TTL_MS, now, undefined, announceReplaced);
+  // Primitives 7+8 compose the decoration sources into one revision-bearing read.
+  const extrasReader = createWorkspaceExtrasReader({
+    readNotifications: () => notificationReader.read(),
+    readWorkspaceStates: (ids) => workspaceStateReader.read(ids),
+  });
+  const directoryFactsReader = createDirectoryFactsPrimitive(
+    options.directoryFacts ?? createDirectoryFactsCache(now),
+  );
   const processAdapter = options.processAdapter ?? bunAsyncProcessAdapter;
   const closeCmux = options.closeCmuxWorkspace ?? (async (workspaceId: string) =>
     (await processAdapter.run(
@@ -712,7 +723,6 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       }
     }
   }
-  const directoryFacts = options.directoryFacts ?? createDirectoryFactsCache(now);
 
   /**
    * The index is a convenience here, not a dependency.
@@ -1096,9 +1106,11 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       const sessionless = liveWorkspacesFrom(bridge, pinnedWorkspaces, bridge.activeWindowId)
         .filter((workspace) => !claimedWorkspaces.has(workspace.workspaceId));
       phaseStartedAt = performance.now();
-      const workspaceStates = sessionless.length > 0
-        ? await workspaceStateReader.read(sessionless.map((entry) => entry.workspaceId))
-        : new Map<string, null>();
+      // Primitive 7 composes the unread counts and the workspace-state sweep into one read.
+      const extras = bridge.readable
+        ? await extrasReader.read(sessionless.map((entry) => entry.workspaceId))
+        : null;
+      const workspaceStates = extras?.stateByWorkspaceId ?? new Map<string, WorkspaceState | null>();
       const workspaceStateMs = performance.now() - phaseStartedAt;
       const workspaces: LiveWorkspaceInput[] = sessionless.map((entry) => ({
         ...entry,
@@ -1110,7 +1122,8 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
             && (catalogue.t3Associated.has(session.sessionId)
               || catalogue.t3Associated.has(session.resumeId))));
       phaseStartedAt = performance.now();
-      const facts = await directoryFacts.lookup([
+      // Primitive 8: same resolution, plus the revision the other primitives carry.
+      const facts = await directoryFactsReader.read([
         ...directoriesToResolve(
           live,
           indexedForScope,
@@ -1120,11 +1133,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
       ]);
       const directoryFactsMs = performance.now() - phaseStartedAt;
 
-      phaseStartedAt = performance.now();
-      const notifications = bridge.readable
-        ? await notificationReader.read()
-        : null;
-      const notificationsMs = performance.now() - phaseStartedAt;
+      const notificationsMs = 0; // unread counts are composed into the extras read above
       phaseStartedAt = performance.now();
       const categoryProjection = readCategories(cataloguePath, categoryRegistryPath);
       const snapshot = projectSidebar({
@@ -1142,7 +1151,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         scope: projectionScope,
         checkouts: facts.checkouts,
         faviconDirectories: new Set(facts.favicons.keys()),
-        unreadByWorkspaceId: notifications?.unreadCountsByWorkspaceId,
+        unreadByWorkspaceId: extras?.unreadByWorkspaceId,
         summaries: catalogue.summaries,
         preferredTitles: catalogue.preferredTitles,
         memberships: catalogue.memberships,
