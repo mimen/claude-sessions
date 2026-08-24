@@ -312,7 +312,9 @@ function buildMirror(
     groups: byWorkspace,
     windows: byWindow,
     closed: [],
-    ghosts: joined.ghosts.map((r) => decorate(r, false)),
+    ghosts: joined.ghosts
+      .filter((r) => !isCatalogueClosed(r.sessionId))
+      .map((r) => decorate(r, false)),
     unboundSurfaces: joined.unboundSurfaces.map((s) => ({
       workspaceRef: s.workspaceRef,
       title: s.workspaceTitle,
@@ -337,6 +339,7 @@ let lastTreeFacts: Awaited<ReturnType<typeof auditSurfaceTree>>["facts"] | null 
 let catalogueBySession = new Map<string, string>();
 let incognitoIds = new Set<string>();
 let auxiliaryIds = new Set<string>();
+let t3AssociatedIds = new Set<string>();
 let t3BySession = new Map<string, string>();
 let categoryBySession = new Map<string, SidebarCategoryProjection>();
 let indexFactsBySession = new Map<string, {
@@ -482,7 +485,9 @@ function extrasFor(sessionId: string | null, workspaceId: string | null): Pick<
     categoryHex: category?.hex ?? null,
     incognito: sessionId ? incognitoIds.has(sessionId) : false,
     auxiliary: sessionId ? auxiliaryIds.has(sessionId) : false,
-    t3: sessionId ? t3BySession.get(sessionId) ?? null : null,
+    t3: sessionId
+      ? t3BySession.get(sessionId) ?? (t3AssociatedIds.has(sessionId) ? "T3 associated" : null)
+      : null,
   };
 }
 
@@ -494,45 +499,98 @@ function reloadCatalogue(): void {
   catalogueBySession = next;
   incognitoIds = new Set(outcome.facts.incognito);
   auxiliaryIds = new Set(outcome.facts.auxiliary);
+  t3AssociatedIds = new Set(outcome.facts.t3Associated);
   const categories = readSidebarCategoryProjection(CATALOGUE_PATH(), CATEGORY_REGISTRY_PATH());
   categoryBySession = categories.status === "ok" ? new Map(categories.categories) : new Map();
 }
 
+function isCatalogueClosed(sessionId: string): boolean {
+  const life = catalogueLifecycleOf(sessionId);
+  return life === "completed" || life === "saved" || life === "archived";
+}
+
+function closedRowFromIndex(row: {
+  sessionId: string;
+  resumeId: string;
+  title: string;
+  transcriptPath?: string | null;
+}): MirrorRow {
+  return {
+    kind: "claude",
+    primary: false,
+    sessionId: row.sessionId,
+    title: lastTitles.get(row.sessionId) ?? row.title,
+    surfaceId: null,
+    surfaceTitle: null,
+    workspaceTitle: null,
+    workspaceRef: null,
+    trackedLifecycle: null,
+    surfaceInTree: false,
+    workspaceFocused: false,
+    surfaceFocused: false,
+    pidAlive: null,
+    transcriptState: row.transcriptPath ? "present" : "absent",
+    authoritativePill: null,
+    derivedLabel: null,
+    catalogueLifecycle: catalogueLifecycleOf(row.sessionId),
+    workspaceId: null,
+    pinned: false,
+    shortcut: null,
+    ...extrasFor(row.sessionId, null),
+  };
+}
+
 function rebuildClosed(live: MirrorRow[], ghosts: MirrorRow[]): MirrorRow[] {
-  const open = new Set(
-    [...live, ...ghosts].map((row) => row.sessionId).filter((id) => id.length > 0),
-  );
+  // Only live tree rows are "open". Hook-store ghosts of a CCS-closed session belong here.
+  const liveIds = new Set(live.map((row) => row.sessionId).filter((id) => id.length > 0));
+  const indexById = new Map<string, (typeof lastIndexRows)[number]>();
+  for (const row of lastIndexRows) {
+    indexById.set(row.sessionId, row);
+    if (row.resumeId) indexById.set(row.resumeId, row);
+  }
+  const wanted = new Set<string>();
+  for (const [id, life] of catalogueBySession) {
+    if (liveIds.has(id)) continue;
+    if (life === "completed" || life === "saved" || life === "archived") wanted.add(id);
+  }
+  for (const id of t3AssociatedIds) {
+    if (!liveIds.has(id)) wanted.add(id);
+  }
+  for (const row of lastIndexRows) {
+    if (!liveIds.has(row.sessionId) && !liveIds.has(row.resumeId)) wanted.add(row.sessionId);
+  }
+  const missing = [...wanted].filter((id) => !indexById.has(id));
+  if (missing.length > 0) {
+    try {
+      for (const row of readIndexReadOnly(DB_PATH(), { limit: Math.max(missing.length, 1), sessionIds: missing })) {
+        indexById.set(row.sessionId, row);
+        if (row.resumeId) indexById.set(row.resumeId, row);
+      }
+    } catch {
+      // closed rows can still render from catalogue ids alone
+    }
+  }
   const rows: MirrorRow[] = [];
   const seen = new Set<string>();
-  for (const row of lastIndexRows) {
-    if (open.has(row.sessionId) || open.has(row.resumeId) || seen.has(row.sessionId)) continue;
-    seen.add(row.sessionId);
-    rows.push({
-      kind: "claude",
-      primary: false,
-      sessionId: row.sessionId,
-      title: lastTitles.get(row.sessionId) ?? row.title,
-      surfaceId: null,
-      surfaceTitle: null,
-      workspaceTitle: null,
-      workspaceRef: null,
-      trackedLifecycle: null,
-      surfaceInTree: false,
-      workspaceFocused: false,
-      surfaceFocused: false,
-      pidAlive: null,
-      transcriptState: row.transcriptPath ? "present" : "absent",
-      authoritativePill: null,
-      derivedLabel: null,
-      catalogueLifecycle: catalogueLifecycleOf(row.sessionId),
-      workspaceId: null,
-      pinned: false,
-      shortcut: null,
-      ...extrasFor(row.sessionId, null),
-    });
+  for (const id of wanted) {
+    if (liveIds.has(id) || seen.has(id)) continue;
+    const indexed = indexById.get(id);
+    const sessionId = indexed?.sessionId ?? id;
+    if (seen.has(sessionId) || liveIds.has(sessionId)) continue;
+    seen.add(sessionId);
+    rows.push(
+      indexed
+        ? closedRowFromIndex(indexed)
+        : closedRowFromIndex({ sessionId, resumeId: sessionId, title: lastTitles.get(sessionId) ?? sessionId, transcriptPath: null }),
+    );
   }
-  rows.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
-  return rows.slice(0, 50);
+  rows.sort((a, b) => {
+    const aClosed = isCatalogueClosed(a.sessionId) ? 0 : 1;
+    const bClosed = isCatalogueClosed(b.sessionId) ? 0 : 1;
+    if (aClosed !== bClosed) return aClosed - bClosed;
+    return (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0);
+  });
+  return rows.slice(0, 80);
 }
 
 function paintMirrorFromCache(): void {
