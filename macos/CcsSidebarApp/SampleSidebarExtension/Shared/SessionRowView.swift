@@ -156,14 +156,6 @@ public struct SessionRowView: View {
                 if let suggestion = row.suggestion {
                     SuggestionChip(suggestion: suggestion)
                 }
-                if row.t3Associated == true {
-                    Text("T3")
-                        .font(.system(size: 9, weight: .semibold))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Color(hex: "#2A67E2") ?? .blue))
-                        .foregroundStyle(.white)
-                }
                 if row.pinned {
                     Image(systemName: "pin.fill")
                         .font(.system(size: 8))

@@ -35,9 +35,6 @@ public struct SidebarRow: Decodable, Identifiable, Sendable, Equatable {
         public let hex: String?
     }
 
-    /// True when CCS has marked this session as attached to a T3 thread.
-    public let t3Associated: Bool?
-
     public struct Suggestion: Decodable, Sendable, Equatable {
         public let verb: String
         public let actionable: Bool
