@@ -3,6 +3,15 @@ import Foundation
 struct UsageSnapshot: Decodable, Equatable {
     let generatedAt: Date?
     let observations: [UsageObservation]
+    var adapters: [AdapterHealth]? = nil
+}
+
+/// Per-provider adapter health from ccs: "ok", "degraded" (answered with caveats,
+/// e.g. stale fallbacks), or "unavailable" (no answer at all).
+struct AdapterHealth: Decodable, Equatable {
+    let provider: String
+    let status: String
+    let detail: String?
 }
 
 struct UsageObservation: Decodable, Equatable {
@@ -19,6 +28,9 @@ struct UsageObservation: Decodable, Equatable {
     let exact: Bool?
     let stale: Bool?
     let tier: String?
+    /// When the number was actually fetched — for stale fallbacks this is the
+    /// last successful fetch, not the current run.
+    var observedAt: Date? = nil
 
     var fractionUsed: Double? {
         guard let used, let limit, limit > 0 else { return nil }

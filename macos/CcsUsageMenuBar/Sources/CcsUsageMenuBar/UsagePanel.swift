@@ -10,6 +10,9 @@ struct UsagePanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     content
+                    if !store.adapterNotes.isEmpty {
+                        healthNotes
+                    }
                     if !store.cswapAccounts.isEmpty {
                         accountSwitcher
                     }
@@ -21,6 +24,26 @@ struct UsagePanel: View {
         }
         .frame(width: 320, height: store.panelHeight)
         .onReceive(ticker) { now = $0 }
+    }
+
+    /// Adapters that answered with caveats (stale fallbacks) or not at all.
+    private var healthNotes: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(store.adapterNotes, id: \.self) { note in
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 8.5))
+                        .foregroundStyle(.orange)
+                        .padding(.top, 1)
+                    Text(note)
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(.top, 10)
     }
 
     private var accountSwitcher: some View {
@@ -123,7 +146,7 @@ struct UsagePanel: View {
                             .background(Capsule().fill(Color.secondary.opacity(0.14)))
                     }
                     if section.isStale {
-                        Text("stale")
+                        Text(section.staleAge(now: now).map { "stale \($0)" } ?? "stale")
                             .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                             .foregroundStyle(.orange)
                             .padding(.horizontal, 4)

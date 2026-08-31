@@ -14,6 +14,12 @@ struct UsageSection: Identifiable, Equatable {
     /// True when any observation behind this section came from a stale cache.
     var isStale: Bool { gauges.contains { $0.stale } }
 
+    /// Age of the oldest stale number in this section ("3d"), for the stale badge.
+    func staleAge(now: Date = Date()) -> String? {
+        let oldest = gauges.filter(\.stale).compactMap(\.observedAt).min()
+        return oldest.map { GaugeBuilder.shortAge($0, now: now) }
+    }
+
     var id: String { "\(provider)|\(account ?? "")" }
 
     /// "personal", "auf", or the raw local part as fallback.
@@ -39,6 +45,7 @@ struct UsageGauge: Identifiable, Equatable {
     let resetsAt: Date?
     let exact: Bool
     var stale: Bool = false
+    var observedAt: Date? = nil
     var tier: String? = nil
     var breakdown: [UsageBreakdownSegment]?
 
@@ -175,6 +182,7 @@ enum GaugeBuilder {
             resetsAt: o.resetsAt,
             exact: o.exact ?? false,
             stale: o.stale ?? false,
+            observedAt: o.observedAt,
             tier: o.tier,
             breakdown: nil
         )
@@ -241,14 +249,36 @@ enum GaugeBuilder {
         return (withPlan.reduce(0) { $0 + ($1.plan?.dollars ?? 0) }, withPlan.count)
     }
 
+    static let providerTitle = [
+        "anthropic": "Claude", "codex": "Codex", "grok": "Grok",
+        "opencode-go": "OpenCode Go", "venice": "Venice"
+    ]
+
+    /// "3d" / "5h" / "12m" age of a timestamp; used by the stale badge and health notes.
+    static func shortAge(_ date: Date, now: Date = Date()) -> String {
+        let minutes = max(0, Int((now.timeIntervalSince(date) / 60).rounded()))
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        if hours < 48 { return "\(hours)h" }
+        return "\(hours / 24)d"
+    }
+
+    /// Footnote lines for adapters that answered with caveats or not at all.
+    static func healthNotes(_ adapters: [AdapterHealth]?) -> [String] {
+        (adapters ?? [])
+            .filter { $0.status != "ok" }
+            .map { "\(providerTitle[$0.provider] ?? $0.provider) — \($0.detail ?? $0.status)" }
+    }
+
     /// Single source of truth for the panel's height so the popover window can match it.
-    static func panelHeight(for sections: [UsageSection]) -> CGFloat {
+    static func panelHeight(for sections: [UsageSection], noteCount: Int = 0) -> CGFloat {
         var rows = CGFloat(sections.reduce(0) { $0 + $1.gauges.count })
         rows -= CGFloat(sections.reduce(0) { $0 + ($1.gauges.first?.breakdown?.isEmpty == false ? $1.gauges.first!.breakdown!.count : 0) })
         let sectionHeaders = CGFloat(sections.count)
         let accountSubheaders = CGFloat(sections.compactMap(\.accountDisplay).count)
         let legends = CGFloat(sections.reduce(0) { $0 + (($1.gauges.first?.breakdown?.isEmpty == false) ? 1 : 0) })
-        return min(560, 56 + rows * 46 - legends * 12 + sectionHeaders * 28 + accountSubheaders * 18 + 20)
+        let notes = CGFloat(noteCount) * 28
+        return min(560, 56 + rows * 46 - legends * 12 + sectionHeaders * 28 + accountSubheaders * 18 + notes + 20)
     }
 
     /// Splits "claude-max:milad@x.com#Fable" into friendly label/account.
