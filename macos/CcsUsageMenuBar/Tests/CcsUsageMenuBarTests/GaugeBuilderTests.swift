@@ -130,6 +130,46 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertEqual(sections.reduce(0) { $0 + $1.gauges.count }, 2)
     }
 
+    func testDecodesStaleObservationsAndAdapterHealth() throws {
+        let json = """
+        {"generatedAt":"2026-08-31T17:00:00Z","observations":[
+          {"provider":"anthropic","entitlement":"claude-max:a@b.c","metric":"allowance","scope":"account","window":"weekly","used":9,"limit":100,"remaining":91,"resetsAt":"2026-09-01T21:00:00Z","expiresAt":null,"observedAt":"2026-08-27T23:40:37Z","source":"official_api","exact":false,"stale":true}
+        ],"adapters":[
+          {"provider":"anthropic","status":"degraded","detail":"a@b.c needs re-login (cswap add) — showing data from 3d ago"}
+        ]}
+        """.data(using: .utf8)!
+        let parsed = try SnapshotDecoder.decode(json)
+        XCTAssertEqual(parsed.observations[0].stale, true)
+        XCTAssertNotNil(parsed.observations[0].observedAt)
+        XCTAssertEqual(GaugeBuilder.healthNotes(parsed.adapters),
+                       ["Claude — a@b.c needs re-login (cswap add) — showing data from 3d ago"])
+    }
+
+    func testStaleAgeSurfacesOldestStaleObservation() {
+        let now = Date()
+        let staleObs = UsageObservation(
+            provider: "anthropic", entitlement: "claude-max:a@b.c", metric: "allowance",
+            scope: "account", window: "weekly", used: 9, limit: 100, remaining: 91,
+            resetsAt: nil, expiresAt: nil, exact: false, stale: true, tier: nil,
+            observedAt: now.addingTimeInterval(-3 * 86_400)
+        )
+        let sections = GaugeBuilder.sections(from: snapshot([staleObs]))
+        XCTAssertEqual(sections[0].staleAge(now: now), "3d")
+        XCTAssertEqual(GaugeBuilder.shortAge(now.addingTimeInterval(-300), now: now), "5m")
+        XCTAssertEqual(GaugeBuilder.shortAge(now.addingTimeInterval(-5 * 3600), now: now), "5h")
+        // Live sections have no stale badge age.
+        XCTAssertNil(GaugeBuilder.sections(from: snapshot([observation()]))[0].staleAge(now: now))
+    }
+
+    func testHealthNotesSkipHealthyAdapters() {
+        let notes = GaugeBuilder.healthNotes([
+            AdapterHealth(provider: "codex", status: "ok", detail: nil),
+            AdapterHealth(provider: "grok", status: "unavailable", detail: "no unexpired grok OIDC token")
+        ])
+        XCTAssertEqual(notes, ["Grok — no unexpired grok OIDC token"])
+        XCTAssertEqual(GaugeBuilder.healthNotes(nil), [])
+    }
+
     func testFractionClamped() {
         XCTAssertEqual(observation(used: 150).fractionUsed, 1.0)
         XCTAssertNil(observation(used: nil).fractionUsed)

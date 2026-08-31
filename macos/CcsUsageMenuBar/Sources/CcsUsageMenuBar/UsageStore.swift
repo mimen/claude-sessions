@@ -17,12 +17,16 @@ final class UsageStore: ObservableObject {
     @Published var cswapAccounts: [CswapAccount] = []
     @Published var switchingTo: CswapAccount?
     @Published var switchError: String?
+    @Published var adapterNotes: [String] = []
 
     private var hasLoadedCswap = false
     private var basePanelHeight: CGFloat = 420
 
     func updateHeight(from snapshot: UsageSnapshot) {
-        basePanelHeight = GaugeBuilder.panelHeight(for: GaugeBuilder.sections(from: snapshot))
+        basePanelHeight = GaugeBuilder.panelHeight(
+            for: GaugeBuilder.sections(from: snapshot),
+            noteCount: GaugeBuilder.healthNotes(snapshot.adapters).count
+        )
         syncPanelHeight()
     }
 
@@ -103,6 +107,7 @@ final class UsageStore: ObservableObject {
                 await MainActor.run {
                     self.gauges = built
                     self.observations = snapshot.observations
+                    self.adapterNotes = GaugeBuilder.healthNotes(snapshot.adapters)
                     self.updateHeight(from: snapshot)
                     self.phase = .loaded(snapshot.generatedAt ?? Date())
                 }
