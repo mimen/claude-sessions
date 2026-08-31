@@ -44,6 +44,8 @@ export interface UsageObservation {
   observedAt: string;
   source: SourceClass;
   exact: boolean;
+  /** True when the source could not refresh and this is its last-good snapshot. */
+  stale?: boolean;
 }
 
 /** Adapter health, surfaced by `ccs usage doctor` and embedded in every snapshot. */

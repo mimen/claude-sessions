@@ -105,6 +105,40 @@ test("render lists unavailable adapters after the data sections", () => {
   expect(out).toContain("rate_limits HTTP 401");
 });
 
+test("windowFromCswap carries the stale flag and honest observation time", async () => {
+  const { windowFromCswap } = await import("./adapters.ts");
+  const fetchedAt = "2026-08-27T23:40:37Z";
+  const staleObs = windowFromCswap({ pct: 9, resetsAt: "2026-09-01T21:00:00Z" }, fetchedAt, true);
+  expect(staleObs?.stale).toBe(true);
+  expect(staleObs?.observedAt).toBe(fetchedAt);
+  const liveObs = windowFromCswap({ pct: 9 }, fetchedAt, false);
+  expect(liveObs?.stale).toBeUndefined();
+});
+
+test("stale allowance rows render a stale marker with the data's age", () => {
+  const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString();
+  const out = renderSnapshot(snap({
+    observations: [obs({
+      provider: "anthropic", entitlement: "claude-max:a@b.c",
+      used: 9, stale: true, observedAt: threeDaysAgo,
+    })],
+  }));
+  expect(out).toContain("· stale 3d");
+});
+
+test("render lists degraded adapters separately from unavailable ones", () => {
+  const out = renderSnapshot(snap({
+    observations: [obs({ used: 10 })],
+    adapters: [
+      { provider: "anthropic", status: "degraded", detail: "a@b.c needs re-login (cswap add) — showing data from 3d ago" },
+      { provider: "venice", status: "unavailable", detail: "rate_limits HTTP 401" },
+    ],
+  }));
+  expect(out.indexOf("degraded")).toBeGreaterThan(out.indexOf("10%"));
+  expect(out.indexOf("unavailable")).toBeGreaterThan(out.indexOf("degraded"));
+  expect(out).toContain("needs re-login");
+});
+
 test("usageCommand rejects an unknown provider id", async () => {
   expect(await usageCommand(["--provider", "nope"])).toBe(1);
 });
@@ -141,7 +175,8 @@ test("sourceClassFor maps codexbar entry sources to evidence classes", async () 
 });
 
 test("product breakdown rows show percentages without duplicate bars or reset countdowns", () => {
-  const reset = "2026-08-27T04:05:01Z";
+  // Always in the future: a hardcoded date rots into "now" once the calendar passes it.
+  const reset = new Date(Date.now() + 86_400_000).toISOString();
   const out = renderSnapshot(snap({
     observations: [
       obs({ provider: "grok", entitlement: "grok-super-grok-plus:a@b.c", used: 9, resetsAt: reset }),

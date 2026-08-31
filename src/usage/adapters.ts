@@ -19,6 +19,7 @@ import type {
 } from "./types.ts";
 import { codexBarVersion, entryErrorHealth, runCodexBar, sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
 import { runCswap, type CswapWindow } from "./cswap.ts";
+import { ageShort } from "./render.ts";
 import { fetchGrokBilling } from "./grok.ts";
 
 export interface AdapterResult {
@@ -239,7 +240,7 @@ function codexAdapter(): AdapterResult {
 // Anthropic (CodexBar's Claude reader)
 // ---------------------------------------------------------------------------
 
-function windowFromCswap(
+export function windowFromCswap(
   w: CswapWindow | null | undefined,
   observedAt: string,
   stale: boolean,
@@ -260,20 +261,28 @@ function windowFromCswap(
     source: "official_api",
     exact: false,
     // stale marks lastGoodUsage fallbacks (cswap could not refresh this account).
-  } as UsageObservation & { stale?: boolean };
+    ...(stale ? { stale: true } : {}),
+  };
 }
 
 function anthropicAdapter(): AdapterResult {
   const res = runCswap();
   if (!res.ok) return { observations: [], health: res.error };
   const observations: UsageObservation[] = [];
+  const staleAccounts: string[] = [];
   let okCount = 0;
   for (const acct of res.value.report.accounts ?? []) {
     if (!acct.email) continue;
     const base = `claude-max:${acct.email}`;
     const live = acct.usageStatus === "ok";
     const usage = (live ? acct.usage : acct.lastGoodUsage) ?? {};
-    const observedAt = now();
+    // Fallback observations keep the time they were actually fetched — a fresh
+    // timestamp on days-old numbers is exactly the lie this view exists to avoid.
+    const observedAt = live ? now() : (acct.lastGoodFetchedAt ?? now());
+    if (!live) {
+      const age = acct.lastGoodFetchedAt ? ` — showing data from ${ageShort(acct.lastGoodFetchedAt)} ago` : "";
+      staleAccounts.push(`${acct.email} needs re-login (cswap add)${age}`);
+    }
     for (const [w, win] of [
       ["five_hour", usage.fiveHour],
       ["weekly", usage.sevenDay],
@@ -300,7 +309,9 @@ function anthropicAdapter(): AdapterResult {
   const health: AdapterHealth =
     okCount === 0
       ? { provider: "anthropic", status: "unavailable", detail: "cswap returned no usable windows" }
-      : { provider: "anthropic", status: "ok", detail: null };
+      : staleAccounts.length
+        ? { provider: "anthropic", status: "degraded", detail: staleAccounts.join("; ") }
+        : { provider: "anthropic", status: "ok", detail: null };
   return { observations, health };
 }
 

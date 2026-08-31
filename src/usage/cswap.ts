@@ -35,6 +35,8 @@ export interface CswapAccount {
     sevenDay?: CswapWindow | null;
     scoped?: CswapWindow[];
   } | null;
+  /** When lastGoodUsage was actually fetched — the honest observedAt for fallbacks. */
+  lastGoodFetchedAt?: string;
 }
 
 export interface CswapReport {

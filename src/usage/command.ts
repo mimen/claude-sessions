@@ -91,7 +91,7 @@ export function usageCommand(args: readonly string[]): number | Promise<number> 
   })();
 }
 
-/** Nonzero when any adapter is unavailable so automation notices a partial answer. */
+/** Nonzero when any adapter is not fully healthy so automation notices a partial or stale answer. */
 function unhealthyExit(snap: UsageSnapshot): number {
-  return snap.adapters.some((a) => a.status === "unavailable") ? 2 : 0;
+  return snap.adapters.some((a) => a.status !== "ok") ? 2 : 0;
 }

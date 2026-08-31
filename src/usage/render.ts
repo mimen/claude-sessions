@@ -166,6 +166,17 @@ export function countdown(iso: string | null): string {
   return `in ${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
+/** "3d" / "5h" / "12m" age of an ISO timestamp relative to now; "?" when unparseable. */
+export function ageShort(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "?";
+  const m = Math.max(0, Math.round((Date.now() - t) / 60_000));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
 /** "Aug 25 13:59" style short timestamp; falls back to the raw ISO when unparseable. */
 export function shortReset(iso: string): string {
   const t = Date.parse(iso);
@@ -261,10 +272,12 @@ export function renderSnapshot(snap: UsageSnapshot): string {
   }
 
   // Adapter failures close the view — after the data, where they read as footnotes.
-  const unhealthy = snap.adapters.filter((a) => a.status !== "ok");
-  if (unhealthy.length) {
-    lines.push("unavailable");
-    for (const a of unhealthy) {
+  // Degraded adapters answered with caveats (e.g. stale fallbacks); unavailable ones did not.
+  for (const status of ["degraded", "unavailable"] as const) {
+    const flagged = snap.adapters.filter((a) => a.status === status);
+    if (!flagged.length) continue;
+    lines.push(status);
+    for (const a of flagged) {
       lines.push(`  ${PROVIDER_TITLE[a.provider] ?? a.provider} — ${a.detail ?? a.status}`);
     }
     lines.push("");
@@ -289,7 +302,8 @@ function rowFor(o: UsageObservation, name: string, limitPad: number, capSummary:
         }
         const barText = colorFor(pct, label + colorFor(pct, bar(pct)));
         const when = countdown(o.resetsAt) || shortReset(o.resetsAt ?? "");
-        return `${indent}${barText} ${String(pct).padStart(3)}%  ${when}`;
+        const staleNote = o.stale ? ` · stale ${ageShort(o.observedAt)}` : "";
+        return `${indent}${barText} ${String(pct).padStart(3)}%  ${when}${staleNote}`;
       }
       return `${indent}${label}— unknown`;
     }
