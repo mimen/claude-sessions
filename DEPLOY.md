@@ -1,5 +1,5 @@
 ---
-deployment_status: deterministic
+deployment_status: verified
 deployment_production_trigger: merge to master
 deployment_verify_command: ccs doctor launcher && ccs doctor models
 deployment_last_assessed: 2026-09-03
