@@ -232,6 +232,7 @@ describe("routing and compilation", () => {
 
     // Direct-to-Anthropic launchers take the canonical ID verbatim.
     expect(compileLaunchModel("claude-opus-5[1m]", "claude-native")).toBe("claude-opus-5");
+    expect(compileLaunchModel("claude-haiku-4-5[1m]", "claudex")).toBe("claude-haiku-4-5");
   });
 
   test("compiles primary and fallback with their route-local models and efforts", () => {
@@ -277,9 +278,9 @@ describe("routing and compilation", () => {
 name: generalist
 description: Broad default seat
 tools: ["Bash", "Read"]
-model: claude-opus-5
+model: claude-opus-5[1m]
 effort: high
-fallback_model: claude-fable-5
+fallback_model: claude-fable-5-1[1m]
 fallback_effort: high
 permission_mode: bypassPermissions
 ---
@@ -289,6 +290,8 @@ Do the specified work.
     const loaded = loadSeat(root, "generalist");
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
+    expect(loaded.value.model).toBe("claude-opus-5");
+    expect(loaded.value.fallback?.model).toBe("claude-fable-5-1");
 
     const fallback = resolveSeatRoute(loaded.value, "fallback");
     expect(fallback).toEqual({
@@ -297,9 +300,9 @@ Do the specified work.
         route: "fallback",
         provider: "claude",
         launcher: "claudex",
-        requestedModel: "claude-fable-5",
+        requestedModel: "claude-fable-5-1",
         // claudex is a gateway launcher, so the window is declared for Claude too.
-        compiledModel: "claude-fable-5[1m]",
+        compiledModel: "claude-fable-5-1[1m]",
         effort: "high",
       },
     });
@@ -310,7 +313,7 @@ Do the specified work.
         prompt: "Do the specified work.",
         tools: ["Bash", "Read"],
         // What reaches Claude Code is the compiled spelling, window declaration included.
-        model: "claude-fable-5[1m]",
+        model: "claude-fable-5-1[1m]",
         permissionMode: "bypassPermissions",
         effort: "high",
       },

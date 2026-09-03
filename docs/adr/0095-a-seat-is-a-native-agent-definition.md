@@ -49,13 +49,20 @@ restriction, inherit every tool.
 reserved when the definition declares none. Half a fallback is an authoring error and fails at load,
 rather than silently launching the primary model at the backup's effort.
 
-A definition declares no provider and no launcher, so the provider/launcher pairing invariant is
-**deleted, not satisfied with synthesized values**. Every delegated child is born on `claudex`, the
-birth route default and the one launcher that reaches both vendors. Provider is still derived from
-the model's prefix and recorded as catalogue provenance; nothing routes on it.
+A definition declares no provider and no launcher. Every delegated child is born on `claudex`, the
+birth route default and the one launcher that reaches both vendors. Provider is derived from the
+model prefix and recorded as catalogue provenance. Provider does not control routing.
 
-The `[1m]` context declaration stays a `gpt-*`-only spelling on the delegation path. Claude model IDs
-are accepted verbatim by the gateway, so appending it there buys nothing.
+Shared agent frontmatter is a direct Claude Code input. Full Fable, Opus, and Sonnet IDs therefore
+carry the client-side `[1m]` context declaration. Haiku and non-Claude IDs remain unsuffixed. This
+literal spelling also matters for settings and model-picker values because `/model` writes the
+selected value back to Claude Code settings without passing through a launcher wrapper. GPT-5.6
+picker rows omit `behavesAs`. Mapping one to a known Claude model also imports that model's 200K
+window and prevents the launcher's 921K context declaration from applying.
+
+`ccs delegate` removes `[1m]` when it loads a seat. It records the canonical model ID in route
+provenance, then compiles that ID for the selected launcher. This keeps native Agent dispatch and
+CCS delegation on one definition without storing client metadata in CCS routing data.
 
 Everything else about delegation is unchanged: reservation of the auxiliary child and its causal edge
 before launch, creator provenance, synchronous execution, exit-status passthrough, and no automatic

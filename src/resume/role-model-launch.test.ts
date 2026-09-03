@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
 import {
+  canonicalModelId,
+  claudeCodeModelId,
+  claudeModelUsesMillionWindow,
   compileLocationModelLaunch,
   compileModelLaunch,
   compileRoleModelLaunch,
@@ -33,11 +36,29 @@ test("compileRoleModelLaunch derives launchers and exact model spellings", () =>
   });
 });
 
+test("Claude Code model declarations follow each model family's real window", () => {
+  expect(canonicalModelId("claude-opus-5[1m][1m]")).toBe("claude-opus-5");
+  expect(claudeModelUsesMillionWindow("claude-fable-5-1")).toBe(true);
+  expect(claudeModelUsesMillionWindow("claude-opus-4-8[1m]")).toBe(true);
+  expect(claudeModelUsesMillionWindow("claude-sonnet-5")).toBe(true);
+  expect(claudeModelUsesMillionWindow("claude-haiku-4-5")).toBe(false);
+  expect(claudeCodeModelId("claude-fable-5-1")).toBe("claude-fable-5-1[1m]");
+  expect(claudeCodeModelId("claude-haiku-4-5[1m]")).toBe("claude-haiku-4-5");
+  expect(claudeCodeModelId("gpt-5.6-sol[1m]")).toBe("gpt-5.6-sol");
+});
+
 test("fresh-birth compiler routes every context family to its full-window process", () => {
   expect(parseBirthModel("claude-fable-5")).toBe("claude-fable-5");
+  expect(parseBirthModel("claude-fable-5-1")).toBe("claude-fable-5-1");
+  expect(parseBirthModel("claude-fable-5-1[1m]")).toBeNull();
   expect(parseRoleModel("claude-fable-5")).toBeNull();
   expect(compileModelLaunch("claude-fable-5")).toMatchObject({
     launcher: { name: "claudex", binary: "claudex" }, launchModel: "claude-fable-5[1m]",
+  });
+  expect(compileModelLaunch("claude-fable-5-1")).toMatchObject({
+    model: "claude-fable-5-1",
+    launcher: { name: "claudex", binary: "claudex" },
+    launchModel: "claude-fable-5-1[1m]",
   });
   expect(compileModelLaunch("gpt-5.6-sol")).toMatchObject({
     launcher: { name: "claude-gpt", binary: "claude-gpt" }, launchModel: "gpt-5.6-sol",

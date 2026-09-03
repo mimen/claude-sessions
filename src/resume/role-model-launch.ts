@@ -4,6 +4,7 @@ import { type Result, err, ok } from "../result.ts";
 /** Canonical model IDs that CCS can compile for a fresh managed birth. */
 export const BIRTH_MODEL_IDS = [
   "claude-fable-5",
+  "claude-fable-5-1",
   "claude-opus-5",
   "claude-sonnet-5",
   "gpt-5.6-sol",
@@ -14,6 +15,11 @@ export const BIRTH_MODEL_IDS = [
 ] as const;
 
 export type BirthModelId = (typeof BIRTH_MODEL_IDS)[number];
+
+/** Preferred active declarations for accepted compatibility IDs. */
+export const ACTIVE_MODEL_DECLARATION_REPLACEMENTS: ReadonlyMap<string, BirthModelId> = new Map([
+  ["claude-fable-5", "claude-fable-5-1"],
+]);
 
 /** The closed, authored role-model vocabulary. Values are canonical IDs, never aliases or launcher IDs. */
 export const ROLE_MODEL_IDS = [
@@ -47,6 +53,29 @@ export const LAUNCHER_NAMES = Object.keys(LAUNCHER_MODEL_PATTERNS) as readonly L
 
 /** The gateway launcher whose Claude model IDs need Claude Code's client-side 1M marker. */
 export const ONE_MILLION_MARKER_LAUNCHERS: ReadonlySet<LauncherName> = new Set<LauncherName>(["claudex"]);
+
+/** Remove Claude Code's launcher-only context declaration from a model ID. */
+export function canonicalModelId(model: string): string {
+  return model.replace(/(?:\[1m\])+$/, "");
+}
+
+export const MILLION_WINDOW_CLAUDE_FAMILIES = [
+  "claude-fable-",
+  "claude-opus-",
+  "claude-sonnet-",
+] as const;
+
+/** Whether the canonical Claude model family has a documented 1M context window. */
+export function claudeModelUsesMillionWindow(model: string): boolean {
+  const canonical = canonicalModelId(model);
+  return MILLION_WINDOW_CLAUDE_FAMILIES.some((family) => canonical.startsWith(family));
+}
+
+/** Compile a direct Claude Code model declaration without changing provider-canonical routing IDs. */
+export function claudeCodeModelId(model: string): string {
+  const canonical = canonicalModelId(model);
+  return claudeModelUsesMillionWindow(canonical) ? `${canonical}[1m]` : canonical;
+}
 
 export function parseLauncherName(value: string): LauncherName | null {
   return (LAUNCHER_NAMES as readonly string[]).includes(value) ? value as LauncherName : null;
@@ -119,9 +148,9 @@ export function launchModelFor(launcher: LauncherName, model: BirthModelId): str
     return `${model}(low)`;
   }
   if (modelFamily(model) === "claude" && ONE_MILLION_MARKER_LAUNCHERS.has(launcher)) {
-    return `${model}[1m]`;
+    return claudeCodeModelId(model);
   }
-  return model;
+  return canonicalModelId(model);
 }
 
 function defaultLauncherFor(model: BirthModelId): LauncherName {

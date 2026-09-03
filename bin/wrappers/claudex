@@ -34,11 +34,10 @@ validate_model() {
 
 declare_claude_window() {
   local canonical="${1//\[1m\]/}" base="$(model_base "$1")"
-  if [[ "$base" == claude-* ]]; then
-    print -r -- "${canonical}[1m]"
-  else
-    print -r -- "$canonical"
-  fi
+  case "$base" in
+    claude-fable-*|claude-opus-*|claude-sonnet-*) print -r -- "${canonical}[1m]" ;;
+    *) print -r -- "$canonical" ;;
+  esac
 }
 
 MODEL='opus'

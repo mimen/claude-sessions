@@ -88,6 +88,7 @@ Usage:
   ccs doctor sessions [--json]  Report post-rollout unclassified or provenance-missing sessions
   ccs doctor launcher [--json]  Report deployed-vs-origin and installed-vs-config launcher drift
   ccs doctor categories [--json] [--deep]  Report life-domain category drift across every surface
+  ccs doctor models [--json]  Report model declarations that use the wrong context window
 
 Identities (durable, per-work-unit — ADR-0089):
   ccs identity mint <key> --cluster=<c> --role=<r> [--grouping=<g>]

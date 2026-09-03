@@ -22,11 +22,14 @@ test("--model still derives its own launcher without consulting the registry", (
   expect(gpt.ok).toBe(true);
   if (gpt.ok) expect(gpt.value.launcher).toBe("claude-gpt");
 
-  const claude = compileExactBirthRoute({ locationKey: "home", model: "claude-fable-5" });
+  const claude = compileExactBirthRoute({ locationKey: "home", model: "claude-fable-5-1" });
   expect(claude.ok).toBe(true);
   if (claude.ok) {
-    expect(claude.value.launcher).toBe("claudex");
-    expect(claude.value.launchModel).toBe("claude-fable-5[1m]");
+    expect(claude.value).toEqual({
+      launcher: "claudex",
+      model: "claude-fable-5-1",
+      launchModel: "claude-fable-5-1[1m]",
+    });
   }
 });
 

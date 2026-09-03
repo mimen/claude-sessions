@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { MILLION_WINDOW_CLAUDE_FAMILIES } from "../resume/role-model-launch.ts";
 
 const WRAPPER_SOURCE = resolve(import.meta.dir, "../../bin/wrappers");
 const roots: string[] = [];
@@ -37,12 +38,32 @@ function runWrapper(binary: string, args: readonly string[]): Observation {
 }
 
 describe("context-family launcher wrappers", () => {
-  test("claudex declares 1M only for Claude and preserves GPT-5.6 at 921K", () => {
-    const claude = runWrapper("claudex", ["--model", "claude-opus-5", "-p", "hello"]);
-    expect(claude.exitCode).toBe(0);
-    expect(claude.stdout).toContain("selector=claudex");
-    expect(claude.stdout).toContain("arg=--model");
-    expect(claude.stdout).toContain("arg=claude-opus-5[1m]");
+  test("claudex declares each model family's real context window", () => {
+    const opus = runWrapper("claudex", ["--model", "claude-opus-5", "-p", "hello"]);
+    expect(opus.exitCode).toBe(0);
+    expect(opus.stdout).toContain("selector=claudex");
+    expect(opus.stdout).toContain("arg=--model");
+    expect(opus.stdout).toContain("arg=claude-opus-5[1m]");
+
+    const fable = runWrapper("claudex", ["claude-fable-5-1", "-p", "hello"]);
+    expect(fable.exitCode).toBe(0);
+    expect(fable.stdout).toContain("arg=claude-fable-5-1[1m]");
+
+    const sonnet = runWrapper("claudex", ["--model=claude-sonnet-5", "-p", "hello"]);
+    expect(sonnet.exitCode).toBe(0);
+    expect(sonnet.stdout).toContain("arg=--model=claude-sonnet-5[1m]");
+
+    for (const family of MILLION_WINDOW_CLAUDE_FAMILIES) {
+      const model = `${family}test`;
+      const result = runWrapper("claudex", [`--model=${model}`, "-p", "hello"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(`arg=--model=${model}[1m]`);
+    }
+
+    const haiku = runWrapper("claudex", ["--model=claude-haiku-4-5[1m]", "-p", "hello"]);
+    expect(haiku.exitCode).toBe(0);
+    expect(haiku.stdout).toContain("arg=--model=claude-haiku-4-5");
+    expect(haiku.stdout).not.toContain("[1m]");
 
     const gpt = runWrapper("claudex", ["--model=gpt-5.6-sol[1m]", "-p", "hello"]);
     expect(gpt.exitCode).toBe(0);

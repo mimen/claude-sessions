@@ -108,8 +108,9 @@ override the directory). Claude Code ignores frontmatter keys it does not know, 
 `ccs delegate` reads `name`, `description`, `tools`, `model`, `effort`, and the optional
 `fallback_model`, `fallback_effort`, `skills`, and `permission_mode`, ignores every other key, and
 compiles them into process-local `--agents` JSON for that one delegation. A definition declares no
-launcher: children are born on `claudex`. Claude models receive the client-side `[1m]` declaration;
-GPT-5.6 models stay unsuffixed and use the launcher's exact 921K context environment.
+launcher: children are born on `claudex`. Full Fable, Opus, and Sonnet IDs receive the client-side
+`[1m]` declaration. Haiku stays unsuffixed at 200K, and GPT-5.6 stays unsuffixed and uses the
+launcher's exact 921K context environment.
 
 `--model` accepts a canonical birth-model ID and derives the matching launcher; it cannot be combined
 with legacy `--via`. Registered location overrides inherit the registry-wide exact route when omitted.
@@ -371,9 +372,12 @@ have. A host with no registry file behaves exactly as before — `config.toml` i
 
 ```
 ccs doctor launcher [--json]
+ccs doctor models [--json]
 ```
 
-Reports, and never repairs: the deployed checkout's revision against its **origin default branch**
+`ccs doctor models` checks every direct Claude Code model declaration in settings, the model picker, shared agent definitions, and the effective launcher fleet. It follows the configured launcher and location registry paths and includes machine-local launcher overrides. Exit code 1 means a declaration has the wrong context marker, an active Fable declaration still names Fable 5, a selected settings model is absent from an explicit `availableModels` allowlist, or a GPT-5.6 picker row uses `behavesAs` and inherits a Claude model's 200K window instead of the launcher's 921K limit. The command reports drift and changes nothing.
+
+`ccs doctor launcher` reports, and never repairs, the deployed checkout's revision against its **origin default branch**
 (the stale-deploy case that hid behind a local branch 75 commits behind origin), each installed
 wrapper/env-spec against what the current config would generate, and any declared launcher whose
 env spec is missing or unreadable. A launcher with no spec is called out specifically, because the

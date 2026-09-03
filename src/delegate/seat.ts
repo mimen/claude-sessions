@@ -11,7 +11,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { err, ok, type Result } from "../result.ts";
-import { ONE_MILLION_MARKER_LAUNCHERS } from "../resume/role-model-launch.ts";
+import {
+  canonicalModelId,
+  claudeCodeModelId,
+  ONE_MILLION_MARKER_LAUNCHERS,
+} from "../resume/role-model-launch.ts";
 import type { LauncherName, ModelFamily } from "../resume/role-model-launch.ts";
 
 const SeatNameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]*$/);
@@ -127,14 +131,13 @@ function providerFor(model: string): ModelFamily {
 }
 
 /**
- * Compile a seat model for its process envelope. Claude Code strips `[1m]` client-side, so Claude
- * models routed through `claudex` need it to declare their real 1M window. GPT-5.6 uses the
- * launcher's exact 921K environment and must not carry a false 1M declaration.
+ * Compile a seat model for its process envelope. GPT-5.6 uses the launcher's exact 921K
+ * environment and must not carry a false 1M declaration.
  */
 export function compileLaunchModel(model: string, launcher: LauncherName): string {
-  const canonical = model.endsWith("[1m]") ? model.slice(0, -4) : model;
-  if (canonical.startsWith("claude-") && ONE_MILLION_MARKER_LAUNCHERS.has(launcher)) {
-    return `${canonical}[1m]`;
+  const canonical = canonicalModelId(model);
+  if (ONE_MILLION_MARKER_LAUNCHERS.has(launcher)) {
+    return claudeCodeModelId(canonical);
   }
   return canonical;
 }
@@ -174,10 +177,10 @@ export function loadSeat(agentsRoot: string, seatName: string): Result<SeatDefin
       name: definition.name,
       description: definition.description,
       tools: definition.tools,
-      model: definition.model,
+      model: canonicalModelId(definition.model),
       effort: definition.effort,
       fallback: definition.fallback_model && definition.fallback_effort
-        ? { model: definition.fallback_model, effort: definition.fallback_effort }
+        ? { model: canonicalModelId(definition.fallback_model), effort: definition.fallback_effort }
         : null,
       skills: definition.skills ?? [],
       permissionMode: definition.permission_mode ?? null,

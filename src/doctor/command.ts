@@ -9,6 +9,8 @@ import { collectLauncherDrift } from "./launcher-drift-io.ts";
 import { launcherDriftExitCode, renderLauncherDriftReport } from "./launcher-drift.ts";
 import { collectCategoryHealth } from "./category-health-io.ts";
 import { categoryHealthExitCode, renderCategoryHealthReport } from "./category-health.ts";
+import { collectModelDeclarations } from "./model-declarations-io.ts";
+import { modelDeclarationsExitCode, renderModelDeclarationsReport } from "./model-declarations.ts";
 
 /**
  * `ccs doctor launcher` — report-only drift between what is DEPLOYED/INSTALLED and what the
@@ -32,14 +34,31 @@ function categoryDoctor(args: readonly string[]): number {
   return categoryHealthExitCode(report);
 }
 
+function modelsDoctor(args: readonly string[]): number {
+  if (args.some((arg) => arg !== "--json")) {
+    console.error("usage: ccs doctor models [--json]");
+    return 2;
+  }
+  const result = collectModelDeclarations();
+  if (!result.ok) {
+    console.error(`ccs doctor models: ${result.error.message}`);
+    return 2;
+  }
+  if (args.includes("--json")) console.log(JSON.stringify(result.value, null, 2));
+  else console.log(renderModelDeclarationsReport(result.value));
+  return modelDeclarationsExitCode(result.value);
+}
+
 export function doctorCommand(args: readonly string[]): number {
   if (args[0] === "launcher") return launcherDoctor(args.slice(1));
   if (args[0] === "categories") return categoryDoctor(args.slice(1));
+  if (args[0] === "models") return modelsDoctor(args.slice(1));
   if (args[0] !== "sessions") {
     console.error(
       "usage: ccs doctor sessions [--json]\n" +
         "       ccs doctor launcher [--json]\n" +
-        "       ccs doctor categories [--json] [--deep]",
+        "       ccs doctor categories [--json] [--deep]\n" +
+        "       ccs doctor models [--json]",
     );
     return 2;
   }
