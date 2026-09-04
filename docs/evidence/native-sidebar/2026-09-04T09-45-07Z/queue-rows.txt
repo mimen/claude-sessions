@@ -1,0 +1,9 @@
+needs-you | ClaudeConfig skill and mode architecture | active | 
+ready | ClaudeConfig model registry and lifecycle plan | active | 
+needs-you | Claude Actions readable message previews | active | 
+needs-you | Freakuency production kickoff agenda | active | focused
+ready | ClaudeConfig and vault Git repositories | active | 
+ready | X subscriber-only tweet webhook service | active | 
+needs-you | AUF email and SMS list synchronization | active | 
+needs-you | Instagram AUF group chat audit | active | 
+---- totals: 124 rows; revision 1 ; hasMoreRows False
