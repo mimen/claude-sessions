@@ -24,7 +24,9 @@ hide it as incognito, and accept or dismiss the enrichment verdict the row is as
 ## Driving it with the CCS harnesses
 
 Preconditions: a session you own; note its full id and current lifecycle first:
-`sqlite3 ~/.ccs/cache/catalogue.db "select lifecycle, incognito from sessions where session_id='<id>';"`.
+`sqlite3 ~/.ccs/cache/catalogue.db "select saved, completed, incognito from catalogue where session_id='<id>';"` —
+lifecycle is three columns on the `catalogue` table, not a `lifecycle` column and not a `sessions`
+table.
 
 - **Hover controls exist.** `cd macos && ./.build/release/ccs-sidebar-render /tmp/hover.png 6 active 8787`.
   Every row is drawn twice, the second one hovered: the bookmark and checkmark appear on the hovered
@@ -32,12 +34,13 @@ Preconditions: a session you own; note its full id and current lifecycle first:
 - **Menu contents.** Right-click a row live: `peekaboo click --coords <x>,<y> --global-coords --right`,
   then screenshot. A completed row offers `Reopen`; an active one offers `Save for later` and
   `Mark done`; a workspace-only row offers only `Close tab`.
-- **Save.** Choose `Save for later`, then re-read the catalogue: `lifecycle` is `saved`, the row
-  leaves Active, and it appears under the Saved scope. Undo with `Move to Active`.
-- **Done and reopen.** `Mark done` → `lifecycle` is `completed` and the row moves to the Done scope.
-  `Reopen` returns it to `active`.
+- **Save.** Choose `Save for later`, then re-read the catalogue: `saved` is `1`, the row leaves
+  Active, and it appears under the Saved scope. Undo with `Move to Active`.
+- **Done and reopen.** `Mark done` → `completed` is `1` and the row moves to the Done scope.
+  `Reopen` returns both columns to `0`.
 - **Server half alone.** `curl -s -X POST http://127.0.0.1:8787/api/session/lifecycle
-  -H 'Content-Type: application/json' -d '{"sessionId":"<full-id>","action":"save"}'` — the verbs are
+  -H 'Content-Type: application/json' -H 'Origin: http://127.0.0.1:8787'
+  -d '{"sessionId":"<full-id>","action":"save"}'` — the verbs are
   `save`, `unsave`, `complete`, `uncomplete`. Prove the catalogue changed, and say you drove the
   endpoint rather than the menu.
 - **Incognito.** `/api/session/incognito` with `{"sessionId":"…","incognito":true}`. The session
@@ -50,6 +53,13 @@ Preconditions: a session you own; note its full id and current lifecycle first:
 
 ## Gotchas
 
+- Every POST needs an `Origin` header matching the address the server bound. Without it the reply
+  is `{"code":"denied"}` with a 403, which reads like a rejected action rather than a missing
+  header. The same guard rejects a foreign `Host`.
+- A row can outlive its own lifecycle in one scope. Verified on 2026-09-04 against master
+  `b0425f0`: two freshly started servers kept an unsaved session in the Saved scope indefinitely
+  while the catalogue read `saved=0`, and the long-running release on 8787 did not. Believe the
+  catalogue over the scope, and check both before reporting a lifecycle action as broken.
 - `Accept` and `Mark done` post the identical `complete` command. Proving one does not prove the
   other's menu item exists — check the section header the verdict is under.
 - `Close tab` only appears where `workspaceRef` is present; a row without a tab has nothing to

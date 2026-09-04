@@ -19,7 +19,7 @@ It sits alone at the bottom of the context menu, behind a confirmation that name
 
 Preconditions: **a session you created for this purpose and are willing to lose.** Never a real one.
 Record its id and descendants first:
-`sqlite3 ~/.ccs/cache/catalogue.db "select session_id, parent_session_id from sessions where session_id='<id>' or parent_session_id='<id>';"`.
+`sqlite3 ~/.ccs/cache/catalogue.db "select session_id, parent_session_id from catalogue where session_id='<id>' or parent_session_id='<id>';"`.
 
 - **Preflight, without destroying.** `curl -s -X POST http://127.0.0.1:8787/api/session/destroy/preflight
   -H 'Content-Type: application/json' -d '{"sessionId":"<full-id>"}'`. The response's

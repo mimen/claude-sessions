@@ -39,7 +39,7 @@ Preconditions: server up; a session you own to click; `cmux tree --all --json` r
   appears in `cmux tree --all --json` and the row gains a `workspaceId` in the next snapshot.
 - **Completed guard.** Click a row in the Done scope. The panel asks before reopening; approving
   posts `{"sessionId":"…","reopenCompleted":true}` and the catalogue lifecycle returns to `active`:
-  `sqlite3 ~/.ccs/cache/catalogue.db "select lifecycle from sessions where session_id='<id>';"`.
+  `sqlite3 ~/.ccs/cache/catalogue.db "select saved, completed from catalogue where session_id='<id>';"`.
 - **Optimistic paint.** Click, then screenshot within four seconds and again after ten. The row is
   lit in both when the open succeeded; the highlight returns to the server's row when it failed.
 

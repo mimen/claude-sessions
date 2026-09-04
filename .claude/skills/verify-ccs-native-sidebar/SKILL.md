@@ -121,8 +121,10 @@ turns into notices. Never truncate ids quoted from here: live sessions share lon
 The action endpoints are what the native `ActionClient` posts to, one per row command:
 `/api/open`, `/api/session/lifecycle`, `/api/session/decline`, `/api/session/incognito`,
 `/api/session/close`, `/api/session/destroy` (+ `/destroy/preflight`), `/api/workspace/focus`,
-`/api/workspace/pin`, `/api/workspace/close`. Curling one proves the server half of a feature, not
-the sidebar: it says nothing about whether the row, the menu item, or the confirmation exists.
+`/api/workspace/pin`, `/api/workspace/close`. Every POST needs an `Origin` header
+matching the bound address (`-H 'Origin: http://127.0.0.1:8787'`) or the server answers 403
+`{"code":"denied"}`. Curling one proves the server half of a feature, not the sidebar: it says
+nothing about whether the row, the menu item, or the confirmation exists.
 Verify the side effect after any action you do drive — `sqlite3 ~/.ccs/cache/catalogue.db` for
 lifecycle, `cmux tree --all --json` for focus and tabs.
 
@@ -137,10 +139,14 @@ Two facts about this machine shape everything below:
 - cmux's accessibility tree exposes **nothing** inside the sidebar (`peekaboo inspect-ui --app cmux`
   returns a single element). There are no row identifiers to click by name. Clicks are global
   coordinates read off a screenshot.
-- Screenshots need Screen Recording for the peekaboo bridge host (`/opt/homebrew/bin/peekaboo`).
-  Adding it in System Settings requires Touch ID, so it cannot be granted unattended — ask the
-  user for that one touch. `peekaboo permissions` says whether it is granted; Accessibility and
-  event synthesis already are, so clicking and typing work regardless.
+- Screenshots need Screen Recording, and macOS attributes it to the **responsible process** — the
+  app the agent's shell runs under, not the `peekaboo` binary. Walk `ps -o ppid=` up from `$$` to
+  find it (a Claude Code session under `T3 Code (Nightly)` is granted by that app's toggle, not by
+  cmux's). Granting it — the "+" button or any existing toggle in System Settings > Privacy &
+  Security > Screen & System Audio Recording — raises an admin password / Touch ID sheet, so an
+  agent cannot do it alone: ask the user, and say which app needs the toggle.
+  `peekaboo permissions` reports the state. Accessibility and event synthesis are already granted,
+  so clicking and typing work regardless of this.
 
 ```sh
 .claude/skills/verify-ccs-native-sidebar/shot.sh docs/evidence/native-sidebar/<stamp>/panel.png
