@@ -56,6 +56,10 @@ const T3_CLIENT = JSON.stringify({
   providerModelPreferences: {
     claudeAgent: { hiddenModels: [], modelOrder: ["gpt-5.6-sol", "kimi-k3"] },
   },
+  favorites: [
+    { provider: "opencode", model: "opencode/x-preview" },
+    { provider: "claudeAgent", model: "kimi-k3" },
+  ],
 }, null, 2);
 
 test("a launcher's settings carry only the models it hosts", () => {
