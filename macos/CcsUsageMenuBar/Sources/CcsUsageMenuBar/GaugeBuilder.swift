@@ -315,11 +315,13 @@ enum GaugeBuilder {
         return (nameLabel[body.lowercased()] ?? body, account)
     }
 
+    /// ccs sends the plan name ("Max 20x", "Pro"); raw tiers ("default_claude_max_20x")
+    /// are accepted too so an older ccs still labels correctly.
     static func planFromTier(_ tier: String) -> PlanInfo? {
         let t = tier.lowercased()
-        if t.contains("max_20") { return PlanInfo(name: "Max 20x", dollars: 200) }
-        if t.contains("max_5") { return PlanInfo(name: "Max 5x", dollars: 100) }
-        if t.contains("pro") { return PlanInfo(name: "Pro", dollars: 20) }
+        if t.contains("max_20") || t.contains("max 20") { return PlanInfo(name: "Max 20x", dollars: 200) }
+        if t.contains("max_5") || t.contains("max 5") { return PlanInfo(name: "Max 5x", dollars: 100) }
+        if t.contains("pro") || t == "default_claude_ai" { return PlanInfo(name: "Pro", dollars: 20) }
         if t.contains("max") { return PlanInfo(name: "Max", dollars: 100) }
         return nil
     }

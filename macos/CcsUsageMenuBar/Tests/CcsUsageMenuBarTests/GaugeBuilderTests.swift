@@ -199,4 +199,11 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertNotNil(GaugeBuilder.overallUsedFraction(sections))
         XCTAssertGreaterThan(GaugeBuilder.panelHeight(for: sections, noteCount: 1), 0)
     }
+
+    func testPlanFromTierReadsNamesAndRawTiers() {
+        XCTAssertEqual(GaugeBuilder.planFromTier("Max 20x"), PlanInfo(name: "Max 20x", dollars: 200))
+        XCTAssertEqual(GaugeBuilder.planFromTier("default_claude_max_20x"), PlanInfo(name: "Max 20x", dollars: 200))
+        XCTAssertEqual(GaugeBuilder.planFromTier("Pro"), PlanInfo(name: "Pro", dollars: 20))
+        XCTAssertEqual(GaugeBuilder.planFromTier("default_claude_ai"), PlanInfo(name: "Pro", dollars: 20))
+    }
 }
