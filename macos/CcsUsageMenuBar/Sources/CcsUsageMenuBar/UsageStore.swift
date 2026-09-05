@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -80,19 +81,35 @@ final class UsageStore: ObservableObject {
         self.pollInterval = pollInterval
     }
 
+    private var wakeObserver: NSObjectProtocol?
+
     func startPolling() {
         refresh()
         timer?.invalidate()
         let timer = Timer(timeInterval: pollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refresh() }
         }
+        timer.tolerance = pollInterval / 10
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+        // Sleep suspends the timer; the numbers on screen are as old as the nap.
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                Self.log("wake")
+                self?.refresh()
+            }
+        }
     }
 
     func stopPolling() {
         timer?.invalidate()
         timer = nil
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+        }
+        wakeObserver = nil
     }
 
     func refresh() {
@@ -121,15 +138,25 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    /// Local time, so the log lines up with crash reports and pmset without conversion.
+    private static let logClock: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss ZZZZZ"
+        return f
+    }()
+    private static let logCap: UInt64 = 2 * 1024 * 1024
+
     static func log(_ message: String) {
         let path = NSHomeDirectory() + "/.ccs-usage-menubar.log"
-        let line = "\(Date()) \(message)\n"
+        let line = Data("\(Self.logClock.string(from: Date())) \(message)\n".utf8)
         if let handle = FileHandle(forWritingAtPath: path) {
-            handle.seekToEndOfFile()
-            handle.write(line.data(using: .utf8)!)
-            handle.closeFile()
+            defer { handle.closeFile() }
+            if (try? handle.seekToEnd()) ?? 0 > logCap {
+                try? handle.truncate(atOffset: 0)
+            }
+            handle.write(line)
         } else {
-            try? line.write(toFile: path, atomically: true, encoding: .utf8)
+            try? line.write(to: URL(fileURLWithPath: path))
         }
     }
 

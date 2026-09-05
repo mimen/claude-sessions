@@ -70,33 +70,61 @@ enum UsageFetcher {
 
     static func runBlocking(ccsPath: String, timeout: TimeInterval) throws -> UsageSnapshot {
         let expanded = (ccsPath as NSString).expandingTildeInPath
-        guard FileManager.default.isExecutableFile(atPath: expanded) else {
-            throw UsageFetchError.launchFailed("no executable at \(expanded)")
+        let environment = ProcessInfo.processInfo.environment
+        var env = environment
+        env["PATH"] = "\(environment["HOME"] ?? "")/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:\(environment["PATH"] ?? "")"
+
+        let result: ProcessRun.Output
+        do {
+            result = try ProcessRun.collect(executable: expanded, arguments: ["usage", "--json"],
+                                            environment: env, timeout: timeout)
+        } catch ProcessRun.Failure.launch(let detail) {
+            throw UsageFetchError.launchFailed(detail)
+        } catch ProcessRun.Failure.timedOut {
+            throw UsageFetchError.nonZeroExit(-1, "timed out after \(Int(timeout))s")
+        }
+        // ccs usage can exit non-zero on partial adapter degradation while still
+        // emitting the complete snapshot on stdout — parse whenever we got data.
+        guard !result.stdout.isEmpty else {
+            throw UsageFetchError.nonZeroExit(result.status, String(data: result.stderr, encoding: .utf8) ?? "")
+        }
+        return try SnapshotDecoder.decode(result.stdout)
+    }
+}
+
+/// Runs a child process to completion with a deadline, collecting both pipes
+/// through readability handlers. A grandchild that inherits the pipe's write end
+/// would keep readDataToEndOfFile blocked on EOF long after the child exits;
+/// the handlers stop on the child's exit instead.
+enum ProcessRun {
+    struct Output {
+        let status: Int32
+        let stdout: Data
+        let stderr: Data
+    }
+
+    enum Failure: Error {
+        case launch(String)
+        case timedOut
+    }
+
+    static func collect(executable: String, arguments: [String],
+                        environment: [String: String]? = nil, timeout: TimeInterval) throws -> Output {
+        guard FileManager.default.isExecutableFile(atPath: executable) else {
+            throw Failure.launch("no executable at \(executable)")
         }
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: expanded)
-        process.arguments = ["usage", "--json"]
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        if let environment { process.environment = environment }
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
 
-        let environment = ProcessInfo.processInfo.environment
-        var env = environment
-        env["PATH"] = "\(environment["HOME"] ?? "")/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:\(environment["PATH"] ?? "")"
-        process.environment = env
-
-        do {
-            try process.run()
-        } catch {
-            throw UsageFetchError.launchFailed(error.localizedDescription)
-        }
-
-        // Collect pipe output via handlers: a grandchild inheriting the write-end
-        // would keep readDataToEndOfFile blocked on EOF long after ccs exits.
         var outData = Data()
         var errData = Data()
-        let queue = DispatchQueue(label: "usage-pipes")
+        let queue = DispatchQueue(label: "process-run-pipes")
         stdout.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
             if chunk.isEmpty { handle.readabilityHandler = nil; return }
@@ -107,36 +135,31 @@ enum UsageFetcher {
             if chunk.isEmpty { handle.readabilityHandler = nil; return }
             queue.async { errData.append(chunk) }
         }
+        defer {
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+        }
 
-        // Collect the exit status on a side thread so isRunning flips false
-        // (without waitUntilExit the child lingers as a zombie).
+        do {
+            try process.run()
+        } catch {
+            throw Failure.launch(error.localizedDescription)
+        }
+
+        // Reap on a side thread so isRunning flips false without leaving a zombie.
         DispatchQueue.global(qos: .default).async {
             process.waitUntilExit()
         }
-
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning && Date() < deadline {
             Thread.sleep(forTimeInterval: 0.05)
         }
         if process.isRunning {
             process.terminate()
-            stdout.fileHandleForReading.readabilityHandler = nil
-            stderr.fileHandleForReading.readabilityHandler = nil
-            throw UsageFetchError.nonZeroExit(-1, "timed out after \(Int(timeout))s")
+            throw Failure.timedOut
         }
         // Grace period for the handlers to flush trailing chunks.
         Thread.sleep(forTimeInterval: 0.3)
-        stdout.fileHandleForReading.readabilityHandler = nil
-        stderr.fileHandleForReading.readabilityHandler = nil
-        queue.sync {}
-
-        let data = outData
-        let err = String(data: errData, encoding: .utf8) ?? ""
-        // ccs usage can exit non-zero on partial adapter degradation while still
-        // emitting the complete snapshot on stdout — parse whenever we got data.
-        guard !data.isEmpty else {
-            throw UsageFetchError.nonZeroExit(process.terminationStatus, err)
-        }
-        return try SnapshotDecoder.decode(data)
+        return queue.sync { Output(status: process.terminationStatus, stdout: outData, stderr: errData) }
     }
 }

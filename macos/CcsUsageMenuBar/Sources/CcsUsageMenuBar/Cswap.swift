@@ -33,40 +33,20 @@ enum Cswap {
         guard isAvailable() else {
             throw CswapError.failed("no executable at \(executable)")
         }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = args
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        try process.run()
-        let group = DispatchGroup()
-        var outData = Data()
-        var errData = Data()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            outData = stdout.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
+        let result: ProcessRun.Output
+        do {
+            result = try ProcessRun.collect(executable: executable, arguments: args, timeout: timeout)
+        } catch ProcessRun.Failure.launch(let detail) {
+            throw CswapError.failed(detail)
+        } catch ProcessRun.Failure.timedOut {
+            throw CswapError.failed("timed out after \(Int(timeout))s")
         }
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            errData = stderr.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-        if group.wait(timeout: .now() + timeout) == .timedOut {
-            if process.isRunning { process.terminate() }
-            throw CswapError.failed("timed out")
-        }
-        process.waitUntilExit()
-
-        // Degraded usage fetches can exit non-zero while still emitting output —
+        // Degraded fetches can exit non-zero while still emitting output —
         // judge by stdout content, not exit status.
-        guard !outData.isEmpty else {
-            throw CswapError.failed(String(data: errData, encoding: .utf8) ?? "unknown error")
+        guard !result.stdout.isEmpty else {
+            throw CswapError.failed(String(data: result.stderr, encoding: .utf8) ?? "unknown error")
         }
-        return outData
+        return result.stdout
     }
 
     static func accounts() throws -> [CswapAccount] {
