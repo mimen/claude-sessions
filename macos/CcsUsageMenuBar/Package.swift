@@ -12,7 +12,8 @@ let package = Package(
         .testTarget(
             name: "CcsUsageMenuBarTests",
             dependencies: ["CcsUsageMenuBar"],
-            path: "Tests/CcsUsageMenuBarTests"
+            path: "Tests/CcsUsageMenuBarTests",
+            resources: [.copy("Fixtures")]
         )
     ]
 )

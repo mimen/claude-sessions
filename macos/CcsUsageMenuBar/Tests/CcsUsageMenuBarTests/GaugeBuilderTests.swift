@@ -174,4 +174,29 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertEqual(observation(used: 150).fractionUsed, 1.0)
         XCTAssertNil(observation(used: nil).fractionUsed)
     }
+
+    func testDuplicateGaugeIdsNeverTrap() {
+        // Two banked reset credits with different expiries share an entitlement.
+        let a = observation(provider: "codex", entitlement: "codex-reset-credit:m@x.com",
+                            metric: "reset_credit", window: nil, used: nil, limit: nil, remaining: 1)
+        let b = a
+        let sections = GaugeBuilder.sections(from: snapshot([a, b]))
+        XCTAssertEqual(sections.count, 1)
+        XCTAssertEqual(sections[0].gauges.count, 2)
+        XCTAssertEqual(Set(sections[0].gauges.map(\.id)).count, 2, "ids stay distinct for SwiftUI")
+    }
+
+    func testLiveSnapshotFixtureBuildsEveryGauge() throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "usage-2026-09-05", withExtension: "json",
+                                                  subdirectory: "Fixtures"))
+        let parsed = try SnapshotDecoder.decode(Data(contentsOf: url))
+        XCTAssertEqual(parsed.observations.count, 225)
+        let sections = GaugeBuilder.sections(from: parsed)
+        let gauges = sections.flatMap(\.gauges)
+        XCTAssertEqual(gauges.count, 20)
+        XCTAssertEqual(Set(gauges.map(\.id)).count, gauges.count)
+        XCTAssertEqual(gauges.filter { $0.label == "Banked reset" && $0.provider == "codex" }.count, 2)
+        XCTAssertNotNil(GaugeBuilder.overallUsedFraction(sections))
+        XCTAssertGreaterThan(GaugeBuilder.panelHeight(for: sections, noteCount: 1), 0)
+    }
 }
