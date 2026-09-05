@@ -34,7 +34,7 @@ struct UsageSection: Identifiable, Equatable {
 }
 
 struct UsageGauge: Identifiable, Equatable {
-    let id: String
+    var id: String
     let provider: String
     let account: String?
     let label: String
@@ -96,7 +96,7 @@ enum GaugeBuilder {
                 break
             }
         }
-        gauges = foldBreakdowns(gauges)
+        gauges = foldBreakdowns(disambiguated(gauges))
 
         // Group by provider+account; provider-level rows with no account join the
         // provider's sole named account when there is exactly one.
@@ -110,22 +110,17 @@ enum GaugeBuilder {
         for provider in Set(gauges.map(\.provider)) {
             let unnamed = "\(provider)|"
             let named = order.filter { $0.hasPrefix("\(provider)|") && $0 != unnamed }
-            if grouped[unnamed] != nil, named.count == 1 {
-                grouped[named[0]]!.append(contentsOf: grouped[unnamed]!)
+            if let orphans = grouped[unnamed], named.count == 1 {
+                grouped[named[0], default: []].append(contentsOf: orphans)
                 grouped[unnamed] = nil
                 order.removeAll { $0 == unnamed }
             }
         }
 
-        return order.map { key in
-            let rows = grouped[key]!.sorted { rank($0.windowLabel) < rank($1.windowLabel) }
-            let section = UsageSection(
-                provider: rows[0].provider,
-                account: rows[0].account,
-                plan: nil,
-                gauges: rows
-            )
-            return section
+        return order.compactMap { key -> UsageSection? in
+            let rows = (grouped[key] ?? []).sorted { rank($0.windowLabel) < rank($1.windowLabel) }
+            guard let first = rows.first else { return nil }
+            return UsageSection(provider: first.provider, account: first.account, plan: nil, gauges: rows)
         }.map { s in
             var s = s
             let tierPlan = s.gauges.compactMap(\ .tier).first.flatMap(Self.planFromTier)
@@ -137,7 +132,7 @@ enum GaugeBuilder {
 
     /// Grok-style #sub-pool rows become colored segments on their parent gauge.
     static func foldBreakdowns(_ gauges: [UsageGauge]) -> [UsageGauge] {
-        let parents = Dictionary(uniqueKeysWithValues: gauges.map { ($0.id, $0) })
+        let parents = Dictionary(gauges.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var childrenByParent: [String: [UsageGauge]] = [:]
         var foldedIds = Set<String>()
         // Only Grok reports sub-pool breakdowns as stacked-bar segments;
@@ -161,6 +156,22 @@ enum GaugeBuilder {
             }
         }
         return result
+    }
+
+    /// The snapshot is external data: two observations can legitimately collapse to
+    /// one gauge id (a provider reporting the same entitlement twice). Ids must stay
+    /// unique for SwiftUI's ForEach and for the breakdown fold, so repeats get an
+    /// ordinal suffix instead of trapping.
+    static func disambiguated(_ gauges: [UsageGauge]) -> [UsageGauge] {
+        var seen: [String: Int] = [:]
+        return gauges.map { g in
+            let n = seen[g.id, default: 0]
+            seen[g.id] = n + 1
+            guard n > 0 else { return g }
+            var copy = g
+            copy.id = "\(g.id)~\(n)"
+            return copy
+        }
     }
 
     private static func rank(_ window: String?) -> Int {
@@ -207,8 +218,9 @@ enum GaugeBuilder {
 
     /// A banked full-reset token: binary (redeemable or not), with an expiry.
     static func resetCreditGauge(_ o: UsageObservation) -> UsageGauge {
-        UsageGauge(
-            id: "reset|\(o.provider)|\(o.entitlement)",
+        let expiry = (o.expiresAt ?? o.resetsAt).map { "|\(Int($0.timeIntervalSince1970))" } ?? ""
+        return UsageGauge(
+            id: "reset|\(o.provider)|\(o.entitlement)\(expiry)",
             provider: o.provider,
             account: entitlementParts(o.entitlement).account,
             label: "Banked reset",
@@ -273,7 +285,7 @@ enum GaugeBuilder {
     /// Single source of truth for the panel's height so the popover window can match it.
     static func panelHeight(for sections: [UsageSection], noteCount: Int = 0) -> CGFloat {
         var rows = CGFloat(sections.reduce(0) { $0 + $1.gauges.count })
-        rows -= CGFloat(sections.reduce(0) { $0 + ($1.gauges.first?.breakdown?.isEmpty == false ? $1.gauges.first!.breakdown!.count : 0) })
+        rows -= CGFloat(sections.reduce(0) { $0 + ($1.gauges.first?.breakdown?.count ?? 0) })
         let sectionHeaders = CGFloat(sections.count)
         let accountSubheaders = CGFloat(sections.compactMap(\.accountDisplay).count)
         let legends = CGFloat(sections.reduce(0) { $0 + (($1.gauges.first?.breakdown?.isEmpty == false) ? 1 : 0) })
