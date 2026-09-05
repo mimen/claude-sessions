@@ -18,6 +18,8 @@ import {
   resolveDefaultLauncher,
 } from "../launcher/install.ts";
 import { loadLauncherRegistry } from "../launcher/registry.ts";
+import { launcherSettingsContents, launcherSettingsFilename } from "../launcher/model-surfaces.ts";
+import { displayModelRegistry } from "../models/registry.ts";
 import {
   BUNDLED_WRAPPER_BINARIES,
   expectedBundledWrappers,
@@ -293,6 +295,7 @@ export function collectLauncherDrift(options: LauncherDriftOptions = {}): Launch
     .map((binary) => join(binDirectory, binary))
     .filter((path) => existsSync(path));
 
+  const models = displayModelRegistry();
   const expectedEnvFiles = new Set<string>();
   for (const launcher of launchers.value) {
     const filename = launcherEnvSpecFilename(launcher.name);
@@ -312,6 +315,12 @@ export function collectLauncherDrift(options: LauncherDriftOptions = {}): Launch
       continue;
     }
     artifacts.push(readArtifact(specPath, spec.value, 0o600));
+    const settings = models ? launcherSettingsContents(models, launcher.name) : null;
+    if (settings !== null) {
+      const settingsFilename = launcherSettingsFilename(launcher.name);
+      expectedEnvFiles.add(settingsFilename);
+      artifacts.push(readArtifact(join(launcherEnvDir, settingsFilename), settings, 0o600));
+    }
   }
 
   if (defaultLauncher.value !== null) {

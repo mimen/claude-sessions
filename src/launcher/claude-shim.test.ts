@@ -55,6 +55,7 @@ function run(
     env: {
       ...process.env,
       CCS_RAW_CLAUDE_PATH: f.raw,
+      CCS_LAUNCHER_ENV_DIR: join(f.root, "launcher-env"),
       CCS_BIN: f.ccs,
       CCS_TEST_RAW_OBSERVATION: f.rawObservation,
       CCS_TEST_CCS_OBSERVATION: f.ccsObservation,

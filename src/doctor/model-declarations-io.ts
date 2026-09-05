@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { type Config, loadConfig } from "../config.ts";
+import { loadLauncherRegistry, mergeLauncherFleet, type LauncherRegistryEntry } from "../launcher/registry.ts";
 import { loadLocationRegistry } from "../locations/registry.ts";
 import { CONFIG_PATH } from "../paths.ts";
 import { err, ok, type Result } from "../result.ts";
@@ -259,6 +260,19 @@ function readAgents(path: string, declarations: ModelDeclaration[]): Result<void
   }
 }
 
+/**
+ * The launcher environment as AUTHORED in the fleet files, before the registry's `[slots]` overlay.
+ * The doctor's job is to find a model key a human still spells in the fleet; the effective fleet
+ * always carries the overlaid keys and would report every launcher as drifting against itself.
+ */
+function authoredLaunchers(config: Config): readonly Launcher[] {
+  const shared = loadLauncherRegistry(config.routing.launchers);
+  const entries = shared.ok && shared.value
+    ? mergeLauncherFleet(shared.value.launcher, config.launcher)
+    : config.launcher;
+  return entries.map((entry: LauncherRegistryEntry) => ({ ...entry }));
+}
+
 function readLaunchers(
   config: Config,
   configPath: string,
@@ -266,14 +280,20 @@ function readLaunchers(
   declarations: ModelDeclaration[],
 ): LauncherServes[] {
   const localNames = new Set(config.launcher.map((launcher) => launcher.name));
+  const authored = new Map(authoredLaunchers(config).map((launcher) => [launcher.name, launcher]));
   const fleet: LauncherServes[] = [];
   for (const launcher of launchers) {
     const sourcePath = localNames.has(launcher.name) ? configPath : config.routing.launchers;
     const modelEnvironmentKeys: string[] = [];
+    const authoredEnv = authored.get(launcher.name)?.env ?? launcher.env;
+    for (const key of Object.keys(authoredEnv)) {
+      if (modelEnvironmentSurface(key, "launcher")) modelEnvironmentKeys.push(key);
+    }
+    // The spelling checked is what the PROCESS sees: the effective environment after the registry
+    // overlay. A key the fleet still spells is reported once, as advice to remove it.
     for (const [key, value] of Object.entries(launcher.env)) {
       const surface = modelEnvironmentSurface(key, "launcher");
       if (!surface) continue;
-      modelEnvironmentKeys.push(key);
       direct(declarations, sourcePath, `launcher.${launcher.name}.env.${key}`, surface, value);
     }
     fleet.push({ name: launcher.name, serves: launcher.serves, modelEnvironmentKeys, path: sourcePath });
