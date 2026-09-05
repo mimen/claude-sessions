@@ -335,10 +335,19 @@ describe("generated launcher settings", () => {
     writeFileSync(join(envDir, "default"), "claudex\n");
     writeFileSync(join(envDir, "claudex.env"), "set X=1\n");
     const settings = join(envDir, "claudex.settings.json");
-    writeFileSync(settings, "{}\n");
+    writeFileSync(settings, JSON.stringify({ modelPicker: { options: [{ model: "a" }] } }));
     const cmuxWrapper = join(f.root, "cmux-claude-wrapper");
     const cmuxObservation = join(f.root, "cmux-argv");
-    writeFileSync(cmuxWrapper, `#!/bin/bash\nprintf '%s\\n' "$@" > '${cmuxObservation}'\nexport CCS_CLAUDE_SHIM_AFTER_CMUX=1\nexec '${SHIM}' "$@"\n`);
+    writeFileSync(cmuxWrapper, [
+      "#!/bin/bash",
+      `printf '%s\\n' "$@" > '${cmuxObservation}'`,
+      "export CCS_CLAUDE_SHIM_AFTER_CMUX=1",
+      // Real cmux folds the caller's --settings into its own JSON and passes exactly one flag.
+      `merged="$(node -e 'const fs=require(\"fs\");const u=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\"));process.stdout.write(JSON.stringify({hooks:{Stop:[]},...u}))' "$2")"`,
+      `shift 2`,
+      `exec '${SHIM}' --settings "$merged" "$@"`,
+      "",
+    ].join("\n"));
     chmodSync(cmuxWrapper, 0o755);
     const result = run(f, ["-p", "ok"], {
       CMUX_SURFACE_ID: "surface-1",
@@ -348,6 +357,8 @@ describe("generated launcher settings", () => {
     expect(lines(cmuxObservation).slice(0, 2)).toEqual(["--settings", settings]);
     const raw = lines(f.rawObservation);
     expect(raw.filter((arg) => arg === "--settings")).toHaveLength(1);
+    const merged = JSON.parse(raw[raw.indexOf("--settings") + 1] ?? "{}") as { modelPicker?: { options?: unknown[] } };
+    expect(merged.modelPicker?.options).toHaveLength(1);
   });
 
   test("yield to a caller's own --settings", () => {

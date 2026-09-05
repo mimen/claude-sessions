@@ -244,10 +244,15 @@ merge_settings_json() {
   local base="$1" overlay="$2"
   [[ "$base" == \{* ]] || return 1
   command -v node >/dev/null 2>&1 || return 1
+  # When the shim ran first it already handed the file to cmux, whose wrapper merged it into this
+  # JSON; merging again would concatenate the picker rows twice. Any key the overlay sets that the
+  # base already carries means the base is already merged, and the base is returned as is.
   CCS_BASE="$base" CCS_OVERLAY="$overlay" node -e '
 const fs=require("fs");const isObj=x=>x&&typeof x==="object"&&!Array.isArray(x);
 const merge=(a,b)=>{if(Array.isArray(a)&&Array.isArray(b))return a.concat(b);if(isObj(a)&&isObj(b)){const o={...a};for(const k of Object.keys(b))o[k]=(k in a)?merge(a[k],b[k]):b[k];return o;}return b;};
-process.stdout.write(JSON.stringify(merge(JSON.parse(process.env.CCS_BASE),JSON.parse(fs.readFileSync(process.env.CCS_OVERLAY,"utf8")))));' 2>/dev/null
+const base=JSON.parse(process.env.CCS_BASE),overlay=JSON.parse(fs.readFileSync(process.env.CCS_OVERLAY,"utf8"));
+const already=Object.keys(overlay).some(k=>k in base);
+process.stdout.write(JSON.stringify(already?base:merge(base,overlay)));' 2>/dev/null
 }
 
 exec_raw() {
