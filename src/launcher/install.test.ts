@@ -10,7 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { installClaudeShim, updateZshrc } from "./install.ts";
 import { loadConfig } from "../config.ts";
@@ -455,25 +455,7 @@ describe("launcher environment materialization", () => {
     );
     chmodSync(rawClaude, 0o755);
 
-    const fleet = `${FLEET_TOML.replace("/tmp/key", key)}
-[[launcher]]
-name = "claude-gpt"
-binary = "claude-gpt"
-serves = ["gpt-5.6-*"]
-env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@file:${key}" }
-
-[[launcher]]
-name = "claude-gpt55"
-binary = "claude-gpt55"
-serves = ["gpt-5.5"]
-env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@file:${key}" }
-
-[[launcher]]
-name = "local-mlx"
-binary = "local-mlx"
-serves = ["qwen3.8-local"]
-env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@file:${key}" }
-`;
+    const fleet = FLEET_TOML.replace("/tmp/key", key);
     const installed = installClaudeShim({
       root: runtime,
       zshrcPath: join(fixture, ".zshrc"),
@@ -481,13 +463,7 @@ env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@f
     });
     expect(installed.ok).toBe(true);
     if (!installed.ok) return;
-    expect(installed.value.wrappers).toEqual([
-      "claude-gpt",
-      "claude-gpt55",
-      "claude-native",
-      "claudex",
-      "local-mlx",
-    ]);
+    expect(installed.value.wrappers).toEqual(["claude-native", "claudex"]);
 
     for (const name of installed.value.wrappers) {
       const wrapper = readFileSync(join(runtime, "bin", name), "utf8");
@@ -495,7 +471,7 @@ env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@f
       expect(wrapper).toContain(`export CCS_FORCE_HARNESS=${name}`);
     }
 
-    const run = (name: string): string => {
+    const run = (name: string, extra: readonly string[] = []): string => {
       const env: Record<string, string | undefined> = {
         ...process.env,
         PATH: "/usr/bin:/bin",
@@ -510,26 +486,30 @@ env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@f
       delete env.CCS_CLAUDE_SHIM_AFTER_CMUX;
       delete env.CCS_CARRIED_ANTHROPIC_API_KEY;
       delete env.CCS_CARRIED_ANTHROPIC_BASE_URL;
-      const result = Bun.spawnSync([join(runtime, "bin", name), "--version"], { env });
+      const result = Bun.spawnSync([join(runtime, "bin", name), ...extra, "--version"], { env });
       expect(result.exitCode).toBe(0);
       return new TextDecoder().decode(result.stdout);
     };
 
+    const settingsOf = (name: string): string =>
+      join(installed.value.launcherEnvDir, `${name}.settings.json`);
+
     const native = run("claude-native");
     expect(native).toContain("base=\nauth=\napi=\nforce=\n");
-    expect(native).toContain("args=--version");
+    expect(native).toContain(`args=--settings ${settingsOf("claude-native")} --version`);
 
     const mixed = run("claudex");
     expect(mixed).toContain("base=http://127.0.0.1:8317");
     expect(mixed).toContain("auth=test-gateway-token");
     expect(mixed).toContain("force=\n");
-    expect(mixed).toContain("args=--dangerously-skip-permissions --model opus --version");
+    expect(mixed).toContain(
+      `args=--settings ${settingsOf("claudex")} --dangerously-skip-permissions --model opus --version`,
+    );
 
-    const gpt = run("claude-gpt");
-    expect(gpt).toContain("base=http://127.0.0.1:8317");
-    expect(gpt).toContain("auth=test-gateway-token");
-    expect(gpt).toContain("force=\n");
-    expect(gpt).toContain("args=--dangerously-skip-permissions --model fable --version");
+    // A caller who brought a settings file keeps it; the generated one is never a second --settings.
+    const explicit = run("claudex", ["--settings", "/tmp/mine.json"]);
+    expect(explicit).toContain("args=--dangerously-skip-permissions --model opus --settings /tmp/mine.json --version");
+    expect(explicit).not.toContain(settingsOf("claudex"));
   });
 
   test("writes one spec per configured launcher", () => {
@@ -548,6 +528,37 @@ env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@f
     expect(native).toContain("clear ANTHROPIC_BASE_URL");
     expect(native).toContain("clear ANTHROPIC_AUTH_TOKEN");
     expect(native).not.toContain("set ANTHROPIC_BASE_URL");
+  });
+
+  test("each launcher gets a settings file carrying the models it hosts", () => {
+    const fixture = root();
+    const result = install(fixture, FLEET_TOML);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const read = (name: string) =>
+      JSON.parse(readFileSync(join(result.value.launcherEnvDir, `${name}.settings.json`), "utf8")) as {
+        availableModels: string[];
+        modelPicker: { replaceBuiltInOptions: boolean; options: { model: string; behavesAs?: string }[] };
+      };
+
+    const claudex = read("claudex");
+    expect(claudex.modelPicker.replaceBuiltInOptions).toBe(true);
+    expect(claudex.availableModels).toContain("claude-opus-5[1m]");
+    expect(claudex.availableModels).toContain("gpt-5.6-sol");
+    for (const option of claudex.modelPicker.options) {
+      if (option.model.startsWith("gpt-")) expect(option.behavesAs).toBeUndefined();
+    }
+
+    // The escape hatch never offers a gateway row, and never a marked Claude spelling.
+    const native = read("claude-native");
+    expect(native.availableModels).toContain("claude-opus-5");
+    expect(native.availableModels.some((model) => model.startsWith("gpt-"))).toBe(false);
+
+    // The registry's tier slots reach the process through the same spec the shim reads.
+    const spec = readFileSync(join(result.value.launcherEnvDir, "claudex.env"), "utf8");
+    expect(spec).toContain("set ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5[1m]");
+    expect(spec).toContain("set CLAUDE_CODE_MAX_CONTEXT_TOKENS=921000");
   });
 
   test("the default launcher comes from the location registry's default_harness", () => {
@@ -647,3 +658,28 @@ env = { ANTHROPIC_BASE_URL = "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN = "@f
     expect(existsSync(join(second.value.launcherEnvDir, "claude-native.env"))).toBe(false);
   });
 });
+
+test("installing into a temporary root never resolves client surfaces under the real home", () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-install-home-"));
+  const source = join(root, "shim");
+  writeFileSync(source, "#!/bin/sh\n");
+  const zshrc = join(root, ".zshrc");
+  const before = {
+    opencode: statOrNull(join(homedir(), ".config", "opencode", "opencode.jsonc")),
+    t3: statOrNull(join(homedir(), ".t3", "userdata", "settings.json")),
+    t3Client: statOrNull(join(homedir(), ".t3", "userdata", "client-settings.json")),
+  };
+  const result = installClaudeShim({ sourcePath: source, root: join(root, ".ccs"), zshrcPath: zshrc, config: EMPTY_CONFIG(root) });
+  expect(result.ok).toBe(true);
+  expect(statOrNull(join(homedir(), ".config", "opencode", "opencode.jsonc"))).toEqual(before.opencode);
+  expect(statOrNull(join(homedir(), ".t3", "userdata", "settings.json"))).toEqual(before.t3);
+  expect(statOrNull(join(homedir(), ".t3", "userdata", "client-settings.json"))).toEqual(before.t3Client);
+});
+
+function statOrNull(path: string): number | null {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return null;
+  }
+}

@@ -1,11 +1,10 @@
 /**
  * `swap-harness` — relaunch a live session on a DIFFERENT launcher, in place.
  *
- * A harness is a launcher binary: `claudex` (one gateway process reaching both vendors),
- * `claude-native` (real Anthropic, the only one with claude.ai connectors and Remote Control), or
- * `claude-gpt` (GPT-5.6), `claude-gpt55` (GPT-5.5), or `local-mlx` (Qwen). Transcripts are stored
- * in Anthropic format regardless of which one wrote them, so a swap is a launcher change, not a
- * data migration.
+ * A harness is a launcher binary: `claudex` (one gateway process reaching both vendors) or
+ * `claude-native` (real Anthropic, the only one with claude.ai connectors and Remote Control).
+ * Transcripts are stored in Anthropic format regardless of which one wrote them, so a swap is a
+ * launcher change, not a data migration.
  *
  * Now that one launcher reaches both vendors, changing MODEL no longer needs a swap (`/model` does
  * it in-session); what a swap still changes is the CAPABILITY ENVELOPE of the process.
@@ -32,20 +31,12 @@ import {
 } from "./respawn.ts";
 
 /**
- * Where a swap lands, per target harness (Milad, 2026-07-24; `claudex` added 2026-07-28).
- * Deliberately one model per harness rather than a tier map between them: a tier map has to be
- * re-derived every time the fleet changes, and these entries are the ones actually wanted.
- *
- * `claudex` reaches both vendors, so its default is the Claude one it opens on; landing there on a
- * GPT model is a `--model` away and no longer needs a different binary.
+ * Where a swap lands when the caller names no model: the `opus` TIER ALIAS, which every launcher
+ * resolves through its own environment slots. A per-harness table would have to be re-derived
+ * every time the fleet changed, and an alias means a target this build has never heard of still
+ * lands on that launcher's own default rather than refusing the swap.
  */
-export const DEFAULT_SWAP_MODEL: Readonly<Record<string, string>> = {
-  claudex: "opus",
-  "claude-native": "opus",
-  "claude-gpt": "gpt-5.6-sol",
-  "claude-gpt55": "gpt-5.5",
-  "local-mlx": "qwen3.8-local",
-};
+export const DEFAULT_SWAP_MODEL = "opus";
 
 export function planSwap(
   env: RespawnEnv,
@@ -110,10 +101,7 @@ export function planSwap(
   // settings alias would resolve to the harness you just left. User overrides are canonical model
   // IDs and always compile through the birth-model contract. The native `opus` default deliberately
   // remains a settings alias; canonical gateway models compile for the target context envelope.
-  const requestedModel = opts.model ?? DEFAULT_SWAP_MODEL[target.name];
-  if (!requestedModel) {
-    return refuse("model-unknown", `no default model for launcher "${target.name}" — pass --model`);
-  }
+  const requestedModel = opts.model ?? DEFAULT_SWAP_MODEL;
   const shouldCompile = opts.model !== undefined || parseBirthModel(requestedModel) !== null;
   const compiled = shouldCompile ? compileRespawnModel(requestedModel, target) : ok(requestedModel);
   if (!compiled.ok) return compiled;

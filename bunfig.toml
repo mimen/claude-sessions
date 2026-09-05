@@ -1,0 +1,4 @@
+[test]
+# Every test resolves the model registry to the checked-in fixture, never the machine's live vault
+# file: a suite that read the real registry would pass or fail on whatever model was added today.
+preload = ["./src/test-preload.ts"]

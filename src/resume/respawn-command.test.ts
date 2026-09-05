@@ -19,12 +19,7 @@ const SURFACE = "surface-1";
 const WORKSPACE = "workspace-1";
 const FLEET: Launcher[] = [
   { name: "claude-native", binary: "claude-native", serves: ["claude-*"], env: {}, clears: [] },
-  { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-5.6-*"], env: {}, clears: [] },
-];
-const CONTEXT_FLEET: Launcher[] = [
-  ...FLEET,
-  { name: "claude-gpt55", binary: "claude-gpt55", serves: ["gpt-5.5"], env: {}, clears: [] },
-  { name: "local-mlx", binary: "local-mlx", serves: ["qwen3.8-local"], env: {}, clears: [] },
+  { name: "claudex", binary: "claudex", serves: ["gpt-5.6-*", "grok-*", "glm-*"], env: {}, clears: [] },
 ];
 const ENVIRONMENT: RespawnEnv = {
   sessionId: SESSION,
@@ -186,7 +181,7 @@ test("restartCommand uses the current transcript when SQLite still reports the o
     }));
     expect(exit).toBe(0);
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain("claude-gpt --resume");
+    expect(calls[0]).toContain("claudex --resume");
     expect(calls[0]).not.toContain("--model");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
@@ -258,7 +253,7 @@ test("a planning refusal returns exit 1 without calling the destructive respawn 
   const errors: string[] = [];
   try {
     const exit = await swapHarnessCommand(
-      ["--to", "claude-gpt", "--do"],
+      ["--to", "claudex", "--do"],
       f.dbPath,
       dependencies(f.bridge, {
         respawn: () => {
@@ -269,7 +264,7 @@ test("a planning refusal returns exit 1 without calling the destructive respawn 
     );
     expect(exit).toBe(1);
     expect(respawns).toBe(0);
-    expect(errors[0]).toContain("already running on claude-gpt");
+    expect(errors[0]).toContain("already running on claudex");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
@@ -346,7 +341,7 @@ test("a valid canonical command override reaches respawn as current GPT launch s
   }
 });
 
-test("command parsing admits the dedicated GPT-5.5 and Qwen context families", async () => {
+test("command parsing admits every registry family the origin launcher serves", async () => {
   const f = fixture();
   const calls: string[] = [];
   const io: RespawnIo = {
@@ -356,23 +351,17 @@ test("command parsing admits the dedicated GPT-5.5 and Qwen context families", a
     },
   };
   try {
-    expect(await swapHarnessCommand(
-      ["--to", "claude-gpt55", "--model", "gpt-5.5", "--do"],
-      f.dbPath,
-      dependencies(f.bridge, io, [], CONTEXT_FLEET),
-    )).toBe(0);
-    expect(await swapHarnessCommand(
-      ["--to", "local-mlx", "--model", "qwen3.8-local", "--do"],
-      f.dbPath,
-      dependencies(f.bridge, io, [], CONTEXT_FLEET),
-    )).toBe(0);
+    expect(await restartCommand(["--model", "grok-4.6", "--do"], f.dbPath, dependencies(f.bridge, io)))
+      .toBe(0);
+    expect(await restartCommand(["--model", "glm-5.3-flash", "--do"], f.dbPath, dependencies(f.bridge, io)))
+      .toBe(0);
 
     expect(calls).toHaveLength(2);
-    expect(calls[0]).toContain("claude-gpt55 --resume");
-    expect(calls[0]).toContain("--model gpt-5.5");
-    expect(calls[1]).toContain("local-mlx --resume");
-    expect(calls[1]).toContain("--model qwen3.8-local");
+    // A behaves_as family is accounted through the picker mapping, never through a spelling.
+    expect(calls[0]).toContain("--model grok-4.6");
+    expect(calls[1]).toContain("--model glm-5.3-flash");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }
 });
+

@@ -8,6 +8,7 @@ import {
   DEFAULT_STORE_PATH,
   HOST_REGISTRY_PATH,
   LAUNCHER_REGISTRY_PATH,
+  MODEL_REGISTRY_PATH,
   LOCATION_REGISTRY_PATH,
   expandHome,
 } from "./paths.ts";
@@ -85,6 +86,11 @@ const ConfigSchema = z.object({
        * `[[launcher]]` entries below are the whole fleet, exactly as before.
        */
       launchers: z.string().default(""),
+      /**
+       * Shared model registry; empty resolves to the CCS runtime default
+       * (`~/.ccs/models.toml`, normally a link into the git-backed vault).
+       */
+      models: z.string().default(""),
     })
     .prefault({}),
   /**
@@ -185,5 +191,8 @@ export function loadConfig(
   config.routing.launchers = config.routing.launchers
     ? expandHome(config.routing.launchers)
     : LAUNCHER_REGISTRY_PATH();
+  config.routing.models = config.routing.models
+    ? expandHome(config.routing.models)
+    : MODEL_REGISTRY_PATH();
   return ok(config);
 }

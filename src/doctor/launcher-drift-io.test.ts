@@ -117,7 +117,7 @@ describe("launcher drift collection", () => {
       finding.check === "fleet" && finding.detail.includes("cannot read bundled shim source")
     )).toBe(true);
 
-    const unexpectedPath = join(runtime, "bin", "claude-gpt");
+    const unexpectedPath = join(runtime, "bin", "claude-native");
     writeFileSync(unexpectedPath, "stale wrapper\n");
     const unexpected = collect();
     expect(unexpected.findings.some((finding) =>

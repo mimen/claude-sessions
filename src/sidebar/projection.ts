@@ -15,6 +15,7 @@ import {
 } from "../catalogue/enrichment.ts";
 import type { Recommendation } from "../catalogue/enrichment-schema.ts";
 import { familyOf } from "../display/format.ts";
+import { displayModelRegistry, modelBase, modelById, shortOf } from "../models/registry.ts";
 import { enrichmentDriftLabel } from "../enrich/staleness.ts";
 import type { SidebarCategoryProjection } from "./category-projection.ts";
 
@@ -470,39 +471,34 @@ export function sidebarLifecycleOf(lifecycle: Lifecycle): SidebarLifecycle {
   return "active";
 }
 
-/**
- * Which provider drew a model, and how to write its name in a GUI.
- *
- * The colour is deliberately absent: CCS already decides what colour each model family is, and
- * a second copy here would drift the moment either side changed. `familyOf` stays the one
- * authority; this table only adds what a terminal badge never needed — the provider whose logo
- * to draw, and a capitalised label.
- */
-const MODEL_IDENTITIES: ReadonlyArray<{
-  readonly prefix: string;
-  readonly label: string;
-  readonly provider: SidebarModel["provider"];
-}> = [
-  { prefix: "gpt-5.6-sol", label: "Sol", provider: "openai" },
-  { prefix: "gpt-5.6-terra", label: "Terra", provider: "openai" },
-  { prefix: "gpt-5.6-luna", label: "Luna", provider: "openai" },
-  { prefix: "gpt-", label: "GPT", provider: "openai" },
-  { prefix: "claude-fable", label: "Fable", provider: "anthropic" },
-  { prefix: "claude-mythos", label: "Mythos", provider: "anthropic" },
-  { prefix: "claude-opus", label: "Opus", provider: "anthropic" },
-  { prefix: "claude-sonnet", label: "Sonnet", provider: "anthropic" },
-  { prefix: "claude-haiku", label: "Haiku", provider: "anthropic" },
-];
+/** Which provider's logo the UI draws for a registry `provider` value. */
+function providerIcon(provider: string | null, modelId: string): SidebarModel["provider"] {
+  if (provider === "claude") return "anthropic";
+  if (provider === "codex") return "openai";
+  if (provider !== null) return "unknown";
+  // Historical rows carry no provider; their id still says who drew them.
+  if (modelId.startsWith("claude-")) return "anthropic";
+  if (modelId.startsWith("gpt-")) return "openai";
+  return "unknown";
+}
 
-/** Resolve one model id to its short display identity. */
+/**
+ * Resolve one model id to its short display identity.
+ *
+ * The colour comes through `familyOf` rather than a second table here: CCS already decides what
+ * colour each model is, and a second copy would drift the moment either side changed.
+ */
 export function modelOf(modelId: string): SidebarModel {
   const color = familyOf(modelId).color;
-  for (const identity of MODEL_IDENTITIES) {
-    if (modelId.startsWith(identity.prefix)) {
-      return { id: modelId, label: identity.label, provider: identity.provider, color };
-    }
-  }
-  return { id: modelId, label: modelId, provider: "unknown", color };
+  const registry = displayModelRegistry();
+  const short = registry ? shortOf(registry, modelId) : null;
+  const provider = registry ? modelById(registry, modelBase(modelId))?.provider ?? null : null;
+  return {
+    id: modelId,
+    label: short ?? modelId,
+    provider: short ? providerIcon(provider, modelId) : "unknown",
+    color,
+  };
 }
 
 /**

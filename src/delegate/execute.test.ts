@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { err, ok, type Result } from "../result.ts";
+import { DELEGATE_LAUNCHER } from "./seat.ts";
 import {
   executeDelegate,
   type DelegateDependencies,
@@ -108,7 +109,7 @@ describe("executeDelegate", () => {
         cwd: "/tmp",
         route: "primary",
         provider: "gpt",
-        launcher: "claudex",
+        launcher: DELEGATE_LAUNCHER,
         requestedModel: "gpt-5.6-sol",
         compiledModel: "gpt-5.6-sol",
         effort: "high",

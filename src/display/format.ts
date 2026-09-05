@@ -1,4 +1,5 @@
 import { humanizeSlug, workRefOfIdentityKey } from "../catalogue/identity-key.ts";
+import { colorOf, displayModelRegistry, shortOf } from "../models/registry.ts";
 
 /** Display helpers for the TUI: model badges and compact money formatting. */
 
@@ -9,32 +10,21 @@ export interface ModelBadge {
   readonly color: string;
 }
 
-// Order matters: first prefix match wins. Muted family hues — legible but not shouting, since
-// a model tag sits on most rows and color-only would be noise (it's always paired with the label).
-const FAMILIES: ReadonlyArray<readonly [prefix: string, label: string, color: string]> = [
-  // Gateway-backed GPT models (claude-gpt launcher) — distinct teal hues so a cross-backend
-  // session is spottable at a glance in the model column.
-  ["gpt-5.6-sol", "sol", "#4fb3a9"],
-  ["gpt-5.6-terra", "terra", "#3d8f87"],
-  ["gpt-5.6-luna", "luna", "#6fcfc4"],
-  ["gpt-", "gpt", "#4fb3a9"],
-  ["claude-fable", "fable", "#a689c9"],
-  ["claude-mythos", "mythos", "#a689c9"],
-  ["claude-opus", "opus", "#c99a6b"],
-  ["claude-sonnet", "sonnet", "#6f9bc2"],
-  ["claude-haiku", "haiku", "#7ba85f"],
-  ["claude-3-opus", "opus", "#c99a6b"],
-  ["claude-3-5-sonnet", "sonnet", "#6f9bc2"],
-  ["claude-3-7-sonnet", "sonnet", "#6f9bc2"],
-  ["claude-3-5-haiku", "haiku", "#7ba85f"],
-  ["claude-3-haiku", "haiku", "#7ba85f"],
-];
-
+/**
+ * A model's badge, resolved from the shared registry: its short name lowercased, and the colour
+ * the registry gives it. Muted family hues, legible but not shouting, since a model tag sits on
+ * most rows and colour-only would be noise (it is always paired with the label).
+ *
+ * `other` is the honest answer for an id no registry row claims, and it is what a session renders
+ * as while the registry is unreadable.
+ */
 export function familyOf(modelId: string): ModelBadge {
-  for (const [prefix, label, color] of FAMILIES) {
-    if (modelId.startsWith(prefix)) return { key: label, label, color };
-  }
-  return { key: "other", label: "·", color: "#6b7280" };
+  const registry = displayModelRegistry();
+  const short = registry ? shortOf(registry, modelId) : null;
+  const color = registry ? colorOf(registry, modelId) : null;
+  if (!short) return { key: "other", label: "·", color: color ?? "#6b7280" };
+  const label = short.toLowerCase();
+  return { key: label, label, color: color ?? "#6b7280" };
 }
 
 /**

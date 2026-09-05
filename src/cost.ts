@@ -1,3 +1,5 @@
+import { displayModelRegistry, priceFor as registryPriceFor } from "./models/registry.ts";
+
 /**
  * API-equivalent cost of a Session, computed from the exact `usage` objects the API
  * returned (persisted on every assistant line of the transcript). These are the billed
@@ -58,49 +60,12 @@ const CACHE_WRITE_1H_MULT = 2.0;
 // Web search is $10 per 1k requests (web fetch has no per-request fee).
 const WEB_SEARCH_USD = 0.01;
 
-/** USD per million tokens, matched by model-id prefix (ids may carry date suffixes). */
-const PRICES: ReadonlyArray<readonly [prefix: string, input: number, output: number]> = [
-  // GPT gateway sessions retain their served model ids in transcript usage. These are
-  // API-equivalent list prices; subscription-backed runs remain notional, like Claude runs.
-  ["gpt-5.6-sol", 5, 30],
-  ["gpt-5.6-terra", 2.5, 15],
-  ["gpt-5.6-luna", 1, 6],
-  ["gpt-5.5", 5, 30],
-  ["claude-fable-5", 10, 50],
-  ["claude-mythos", 10, 50],
-  ["claude-opus-5", 5, 25],
-  ["claude-opus-4-8", 5, 25],
-  ["claude-opus-4-7", 5, 25],
-  ["claude-opus-4-6", 5, 25],
-  ["claude-opus-4-5", 5, 25],
-  ["claude-opus-4-1", 15, 75],
-  ["claude-opus-4-2", 15, 75], // claude-opus-4-20250514
-  ["claude-3-opus", 15, 75],
-  // claude-sonnet-5 is priced in priceFor() — its intro pricing is date-conditional.
-  ["claude-sonnet-4", 3, 15],
-  ["claude-3-7-sonnet", 3, 15],
-  ["claude-3-5-sonnet", 3, 15],
-  ["claude-haiku-4-5", 1, 5],
-  ["claude-3-5-haiku", 0.8, 4],
-  ["claude-3-haiku", 0.25, 1.25],
-];
-
-// Sonnet 5 bills $2/$10 introductory through 2026-08-31, $3/$15 after.
-const SONNET5_INTRO_END = Date.parse("2026-09-01T00:00:00Z");
-
 function priceFor(
   model: string,
   timestamp: string | undefined,
 ): { input: number; output: number } | null {
-  if (model.startsWith("claude-sonnet-5")) {
-    const ts = timestamp ? Date.parse(timestamp) : NaN;
-    const intro = !Number.isNaN(ts) && ts < SONNET5_INTRO_END;
-    return intro ? { input: 2, output: 10 } : { input: 3, output: 15 };
-  }
-  for (const [prefix, input, output] of PRICES) {
-    if (model.startsWith(prefix)) return { input, output };
-  }
-  return null;
+  const registry = displayModelRegistry();
+  return registry ? registryPriceFor(registry, model, timestamp) : null;
 }
 
 export interface UsageAccumulator {

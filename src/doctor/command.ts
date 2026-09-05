@@ -34,12 +34,12 @@ function categoryDoctor(args: readonly string[]): number {
   return categoryHealthExitCode(report);
 }
 
-function modelsDoctor(args: readonly string[]): number {
+async function modelsDoctor(args: readonly string[]): Promise<number> {
   if (args.some((arg) => arg !== "--json")) {
     console.error("usage: ccs doctor models [--json]");
     return 2;
   }
-  const result = collectModelDeclarations();
+  const result = await collectModelDeclarations();
   if (!result.ok) {
     console.error(`ccs doctor models: ${result.error.message}`);
     return 2;
@@ -49,7 +49,7 @@ function modelsDoctor(args: readonly string[]): number {
   return modelDeclarationsExitCode(result.value);
 }
 
-export function doctorCommand(args: readonly string[]): number {
+export function doctorCommand(args: readonly string[]): number | Promise<number> {
   if (args[0] === "launcher") return launcherDoctor(args.slice(1));
   if (args[0] === "categories") return categoryDoctor(args.slice(1));
   if (args[0] === "models") return modelsDoctor(args.slice(1));

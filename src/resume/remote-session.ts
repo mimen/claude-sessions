@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { CreatorKind } from "../catalogue/db-schema.ts";
 import { type Result, err, ok } from "../result.ts";
 import { shellQuote } from "./command.ts";
-import { BIRTH_MODEL_IDS, type BirthModelId } from "./role-model-launch.ts";
+import { parseBirthModel, type BirthModelId } from "./role-model-launch.ts";
 import type { ExactBirthRoute } from "./birth-route.ts";
 
 export interface CommandResult {
@@ -40,7 +40,12 @@ const DEFAULT_RUNNER: CommandRunner = {
 
 const ExactBirthRouteSchema = z.object({
   launcher: z.string().min(1),
-  model: z.enum(BIRTH_MODEL_IDS).nullable(),
+  // The remote host compiled this route against the SAME shared registry; re-parsing it here is
+  // what keeps a stale remote binary from smuggling a model this host cannot host.
+  model: z.string().min(1).nullable().refine(
+    (value) => value === null || parseBirthModel(value) !== null,
+    { message: "model is not a canonical birth model in the shared model registry" },
+  ).transform((value) => value as BirthModelId | null),
   launchModel: z.string().min(1).nullable(),
 }).strict().superRefine((route, context) => {
   if ((route.model === null) !== (route.launchModel === null)) {

@@ -6,7 +6,6 @@ import type { Launcher } from "./launchers.ts";
 const FLEET: readonly Launcher[] = [
   { name: "claudex", binary: "claudex", serves: ["*"], env: {}, clears: [] },
   { name: "claude-native", binary: "claude-native", serves: ["claude-*", "anthropic.*"], env: {}, clears: [] },
-  { name: "claude-gpt", binary: "claude-gpt", serves: ["gpt-*"], env: {}, clears: [] },
 ];
 const registry = () => ok(FLEET);
 
@@ -17,15 +16,15 @@ test("no declared route falls back to the zero-config launcher", () => {
   expect(route.value).toEqual({ launcher: "claude", model: null, launchModel: null });
 });
 
-test("--model still derives its own launcher without consulting the registry", () => {
+test("--model still derives its own launcher without consulting the launcher fleet", () => {
   const gpt = compileExactBirthRoute({ locationKey: "home", model: "gpt-5.6-sol" });
   expect(gpt.ok).toBe(true);
-  if (gpt.ok) expect(gpt.value.launcher).toBe("claude-gpt");
+  if (gpt.ok) expect(gpt.value.launcher).toBe("claudex");
 
   const claude = compileExactBirthRoute({ locationKey: "home", model: "claude-fable-5-1" });
   expect(claude.ok).toBe(true);
   if (claude.ok) {
-    expect(claude.value).toEqual({
+    expect(claude.value).toMatchObject({
       launcher: "claudex",
       model: "claude-fable-5-1",
       launchModel: "claude-fable-5-1[1m]",
@@ -45,7 +44,7 @@ test("a location-declared claudex default survives BOTH compile and resolve", ()
   const exact = compileExactBirthRoute(request);
   expect(exact.ok).toBe(true);
   if (!exact.ok) return;
-  expect(exact.value).toEqual({
+  expect(exact.value).toMatchObject({
     launcher: "claudex",
     model: "claude-opus-5",
     launchModel: "claude-opus-5[1m]",
@@ -74,8 +73,8 @@ test("repointing the default back to claude-native is the same one-line edit", (
 test("a location cannot declare a harness that does not reach its model", () => {
   const bad = compileExactBirthRoute({
     locationKey: "home",
-    defaultHarness: "claude-gpt",
-    defaultModel: "claude-opus-5",
+    defaultHarness: "claude-native",
+    defaultModel: "gpt-5.6-sol",
   });
   expect(bad.ok).toBe(false);
   if (bad.ok) return;
@@ -91,5 +90,5 @@ test("--via resolves against the machine's configured fleet, not the birth table
 
   const unknown = resolveBirthRoute({ locationKey: "home", via: "nope" }, registry);
   expect(unknown.ok).toBe(false);
-  if (!unknown.ok) expect(unknown.error.message).toContain("claudex, claude-native, claude-gpt");
+  if (!unknown.ok) expect(unknown.error.message).toContain("claudex, claude-native");
 });

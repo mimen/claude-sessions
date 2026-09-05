@@ -5,11 +5,8 @@ import type { Launcher } from "../resume/launchers.ts";
 import { launcherEnvSpecFilename } from "./environment.ts";
 
 export const BUNDLED_WRAPPER_BINARIES = [
-  "claude-gpt",
-  "claude-gpt55",
   "claude-native",
   "claudex",
-  "local-mlx",
 ] as const;
 export const WRAPPER_MANIFEST_FILE = ".launcher-wrappers";
 

@@ -61,7 +61,7 @@ test("loads the vault registry shape and canonical host defaults", () => {
   if (!loaded.ok) return;
 
   expect(loaded.value.defaultHost).toBe(MINI_HOST);
-  expect(loaded.value.defaultHarness).toBe("claude-gpt");
+  expect(loaded.value.defaultHarness).toBe("claudex");
   expect(loaded.value.defaultModel).toBe("gpt-5.6-sol");
   expect(loaded.value.locations).toHaveLength(29);
   expect(new Set(loaded.value.locations.map((location) => location.kind))).toEqual(
@@ -69,12 +69,12 @@ test("loads the vault registry shape and canonical host defaults", () => {
   );
   const home = loaded.value.locations.find((location) => location.key === "home");
   expect(effectiveLocationDefaults(loaded.value, home!)).toEqual({
-    defaultHarness: "claude-gpt",
+    defaultHarness: "claudex",
     defaultModel: "gpt-5.6-sol",
   });
   const ccs = loaded.value.locations.find((location) => location.key === "ccs");
   expect(ccs?.preferredHost).toBe(MINI_HOST);
-  expect(ccs?.defaultHarness).toBe("claude-gpt");
+  expect(ccs?.defaultHarness).toBe("claudex");
   expect(ccs?.defaultModel).toBe("gpt-5.6-sol");
   expect(resolveLocationForHost(ccs!, LAPTOP_HOST).ok).toBe(true);
   expect(resolveLocationForHost(ccs!, MINI_HOST).ok).toBe(true);
@@ -94,7 +94,7 @@ cwd = "${cwd}"
 kind = "repo"
 eligible_hosts = ["${LAPTOP_HOST}", "${MINI_HOST}"]
 preferred_host = "${MINI_HOST}"
-default_harness = "claude-gpt"
+default_harness = "claudex"
 default_model = "gpt-5.6-sol"
 status = "active"
 `);
@@ -110,7 +110,7 @@ status = "active"
   expect(resolved.ok).toBe(true);
   if (!resolved.ok) return;
   expect(resolved.value.cwd).toBe(realpathSync(cwd));
-  expect(resolved.value.defaultHarness).toBe("claude-gpt");
+  expect(resolved.value.defaultHarness).toBe("claudex");
 });
 
 test("requires the exact root schema", () => {
@@ -203,7 +203,7 @@ test("rejects unsupported kinds, relative paths, invalid preferred hosts, and un
     },
     {
       name: "unpaired defaults",
-      field: 'cwd = "/tmp/project"\nkind = "repo"\neligible_hosts = ["Milads-M3-2"]\npreferred_host = "Milads-M3-2"\ndefault_harness = "claude-gpt"',
+      field: 'cwd = "/tmp/project"\nkind = "repo"\neligible_hosts = ["Milads-M3-2"]\npreferred_host = "Milads-M3-2"\ndefault_harness = "claudex"',
       message: "must declare default_harness and default_model together",
     },
   ] as const;
@@ -225,7 +225,7 @@ status = "active"
 
 test("root model defaults are paired and inherited unless a location overrides them", () => {
   const root = tempRoot();
-  const path = writeRegistry(root, `${locationHeader}default_harness = "claude-gpt"
+  const path = writeRegistry(root, `${locationHeader}default_harness = "claudex"
 default_model = "gpt-5.6-sol"
 
 [[location]]
@@ -251,10 +251,10 @@ status = "active"
   const loaded = loadLocationRegistry(path);
   expect(loaded.ok).toBe(true);
   if (!loaded.ok) return;
-  expect(loaded.value.defaultHarness).toBe("claude-gpt");
+  expect(loaded.value.defaultHarness).toBe("claudex");
   expect(loaded.value.defaultModel).toBe("gpt-5.6-sol");
   expect(effectiveLocationDefaults(loaded.value, loaded.value.locations[0]!)).toEqual({
-    defaultHarness: "claude-gpt",
+    defaultHarness: "claudex",
     defaultModel: "gpt-5.6-sol",
   });
   expect(effectiveLocationDefaults(loaded.value, loaded.value.locations[1]!)).toEqual({
@@ -262,7 +262,7 @@ status = "active"
     defaultModel: "claude-fable-5",
   });
 
-  const invalid = writeRegistry(root, `${locationHeader}default_harness = "claude-gpt"\n`);
+  const invalid = writeRegistry(root, `${locationHeader}default_harness = "claudex"\n`);
   const result = loadLocationRegistry(invalid);
   expect(result.ok).toBe(false);
   if (!result.ok) expect(result.error.message).toContain("default_harness and default_model together");

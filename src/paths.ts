@@ -31,6 +31,13 @@ export const HOST_REGISTRY_PATH = () => join(runtimeRoot(), "hosts.toml");
  * (a binary that is not installed here) while the canonical fleet stays versioned and backed up.
  */
 export const LAUNCHER_REGISTRY_PATH = () => join(runtimeRoot(), "launchers.toml");
+/**
+ * Shared model registry, normally a link to the git-backed vault copy. It is the only place a
+ * model's id, family, context window, launcher membership, label, colour, price and birth
+ * eligibility are written; ccs reads it, `ccs launcher install` generates from it, and
+ * `ccs doctor models` refuses anything that disagrees with it.
+ */
+export const MODEL_REGISTRY_PATH = () => join(runtimeRoot(), "models.toml");
 export const DB_PATH = () => join(DATA_DIR(), "index.db");
 /**
  * Catalogue: session metadata (rename, loop, lifecycle, tags). A SEPARATE file from the Index

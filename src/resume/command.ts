@@ -34,7 +34,7 @@ export interface ResumeCommand {
  * Build the canonical resume invocation for a Session. We always construct
  * `<binary> --resume <id>` ourselves and run it in the Session's recorded cwd — this is what
  * sidesteps the cwd-scoped picker and the unreliable end-of-session hint (failure modes A/B/D).
- * `binary` defaults to `claude`; a route through another launcher (claude-gpt, …) swaps argv[0].
+ * `binary` defaults to `claude`; a route through another launcher (claudex, …) swaps argv[0].
  */
 export function buildResumeCommand(
   row: SessionRow,

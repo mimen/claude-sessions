@@ -1,0 +1,347 @@
+# ClaudeConfig/models.toml   (top level, beside settings.json; ~/.ccs/models.toml links here)
+#
+# Source of truth for model AVAILABILITY. Says nothing about what a model is for;
+# that is AGENTS.md and the seats. Canonical IDs only: exactly what the gateway's
+# /v1/models returns. Claude Code direct spellings ([1m]) are derived from the
+# family, never written here.
+
+version = 1
+gateway = "http://127.0.0.1:8317"
+
+[defaults]
+enrich_model = "gpt-5.6-sol(medium)"   # ccs session enrichment: read-and-classify, not reasoning
+
+# ── Families: one context-window contract each ─────────────────────────────
+# window     : the model's real context limit (what opencode and T3 are told)
+# accounting : how Claude Code learns the window on claudex. Exactly one of:
+#   "marker"     append [1m]; Claude Code recognizes the Claude ID and uses 1M
+#   "behaves_as" map to a known Claude ID; Claude Code uses THAT model's window
+#   "envelope"   no mapping; Claude Code uses the process-wide max_context slot
+# Claude Code has no per-model context field for custom IDs, so a model whose
+# window matches neither 200K nor the envelope is accounted for approximately.
+
+[[family]]
+name = "claude-1m"
+window = 1000000
+accounting = "marker"
+marker = "[1m]"
+prefixes = ["claude-fable-", "claude-opus-", "claude-sonnet-"]
+
+[[family]]
+name = "claude-200k"
+window = 200000
+accounting = "marker"        # bare ID, Claude Code knows it as 200K
+marker = ""
+prefixes = ["claude-haiku-"]
+
+[[family]]
+name = "gpt-5.6"
+window = 921000
+accounting = "envelope"      # NEVER behaves_as: it drops the row to the Claude model's 200K
+prefixes = ["gpt-5.6-"]
+
+[[family]]
+name = "grok"
+window = 500000              # xAI's limit for 4.5 and 4.6
+accounting = "behaves_as"    # DECISION: 200K accounted, 300K left on the table. The envelope
+behaves_as = "claude-sonnet-5"  # alternative is 921K, which overruns 500K mid-session and fails
+prefixes = ["grok-"]         # late. Undercount is the safe error. Revisit if Claude Code gains
+                             # a per-row context field or a 500K Claude ID appears.
+                             # The donor is any bare Claude 5 ID: behavesAs lends its prompt
+                             # profile, effort controls, and 200K accounting, and sends grok-*
+                             # unchanged. Sonnet 5 implies no resemblance; it is the 200K
+                             # Claude ID with the effort slider.
+
+[[family]]
+name = "glm"
+window = 1000000             # 1M upstream on every lane
+accounting = "envelope"      # 921K accounted, fits under the real window; today's behavesAs
+prefixes = ["glm-"]          # row is a 200K degradation and gets removed
+
+# ── Active models ──────────────────────────────────────────────────────────
+# launchers : Claude Code launchers whose picker and allowlist carry the row
+# clients   : every active model goes to every other client (opencode, T3, ...)
+#             by default; hermes discovers live. There is no per-row opt-out.
+# clients   : other harnesses that need an explicit entry (hermes discovers live)
+# birth     : accepted as a ccs managed-birth model
+# picker    : shown in /model (false = allowlisted, not offered)
+
+[[model]]
+id = "claude-fable-5-1"
+family = "claude-1m"
+provider = "claude"                   # cliproxyapi OAuth lane
+launchers = ["claudex", "claude-native"]
+label = "Fable 5.1"
+short = "Fable"
+description = "Hard-problem orchestrator, taste and judgment (Claude sub, Fable half)"
+color = "#a689c9"
+price = { input = 10, output = 50 }
+birth = true
+picker = true
+
+[[model]]
+id = "claude-fable-5"
+family = "claude-1m"
+provider = "claude"
+replaced_by = "claude-fable-5-1"      # compatibility: births resolve, never generated into active surfaces
+label = "Fable 5"
+short = "Fable"
+color = "#a689c9"
+price = { input = 10, output = 50 }
+birth = true
+picker = false
+
+[[model]]
+id = "claude-opus-5"
+family = "claude-1m"
+provider = "claude"
+launchers = ["claudex", "claude-native"]
+label = "Opus 5"
+short = "Opus"
+description = "Strong delegated seat, poor driver (Claude sub, must-burn half)"
+color = "#c99a6b"
+price = { input = 5, output = 25 }
+birth = true
+picker = true
+
+[[model]]
+id = "claude-sonnet-5"
+family = "claude-1m"
+provider = "claude"
+launchers = ["claudex", "claude-native"]
+label = "Sonnet 5"
+short = "Sonnet"
+description = "Iterative-UX driver, tight loops and small diffs (Claude sub, must-burn half)"
+color = "#6f9bc2"
+price = { input = 3, output = 15 }    # intro $2/$10 ended 2026-08-31
+birth = true
+picker = true
+
+[[model]]
+id = "claude-haiku-4-5-20251001"
+family = "claude-200k"
+provider = "claude"
+launchers = ["claude-native"]         # gateway has no Haiku route; native only
+label = "Haiku 4.5"
+short = "Haiku"
+color = "#7ba85f"
+price = { input = 1, output = 5 }
+birth = false
+picker = false                        # allowlisted so Claude Code's own background calls resolve
+
+[[model]]
+id = "gpt-5.6-sol"
+family = "gpt-5.6"
+provider = "codex"
+launchers = ["claudex"]
+label = "Sol 5.6"
+short = "Sol"
+description = "Main orchestrator, daily driver (Codex sub)"
+color = "#4fb3a9"
+price = { input = 5, output = 30 }
+birth = true
+picker = true
+
+[[model]]
+id = "gpt-5.6-terra"
+family = "gpt-5.6"
+provider = "codex"
+launchers = ["claudex"]
+label = "Terra 5.6"
+short = "Terra"
+description = "Excess-Codex burn lane, short leash under a supervisor"
+color = "#3d8f87"
+price = { input = 2.5, output = 15 }
+birth = true
+picker = true
+
+[[model]]
+id = "gpt-5.6-luna"
+family = "gpt-5.6"
+provider = "codex"
+launchers = ["claudex"]
+label = "Luna 5.6"
+short = "Luna"
+description = "Cheap mechanical glue and read-only search"
+color = "#6fcfc4"
+price = { input = 1, output = 6 }
+launch_effort = "low"                 # every managed birth on the glue lane runs cheap
+birth = true
+picker = true
+
+[[model]]
+id = "grok-4.6"
+family = "grok"
+provider = "xai"                      # cliproxyapi OAuth lane (Grok Build)
+launchers = ["claudex"]
+label = "Grok 4.6"
+short = "Grok"
+description = "Live world and sentiment, burns quota fast (reserve for Grok Bot)"
+color = "#d08770"
+price = { input = 3, output = 15 }    # xAI list; subscription-backed, notional
+birth = true
+picker = true
+
+[[model]]
+id = "grok-4.5"
+family = "grok"
+provider = "xai"
+launchers = ["claudex"]
+label = "Grok 4.5"
+short = "Grok"
+description = "Live world and sentiment, sweep lane"
+color = "#d08770"
+price = { input = 3, output = 15 }
+birth = true
+picker = true
+
+[[model]]
+id = "glm-5.3-flash"
+family = "glm"
+provider = "openrouter"               # openai-compatibility entry; upstream z-ai/glm-5.3-flash
+launchers = ["claudex"]
+label = "GLM 5.3 Flash"
+short = "GLM"
+description = "Obedient grind driver, API-billed via OpenRouter"
+color = "#b5a642"
+price = { input = 0.15, output = 0.50 }
+birth = true
+picker = true
+
+[[model]]
+id = "glm-5.3-flash-fast"
+family = "glm"
+provider = "openrouter"               # same upstream, payload.override-raw pins Parasail
+launchers = ["claudex"]
+label = "GLM 5.3 Flash (fast)"
+short = "GLM"
+color = "#b5a642"
+price = { input = 0.15, output = 0.50 }
+birth = true
+picker = false                        # a lane, reached by explicit --model, not a picker row
+
+[[model]]
+id = "glm-5.3-flash-go"
+family = "glm"
+provider = "opencode-go"
+launchers = ["claudex"]
+label = "GLM 5.3 Flash (Go)"
+short = "GLM"
+color = "#b5a642"
+price = { input = 0.15, output = 0.50 }
+birth = true
+picker = false
+
+# ── Launcher tier slots ────────────────────────────────────────────────────
+# Values are canonical IDs plus an optional effort suffix; the generator applies
+# the family marker. claude-native has no table: it clears every override and
+# lets Claude Code's own defaults stand.
+
+[slots.claudex]
+fable  = "claude-fable-5-1"           # -> ANTHROPIC_DEFAULT_FABLE_MODEL=claude-fable-5-1[1m]
+opus   = "claude-opus-5"
+sonnet = "gpt-5.6-sol"
+haiku  = "gpt-5.6-luna(low)"
+subagent = "gpt-5.6-luna(xhigh)"      # -> CLAUDE_CODE_SUBAGENT_MODEL
+max_context = 921000                  # -> CLAUDE_CODE_MAX_CONTEXT_TOKENS, the GPT-5.6 envelope
+auto_compact = 1000000                # -> CLAUDE_CODE_AUTO_COMPACT_WINDOW
+
+# ── Historical: priced and colored for old transcripts, never offered ──────
+# Only id, family/color, and price matter here. Adding a row is how a retired
+# model keeps rendering correctly in ccs; deleting one makes its sessions unpriced.
+
+[[historical]]
+id = "gpt-5.5"
+price = { input = 5, output = 30 }
+color = "#4fb3a9"
+short = "GPT"
+
+[[historical]]
+id = "qwen3.8-local"
+price = { input = 0, output = 0 }
+color = "#6b7280"
+short = "Qwen"
+
+[[historical]]
+id = "claude-haiku-4-5"               # undated spelling seen in older transcripts
+price = { input = 1, output = 5 }
+color = "#7ba85f"
+short = "Haiku"
+
+[[historical]]
+id = "claude-opus-4-8"
+price = { input = 5, output = 25 }
+color = "#c99a6b"
+short = "Opus"
+
+[[historical]]
+id = "claude-opus-4-7"
+price = { input = 5, output = 25 }
+color = "#c99a6b"
+short = "Opus"
+
+[[historical]]
+id = "claude-opus-4-6"
+price = { input = 5, output = 25 }
+color = "#c99a6b"
+short = "Opus"
+
+[[historical]]
+id = "claude-opus-4-5"
+price = { input = 5, output = 25 }
+color = "#c99a6b"
+short = "Opus"
+
+[[historical]]
+id = "claude-opus-4-1"
+price = { input = 15, output = 75 }
+color = "#c99a6b"
+short = "Opus"
+
+[[historical]]
+id = "claude-sonnet-4"
+price = { input = 3, output = 15 }
+color = "#6f9bc2"
+short = "Sonnet"
+
+[[historical]]
+id = "claude-mythos"
+price = { input = 10, output = 50 }
+color = "#a689c9"
+short = "Mythos"
+
+[[historical]]
+id = "claude-opus-4-2"               # claude-opus-4-20250514
+price = { input = 15, output = 75 }
+color = "#c99a6b"
+short = "Opus"
+
+[[historical]]
+id = "claude-3-opus"
+price = { input = 15, output = 75 }
+color = "#c99a6b"
+short = "Opus"
+
+[[historical]]
+id = "claude-3-7-sonnet"
+price = { input = 3, output = 15 }
+color = "#6f9bc2"
+short = "Sonnet"
+
+[[historical]]
+id = "claude-3-5-sonnet"
+price = { input = 3, output = 15 }
+color = "#6f9bc2"
+short = "Sonnet"
+
+[[historical]]
+id = "claude-3-5-haiku"
+price = { input = 0.8, output = 4 }
+color = "#7ba85f"
+short = "Haiku"
+
+[[historical]]
+id = "claude-3-haiku"
+price = { input = 0.25, output = 1.25 }
+color = "#7ba85f"
+short = "Haiku"

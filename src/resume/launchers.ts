@@ -1,6 +1,6 @@
 /**
  * Launchers + routes (cross-backend resume). A LAUNCHER is one Claude Code executable
- * (native `claude`, a gateway wrapper like `claude-gpt`, …) declared in config.toml with the
+ * (native `claude`, a gateway wrapper like `claudex`, …) declared in config.toml with the
  * model-id globs its backend can replay. A ROUTE is one launcher's eligibility verdict for a
  * given session's model history. Transcripts are stored in Anthropic format regardless of
  * backend, but only a backend that can replay EVERY model in the history may resume it —
@@ -12,6 +12,8 @@ import {
   type ResolvedLauncherEnv,
 } from "../launcher/environment.ts";
 import { loadLauncherRegistry, mergeLauncherFleet } from "../launcher/registry.ts";
+import { slotEnvironment } from "../launcher/model-surfaces.ts";
+import { displayModelRegistry } from "../models/registry.ts";
 import { type Result, ok, err } from "../result.ts";
 
 export interface Launcher {
@@ -207,7 +209,23 @@ export function effectiveLaunchers(config: Config): Result<Launcher[]> {
     : config.launcher;
   const launchers = launchersFrom(entries);
   if ("error" in launchers) return err(new Error(launchers.error));
-  return ok(launchers);
+  return ok(launchers.map(withRegistrySlots));
+}
+
+/**
+ * Overlay the model registry's `[slots.<launcher>]` table onto a launcher's environment.
+ *
+ * The registry WINS over the same key in the launcher fleet, because a model spelling is registry
+ * data and a fleet entry naming one is a second copy that can only drift. Applied here rather than
+ * only in `ccs launcher install` so an explicit `--via` spawn and the interactive shim install the
+ * identical environment; `ccs doctor models` reports a fleet entry still carrying a model key.
+ */
+function withRegistrySlots(launcher: Launcher): Launcher {
+  const registry = displayModelRegistry();
+  if (!registry) return launcher;
+  const slots = slotEnvironment(registry, launcher.name);
+  if (Object.keys(slots).length === 0) return launcher;
+  return { ...launcher, env: { ...launcher.env, ...slots } };
 }
 
 /** Load the launcher fleet. Config errors stay LOUD (a silent fall-back to

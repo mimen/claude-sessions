@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import type { BirthModelId } from "./role-model-launch.ts";
 import {
   launchRemoteSession,
   preflightRemoteSession,
@@ -49,11 +50,11 @@ function preflightRequest(overrides: Partial<RemotePreflightRequest> = {}): Remo
     sshAlias: "macmini",
     locationKey: "ccs",
     route: {
-      launcher: "claude-gpt",
-      model: "gpt-5.6-sol",
+      launcher: "claudex",
+      model: "gpt-5.6-sol" as BirthModelId,
       launchModel: "gpt-5.6-sol[1m]",
     },
-    model: "gpt-5.6-sol",
+    model: "gpt-5.6-sol" as BirthModelId,
     requiredCapabilities: ["always-on", "shared-vault"],
     ...overrides,
   };
@@ -65,8 +66,8 @@ function preflightPayload(overrides: Readonly<Record<string, object | string | r
     host: "Milads-Mac-mini",
     location: { key: "ccs", name: "CCS", cwd: "/remote/ccs" },
     route: {
-      launcher: "claude-gpt",
-      model: "gpt-5.6-sol",
+      launcher: "claudex",
+      model: "gpt-5.6-sol" as BirthModelId,
       launchModel: "gpt-5.6-sol[1m]",
     },
     required_capabilities: ["always-on", "shared-vault"],
@@ -82,7 +83,7 @@ function request(overrides: Partial<RemoteSessionRequest> = {}): RemoteSessionRe
     title: "CCS router",
     prompt: "implement routing",
     permissionMode: "acceptEdits",
-    model: "gpt-5.6-sol",
+    model: "gpt-5.6-sol" as BirthModelId,
     requiredCapabilities: ["always-on", "shared-vault"],
     creatorKind: "agent",
     creatorRef: "11111111-1111-4111-8111-111111111111",

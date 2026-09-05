@@ -54,7 +54,7 @@ if [[ -n "${CMUX_SURFACE_ID:-}" && -z "${CCS_CLAUDE_SHIM_AFTER_CMUX:-}" ]]; then
   if [[ -n "$cmux_wrapper" ]]; then
     export CCS_LAUNCH_PARENT_SESSION_ID="${CCS_LAUNCH_PARENT_SESSION_ID:-${CLAUDE_CODE_SESSION_ID:-}}"
     # cmux clears the inherited Anthropic credential along with that identity, which
-    # silently strips the gateway route a launcher wrapper (claude-gpt) installed one
+    # silently strips the gateway route a launcher wrapper (claudex) installed one
     # exec earlier — the session then reaches the gateway with no key, or with cmux's
     # own OAuth token, and the gateway rejects it. Carry the route across in CCS-only
     # variables, exactly as the causal parent survives.
@@ -107,7 +107,7 @@ fi
 env_spec_dir="${CCS_LAUNCHER_ENV_DIR:-${HOME:-}/.ccs/launcher-env}"
 
 # The active launcher name. CCS_FORCE_HARNESS lets a wrapper name ITSELF, which is what keeps
-# `claudex`/`claude-gpt`/`claude-native` working while they stop defining environment: they are
+# `claudex`/`claude-native` working while they stop defining environment: they are
 # thin shims that set this and exec back through here, and the bounce is still what registers
 # the session. Absent, the materialized default wins.
 resolve_launcher_name() {
@@ -134,6 +134,9 @@ read_secret_file() {
   printf '%s' "$value"
 }
 
+# The launcher whose environment was installed, so `exec_raw` can find its generated settings.
+active_launcher=""
+
 apply_launcher_env() {
   local name
   name="$(resolve_launcher_name)"
@@ -142,6 +145,7 @@ apply_launcher_env() {
   case "$name" in
     *[!A-Za-z0-9._-]*|.|..) warn "ignoring invalid launcher name: $name"; return 0 ;;
   esac
+  active_launcher="$name"
 
   local spec="$env_spec_dir/$name.env"
   if [[ ! -r "$spec" ]]; then
@@ -198,6 +202,19 @@ apply_launcher_env() {
   done < "$spec"
 }
 
+# A caller who brought their own --settings gets exactly that; Claude Code takes one file, and
+# silently replacing an explicit choice with the generated one would be the wrong surprise.
+caller_declares_settings() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --) return 1 ;;
+      --settings|--settings=*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 exec_raw() {
   apply_launcher_env
   unset CCS_CLAUDE_SHIM_AFTER_CMUX CCS_LAUNCH_PARENT_SESSION_ID
@@ -209,6 +226,12 @@ exec_raw() {
   # The carriers have already been restored to their real names. Drop them so the
   # credential is not handed to Claude under a second name it does not know to redact.
   unset CCS_CARRIED_ANTHROPIC_API_KEY CCS_CARRIED_ANTHROPIC_BASE_URL
+  # `ccs launcher install` generates one settings file per launcher carrying the models THAT
+  # launcher hosts, so `/model` never offers a row this process envelope cannot serve.
+  local generated_settings="$env_spec_dir/$active_launcher.settings.json"
+  if [[ -n "$active_launcher" && -r "$generated_settings" ]] && ! caller_declares_settings "$@"; then
+    exec "$raw_claude" --settings "$generated_settings" "$@"
+  fi
   exec "$raw_claude" "$@"
 }
 

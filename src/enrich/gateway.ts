@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { err, ok, type Result } from "../result.ts";
+import { displayModelRegistry, enrichModel } from "../models/registry.ts";
 import {
   EnrichmentPayloadSchema,
   enrichmentJsonSchema,
@@ -48,11 +49,14 @@ function isTransientStatus(status: number): boolean {
 }
 
 /**
- * Sol at medium effort. Enrichment is a read-and-classify task over a bounded payload, not a
- * reasoning problem, so the fleet's high-effort ceiling would buy nothing on ~340 sessions.
- * Effort rides in the model string, matching the gateway's existing convention.
+ * The registry's `[defaults] enrich_model`. Enrichment is a read-and-classify task over a bounded
+ * payload, not a reasoning problem, so the fleet's high-effort ceiling would buy nothing on ~340
+ * sessions. Effort rides in the model string, matching the gateway's existing convention.
  */
-const DEFAULT_GATEWAY_MODEL = "gpt-5.6-sol(medium)";
+function defaultGatewayModel(): string | null {
+  const registry = displayModelRegistry();
+  return registry ? enrichModel(registry) : null;
+}
 const DEFAULT_TIMEOUT_MS = 90_000;
 
 const GatewayEnvelopeSchema = z.object({
@@ -227,8 +231,13 @@ export async function requestEnrichment(
   }
   if (!key) return err(new Error(`gateway key is empty at ${keyPath}`));
 
+  const model = options.model ?? defaultGatewayModel();
+  if (!model) {
+    return err(new Error("no enrichment model: pass one, or declare [defaults] enrich_model in the model registry"));
+  }
+
   const body = {
-    model: options.model ?? DEFAULT_GATEWAY_MODEL,
+    model,
     system: SYSTEM_PROMPT,
     max_tokens: 1500,
     tools: [{

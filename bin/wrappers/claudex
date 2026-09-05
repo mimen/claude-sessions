@@ -15,15 +15,7 @@ model_base() {
 validate_model() {
   local base="$(model_base "$1")"
   case "$base" in
-    gpt-5.6-*|claude-*|opus|fable|sonnet|haiku|best|default|opusplan) return 0 ;;
-    gpt-5.5)
-      print -u2 -- "claudex: gpt-5.5 requires the 272K claude-gpt55 launcher"
-      return 2
-      ;;
-    qwen3.8-local)
-      print -u2 -- "claudex: qwen3.8-local requires the 262,144-token local-mlx launcher"
-      return 2
-      ;;
+    gpt-5.6-*|claude-*|grok-*|glm-*|opus|fable|sonnet|haiku|best|default|opusplan) return 0 ;;
     gpt-*|qwen*)
       print -u2 -- "claudex: model $base is outside this launcher's context envelope"
       return 2
@@ -42,7 +34,7 @@ declare_claude_window() {
 
 MODEL='opus'
 args=("$@")
-if (( ${#args} > 0 )) && [[ "${args[1]}" == gpt-* || "${args[1]}" == claude-* || "${args[1]}" == qwen* ]]; then
+if (( ${#args} > 0 )) && [[ "${args[1]}" == gpt-* || "${args[1]}" == claude-* || "${args[1]}" == grok-* || "${args[1]}" == glm-* || "${args[1]}" == qwen* ]]; then
   validate_model "${args[1]}" || exit $?
   MODEL="$(declare_claude_window "${args[1]}")"
   args=("${args[@]:1}")

@@ -9,11 +9,15 @@ import { err, ok, type Result } from "../result.ts";
 import { type Launcher, effectiveLaunchers } from "../resume/launchers.ts";
 import {
   buildModelDeclarationsReport,
+  type LauncherServes,
   type ModelBehaviorMapping,
   type ModelDeclaration,
   type ModelDeclarationsReport,
   type ModelMembershipRequirement,
+  type ModelPickerRow,
+  type PolicyModelReference,
 } from "./model-declarations.ts";
+import { loadModelRegistry, type ModelRegistry } from "../models/registry.ts";
 
 const SettingsSchema = z.object({
   model: z.string().optional(),
@@ -50,7 +54,106 @@ export interface ModelDeclarationsOptions {
   readonly configPath?: string;
   readonly launcherRegistryPath?: string;
   readonly locationRegistryPath?: string;
+  readonly modelRegistryPath?: string;
+  readonly hermesConfigPath?: string;
+  readonly pstackModelsPath?: string;
+  readonly gatewayKeyPath?: string;
   readonly environment?: NodeJS.ProcessEnv;
+  /** Injected by tests; production probes the live gateway catalogue. */
+  readonly fetchGatewayModels?: (registry: ModelRegistry) => Promise<readonly string[] | null>;
+}
+
+const HermesSchema = z.object({
+  model: z.object({ default: z.string().optional() }).passthrough().optional(),
+  providers: z.record(z.string(), z.object({
+    default_model: z.string().optional(),
+  }).passthrough()).optional(),
+}).passthrough();
+
+const PstackSchema = z.object({
+  singleRoleDefault: z.string().optional(),
+  panel: z.array(z.string()).optional(),
+  available: z.array(z.object({ slug: z.string() }).passthrough()).optional(),
+  roles: z.array(z.object({ role: z.string(), models: z.array(z.string()) }).passthrough()).optional(),
+}).passthrough();
+
+/** Model ids Hermes selects by hand; its catalogue itself is discovered live from the gateway. */
+function readHermes(path: string): readonly PolicyModelReference[] {
+  let parsed: unknown;
+  try {
+    parsed = Bun.YAML.parse(readFileSync(path, "utf8"));
+  } catch {
+    // A machine without Hermes has nothing to check, and a malformed Hermes config is Hermes's
+    // own doctor to report.
+    return [];
+  }
+  const config = HermesSchema.safeParse(parsed);
+  if (!config.success) return [];
+  const references: PolicyModelReference[] = [];
+  if (config.data.model?.default) {
+    references.push({ path, field: "model.default", value: config.data.model.default });
+  }
+  for (const [name, provider] of Object.entries(config.data.providers ?? {})) {
+    if (provider.default_model) {
+      references.push({ path, field: `providers.${name}.default_model`, value: provider.default_model });
+    }
+  }
+  return references;
+}
+
+/** Role defaults pstack stamps into its skills. Out of scope for generation, in scope for drift. */
+function readPstackModels(path: string): readonly PolicyModelReference[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return [];
+  }
+  const models = PstackSchema.safeParse(parsed);
+  if (!models.success) return [];
+  const references: PolicyModelReference[] = [];
+  const add = (field: string, value: string): void => {
+    references.push({ path, field, value });
+  };
+  if (models.data.singleRoleDefault) add("singleRoleDefault", models.data.singleRoleDefault);
+  for (const [index, value] of (models.data.panel ?? []).entries()) add(`panel[${index}]`, value);
+  for (const [index, entry] of (models.data.available ?? []).entries()) add(`available[${index}].slug`, entry.slug);
+  for (const entry of models.data.roles ?? []) {
+    for (const [index, value] of entry.models.entries()) add(`roles[${entry.role}].models[${index}]`, value);
+  }
+  return references;
+}
+
+const GatewayModelsSchema = z.object({
+  data: z.array(z.object({ id: z.string() }).passthrough()),
+});
+
+/**
+ * The gateway's live catalogue. Null on any transport or shape failure: an unreachable gateway is
+ * a fact about right now, not drift in the registry, so it warns rather than fails.
+ */
+async function probeGatewayModels(
+  registry: ModelRegistry,
+  keyPath: string,
+): Promise<readonly string[] | null> {
+  if (!registry.gateway) return null;
+  let key: string;
+  try {
+    key = readFileSync(keyPath, "utf8").trim();
+  } catch {
+    return null;
+  }
+  try {
+    const response = await fetch(`${registry.gateway}/v1/models`, {
+      headers: { authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) return null;
+    const parsed = GatewayModelsSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data.data.map((model) => model.id) : null;
+  } catch {
+    return null;
+  }
 }
 
 function direct(
@@ -93,6 +196,7 @@ function readSettings(
   declarations: ModelDeclaration[],
   memberships: ModelMembershipRequirement[],
   behaviorMappings: ModelBehaviorMapping[],
+  pickerRows: ModelPickerRow[],
 ): Result<void> {
   try {
     const settings = SettingsSchema.parse(JSON.parse(readFileSync(path, "utf8")));
@@ -106,6 +210,12 @@ function readSettings(
     }
     for (const [index, option] of (settings.modelPicker?.options ?? []).entries()) {
       direct(declarations, path, `modelPicker.options[${index}].model`, "settings.modelPicker", option.model);
+      pickerRows.push({
+        path,
+        field: `modelPicker.options[${index}]`,
+        model: option.model,
+        behavesAs: option.behavesAs ?? null,
+      });
       if (available) memberships.push({ path, field: "availableModels", value: option.model, values: available });
       if (option.behavesAs) {
         behaviorMappings.push({
@@ -152,15 +262,21 @@ function readLaunchers(
   configPath: string,
   launchers: readonly Launcher[],
   declarations: ModelDeclaration[],
-): void {
+): LauncherServes[] {
   const localNames = new Set(config.launcher.map((launcher) => launcher.name));
+  const fleet: LauncherServes[] = [];
   for (const launcher of launchers) {
     const sourcePath = localNames.has(launcher.name) ? configPath : config.routing.launchers;
+    const modelEnvironmentKeys: string[] = [];
     for (const [key, value] of Object.entries(launcher.env)) {
       const surface = modelEnvironmentSurface(key, "launcher");
-      if (surface) direct(declarations, sourcePath, `launcher.${launcher.name}.env.${key}`, surface, value);
+      if (!surface) continue;
+      modelEnvironmentKeys.push(key);
+      direct(declarations, sourcePath, `launcher.${launcher.name}.env.${key}`, surface, value);
     }
+    fleet.push({ name: launcher.name, serves: launcher.serves, modelEnvironmentKeys, path: sourcePath });
   }
+  return fleet;
 }
 
 function readLocations(path: string, declarations: ModelDeclaration[]): Result<void> {
@@ -175,9 +291,9 @@ function readLocations(path: string, declarations: ModelDeclaration[]): Result<v
   return ok(undefined);
 }
 
-export function collectModelDeclarations(
+export async function collectModelDeclarations(
   options: ModelDeclarationsOptions = {},
-): Result<ModelDeclarationsReport> {
+): Promise<Result<ModelDeclarationsReport>> {
   const environment = options.environment ?? process.env;
   const home = environment.HOME ?? homedir();
   const claudeConfigDir = environment.CLAUDE_CONFIG_DIR ?? join(home, ".claude");
@@ -196,19 +312,38 @@ export function collectModelDeclarations(
   };
   const launchers = effectiveLaunchers(config);
   if (!launchers.ok) return launchers;
+  const registry = loadModelRegistry(options.modelRegistryPath ?? config.routing.models);
+  if (!registry.ok) return registry;
 
   const declarations: ModelDeclaration[] = [];
   const memberships: ModelMembershipRequirement[] = [];
   const behaviorMappings: ModelBehaviorMapping[] = [];
+  const pickerRows: ModelPickerRow[] = [];
 
   for (const result of [
-    readSettings(settingsPath, declarations, memberships, behaviorMappings),
+    readSettings(settingsPath, declarations, memberships, behaviorMappings, pickerRows),
     readAgents(agentsRoot, declarations),
     readLocations(config.routing.registry, declarations),
   ]) {
     if (!result.ok) return result;
   }
-  readLaunchers(config, configPath, launchers.value, declarations);
+  const fleet = readLaunchers(config, configPath, launchers.value, declarations);
 
-  return ok(buildModelDeclarationsReport({ declarations, memberships, behaviorMappings }));
+  const hermesPath = options.hermesConfigPath ?? join(home, ".hermes", "config.yaml");
+  const pstackPath = options.pstackModelsPath
+    ?? join(home, "Documents", "milad-vault", "ClaudeConfig", "plugins", "pstack", "models.json");
+  const gatewayKeyPath = options.gatewayKeyPath ?? join(home, ".cli-proxy-api-key");
+  const probe = options.fetchGatewayModels ?? ((value: ModelRegistry) => probeGatewayModels(value, gatewayKeyPath));
+
+  return ok(buildModelDeclarationsReport({
+    declarations,
+    memberships,
+    behaviorMappings,
+    pickerRows,
+    registry: registry.value,
+    launchers: fleet,
+    hermes: readHermes(hermesPath),
+    pstack: readPstackModels(pstackPath),
+    gatewayModels: await probe(registry.value),
+  }));
 }

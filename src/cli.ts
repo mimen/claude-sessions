@@ -115,7 +115,7 @@ Sessions (ephemeral, per-run):
            --pr-repo owner/repo --pr-number 123 --gus-work W-... · --print-id (reserve only)
            --json (structured detached-launch receipt with full session id and workspace ref)
            --incognito (born hidden: no listing, no enrichment, never quoted into another session)
-           --via <launcher> (legacy policy-less launcher selection, e.g. claude-gpt)
+           --via <launcher> (legacy policy-less launcher selection, e.g. claude-native)
            role.toml model policy: canonical IDs compile launcher + --model; it rejects --via/--model
   ccs session bump <id> [--note "..."]            Wake the session's cmux tab
   ccs session incognito [<id>|.] [--off]          Hide from every listing; never enriched or quoted elsewhere
@@ -169,10 +169,8 @@ Resume & tabs:
                                                   change its CAPABILITY envelope — changing model
                                                   alone is now /model, in session. Bare form is a
                                                   preflight; --to is required once more than two
-                                                  launchers are configured. Model defaults: claudex
-                                                  → opus, claude-native → opus, claude-gpt →
-                                                  gpt-5.6-sol, claude-gpt55 → gpt-5.5,
-                                                  local-mlx → qwen3.8-local
+                                                  launchers are configured. Model defaults to the
+                                                  opus tier alias, resolved by the target launcher
   ccs restart [--on <launcher>] [--model <canonical-id>] [--do]
                                                   Relaunch THIS session on the SAME harness, in
                                                   place — picks up a newly released model, a newer

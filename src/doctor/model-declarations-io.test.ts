@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { collectModelDeclarations } from "./model-declarations-io.ts";
+import type { ModelDeclarationFinding, ModelDeclarationsReport } from "./model-declarations.ts";
+import type { ModelRegistry } from "../models/registry.ts";
 
 const roots: string[] = [];
 
@@ -94,25 +96,44 @@ function fixture(options: FixtureOptions = {}): Fixture {
   return { settingsPath, agentsRoot, configPath, launcherRegistryPath, locationRegistryPath };
 }
 
+const MODEL_REGISTRY = join(import.meta.dir, "..", "models", "fixtures", "models.toml");
+
+/**
+ * Every collection runs against the checked-in registry, and against a gateway that serves exactly
+ * what the registry declares: the live catalogue is a fact about the machine, not about drift.
+ */
+const ISOLATION = {
+  modelRegistryPath: MODEL_REGISTRY,
+  hermesConfigPath: join(tmpdir(), "ccs-doctor-absent-hermes.yaml"),
+  pstackModelsPath: join(tmpdir(), "ccs-doctor-absent-pstack.json"),
+  fetchGatewayModels: async (registry: ModelRegistry) => registry.model.map((model) => model.id),
+} as const;
+
 function collect(fixturePaths: Fixture) {
   return collectModelDeclarations({
+    ...ISOLATION,
     settingsPath: fixturePaths.settingsPath,
     agentsRoot: fixturePaths.agentsRoot,
     configPath: fixturePaths.configPath,
   });
 }
 
+/** Warnings are advice; only an error means a declaration disagrees with the registry. */
+function errorsOf(report: ModelDeclarationsReport): readonly ModelDeclarationFinding[] {
+  return report.findings.filter((finding) => finding.severity === "error");
+}
+
 describe("model declaration collection", () => {
-  test("collects configured settings, Agent, launcher, and routing paths without drift", () => {
+  test("collects configured settings, Agent, launcher, and routing paths without drift", async () => {
     const paths = fixture();
-    const result = collect(paths);
+    const result = await collect(paths);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.findings).toEqual([]);
+    expect(errorsOf(result.value)).toEqual([]);
   });
 
-  test("finds bare direct Claude IDs and stale Fable 5 declarations on every surface", () => {
-    const result = collect(fixture({ drift: true }));
+  test("finds bare direct Claude IDs and stale Fable 5 declarations on every surface", async () => {
+    const result = await collect(fixture({ drift: true }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const checks = result.value.findings.map((finding) => finding.check);
@@ -125,8 +146,8 @@ describe("model declaration collection", () => {
     expect(checks).toContain("routing.default_model");
   });
 
-  test("collects model selectors from settings and launcher environments", () => {
-    const result = collect(fixture({ environmentDrift: true }));
+  test("collects model selectors from settings and launcher environments", async () => {
+    const result = await collect(fixture({ environmentDrift: true }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const checks = result.value.findings.map((finding) => finding.check);
@@ -145,34 +166,38 @@ describe("model declaration collection", () => {
     }
   });
 
-  test("checks the effective machine-local launcher override", () => {
+  // The registry's slots overlay the effective fleet, so a machine-local entry can no longer put a
+  // bare spelling into the process: the finding is that the entry still spells the key at all.
+  test("checks the effective machine-local launcher override", async () => {
     const paths = fixture({ localLauncherDrift: true });
-    const result = collect(paths);
+    const result = await collect(paths);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    expect(errorsOf(result.value)).toEqual([]);
     expect(result.value.findings).toContainEqual(expect.objectContaining({
       check: "launcher.slot",
       path: paths.configPath,
-      actual: "claude-opus-5",
+      field: "launcher.claudex.env.ANTHROPIC_DEFAULT_OPUS_MODEL",
+      severity: "warning",
     }));
   });
 
-  test("accepts a machine-only launcher fleet when the shared registry is absent", () => {
-    const result = collect(fixture({ missingSharedLaunchers: true }));
+  test("accepts a machine-only launcher fleet when the shared registry is absent", async () => {
+    const result = await collect(fixture({ missingSharedLaunchers: true }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.findings).toEqual([]);
+    expect(errorsOf(result.value)).toEqual([]);
   });
 
-  test("does not invent an allowlist when availableModels is omitted", () => {
-    const result = collect(fixture({ omitAvailableModels: true }));
+  test("does not invent an allowlist when availableModels is omitted", async () => {
+    const result = await collect(fixture({ omitAvailableModels: true }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.findings).toEqual([]);
+    expect(errorsOf(result.value)).toEqual([]);
   });
 
-  test("finds GPT-5.6 picker mappings that clamp the launcher context to 200K", () => {
-    const result = collect(fixture({ mappedGptPicker: true }));
+  test("finds GPT-5.6 picker mappings that clamp the launcher context to 200K", async () => {
+    const result = await collect(fixture({ mappedGptPicker: true }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.findings).toContainEqual(expect.objectContaining({
@@ -181,9 +206,10 @@ describe("model declaration collection", () => {
     }));
   });
 
-  test("uses CLAUDE_CONFIG_DIR and CCS_AGENTS_ROOT for live declaration paths", () => {
+  test("uses CLAUDE_CONFIG_DIR and CCS_AGENTS_ROOT for live declaration paths", async () => {
     const paths = fixture();
-    const result = collectModelDeclarations({
+    const result = await collectModelDeclarations({
+      ...ISOLATION,
       configPath: paths.configPath,
       environment: {
         HOME: "/unused",
@@ -193,11 +219,11 @@ describe("model declaration collection", () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.findings).toEqual([]);
+    expect(errorsOf(result.value)).toEqual([]);
   });
 
-  test("returns malformed required input as an operational error", () => {
-    const result = collect(fixture({ malformedSettings: true }));
+  test("returns malformed required input as an operational error", async () => {
+    const result = await collect(fixture({ malformedSettings: true }));
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.message).toContain("failed to read Claude Code settings");

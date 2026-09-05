@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import type { RoleModelId } from "../resume/role-model-launch.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -156,7 +157,7 @@ test("readRoleDir parses canonical model policy and rejects aliases", () => {
     writeRole(r, "c", "alias", 'kind = "session"\nmodel = "gpt-5.6-terra[1m]"');
   });
   try {
-    expect(resolveRole("terra", root)!.model).toBe("gpt-5.6-terra");
+    expect(resolveRole("terra", root)!.model).toBe("gpt-5.6-terra" as RoleModelId);
     expect(resolveRole("terra", root)!.manifestError).toBeNull();
     expect(resolveRole("alias", root)!.model).toBeNull();
     expect(resolveRole("alias", root)!.manifestError).toContain("model must be one of");

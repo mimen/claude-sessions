@@ -56,7 +56,7 @@ async function report(parentPath: string, candidates: readonly CandidateRootSess
 }
 
 test("proposes an exact one-to-one detached child match", async () => {
-  const files = fixture(["claude-gpt -p 'Implement the parser' --model gpt-5.6-terra"], "Implement the parser");
+  const files = fixture(["claudex -p 'Implement the parser' --model gpt-5.6-terra"], "Implement the parser");
   const manifest = await report(files.parentPath, [candidate(files.candidatePath)]);
   files.cleanup();
 
@@ -69,7 +69,7 @@ test("proposes an exact one-to-one detached child match", async () => {
 });
 
 test("marks more than one exact candidate as ambiguous", async () => {
-  const files = fixture(["claude-gpt -p 'Same prompt' --model gpt-5.6-terra"], "Same prompt");
+  const files = fixture(["claudex -p 'Same prompt' --model gpt-5.6-terra"], "Same prompt");
   const second = candidate(files.candidatePath, { sessionId: "child-2" });
   const manifest = await report(files.parentPath, [candidate(files.candidatePath), second]);
   files.cleanup();
@@ -80,8 +80,8 @@ test("marks more than one exact candidate as ambiguous", async () => {
 
 test("marks a candidate claimed by two launches as a duplicate claim", async () => {
   const files = fixture([
-    "claude-gpt -p 'Same prompt' --model gpt-5.6-terra",
-    "claude-gpt -p 'Same prompt' --model gpt-5.6-terra",
+    "claudex -p 'Same prompt' --model gpt-5.6-terra",
+    "claudex -p 'Same prompt' --model gpt-5.6-terra",
   ], "Same prompt");
   const manifest = await report(files.parentPath, [candidate(files.candidatePath)]);
   files.cleanup();
@@ -90,7 +90,7 @@ test("marks a candidate claimed by two launches as a duplicate claim", async () 
 });
 
 test("reports a real launch with no matching root transcript as unmatched", async () => {
-  const files = fixture(["claude-gpt -p 'Missing child' --model gpt-5.6-terra"], "Other prompt");
+  const files = fixture(["claudex -p 'Missing child' --model gpt-5.6-terra"], "Other prompt");
   const manifest = await report(files.parentPath, [candidate(files.candidatePath)]);
   files.cleanup();
 
@@ -99,9 +99,9 @@ test("reports a real launch with no matching root transcript as unmatched", asyn
 
 test("excludes inspection and polling commands that mention nested launch syntax", async () => {
   const files = fixture([
-    "ps aux | grep 'claude-gpt -p'",
-    "pgrep -af claude-gpt",
-    "while pgrep -f claude-gpt; do sleep 1; done",
+    "ps aux | grep 'claudex -p'",
+    "pgrep -af claudex",
+    "while pgrep -f claudex; do sleep 1; done",
     "tail -f session.log | rg 'claude-native -p'",
   ], "irrelevant");
   const manifest = await report(files.parentPath, [candidate(files.candidatePath)]);
@@ -111,27 +111,27 @@ test("excludes inspection and polling commands that mention nested launch syntax
 });
 
 test("rejects exact-prompt candidates that mismatch cwd, provider, entrypoint, model, or timestamp", async () => {
-  const cwdFiles = fixture(["claude-gpt -p 'Dimension check' --model gpt-5.6-terra"], "Dimension check");
+  const cwdFiles = fixture(["claudex -p 'Dimension check' --model gpt-5.6-terra"], "Dimension check");
   const cwd = await report(cwdFiles.parentPath, [candidate(cwdFiles.candidatePath, { cwd: "/other" })]);
   expect(cwd.findings[0]?.reason).toBe("cwd mismatch");
   cwdFiles.cleanup();
 
-  const providerFiles = fixture(["claude-gpt -p 'Dimension check' --model gpt-5.6-terra"], "Dimension check");
+  const providerFiles = fixture(["claudex -p 'Dimension check' --model gpt-5.6-terra"], "Dimension check");
   const provider = await report(providerFiles.parentPath, [candidate(providerFiles.candidatePath, { provider: "claude" })]);
   expect(provider.findings[0]?.reason).toBe("provider mismatch");
   providerFiles.cleanup();
 
-  const entrypointFiles = fixture(["claude-gpt -p 'Dimension check' --model gpt-5.6-terra"], "Dimension check");
+  const entrypointFiles = fixture(["claudex -p 'Dimension check' --model gpt-5.6-terra"], "Dimension check");
   const entrypoint = await report(entrypointFiles.parentPath, [candidate(entrypointFiles.candidatePath, { entrypoint: "terminal" })]);
   expect(entrypoint.findings[0]?.reason).toBe("entrypoint mismatch");
   entrypointFiles.cleanup();
 
-  const modelFiles = fixture(["claude-gpt -p 'Dimension check' --model gpt-5.6-terra"], "Dimension check");
+  const modelFiles = fixture(["claudex -p 'Dimension check' --model gpt-5.6-terra"], "Dimension check");
   const model = await report(modelFiles.parentPath, [candidate(modelFiles.candidatePath, { model: "gpt-5.6-sol" })]);
   expect(model.findings[0]?.reason).toBe("model mismatch");
   modelFiles.cleanup();
 
-  const timestampFiles = fixture(["claude-gpt -p 'Dimension check' --model gpt-5.6-terra"], "Dimension check");
+  const timestampFiles = fixture(["claudex -p 'Dimension check' --model gpt-5.6-terra"], "Dimension check");
   const timestamp = await report(timestampFiles.parentPath, [candidate(timestampFiles.candidatePath, { startedAt: "2026-07-15T12:10:00.000Z" })]);
   expect(timestamp.findings[0]?.reason).toBe("timestamp outside narrow window");
   timestampFiles.cleanup();
@@ -146,7 +146,7 @@ test("accepts native and plain claude print-mode launches with a preceding cd", 
 });
 
 test("emits a deterministic manifest regardless of caller candidate order", async () => {
-  const files = fixture(["claude-gpt -p 'Stable output' --model gpt-5.6-terra"], "Stable output");
+  const files = fixture(["claudex -p 'Stable output' --model gpt-5.6-terra"], "Stable output");
   const first = candidate(files.candidatePath);
   const second = candidate(files.candidatePath, { sessionId: "child-2" });
   const one = await report(files.parentPath, [second, first]);
@@ -157,7 +157,7 @@ test("emits a deterministic manifest regardless of caller candidate order", asyn
 });
 
 test("has no catalogue mutation architecture", async () => {
-  const files = fixture(["claude-gpt -p 'Read only' --model gpt-5.6-terra"], "Read only");
+  const files = fixture(["claudex -p 'Read only' --model gpt-5.6-terra"], "Read only");
   const original = readFileSync(files.candidatePath, "utf8");
   await report(files.parentPath, [candidate(files.candidatePath)]);
   expect(readFileSync(files.candidatePath, "utf8")).toBe(original);

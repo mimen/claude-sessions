@@ -16,12 +16,20 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { runtimeRoot } from "../paths.ts";
+import { atomicWriteFile } from "./atomic-write.ts";
 import { err, ok, type Result } from "../result.ts";
 import { loadConfig, type Config } from "../config.ts";
 import { effectiveLaunchers, type Launcher } from "../resume/launchers.ts";
 import { loadLauncherRegistry } from "./registry.ts";
 import { loadLocationRegistry } from "../locations/registry.ts";
 import { compileLauncherEnvSpec, launcherEnvSpecFilename } from "./environment.ts";
+import {
+  launcherSettingsContents,
+  launcherSettingsFilename,
+  writeClientSurfaces,
+  type ClientSurfacePaths,
+} from "./model-surfaces.ts";
+import { displayModelRegistry } from "../models/registry.ts";
 import {
   expectedBundledWrappers,
   isBundledWrapperBinary,
@@ -35,8 +43,6 @@ const END_MARKER = "# <<< CCS managed Claude launcher <<<";
 
 /** Filename holding the default launcher name the shim reads when CCS_FORCE_HARNESS is unset. */
 const DEFAULT_LAUNCHER_FILE = "default";
-let atomicWriteSequence = 0;
-
 export interface ClaudeShimInstallation {
   readonly shimPath: string;
   readonly shellInitPath: string;
@@ -48,6 +54,10 @@ export interface ClaudeShimInstallation {
   readonly wrappers: readonly string[];
   /** The launcher `claude` resolves to with no CCS_FORCE_HARNESS; null when undeclared. */
   readonly defaultLauncher: string | null;
+  /** Client configuration files rewritten from the model registry. */
+  readonly clientSurfaces: readonly string[];
+  /** Registry-driven surfaces this machine has nothing to write to. */
+  readonly warnings: readonly string[];
 }
 
 export interface ClaudeShimInstallOptions {
@@ -57,6 +67,22 @@ export interface ClaudeShimInstallOptions {
   readonly zshrcPath?: string;
   /** Injected for tests; production reads ~/.ccs/config.toml. */
   readonly config?: Config;
+  /** Injected for tests; production rewrites the real opencode and T3 files. */
+  readonly clientSurfacePaths?: ClientSurfacePaths;
+}
+
+/**
+ * The other gateway clients' files, resolved from the same home the runtime root lives under.
+ * Deriving them from `root` rather than `homedir()` keeps a test that installs into a temporary
+ * root from rewriting the developer's real opencode and T3 configuration.
+ */
+function defaultClientSurfacePaths(root: string): ClientSurfacePaths {
+  const home = root === runtimeRoot() ? homedir() : dirname(root);
+  return {
+    opencodeConfig: join(home, ".config", "opencode", "opencode.jsonc"),
+    t3Settings: join(home, ".t3", "userdata", "settings.json"),
+    t3ClientSettings: join(home, ".t3", "userdata", "client-settings.json"),
+  };
 }
 
 function shellSingleQuote(value: string): string {
@@ -126,17 +152,6 @@ export function resolveDefaultLauncher(
     ));
   }
   return ok(harness);
-}
-
-function atomicWriteFile(path: string, contents: string | Uint8Array, mode: number): void {
-  const temporary = `${path}.tmp-${process.pid}-${atomicWriteSequence++}`;
-  try {
-    writeFileSync(temporary, contents, { mode, flag: "wx" });
-    chmodSync(temporary, mode);
-    renameSync(temporary, path);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
 }
 
 function validateManagedDirectory(path: string): Result<void> {
@@ -380,6 +395,7 @@ function planLauncherEnv(
   defaultLauncher: string | null,
 ): Result<LauncherEnvPlan> {
   const files: { filename: string; contents: string }[] = [];
+  const models = displayModelRegistry();
   for (const launcher of launchers) {
     const filename = launcherEnvSpecFilename(launcher.name);
     if (!filename.ok) return filename;
@@ -390,6 +406,12 @@ function planLauncherEnv(
     });
     if (!spec.ok) return spec;
     files.push({ filename: filename.value, contents: spec.value });
+    // Each launcher gets the models IT serves, so `claude-native` never offers a gateway row and
+    // Claude Code refuses a `--model` the launcher's process envelope cannot host.
+    const settings = models ? launcherSettingsContents(models, launcher.name) : null;
+    if (settings !== null) {
+      files.push({ filename: launcherSettingsFilename(launcher.name), contents: settings });
+    }
   }
   return ok({ files, defaultContents: defaultLauncher === null ? null : `${defaultLauncher}\n` });
 }
@@ -447,6 +469,7 @@ function installClaudeShimUnlocked(
     config.value.launcher.length > 0 || (sharedRegistry.value?.launcher.length ?? 0) > 0;
   const defaultLauncher = resolveDefaultLauncher(config.value, launchers.value, fleetDeclared);
   if (!defaultLauncher.ok) return defaultLauncher;
+  const clientSurfacePaths = options.clientSurfacePaths ?? defaultClientSurfacePaths(root);
   const environmentPlan = planLauncherEnv(launchers.value, defaultLauncher.value);
   if (!environmentPlan.ok) return environmentPlan;
   const wrapperPlan = planBundledWrapperInstall(dirname(shimPath), wrapperSourceDir, launchers.value);
@@ -474,6 +497,11 @@ function installClaudeShimUnlocked(
     atomicWriteFile(shellInitPath, shellInitContents, 0o644);
     const updatedZshrc = updateUserFile(zshrcPath, zshrc.value, nextZshrc);
     if (!updatedZshrc.ok) return updatedZshrc;
+    const models = displayModelRegistry();
+    const clients = models
+      ? writeClientSurfaces(models, clientSurfacePaths)
+      : ok({ written: [], warnings: ["skipped opencode and T3: the model registry is unreadable"] });
+    if (!clients.ok) return clients;
     return ok({
       shimPath,
       shellInitPath,
@@ -482,6 +510,8 @@ function installClaudeShimUnlocked(
       launchers: launchers.value.map((launcher) => launcher.name),
       wrappers: wrapperPlan.value.wrappers.map((wrapper) => wrapper.binary),
       defaultLauncher: defaultLauncher.value,
+      clientSurfaces: clients.value.written,
+      warnings: clients.value.warnings,
     });
   } catch (error) {
     return err(error instanceof Error ? error : new Error(String(error)));

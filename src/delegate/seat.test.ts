@@ -4,10 +4,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   compileAgent,
+  DELEGATE_LAUNCHER,
   loadSeat,
   compileLaunchModel,
   resolveSeatRoute,
 } from "./seat.ts";
+import type { LauncherName } from "../resume/role-model-launch.ts";
 
 const roots: string[] = [];
 
@@ -221,18 +223,21 @@ effort: high
   });
 });
 
+const CLAUDEX = DELEGATE_LAUNCHER;
+const NATIVE = "claude-native" as LauncherName;
+
 describe("routing and compilation", () => {
   test("compiles each model for the launcher's real context envelope", () => {
-    expect(compileLaunchModel("gpt-5.6-sol", "claudex")).toBe("gpt-5.6-sol");
-    expect(compileLaunchModel("claude-opus-5", "claudex")).toBe("claude-opus-5[1m]");
+    expect(compileLaunchModel("gpt-5.6-sol", CLAUDEX)).toBe("gpt-5.6-sol");
+    expect(compileLaunchModel("claude-opus-5", CLAUDEX)).toBe("claude-opus-5[1m]");
 
     // Obsolete GPT markers are removed; Claude's marker is idempotent.
-    expect(compileLaunchModel("gpt-5.6-sol[1m]", "claudex")).toBe("gpt-5.6-sol");
-    expect(compileLaunchModel("claude-opus-5[1m]", "claudex")).toBe("claude-opus-5[1m]");
+    expect(compileLaunchModel("gpt-5.6-sol[1m]", CLAUDEX)).toBe("gpt-5.6-sol");
+    expect(compileLaunchModel("claude-opus-5[1m]", CLAUDEX)).toBe("claude-opus-5[1m]");
 
     // Direct-to-Anthropic launchers take the canonical ID verbatim.
-    expect(compileLaunchModel("claude-opus-5[1m]", "claude-native")).toBe("claude-opus-5");
-    expect(compileLaunchModel("claude-haiku-4-5[1m]", "claudex")).toBe("claude-haiku-4-5");
+    expect(compileLaunchModel("claude-opus-5[1m]", NATIVE)).toBe("claude-opus-5");
+    expect(compileLaunchModel("claude-haiku-4-5[1m]", CLAUDEX)).toBe("claude-haiku-4-5");
   });
 
   test("compiles primary and fallback with their route-local models and efforts", () => {
@@ -246,7 +251,7 @@ describe("routing and compilation", () => {
       value: {
         route: "primary",
         provider: "gpt",
-        launcher: "claudex",
+        launcher: DELEGATE_LAUNCHER,
         requestedModel: "gpt-5.6-sol",
         compiledModel: "gpt-5.6-sol",
         effort: "high",
@@ -299,7 +304,7 @@ Do the specified work.
       value: {
         route: "fallback",
         provider: "claude",
-        launcher: "claudex",
+        launcher: DELEGATE_LAUNCHER,
         requestedModel: "claude-fable-5-1",
         // claudex is a gateway launcher, so the window is declared for Claude too.
         compiledModel: "claude-fable-5-1[1m]",

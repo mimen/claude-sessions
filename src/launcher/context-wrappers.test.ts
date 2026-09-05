@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { MILLION_WINDOW_CLAUDE_FAMILIES } from "../resume/role-model-launch.ts";
+import { millionWindowClaudeFamilies } from "../resume/role-model-launch.ts";
 
 const WRAPPER_SOURCE = resolve(import.meta.dir, "../../bin/wrappers");
 const roots: string[] = [];
@@ -53,7 +53,7 @@ describe("context-family launcher wrappers", () => {
     expect(sonnet.exitCode).toBe(0);
     expect(sonnet.stdout).toContain("arg=--model=claude-sonnet-5[1m]");
 
-    for (const family of MILLION_WINDOW_CLAUDE_FAMILIES) {
+    for (const family of millionWindowClaudeFamilies()) {
       const model = `${family}test`;
       const result = runWrapper("claudex", [`--model=${model}`, "-p", "hello"]);
       expect(result.exitCode).toBe(0);
@@ -71,44 +71,23 @@ describe("context-family launcher wrappers", () => {
     expect(gpt.stdout).not.toContain("[1m]");
   });
 
-  test("claudex refuses models that need a smaller process envelope", () => {
-    const gpt55 = runWrapper("claudex", ["gpt-5.5"]);
-    expect(gpt55.exitCode).toBe(2);
-    expect(gpt55.stderr).toContain("claude-gpt55");
-
-    const qwen = runWrapper("claudex", ["--model", "qwen3.8-local"]);
-    expect(qwen.exitCode).toBe(2);
-    expect(qwen.stderr).toContain("local-mlx");
+  test("claudex refuses a model outside its context envelope", () => {
+    const stray = runWrapper("claudex", ["gpt-4.1"]);
+    expect(stray.exitCode).toBe(2);
+    expect(stray.stderr).toContain("outside this launcher's context envelope");
   });
 
-  test("claude-gpt strips obsolete 1M markers and refuses GPT-5.5", () => {
-    const gpt56 = runWrapper("claude-gpt", ["--model", "gpt-5.6-terra[1m]"]);
-    expect(gpt56.exitCode).toBe(0);
-    expect(gpt56.stdout).toContain("selector=claude-gpt");
-    expect(gpt56.stdout).toContain("arg=--model");
-    expect(gpt56.stdout).toContain("arg=gpt-5.6-terra");
-    expect(gpt56.stdout).not.toContain("[1m]");
-
-    const gpt55 = runWrapper("claude-gpt", ["--model=gpt-5.5"]);
-    expect(gpt55.exitCode).toBe(2);
-    expect(gpt55.stderr).toContain("claude-gpt55");
+  test("the gateway families claudex serves pass through unmarked", () => {
+    for (const model of ["grok-4.6", "glm-5.3-flash", "gpt-5.6-terra[1m]"]) {
+      const result = runWrapper("claudex", ["--model", model]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).not.toContain("[1m]");
+    }
   });
 
-  test("dedicated smaller-window wrappers accept only their own model", () => {
-    const gpt55 = runWrapper("claude-gpt55", ["--model", "gpt-5.5[1m]"]);
-    expect(gpt55.exitCode).toBe(0);
-    expect(gpt55.stdout).toContain("selector=claude-gpt55");
-    expect(gpt55.stdout).toContain("arg=--model");
-    expect(gpt55.stdout).toContain("arg=gpt-5.5");
-    expect(gpt55.stdout).not.toContain("[1m]");
-
-    const qwen = runWrapper("local-mlx", ["--model", "qwen3.8-local"]);
-    expect(qwen.exitCode).toBe(0);
-    expect(qwen.stdout).toContain("selector=local-mlx");
-    expect(qwen.stdout).toContain("arg=--model");
-    expect(qwen.stdout).toContain("arg=qwen3.8-local");
-
-    expect(runWrapper("claude-gpt55", ["gpt-5.6-sol"]).exitCode).toBe(2);
-    expect(runWrapper("local-mlx", ["gpt-5.6-sol"]).exitCode).toBe(2);
+  test("claude-native takes the canonical Claude spelling verbatim", () => {
+    const native = runWrapper("claude-native", ["--model", "claude-opus-5[1m]"]);
+    expect(native.exitCode).toBe(0);
+    expect(native.stdout).toContain("selector=claude-native");
   });
 });

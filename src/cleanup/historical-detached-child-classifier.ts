@@ -280,7 +280,7 @@ function parseLaunch(command: string): Omit<Launch, "parentTranscriptPath" | "pa
   const tokens = shellTokens(command);
   if (tokens.length === 0 || isInspectionOrPolling(tokens)) return null;
   const executableIndex = tokens.findIndex(
-    (token) => token === "claude" || token === "claude-native" || token === "claude-gpt" || token === "claude-gpt55",
+    (token) => token === "claude" || token === "claude-native" || token === "claudex",
   );
   const hasLeadingCd = tokens[0] === "cd" && tokens[1] !== undefined;
   if (executableIndex < 0 || (executableIndex > 1 && !(hasLeadingCd && executableIndex === 2))) return null;
@@ -292,7 +292,8 @@ function parseLaunch(command: string): Omit<Launch, "parentTranscriptPath" | "pa
   const cwdIndex = tokens.indexOf("cd");
   const cwd = cwdIndex === 0 ? (tokens[1] ?? null) : null;
   const model = optionValue(tokens, "--model") ?? optionValue(tokens, "-m");
-  const provider: Provider = executable === "claude-gpt" || executable === "claude-gpt55" ? "gpt" : "claude";
+  // One launcher reaches both vendors, so the MODEL names the provider, not the binary.
+  const provider: Provider = model?.startsWith("gpt-") ? "gpt" : "claude";
   return { provider, model, prompt, promptHash: hashPrompt(prompt), cwd };
 }
 

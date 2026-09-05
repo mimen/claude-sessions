@@ -23,12 +23,7 @@ import {
   resolveRoutes,
   type Launcher,
 } from "./launchers.ts";
-import {
-  BIRTH_MODEL_IDS,
-  compileModelLaunchOn,
-  parseBirthModel,
-  parseLauncherName,
-} from "./role-model-launch.ts";
+import { birthModelIds, launchModelFor, parseBirthModel } from "./role-model-launch.ts";
 
 /** Process-side facts a plan is built from — all injected so planning stays pure. */
 export interface RespawnEnv {
@@ -208,7 +203,7 @@ export function compileRespawnModel(
   if (!canonical) {
     return refuse(
       "model-unknown",
-      `unknown model "${model}" — canonical models: ${BIRTH_MODEL_IDS.join(", ")}`,
+      `unknown model "${model}"; canonical models: ${birthModelIds().join(", ")}`,
     );
   }
   if (!target.serves.some((pattern) => matchesModel(pattern, canonical))) {
@@ -217,14 +212,9 @@ export function compileRespawnModel(
       `model "${model}" is not served by launcher "${target.name}"`,
     );
   }
-  const launcher = parseLauncherName(target.name);
-  if (!launcher) {
-    return refuse(
-      "model-unknown",
-      `launcher "${target.name}" has no canonical context compiler`,
-    );
-  }
-  return ok(compileModelLaunchOn(launcher, canonical).launchModel);
+  // A launcher the registry does not know applies no marker, which is the honest declaration: a
+  // marker is a claim about a process envelope only a registry launcher declares.
+  return ok(launchModelFor(target.name, canonical));
 }
 
 /**

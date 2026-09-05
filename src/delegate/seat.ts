@@ -11,12 +11,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { err, ok, type Result } from "../result.ts";
-import {
-  canonicalModelId,
-  claudeCodeModelId,
-  ONE_MILLION_MARKER_LAUNCHERS,
-} from "../resume/role-model-launch.ts";
+import { canonicalModelId, modelFamily } from "../resume/role-model-launch.ts";
 import type { LauncherName, ModelFamily } from "../resume/role-model-launch.ts";
+import { claudeCodeDeclaration, requireModelRegistry, type ModelRegistry } from "../models/registry.ts";
 
 const SeatNameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]*$/);
 const EffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
@@ -60,7 +57,7 @@ export type SeatRouteKind = "primary" | "fallback";
  * whose process envelope safely reaches the Claude 1M and GPT-5.6 921K families, which is precisely
  * what lets one definition name either provider's model.
  */
-export const DELEGATE_LAUNCHER: LauncherName = "claudex";
+export const DELEGATE_LAUNCHER = "claudex" as LauncherName;
 
 export interface SeatFallbackRoute {
   readonly model: string;
@@ -119,27 +116,16 @@ function errorMessage(error: object): string {
 }
 
 /**
- * The vendor a seat's model belongs to, read off its canonical prefix. Recorded for provenance
- * only — nothing routes on it now that one launcher serves both vendors. Deliberately not
- * `modelFamily`, which classifies the closed birth-model vocabulary: a seat's model is a free-form
- * authored string so the registry can name a model this binary has never heard of.
+ * Compile a seat model for its process envelope. A registry family decides whether the id carries
+ * a context marker, so a GPT row never gains a false 1M declaration and a Claude row never loses
+ * a true one.
  */
-function providerFor(model: string): ModelFamily {
-  if (model.startsWith("gpt-")) return "gpt";
-  if (model.startsWith("qwen")) return "local";
-  return "claude";
-}
-
-/**
- * Compile a seat model for its process envelope. GPT-5.6 uses the launcher's exact 921K
- * environment and must not carry a false 1M declaration.
- */
-export function compileLaunchModel(model: string, launcher: LauncherName): string {
-  const canonical = canonicalModelId(model);
-  if (ONE_MILLION_MARKER_LAUNCHERS.has(launcher)) {
-    return claudeCodeModelId(canonical);
-  }
-  return canonical;
+export function compileLaunchModel(
+  model: string,
+  launcher: LauncherName,
+  registry: ModelRegistry = requireModelRegistry(),
+): string {
+  return claudeCodeDeclaration(registry, model, launcher);
 }
 
 export function loadSeat(agentsRoot: string, seatName: string): Result<SeatDefinition> {
@@ -195,16 +181,17 @@ export function loadSeat(agentsRoot: string, seatName: string): Result<SeatDefin
 export function resolveSeatRoute(
   seat: SeatDefinition,
   routeKind: SeatRouteKind = "primary",
+  registry: ModelRegistry = requireModelRegistry(),
 ): Result<ResolvedSeatRoute> {
   const route = routeKind === "primary" ? { model: seat.model, effort: seat.effort } : seat.fallback;
   if (!route) return err(new Error(`Seat ${seat.name} does not declare a fallback route`));
 
   return ok({
     route: routeKind,
-    provider: providerFor(route.model),
+    provider: modelFamily(route.model, registry),
     launcher: DELEGATE_LAUNCHER,
     requestedModel: route.model,
-    compiledModel: compileLaunchModel(route.model, DELEGATE_LAUNCHER),
+    compiledModel: compileLaunchModel(route.model, DELEGATE_LAUNCHER, registry),
     effort: route.effort,
   });
 }

@@ -199,3 +199,17 @@ describe("a both-vendor launcher alongside single-vendor ones", () => {
     expect(launcherByName(CONSOLIDATED_FLEET, "claude-gpt")).toBe(claudeGpt);
   });
 });
+
+// Routing keys on the transcript's MODELS, never on the harness that wrote it, which is what keeps
+// a session born on a retired launcher resumable: today's fleet is asked which of ITS launchers can
+// replay `gpt-5.6-sol`, and exactly one can.
+test("a transcript from a retired harness resolves to the launcher that serves its last model", () => {
+  const fleet: Launcher[] = [
+    { name: "claudex", binary: "claudex", serves: ["gpt-5.6-*", "claude-*", "grok-*", "glm-*"], env: {}, clears: [] },
+    { name: "claude-native", binary: "claude-native", serves: ["claude-*"], env: {}, clears: [] },
+  ];
+  const models = ["gpt-5.6-sol"];
+  const routes = resolveRoutes(fleet, models, "gpt-5.6-sol");
+  expect(routes.filter((route) => route.eligible).map((route) => route.launcher.name)).toEqual(["claudex"]);
+  expect(defaultRoute(routes, models, "gpt-5.6-sol")?.launcher.name).toBe("claudex");
+});

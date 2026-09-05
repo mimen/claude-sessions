@@ -186,3 +186,19 @@ test("formatTokens renders compact counts", () => {
   expect(formatTokens(12_340)).toBe("12.3k");
   expect(formatTokens(4_100_000)).toBe("4.1M");
 });
+
+// Every priced row now comes from the registry, so a model added to the fleet is priced the moment
+// its row exists. Grok and GLM used to cost zero here because no hard-coded table named them.
+test("gateway families outside the Claude and GPT tables are priced from the registry", () => {
+  for (const [model, expected] of [["grok-4.6", 3], ["glm-5.3-flash", 0.15]] as const) {
+    const acc = createUsageAccumulator();
+    acc.add(line({ requestId: model, model, usage: { input_tokens: 1_000_000 } }));
+    expect(acc.totals().costByModel[model]).toBeCloseTo(expected, 6);
+  }
+});
+
+test("a retired model keeps its historical price so old transcripts still cost something", () => {
+  const acc = createUsageAccumulator();
+  acc.add(line({ requestId: "r", model: "gpt-5.5", usage: { input_tokens: 1_000_000 } }));
+  expect(acc.totals().costUSD).toBeCloseTo(5, 6);
+});

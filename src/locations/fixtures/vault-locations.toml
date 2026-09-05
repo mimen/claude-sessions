@@ -1,6 +1,6 @@
 version = 1
 default_host = "Milads-Mac-mini"
-default_harness = "claude-gpt"
+default_harness = "claudex"
 default_model = "gpt-5.6-sol"
 
 [[location]]
@@ -201,7 +201,7 @@ cwd = "~/Programming/Repos/claude-sessions"
 kind = "repo"
 eligible_hosts = ["Milads-M3-2", "Milads-Mac-mini"]
 preferred_host = "Milads-Mac-mini"
-default_harness = "claude-gpt"
+default_harness = "claudex"
 default_model = "gpt-5.6-sol"
 status = "active"
 
