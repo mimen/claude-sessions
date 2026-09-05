@@ -46,6 +46,55 @@ find_cmux_wrapper() {
   return 1
 }
 
+# --- launcher selection ----------------------------------------------------------------
+# Resolved before the cmux handoff below, because the generated launcher settings have to
+# travel into cmux on the first pass. CCS_FORCE_HARNESS lets a wrapper name ITSELF, which is what
+# keeps `claudex`/`claude-native` working while they stop defining environment: they are thin
+# shims that set this and exec back through here, and the bounce is still what registers the
+# session. Absent, the materialized default wins.
+env_spec_dir="${CCS_LAUNCHER_ENV_DIR:-${HOME:-}/.ccs/launcher-env}"
+
+resolve_launcher_name() {
+  if [[ -n "${CCS_FORCE_HARNESS:-}" ]]; then
+    printf '%s' "$CCS_FORCE_HARNESS"
+    return 0
+  fi
+  local default_file="$env_spec_dir/default"
+  if [[ -r "$default_file" ]]; then
+    local name=""
+    IFS= read -r name < "$default_file" || true
+    printf '%s' "$name"
+    return 0
+  fi
+  return 0
+}
+
+# A caller who brought their own --settings gets exactly that; Claude Code takes one file, and
+# silently replacing an explicit choice with the generated one would be the wrong surprise.
+caller_declares_settings() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --) return 1 ;;
+      --settings|--settings=*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# The generated settings file for the launcher this process will run on, or nothing. Resolved
+# from the launcher name alone so it is answerable before any environment has been applied.
+generated_settings_for_launcher() {
+  local name
+  name="$(resolve_launcher_name)"
+  case "$name" in
+    ""|*[!A-Za-z0-9._-]*|.|..) return 1 ;;
+  esac
+  local file="$env_spec_dir/$name.settings.json"
+  [[ -r "$file" ]] || return 1
+  printf '%s' "$file"
+}
+
 # cmux deliberately clears inherited Claude session identity before it invokes its
 # custom target. Enter cmux once from the PATH-precedent shim so we can preserve the
 # causal parent in a CCS-only variable, then perform registration on the second pass.
@@ -65,6 +114,13 @@ if [[ -n "${CMUX_SURFACE_ID:-}" && -z "${CCS_CLAUDE_SHIM_AFTER_CMUX:-}" ]]; then
       export CCS_CARRIED_ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL"
     fi
     export CCS_CLAUDE_SHIM_AFTER_CMUX=1
+    # cmux injects its own --settings and reads exactly one such flag, so the generated launcher
+    # settings must travel INTO cmux here, where its wrapper deep-merges a caller's --settings
+    # with its hooks. Presented on the second pass instead, they would be dropped as a duplicate.
+    generated_settings=""
+    if generated_settings="$(generated_settings_for_launcher)" && ! caller_declares_settings "$@"; then
+      exec "$cmux_wrapper" --settings "$generated_settings" "$@"
+    fi
     exec "$cmux_wrapper" "$@"
   fi
 fi
@@ -104,26 +160,6 @@ fi
 # interactive `claude`, and neither a parser nor a Bun start-up belongs on that path. Directives
 # are dispatched over a fixed three-verb vocabulary, so a malformed spec can set a variable and
 # nothing else — a generated script that got `source`d would be arbitrary code execution.
-env_spec_dir="${CCS_LAUNCHER_ENV_DIR:-${HOME:-}/.ccs/launcher-env}"
-
-# The active launcher name. CCS_FORCE_HARNESS lets a wrapper name ITSELF, which is what keeps
-# `claudex`/`claude-native` working while they stop defining environment: they are
-# thin shims that set this and exec back through here, and the bounce is still what registers
-# the session. Absent, the materialized default wins.
-resolve_launcher_name() {
-  if [[ -n "${CCS_FORCE_HARNESS:-}" ]]; then
-    printf '%s' "$CCS_FORCE_HARNESS"
-    return 0
-  fi
-  local default_file="$env_spec_dir/default"
-  if [[ -r "$default_file" ]]; then
-    local name=""
-    IFS= read -r name < "$default_file" || true
-    printf '%s' "$name"
-    return 0
-  fi
-  return 0
-}
 
 # Read a secret's value from the file that holds it, so it lives in exactly one place on disk and
 # rotating it needs no config edit. Only the first line is taken; a trailing newline is normal.
@@ -134,9 +170,6 @@ read_secret_file() {
   printf '%s' "$value"
 }
 
-# The launcher whose environment was installed, so `exec_raw` can find its generated settings.
-active_launcher=""
-
 apply_launcher_env() {
   local name
   name="$(resolve_launcher_name)"
@@ -145,7 +178,6 @@ apply_launcher_env() {
   case "$name" in
     *[!A-Za-z0-9._-]*|.|..) warn "ignoring invalid launcher name: $name"; return 0 ;;
   esac
-  active_launcher="$name"
 
   local spec="$env_spec_dir/$name.env"
   if [[ ! -r "$spec" ]]; then
@@ -202,18 +234,7 @@ apply_launcher_env() {
   done < "$spec"
 }
 
-# A caller who brought their own --settings gets exactly that; Claude Code takes one file, and
-# silently replacing an explicit choice with the generated one would be the wrong surprise.
-caller_declares_settings() {
-  local arg
-  for arg in "$@"; do
-    case "$arg" in
-      --) return 1 ;;
-      --settings|--settings=*) return 0 ;;
-    esac
-  done
-  return 1
-}
+
 
 exec_raw() {
   apply_launcher_env
@@ -228,8 +249,8 @@ exec_raw() {
   unset CCS_CARRIED_ANTHROPIC_API_KEY CCS_CARRIED_ANTHROPIC_BASE_URL
   # `ccs launcher install` generates one settings file per launcher carrying the models THAT
   # launcher hosts, so `/model` never offers a row this process envelope cannot serve.
-  local generated_settings="$env_spec_dir/$active_launcher.settings.json"
-  if [[ -n "$active_launcher" && -r "$generated_settings" ]] && ! caller_declares_settings "$@"; then
+  local generated_settings
+  if generated_settings="$(generated_settings_for_launcher)" && ! caller_declares_settings "$@"; then
     exec "$raw_claude" --settings "$generated_settings" "$@"
   fi
   exec "$raw_claude" "$@"

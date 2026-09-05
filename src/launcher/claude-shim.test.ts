@@ -304,3 +304,42 @@ exec "$CMUX_CUSTOM_CLAUDE_PATH" "$@"
     expect(lines(f.rawObservation)).toContain("model=gpt-5.6-sol[1m]");
   });
 });
+
+describe("generated launcher settings", () => {
+  test("travel into the cmux wrapper on the first pass and are not repeated on the second", () => {
+    const f = fixture();
+    const envDir = join(f.root, "launcher-env");
+    mkdirSync(envDir, { recursive: true });
+    writeFileSync(join(envDir, "default"), "claudex\n");
+    writeFileSync(join(envDir, "claudex.env"), "set X=1\n");
+    const settings = join(envDir, "claudex.settings.json");
+    writeFileSync(settings, "{}\n");
+    const cmuxWrapper = join(f.root, "cmux-claude-wrapper");
+    const cmuxObservation = join(f.root, "cmux-argv");
+    writeFileSync(cmuxWrapper, `#!/bin/bash\nprintf '%s\\n' "$@" > '${cmuxObservation}'\nexport CCS_CLAUDE_SHIM_AFTER_CMUX=1\nexec '${SHIM}' "$@"\n`);
+    chmodSync(cmuxWrapper, 0o755);
+    const result = run(f, ["-p", "ok"], {
+      CMUX_SURFACE_ID: "surface-1",
+      CCS_CMUX_CLAUDE_WRAPPER_PATH: cmuxWrapper,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(lines(cmuxObservation).slice(0, 2)).toEqual(["--settings", settings]);
+    const raw = lines(f.rawObservation);
+    expect(raw.filter((arg) => arg === "--settings")).toHaveLength(1);
+  });
+
+  test("yield to a caller's own --settings", () => {
+    const f = fixture();
+    const envDir = join(f.root, "launcher-env");
+    mkdirSync(envDir, { recursive: true });
+    writeFileSync(join(envDir, "default"), "claudex\n");
+    writeFileSync(join(envDir, "claudex.env"), "set X=1\n");
+    writeFileSync(join(envDir, "claudex.settings.json"), "{}\n");
+    const mine = join(f.root, "mine.json");
+    writeFileSync(mine, "{}\n");
+    expect(run(f, ["--settings", mine, "-p", "ok"]).exitCode).toBe(0);
+    const raw = lines(f.rawObservation);
+    expect(raw.filter((arg) => arg === "--settings")).toHaveLength(1);
+    expect(raw[raw.indexOf("--settings") + 1]).toBe(mine);
+  });
+});
