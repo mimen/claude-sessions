@@ -57,6 +57,10 @@ install_agent() {
     <key>Label</key><string>$LABEL</string>
     <key>ProgramArguments</key>
     <array><string>/Applications/$APP_NAME.app/Contents/MacOS/$APP_NAME</string></array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key><string>$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
     <key>ThrottleInterval</key><integer>15</integer>

@@ -72,7 +72,10 @@ enum UsageFetcher {
         let expanded = (ccsPath as NSString).expandingTildeInPath
         let environment = ProcessInfo.processInfo.environment
         var env = environment
-        env["PATH"] = "\(environment["HOME"] ?? "")/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:\(environment["PATH"] ?? "")"
+        // launchd hands the app /usr/bin:/bin; ccs resolves cswap (~/.local/bin),
+        // codexbar and op (Homebrew) from PATH, so build the one it needs.
+        let home = environment["HOME"] ?? NSHomeDirectory()
+        env["PATH"] = "\(home)/.local/bin:\(home)/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:\(environment["PATH"] ?? "")"
 
         let result: ProcessRun.Output
         do {
