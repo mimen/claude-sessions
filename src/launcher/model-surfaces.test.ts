@@ -124,15 +124,29 @@ test("T3 gets the gateway ids it does not already know, in registry order", () =
   if (!rendered.ok || rendered.value === null) throw new Error("unreachable");
   const parsed = JSON.parse(rendered.value) as {
     backgroundActivity: boolean;
-    providerInstances: Record<string, { driver: string; config?: { customModels?: string[]; binaryPath?: string } }>;
+    providerInstances: Record<string, { driver: string; config?: { customModels?: T3Entry[]; binaryPath?: string } }>;
+  };
+  type T3Entry = {
+    slug: string;
+    name: string;
+    capabilities: { optionDescriptors: { id: string; type: string; options: { id: string; isDefault?: boolean }[] }[] };
   };
   expect(parsed.backgroundActivity).toBe(true);
   expect(parsed.providerInstances["opencode"]).toEqual({ driver: "opencode" });
   expect(parsed.providerInstances["claudeAgent"]!.config!.binaryPath).toBe("/Users/x/.ccs/bin/claude");
   const custom = parsed.providerInstances["claudeAgent"]!.config!.customModels!;
-  expect(custom[0]).toBe("gpt-5.6-sol");
-  expect(custom.some((id) => id.startsWith("claude-"))).toBe(false);
-  expect(custom).toContain("grok-4.6");
+  expect(custom[0]!.slug).toBe("gpt-5.6-sol");
+  expect(custom[0]!.name).toBe("Sol 5.6");
+  expect(custom.some((entry) => entry.slug.startsWith("claude-"))).toBe(false);
+  expect(custom.map((entry) => entry.slug)).toContain("grok-4.6");
+  // Every custom model carries a Reasoning selector with exactly one default the harness accepts.
+  for (const entry of custom) {
+    const effort = entry.capabilities.optionDescriptors.find((d) => d.id === "effort");
+    expect(effort?.type).toBe("select");
+    expect(effort!.options.filter((o) => o.isDefault)).toHaveLength(1);
+  }
+  const luna = custom.find((entry) => entry.slug === "gpt-5.6-luna")!;
+  expect(luna.capabilities.optionDescriptors[0]!.options.find((o) => o.isDefault)!.id).toBe("low");
 
   const again = renderT3Settings(rendered.value, registry());
   expect(again.ok).toBe(true);

@@ -25,6 +25,7 @@ import {
   SLOT_ENVIRONMENT_KEYS,
   type LauncherSlots,
   type ModelRegistry,
+  type ModelRow,
 } from "../models/registry.ts";
 
 /** Context ceiling opencode is told for a retired model whose row records no window. */
@@ -141,6 +142,53 @@ export function renderOpencodeConfig(text: string, registry: ModelRegistry): Res
   return ok(`${JSON.stringify(next, null, 2)}\n`);
 }
 
+/** Claude Code's effort vocabulary, in the order T3's own Claude profiles list it. */
+const CLAUDE_CODE_EFFORT_LEVELS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
+const EFFORT_LABELS: Readonly<Record<string, string>> = {
+  low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Max",
+};
+
+interface T3CustomModelEntry {
+  readonly slug: string;
+  readonly name: string;
+  readonly capabilities: {
+    readonly optionDescriptors: readonly {
+      readonly id: string;
+      readonly label: string;
+      readonly type: "select";
+      readonly options: readonly { readonly id: string; readonly label: string; readonly isDefault?: boolean }[];
+    }[];
+  };
+}
+
+/**
+ * One T3 custom model: the registry label as its display name and a Reasoning selector built
+ * from the row's effort fields. T3 resolves the chosen effort against this descriptor and
+ * passes it to Claude Code as `--effort`, so the levels offered here must be ones the harness
+ * accepts. Context window is deliberately absent: the launcher owns it.
+ */
+export function t3CustomModelEntry(model: ModelRow): T3CustomModelEntry {
+  const levels = model.effort_levels ?? CLAUDE_CODE_EFFORT_LEVELS;
+  const fallbackDefault = levels.includes("medium") ? "medium" : levels[0];
+  const selected = model.effort_default ?? fallbackDefault;
+  return {
+    slug: model.id,
+    name: model.label,
+    capabilities: {
+      optionDescriptors: [{
+        id: "effort",
+        label: "Reasoning",
+        type: "select",
+        options: levels.map((level) => ({
+          id: level,
+          label: EFFORT_LABELS[level] ?? level,
+          ...(level === selected ? { isDefault: true } : {}),
+        })),
+      }],
+    },
+  };
+}
+
 const T3SettingsSchema = z.object({
   providerInstances: z.record(z.string(), z.object({
     config: z.record(z.string(), z.unknown()).optional(),
@@ -164,8 +212,8 @@ export function renderT3Settings(text: string, registry: ModelRegistry): Result<
   const instance = parsed.data.providerInstances?.["claudeAgent"];
   if (!instance) return ok(null);
   const customModels = registry.model
-    .map((model) => model.id)
-    .filter((id) => !id.startsWith("claude-"));
+    .filter((model) => !model.id.startsWith("claude-"))
+    .map((model) => t3CustomModelEntry(model));
   const next = {
     ...(raw as Record<string, unknown>),
     providerInstances: {

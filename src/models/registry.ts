@@ -63,6 +63,10 @@ const ModelSchema = z.object({
   replaced_by: z.string().min(1).optional(),
   /** Effort suffix every managed birth on this model carries, e.g. `low` for the glue lane. */
   launch_effort: z.string().min(1).optional(),
+  /** Effort levels the model accepts, in picker order. Absent means the full Claude Code set. */
+  effort_levels: z.array(z.string().min(1)).min(1).optional(),
+  /** The effort a composer starts at. Absent means the harness default. */
+  effort_default: z.string().min(1).optional(),
 });
 
 const HistoricalSchema = z.object({
@@ -172,6 +176,14 @@ function validate(registry: ModelRegistry, path: string): Result<ModelRegistry> 
   for (const row of registry.historical) {
     if (ids.has(row.id)) return err(new Error(`duplicate model id "${row.id}" in ${path}`));
     ids.add(row.id);
+  }
+
+  for (const model of registry.model) {
+    if (model.effort_default && model.effort_levels && !model.effort_levels.includes(model.effort_default)) {
+      return err(new Error(
+        `model "${model.id}" in ${path} defaults to effort "${model.effort_default}", which is not in its effort_levels`,
+      ));
+    }
   }
 
   for (const model of registry.model) {
