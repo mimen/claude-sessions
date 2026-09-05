@@ -236,10 +236,24 @@ apply_launcher_env() {
 
 
 
+# Merge the launcher settings file into an inline --settings JSON value and print the result.
+# Arrays concatenate (both hook sets run), objects merge key by key, and the launcher's scalars
+# win as the newer, more specific declaration. Fails when the value is not inline JSON or node is
+# missing, and the caller then leaves argv alone.
+merge_settings_json() {
+  local base="$1" overlay="$2"
+  [[ "$base" == \{* ]] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  CCS_BASE="$base" CCS_OVERLAY="$overlay" node -e '
+const fs=require("fs");const isObj=x=>x&&typeof x==="object"&&!Array.isArray(x);
+const merge=(a,b)=>{if(Array.isArray(a)&&Array.isArray(b))return a.concat(b);if(isObj(a)&&isObj(b)){const o={...a};for(const k of Object.keys(b))o[k]=(k in a)?merge(a[k],b[k]):b[k];return o;}return b;};
+process.stdout.write(JSON.stringify(merge(JSON.parse(process.env.CCS_BASE),JSON.parse(fs.readFileSync(process.env.CCS_OVERLAY,"utf8")))));' 2>/dev/null
+}
+
 exec_raw() {
   # Resolved while CCS_FORCE_HARNESS still names the launcher; the unset below would otherwise
   # make a wrapper launch pick up the default launcher's settings file.
-  local generated_settings=""
+  local generated_settings="" after_cmux="${CCS_CLAUDE_SHIM_AFTER_CMUX:-}"
   generated_settings="$(generated_settings_for_launcher)" || generated_settings=""
   apply_launcher_env
   unset CCS_CLAUDE_SHIM_AFTER_CMUX CCS_LAUNCH_PARENT_SESSION_ID
@@ -255,6 +269,29 @@ exec_raw() {
   # launcher hosts, so `/model` never offers a row this process envelope cannot serve.
   if [[ -n "$generated_settings" ]] && ! caller_declares_settings "$@"; then
     exec "$raw_claude" --settings "$generated_settings" "$@"
+  fi
+  if [[ -n "$generated_settings" && -n "$after_cmux" ]]; then
+    # cmux ran first (its PATH shim precedes ours inside a cmux surface) and already placed its
+    # own --settings JSON. Claude Code keeps exactly one such flag, so the launcher's settings
+    # are folded into that JSON here instead of being added as a second, dropped flag.
+    local rebuilt=() arg value merged i=0 done_merge=0
+    local -a argv=("$@")
+    while (( i < ${#argv[@]} )); do
+      arg="${argv[$i]}"
+      if [[ "$arg" == "--" ]]; then rebuilt+=("${argv[@]:$i}"); break; fi
+      if (( done_merge == 0 )) && [[ "$arg" == "--settings" || "$arg" == --settings=* ]]; then
+        if [[ "$arg" == "--settings" ]]; then value="${argv[$((i + 1))]}"; i=$((i + 1)); else value="${arg#--settings=}"; fi
+        if merged="$(merge_settings_json "$value" "$generated_settings")" && [[ -n "$merged" ]]; then
+          rebuilt+=("--settings" "$merged"); done_merge=1
+        else
+          rebuilt+=("--settings" "$value")
+        fi
+      else
+        rebuilt+=("$arg")
+      fi
+      i=$((i + 1))
+    done
+    if (( done_merge == 1 )); then exec "$raw_claude" "${rebuilt[@]}"; fi
   fi
   exec "$raw_claude" "$@"
 }

@@ -306,6 +306,28 @@ exec "$CMUX_CUSTOM_CLAUDE_PATH" "$@"
 });
 
 describe("generated launcher settings", () => {
+  test("fold into the --settings JSON when cmux ran first and the shim only sees the second pass", () => {
+    const f = fixture();
+    const envDir = join(f.root, "launcher-env");
+    mkdirSync(envDir, { recursive: true });
+    writeFileSync(join(envDir, "default"), "claudex\n");
+    writeFileSync(join(envDir, "claudex.env"), "set X=1\n");
+    writeFileSync(join(envDir, "claudex.settings.json"), JSON.stringify({ availableModels: ["a", "b"], modelPicker: { options: [{ model: "a" }] } }));
+    const cmuxJson = JSON.stringify({ preferredNotifChannel: "notifications_disabled", hooks: { Stop: [{ matcher: "", hooks: [] }] } });
+    const result = run(f, ["--settings", cmuxJson, "-p", "ok"], {
+      CMUX_SURFACE_ID: "surface-1",
+      CCS_CLAUDE_SHIM_AFTER_CMUX: "1",
+    });
+    expect(result.exitCode).toBe(0);
+    const raw = lines(f.rawObservation);
+    const flags = raw.filter((arg) => arg === "--settings");
+    expect(flags).toHaveLength(1);
+    const merged = JSON.parse(raw[raw.indexOf("--settings") + 1] ?? "{}") as Record<string, unknown>;
+    expect(merged.preferredNotifChannel).toBe("notifications_disabled");
+    expect(merged.availableModels).toEqual(["a", "b"]);
+    expect((merged.hooks as Record<string, unknown>).Stop).toBeDefined();
+  });
+
   test("travel into the cmux wrapper on the first pass and are not repeated on the second", () => {
     const f = fixture();
     const envDir = join(f.root, "launcher-env");
