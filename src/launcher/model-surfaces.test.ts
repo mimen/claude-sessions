@@ -142,12 +142,18 @@ test("T3's model order leads with the registry and keeps hand-added ids after it
   const parsed = JSON.parse(rendered.value) as {
     wordWrap: boolean;
     providerModelPreferences: Record<string, { hiddenModels: string[]; modelOrder: string[] }>;
+    favorites: { provider: string; model: string }[];
   };
   expect(parsed.wordWrap).toBe(true);
   expect(parsed.providerModelPreferences["claudeAgent"]!.hiddenModels).toEqual([]);
   const order = parsed.providerModelPreferences["claudeAgent"]!.modelOrder;
   expect(order[0]).toBe("claude-fable-5-1");
   expect(order[order.length - 1]).toBe("kimi-k3");
+  // Stars are the /model rows: every picker=true registry model, other providers' stars kept.
+  expect(parsed.favorites[0]).toEqual({ provider: "opencode", model: "opencode/x-preview" });
+  const starred = parsed.favorites.filter((f) => f.provider === "claudeAgent").map((f) => f.model);
+  expect(starred).toEqual(registry().model.filter((m) => m.picker && !m.replaced_by).map((m) => m.id));
+  expect(starred).not.toContain("kimi-k3");
 
   const again = renderT3ClientSettings(rendered.value, registry());
   expect(again.ok).toBe(true);

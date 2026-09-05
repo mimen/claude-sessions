@@ -176,13 +176,22 @@ export function renderT3Settings(text: string, registry: ModelRegistry): Result<
   return ok(`${JSON.stringify(next, null, 2)}\n`);
 }
 
+const T3FavoriteSchema = z.object({ provider: z.string(), model: z.string() }).passthrough();
+
 const T3ClientSchema = z.object({
   providerModelPreferences: z.record(z.string(), z.object({
     modelOrder: z.array(z.string()).optional(),
   }).passthrough()).optional(),
+  favorites: z.array(T3FavoriteSchema).optional(),
 }).passthrough();
 
-/** Registry order leads T3's picker; ids a human added by hand keep their place after it. */
+/**
+ * Registry order leads T3's picker; ids a human added by hand keep their place after it.
+ *
+ * T3's starred list is the same configuration as Claude Code's `/model` rows: every registry
+ * model with `picker = true` on the Claude Agent provider, in registry order. Stars on other
+ * providers are the user's own and survive untouched.
+ */
 export function renderT3ClientSettings(text: string, registry: ModelRegistry): Result<string | null> {
   let raw: unknown;
   try {
@@ -197,12 +206,17 @@ export function renderT3ClientSettings(text: string, registry: ModelRegistry): R
   if (!preferences) return ok(null);
   const registryOrder = registry.model.map((model) => model.id);
   const extras = (preferences.modelOrder ?? []).filter((id) => !registryOrder.includes(id));
+  const otherFavorites = (parsed.data.favorites ?? []).filter((favorite) => favorite.provider !== "claudeAgent");
+  const pickerFavorites = registry.model
+    .filter((model) => model.picker && model.replaced_by === undefined)
+    .map((model) => ({ provider: "claudeAgent", model: model.id }));
   const next = {
     ...(raw as Record<string, unknown>),
     providerModelPreferences: {
       ...parsed.data.providerModelPreferences,
       claudeAgent: { ...preferences, modelOrder: [...registryOrder, ...extras] },
     },
+    favorites: [...otherFavorites, ...pickerFavorites],
   };
   return ok(`${JSON.stringify(next, null, 2)}\n`);
 }
