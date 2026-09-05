@@ -11,8 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
-        // Launch at login (idempotent; silently ignores "already registered").
-        try? SMAppService.mainApp.register()
+        // Launch and restart belong to the LaunchAgent make-app.sh installs; a
+        // login item would race it into a second menu bar icon.
+        try? SMAppService.mainApp.unregister()
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = item.button else { return }

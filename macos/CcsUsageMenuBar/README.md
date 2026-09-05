@@ -24,4 +24,14 @@ swift test          # unit tests for parsing + gauge logic
 ./make-app.sh --install   # install to /Applications and launch
 ```
 
-The app is LSUIElement (no Dock icon). Quit from the power button in the panel footer.
+The app is LSUIElement (no Dock icon). `--install` also writes and loads the
+`com.milad.ccs.usage-menubar` LaunchAgent, which starts the app at login and restarts it
+after a crash. The power button in the panel footer quits the process; launchd brings it
+back within 15 seconds. To stop it for real:
+
+```sh
+launchctl bootout gui/$(id -u)/com.milad.ccs.usage-menubar
+```
+
+Refresh activity logs to `~/.ccs-usage-menubar.log` (local time, capped at 2 MB); the
+process's own stdout and stderr land in `~/Library/Logs/com.milad.ccs.usage-menubar.log`.
