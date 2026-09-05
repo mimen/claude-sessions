@@ -20,7 +20,7 @@ import type {
 } from "./types.ts";
 import { codexBarVersion, entryErrorHealth, runCodexBar, sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
 import { runCswap, type CswapWindow } from "./cswap.ts";
-import { fetchOauthUsage, planFromTier, readKeychainOauth, SCOPED_WINDOWS } from "./anthropic-oauth.ts";
+import { fetchOauthProfile, fetchOauthUsage, planFromProfile, readKeychainOauth, windowsFromOauthUsage } from "./anthropic-oauth.ts";
 import { fetchGrokBilling } from "./grok.ts";
 
 export interface AdapterResult {
@@ -285,20 +285,22 @@ async function anthropicAdapterLive(): Promise<AdapterResult> {
     const oauth = acct.number != null ? readKeychainOauth(acct.number, acct.email) : null;
     if (oauth) {
       try {
-        const usage = await fetchOauthUsage(oauth.accessToken);
-        const tier = planFromTier(oauth.rateLimitTier);
-        const emit = (w: { utilization?: number | null; resets_at?: string | null } | null | undefined, window: UsageWindow, suffix = "") => {
-          if (!w || typeof w.utilization !== "number") return;
+        const [usage, profile] = await Promise.all([
+          fetchOauthUsage(oauth.accessToken),
+          fetchOauthProfile(oauth.accessToken),
+        ]);
+        const tier = planFromProfile(profile, oauth.rateLimitTier);
+        for (const w of windowsFromOauthUsage(usage)) {
           observations.push({
             provider: "anthropic",
-            entitlement: `${base}${suffix}`,
+            entitlement: `${base}${w.suffix}`,
             metric: "allowance",
             scope: "account",
-            window,
+            window: w.window,
             used: w.utilization,
             limit: 100,
             remaining: Math.max(0, 100 - w.utilization),
-            resetsAt: w.resets_at ?? null,
+            resetsAt: w.resetsAt,
             expiresAt: null,
             observedAt,
             source: "official_api",
@@ -306,11 +308,6 @@ async function anthropicAdapterLive(): Promise<AdapterResult> {
             tier: tier?.name ?? null,
           } as UsageObservation & { tier?: string | null });
           okCount++;
-        };
-        emit(usage.five_hour, "five_hour");
-        emit(usage.seven_day, "weekly");
-        for (const scoped of SCOPED_WINDOWS) {
-          emit(usage[scoped.key] as typeof usage.five_hour | null | undefined, "weekly", scoped.suffix);
         }
         continue;
       } catch {
