@@ -237,6 +237,10 @@ apply_launcher_env() {
 
 
 exec_raw() {
+  # Resolved while CCS_FORCE_HARNESS still names the launcher; the unset below would otherwise
+  # make a wrapper launch pick up the default launcher's settings file.
+  local generated_settings=""
+  generated_settings="$(generated_settings_for_launcher)" || generated_settings=""
   apply_launcher_env
   unset CCS_CLAUDE_SHIM_AFTER_CMUX CCS_LAUNCH_PARENT_SESSION_ID
   unset CCS_LAUNCH_CREATOR_KIND CCS_LAUNCH_CREATOR_REF
@@ -249,8 +253,7 @@ exec_raw() {
   unset CCS_CARRIED_ANTHROPIC_API_KEY CCS_CARRIED_ANTHROPIC_BASE_URL
   # `ccs launcher install` generates one settings file per launcher carrying the models THAT
   # launcher hosts, so `/model` never offers a row this process envelope cannot serve.
-  local generated_settings
-  if generated_settings="$(generated_settings_for_launcher)" && ! caller_declares_settings "$@"; then
+  if [[ -n "$generated_settings" ]] && ! caller_declares_settings "$@"; then
     exec "$raw_claude" --settings "$generated_settings" "$@"
   fi
   exec "$raw_claude" "$@"
