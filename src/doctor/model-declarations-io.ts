@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -238,6 +238,8 @@ function readSettings(
 }
 
 function readAgents(path: string, declarations: ModelDeclaration[]): Result<void> {
+  // Seats are routing vocabulary in model-routing.md; a host may carry no agent definitions at all.
+  if (!existsSync(path)) return ok(undefined);
   try {
     for (const entry of readdirSync(path, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith(".md") || entry.name === "README.md") continue;

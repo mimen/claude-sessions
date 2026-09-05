@@ -229,3 +229,17 @@ describe("model declaration collection", () => {
     expect(result.error.message).toContain("failed to read Claude Code settings");
   });
 });
+
+test("a host with no agent definitions directory collects without error", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ccs-doctor-no-agents-"));
+  const settingsPath = join(root, "settings.json");
+  writeFileSync(settingsPath, JSON.stringify({ model: "claude-fable-5-1[1m]" }));
+  writeFileSync(join(root, "config.toml"), "");
+  const collected = await collectModelDeclarations({
+    ...ISOLATION,
+    settingsPath,
+    agentsRoot: join(root, "missing-agents"),
+    configPath: join(root, "config.toml"),
+  });
+  expect(collected.ok).toBe(true);
+});
