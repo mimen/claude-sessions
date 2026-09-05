@@ -97,7 +97,7 @@ test("opencode keeps every unrelated key and takes its windows from the registry
   expect(provider["cliproxyapi"]!["npm"]).toBe("@ai-sdk/openai-compatible");
   const models = provider["cliproxyapi"]!["models"] as Record<string, { limit: { context: number } }>;
   expect(models["kimi-k3"]).toBeUndefined();
-  expect(models["gpt-5.6-sol"]!.limit.context).toBe(921000);
+  expect(models["gpt-5.6-sol"]!.limit.context).toBe(1050000);
   expect(models["claude-opus-5"]!.limit.context).toBe(1000000);
   // Historical rows keep old transcripts openable and default to 200K.
   expect(models["gpt-5.5"]!.limit.context).toBe(200000);

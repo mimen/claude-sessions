@@ -35,10 +35,10 @@ marker = ""
 prefixes = ["claude-haiku-"]
 
 [[family]]
-name = "gpt-5.6"
-window = 921000
+name = "gpt-1m"
+window = 1050000
 accounting = "envelope"      # NEVER behaves_as: it drops the row to the Claude model's 200K
-prefixes = ["gpt-5.6-"]
+prefixes = ["gpt-5.6-", "gpt-6-"]
 
 [[family]]
 name = "grok"
@@ -131,7 +131,7 @@ picker = false                        # allowlisted so Claude Code's own backgro
 
 [[model]]
 id = "gpt-5.6-sol"
-family = "gpt-5.6"
+family = "gpt-1m"
 provider = "codex"
 launchers = ["claudex"]
 label = "Sol 5.6"
@@ -144,7 +144,7 @@ picker = true
 
 [[model]]
 id = "gpt-5.6-terra"
-family = "gpt-5.6"
+family = "gpt-1m"
 provider = "codex"
 launchers = ["claudex"]
 label = "Terra 5.6"
@@ -157,7 +157,7 @@ picker = true
 
 [[model]]
 id = "gpt-5.6-luna"
-family = "gpt-5.6"
+family = "gpt-1m"
 provider = "codex"
 launchers = ["claudex"]
 label = "Luna 5.6"

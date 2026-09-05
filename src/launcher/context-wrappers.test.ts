@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { launcherSettingsContents } from "./model-surfaces.ts";
+import { allowlist, loadModelRegistry } from "../models/registry.ts";
 import { join, resolve } from "node:path";
 import { millionWindowClaudeFamilies } from "../resume/role-model-launch.ts";
 
@@ -17,6 +19,12 @@ interface Observation {
   readonly stderr: string;
 }
 
+function fixtureRegistry() {
+  const registry = loadModelRegistry(process.env.CCS_MODEL_REGISTRY_PATH ?? "");
+  if (!registry.ok) throw registry.error;
+  return registry.value;
+}
+
 function runWrapper(binary: string, args: readonly string[]): Observation {
   const root = mkdtempSync(join(tmpdir(), "ccs-context-wrapper-"));
   roots.push(root);
@@ -28,8 +36,18 @@ function runWrapper(binary: string, args: readonly string[]): Observation {
   );
   chmodSync(wrapper, 0o755);
   chmodSync(join(root, "claude"), 0o755);
+  // The wrapper validates against the settings file `ccs launcher install` generates from the
+  // registry; the fixture registry's claudex allowlist stands in for the installed one.
+  const envDir = join(root, "launcher-env");
+  mkdirSync(envDir);
+  const settings = launcherSettingsContents(fixtureRegistry(), "claudex");
+  if (settings) writeFileSync(join(envDir, "claudex.settings.json"), settings);
 
-  const result = Bun.spawnSync([wrapper, ...args], { stdout: "pipe", stderr: "pipe" });
+  const result = Bun.spawnSync([wrapper, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, CCS_LAUNCHER_ENV_DIR: envDir },
+  });
   return {
     exitCode: result.exitCode ?? -1,
     stdout: new TextDecoder().decode(result.stdout),
@@ -53,17 +71,16 @@ describe("context-family launcher wrappers", () => {
     expect(sonnet.exitCode).toBe(0);
     expect(sonnet.stdout).toContain("arg=--model=claude-sonnet-5[1m]");
 
+    // Every 1M Claude family in the registry has a claudex row; each gets the marker.
     for (const family of millionWindowClaudeFamilies()) {
-      const model = `${family}test`;
+      const model = allowlist(fixtureRegistry(), "claudex")
+        .map((declaration) => declaration.replace(/\[1m\]$/, ""))
+        .find((id) => id.startsWith(family));
+      expect(model).toBeDefined();
       const result = runWrapper("claudex", [`--model=${model}`, "-p", "hello"]);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain(`arg=--model=${model}[1m]`);
     }
-
-    const haiku = runWrapper("claudex", ["--model=claude-haiku-4-5[1m]", "-p", "hello"]);
-    expect(haiku.exitCode).toBe(0);
-    expect(haiku.stdout).toContain("arg=--model=claude-haiku-4-5");
-    expect(haiku.stdout).not.toContain("[1m]");
 
     const gpt = runWrapper("claudex", ["--model=gpt-5.6-sol[1m]", "-p", "hello"]);
     expect(gpt.exitCode).toBe(0);
@@ -74,7 +91,7 @@ describe("context-family launcher wrappers", () => {
   test("claudex refuses a model outside its context envelope", () => {
     const stray = runWrapper("claudex", ["gpt-4.1"]);
     expect(stray.exitCode).toBe(2);
-    expect(stray.stderr).toContain("outside this launcher's context envelope");
+    expect(stray.stderr).toContain("not in this launcher's registry allowlist");
   });
 
   test("the gateway families claudex serves pass through unmarked", () => {

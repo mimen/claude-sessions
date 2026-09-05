@@ -1,9 +1,9 @@
 #!/bin/zsh -f
-# claudex — one Claude Code harness for Claude 1M and GPT-5.6 921K models through the local
+# claudex — one Claude Code harness for Claude 1M and GPT 921K-envelope models through the local
 # CLIProxyAPI gateway. The launcher registry owns the gateway route, picker slots, and context env.
 #
-# Claude Code reads `[1m]` client-side for Claude IDs. GPT-5.6 must stay unsuffixed: its real 921K
-# window comes from the launcher's CLAUDE_CODE_MAX_CONTEXT_TOKENS setting.
+# Claude Code reads `[1m]` client-side for Claude IDs. GPT IDs stay unsuffixed: their window is the
+# launcher's CLAUDE_CODE_MAX_CONTEXT_TOKENS envelope.
 export CCS_FORCE_HARNESS=claudex
 
 model_base() {
@@ -12,16 +12,22 @@ model_base() {
   print -r -- "$value"
 }
 
+# The models this launcher hosts come from the settings file `ccs launcher install` generates
+# from the model registry, so adding a model is one registry edit and never a change here.
+# Aliases Claude Code resolves itself pass through; a missing settings file lets Claude Code's
+# own allowlist enforcement answer instead of guessing here.
 validate_model() {
   local base="$(model_base "$1")"
   case "$base" in
-    gpt-5.6-*|claude-*|grok-*|glm-*|opus|fable|sonnet|haiku|best|default|opusplan) return 0 ;;
-    gpt-*|qwen*)
-      print -u2 -- "claudex: model $base is outside this launcher's context envelope"
-      return 2
-      ;;
-    *) return 0 ;;
+    opus|fable|sonnet|haiku|best|default|opusplan) return 0 ;;
   esac
+  local settings="${CCS_LAUNCHER_ENV_DIR:-$HOME/.ccs/launcher-env}/claudex.settings.json"
+  [[ -r "$settings" ]] || return 0
+  if grep -Fq -- "\"${base}\"" "$settings" || grep -Fq -- "\"${base}[1m]\"" "$settings"; then
+    return 0
+  fi
+  print -u2 -- "claudex: model $base is not in this launcher's registry allowlist ($settings)"
+  return 2
 }
 
 declare_claude_window() {
@@ -34,7 +40,7 @@ declare_claude_window() {
 
 MODEL='opus'
 args=("$@")
-if (( ${#args} > 0 )) && [[ "${args[1]}" == gpt-* || "${args[1]}" == claude-* || "${args[1]}" == grok-* || "${args[1]}" == glm-* || "${args[1]}" == qwen* ]]; then
+if (( ${#args} > 0 )) && [[ "${args[1]}" == *-* && "${args[1]}" != -* ]]; then
   validate_model "${args[1]}" || exit $?
   MODEL="$(declare_claude_window "${args[1]}")"
   args=("${args[@]:1}")
