@@ -35,7 +35,7 @@ const WATCHED_DEPLOYMENTS: readonly { name: string; host: string; path: string }
   { name: "mindmap-visualizer", host: "Milads-Mac-mini", path: "~/Programming/Repos/mindmap-visualizer" },
 ];
 
-const VAULT_DOCTOR = "Documents/milad-vault/ClaudeConfig/categories/doctor.py";
+const VAULT_DOCTOR = "Documents/milad-vault/categories/doctor.py";
 
 interface VaultFinding {
   readonly area: string;
@@ -162,7 +162,7 @@ export function collectCategoryHealth(options: { deep?: boolean } = {}): Categor
   if (!registry.ok) {
     return buildCategoryHealthReport(
       [finding("contract.registry", "contract", "drift", registry.error.message, {
-        remedy: "fix ClaudeConfig/categories/registry.json",
+        remedy: "fix categories/registry.json in the vault",
       })],
       ["locations", "vault/todoist/calendar", "deployment"],
     );

@@ -107,7 +107,7 @@ export function checkLocationSlugs(
         "locations",
         "drift",
         `location '${location.key}' uses unknown slug '${location.category}'`,
-        { remedy: "correct the slug against ClaudeConfig/categories/registry.json" },
+        { remedy: "correct the slug against categories/registry.json in the vault" },
       ),
     );
 }
@@ -145,7 +145,7 @@ export function checkContract(validate: Result<void, Error>): CategoryFinding[] 
   if (validate.ok) return [];
   return [
     finding("contract.registry", "contract", "drift", validate.error.message, {
-      remedy: "reconcile Life Domains.md and ClaudeConfig/categories/registry.json",
+      remedy: "reconcile Life Domains.md and categories/registry.json in the vault",
     }),
   ];
 }

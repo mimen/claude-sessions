@@ -22,7 +22,7 @@ export const LOCATION_REGISTRY_PATH = () => join(runtimeRoot(), "locations.toml"
 /** Canonical life-domain registry. Tests and nonstandard vaults may set an explicit override. */
 export const CATEGORY_REGISTRY_PATH = () =>
   process.env.CCS_CATEGORY_REGISTRY_PATH
-  ?? join(process.env.HOME ?? homedir(), "Documents", "milad-vault", "ClaudeConfig", "categories", "registry.json");
+  ?? join(process.env.HOME ?? homedir(), "Documents", "milad-vault", "categories", "registry.json");
 /** Validated remote-host registry, normally a machine-adapter-managed link to shared config. */
 export const HOST_REGISTRY_PATH = () => join(runtimeRoot(), "hosts.toml");
 /**
