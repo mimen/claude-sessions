@@ -503,12 +503,12 @@ describe("launcher environment materialization", () => {
     expect(mixed).toContain("auth=test-gateway-token");
     expect(mixed).toContain("force=\n");
     expect(mixed).toContain(
-      `args=--settings ${settingsOf("claudex")} --dangerously-skip-permissions --model opus --version`,
+      `args=--settings ${settingsOf("claudex")} --dangerously-skip-permissions --model opus --disallowedTools Artifact --version`,
     );
 
     // A caller who brought a settings file keeps it; the generated one is never a second --settings.
     const explicit = run("claudex", ["--settings", "/tmp/mine.json"]);
-    expect(explicit).toContain("args=--dangerously-skip-permissions --model opus --settings /tmp/mine.json --version");
+    expect(explicit).toContain("args=--dangerously-skip-permissions --model opus --disallowedTools Artifact --settings /tmp/mine.json --version");
     expect(explicit).not.toContain(settingsOf("claudex"));
   });
 

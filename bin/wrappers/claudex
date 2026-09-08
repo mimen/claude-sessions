@@ -39,12 +39,10 @@ declare_claude_window() {
 }
 
 MODEL='opus'
-EFFECTIVE_MODEL='opus'
 args=("$@")
 if (( ${#args} > 0 )) && [[ "${args[1]}" == *-* && "${args[1]}" != -* ]]; then
   validate_model "${args[1]}" || exit $?
   MODEL="$(declare_claude_window "${args[1]}")"
-  EFFECTIVE_MODEL="$MODEL"
   args=("${args[@]:1}")
 fi
 
@@ -53,14 +51,12 @@ for (( i = 1; i <= ${#args}; i++ )); do
     next=$(( i + 1 ))
     validate_model "${args[$next]}" || exit $?
     args[$next]="$(declare_claude_window "${args[$next]}")"
-    EFFECTIVE_MODEL="${args[$next]}"
     MODEL=""
     (( i++ ))
   elif [[ "${args[i]}" == --model=* ]]; then
     explicit="${args[i]#--model=}"
     validate_model "$explicit" || exit $?
     args[i]="--model=$(declare_claude_window "$explicit")"
-    EFFECTIVE_MODEL="$explicit"
     MODEL=""
   fi
 done
@@ -68,32 +64,13 @@ done
 # Claude Code's built-in Artifact tool declares a JSON Schema `pattern` carrying Unicode property
 # escapes (`\p{Cc}` and friends). OpenAI's and xAI's function-schema validators reject those
 # outright, so every interactive request on a GPT or Grok lane 400s with
-# "Invalid schema for function 'Artifact'". The tool is only sent in interactive sessions, which is
-# why `-p` runs are unaffected. Dropping the tool at launch removes it from the wire schema, not
-# just from execution. Claude lanes keep it. A mid-session `/model` switch from a Claude row to a
-# GPT or Grok row keeps the launch decision and brings the error back; relaunch instead.
-resolve_slot() {
-  local spec="${CCS_LAUNCHER_ENV_DIR:-$HOME/.ccs/launcher-env}/claudex.env"
-  [[ -r "$spec" ]] || return 1
-  sed -n "s/^set ANTHROPIC_DEFAULT_${1}_MODEL=//p" "$spec" | tail -1
-}
-
-serves_artifacts() {
-  local base="$(model_base "$1")"
-  case "$base" in
-    fable)             base="$(model_base "$(resolve_slot FABLE)")" ;;
-    opus|opusplan)     base="$(model_base "$(resolve_slot OPUS)")" ;;
-    sonnet)            base="$(model_base "$(resolve_slot SONNET)")" ;;
-    haiku)             base="$(model_base "$(resolve_slot HAIKU)")" ;;
-    best|default)      return 1 ;;
-  esac
-  [[ "$base" == claude-* || "$base" == anthropic.* ]]
-}
-
-targs=()
-if ! serves_artifacts "$EFFECTIVE_MODEL" && [[ " ${args[*]} " != *" --disallowedTools "* ]]; then
-  targs=(--disallowedTools Artifact)
-fi
+# "Invalid schema for function 'Artifact'". The tool list is fixed when the process starts, so
+# gating this on the launch model would break the moment `/model` crosses families mid-session --
+# and this launcher exists to switch between them. Artifact is dropped for every claudex session:
+# publishing needs the claude.ai login that this launcher's gateway token overrides anyway.
+# claude-native is the launcher that keeps it. Repeated `--disallowedTools` flags accumulate, so
+# this never relaxes a restriction a caller passed in.
+targs=(--disallowedTools Artifact)
 
 margs=()
 [[ -n "$MODEL" ]] && margs=(--model "$MODEL")
