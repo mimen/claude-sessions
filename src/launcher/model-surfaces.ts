@@ -38,6 +38,22 @@ export function launcherSettingsFilename(launcher: string): string {
 }
 
 /**
+ * The tool a gateway launcher denies, and why it has to be denied in the SETTINGS rather than on
+ * the wrapper's command line.
+ *
+ * Claude Code's built-in Artifact tool declares a JSON Schema `pattern` carrying Unicode property
+ * escapes, which OpenAI's and xAI's function-schema validators reject outright: every interactive
+ * request on a GPT or Grok lane 400s on the tool list alone. A `deny` entry removes the tool from
+ * the wire schema, not merely from execution. The wrapper carries the same denial as a command-line
+ * flag, but the wrapper is only one way into a launcher's environment -- resumes, T3, and anything
+ * else that calls the shim directly never see its argv, and they all get this file.
+ *
+ * Denying it costs a gateway session nothing: publishing needs the claude.ai login that the
+ * gateway's own auth token overrides. `claude-native` declares no gateway URL and keeps the tool.
+ */
+const GATEWAY_DENIED_TOOL = "Artifact";
+
+/**
  * One launcher's Claude Code settings: the models it hosts, and the `/model` rows it offers.
  *
  * Null when the registry gives the launcher no rows at all: an empty `availableModels` would
@@ -47,6 +63,7 @@ export function launcherSettingsFilename(launcher: string): string {
 export function launcherSettingsContents(
   registry: ModelRegistry,
   launcher: string,
+  viaGateway = false,
 ): string | null {
   const models = allowlist(registry, launcher);
   if (models.length === 0) return null;
@@ -56,6 +73,7 @@ export function launcherSettingsContents(
       replaceBuiltInOptions: true,
       options: pickerRows(registry, launcher),
     },
+    ...(viaGateway ? { permissions: { deny: [GATEWAY_DENIED_TOOL] } } : {}),
   };
   return `${JSON.stringify(settings, null, 2)}\n`;
 }

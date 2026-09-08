@@ -76,6 +76,19 @@ test("a launcher's settings carry only the models it hosts", () => {
   expect(launcherSettingsContents(registry(), "no-such-launcher")).toBeNull();
 });
 
+test("a gateway launcher denies Artifact in its settings; a direct one keeps the tool", () => {
+  const denyOf = (launcher: string, viaGateway: boolean): string[] | undefined => {
+    const contents = launcherSettingsContents(registry(), launcher, viaGateway);
+    expect(contents).not.toBeNull();
+    return (JSON.parse(contents!) as { permissions?: { deny: string[] } }).permissions?.deny;
+  };
+  // Artifact's schema carries Unicode property escapes that the GPT and Grok validators reject, so
+  // the whole request 400s while the tool is on the wire. The settings file reaches every launch
+  // path, including the resumes and clients that never touch the wrapper's argv.
+  expect(denyOf("claudex", true)).toEqual(["Artifact"]);
+  expect(denyOf("claude-native", false)).toBeUndefined();
+});
+
 test("tier slots become Claude Code environment keys with family-correct spellings", () => {
   expect(slotEnvironment(registry(), "claudex")).toEqual({
     ANTHROPIC_DEFAULT_FABLE_MODEL: "claude-fable-5-1[1m]",

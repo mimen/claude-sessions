@@ -408,7 +408,7 @@ function planLauncherEnv(
     files.push({ filename: filename.value, contents: spec.value });
     // Each launcher gets the models IT serves, so `claude-native` never offers a gateway row and
     // Claude Code refuses a `--model` the launcher's process envelope cannot host.
-    const settings = models ? launcherSettingsContents(models, launcher.name) : null;
+    const settings = models ? launcherSettingsContents(models, launcher.name, launcher.env.ANTHROPIC_BASE_URL !== undefined) : null;
     if (settings !== null) {
       files.push({ filename: launcherSettingsFilename(launcher.name), contents: settings });
     }

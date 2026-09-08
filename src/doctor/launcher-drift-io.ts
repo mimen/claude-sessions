@@ -315,7 +315,7 @@ export function collectLauncherDrift(options: LauncherDriftOptions = {}): Launch
       continue;
     }
     artifacts.push(readArtifact(specPath, spec.value, 0o600));
-    const settings = models ? launcherSettingsContents(models, launcher.name) : null;
+    const settings = models ? launcherSettingsContents(models, launcher.name, launcher.env.ANTHROPIC_BASE_URL !== undefined) : null;
     if (settings !== null) {
       const settingsFilename = launcherSettingsFilename(launcher.name);
       expectedEnvFiles.add(settingsFilename);
