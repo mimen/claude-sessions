@@ -241,7 +241,7 @@ function codexAdapter(): AdapterResult {
 // Anthropic (CodexBar's Claude reader)
 // ---------------------------------------------------------------------------
 
-function windowFromCswap(
+export function windowFromCswap(
   w: CswapWindow | null | undefined,
   observedAt: string,
   stale: boolean,
@@ -261,7 +261,10 @@ function windowFromCswap(
     observedAt,
     source: "official_api",
     exact: false,
-    // stale marks lastGoodUsage fallbacks (cswap could not refresh this account).
+    // stale marks lastGoodUsage fallbacks (cswap could not refresh this account). Without it
+    // a cached row renders as a live one, which is how a dead account showed a confident
+    // percentage next to a healthy one.
+    stale,
   } as UsageObservation & { stale?: boolean };
 }
 
@@ -274,7 +277,7 @@ async function anthropicAdapterLive(): Promise<AdapterResult> {
   if (!res.ok) return { observations: [], health: res.error };
   const observations: UsageObservation[] = [];
   let okCount = 0;
-  let staleCount = 0;
+  const staleAccounts: { email: string; status: string }[] = [];
   for (const acct of res.value.report.accounts ?? []) {
     if (!acct.email) continue;
     const base = `claude-max:${acct.email}`;
@@ -316,13 +319,16 @@ async function anthropicAdapterLive(): Promise<AdapterResult> {
     }
 
     const live = acct.usageStatus === "ok";
-    if (!live) staleCount++;
+    if (!live) staleAccounts.push({ email: acct.email, status: acct.usageStatus ?? "unknown" });
     const usage = (live ? acct.usage : acct.lastGoodUsage) ?? {};
+    // A fallback row is as old as cswap's last live answer, not as old as this process. Dating
+    // it `now()` told the menu bar every cached number was fresh.
+    const rowObservedAt = live ? observedAt : (acct.lastGoodFetchedAt ?? observedAt);
     for (const [w, win] of [
       ["five_hour", usage.fiveHour],
       ["weekly", usage.sevenDay],
     ] as const) {
-      const o = windowFromCswap(win, observedAt, !live);
+      const o = windowFromCswap(win, rowObservedAt, !live);
       if (!o) continue;
       o.entitlement = base;
       o.window = w;
@@ -333,7 +339,7 @@ async function anthropicAdapterLive(): Promise<AdapterResult> {
     // currently exposes Fable here; keep each named scope as its own full quota row.
     for (const scoped of usage.scoped ?? []) {
       if (!scoped.name) continue;
-      const o = windowFromCswap(scoped, observedAt, !live);
+      const o = windowFromCswap(scoped, rowObservedAt, !live);
       if (!o) continue;
       o.entitlement = `${base}#${scoped.name}`;
       o.window = "weekly";
@@ -341,11 +347,18 @@ async function anthropicAdapterLive(): Promise<AdapterResult> {
       okCount++;
     }
   }
+  // Name the accounts. Counting them ("1 account(s) on cached usage") forced the reader to go
+  // find out which one, which defeats the point of surfacing it at all.
   const health: AdapterHealth =
     okCount === 0
       ? { provider: "anthropic", status: "unavailable", detail: "no usable anthropic windows" }
-      : staleCount > 0
-        ? { provider: "anthropic", status: "degraded", detail: `${staleCount} account(s) on cached usage — token revoked or missing; re-auth via cswap` }
+      : staleAccounts.length > 0
+        ? {
+          provider: "anthropic",
+          status: "degraded",
+          detail: `${staleAccounts.map((a) => `${a.email} (${a.status})`).join(", ")} on cached usage — re-auth via cswap`,
+          accounts: staleAccounts.map((a) => a.email),
+        }
         : { provider: "anthropic", status: "ok", detail: null };
   return { observations, health };
 }

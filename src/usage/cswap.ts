@@ -35,6 +35,9 @@ export interface CswapAccount {
     sevenDay?: CswapWindow | null;
     scoped?: CswapWindow[];
   } | null;
+  /** When cswap last got a live answer for this account. The age of a fallback row. */
+  lastGoodFetchedAt?: string | null;
+  lastGoodAgeSeconds?: number | null;
 }
 
 export interface CswapReport {

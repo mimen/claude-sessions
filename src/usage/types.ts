@@ -54,6 +54,8 @@ export interface AdapterHealth {
   detail: string | null;
   /** Helper identity where an external tool supplied the data. */
   helper?: { name: string; version: string };
+  /** Accounts this status is about, when a provider serves more than one. */
+  accounts?: string[];
 }
 
 export interface UsageSnapshot {
