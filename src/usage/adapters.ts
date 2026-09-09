@@ -22,6 +22,7 @@ import { codexBarVersion, entryErrorHealth, runCodexBar, sourceClassFor, type Ra
 import { runCswap, type CswapWindow } from "./cswap.ts";
 import { fetchOauthProfile, fetchOauthUsage, planFromProfile, readKeychainOauth, windowsFromOauthUsage } from "./anthropic-oauth.ts";
 import { fetchGrokBilling } from "./grok.ts";
+import { fetchGatewayClaudeCredentials, gatewayIssues, type GatewayIssue } from "./gateway-claude-health.ts";
 
 export interface AdapterResult {
   observations: UsageObservation[];
@@ -347,20 +348,32 @@ async function anthropicAdapterLive(): Promise<AdapterResult> {
       okCount++;
     }
   }
-  // Name the accounts. Counting them ("1 account(s) on cached usage") forced the reader to go
-  // find out which one, which defeats the point of surfacing it at all.
-  const health: AdapterHealth =
-    okCount === 0
-      ? { provider: "anthropic", status: "unavailable", detail: "no usable anthropic windows" }
-      : staleAccounts.length > 0
-        ? {
-          provider: "anthropic",
-          status: "degraded",
-          detail: `${staleAccounts.map((a) => `${a.email} (${a.status})`).join(", ")} on cached usage — re-auth via cswap`,
-          accounts: staleAccounts.map((a) => a.email),
-        }
-        : { provider: "anthropic", status: "ok", detail: null };
-  return { observations, health };
+  // The gateway holds its own login per account; a dead one is invisible to cswap.
+  const gateway = gatewayIssues(await fetchGatewayClaudeCredentials());
+  return { observations, health: anthropicHealth(okCount, staleAccounts, gateway) };
+}
+
+/**
+ * Name the accounts. Counting them ("1 account(s) on cached usage") forced the reader to go
+ * find out which, which defeats the point of surfacing it at all. Both logins per account are
+ * reported: cswap's slot status and the gateway credential's, each with its own re-auth path.
+ */
+export function anthropicHealth(
+  okCount: number,
+  staleAccounts: { email: string; status: string }[],
+  gateway: GatewayIssue[],
+): AdapterHealth {
+  if (okCount === 0) {
+    return { provider: "anthropic", status: "unavailable", detail: "no usable anthropic windows" };
+  }
+  const parts: string[] = [];
+  if (staleAccounts.length > 0) {
+    parts.push(`${staleAccounts.map((a) => `${a.email} (${a.status})`).join(", ")} on cached usage — re-auth via cswap`);
+  }
+  for (const issue of gateway) parts.push(`${issue.email} ${issue.reason}`);
+  if (parts.length === 0) return { provider: "anthropic", status: "ok", detail: null };
+  const accounts = [...new Set([...staleAccounts.map((a) => a.email), ...gateway.map((g) => g.email)])];
+  return { provider: "anthropic", status: "degraded", detail: parts.join("; "), accounts };
 }
 
 // ---------------------------------------------------------------------------
