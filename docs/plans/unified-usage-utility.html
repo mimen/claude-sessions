@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>ClaudeX Usage Atlas</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg:#edf2f7; --ink:#152235; --muted:#607084; --paper:#fff; --paper2:#e5ecf4;
+      --line:#bcc8d6; --strong:#72849a; --cyan:#007d89; --blue:#2756a3; --violet:#7050a8;
+      --amber:#98620e; --red:#a23b46; --green:#217954; --shadow:0 18px 50px rgba(28,48,76,.13);
+      --pad:clamp(1.75rem,5vw,4.5rem);
+      --display:"Avenir Next Condensed","Arial Narrow","Helvetica Neue",sans-serif;
+      --body:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+      --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    }
+    @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1520;--ink:#eaf1f8;--muted:#9bacc0;--paper:#121f2d;--paper2:#182839;--line:#32475d;--strong:#70869d;--cyan:#68d4de;--blue:#8db5ff;--violet:#c0a2fa;--amber:#edbc6b;--red:#f08d99;--green:#73d5aa;--shadow:0 18px 50px rgba(0,0,0,.3)}}
+    :root[data-theme="dark"]{--bg:#0b1520;--ink:#eaf1f8;--muted:#9bacc0;--paper:#121f2d;--paper2:#182839;--line:#32475d;--strong:#70869d;--cyan:#68d4de;--blue:#8db5ff;--violet:#c0a2fa;--amber:#edbc6b;--red:#f08d99;--green:#73d5aa;--shadow:0 18px 50px rgba(0,0,0,.3)}
+    *{box-sizing:border-box}
+    html{scroll-behavior:auto}
+    body{margin:0;background:linear-gradient(90deg,transparent 0 49.9%,color-mix(in srgb,var(--line) 24%,transparent) 49.9% 50.1%,transparent 50.1%),var(--bg);color:var(--ink);font-family:var(--body);line-height:1.62;-webkit-font-smoothing:antialiased}
+    a{color:var(--blue);text-underline-offset:.18em}
+    a:hover{text-decoration-thickness:2px}
+    :focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+    code,.mono{font-family:var(--mono)}
+    code{font-size:.86em;background:var(--paper2);padding:.08rem .3rem;border-radius:.2rem;overflow-wrap:anywhere}
+    main{width:min(1180px,calc(100% - 2rem));margin:0 auto;padding:2.5rem 0 6rem}
+    .sheet{background:var(--paper);border:1px solid var(--line);box-shadow:var(--shadow)}
+    header{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(16rem,.75fr)}
+    .hero{padding:clamp(2rem,5vw,5rem);border-right:1px solid var(--line)}
+    .eyebrow{margin:0 0 1rem;color:var(--cyan);font:800 .72rem/1.2 var(--mono);letter-spacing:.13em;text-transform:uppercase}
+    h1,h2,h3{font-family:var(--display);line-height:1.02;letter-spacing:-.025em;text-wrap:balance}
+    h1{max-width:12ch;margin:0;font-size:clamp(3rem,8vw,7.5rem);font-weight:700;text-transform:uppercase}
+    h2{margin:0 0 1rem;font-size:clamp(1.9rem,3.6vw,3.3rem);font-weight:650}
+    h3{margin:0 0 .45rem;font-size:1.3rem}
+    .lede{max-width:54ch;margin:1.5rem 0 0;font-size:1.14rem}
+    .status-rail{display:flex;flex-direction:column;justify-content:space-between;gap:2rem;padding:2rem;background:var(--paper2)}
+    .status-card{border-top:.45rem solid var(--amber);padding-top:1rem}
+    .status-card strong{display:block;font:700 1.2rem/1.25 var(--display)}
+    .status-card p{margin:.55rem 0 0;color:var(--muted);font-size:.95rem}
+    .path{margin:0;color:var(--muted);font:.72rem/1.5 var(--mono);word-break:break-all}
+    section{padding:var(--pad);border-top:1px solid var(--line)}
+    .section-grid{display:grid;grid-template-columns:minmax(13rem,.58fr) minmax(0,1.42fr);gap:clamp(2rem,6vw,6rem)}
+    .section-grid>div:first-child{position:sticky;top:1.5rem;align-self:start}
+    .section-head{max-width:80ch;margin-bottom:1.9rem}
+    .section-head>:last-child{margin-bottom:0}
+    .section-note{color:var(--muted);font-size:.93rem}
+    p{margin:.65rem 0 1rem;max-width:74ch}
+    .thesis{font-size:1.15rem;max-width:72ch}
+    .atlas{display:grid;grid-template-columns:repeat(12,1fr);border:1px solid var(--strong);background:var(--paper2)}
+    .atlas article{display:flex;flex-direction:column;grid-column:span 4;min-height:13rem;padding:1.25rem;background:var(--paper);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+    .atlas article:nth-child(3n){border-right:0}
+    .atlas .wide{grid-column:span 6}
+    .atlas .full{grid-column:1/-1;border-right:0;border-bottom:0}
+    .provider-label{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:.85rem;padding-bottom:.55rem;border-bottom:1px solid var(--line)}
+    .provider-label b{font:700 1.12rem/1 var(--display);letter-spacing:-.01em}
+    .badge{border:1px solid currentColor;border-radius:999px;padding:.12rem .45rem;font:700 .62rem/1.2 var(--mono);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+    .paid{color:var(--green)}.catalog{color:var(--violet)}.local{color:var(--cyan)}.unknown{color:var(--amber)}
+    .atlas ul{margin:0;padding-left:1.05rem;font-size:.9rem}
+    .atlas li{margin:.35rem 0}
+    .atlas li::marker{color:var(--strong)}
+    .source-key{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border:1px solid var(--line);margin:1.5rem 0}
+    .source-key div{padding:1rem;border-right:1px solid var(--line)}
+    .source-key div:last-child{border-right:0}
+    .source-key b{display:block;font:700 .76rem/1.2 var(--mono);margin-bottom:.35rem}
+    .source-key span{color:var(--muted);font-size:.82rem}
+    .c1{border-top:.35rem solid var(--green)}.c2{border-top:.35rem solid var(--blue)}.c3{border-top:.35rem solid var(--violet)}.c4{border-top:.35rem solid var(--amber)}.c5{border-top:.35rem solid var(--red)}
+    .table-wrap{overflow-x:auto;max-width:100%;border:1px solid var(--line)}
+    table{border-collapse:collapse;width:100%;min-width:900px;font-size:.87rem}
+    th,td{text-align:left;vertical-align:top;padding:.74rem .8rem;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+    th:last-child,td:last-child{border-right:0}
+    th{background:var(--paper2);font:700 .7rem/1.3 var(--mono);letter-spacing:.06em;text-transform:uppercase}
+    tbody tr:nth-child(even){background:color-mix(in srgb,var(--paper2) 45%,transparent)}
+    tbody td:first-child{font-weight:700}
+    tr:last-child td{border-bottom:0}
+    .yes{color:var(--green);font-weight:700}.partial{color:var(--amber);font-weight:700}.no{color:var(--red);font-weight:700}
+    .flow{margin:0;display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:stretch;gap:.7rem}
+    .node{padding:1.1rem;border:1px solid var(--strong);background:var(--paper2)}
+    .node b{display:block;font:700 1rem/1.2 var(--display);margin-bottom:.4rem}
+    .node span{color:var(--muted);font-size:.85rem}
+    .arrow{display:grid;place-items:center;color:var(--cyan);font:800 1.4rem/1 var(--mono)}
+    .ledger{border:1px solid var(--strong);margin-top:1.5rem}
+    .ledger-row{display:grid;grid-template-columns:10rem 1.15fr .85fr 1.1fr}
+    .ledger-row>div{padding:.8rem;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+    .ledger-row>div:last-child{border-right:0}
+    .ledger-row:last-child>div{border-bottom:0}
+    .ledger-row.head{background:var(--paper2);font:700 .67rem/1.2 var(--mono);text-transform:uppercase;letter-spacing:.06em}
+    .decision{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1.25rem}
+    .section-head+.decision,.section-head+.refs{margin-top:0}
+    .choice{border:1px solid var(--line);padding:1.15rem;background:var(--paper)}
+    .choice.recommended{border-top:.45rem solid var(--green)}
+    .choice.alternative{border-top:.45rem solid var(--amber)}
+    .choice h3{font-size:1.16rem}
+    .choice p,.choice li{font-size:.9rem}
+    .choice p{margin-bottom:0}
+    .choice ul{margin:.6rem 0 0;padding-left:1.05rem}
+    .choice li{margin:.3rem 0}
+    .callout{border-left:.45rem solid var(--cyan);background:var(--paper2);padding:1rem 1.2rem;margin:1.4rem 0}
+    .callout.warn{border-left-color:var(--amber)}
+    .callout.risk{border-left-color:var(--red)}
+    .callout p{margin:0;max-width:86ch}
+    .callout p+p{margin-top:.6rem}
+    .decisions-needed{border:2px solid var(--amber);background:color-mix(in srgb,var(--amber) 8%,var(--paper))}
+    .decisions-needed ol{max-width:82ch;padding-left:1.2rem}
+    .decisions-needed li{margin:.8rem 0}
+    .refs{columns:2;column-gap:2.5rem;margin:1.25rem 0 0;padding-left:1.1rem}
+    .refs li{break-inside:avoid;margin:.55rem 0;font-size:.88rem}
+    pre{overflow-x:auto;max-width:100%;padding:1.1rem;background:var(--paper2);border:1px solid var(--line);font:.82rem/1.55 var(--mono)}
+    pre code{padding:0;background:none;font-size:1em}
+    pre.cli{border-left:.45rem solid var(--cyan)}
+    footer{padding:1.5rem var(--pad);border-top:1px solid var(--line);color:var(--muted);font:.74rem/1.5 var(--mono)}
+    @media(max-width:850px){
+      body{background:var(--bg)}
+      header,.section-grid{grid-template-columns:1fr}
+      .section-grid>div:first-child{position:static}
+      .hero{border-right:0;border-bottom:1px solid var(--line)}
+      .atlas article,.atlas .wide{grid-column:span 6}
+      .atlas article:nth-child(3n){border-right:1px solid var(--line)}
+      .atlas article:nth-child(2n){border-right:0}
+      .source-key{grid-template-columns:1fr}
+      .source-key div{border-right:0;border-bottom:1px solid var(--line)}
+      .source-key div:last-child{border-bottom:0}
+      .flow{grid-template-columns:1fr}
+      .arrow{transform:rotate(90deg)}
+      .decision{grid-template-columns:1fr}
+      .refs{columns:1}
+    }
+    @media(max-width:560px){
+      main{width:100%;padding:0}
+      .sheet{border-left:0;border-right:0}
+      .atlas article,.atlas .wide{grid-column:1/-1;border-right:0}
+      .ledger-row{grid-template-columns:1fr}
+      .ledger-row>div{border-right:0}
+      .ledger-row.head{display:none}
+      .ledger-row>div::before{content:attr(data-label);display:block;margin-bottom:.25rem;color:var(--muted);font:700 .62rem/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase}
+    }
+    @media print{
+      body{background:#fff}
+      main{width:100%;padding:0}
+      .sheet{border:0;box-shadow:none}
+      .atlas article,.choice,.callout,.node,.ledger-row,.source-key div{break-inside:avoid}
+      a{color:inherit}
+    }
+  </style>
+  <script>(()=>{const k="unified-usage-utility-scroll";try{const s=sessionStorage.getItem(k);if(s!==null)addEventListener("DOMContentLoaded",()=>scrollTo(0,Number(s)));addEventListener("beforeunload",()=>sessionStorage.setItem(k,String(scrollY)))}catch(_){}})();</script>
+</head>
+<body><main><article class="sheet">
+  <header>
+    <div class="hero"><p class="eyebrow">Unified subscription telemetry</p><h1>Usage atlas</h1><p class="lede">One CCS command should answer four questions at once: what can Milad still use right now, what resets next, what expires if ignored, and which numbers are official rather than inferred?</p></div>
+    <aside class="status-rail"><div class="status-card"><strong>Status: awaiting implementation authorization</strong><p>The inventory, provider research, and product decisions are settled. Implementation has not been authorized.</p></div><p class="path">Artifact: /Users/mimen/Programming/Repos/claude-sessions/docs/plans/unified-usage-utility.html</p></aside>
+  </header>
+
+  <section><div class="section-grid"><div><p class="eyebrow">The decision</p><h2>Build this inside CCS</h2><p class="section-note">CCS is the Claude Sessions CLI and catalogue. It already understands launchers, models, transcripts, and notional model cost.</p></div><div>
+    <p class="thesis"><strong>Recommended shape:</strong> add a typed provider telemetry layer under <code>src/usage/</code>, expose it through <code>ccs usage</code>, and let each provider adapter report the strongest evidence it can obtain, without flattening quotas of different kinds into a single percentage.</p>
+    <p>The utility joins two systems that exist separately today. <strong>CodexBar</strong>, the external helper this plan shells out to, can inspect live provider allowances and reset windows. <a href="file:///Users/mimen/Programming/Repos/claude-sessions/src/cost.ts" target="_blank" rel="noopener">CCS cost accounting</a> reconstructs exact transcript token use and API-equivalent spend. Neither gives these five providers one source-aware view or answers the cross-provider reset question.</p>
+    <div class="callout"><p><strong>The product is an availability instrument, not primarily a billing dashboard.</strong> Its default sort is “what runs out next,” followed by “what expires unused,” then spend and historical burn.</p></div>
+  </div></div></section>
+
+  <section>
+    <div class="section-head"><p class="eyebrow">Version-one scope</p><h2>Five providers with actionable usage</h2><p class="thesis">Version one includes only subscriptions or credit systems whose remaining usage, reset window, or spendable balance changes what Milad can run next: Codex, Anthropic, Grok, OpenCode Go, and Venice. Model catalogs and unrelated API keys stay out.</p></div>
+    <div class="atlas">
+      <article><div class="provider-label"><b>OpenAI Codex</b><span class="badge paid">ChatGPT Pro</span></div><ul><li>One personal account across gateway, Codex CLI, and desktop.</li><li>Five-hour, weekly, Spark, and Spark-weekly windows.</li><li>Banked full-reset credits with grant and expiry dates.</li><li>Dollar credits remain separate from reset credits.</li></ul></article>
+      <article><div class="provider-label"><b>Anthropic personal</b><span class="badge paid">Claude Max</span></div><ul><li>Primary gateway OAuth account.</li><li>Native Claude and gateway routes share one entitlement.</li><li>Consumer allowance has no supported public API.</li><li>CodexBar's Claude reader currently needs repair.</li></ul></article>
+      <article><div class="provider-label"><b>Anthropic AUF</b><span class="badge paid">separate account</span></div><ul><li>Distinct organization, subscription, and gateway priority.</li><li>Reported separately from personal usage.</li><li>Same provider, separate accounting scope.</li><li>Needs multi-account quota discovery.</li></ul></article>
+      <article><div class="provider-label"><b>Grok</b><span class="badge paid">consumer / team OIDC</span></div><ul><li>Grok Build is authenticated through OIDC, which is browser-based single sign-on, not an xAI API key.</li><li>Report the shared consumer or team usage allowance, weekly reset, and Extra Usage Credits.</li><li>Do not implement xAI API billing or management reporting.</li><li>Current CLI evidence shows the Build allowance can report exhaustion directly.</li></ul></article>
+      <article><div class="provider-label"><b>OpenCode Go</b><span class="badge paid">Zen Go</span></div><ul><li>One subscription fronts eight model families.</li><li>$12 per five hours, $30 per week, and $60 per month.</li><li>Can fall back to ordinary Zen balance if enabled.</li><li>Exact reset timestamps are console or private-source data.</li></ul></article>
+      <article><div class="provider-label"><b>Venice</b><span class="badge paid">API credits</span></div><ul><li>Official usage, balance, limits, and rate-limit log APIs.</li><li>Reports USD, DIEM, API tier, per-model limits, and next epoch.</li><li>Currency and epoch remain separate.</li><li>Best-supported direct API adapter in version one.</li></ul></article>
+    </div>
+  </section>
+
+  <section><div class="section-grid"><div><p class="eyebrow">Evidence contract</p><h2>Never flatten uncertainty</h2><p class="section-note">A precise-looking number without provenance is worse than an explicit unknown.</p></div><div>
+    <p>Every metric carries a source class, observation time, scope, and exactness flag. Supported APIs can lead the UI while useful private or inferred values remain visibly qualified.</p>
+    <div class="source-key"><div class="c1"><b>Official API</b><span>Documented endpoint and supported authentication.</span></div><div class="c2"><b>Provider header</b><span>Live capacity attached to a real request.</span></div><div class="c3"><b>Official UI or CLI</b><span>Authoritative product surface, not a stable external API.</span></div><div class="c4"><b>Observed private</b><span>Reverse-engineered client endpoint, explicitly experimental.</span></div><div class="c5"><b>Local estimate</b><span>Transcript burn or forecast, never provider truth.</span></div></div>
+    <pre><code>type UsageObservation = {
+  provider: ProviderId
+  entitlement: EntitlementId
+  metric: "allowance" | "rate_limit" | "credit" | "reset_credit" | "cost" | "capacity"
+  scope: "account" | "organization" | "project" | "key" | "model" | "machine"
+  window: "minute" | "five_hour" | "daily" | "weekly" | "monthly" | null
+  used: number | null
+  limit: number | null
+  remaining: number | null
+  resetsAt: string | null
+  expiresAt: string | null
+  observedAt: string
+  source: "official_api" | "provider_header" | "official_ui" | "official_cli" | "observed_private" | "local_estimate"
+  exact: boolean
+}</code></pre>
+  </div></div></section>
+
+  <section>
+    <div class="section-head"><p class="eyebrow">Capability matrix</p><h2>Each provider reveals a different slice</h2></div>
+    <div class="table-wrap"><table><thead><tr><th>Entitlement</th><th>Live allowance</th><th>Reset / expiry</th><th>Credits</th><th>Preferred source</th><th>Important distinction</th></tr></thead><tbody>
+    <tr><td>Codex Pro</td><td class="yes">Exact</td><td class="yes">Exact</td><td class="yes">Reset + dollar credits</td><td><code>codexbar usage --provider codex --format json</code></td><td>Ordinary windows, banked resets, and paid credits are separate state.</td></tr>
+    <tr><td>Claude Max personal / AUF</td><td class="partial">Official UI only</td><td class="partial">Official UI only</td><td class="partial">Usage credits where enabled</td><td>Repair or replace CodexBar's Claude reader</td><td>Two subscriptions must remain separate.</td></tr>
+    <tr><td>Grok consumer / Build</td><td class="partial">Official UI or CLI</td><td class="partial">Weekly reset</td><td class="partial">Extra Usage Credits</td><td>Official Grok usage surface or CodexBar Grok adapter</td><td>OIDC subscription usage only; no xAI API billing adapter.</td></tr>
+    <tr><td>OpenCode Go</td><td class="yes">Value windows</td><td class="partial">Console/private timestamp</td><td class="partial">Optional Zen balance fallback</td><td>CodexBar OpenCode Go adapter</td><td>One subscription fronts many model vendors.</td></tr>
+    <tr><td>Venice</td><td class="yes">Official API</td><td class="yes">Next epoch</td><td class="yes">USD + DIEM</td><td>Billing and rate-limit APIs</td><td>Keep currencies and allocations separate.</td></tr>
+  </tbody></table></div></section>
+
+  <section><div class="section-grid"><div><p class="eyebrow">Codex reset ledger</p><h2>Banked is not “next reset”</h2><p class="section-note">Codex state deserves a dedicated model rather than generic credits.</p></div><div>
+    <p>CodexBar already exposes the reset-credit inventory, including lifecycle state, grant time, expiry, and separate five-hour and weekly windows. A banked full reset renews both windows and moves the weekly anchor, so redeeming it is a scheduling decision.</p>
+    <div class="ledger"><div class="ledger-row head"><div>Class</div><div>Meaning</div><div>Deadline</div><div>Display rule</div></div><div class="ledger-row"><div><strong>Ordinary reset</strong></div><div>Automatic five-hour or weekly replenishment.</div><div><code>resetsAt</code></div><div>Countdown and projected use at reset.</div></div><div class="ledger-row"><div><strong>Banked reset</strong></div><div>Available full-reset entitlement not yet redeemed.</div><div><code>expiresAt</code></div><div>Count, oldest expiry, and urgency.</div></div><div class="ledger-row"><div><strong>Redeeming</strong></div><div>Redemption started but not confirmed.</div><div><code>redeemStartedAt</code></div><div>Pending, no optimistic decrement.</div></div><div class="ledger-row"><div><strong>Redeemed</strong></div><div>Consumed reset retained for audit.</div><div><code>redeemedAt</code></div><div>History only.</div></div><div class="ledger-row"><div><strong>Dollar credits</strong></div><div>Paid overflow, separate from reset credits.</div><div>Offer-specific</div><div>Currency card and depletion forecast.</div></div></div>
+    <div class="callout warn"><p><strong>Observed on 2026-08-21:</strong> one available full-reset credit, expiring 2026-09-20. This belongs in live output, never configuration.</p></div>
+  </div></div></section>
+
+  <section>
+    <div class="section-head"><p class="eyebrow">Runtime architecture</p><h2>Adapters collect; CCS normalizes; views decide</h2></div>
+    <div class="flow"><div class="node"><b>Five provider adapters</b><span>CodexBar, official product surfaces, provider headers, and Venice APIs.</span></div><div class="arrow" aria-hidden="true">→</div><div class="node"><b>Normalized snapshot</b><span>Entitlements, observations, resets, source confidence, adapter health.</span></div><div class="arrow" aria-hidden="true">→</div><div class="node"><b>CLI output</b><span><code>ccs usage</code> and JSON snapshots, with no retained history in version one.</span></div></div>
+    <div class="decision"><div class="choice recommended"><h3>CodexBar for subscription-shaped providers</h3><p>Shell out to its JSON CLI for Codex, Anthropic, Grok, and OpenCode Go where it already handles auth, account selection, pace, and reset lifecycle.</p><ul><li>Repair or bypass only the provider adapters that fail.</li><li>Record helper version and source confidence.</li><li>One provider failure must not collapse the command.</li></ul></div><div class="choice alternative"><h3>Direct API for Venice</h3><p>Use Venice's supported usage, balance, and rate-limit APIs because they expose stronger structured data than a helper abstraction.</p><ul><li>Private endpoints remain experimental fallbacks.</li><li>Point-in-time output needs no persistent cache.</li><li>No generic provider framework is required beyond these five adapters.</li></ul></div></div>
+  </section>
+
+  <section><div class="section-grid"><div><p class="eyebrow">CLI contract</p><h2>The useful first screen</h2><p class="section-note">Default output answers the operational question without provider trivia.</p></div><div><pre><code>$ ccs usage
+
+ATTENTION
+Codex Pro       weekly 89% used · resets Thu 04:05 · will not last
+                1 banked full reset · expires Sep 20
+Grok Build      allowance exhausted · consumer/team OIDC source
+
+AVAILABLE
+Claude personal allowance unavailable · transcript burn 3.4M tokens / 7d
+Claude AUF      allowance unavailable · separate account healthy
+OpenCode Go     $8.40 / $12 five-hour value used · weekly and monthly below cap
+Venice          DIEM epoch resets in 7h · USD balance healthy</code></pre>
+    <ul><li><code>ccs usage --json</code> for automation and a later sidebar.</li><li><code>ccs usage --provider codex --account all</code> for provider-level diagnosis.</li><li><code>ccs usage sources</code> to explain the five adapters and their confidence without exposing secrets.</li><li><code>ccs usage doctor</code> for stale auth, missing helpers, and broken provider parsers.</li></ul>
+  </div></div></section>
+
+  <section>
+    <div class="section-head"><p class="eyebrow">Tradeoffs</p><h2>Commitments the implementation should hold</h2></div>
+    <div class="decision"><div class="choice recommended"><h3>Snapshot first, history second</h3><p>Ship a reliable on-demand snapshot before a daemon, cloud store, or alerts.</p></div><div class="choice recommended"><h3>Entitlements, not model IDs</h3><p>Deduplicate routes by the account or subscription they consume.</p></div><div class="choice recommended"><h3>Unknown beats fake precision</h3><p>Never estimate consumer allowance from tokens. Show burn beside an explicit unknown.</p></div><div class="choice recommended"><h3>No secrets in snapshots</h3><p>Return account labels and auth health, never tokens, cookies, or management keys.</p></div></div>
+    <div class="callout warn"><p><strong>Gateway aggregation remains disabled.</strong> Version one reads the five providers' own usage or credit surfaces and does not add a second traffic-accounting system.</p></div>
+  </section>
+
+  <section class="decisions-needed">
+    <div class="section-head"><p class="eyebrow">Locked scope</p><h2>Version one stays narrow at the surface</h2></div>
+    <ol><li><strong>Providers:</strong> Codex, Anthropic, Grok, OpenCode Go, and Venice only. Other reachable models and API keys are outside version one.</li><li><strong>Grok accounting:</strong> consumer or team OIDC allowance and Extra Usage Credits only. Do not build xAI API billing support.</li><li><strong>Delivery:</strong> ship <code>ccs usage</code> plus a stable JSON contract. The CCS sidebar follows only after real provider output proves the schema.</li><li><strong>Persistence:</strong> point-in-time only. Version one stores no usage history and introduces no Convex or local-cache dependency.</li><li><strong>Gateway statistics:</strong> leave CLIProxyAPI aggregation disabled.</li></ol></section>
+
+  <section>
+    <div class="section-head"><p class="eyebrow">Evidence</p><h2>Local receipts and official references</h2></div>
+    <ul class="refs"><li><a href="file:///Users/mimen/Documents/milad-vault/ClaudeConfig/session-routing/launchers.toml" target="_blank" rel="noopener">ClaudeX launcher registry</a></li><li><a href="file:///Users/mimen/Programming/Repos/claude-sessions/src/cost.ts" target="_blank" rel="noopener">CCS transcript cost engine</a></li><li><a href="https://help.openai.com/en/articles/11369540/" target="_blank" rel="noopener">Codex with a ChatGPT plan</a></li><li><a href="https://help.openai.com/en/articles/20001271" target="_blank" rel="noopener">Codex reset-credit promotions</a></li><li><a href="https://support.claude.com/en/articles/11647753-how-do-usage-and-length-limits-work" target="_blank" rel="noopener">Claude subscription usage limits</a></li><li><a href="https://docs.x.ai/grok/faq" target="_blank" rel="noopener">Grok shared allowance and credits</a></li><li><a href="https://opencode.ai/docs/go/" target="_blank" rel="noopener">OpenCode Go limits</a></li><li><a href="https://docs.venice.ai/api-reference/endpoint/api_keys/rate_limits" target="_blank" rel="noopener">Venice limits and next epoch</a></li><li><a href="https://docs.venice.ai/api-reference/endpoint/billing/balance" target="_blank" rel="noopener">Venice credit balances</a></li></ul></section>
+  <footer>Living plan. Read only. Current status: scope settled and awaiting implementation authorization. The plan freezes when implementation is explicitly approved.</footer>
+</article></main></body></html>
