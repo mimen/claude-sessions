@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claude budgets · Preview</title>
+<style>
+:root{color-scheme:dark;--bg:#14161a;--panel:#1c1f24;--raised:#242830;--line:#353b45;--ink:#eef0f4;--muted:#a6aeba;--blue:#3987e5;--track:#26364d;--focus:#97c4ff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.5}main{max-width:920px;margin:48px auto;padding:0 28px}h1{font-size:27px;font-weight:600;letter-spacing:-.6px;margin:0}h2{font-size:15px;font-weight:550;margin:0}p{margin:0}.muted{color:var(--muted)}header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:30px 0 22px}.preview{display:flex;align-items:center;justify-content:space-between;gap:18px;border-bottom:1px solid var(--line);padding-bottom:16px;color:var(--muted);font-size:12px}.preview strong{color:var(--ink);font-weight:500}.controls{display:flex;gap:9px;align-items:center}select{font:inherit;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);padding:8px 30px 8px 11px;max-width:100%}select:focus-visible,button:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:4px}.scope{min-width:154px}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 24px 0}.budget{padding:23px 0 25px}.budget+.budget{border-top:1px solid var(--line)}.budget-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.title{font-size:18px;letter-spacing:-.2px}.reading{font-size:30px;font-weight:550;letter-spacing:-.7px}.reading small{color:var(--muted);font-size:12px;font-weight:400;letter-spacing:0;margin-left:7px}.bar{height:7px;background:var(--track);border-radius:4px;margin-top:13px;position:relative}.fill{display:block;height:100%;background:var(--blue);border-radius:0 4px 4px 0;max-width:100%}.bar.unknown{background:repeating-linear-gradient(135deg,var(--raised) 0 5px,var(--line) 5px 6px)}.bar[data-tooltip]:hover::after,.bar[data-tooltip]:focus-visible::after{content:attr(data-tooltip);position:absolute;z-index:3;bottom:18px;right:0;background:var(--ink);color:var(--bg);padding:7px 10px;border-radius:5px;font-size:12px;white-space:nowrap}.budget-meta{display:flex;justify-content:space-between;gap:16px;color:var(--muted);font-size:12px;margin-top:10px}.budget-meta .extra{color:var(--ink)}.total{border-top:1px solid var(--line);margin:0 -24px;padding:16px 24px;display:flex;justify-content:space-between;align-items:baseline;gap:16px}.total strong{font-size:17px;font-weight:550}.total small{color:var(--muted);font-size:12px;margin-left:6px}.accounts{margin-top:29px}.section-heading{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px;gap:16px}.section-heading span{font-size:12px;color:var(--muted)}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}th{text-align:right;font-weight:400;color:var(--muted);font-size:11px;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}td{text-align:right;padding:14px 12px;border-bottom:1px solid var(--line);white-space:nowrap}th:first-child,td:first-child{text-align:left;padding-left:0}th:last-child,td:last-child{padding-right:0}.reset{color:var(--muted);font-size:12px}.formula{margin-top:23px;color:var(--muted);font-size:12px}.formula summary{cursor:pointer;display:list-item;width:fit-content}.formula p{margin-top:10px;max-width:72ch}code{font-size:12px}footer{color:var(--muted);font-size:11px;margin:27px 0 36px;max-width:78ch}footer a{color:var(--muted)}.selection-note{font-size:12px;color:var(--muted);margin-top:3px}[hidden]{display:none!important}
+@media(max-width:600px){main{margin:20px auto;padding:0 18px}.preview{align-items:flex-start;flex-direction:column;gap:11px}.controls{width:100%}.controls select{flex:1}header{align-items:flex-start;gap:14px;flex-wrap:wrap}h1{font-size:24px}.scope{min-width:0}.card{padding:3px 18px 0}.total{margin:0 -18px;padding:14px 18px}.total small{display:block;margin-left:0}.budget-meta{gap:8px}.reading{font-size:29px}th,td{padding-left:8px;padding-right:8px}.reset{white-space:normal;min-width:62px}.section-heading{align-items:flex-start}.bar[data-tooltip]:hover::after{max-width:80vw;white-space:normal}}
+@media(forced-colors:active){.bar{border:1px solid CanvasText}.fill{background:Highlight}.bar.unknown{border-style:dashed}}
+</style>
+</head>
+<body>
+<main>
+<div class="preview"><div><strong>Layout preview</strong><br>Sample data, not live account usage.</div><div class="controls"><label for="scenario">Example</label><select id="scenario"><option value="typical">Typical week</option><option value="fable-spent">Fable fully used</option><option value="opus-over">Opus above allocation</option><option value="spent">Subscription fully used</option><option value="unequal">Different account capacities</option><option value="unknown">Missing Fable reading</option></select></div></div>
+<header><div><h1>Claude budgets</h1><p class="selection-note">Weekly allocation · 50% Fable / 50% Opus</p></div><label><span class="muted" style="font-size:12px;margin-right:7px">Accounts</span><select id="scope" class="scope"><option value="all">All accounts</option><option value="personal">Personal</option><option value="auf">AUF</option></select></label></header>
+<section class="card" aria-label="Budget allocation usage" aria-live="polite">
+<div class="budget" data-budget="fable"><div class="budget-heading"><h2 class="title">Fable</h2><div class="reading"><span data-value>90%</span><small>used</small></div></div><div class="bar" tabindex="0"><span class="fill"></span></div><div class="budget-meta"><span>50% allocation</span><span data-remainder>10% remaining</span></div></div>
+<div class="budget" data-budget="opus"><div class="budget-heading"><h2 class="title">Opus</h2><div class="reading"><span data-value>30%</span><small>used</small></div></div><div class="bar" tabindex="0"><span class="fill"></span></div><div class="budget-meta"><span>50% allocation · All non-Fable models</span><span data-remainder>70% remaining</span></div></div>
+<div class="total"><span>Subscription remaining</span><div><strong id="remaining">40%</strong><small id="total-detail">80 / 200 units</small></div></div>
+</section>
+<section class="accounts" aria-labelledby="accounts-heading"><div class="section-heading"><h2 id="accounts-heading">By account</h2><span>Fable &amp; Opus: % of allocation used</span></div><div class="table-wrap"><table><thead><tr><th scope="col">Account</th><th scope="col">Fable</th><th scope="col">Opus</th><th scope="col">Sub. remaining</th><th scope="col">Resets in</th></tr></thead><tbody id="account-rows"></tbody></table></div></section>
+<details class="formula"><summary>Calculation</summary><p>Each account has two allocations, each equal to half its weekly capacity. Opus usage is total weekly usage minus Fable usage, measured in the same units. The displayed percentages divide each model group's usage by its allocation. Numbers can exceed 100%; bars stop at 100%.</p><p>The summary adds usage and capacity before calculating percentages. Subscription remaining counts the shared allowance once. It does not add the two displayed allocation remainders.</p><p id="calculation"></p></details>
+<footer>This prototype uses comparable sample capacity units, not tokens or API dollars. Live readings require verified model attribution, conversion and matching reset windows. A missing split stays unknown. No provider requests or routing changes.</footer>
+</main>
+<script>
+const fixtures = {
+  typical: [{capacity:100, totalUsed:55, fableUsed:40}, {capacity:100, totalUsed:65, fableUsed:50}],
+  'fable-spent': [{capacity:100, totalUsed:65, fableUsed:50}, {capacity:100, totalUsed:70, fableUsed:50}],
+  'opus-over': [{capacity:100, totalUsed:85, fableUsed:25}, {capacity:100, totalUsed:75, fableUsed:20}],
+  spent: [{capacity:100, totalUsed:100, fableUsed:40}, {capacity:100, totalUsed:100, fableUsed:50}],
+  unequal: [{capacity:100, totalUsed:55, fableUsed:40}, {capacity:200, totalUsed:120, fableUsed:100}],
+  unknown: [{capacity:100, totalUsed:55, fableUsed:null}, {capacity:100, totalUsed:65, fableUsed:50}]
+};
+const accounts = [{id:'personal', label:'Personal', reset:'2d 4h'}, {id:'auf', label:'AUF', reset:'4d 9h'}];
+const number = new Intl.NumberFormat('en-US', {maximumFractionDigits:1});
+const percent = value => `${number.format(value)}%`;
+const scenario = document.querySelector('#scenario');
+const scope = document.querySelector('#scope');
+function render() {
+  const rows = fixtures[scenario.value].map((values, index) => ({...accounts[index], ...values}));
+  const selected = rows.filter(row => scope.value === 'all' || row.id === scope.value);
+  const capacity = selected.reduce((sum, row) => sum + row.capacity, 0);
+  const totalUsed = selected.reduce((sum, row) => sum + row.totalUsed, 0);
+  const complete = selected.every(row => row.fableUsed !== null);
+  const fableUsed = complete ? selected.reduce((sum, row) => sum + row.fableUsed, 0) : null;
+  const usage = {fable:fableUsed, opus:complete ? totalUsed - fableUsed : null};
+  const allocation = capacity / 2;
+  for (const [budget, used] of Object.entries(usage)) {
+    const root = document.querySelector(`[data-budget="${budget}"]`);
+    const bar = root.querySelector('.bar');
+    const remainder = root.querySelector('[data-remainder]');
+    const fraction = used === null ? null : used / allocation * 100;
+    root.querySelector('[data-value]').textContent = fraction === null ? 'Unknown' : percent(fraction);
+    root.querySelector('.reading small').hidden = fraction === null;
+    root.querySelector('.fill').style.width = `${fraction === null ? 0 : Math.min(100, fraction)}%`;
+    bar.classList.toggle('unknown', fraction === null);
+    remainder.classList.toggle('extra', fraction !== null && fraction > 100);
+    remainder.textContent = fraction === null ? 'Split unavailable' : fraction > 100 ? `+${percent(fraction - 100)} of allocation` : `${percent(100 - fraction)} remaining`;
+    const tooltip = fraction === null ? 'Fable usage is missing; the split cannot be calculated.' : `${number.format(used)} / ${number.format(allocation)} allocation units · ${percent(fraction)} used`;
+    bar.dataset.tooltip = tooltip;
+    bar.setAttribute('aria-label', `${budget === 'fable' ? 'Fable' : 'Opus'}: ${tooltip}`);
+  }
+  document.querySelector('#remaining').textContent = percent((capacity - totalUsed) / capacity * 100);
+  document.querySelector('#total-detail').textContent = `${number.format(capacity - totalUsed)} / ${number.format(capacity)} units`;
+  const body = document.querySelector('#account-rows');
+  body.replaceChildren();
+  for (const row of selected) {
+    const tr = document.createElement('tr');
+    const cells = [row.label, row.fableUsed === null ? 'Unknown' : percent(row.fableUsed / (row.capacity / 2) * 100), row.fableUsed === null ? 'Unknown' : percent((row.totalUsed - row.fableUsed) / (row.capacity / 2) * 100), percent((row.capacity - row.totalUsed) / row.capacity * 100), row.reset];
+    for (const [index, value] of cells.entries()) {
+      const cell = document.createElement(index === 0 ? 'th' : 'td');
+      cell.textContent = value;
+      if (index === 0) cell.scope = 'row';
+      if (index === 4) cell.className = 'reset';
+      tr.append(cell);
+    }
+    body.append(tr);
+  }
+  document.querySelector('#calculation').textContent = complete ? `This example: Opus = (${number.format(totalUsed)} total − ${number.format(fableUsed)} Fable) ÷ ${number.format(allocation)} allocation = ${percent(usage.opus / allocation * 100)} used.` : 'This example: total usage is known, but at least one selected account has no Fable reading. Both split percentages are unknown; the subscription total is still available.';
+}
+scenario.addEventListener('change', render);
+scope.addEventListener('change', render);
+render();
+</script>
+</body>
+</html>
