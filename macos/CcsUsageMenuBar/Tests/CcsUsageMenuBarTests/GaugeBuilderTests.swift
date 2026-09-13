@@ -10,12 +10,28 @@ final class GaugeBuilderTests: XCTestCase {
         used: Double? = 50,
         limit: Double? = 100,
         remaining: Double? = nil,
-        resetsAt: Date? = Date(timeIntervalSinceNow: 3600)
+        resetsAt: Date? = Date(timeIntervalSinceNow: 3600),
+        stale: Bool? = nil,
+        observedAt: Date? = nil
     ) -> UsageObservation {
         UsageObservation(
             provider: provider, entitlement: entitlement, metric: metric,
             scope: "account", window: window, used: used, limit: limit,
-            remaining: remaining, resetsAt: resetsAt, expiresAt: nil, exact: true, stale: nil, tier: nil
+            remaining: remaining, resetsAt: resetsAt, expiresAt: nil, exact: true, stale: stale, tier: nil,
+            observedAt: observedAt
+        )
+    }
+
+    /// A weekly Claude allowance row for one account, `#Fable`-scoped when `fable` is set.
+    private func claudeWeekly(
+        account: String, fable: Bool, used: Double?, limit: Double? = 100,
+        observedAt: Date?, resetsAt: Date?, stale: Bool? = nil
+    ) -> UsageObservation {
+        observation(
+            provider: "anthropic",
+            entitlement: "claude-max:\(account)@example.com\(fable ? "#Fable" : "")",
+            window: "weekly", used: used, limit: limit, resetsAt: resetsAt,
+            stale: stale, observedAt: observedAt
         )
     }
 
@@ -80,8 +96,9 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertEqual(grok.gauges.map(\.label), ["All Usage"])
         XCTAssertEqual(grok.gauges[0].breakdown?.map(\.name), ["Build"])
         let anthropic = sections.first { $0.provider == "anthropic" }!
-        // Anthropic suffixed rows stay as their own rows.
         XCTAssertEqual(anthropic.gauges.map(\.label), ["All models", "Fable"])
+        XCTAssertEqual(anthropic.displayGauges.map(\.label), ["All models"])
+        XCTAssertEqual(anthropic.budgets.map(\.name), [.fable, .opus])
     }
 
     func testUnnamedAccountMergesIntoSoleNamedAccount() {
@@ -194,10 +211,136 @@ final class GaugeBuilderTests: XCTestCase {
         let sections = GaugeBuilder.sections(from: parsed)
         let gauges = sections.flatMap(\.gauges)
         XCTAssertEqual(gauges.count, 20)
+        let displayed = sections.flatMap(\.displayGauges)
+        XCTAssertEqual(displayed.count, 18)
+        XCTAssertFalse(displayed.contains { $0.provider == "anthropic" && $0.label == "Fable" })
         XCTAssertEqual(Set(gauges.map(\.id)).count, gauges.count)
         XCTAssertEqual(gauges.filter { $0.label == "Banked reset" && $0.provider == "codex" }.count, 2)
         XCTAssertNotNil(GaugeBuilder.overallUsedFraction(sections))
         XCTAssertGreaterThan(GaugeBuilder.panelHeight(for: sections, noteCount: 1), 0)
+
+        // Both Claude accounts carry a Fable + Opus budget derived from their weekly rows.
+        let anthropic = sections.filter { $0.provider == "anthropic" }
+        XCTAssertEqual(anthropic.count, 2)
+        for s in anthropic { XCTAssertEqual(s.budgets.map(\.name), [.fable, .opus]) }
+        let personal = try XCTUnwrap(anthropic.first { $0.accountDisplay == "personal" })
+        // personal weekly 29%, Fable 48% -> Opus 2*29-48 = 10%.
+        guard case .known(let pFable, _, _) = personal.budgets[0].usage,
+              case .known(let pOpus, _, _) = personal.budgets[1].usage else { return XCTFail("personal budgets known") }
+        XCTAssertEqual(pFable, 48, accuracy: 0.001)
+        XCTAssertEqual(pOpus, 10, accuracy: 0.001)
+        let auf = try XCTUnwrap(anthropic.first { $0.accountDisplay == "auf" })
+        // auf weekly 18%, Fable 0% (null reset) -> Opus 2*18-0 = 36%.
+        guard case .known(let aOpus, _, _) = auf.budgets[1].usage else { return XCTFail("auf Opus known") }
+        XCTAssertEqual(aOpus, 36, accuracy: 0.001)
+    }
+
+    // MARK: - Claude Fable/Opus budgets
+
+    func testClaudeBudgetsCapturedCases() {
+        let d = Date(timeIntervalSince1970: 1_757_000_000)
+        let r = Date(timeIntervalSince1970: 1_757_500_000)
+        let personal = ClaudeBudgets.compute([
+            claudeWeekly(account: "miladmaaan", fable: false, used: 48, observedAt: d, resetsAt: r),
+            claudeWeekly(account: "miladmaaan", fable: true, used: 95, observedAt: d, resetsAt: r)
+        ])
+        XCTAssertEqual(personal.map(\.name), [.fable, .opus])
+        guard case .known(let pFable, _, _) = personal[0].usage,
+              case .known(let pOpus, _, let pCached) = personal[1].usage else { return XCTFail("personal known") }
+        XCTAssertEqual(pFable, 95, accuracy: 0.001)
+        XCTAssertEqual(pOpus, 1, accuracy: 0.001)   // 2*48 - 95
+        XCTAssertFalse(pCached)
+
+        let auf = ClaudeBudgets.compute([
+            claudeWeekly(account: "milad", fable: false, used: 83, observedAt: d, resetsAt: r),
+            claudeWeekly(account: "milad", fable: true, used: 100, observedAt: d, resetsAt: r)
+        ])
+        guard case .known(let aOpus, _, _) = auf[1].usage else { return XCTFail("auf Opus known") }
+        XCTAssertEqual(aOpus, 66, accuracy: 0.001)   // 2*83 - 100
+    }
+
+    func testBudgetsAllowNumericOver100Unclamped() {
+        let d = Date(timeIntervalSince1970: 1_757_000_000)
+        let r = Date(timeIntervalSince1970: 1_757_500_000)
+        // Opus estimate past 100 stays numeric, not clamped: 2*90 - 40 = 140.
+        let opusOver = ClaudeBudgets.compute([
+            claudeWeekly(account: "x", fable: false, used: 90, observedAt: d, resetsAt: r),
+            claudeWeekly(account: "x", fable: true, used: 40, observedAt: d, resetsAt: r)
+        ])
+        guard case .known(let opusPct, _, _) = opusOver[1].usage else { return XCTFail("Opus known") }
+        XCTAssertEqual(opusPct, 140, accuracy: 0.001)
+        // Fable scoped past 100 is likewise reported as-is.
+        let fableOver = ClaudeBudgets.compute([
+            claudeWeekly(account: "x", fable: false, used: 90, observedAt: d, resetsAt: r),
+            claudeWeekly(account: "x", fable: true, used: 130, observedAt: d, resetsAt: r)
+        ])
+        guard case .known(let fablePct, _, _) = fableOver[0].usage else { return XCTFail("Fable known") }
+        XCTAssertEqual(fablePct, 130, accuracy: 0.001)
+    }
+
+    func testBudgetsUnknownWhenReadingsCantBeTrusted() {
+        let d = Date(timeIntervalSince1970: 1_757_000_000)
+        let r = Date(timeIntervalSince1970: 1_757_500_000)
+        // A cached weekly reading: Fable stays known, Opus can't be derived.
+        let cached = ClaudeBudgets.compute([
+            claudeWeekly(account: "x", fable: false, used: 40, observedAt: d, resetsAt: r, stale: true),
+            claudeWeekly(account: "x", fable: true, used: 20, observedAt: d, resetsAt: r)
+        ])
+        guard case .known = cached[0].usage else { return XCTFail("Fable known") }
+        guard case .unknown(let cReason) = cached[1].usage else { return XCTFail("Opus unknown") }
+        XCTAssertEqual(cReason, "cached readings")
+
+        // Missing Fable row: both allocations unknown.
+        let missing = ClaudeBudgets.compute([
+            claudeWeekly(account: "x", fable: false, used: 40, observedAt: d, resetsAt: r)
+        ])
+        guard case .unknown = missing[0].usage, case .unknown = missing[1].usage else {
+            return XCTFail("both unknown when Fable missing")
+        }
+
+        // Readings from different fetches: Opus unknown.
+        let mismatchTime = ClaudeBudgets.compute([
+            claudeWeekly(account: "x", fable: false, used: 40, observedAt: d, resetsAt: r),
+            claudeWeekly(account: "x", fable: true, used: 20, observedAt: d.addingTimeInterval(60), resetsAt: r)
+        ])
+        guard case .unknown(let tReason) = mismatchTime[1].usage else { return XCTFail("Opus unknown") }
+        XCTAssertEqual(tReason, "observation times differ")
+
+        // Different reset windows: Opus unknown.
+        let mismatchReset = ClaudeBudgets.compute([
+            claudeWeekly(account: "x", fable: false, used: 40, observedAt: d, resetsAt: r),
+            claudeWeekly(account: "x", fable: true, used: 20, observedAt: d, resetsAt: r.addingTimeInterval(3600))
+        ])
+        guard case .unknown(let rReason) = mismatchReset[1].usage else { return XCTFail("Opus unknown") }
+        XCTAssertEqual(rReason, "reset windows differ")
+
+        // Account mismatch inside one bucket yields no budgets at all.
+        XCTAssertTrue(ClaudeBudgets.compute([
+            claudeWeekly(account: "a", fable: false, used: 40, observedAt: d, resetsAt: r),
+            claudeWeekly(account: "b", fable: false, used: 41, observedAt: d, resetsAt: r)
+        ]).isEmpty)
+    }
+
+    func testBudgetsPerAccountPreserveProviderLimitsAndOverall() throws {
+        let d = Date(timeIntervalSince1970: 1_757_000_000)
+        let r = Date(timeIntervalSince1970: 1_757_500_000)
+        let sections = GaugeBuilder.sections(from: snapshot([
+            claudeWeekly(account: "miladmaaan", fable: false, used: 48, observedAt: d, resetsAt: r),
+            claudeWeekly(account: "miladmaaan", fable: true, used: 95, observedAt: d, resetsAt: r),
+            claudeWeekly(account: "milad", fable: false, used: 85, observedAt: d, resetsAt: r),
+            claudeWeekly(account: "milad", fable: true, used: 50, observedAt: d, resetsAt: r)
+        ]))
+        XCTAssertEqual(sections.count, 2)
+        for s in sections {
+            XCTAssertEqual(s.budgets.map(\.name), [.fable, .opus])
+            XCTAssertFalse(s.displayGauges.contains { $0.label == "Fable" })
+            XCTAssertTrue(s.gauges.contains { $0.label == "Fable" })
+        }
+        let personal = try XCTUnwrap(sections.first { $0.accountDisplay == "personal" })
+        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction([personal])), 0.95, accuracy: 0.001)
+        let auf = try XCTUnwrap(sections.first { $0.accountDisplay == "auf" })
+        XCTAssertEqual(auf.budgets[1].usage, .known(usedPct: 120, resetsAt: r, cached: false))
+        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction([auf])), 0.85, accuracy: 0.001)
     }
 
     func testPlanFromTierReadsNamesAndRawTiers() {

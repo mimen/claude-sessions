@@ -157,8 +157,17 @@ struct UsagePanel: View {
                 }
                 .padding(.bottom, 2)
             }
-            ForEach(section.gauges) { gauge in
+            ForEach(section.displayGauges) { gauge in
                 GaugeRow(gauge: gauge, now: now)
+            }
+            if !section.budgets.isEmpty {
+                ForEach(section.budgets) { budget in
+                    BudgetRow(budget: budget, now: now)
+                }
+                Text("50/50 allocation; Opus estimated.")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 1)
             }
         }
     }

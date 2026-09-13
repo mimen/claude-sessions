@@ -170,6 +170,69 @@ struct GaugeRow: View {
     }
 }
 
+/// A Claude 50/50 display allocation row. Its bar is neutral and clamped, so a >100%
+/// estimate never overflows or reads as an over-limit warning; the numeric stays exact.
+struct BudgetRow: View {
+    let budget: ClaudeBudget
+    let now: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(budget.name.rawValue)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer()
+                if case .known(let usedPct, _, _) = budget.usage {
+                    // Unclamped: the estimate can legitimately read past 100%.
+                    Text(String(format: "%.0f%%", usedPct))
+                        .font(.system(size: 11.5, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            switch budget.usage {
+            case .known(let usedPct, let resetsAt, let cached):
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.18))
+                        Capsule()
+                            .fill(Color.secondary.opacity(0.55))
+                            .frame(width: geo.size.width * CGFloat(min(max(usedPct / 100, 0), 1)))
+                    }
+                }
+                .frame(height: 5)
+                HStack(spacing: 4) {
+                    Text(resetsAt.map { "resets in \(relative($0))" } ?? "estimated")
+                    if cached { Text("· cached").foregroundStyle(.orange) }
+                    Spacer()
+                }
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
+            case .unknown(let reason):
+                HStack {
+                    Text("unknown · \(reason)")
+                    Spacer()
+                }
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func relative(_ date: Date) -> String {
+        let interval = date.timeIntervalSince(now)
+        if interval <= 0 { return "now" }
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = interval >= 86_400 ? [.day, .hour] : [.hour, .minute]
+        formatter.maximumUnitCount = 2
+        formatter.unitsStyle = .abbreviated
+        return formatter.string(from: interval) ?? "soon"
+    }
+}
+
 struct ProviderSectionHeader: View {
     let provider: String
 

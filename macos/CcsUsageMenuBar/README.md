@@ -15,6 +15,12 @@ Pure SwiftUI (`MenuBarExtra`), no dependencies, macOS 13+. The app shells out to
   dollars; Venice per-model minute rate limits are dropped as noise; Grok `#build` /
   `#chat` / `#imagine` sub-pools collapse into their parent row when one exists.
 
+### Claude account budgets
+
+Each Claude account keeps its own section with Fable and Opus budget rows. Each allocation is 50% of that account's weekly capacity. Opus includes all non-Fable models and is estimated as `2 × weekly-used-percent - Fable-used-percent`, matching the CLI's allocation convention.
+
+Budget numbers can exceed 100%; their neutral bars stop at 100%. Missing, cached, inconsistent, or mismatched readings leave the Opus estimate unknown. The raw Fable limit remains part of provider accounting but is hidden from the panel when its budget row is shown. Display budgets never change overall usage, plan weighting, raw JSON, or account routing.
+
 ## Build & run
 
 ```sh

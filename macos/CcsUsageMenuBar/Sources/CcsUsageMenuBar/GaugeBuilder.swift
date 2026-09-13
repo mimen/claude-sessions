@@ -10,6 +10,13 @@ struct UsageSection: Identifiable, Equatable {
     let account: String?
     var plan: PlanInfo?
     let gauges: [UsageGauge]
+    var budgets: [ClaudeBudget] = []
+
+    // Hide the duplicate Fable row in the panel, not from provider-limit accounting.
+    var displayGauges: [UsageGauge] {
+        guard !budgets.isEmpty else { return gauges }
+        return gauges.filter { $0.label != "Fable" || $0.windowLabel != "wk" }
+    }
 
     /// True when any observation behind this section came from a stale cache.
     var isStale: Bool { gauges.contains { $0.stale } }
@@ -83,6 +90,11 @@ enum GaugeBuilder {
     }
 
     static func sections(from snapshot: UsageSnapshot) -> [UsageSection] {
+        // Raw Claude observations per account, keyed the same way gauges resolve their
+        // account, so budget derivation sees the same rows the CLI groups together.
+        let anthropicByAccount = Dictionary(grouping: snapshot.observations.filter { $0.provider == "anthropic" }) {
+            entitlementParts($0.entitlement).account ?? ""
+        }
         var gauges: [UsageGauge] = []
         for o in snapshot.observations {
             switch o.metric {
@@ -126,6 +138,9 @@ enum GaugeBuilder {
             let tierPlan = s.gauges.compactMap(\ .tier).first.flatMap(Self.planFromTier)
             let p = tierPlan ?? plan(provider: s.provider, account: s.account)
             s.plan = p.dollars > 0 ? p : nil
+            if s.provider == "anthropic" {
+                s.budgets = ClaudeBudgets.compute(anthropicByAccount[s.account ?? ""] ?? [])
+            }
             return s
         }
     }
@@ -284,13 +299,15 @@ enum GaugeBuilder {
 
     /// Single source of truth for the panel's height so the popover window can match it.
     static func panelHeight(for sections: [UsageSection], noteCount: Int = 0) -> CGFloat {
-        var rows = CGFloat(sections.reduce(0) { $0 + $1.gauges.count })
+        var rows = CGFloat(sections.reduce(0) { $0 + $1.displayGauges.count })
         rows -= CGFloat(sections.reduce(0) { $0 + ($1.gauges.first?.breakdown?.count ?? 0) })
+        let budgetRows = CGFloat(sections.reduce(0) { $0 + $1.budgets.count })
+        let allocationNotes = CGFloat(sections.filter { !$0.budgets.isEmpty }.count) * 16
         let sectionHeaders = CGFloat(sections.count)
         let accountSubheaders = CGFloat(sections.compactMap(\.accountDisplay).count)
         let legends = CGFloat(sections.reduce(0) { $0 + (($1.gauges.first?.breakdown?.isEmpty == false) ? 1 : 0) })
         let notes = CGFloat(noteCount) * 28
-        return min(560, 56 + rows * 46 - legends * 12 + sectionHeaders * 28 + accountSubheaders * 18 + notes + 20)
+        return min(620, 56 + rows * 46 + budgetRows * 42 - legends * 12 + sectionHeaders * 28 + accountSubheaders * 18 + allocationNotes + notes + 20)
     }
 
     /// Splits "claude-max:milad@x.com#Fable" into friendly label/account.
