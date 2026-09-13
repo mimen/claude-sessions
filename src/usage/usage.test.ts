@@ -142,7 +142,7 @@ test("sourceClassFor maps codexbar entry sources to evidence classes", async () 
 });
 
 test("product breakdown rows show percentages without duplicate bars or reset countdowns", () => {
-  const reset = "2026-08-27T04:05:01Z";
+  const reset = new Date(Date.now() + 3_600_000).toISOString();
   const out = renderSnapshot(snap({
     observations: [
       obs({ provider: "grok", entitlement: "grok-super-grok-plus:a@b.c", used: 9, resetsAt: reset }),

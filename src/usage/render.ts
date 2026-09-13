@@ -6,6 +6,7 @@
 
 import type { UsageObservation, UsageSnapshot } from "./types.ts";
 import { formatCost } from "../cost.ts";
+import { claudeBudgets, type ClaudeBudget } from "./claude-budgets.ts";
 
 const PROVIDER_ORDER: Readonly<Record<string, number>> = {
   anthropic: 0,
@@ -183,11 +184,39 @@ function creditAmount(entitlement: string, remaining: number | null): string {
   return remaining === 0 ? "$0" : formatCost(remaining);
 }
 
+type DisplayRow =
+  | { kind: "observation"; obs: UsageObservation; name: string }
+  | { kind: "allocation"; budget: ClaudeBudget; name: string };
+
 interface Group {
   provider: string;
   account: string | null;
   title: string;
-  rows: Array<{ obs: UsageObservation; name: string }>;
+  rows: DisplayRow[];
+}
+
+function addClaudeBudgets(group: Group): void {
+  if (group.provider !== "anthropic") return;
+  const observations = group.rows.flatMap(row => row.kind === "observation" ? [row.obs] : []);
+  const budgets = claudeBudgets(observations);
+  if (budgets.length === 0) return;
+  group.rows = group.rows.filter(row => row.kind !== "observation"
+    || row.obs.metric !== "allowance" || row.obs.window !== "weekly"
+    || productOf(row.obs.entitlement)?.toLowerCase() !== "fable");
+  group.rows.push(...budgets.map(budget => ({ kind: "allocation" as const, budget, name: budget.name })));
+}
+
+function displayOrder(row: DisplayRow): number {
+  if (row.kind === "observation") return rowOrder(row.obs);
+  return row.budget.name === "Fable budget" ? 40 : 41;
+}
+
+function allocationRow(budget: ClaudeBudget, limitPad: number): string {
+  const label = `  ${budget.name.padEnd(limitPad)} `;
+  if (budget.usage.kind === "unknown") return `${label}unknown (${budget.usage.reason})`;
+  const { usedPct, resetsAt, cached } = budget.usage;
+  const when = countdown(resetsAt) || shortReset(resetsAt ?? "");
+  return `${label}${bar(usedPct)} ${String(Math.round(usedPct)).padStart(3)}%  ${when}${cached ? " · cached" : ""}`.trimEnd();
 }
 
 /** Column width so limit names align within their group blocks. */
@@ -241,11 +270,12 @@ export function renderSnapshot(snap: UsageSnapshot): string {
         rows: [],
       });
     }
-    groups.get(key)!.rows.push({ obs: o, name: limitName(o) });
+    groups.get(key)!.rows.push({ kind: "observation", obs: o, name: limitName(o) });
   }
+  for (const group of groups.values()) addClaudeBudgets(group);
   const sortedGroups = [...groups.values()].map((g) => ({
     ...g,
-    rows: [...g.rows].sort((a, b) => rowOrder(a.obs) - rowOrder(b.obs)),
+    rows: [...g.rows].sort((a, b) => displayOrder(a) - displayOrder(b)),
   }));
   // Fixed platform order; stable sort preserves cswap's account order within Claude.
   sortedGroups.sort(
@@ -256,7 +286,14 @@ export function renderSnapshot(snap: UsageSnapshot): string {
 
   for (const g of sortedGroups) {
     lines.push(g.title);
-    for (const { obs, name } of g.rows) lines.push(rowFor(obs, name, limitPad, capSummary));
+    for (const row of g.rows) {
+      lines.push(row.kind === "allocation"
+        ? allocationRow(row.budget, limitPad)
+        : rowFor(row.obs, row.name, limitPad, capSummary));
+    }
+    if (g.rows.some(row => row.kind === "allocation")) {
+      lines.push("  50/50 allocation model; Opus is estimated.");
+    }
     lines.push("");
   }
 

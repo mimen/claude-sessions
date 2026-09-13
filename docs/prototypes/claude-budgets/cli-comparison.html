@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ccs usage · Before and after</title>
+<style>
+:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#edf0f4;background:#14161a}*{box-sizing:border-box}body{margin:0;padding:40px 30px}main{max-width:1220px;margin:auto}h1{font-size:24px;font-weight:550;margin:0 0 8px}p{font-size:13px;color:#a6aeba;margin:0 0 25px}.panels{display:grid;grid-template-columns:1fr 1fr;gap:20px}section{border:1px solid #353b45;background:#1c1f24;border-radius:10px;overflow:hidden}h2{font-size:14px;font-weight:500;margin:0;padding:16px 20px;border-bottom:1px solid #353b45}pre{padding:22px 20px;margin:0;overflow:auto;font:12px/1.8 ui-monospace,SFMono-Regular,Menlo,monospace;min-height:320px}.after h2{border-bottom-color:#3987e5}footer{font-size:12px;line-height:1.6;color:#a6aeba;margin-top:22px;max-width:90ch}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}@media(max-width:1000px){.panels{grid-template-columns:1fr}body{padding:24px 16px}pre{min-height:0}}
+</style>
+</head>
+<body><main>
+<h1><code>ccs usage --provider anthropic</code></h1>
+<p>Same captured account readings, before and after the CLI change. Snapshot: 2026-09-13 05:03:55 UTC.</p>
+<div class="panels">
+<section><h2>Before</h2><pre>Claude · miladmaaan@gmail.com
+  five-hour ███████░  88%  in 46m
+  weekly    ████░░░░  48%  in 2d 15h
+  Fable     ████████  95%  in 2d 15h
+
+Claude · milad@afternoonumbrellafriends.com
+  five-hour ██░░░░░░  22%  in 46m
+  weekly    ███████░  83%  in 2d 14h
+  Fable     ████████ 100%  in 2d 14h</pre></section>
+<section class="after"><h2>After</h2><pre>Claude · miladmaaan@gmail.com
+  five-hour    ███████░  88%  in 46m
+  weekly       ████░░░░  48%  in 2d 15h
+  Fable budget ████████  95%  in 2d 15h
+  Opus budget  ░░░░░░░░   1%  in 2d 15h
+  50/50 allocation model; Opus is estimated.
+
+Claude · milad@afternoonumbrellafriends.com
+  five-hour    ██░░░░░░  22%  in 46m
+  weekly       ███████░  83%  in 2d 14h
+  Fable budget ████████ 100%  in 2d 14h
+  Opus budget  █████░░░  66%  in 2d 14h
+  50/50 allocation model; Opus is estimated.</pre></section>
+</div>
+<footer>Recorded CLI rendering, not a live dashboard. Each account stays separate. Budget percentages use the 50/50 allocation convention; the shared weekly reading stays unchanged. The existing AUF gateway rate-limit warning is unchanged and omitted from both panels. Raw <code>--json</code> observations are not modified.</footer>
+</main></body></html>
