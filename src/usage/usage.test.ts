@@ -2,8 +2,9 @@ import { test, expect } from "bun:test";
 import { accountLabel } from "./adapters.ts";
 import { renderSnapshot, shortReset } from "./render.ts";
 import { usageCommand } from "./command.ts";
-import type { AdapterHealth, UsageObservation, UsageSnapshot } from "./types.ts";
+import type { AdapterHealth, SubscriptionInfo, UsageObservation, UsageSnapshot } from "./types.ts";
 import { windowFromCswap } from "./adapters.ts";
+import { nextMonthlyRenewal, resolveSubscriptions } from "./subscriptions.ts";
 
 function obs(over: Partial<UsageObservation> = {}): UsageObservation {
   return {
@@ -24,13 +25,55 @@ function obs(over: Partial<UsageObservation> = {}): UsageObservation {
   };
 }
 
-function snap(over: { observations?: UsageObservation[]; adapters?: AdapterHealth[] } = {}): UsageSnapshot {
+function snap(over: { observations?: UsageObservation[]; adapters?: AdapterHealth[]; subscriptions?: SubscriptionInfo[] } = {}): UsageSnapshot {
   return {
     generatedAt: "2026-08-22T02:00:00Z",
     observations: over.observations ?? [],
     adapters: over.adapters ?? [],
+    subscriptions: over.subscriptions ?? [],
   };
 }
+
+test("next monthly renewal uses the current anchor day or the next month", () => {
+  expect(nextMonthlyRenewal("2026-09-21", new Date("2026-08-01T00:00:00Z"))).toBe("2026-09-21");
+  expect(nextMonthlyRenewal("2026-02-05", new Date("2026-09-05T23:59:59Z"))).toBe("2026-09-05");
+  expect(nextMonthlyRenewal("2026-02-05", new Date("2026-09-06T00:00:00Z"))).toBe("2026-10-05");
+  expect(nextMonthlyRenewal("2024-01-31", new Date("2026-02-28T12:00:00Z"))).toBe("2026-02-28");
+});
+
+test("subscription resolver filters providers and keeps full account identities", () => {
+  expect(resolveSubscriptions(["anthropic"], new Date("2026-09-13T00:00:00Z"))).toEqual([
+    {
+      provider: "anthropic", account: "miladmaaan@gmail.com", planName: "Max 20x",
+      monthlyDollars: 200, renewsOn: "2026-10-05", source: "configured",
+    },
+    {
+      provider: "anthropic", account: "milad@afternoonumbrellafriends.com", planName: "Max 20x",
+      monthlyDollars: 200, renewsOn: "2026-09-21", source: "configured",
+    },
+  ]);
+});
+
+test("render attaches subscriptions by exact provider and full account", () => {
+  const out = renderSnapshot(snap({
+    observations: [
+      obs({ provider: "anthropic", entitlement: "claude-max:miladmaaan@other.com" }),
+      obs({ provider: "anthropic", entitlement: "claude-max:miladmaaan@gmail.com" }),
+    ],
+    subscriptions: resolveSubscriptions(["anthropic"], new Date("2026-09-13T00:00:00Z")),
+  }));
+  const wrongAccount = out.slice(out.indexOf("miladmaaan@other.com"), out.indexOf("Claude · personal"));
+  expect(wrongAccount).not.toContain("Max 20x · renews");
+  expect(out).toContain("Claude · personal\n  Max 20x · renews Oct 5");
+  expect(out).toContain("Claude · AUF\n  Max 20x · renews Sep 21");
+});
+
+test("render includes a subscription-only provider group", () => {
+  const out = renderSnapshot(snap({
+    subscriptions: resolveSubscriptions(["venice"], new Date("2026-09-13T00:00:00Z")),
+  }));
+  expect(out).toBe("Venice\n  Pro · renews Oct 9");
+});
 
 test("accountLabel prefers email, then login method, then unknown", () => {
   expect(accountLabel({ accountEmail: "a@b.c", loginMethod: "pro" })).toBe("a@b.c");

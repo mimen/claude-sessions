@@ -3,7 +3,47 @@ import Foundation
 struct UsageSnapshot: Decodable, Equatable {
     let generatedAt: Date?
     let observations: [UsageObservation]
-    var adapters: [AdapterHealth]? = nil
+    let adapters: [AdapterHealth]?
+    let subscriptions: [SubscriptionInfo]
+
+    init(
+        generatedAt: Date?,
+        observations: [UsageObservation],
+        adapters: [AdapterHealth]? = nil,
+        subscriptions: [SubscriptionInfo] = []
+    ) {
+        self.generatedAt = generatedAt
+        self.observations = observations
+        self.adapters = adapters
+        self.subscriptions = subscriptions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case generatedAt, observations, adapters, subscriptions
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try values.decodeIfPresent(Date.self, forKey: .generatedAt)
+        observations = try values.decode([UsageObservation].self, forKey: .observations)
+        adapters = try values.decodeIfPresent([AdapterHealth].self, forKey: .adapters)
+        subscriptions = try values.decodeIfPresent([SubscriptionInfo].self, forKey: .subscriptions) ?? []
+    }
+}
+
+struct SubscriptionInfo: Decodable, Equatable {
+    let provider: String
+    let account: String?
+    let planName: String
+    let monthlyDollars: Double
+    let renewsOn: String
+    let source: String
+
+    var renewalDisplay: String {
+        guard renewsOn.count == 10,
+              let date = SnapshotDecoder.dayOnly.date(from: renewsOn) else { return renewsOn }
+        return SnapshotDecoder.monthDay.string(from: date)
+    }
 }
 
 /// Per-provider adapter health from ccs: "ok", "degraded" (answered with caveats,
@@ -57,6 +97,24 @@ struct SnapshotDecoder {
     static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    static let dayOnly: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    static let monthDay: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "MMM d"
         return f
     }()
 

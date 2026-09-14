@@ -58,8 +58,18 @@ export interface AdapterHealth {
   accounts?: string[];
 }
 
+export interface SubscriptionInfo {
+  provider: ProviderId;
+  account: string | null;
+  planName: string;
+  monthlyDollars: number;
+  renewsOn: string;
+  source: "official_api" | "configured";
+}
+
 export interface UsageSnapshot {
   generatedAt: string;
   observations: UsageObservation[];
   adapters: AdapterHealth[];
+  subscriptions: SubscriptionInfo[];
 }

@@ -27,16 +27,35 @@ final class GaugeBuilderTests: XCTestCase {
         account: String, fable: Bool, used: Double?, limit: Double? = 100,
         observedAt: Date?, resetsAt: Date?, stale: Bool? = nil
     ) -> UsageObservation {
-        observation(
+        let fullAccount = account == "miladmaaan" ? "miladmaaan@gmail.com"
+            : account == "milad" ? "milad@afternoonumbrellafriends.com"
+            : account.contains("@") ? account : "\(account)@example.com"
+        return observation(
             provider: "anthropic",
-            entitlement: "claude-max:\(account)@example.com\(fable ? "#Fable" : "")",
+            entitlement: "claude-max:\(fullAccount)\(fable ? "#Fable" : "")",
             window: "weekly", used: used, limit: limit, resetsAt: resetsAt,
             stale: stale, observedAt: observedAt
         )
     }
 
-    private func snapshot(_ observations: [UsageObservation]) -> UsageSnapshot {
-        UsageSnapshot(generatedAt: nil, observations: observations)
+    private func subscription(
+        provider: String = "anthropic",
+        account: String? = "miladmaaan@gmail.com",
+        planName: String = "Max 20x",
+        monthlyDollars: Double = 200,
+        renewsOn: String = "2026-10-05"
+    ) -> SubscriptionInfo {
+        SubscriptionInfo(
+            provider: provider, account: account, planName: planName,
+            monthlyDollars: monthlyDollars, renewsOn: renewsOn, source: "configured"
+        )
+    }
+
+    private func snapshot(
+        _ observations: [UsageObservation],
+        subscriptions: [SubscriptionInfo] = []
+    ) -> UsageSnapshot {
+        UsageSnapshot(generatedAt: nil, observations: observations, subscriptions: subscriptions)
     }
 
     func testDecodesFractionalAndPlainTimestamps() throws {
@@ -48,15 +67,44 @@ final class GaugeBuilderTests: XCTestCase {
         """.data(using: .utf8)!
         let parsed = try SnapshotDecoder.decode(json)
         XCTAssertEqual(parsed.observations.count, 2)
+        XCTAssertEqual(parsed.subscriptions, [])
         XCTAssertNotNil(parsed.generatedAt)
         XCTAssertNotNil(parsed.observations[0].resetsAt)
         XCTAssertNotNil(parsed.observations[1].resetsAt)
     }
 
+    func testDecodesSubscriptionAndBuildsPlanRenewalData() throws {
+        let json = """
+        {"generatedAt":"2026-09-13T00:00:00Z","observations":[],"subscriptions":[
+          {"provider":"venice","account":null,"planName":"Pro","monthlyDollars":68,"renewsOn":"2026-10-09","source":"configured"}
+        ],"adapters":[]}
+        """.data(using: .utf8)!
+        let parsed = try SnapshotDecoder.decode(json)
+        XCTAssertEqual(parsed.subscriptions.count, 1)
+        let section = try XCTUnwrap(GaugeBuilder.sections(from: parsed).first)
+        XCTAssertNil(section.account)
+        XCTAssertEqual(section.plan, PlanInfo(name: "Pro", dollars: 68))
+        XCTAssertEqual(section.subscription?.renewalDisplay, "Oct 9")
+        XCTAssertEqual(section.gauges, [])
+    }
+
+    func testSubscriptionMatchingUsesProviderAndFullAccount() throws {
+        let sections = GaugeBuilder.sections(from: snapshot([
+            observation(entitlement: "claude-max:miladmaaan@other.com"),
+            observation(entitlement: "claude-max:miladmaaan@gmail.com")
+        ], subscriptions: [subscription()]))
+        let matching = try XCTUnwrap(sections.first { $0.account == "miladmaaan@gmail.com" })
+        let other = try XCTUnwrap(sections.first { $0.account == "miladmaaan@other.com" })
+        XCTAssertEqual(matching.subscription?.planName, "Max 20x")
+        XCTAssertNil(other.subscription)
+        XCTAssertEqual(matching.accountDisplay, "personal")
+        XCTAssertEqual(other.accountDisplay, "miladmaaan@other.com")
+    }
+
     func testSectionsGroupByProviderAndAccount() {
         let sections = GaugeBuilder.sections(from: snapshot([
             observation(entitlement: "claude-max:miladmaaan@gmail.com", window: "five_hour"),
-            observation(entitlement: "claude-max:milad@auf.com", window: "weekly"),
+            observation(entitlement: "claude-max:milad@afternoonumbrellafriends.com", window: "weekly"),
             observation(entitlement: "claude-max:miladmaaan@gmail.com", window: "weekly")
         ]))
         XCTAssertEqual(sections.count, 2)
@@ -70,7 +118,7 @@ final class GaugeBuilderTests: XCTestCase {
         let fable = GaugeBuilder.allowanceGauge(
             observation(entitlement: "claude-max:miladmaaan@gmail.com#Fable"))
         XCTAssertEqual(fable.label, "Fable")
-        XCTAssertEqual(fable.account, "miladmaaan")
+        XCTAssertEqual(fable.account, "miladmaaan@gmail.com")
         let plain = GaugeBuilder.allowanceGauge(observation(entitlement: "codex-pro:x@y.com"))
         XCTAssertEqual(plain.label, "All models")
     }
@@ -78,7 +126,7 @@ final class GaugeBuilderTests: XCTestCase {
     func testEntitlementParts() {
         let parts = GaugeBuilder.entitlementParts("grok-super grok plus:m@x.com#build")
         XCTAssertEqual(parts.label, "Build")
-        XCTAssertEqual(parts.account, "m")
+        XCTAssertEqual(parts.account, "m@x.com")
         let bare = GaugeBuilder.entitlementParts("opencode-go-zen")
         XCTAssertEqual(bare.label, "All models")
         XCTAssertNil(bare.account)
@@ -117,7 +165,7 @@ final class GaugeBuilderTests: XCTestCase {
             GaugeBuilder.allowanceGauge(observation(used: 0))    // fresh 5h window
         ]
         let section = UsageSection(provider: "anthropic", account: nil,
-                                   plan: PlanInfo(name: "", dollars: 100), gauges: gauges)
+                                   subscription: nil, gauges: gauges)
         // The exhausted window cancels out the fresh one — binding constraint wins.
         XCTAssertEqual(GaugeBuilder.overallUsedFraction([section])!, 1.0)
         XCTAssertNil(GaugeBuilder.overallUsedFraction([]))
@@ -126,10 +174,11 @@ final class GaugeBuilderTests: XCTestCase {
     func testDollarWeightingFavorsExpensivePlan() {
         // Max ($200, 50% used) should dominate Pro ($20, 100% used).
         let maxSection = UsageSection(
-            provider: "anthropic", account: "a", plan: PlanInfo(name: "Max 20x", dollars: 200),
+            provider: "anthropic", account: "a", subscription: subscription(account: "a"),
             gauges: [GaugeBuilder.allowanceGauge(observation(used: 50))])
         let proSection = UsageSection(
-            provider: "anthropic", account: "b", plan: PlanInfo(name: "Pro", dollars: 20),
+            provider: "anthropic", account: "b",
+            subscription: subscription(account: "b", planName: "Pro", monthlyDollars: 20),
             gauges: [GaugeBuilder.allowanceGauge(observation(used: 100))])
         let overall = GaugeBuilder.overallUsedFraction([maxSection, proSection])!
         XCTAssertGreaterThan(overall, 0.5)
@@ -343,10 +392,12 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction([auf])), 0.85, accuracy: 0.001)
     }
 
-    func testPlanFromTierReadsNamesAndRawTiers() {
-        XCTAssertEqual(GaugeBuilder.planFromTier("Max 20x"), PlanInfo(name: "Max 20x", dollars: 200))
-        XCTAssertEqual(GaugeBuilder.planFromTier("default_claude_max_20x"), PlanInfo(name: "Max 20x", dollars: 200))
-        XCTAssertEqual(GaugeBuilder.planFromTier("Pro"), PlanInfo(name: "Pro", dollars: 20))
-        XCTAssertEqual(GaugeBuilder.planFromTier("default_claude_ai"), PlanInfo(name: "Pro", dollars: 20))
+    func testPanelHeightAccountsForSubscriptionDetailRows() {
+        let observation = observation(provider: "venice", entitlement: "venice-diem-balance")
+        let without = GaugeBuilder.sections(from: snapshot([observation]))
+        let with = GaugeBuilder.sections(from: snapshot([observation], subscriptions: [
+            subscription(provider: "venice", account: nil, planName: "Pro", monthlyDollars: 68)
+        ]))
+        XCTAssertEqual(GaugeBuilder.panelHeight(for: with) - GaugeBuilder.panelHeight(for: without), 18)
     }
 }

@@ -13,7 +13,7 @@ final class UsageStore: ObservableObject {
 
     @Published var phase: Phase = .idle
     @Published var gauges: [UsageGauge] = []
-    @Published var observations: [UsageObservation] = []
+    @Published var snapshot = UsageSnapshot(generatedAt: nil, observations: [])
     @Published var panelHeight: CGFloat = 420
     @Published var cswapAccounts: [CswapAccount] = []
     @Published var switchingTo: CswapAccount?
@@ -35,7 +35,7 @@ final class UsageStore: ObservableObject {
     /// switcher — so the popover window always matches its content.
     func syncPanelHeight() {
         let switcher = cswapAccounts.isEmpty ? 0 : CGFloat(cswapAccounts.count) * 26 + 30
-        panelHeight = min(basePanelHeight + switcher, 620)
+        panelHeight = min(basePanelHeight + switcher, 680)
     }
 
     func loadCswapAccountsIfNeeded() {
@@ -123,7 +123,7 @@ final class UsageStore: ObservableObject {
                 let built = GaugeBuilder.sections(from: snapshot).flatMap(\.gauges)
                 await MainActor.run {
                     self.gauges = built
-                    self.observations = snapshot.observations
+                    self.snapshot = snapshot
                     self.adapterNotes = GaugeBuilder.healthNotes(snapshot.adapters)
                     self.updateHeight(from: snapshot)
                     self.phase = .loaded(snapshot.generatedAt ?? Date())
@@ -161,7 +161,7 @@ final class UsageStore: ObservableObject {
     }
 
     var sections: [UsageSection] {
-        GaugeBuilder.sections(from: UsageSnapshot(generatedAt: nil, observations: observations))
+        GaugeBuilder.sections(from: snapshot)
     }
 
     var overallRemaining: Double? {

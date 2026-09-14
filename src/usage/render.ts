@@ -4,7 +4,7 @@
  * run. Unknowns state themselves plainly; quota kinds never merge into one percentage.
  */
 
-import type { UsageObservation, UsageSnapshot } from "./types.ts";
+import type { SubscriptionInfo, UsageObservation, UsageSnapshot } from "./types.ts";
 import { formatCost } from "../cost.ts";
 import { claudeBudgets, type ClaudeBudget } from "./claude-budgets.ts";
 
@@ -133,7 +133,23 @@ function groupKey(o: UsageObservation): string {
 
 function groupTitle(provider: string, account: string | null): string {
   const base = PROVIDER_TITLE[provider] ?? provider;
-  return account ? `${base} · ${account}` : base;
+  const aliases: Readonly<Record<string, string>> = {
+    "miladmaaan@gmail.com": "personal",
+    "milad@afternoonumbrellafriends.com": "AUF",
+  };
+  return account ? `${base} · ${aliases[account.toLowerCase()] ?? account}` : base;
+}
+
+function subscriptionKey(subscription: SubscriptionInfo): string {
+  return subscription.account
+    ? `${subscription.provider}:${subscription.account}`
+    : subscription.provider;
+}
+
+function renewalLabel(renewsOn: string): string {
+  const date = new Date(`${renewsOn}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return renewsOn;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 /**
@@ -193,6 +209,7 @@ interface Group {
   account: string | null;
   title: string;
   rows: DisplayRow[];
+  subscription: SubscriptionInfo | null;
 }
 
 function addClaudeBudgets(group: Group): void {
@@ -268,9 +285,25 @@ export function renderSnapshot(snap: UsageSnapshot): string {
         account,
         title: groupTitle(o.provider, account),
         rows: [],
+        subscription: null,
       });
     }
     groups.get(key)!.rows.push({ kind: "observation", obs: o, name: limitName(o) });
+  }
+  for (const subscription of snap.subscriptions) {
+    const key = subscriptionKey(subscription);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.subscription = subscription;
+    } else {
+      groups.set(key, {
+        provider: subscription.provider,
+        account: subscription.account,
+        title: groupTitle(subscription.provider, subscription.account),
+        rows: [],
+        subscription,
+      });
+    }
   }
   for (const group of groups.values()) addClaudeBudgets(group);
   const sortedGroups = [...groups.values()].map((g) => ({
@@ -286,6 +319,9 @@ export function renderSnapshot(snap: UsageSnapshot): string {
 
   for (const g of sortedGroups) {
     lines.push(g.title);
+    if (g.subscription) {
+      lines.push(`  ${g.subscription.planName} · renews ${renewalLabel(g.subscription.renewsOn)}`);
+    }
     for (const row of g.rows) {
       lines.push(row.kind === "allocation"
         ? allocationRow(row.budget, limitPad)

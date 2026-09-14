@@ -23,6 +23,7 @@ import { runCswap, type CswapWindow } from "./cswap.ts";
 import { fetchOauthProfile, fetchOauthUsage, planFromProfile, readKeychainOauth, windowsFromOauthUsage } from "./anthropic-oauth.ts";
 import { fetchGrokBilling } from "./grok.ts";
 import { fetchGatewayClaudeCredentials, gatewayIssues, type GatewayIssue } from "./gateway-claude-health.ts";
+import { resolveSubscriptions } from "./subscriptions.ts";
 
 export interface AdapterResult {
   observations: UsageObservation[];
@@ -748,5 +749,6 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
     generatedAt: now(),
     observations: results.flatMap((r) => r.observations),
     adapters: results.map((r) => r.health),
+    subscriptions: resolveSubscriptions(wanted),
   };
 }

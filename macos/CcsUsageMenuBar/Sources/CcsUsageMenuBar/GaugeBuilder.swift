@@ -8,9 +8,13 @@ struct PlanInfo: Equatable {
 struct UsageSection: Identifiable, Equatable {
     let provider: String
     let account: String?
-    var plan: PlanInfo?
+    let subscription: SubscriptionInfo?
     let gauges: [UsageGauge]
     var budgets: [ClaudeBudget] = []
+
+    var plan: PlanInfo? {
+        subscription.map { PlanInfo(name: $0.planName, dollars: $0.monthlyDollars) }
+    }
 
     // Hide the duplicate Fable row in the panel, not from provider-limit accounting.
     var displayGauges: [UsageGauge] {
@@ -62,7 +66,10 @@ struct UsageGauge: Identifiable, Equatable {
 }
 
 enum GaugeBuilder {
-    static let accountAlias = ["miladmaaan": "personal", "milad": "auf"]
+    static let accountAlias = [
+        "miladmaaan@gmail.com": "personal",
+        "milad@afternoonumbrellafriends.com": "auf"
+    ]
 
     static let nameLabel = [
         "claude-max": "All models",
@@ -71,23 +78,7 @@ enum GaugeBuilder {
         "grok-super grok plus": "All Usage"
     ]
 
-    /// Known subscription dollar values, keyed provider|accountAlias. Edit freely;
-    /// unknown combos fall back to even weighting via `fallbackDollars`.
-    static let planTable: [String: PlanInfo] = [
-        "anthropic|personal": PlanInfo(name: "Max 20x", dollars: 200),
-        "anthropic|auf": PlanInfo(name: "Pro", dollars: 20),
-        "grok|personal": PlanInfo(name: "SuperGrok", dollars: 100),
-        "codex|personal": PlanInfo(name: "Codex Pro", dollars: 200),
-        "opencode-go|": PlanInfo(name: "Go", dollars: 10),
-        "venice|": PlanInfo(name: "Pro", dollars: 68)
-    ]
-
     static let fallbackDollars = 50.0
-
-    static func plan(provider: String, account: String?) -> PlanInfo {
-        let key = "\(provider)|\(account.flatMap { accountAlias[$0.lowercased()]?.lowercased() } ?? "")"
-        return planTable[key] ?? PlanInfo(name: "", dollars: fallbackDollars)
-    }
 
     static func sections(from snapshot: UsageSnapshot) -> [UsageSection] {
         // Raw Claude observations per account, keyed the same way gauges resolve their
@@ -114,10 +105,12 @@ enum GaugeBuilder {
         // provider's sole named account when there is exactly one.
         var order: [String] = []
         var grouped: [String: [UsageGauge]] = [:]
+        var identities: [String: (provider: String, account: String?)] = [:]
         for g in gauges {
             let key = "\(g.provider)|\(g.account ?? "")"
             if grouped[key] == nil { order.append(key) }
             grouped[key, default: []].append(g)
+            identities[key] = (g.provider, g.account)
         }
         for provider in Set(gauges.map(\.provider)) {
             let unnamed = "\(provider)|"
@@ -129,15 +122,27 @@ enum GaugeBuilder {
             }
         }
 
+        let subscriptions = Dictionary(
+            snapshot.subscriptions.map { ("\($0.provider)|\($0.account ?? "")", $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for subscription in snapshot.subscriptions {
+            let key = "\(subscription.provider)|\(subscription.account ?? "")"
+            if !order.contains(key) { order.append(key) }
+            identities[key] = (subscription.provider, subscription.account)
+        }
+
         return order.compactMap { key -> UsageSection? in
             let rows = (grouped[key] ?? []).sorted { rank($0.windowLabel) < rank($1.windowLabel) }
-            guard let first = rows.first else { return nil }
-            return UsageSection(provider: first.provider, account: first.account, plan: nil, gauges: rows)
+            guard let identity = identities[key] else { return nil }
+            return UsageSection(
+                provider: identity.provider,
+                account: identity.account,
+                subscription: subscriptions[key],
+                gauges: rows
+            )
         }.map { s in
             var s = s
-            let tierPlan = s.gauges.compactMap(\ .tier).first.flatMap(Self.planFromTier)
-            let p = tierPlan ?? plan(provider: s.provider, account: s.account)
-            s.plan = p.dollars > 0 ? p : nil
             if s.provider == "anthropic" {
                 s.budgets = ClaudeBudgets.compute(anthropicByAccount[s.account ?? ""] ?? [])
             }
@@ -304,10 +309,10 @@ enum GaugeBuilder {
         let budgetRows = CGFloat(sections.reduce(0) { $0 + $1.budgets.count })
         let allocationNotes = CGFloat(sections.filter { !$0.budgets.isEmpty }.count) * 16
         let sectionHeaders = CGFloat(sections.count)
-        let accountSubheaders = CGFloat(sections.compactMap(\.accountDisplay).count)
+        let detailRows = CGFloat(sections.filter { $0.accountDisplay != nil || $0.subscription != nil }.count)
         let legends = CGFloat(sections.reduce(0) { $0 + (($1.gauges.first?.breakdown?.isEmpty == false) ? 1 : 0) })
         let notes = CGFloat(noteCount) * 28
-        return min(620, 56 + rows * 46 + budgetRows * 42 - legends * 12 + sectionHeaders * 28 + accountSubheaders * 18 + allocationNotes + notes + 20)
+        return min(680, 56 + rows * 46 + budgetRows * 42 - legends * 12 + sectionHeaders * 28 + detailRows * 18 + allocationNotes + notes + 20)
     }
 
     /// Splits "claude-max:milad@x.com#Fable" into friendly label/account.
@@ -321,8 +326,7 @@ enum GaugeBuilder {
         var account: String?
         if let colon = body.firstIndex(of: ":") {
             let accountFull = String(body[body.index(after: colon)...])
-            let localPart = accountFull.split(separator: "@").first.map(String.init) ?? accountFull
-            account = localPart.isEmpty ? nil : localPart
+            account = accountFull.isEmpty ? nil : accountFull
             body = String(body[..<colon])
         }
         if !suffix.isEmpty {
@@ -330,17 +334,6 @@ enum GaugeBuilder {
             return (suffix.prefix(1).uppercased() + suffix.dropFirst(), account)
         }
         return (nameLabel[body.lowercased()] ?? body, account)
-    }
-
-    /// ccs sends the plan name ("Max 20x", "Pro"); raw tiers ("default_claude_max_20x")
-    /// are accepted too so an older ccs still labels correctly.
-    static func planFromTier(_ tier: String) -> PlanInfo? {
-        let t = tier.lowercased()
-        if t.contains("max_20") || t.contains("max 20") { return PlanInfo(name: "Max 20x", dollars: 200) }
-        if t.contains("max_5") || t.contains("max 5") { return PlanInfo(name: "Max 5x", dollars: 100) }
-        if t.contains("pro") || t == "default_claude_ai" { return PlanInfo(name: "Pro", dollars: 20) }
-        if t.contains("max") { return PlanInfo(name: "Max", dollars: 100) }
-        return nil
     }
 
     static func shortEntitlement(_ entitlement: String) -> String {

@@ -12,7 +12,7 @@ function reading(entitlement: string, used: number | null, extra: Partial<UsageO
   };
 }
 function snapshot(observations: UsageObservation[]): UsageSnapshot {
-  return { generatedAt: "2026-09-13T05:03:55Z", observations, adapters: [] };
+  return { generatedAt: "2026-09-13T05:03:55Z", observations, adapters: [], subscriptions: [] };
 }
 function budgetValues(output: string): string[] {
   return output.split("\n").filter(line => /(?:Fable|Opus) budget/.test(line))

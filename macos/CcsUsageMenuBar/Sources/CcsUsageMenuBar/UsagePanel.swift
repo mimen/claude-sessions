@@ -130,15 +130,17 @@ struct UsagePanel: View {
     private var gaugeList: some View {
         ForEach(sections) { section in
             ProviderSectionHeader(provider: section.provider)
-            if let account = section.accountDisplay {
+            if section.accountDisplay != nil || section.subscription != nil {
                 HStack(spacing: 5) {
-                    Text(account)
-                        .font(.system(size: 9.5, weight: .medium, design: .rounded))
-                        .textCase(.uppercase)
-                        .kerning(0.5)
-                        .foregroundStyle(.tertiary)
-                    if let plan = section.plan {
-                        Text(plan.name)
+                    if let account = section.accountDisplay {
+                        Text(account)
+                            .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                            .textCase(.uppercase)
+                            .kerning(0.5)
+                            .foregroundStyle(.tertiary)
+                    }
+                    if let subscription = section.subscription {
+                        Text("\(subscription.planName) · renews \(subscription.renewalDisplay)")
                             .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)
