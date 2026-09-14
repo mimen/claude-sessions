@@ -88,13 +88,13 @@ struct UsagePanel: View {
         case .idle:
             spinner
         case .loading:
-            if store.gauges.isEmpty {
+            if store.sections.isEmpty {
                 spinner
             } else {
                 gaugeList
             }
         case .failed(let message):
-            if store.gauges.isEmpty {
+            if store.sections.isEmpty {
                 errorView(message)
             } else {
                 gaugeList
@@ -130,7 +130,7 @@ struct UsagePanel: View {
     private var gaugeList: some View {
         ForEach(sections) { section in
             ProviderSectionHeader(provider: section.provider)
-            if section.accountDisplay != nil || section.subscription != nil {
+            if section.accountDisplay != nil || section.plan != nil {
                 HStack(spacing: 5) {
                     if let account = section.accountDisplay {
                         Text(account)
@@ -141,6 +141,13 @@ struct UsagePanel: View {
                     }
                     if let subscription = section.subscription {
                         Text("\(subscription.planName) · renews \(subscription.renewalDisplay)")
+                            .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.secondary.opacity(0.14)))
+                    } else if let plan = section.plan {
+                        Text(plan.name)
                             .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)

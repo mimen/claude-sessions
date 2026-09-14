@@ -31,8 +31,6 @@ final class UsageStore: ObservableObject {
         syncPanelHeight()
     }
 
-    /// One number for how tall the panel is — usage gauges plus the account
-    /// switcher — so the popover window always matches its content.
     func syncPanelHeight() {
         let switcher = cswapAccounts.isEmpty ? 0 : CGFloat(cswapAccounts.count) * 26 + 30
         panelHeight = min(basePanelHeight + switcher, 680)

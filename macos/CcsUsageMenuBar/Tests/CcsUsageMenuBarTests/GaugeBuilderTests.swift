@@ -88,6 +88,17 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertEqual(section.gauges, [])
     }
 
+    func testOldSnapshotWithoutSubscriptionsKeepsLegacyPlansAndBill() throws {
+        let json = """
+        {"generatedAt":"2026-09-13T18:00:00Z","observations":[
+          {"provider":"codex","entitlement":"codex-pro:miladmaaan@gmail.com","metric":"allowance","scope":"account","window":"weekly","used":22,"limit":100,"remaining":78,"resetsAt":null,"expiresAt":null,"observedAt":"2026-09-13T18:00:00Z","source":"official_cli","exact":false}
+        ],"adapters":[]}
+        """.data(using: .utf8)!
+        let sections = GaugeBuilder.sections(from: try SnapshotDecoder.decode(json))
+        XCTAssertEqual(sections.first?.plan, PlanInfo(name: "Codex Pro", dollars: 200))
+        XCTAssertEqual(GaugeBuilder.monthlyBill(sections).total, 200)
+    }
+
     func testSubscriptionMatchingUsesProviderAndFullAccount() throws {
         let sections = GaugeBuilder.sections(from: snapshot([
             observation(entitlement: "claude-max:miladmaaan@other.com"),
@@ -393,10 +404,10 @@ final class GaugeBuilderTests: XCTestCase {
     }
 
     func testPanelHeightAccountsForSubscriptionDetailRows() {
-        let observation = observation(provider: "venice", entitlement: "venice-diem-balance")
+        let observation = observation(provider: "other", entitlement: "other-plan")
         let without = GaugeBuilder.sections(from: snapshot([observation]))
         let with = GaugeBuilder.sections(from: snapshot([observation], subscriptions: [
-            subscription(provider: "venice", account: nil, planName: "Pro", monthlyDollars: 68)
+            subscription(provider: "other", account: nil, planName: "Pro", monthlyDollars: 68)
         ]))
         XCTAssertEqual(GaugeBuilder.panelHeight(for: with) - GaugeBuilder.panelHeight(for: without), 18)
     }

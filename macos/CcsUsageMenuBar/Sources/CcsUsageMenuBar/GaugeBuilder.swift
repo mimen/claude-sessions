@@ -14,6 +14,7 @@ struct UsageSection: Identifiable, Equatable {
 
     var plan: PlanInfo? {
         subscription.map { PlanInfo(name: $0.planName, dollars: $0.monthlyDollars) }
+            ?? GaugeBuilder.legacyPlan(provider: provider, account: account, gauges: gauges)
     }
 
     // Hide the duplicate Fable row in the panel, not from provider-limit accounting.
@@ -33,7 +34,6 @@ struct UsageSection: Identifiable, Equatable {
 
     var id: String { "\(provider)|\(account ?? "")" }
 
-    /// "personal", "auf", or the raw local part as fallback.
     var accountDisplay: String? {
         guard let account else { return nil }
         return GaugeBuilder.accountAlias[account.lowercased()] ?? account
@@ -79,6 +79,24 @@ enum GaugeBuilder {
     ]
 
     static let fallbackDollars = 50.0
+
+    static let legacyPlanTable: [String: PlanInfo] = [
+        "anthropic|personal": PlanInfo(name: "Max 20x", dollars: 200),
+        "anthropic|auf": PlanInfo(name: "Pro", dollars: 20),
+        "grok|personal": PlanInfo(name: "SuperGrok", dollars: 100),
+        "codex|personal": PlanInfo(name: "Codex Pro", dollars: 200),
+        "opencode-go|": PlanInfo(name: "Go", dollars: 10),
+        "venice|": PlanInfo(name: "Pro", dollars: 68)
+    ]
+
+    static func legacyPlan(provider: String, account: String?, gauges: [UsageGauge]) -> PlanInfo? {
+        if provider == "anthropic", let tier = gauges.compactMap(\.tier).first,
+           let plan = planFromTier(tier) {
+            return plan
+        }
+        let alias = account.flatMap { accountAlias[$0.lowercased()] } ?? ""
+        return legacyPlanTable["\(provider)|\(alias)"]
+    }
 
     static func sections(from snapshot: UsageSnapshot) -> [UsageSection] {
         // Raw Claude observations per account, keyed the same way gauges resolve their
@@ -274,8 +292,6 @@ enum GaugeBuilder {
         return total / weight
     }
 
-    /// Total monthly subscription dollars. Fallback-weighted sections (providers
-    /// without a known plan, e.g. Venice) don't count — they aren't subscriptions.
     static func monthlyBill(_ sections: [UsageSection]) -> (total: Double, planCount: Int) {
         let withPlan = sections.filter { ($0.plan?.name.isEmpty == false) }
         return (withPlan.reduce(0) { $0 + ($1.plan?.dollars ?? 0) }, withPlan.count)
@@ -309,7 +325,7 @@ enum GaugeBuilder {
         let budgetRows = CGFloat(sections.reduce(0) { $0 + $1.budgets.count })
         let allocationNotes = CGFloat(sections.filter { !$0.budgets.isEmpty }.count) * 16
         let sectionHeaders = CGFloat(sections.count)
-        let detailRows = CGFloat(sections.filter { $0.accountDisplay != nil || $0.subscription != nil }.count)
+        let detailRows = CGFloat(sections.filter { $0.accountDisplay != nil || $0.plan != nil }.count)
         let legends = CGFloat(sections.reduce(0) { $0 + (($1.gauges.first?.breakdown?.isEmpty == false) ? 1 : 0) })
         let notes = CGFloat(noteCount) * 28
         return min(680, 56 + rows * 46 + budgetRows * 42 - legends * 12 + sectionHeaders * 28 + detailRows * 18 + allocationNotes + notes + 20)
@@ -342,6 +358,15 @@ enum GaugeBuilder {
             .replacingOccurrences(of: "-diem-balance", with: " Diem")
             .replacingOccurrences(of: "-dollar-credit", with: " credit")
             .replacingOccurrences(of: "venice-", with: "")
+    }
+
+    static func planFromTier(_ tier: String) -> PlanInfo? {
+        let value = tier.lowercased()
+        if value.contains("max_20") || value.contains("max 20") { return PlanInfo(name: "Max 20x", dollars: 200) }
+        if value.contains("max_5") || value.contains("max 5") { return PlanInfo(name: "Max 5x", dollars: 100) }
+        if value.contains("pro") || value == "default_claude_ai" { return PlanInfo(name: "Pro", dollars: 20) }
+        if value.contains("max") { return PlanInfo(name: "Max", dollars: 100) }
+        return nil
     }
 }
 
