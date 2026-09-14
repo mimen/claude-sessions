@@ -14,6 +14,7 @@
 import type {
   AdapterHealth,
   ProviderId,
+  SubscriptionRenewal,
   UsageObservation,
   UsageSnapshot,
   UsageWindow,
@@ -23,11 +24,12 @@ import { runCswap, type CswapWindow } from "./cswap.ts";
 import { fetchOauthProfile, fetchOauthUsage, planFromProfile, readKeychainOauth, windowsFromOauthUsage } from "./anthropic-oauth.ts";
 import { fetchGrokBilling } from "./grok.ts";
 import { fetchGatewayClaudeCredentials, gatewayIssues, type GatewayIssue } from "./gateway-claude-health.ts";
-import { resolveSubscriptions } from "./subscriptions.ts";
+import { mergeSubscriptionRenewals, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
 
 export interface AdapterResult {
   observations: UsageObservation[];
   health: AdapterHealth;
+  renewals?: SubscriptionRenewal[];
 }
 
 const PROVIDERS: readonly ProviderId[] = ["codex", "anthropic", "grok", "opencode-go", "venice"];
@@ -119,10 +121,12 @@ function collectCodexBarProvider(
   providerId: ProviderId,
   perEntry: (entry: RawCodexBarEntry) => UsageObservation[],
   failureDetail: (entries: RawCodexBarEntry[]) => string,
+  renewalForEntry?: (entry: RawCodexBarEntry) => SubscriptionRenewal | null,
 ): AdapterResult {
   const res = runCodexBar(providerArg);
   if (!res.ok) return { observations: [], health: { ...res.error, provider: providerId } };
   const observations: UsageObservation[] = [];
+  const renewals: SubscriptionRenewal[] = [];
   let hadError = false;
   let lastError = "";
   for (const entry of res.value.entries) {
@@ -132,6 +136,8 @@ function collectCodexBarProvider(
       continue;
     }
     observations.push(...perEntry(entry));
+    const renewal = renewalForEntry?.(entry);
+    if (renewal) renewals.push(renewal);
   }
   const version = codexBarVersion();
   const health: AdapterHealth =
@@ -147,7 +153,7 @@ function collectCodexBarProvider(
               detail: null,
               ...(version ? { helper: { name: "codexbar", version } } : {}),
             };
-  return { observations, health };
+  return { observations, health, renewals };
 }
 
 interface CodexUsage {
@@ -170,6 +176,7 @@ interface CodexUsage {
     updatedAt?: string;
   };
   credits?: { remaining?: number; updatedAt?: string };
+  subscriptionRenewsAt?: string | null;
 }
 
 function codexAdapter(): AdapterResult {
@@ -236,7 +243,17 @@ function codexAdapter(): AdapterResult {
       });
     }
     return out;
-  }, () => "no codex usage entries returned");
+  }, () => "no codex usage entries returned", (entry) => {
+    const usage = entry.usage as CodexUsage | undefined;
+    const renewsOn = renewalDate(usage?.subscriptionRenewsAt);
+    if (!renewsOn) return null;
+    return {
+      provider: "codex",
+      account: usage?.identity?.accountEmail ?? null,
+      renewsOn,
+      source: "official_ui",
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -384,7 +401,7 @@ export function anthropicHealth(
 async function grokAdapter(): Promise<AdapterResult> {
   const res = await fetchGrokBilling();
   if (!res.ok) return { observations: [], health: res.error };
-  const { credits, resets, resetError, tier, email } = res.value;
+  const { credits, resets, resetError, tier, email, renewsAt } = res.value;
   const c = credits.config;
   const observedAt = now();
   const entitlement =
@@ -468,8 +485,15 @@ async function grokAdapter(): Promise<AdapterResult> {
       exact: true,
     });
   }
+  const renewsOn = renewalDate(renewsAt);
   return {
     observations: out,
+    renewals: renewsOn ? [{
+      provider: "grok",
+      account: email,
+      renewsOn,
+      source: "official_api",
+    }] : [],
     health: out.length === 0
       ? { provider: "grok", status: "unavailable", detail: "billing returned no usable fields" }
       : resetError
@@ -749,6 +773,9 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
     generatedAt: now(),
     observations: results.flatMap((r) => r.observations),
     adapters: results.map((r) => r.health),
-    subscriptions: resolveSubscriptions(wanted),
+    subscriptions: mergeSubscriptionRenewals(
+      resolveSubscriptions(wanted),
+      results.flatMap((result) => result.renewals ?? []),
+    ),
   };
 }

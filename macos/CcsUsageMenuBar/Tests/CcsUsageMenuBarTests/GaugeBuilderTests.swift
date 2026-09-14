@@ -43,7 +43,7 @@ final class GaugeBuilderTests: XCTestCase {
         account: String? = "miladmaaan@gmail.com",
         planName: String = "Max 20x",
         monthlyDollars: Double = 200,
-        renewsOn: String = "2026-10-05"
+        renewsOn: String? = "2026-10-10"
     ) -> SubscriptionInfo {
         SubscriptionInfo(
             provider: provider, account: account, planName: planName,
@@ -86,6 +86,16 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertEqual(section.plan, PlanInfo(name: "Pro", dollars: 68))
         XCTAssertEqual(section.subscription?.renewalDisplay, "Oct 9")
         XCTAssertEqual(section.gauges, [])
+    }
+
+    func testDecodesUnknownSubscriptionRenewal() throws {
+        let json = """
+        {"generatedAt":"2026-09-13T00:00:00Z","observations":[],"subscriptions":[
+          {"provider":"venice","account":null,"planName":"Pro","monthlyDollars":68,"renewsOn":null,"source":"unknown"}
+        ],"adapters":[]}
+        """.data(using: .utf8)!
+        let parsed = try SnapshotDecoder.decode(json)
+        XCTAssertNil(parsed.subscriptions.first?.renewalDisplay)
     }
 
     func testOldSnapshotWithoutSubscriptionsKeepsLegacyPlansAndBill() throws {

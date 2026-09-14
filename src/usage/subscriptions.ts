@@ -1,20 +1,20 @@
-import type { ProviderId, SubscriptionInfo } from "./types.ts";
+import type { ProviderId, SubscriptionInfo, SubscriptionRenewal } from "./types.ts";
 
 interface ConfiguredSubscription {
   provider: ProviderId;
   account: string | null;
   planName: string;
   monthlyDollars: number;
-  anchor: string;
+  anchor: string | null;
 }
 
 const REGISTRY: readonly ConfiguredSubscription[] = [
-  { provider: "anthropic", account: "miladmaaan@gmail.com", planName: "Max 20x", monthlyDollars: 200, anchor: "2026-02-05" },
-  { provider: "anthropic", account: "milad@afternoonumbrellafriends.com", planName: "Max 20x", monthlyDollars: 200, anchor: "2025-06-21" },
-  { provider: "codex", account: "miladmaaan@gmail.com", planName: "Codex Pro", monthlyDollars: 200, anchor: "2026-08-21" },
+  { provider: "anthropic", account: "miladmaaan@gmail.com", planName: "Max 20x", monthlyDollars: 200, anchor: "2026-09-10" },
+  { provider: "anthropic", account: "milad@afternoonumbrellafriends.com", planName: "Max 20x", monthlyDollars: 200, anchor: "2026-09-08" },
+  { provider: "codex", account: "miladmaaan@gmail.com", planName: "Codex Pro", monthlyDollars: 200, anchor: "2026-09-20" },
   { provider: "grok", account: "miladmaaan@gmail.com", planName: "SuperGrok", monthlyDollars: 100, anchor: "2026-09-21" },
   { provider: "opencode-go", account: null, planName: "Go", monthlyDollars: 10, anchor: "2026-09-08" },
-  { provider: "venice", account: null, planName: "Pro", monthlyDollars: 68, anchor: "2026-08-09" },
+  { provider: "venice", account: null, planName: "Pro", monthlyDollars: 68, anchor: null },
 ];
 
 function daysInUtcMonth(year: number, month: number): number {
@@ -80,9 +80,28 @@ export function resolveSubscriptions(
   const wanted = providers ? new Set(providers) : null;
   return REGISTRY
     .filter((entry) => !wanted || wanted.has(entry.provider))
-    .map(({ anchor, ...entry }) => ({
-      ...entry,
-      renewsOn: nextMonthlyRenewal(anchor, asOf),
-      source: "configured" as const,
-    }));
+    .map(({ anchor, ...entry }) => anchor
+      ? { ...entry, renewsOn: nextMonthlyRenewal(anchor, asOf), source: "configured" as const }
+      : { ...entry, renewsOn: null, source: "unknown" as const });
+}
+
+export function renewalDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : losAngelesDate(parsed).value;
+}
+
+export function mergeSubscriptionRenewals(
+  subscriptions: readonly SubscriptionInfo[],
+  renewals: readonly SubscriptionRenewal[],
+): SubscriptionInfo[] {
+  const live = new Map(renewals.map((renewal) => [
+    `${renewal.provider}:${renewal.account ?? ""}`,
+    renewal,
+  ]));
+  return subscriptions.map((subscription) => {
+    const renewal = live.get(`${subscription.provider}:${subscription.account ?? ""}`);
+    return renewal ? { ...subscription, renewsOn: renewal.renewsOn, source: renewal.source } : subscription;
+  });
 }

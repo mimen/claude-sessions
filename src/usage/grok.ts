@@ -29,7 +29,7 @@ export interface GrokCreditsConfig {
 }
 
 export interface GrokSubscriptions {
-  subscriptions?: Array<{ tier?: string; status?: string }>;
+  subscriptions?: Array<{ tier?: string; status?: string; billingPeriodEnd?: string }>;
 }
 
 const GROK_TIMEOUT_MS = 15_000;
@@ -47,7 +47,28 @@ export interface GrokBilling {
   /** Non-null when billing worked but the separate reset-grant RPC did not. */
   resetError: string | null;
   tier: string | null;
+  renewsAt: string | null;
   email: string;
+}
+
+export function activeGrokSubscription(subscriptions: GrokSubscriptions | null): {
+  tier: string | null;
+  renewsAt: string | null;
+} {
+  const active = subscriptions?.subscriptions?.find((subscription) =>
+    subscription.status === "SUBSCRIPTION_STATUS_ACTIVE"
+      && subscription.tier?.startsWith("SUBSCRIPTION_TIER_")
+      && subscription.billingPeriodEnd,
+  ) ?? subscriptions?.subscriptions?.find((subscription) =>
+    subscription.status === "SUBSCRIPTION_STATUS_ACTIVE"
+      && subscription.tier?.startsWith("SUBSCRIPTION_TIER_"),
+  );
+  return {
+    tier: active?.tier
+      ? active.tier.replace("SUBSCRIPTION_TIER_", "").replaceAll("_", " ").toLowerCase()
+      : null,
+    renewsAt: active?.billingPeriodEnd ?? null,
+  };
 }
 
 /** Read identity + token from ~/.grok/auth.json. Values never leave this module raw. */
@@ -185,12 +206,13 @@ export async function fetchGrokBilling(): Promise<Result<GrokBilling, AdapterHea
         .then((value) => ({ ok: true as const, value }))
         .catch((error: Error) => ({ ok: false as const, error })),
     ]);
-    const active = subs?.subscriptions?.find((s) => s.status === "SUBSCRIPTION_STATUS_ACTIVE")?.tier;
+    const active = activeGrokSubscription(subs);
     return ok({
       credits,
       resets: resetResult.ok ? resetResult.value : [],
       resetError: resetResult.ok ? null : resetResult.error.message,
-      tier: active ? active.replace("SUBSCRIPTION_TIER_", "").replaceAll("_", " ").toLowerCase() : null,
+      tier: active.tier,
+      renewsAt: active.renewsAt,
       email,
     });
   } catch (e) {

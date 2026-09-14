@@ -140,7 +140,8 @@ struct UsagePanel: View {
                             .foregroundStyle(.tertiary)
                     }
                     if let subscription = section.subscription {
-                        Text("\(subscription.planName) · renews \(subscription.renewalDisplay)")
+                        Text(subscription.renewalDisplay.map { "\(subscription.planName) · renews \($0)" }
+                            ?? "\(subscription.planName) · renewal unknown")
                             .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)

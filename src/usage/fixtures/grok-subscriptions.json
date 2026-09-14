@@ -1,0 +1,18 @@
+{
+  "subscriptions": [
+    {
+      "tier": "SUBSCRIPTION_TIER_X_PREMIUM",
+      "status": "SUBSCRIPTION_STATUS_ACTIVE"
+    },
+    {
+      "tier": "SUBSCRIPTION_TIER_SUPER_GROK_PLUS",
+      "status": "SUBSCRIPTION_STATUS_ACTIVE",
+      "billingPeriodEnd": "2026-09-21T18:10:21Z"
+    },
+    {
+      "tier": "SUBSCRIPTION_TIER_SUPER_GROK",
+      "status": "SUBSCRIPTION_STATUS_INACTIVE",
+      "billingPeriodEnd": "2026-08-21T18:10:21Z"
+    }
+  ]
+}

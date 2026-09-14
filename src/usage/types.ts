@@ -63,8 +63,15 @@ export interface SubscriptionInfo {
   account: string | null;
   planName: string;
   monthlyDollars: number;
+  renewsOn: string | null;
+  source: "official_api" | "official_ui" | "configured" | "unknown";
+}
+
+export interface SubscriptionRenewal {
+  provider: ProviderId;
+  account: string | null;
   renewsOn: string;
-  source: "official_api" | "configured";
+  source: "official_api" | "official_ui";
 }
 
 export interface UsageSnapshot {

@@ -320,7 +320,9 @@ export function renderSnapshot(snap: UsageSnapshot): string {
   for (const g of sortedGroups) {
     lines.push(g.title);
     if (g.subscription) {
-      lines.push(`  ${g.subscription.planName} · renews ${renewalLabel(g.subscription.renewsOn)}`);
+      lines.push(g.subscription.renewsOn
+        ? `  ${g.subscription.planName} · renews ${renewalLabel(g.subscription.renewsOn)}`
+        : `  ${g.subscription.planName} · renewal unknown`);
     }
     for (const row of g.rows) {
       lines.push(row.kind === "allocation"

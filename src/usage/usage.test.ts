@@ -4,7 +4,7 @@ import { renderSnapshot, shortReset } from "./render.ts";
 import { usageCommand } from "./command.ts";
 import type { AdapterHealth, SubscriptionInfo, UsageObservation, UsageSnapshot } from "./types.ts";
 import { windowFromCswap } from "./adapters.ts";
-import { nextMonthlyRenewal, resolveSubscriptions } from "./subscriptions.ts";
+import { mergeSubscriptionRenewals, nextMonthlyRenewal, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
 
 function obs(over: Partial<UsageObservation> = {}): UsageObservation {
   return {
@@ -50,11 +50,11 @@ test("subscription resolver filters providers and keeps full account identities"
   expect(resolveSubscriptions(["anthropic"], new Date("2026-09-13T00:00:00Z"))).toEqual([
     {
       provider: "anthropic", account: "miladmaaan@gmail.com", planName: "Max 20x",
-      monthlyDollars: 200, renewsOn: "2026-10-05", source: "configured",
+      monthlyDollars: 200, renewsOn: "2026-10-10", source: "configured",
     },
     {
       provider: "anthropic", account: "milad@afternoonumbrellafriends.com", planName: "Max 20x",
-      monthlyDollars: 200, renewsOn: "2026-09-21", source: "configured",
+      monthlyDollars: 200, renewsOn: "2026-10-08", source: "configured",
     },
   ]);
 });
@@ -69,15 +69,30 @@ test("render attaches subscriptions by exact provider and full account", () => {
   }));
   const wrongAccount = out.slice(out.indexOf("miladmaaan@other.com"), out.indexOf("Claude · personal"));
   expect(wrongAccount).not.toContain("Max 20x · renews");
-  expect(out).toContain("Claude · personal\n  Max 20x · renews Oct 5");
-  expect(out).toContain("Claude · AUF\n  Max 20x · renews Sep 21");
+  expect(out).toContain("Claude · personal\n  Max 20x · renews Oct 10");
+  expect(out).toContain("Claude · AUF\n  Max 20x · renews Oct 8");
 });
 
 test("render includes a subscription-only provider group", () => {
   const out = renderSnapshot(snap({
     subscriptions: resolveSubscriptions(["venice"], new Date("2026-09-13T00:00:00Z")),
   }));
-  expect(out).toBe("Venice\n  Pro · renews Oct 9");
+  expect(out).toBe("Venice\n  Pro · renewal unknown");
+});
+
+test("verified renewals override configured fallbacks for the exact account", () => {
+  const configured = resolveSubscriptions(["codex"], new Date("2026-09-14T12:00:00Z"));
+  expect(mergeSubscriptionRenewals(configured, [{
+    provider: "codex",
+    account: "miladmaaan@gmail.com",
+    renewsOn: "2026-10-20",
+    source: "official_ui",
+  }])).toEqual([{ ...configured[0]!, renewsOn: "2026-10-20", source: "official_ui" }]);
+});
+
+test("provider timestamps become Los Angeles subscription dates", () => {
+  expect(renewalDate("2026-09-21T06:30:00Z")).toBe("2026-09-20");
+  expect(renewalDate("not-a-date")).toBeNull();
 });
 
 test("accountLabel prefers email, then login method, then unknown", () => {

@@ -1,5 +1,13 @@
 import { expect, test } from "bun:test";
-import { parseGrokResetGrants } from "./grok.ts";
+import subscriptionsFixture from "./fixtures/grok-subscriptions.json";
+import { activeGrokSubscription, parseGrokResetGrants, type GrokSubscriptions } from "./grok.ts";
+
+test("reads the billing period end from the active Grok subscription", () => {
+  expect(activeGrokSubscription(subscriptionsFixture as GrokSubscriptions)).toEqual({
+    tier: "super grok plus",
+    renewsAt: "2026-09-21T18:10:21Z",
+  });
+});
 
 /** Actual GetRemainingResets response shape captured from grok.com, with token anonymized. */
 test("decodes a redeemable Grok usage reset and its expiry", () => {

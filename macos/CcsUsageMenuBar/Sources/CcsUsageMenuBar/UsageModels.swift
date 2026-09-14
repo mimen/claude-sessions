@@ -36,10 +36,11 @@ struct SubscriptionInfo: Decodable, Equatable {
     let account: String?
     let planName: String
     let monthlyDollars: Double
-    let renewsOn: String
+    let renewsOn: String?
     let source: String
 
-    var renewalDisplay: String {
+    var renewalDisplay: String? {
+        guard let renewsOn else { return nil }
         guard renewsOn.count == 10,
               let date = SnapshotDecoder.dayOnly.date(from: renewsOn) else { return renewsOn }
         return SnapshotDecoder.monthDay.string(from: date)
