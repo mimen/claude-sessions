@@ -28,6 +28,25 @@ function dateOnly(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function losAngelesDate(date: Date): { year: number; month: number; value: string } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((part) => part.type === type)?.value);
+  const year = value("year");
+  const month = value("month");
+  const day = value("day");
+  return {
+    year,
+    month,
+    value: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+  };
+}
+
 export function nextMonthlyRenewal(anchor: string, asOf: Date): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(anchor);
   if (!match) throw new Error(`invalid subscription anchor: ${anchor}`);
@@ -35,14 +54,14 @@ export function nextMonthlyRenewal(anchor: string, asOf: Date): string {
   if (Number.isNaN(anchorDate.getTime()) || dateOnly(anchorDate) !== anchor) {
     throw new Error(`invalid subscription anchor: ${anchor}`);
   }
-  const today = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate()));
-  if (today < anchorDate) return anchor;
+  const today = losAngelesDate(asOf);
+  if (today.value < anchor) return anchor;
   const anchorDay = Number(match[3]);
-  let year = asOf.getUTCFullYear();
-  let month = asOf.getUTCMonth();
+  let year = today.year;
+  let month = today.month - 1;
   let day = Math.min(anchorDay, daysInUtcMonth(year, month));
   let candidate = new Date(Date.UTC(year, month, day));
-  if (candidate < today) {
+  if (dateOnly(candidate) < today.value) {
     month += 1;
     if (month === 12) {
       year += 1;

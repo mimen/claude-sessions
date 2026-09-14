@@ -37,8 +37,13 @@ function snap(over: { observations?: UsageObservation[]; adapters?: AdapterHealt
 test("next monthly renewal uses the current anchor day or the next month", () => {
   expect(nextMonthlyRenewal("2026-09-21", new Date("2026-08-01T00:00:00Z"))).toBe("2026-09-21");
   expect(nextMonthlyRenewal("2026-02-05", new Date("2026-09-05T23:59:59Z"))).toBe("2026-09-05");
-  expect(nextMonthlyRenewal("2026-02-05", new Date("2026-09-06T00:00:00Z"))).toBe("2026-10-05");
+  expect(nextMonthlyRenewal("2026-02-05", new Date("2026-09-06T08:00:00Z"))).toBe("2026-10-05");
   expect(nextMonthlyRenewal("2024-01-31", new Date("2026-02-28T12:00:00Z"))).toBe("2026-02-28");
+});
+
+test("renewal uses the Los Angeles calendar date at the evening boundary", () => {
+  expect(nextMonthlyRenewal("2026-09-21", new Date("2026-09-21T03:00:00Z"))).toBe("2026-09-21");
+  expect(nextMonthlyRenewal("2026-09-21", new Date("2026-09-22T03:00:00Z"))).toBe("2026-09-21");
 });
 
 test("subscription resolver filters providers and keeps full account identities", () => {
