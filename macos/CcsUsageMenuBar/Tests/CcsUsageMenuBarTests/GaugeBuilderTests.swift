@@ -192,6 +192,29 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertNil(GaugeBuilder.overallUsedFraction([]))
     }
 
+    func testExhaustedFableScopeDoesNotPinTheAccount() throws {
+        let d = Date(timeIntervalSince1970: 1_757_000_000)
+        let r = Date(timeIntervalSince1970: 1_757_500_000)
+        let sections = GaugeBuilder.sections(from: snapshot([
+            observation(entitlement: "claude-max:x@example.com", window: "five_hour",
+                        used: 11, resetsAt: r, observedAt: d),
+            claudeWeekly(account: "x", fable: false, used: 54, observedAt: d, resetsAt: r),
+            claudeWeekly(account: "x", fable: true, used: 100, observedAt: d, resetsAt: r)
+        ]))
+        // Fable is a scope inside the weekly pool, so an exhausted Fable leaves
+        // the account's own weekly cap as the binding constraint.
+        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction(sections)), 0.54, accuracy: 0.001)
+    }
+
+    func testScopedRowCountsWhenItsParentPoolIsMissing() throws {
+        let d = Date(timeIntervalSince1970: 1_757_000_000)
+        let r = Date(timeIntervalSince1970: 1_757_500_000)
+        let sections = GaugeBuilder.sections(from: snapshot([
+            claudeWeekly(account: "x", fable: true, used: 100, observedAt: d, resetsAt: r)
+        ]))
+        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction(sections)), 1.0, accuracy: 0.001)
+    }
+
     func testDollarWeightingFavorsExpensivePlan() {
         // Max ($200, 50% used) should dominate Pro ($20, 100% used).
         let maxSection = UsageSection(
@@ -407,7 +430,8 @@ final class GaugeBuilderTests: XCTestCase {
             XCTAssertTrue(s.gauges.contains { $0.label == "Fable" })
         }
         let personal = try XCTUnwrap(sections.first { $0.accountDisplay == "personal" })
-        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction([personal])), 0.95, accuracy: 0.001)
+        // Weekly 48% binds, not the 95% Fable scope sitting inside it.
+        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction([personal])), 0.48, accuracy: 0.001)
         let auf = try XCTUnwrap(sections.first { $0.accountDisplay == "auf" })
         XCTAssertEqual(auf.budgets[1].usage, .known(usedPct: 120, resetsAt: r, cached: false))
         XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction([auf])), 0.85, accuracy: 0.001)
