@@ -17,10 +17,20 @@ struct UsageSection: Identifiable, Equatable {
             ?? GaugeBuilder.legacyPlan(provider: provider, account: account, gauges: gauges)
     }
 
-    // Hide the duplicate Fable row in the panel, not from provider-limit accounting.
+    /// Rows reporting a scope inside another row's pool, where that pool is also
+    /// present. Claude's weekly "#Fable" scope is one: it spends the weekly
+    /// allowance rather than capping anything of its own, so a spent Fable must not
+    /// read as a spent account. Grok's sub-pools never reach here, foldBreakdowns
+    /// having already folded them into their parent's bar.
+    var subPoolIds: Set<String> {
+        let present = Set(gauges.map(\.id))
+        return Set(gauges.filter { $0.parentGaugeId.map(present.contains) == true }.map(\.id))
+    }
+
     var displayGauges: [UsageGauge] {
         guard !budgets.isEmpty else { return gauges }
-        return gauges.filter { $0.label != "Fable" || $0.windowLabel != "wk" }
+        let subPools = subPoolIds
+        return gauges.filter { !subPools.contains($0.id) }
     }
 
     /// True when any observation behind this section came from a stale cache.
@@ -40,7 +50,8 @@ struct UsageSection: Identifiable, Equatable {
     }
 
     var allowanceGauges: [UsageGauge] {
-        gauges.filter { $0.fractionUsed != nil }
+        let subPools = subPoolIds
+        return gauges.filter { $0.fractionUsed != nil && !subPools.contains($0.id) }
     }
 }
 
@@ -175,7 +186,7 @@ enum GaugeBuilder {
         var foldedIds = Set<String>()
         // Only Grok reports sub-pool breakdowns as stacked-bar segments;
         // other providers' suffixed rows (#Fable) stay as their own rows.
-        for g in gauges where g.provider == "grok" && g.isBreakdownChild {
+        for g in gauges where g.provider == "grok" && g.parentGaugeId != nil {
             guard let parentId = g.parentGaugeId, parents[parentId] != nil else { continue }
             childrenByParent[parentId, default: []].append(g)
             foldedIds.insert(g.id)
@@ -371,9 +382,6 @@ enum GaugeBuilder {
 }
 
 private extension UsageGauge {
-    /// A "#sub-pool" child of a family that also reports a parent aggregate row.
-    var isBreakdownChild: Bool { parentGaugeId != nil }
-
     /// The parent allowance gauge's id: same id with the "#suffix" removed.
     /// Ids look like "provider|entitlement#suffix|window".
     var parentGaugeId: String? {
