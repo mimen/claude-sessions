@@ -170,8 +170,8 @@ struct GaugeRow: View {
     }
 }
 
-/// A Claude 50/50 display allocation row. Its bar is neutral and clamped, so a >100%
-/// estimate never overflows or reads as an over-limit warning; the numeric stays exact.
+/// A Claude display budget row. Its bar is neutral and clamped at full width, because a
+/// provider can still publish a reading above its own limit. The numeric stays verbatim.
 struct BudgetRow: View {
     let budget: ClaudeBudget
     let now: Date
@@ -184,8 +184,7 @@ struct BudgetRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer()
-                if case .known(let usedPct, _, _) = budget.usage {
-                    // Unclamped: the estimate can legitimately read past 100%.
+                if case .known(let usedPct, _, _, _) = budget.usage {
                     Text(String(format: "%.0f%%", usedPct))
                         .font(.system(size: 11.5, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -193,7 +192,7 @@ struct BudgetRow: View {
             }
 
             switch budget.usage {
-            case .known(let usedPct, let resetsAt, let cached):
+            case .known(let usedPct, let resetsAt, let cached, let binding):
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.secondary.opacity(0.18))
@@ -204,8 +203,14 @@ struct BudgetRow: View {
                 }
                 .frame(height: 5)
                 HStack(spacing: 4) {
-                    Text(resetsAt.map { "resets in \(relative($0))" } ?? "estimated")
-                    if cached { Text("· cached").foregroundStyle(.orange) }
+                    let notes = [
+                        resetsAt.map { "resets in \(relative($0))" },
+                        binding == .sharedPool ? "limited by the weekly pool" : nil
+                    ].compactMap { $0 }
+                    if !notes.isEmpty { Text(notes.joined(separator: " · ")) }
+                    if cached {
+                        Text(notes.isEmpty ? "cached" : "· cached").foregroundStyle(.orange)
+                    }
                     Spacer()
                 }
                 .font(.system(size: 9.5))

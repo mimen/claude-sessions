@@ -1,13 +1,16 @@
 import Foundation
 
+/// Which meter is the lower ceiling: the budget's own cap, or the weekly pool it nests inside.
+enum BudgetBinding: Equatable { case ownCap, sharedPool }
+
 enum AllocationUsage: Equatable {
-    case known(usedPct: Double, resetsAt: Date?, cached: Bool)
+    case known(usedPct: Double, resetsAt: Date?, cached: Bool, binding: BudgetBinding)
     case unknown(reason: String)
 }
 
-/// Display allocations stay separate from provider limits and overall usage.
+/// Display budgets stay separate from provider limits and overall usage.
 struct ClaudeBudget: Equatable, Identifiable {
-    enum Name: String { case fable = "Fable budget", opus = "Opus budget" }
+    enum Name: String { case fable = "Fable budget", nonFable = "Non-Fable budget" }
     let name: Name
     let usage: AllocationUsage
     var id: String { name.rawValue }
@@ -17,7 +20,8 @@ struct ClaudeBudget: Equatable, Identifiable {
 enum ClaudeBudgets {
     private static func percentage(_ o: UsageObservation?) -> Double? {
         guard let o, let used = o.used, let limit = o.limit, limit > 0 else { return nil }
-        let pct = used / limit * 100
+        // Multiply before dividing, as the CLI does, so whole-number readings stay exact.
+        let pct = used * 100 / limit
         return pct.isFinite && pct >= 0 ? pct : nil
     }
 
@@ -34,6 +38,27 @@ enum ClaudeBudgets {
     private static func observationsAlign(_ a: UsageObservation, _ b: UsageObservation) -> Bool {
         guard let ao = a.observedAt, let bo = b.observedAt else { return false }
         return ao == bo
+    }
+
+    /// The Fable budget compares two readings, so it carries the guards that make the
+    /// comparison meaningful. Reporting the Fable cap without the weekly pool it nests
+    /// inside would hide an already exhausted account, so a missing weekly reading is unknown.
+    private static func fableBudget(fable: UsageObservation?, fablePct: Double?,
+                                    weekly: UsageObservation?, weeklyPct: Double?) -> AllocationUsage {
+        guard let fable, let fablePct else { return .unknown(reason: "Fable reading unavailable") }
+        guard let weekly, let weeklyPct else { return .unknown(reason: "weekly reading unavailable") }
+        guard observationsAlign(weekly, fable) else { return .unknown(reason: "observation times differ") }
+        guard sameReset(weekly.resetsAt, fable.resetsAt) || (fablePct == 0 && fable.resetsAt == nil) else {
+            return .unknown(reason: "reset windows differ")
+        }
+        // A Fable request spends the shared weekly pool too, so the fuller meter is the real
+        // ceiling. Taking the larger of two real readings can only report a number one of
+        // them published.
+        let ownCap = fablePct >= weeklyPct
+        return .known(usedPct: ownCap ? fablePct : weeklyPct,
+                      resetsAt: ownCap ? fable.resetsAt : weekly.resetsAt,
+                      cached: cached(fable) || cached(weekly),
+                      binding: ownCap ? .ownCap : .sharedPool)
     }
 
     static func compute(_ rows: [UsageObservation]) -> [ClaudeBudget] {
@@ -55,36 +80,19 @@ enum ClaudeBudgets {
         let weeklyPct = percentage(weekly)
         let fablePct = percentage(fable)
 
-        let fableUsage: AllocationUsage
-        if let fable, let fablePct {
-            fableUsage = .known(usedPct: fablePct, resetsAt: fable.resetsAt, cached: cached(fable))
+        // A non-Fable request spends only the shared weekly pool, so that one reading is the
+        // whole budget and no cross-reading guard applies to it.
+        let nonFableUsage: AllocationUsage
+        if let weekly, let weeklyPct {
+            nonFableUsage = .known(usedPct: weeklyPct, resetsAt: weekly.resetsAt,
+                                   cached: cached(weekly), binding: .sharedPool)
         } else {
-            fableUsage = .unknown(reason: "Fable reading unavailable")
+            nonFableUsage = .unknown(reason: "weekly reading unavailable")
         }
 
-        let opusUsage: AllocationUsage
-        if let fable, let fablePct, let weekly, let weeklyPct {
-            if cached(weekly) || cached(fable) {
-                opusUsage = .unknown(reason: "cached readings")
-            } else if !observationsAlign(weekly, fable) {
-                opusUsage = .unknown(reason: "observation times differ")
-            } else if !sameReset(weekly.resetsAt, fable.resetsAt) && !(fablePct == 0 && fable.resetsAt == nil) {
-                opusUsage = .unknown(reason: "reset windows differ")
-            } else {
-                // The user's 50/50 allocation model: Opus is all non-Fable weekly use,
-                // estimated against its half of the allowance. Not a provider-reported quota.
-                let opusPct = 2 * weeklyPct - fablePct
-                opusUsage = opusPct < 0
-                    ? .unknown(reason: "inconsistent 50/50 readings")
-                    : .known(usedPct: opusPct, resetsAt: weekly.resetsAt, cached: false)
-            }
-        } else if fable == nil || fablePct == nil {
-            opusUsage = .unknown(reason: "Fable reading unavailable")
-        } else {
-            opusUsage = .unknown(reason: "weekly reading unavailable")
-        }
-
-        return [ClaudeBudget(name: .fable, usage: fableUsage),
-                ClaudeBudget(name: .opus, usage: opusUsage)]
+        return [ClaudeBudget(name: .fable,
+                             usage: fableBudget(fable: fable, fablePct: fablePct,
+                                                weekly: weekly, weeklyPct: weeklyPct)),
+                ClaudeBudget(name: .nonFable, usage: nonFableUsage)]
     }
 }

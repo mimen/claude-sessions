@@ -1,6 +1,6 @@
 # Claude budget preview
 
-A standalone prototype of the numbers-only 50/50 Fable and Opus allocation view. Opus includes all non-Fable Claude models. This reflects the user's revised direction, not the earlier nested-cap recommendation in the separate proposal.
+A standalone prototype of the numbers-only 50/50 Fable and Opus allocation view. Opus includes all non-Fable Claude models. This records an earlier exploration. The nested-cap model from the separate proposal is the decided direction, and the shipped surfaces follow it.
 
 From the repository root:
 
