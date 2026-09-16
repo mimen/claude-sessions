@@ -22,16 +22,16 @@ Eight, in one repository. The `ccs` CLI is the hub; the others read its caches, 
 sidebar server, or drive it. The September 2026 audit note drew six at an older revision;
 the native macOS sidebar and the usage menu-bar app have landed since.
 
-| Component | Path | What it is |
-|---|---|---|
-| `ccs` CLI and engine | `src/`, `bin/`, `package.json` | TypeScript on Bun. The core: indexing, catalogue, cost, delegation, cluster and role orchestration. Sole writer of the SQLite caches. |
-| Go TUI | `tui-go/` | Bubble Tea TUI, the default `ccs` interface. Reads the caches read-only and shells every mutation back to the CLI. |
-| Productivity sidebar server | `src/sidebar/` | HTTP server on loopback `:8787`, a work queue for the cmux Dock. A second TypeScript project. The React web app it bundles is now frozen, kept as a fallback. |
-| CCS native sidebar | `macos/` | SwiftUI cmux ExtensionKit extension, now the primary sidebar front-end. A client of the sidebar server: reads `/api/snapshot`, POSTs mutations. `CcsSidebarApp/` is its host app, `Sources/ccs-sidebar-render/` a headless PNG renderer. |
-| cmux Swift sidebar | `integrations/cmux/` | `ccs.swift`, a compact session navigator interpreted by cmux itself, plus `ccs-web.url` and a guarded installer. |
-| Usage menu-bar app | `macos/CcsUsageMenuBar/` | Native SwiftUI `MenuBarExtra` showing live provider usage from `ccs usage --json`. Its own app, shells out to `ccs`. |
-| `ccs` plugin and marketplace | `plugins/ccs/`, `.claude-plugin/` | Claude Code plugin, thirteen `/ccs:*` commands, distributed via an in-repo marketplace manifest. |
-| Scheduled LaunchAgents | `scripts/launchd/` | Two macOS LaunchAgents (enrich, catalogue-refresh) and three installers. The only unattended component. |
+| Component | Path | What it is | Surfaces |
+|---|---|---|---|
+| `ccs` CLI and engine | `src/`, `bin/`, `package.json` | TypeScript on Bun. The core: indexing, catalogue, cost, delegation, cluster and role orchestration. Sole writer of the SQLite caches. | cli-tui, backend-data |
+| Go TUI | `tui-go/` | Bubble Tea TUI, the default `ccs` interface. Reads the caches read-only and shells every mutation back to the CLI. | cli-tui |
+| Productivity sidebar server | `src/sidebar/` | HTTP server on loopback `:8787`, a work queue for the cmux Dock. A second TypeScript project. The React web app it bundles is now frozen, kept as a fallback. | api, web |
+| CCS native sidebar | `macos/` | SwiftUI cmux ExtensionKit extension, now the primary sidebar front-end. A client of the sidebar server: reads `/api/snapshot`, POSTs mutations. `CcsSidebarApp/` is its host app, `Sources/ccs-sidebar-render/` a headless PNG renderer. | desktop, cli-tui |
+| cmux Swift sidebar | `integrations/cmux/` | `ccs.swift`, a compact session navigator interpreted by cmux itself, plus `ccs-web.url` and a guarded installer. | configuration |
+| Usage menu-bar app | `macos/CcsUsageMenuBar/` | Native SwiftUI `MenuBarExtra` showing live provider usage from `ccs usage --json`. Its own app, shells out to `ccs`. | desktop |
+| `ccs` plugin and marketplace | `plugins/ccs/`, `.claude-plugin/` | Claude Code plugin, thirteen `/ccs:*` commands, distributed via an in-repo marketplace manifest. | configuration |
+| Scheduled LaunchAgents | `scripts/launchd/` | Two macOS LaunchAgents (enrich, catalogue-refresh) and three installers. The only unattended component. | resident, configuration, cli-tui |
 
 `docs/` is not a component. It ships 100 ADRs, `CONTEXT.md`, `docs/GLOSSARY.md`, and
 `docs/runbook.md`, all documentation and no code. `skills/ccs-upkeep/SKILL.md` is a single
