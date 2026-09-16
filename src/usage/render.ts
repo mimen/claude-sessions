@@ -231,9 +231,13 @@ function displayOrder(row: DisplayRow): number {
 function allocationRow(budget: ClaudeBudget, limitPad: number): string {
   const label = `  ${budget.name.padEnd(limitPad)} `;
   if (budget.usage.kind === "unknown") return `${label}unknown (${budget.usage.reason})`;
-  const { usedPct, resetsAt, cached } = budget.usage;
-  const when = countdown(resetsAt) || shortReset(resetsAt ?? "");
-  return `${label}${bar(usedPct)} ${String(Math.round(usedPct)).padStart(3)}%  ${when}${cached ? " · cached" : ""}`.trimEnd();
+  const { usedPct, resetsAt, cached, binding } = budget.usage;
+  const notes = [
+    countdown(resetsAt) || shortReset(resetsAt ?? ""),
+    binding === "shared-pool" ? "limited by the weekly pool" : "",
+    cached ? "cached" : "",
+  ].filter(Boolean);
+  return `${label}${bar(usedPct)} ${String(Math.round(usedPct)).padStart(3)}%  ${notes.join(" · ")}`.trimEnd();
 }
 
 /** Column width so limit names align within their group blocks. */
@@ -330,7 +334,7 @@ export function renderSnapshot(snap: UsageSnapshot): string {
         : rowFor(row.obs, row.name, limitPad, capSummary));
     }
     if (g.rows.some(row => row.kind === "allocation")) {
-      lines.push("  50/50 allocation model; Opus is estimated.");
+      lines.push("  One weekly pool covers every model; the Fable cap nests inside it.");
     }
     lines.push("");
   }
