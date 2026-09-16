@@ -174,7 +174,7 @@ struct UsagePanel: View {
                 ForEach(section.budgets) { budget in
                     BudgetRow(budget: budget, now: now)
                 }
-                Text("50/50 allocation; Opus estimated.")
+                Text("One weekly pool for all models; Fable nests inside it.")
                     .font(.system(size: 9, weight: .medium, design: .rounded))
                     .foregroundStyle(.tertiary)
                     .padding(.top, 1)
