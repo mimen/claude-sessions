@@ -28,9 +28,10 @@ const SOURCES_HELP = `ccs usage sources — what each adapter reads
   venice       Official APIs (official_api): api_keys/rate_limits for balances, tier,
                per-model caps, next epoch. USD and DIEM never merged.
 
-Claude text rows use a per-account 50/50 Fable / Opus allocation model.
-Opus includes all non-Fable models and is estimated as 2 × weekly % - Fable %.
-Budget percentages can exceed 100%. The shared weekly reading is unchanged.
+Claude text rows split each account into a Fable budget and a non-Fable budget.
+One weekly pool covers every model, with a smaller Fable cap nested inside it.
+A Fable request spends both, so the Fable budget reports whichever meter is fuller
+and names the pool that binds it. The shared weekly reading is unchanged.
 --json retains provider observations and does not contain these display budgets.
 
 Evidence classes, strongest first: official_api, provider_header, official_ui,

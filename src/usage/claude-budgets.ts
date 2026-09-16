@@ -1,17 +1,20 @@
 import type { UsageObservation } from "./types.ts";
 
+/** Which meter is the lower ceiling: the budget's own cap, or the weekly pool it nests inside. */
+export type BudgetBinding = "own-cap" | "shared-pool";
+
 export type AllocationUsage =
-  | { kind: "known"; usedPct: number; resetsAt: string | null; cached: boolean }
+  | { kind: "known"; usedPct: number; resetsAt: string | null; cached: boolean; binding: BudgetBinding }
   | { kind: "unknown"; reason: string };
 
 export interface ClaudeBudget {
-  name: "Fable budget" | "Opus budget";
+  name: "Fable budget" | "Non-Fable budget";
   usage: AllocationUsage;
 }
 
 function percentage(row: UsageObservation | undefined): number | null {
   if (!row || row.used === null || row.limit === null || row.limit <= 0) return null;
-  const pct = row.used / row.limit * 100;
+  const pct = row.used * 100 / row.limit;
   return Number.isFinite(pct) && pct >= 0 ? pct : null;
 }
 
@@ -35,26 +38,32 @@ export function claudeBudgets(rows: UsageObservation[]): ClaudeBudget[] {
 
   const weeklyPct = percentage(weekly);
   const fablePct = percentage(fable);
-  const fableUsage: AllocationUsage = fable && fablePct !== null
-    ? { kind: "known", usedPct: fablePct, resetsAt: fable.resetsAt, cached: cached(fable) }
-    : { kind: "unknown", reason: "Fable reading unavailable" };
-  let opusUsage: AllocationUsage;
+
+  // A non-Fable request spends only the shared weekly pool, so that one reading is the whole budget.
+  const nonFableUsage: AllocationUsage = weekly && weeklyPct !== null
+    ? { kind: "known", usedPct: weeklyPct, resetsAt: weekly.resetsAt, cached: cached(weekly), binding: "shared-pool" }
+    : { kind: "unknown", reason: "weekly reading unavailable" };
+
+  let fableUsage: AllocationUsage;
   if (!fable || fablePct === null) {
-    opusUsage = { kind: "unknown", reason: "Fable reading unavailable" };
+    fableUsage = { kind: "unknown", reason: "Fable reading unavailable" };
   } else if (!weekly || weeklyPct === null) {
-    opusUsage = { kind: "unknown", reason: "weekly reading unavailable" };
-  } else if (cached(weekly) || cached(fable)) {
-    opusUsage = { kind: "unknown", reason: "cached readings" };
+    fableUsage = { kind: "unknown", reason: "weekly reading unavailable" };
   } else if (Date.parse(weekly.observedAt) !== Date.parse(fable.observedAt)) {
-    opusUsage = { kind: "unknown", reason: "observation times differ" };
+    fableUsage = { kind: "unknown", reason: "observation times differ" };
   } else if (!sameReset(weekly.resetsAt, fable.resetsAt) && !(fablePct === 0 && fable.resetsAt === null)) {
-    opusUsage = { kind: "unknown", reason: "reset windows differ" };
+    fableUsage = { kind: "unknown", reason: "reset windows differ" };
   } else {
-    // This is the user's 50/50 allocation model, not a provider-reported non-Fable quota.
-    const opusPct = 2 * weeklyPct - fablePct;
-    opusUsage = opusPct < 0
-      ? { kind: "unknown", reason: "inconsistent 50/50 readings" }
-      : { kind: "known", usedPct: opusPct, resetsAt: weekly.resetsAt, cached: false };
+    // A Fable request spends the shared weekly pool too, so the fuller meter is the real ceiling.
+    // Taking the larger of two real readings can only report a number one of them published.
+    const ownCap = fablePct >= weeklyPct;
+    fableUsage = {
+      kind: "known",
+      usedPct: ownCap ? fablePct : weeklyPct,
+      resetsAt: ownCap ? fable.resetsAt : weekly.resetsAt,
+      cached: cached(fable) || cached(weekly),
+      binding: ownCap ? "own-cap" : "shared-pool",
+    };
   }
-  return [{ name: "Fable budget", usage: fableUsage }, { name: "Opus budget", usage: opusUsage }];
+  return [{ name: "Fable budget", usage: fableUsage }, { name: "Non-Fable budget", usage: nonFableUsage }];
 }

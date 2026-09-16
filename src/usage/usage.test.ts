@@ -149,7 +149,8 @@ test("bars align: every bar row shares the same bar column offset", () => {
   const offsets = out.split("\n")
     .filter((l) => l.includes("█") || l.includes("░"))
     .map((l) => l.indexOf("█") >= 0 ? l.indexOf("█") : l.indexOf("░"));
-  expect(offsets.length).toBe(2);
+  // Three bars: both accounts' own rows, plus the non-Fable budget the weekly row alone supports.
+  expect(offsets.length).toBe(3);
   expect(new Set(offsets).size).toBe(1); // all bars start at the same column
 });
 
