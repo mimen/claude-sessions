@@ -5,6 +5,13 @@ struct PlanInfo: Equatable {
     let dollars: Double
 }
 
+/// Dollar-weighted overall used fractions (0...1) for the two headline windows.
+/// Either is nil when no account reports a reading of that kind.
+struct OverallReading: Equatable {
+    let fiveHour: Double?
+    let sevenDay: Double?
+}
+
 struct UsageSection: Identifiable, Equatable {
     let provider: String
     let account: String?
@@ -284,23 +291,32 @@ enum GaugeBuilder {
         )
     }
 
-    /// Limit-weighted average used fraction across sections, weighted by each
-    /// account's plan's dollar value (each account counts once).
-    /// Dollar-weighted average of each account's binding constraint (its most-used
-    /// window): a nearly-exhausted weekly cap cancels out the same account's fresh
-    /// 5h window — effective availability is the min, so usage is the max.
-    static func overallUsedFraction(_ sections: [UsageSection]) -> Double? {
-        var total = 0.0, weight = 0.0
+    /// Dollar-weighted overall used fraction per window, each section weighted by
+    /// its plan dollars (or fallbackDollars). Sub-pool scoped gauges are excluded
+    /// via allowanceGauges, so an exhausted #Fable scope cannot pin the account.
+    static func overallReading(_ sections: [UsageSection]) -> OverallReading {
+        var fiveTotal = 0.0, fiveWeight = 0.0
+        var sevenTotal = 0.0, sevenWeight = 0.0
         for s in sections {
             let allowances = s.allowanceGauges
-            guard !allowances.isEmpty else { continue }
+            let weekly = allowances.first { $0.windowLabel == UsageGauge.windowShort["weekly"] }?.fractionUsed
+            let raw5h = allowances.first { $0.windowLabel == UsageGauge.windowShort["five_hour"] }?.fractionUsed
             let dollars = s.plan?.dollars ?? fallbackDollars
-            let binding = allowances.compactMap(\.fractionUsed).max() ?? 0
-            total += binding * dollars
-            weight += dollars
+            // A sub with no 5h cap falls through to its weekly cap, and even a real
+            // 5h cap can't outspend the weekly pool, so 5h usage is the max of both.
+            if let five = [raw5h, weekly].compactMap({ $0 }).max() {
+                fiveTotal += five * dollars
+                fiveWeight += dollars
+            }
+            if let seven = weekly {
+                sevenTotal += seven * dollars
+                sevenWeight += dollars
+            }
         }
-        guard weight > 0 else { return nil }
-        return total / weight
+        return OverallReading(
+            fiveHour: fiveWeight > 0 ? fiveTotal / fiveWeight : nil,
+            sevenDay: sevenWeight > 0 ? sevenTotal / sevenWeight : nil
+        )
     }
 
     static func monthlyBill(_ sections: [UsageSection]) -> (total: Double, planCount: Int) {

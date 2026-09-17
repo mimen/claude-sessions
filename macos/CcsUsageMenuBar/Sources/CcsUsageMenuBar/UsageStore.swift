@@ -2,6 +2,14 @@ import AppKit
 import Foundation
 import SwiftUI
 
+/// What the menu bar label shows: 5h only, 7d only, or both as "5h / 7d".
+enum OverallMode: String, CaseIterable, Identifiable {
+    case fiveHour = "5h"
+    case sevenDay = "7d"
+    case both = "5h / 7d"
+    var id: String { rawValue }
+}
+
 @MainActor
 final class UsageStore: ObservableObject {
     enum Phase: Equatable {
@@ -19,6 +27,10 @@ final class UsageStore: ObservableObject {
     @Published var switchingTo: CswapAccount?
     @Published var switchError: String?
     @Published var adapterNotes: [String] = []
+    @Published var overallMode: OverallMode =
+        UserDefaults.standard.string(forKey: "overallMode").flatMap(OverallMode.init) ?? .both {
+        didSet { UserDefaults.standard.set(overallMode.rawValue, forKey: "overallMode") }
+    }
 
     private var hasLoadedCswap = false
     private var basePanelHeight: CGFloat = 420
@@ -162,7 +174,7 @@ final class UsageStore: ObservableObject {
         GaugeBuilder.sections(from: snapshot)
     }
 
-    var overallRemaining: Double? {
-        GaugeBuilder.overallUsedFraction(sections).map { 1 - $0 }
+    var overallReading: OverallReading {
+        GaugeBuilder.overallReading(sections)
     }
 }

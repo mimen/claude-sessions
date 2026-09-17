@@ -197,6 +197,16 @@ struct UsagePanel: View {
                 .font(.system(size: 9.5))
                 .foregroundStyle(.tertiary)
             Spacer()
+            Picker("", selection: $store.overallMode) {
+                ForEach(OverallMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .font(.system(size: 9.5))
+            .foregroundStyle(.secondary)
+            .fixedSize()
         }
         .padding(.horizontal, 14)
         .padding(.top, 8)
@@ -250,20 +260,39 @@ struct UsagePanel: View {
 }
 
 struct MenuBarLabel: View {
-    /// Weighted-average remaining share across all allowance gauges.
-    let remaining: Double?
+    let reading: OverallReading
+    let mode: OverallMode
 
     var body: some View {
-        if let remaining {
+        let values = remainings
+        if values.isEmpty {
+            Image(systemName: "sparkles")
+        } else {
             HStack(spacing: 3) {
                 Image(systemName: "sparkles")
-                Text("\(Int((remaining * 100).rounded()))%")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                ForEach(Array(values.enumerated()), id: \.offset) { i, remaining in
+                    if i > 0 {
+                        Text("/")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("\(Int((remaining * 100).rounded()))%")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(Self.labelColor(remaining))
+                }
             }
-            .foregroundStyle(Self.labelColor(remaining))
-        } else {
-            Image(systemName: "sparkles")
         }
+    }
+
+    /// Remaining share (1 - used) per shown window, 5h first, nils dropped.
+    private var remainings: [Double] {
+        let used: [Double?]
+        switch mode {
+        case .fiveHour: used = [reading.fiveHour]
+        case .sevenDay: used = [reading.sevenDay]
+        case .both: used = [reading.fiveHour, reading.sevenDay]
+        }
+        return used.compactMap { $0.map { 1 - $0 } }
     }
 
     static func labelColor(_ remaining: Double) -> Color {

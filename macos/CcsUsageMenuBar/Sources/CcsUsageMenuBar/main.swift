@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = item.button else { return }
-        let labelView = NSHostingView(rootView: MenuBarLabel(remaining: nil))
+        let labelView = NSHostingView(rootView: MenuBarLabel(reading: store.overallReading, mode: store.overallMode))
         let ideal = labelView.fittingSize
         let barHeight = NSStatusBar.system.thickness
         labelView.frame = NSRect(x: 0, y: (barHeight - ideal.height) / 2,
@@ -32,12 +32,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = false
 
-        store.$gauges
+        store.$gauges.map { _ in () }
+            .merge(with: store.$overallMode.map { _ in () })
             .receive(on: RunLoop.main)
-            .sink { [weak self] gauges in
+            .sink { [weak self] in
                 guard let self, let button = self.statusItem?.button else { return }
-                let remaining = AppStore.shared.overallRemaining
-                labelView.rootView = MenuBarLabel(remaining: remaining)
+                labelView.rootView = MenuBarLabel(reading: AppStore.shared.overallReading,
+                                                  mode: AppStore.shared.overallMode)
                 let width = labelView.fittingSize.width
                 labelView.frame.size.width = max(width, 20)
                 button.frame.size.width = max(width, 20) + 14
@@ -93,7 +94,9 @@ if CommandLine.arguments.contains("--fetch-once") {
                 print("    \(g.label) | \(g.windowLabel ?? "-") | \(g.fractionUsed.map { "\(Int($0 * 100))%" } ?? g.remaining.map { "$\($0)" } ?? "?")")
             }
         }
-        print("overall used avg: \(GaugeBuilder.overallUsedFraction(gauges).map { "\(Int($0 * 100))%" } ?? "nil")")
+        let reading = GaugeBuilder.overallReading(gauges)
+        func pct(_ v: Double?) -> String { v.map { "\(Int($0 * 100))%" } ?? "nil" }
+        print("overall used 5h: \(pct(reading.fiveHour)), 7d: \(pct(reading.sevenDay))")
     } catch {
         print("FETCH FAILED: \(error)")
     }

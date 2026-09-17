@@ -180,16 +180,20 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertEqual(sections[0].gauges.count, 2)
     }
 
-    func testOverallUsesBindingConstraintPerAccount() {
+    func testFiveHourReadingRespectsTheWeeklyCap() {
         let gauges = [
-            GaugeBuilder.allowanceGauge(observation(used: 100)), // exhausted weekly cap
-            GaugeBuilder.allowanceGauge(observation(used: 0))    // fresh 5h window
+            GaugeBuilder.allowanceGauge(observation(window: "weekly", used: 100)), // exhausted weekly cap
+            GaugeBuilder.allowanceGauge(observation(window: "five_hour", used: 0)) // fresh 5h window
         ]
         let section = UsageSection(provider: "anthropic", account: nil,
                                    subscription: nil, gauges: gauges)
-        // The exhausted window cancels out the fresh one — binding constraint wins.
-        XCTAssertEqual(GaugeBuilder.overallUsedFraction([section])!, 1.0)
-        XCTAssertNil(GaugeBuilder.overallUsedFraction([]))
+        // A fresh 5h window cannot outspend the exhausted weekly pool.
+        let reading = GaugeBuilder.overallReading([section])
+        XCTAssertEqual(reading.fiveHour!, 1.0)
+        XCTAssertEqual(reading.sevenDay!, 1.0)
+        let empty = GaugeBuilder.overallReading([])
+        XCTAssertNil(empty.fiveHour)
+        XCTAssertNil(empty.sevenDay)
     }
 
     func testExhaustedFableScopeDoesNotPinTheAccount() throws {
@@ -203,7 +207,9 @@ final class GaugeBuilderTests: XCTestCase {
         ]))
         // Fable is a scope inside the weekly pool, so an exhausted Fable leaves
         // the account's own weekly cap as the binding constraint.
-        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction(sections)), 0.54, accuracy: 0.001)
+        let reading = GaugeBuilder.overallReading(sections)
+        XCTAssertEqual(try XCTUnwrap(reading.sevenDay), 0.54, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(reading.fiveHour), 0.54, accuracy: 0.001)
     }
 
     func testScopedRowCountsWhenItsParentPoolIsMissing() throws {
@@ -212,7 +218,9 @@ final class GaugeBuilderTests: XCTestCase {
         let sections = GaugeBuilder.sections(from: snapshot([
             claudeWeekly(account: "x", fable: true, used: 100, observedAt: d, resetsAt: r)
         ]))
-        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction(sections)), 1.0, accuracy: 0.001)
+        let reading = GaugeBuilder.overallReading(sections)
+        XCTAssertEqual(try XCTUnwrap(reading.sevenDay), 1.0, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(reading.fiveHour), 1.0, accuracy: 0.001)
     }
 
     func testDollarWeightingFavorsExpensivePlan() {
@@ -224,9 +232,50 @@ final class GaugeBuilderTests: XCTestCase {
             provider: "anthropic", account: "b",
             subscription: subscription(account: "b", planName: "Pro", monthlyDollars: 20),
             gauges: [GaugeBuilder.allowanceGauge(observation(used: 100))])
-        let overall = GaugeBuilder.overallUsedFraction([maxSection, proSection])!
+        let overall = GaugeBuilder.overallReading([maxSection, proSection]).sevenDay!
         XCTAssertGreaterThan(overall, 0.5)
         XCTAssertLessThan(overall, 0.6)
+    }
+
+    func testWeeklyOnlySectionFallsThroughToFiveHour() {
+        // A sub with no 5h cap reads its weekly cap as the 5h availability.
+        let section = UsageSection(provider: "anthropic", account: nil, subscription: nil,
+            gauges: [GaugeBuilder.allowanceGauge(observation(window: "weekly", used: 24))])
+        let reading = GaugeBuilder.overallReading([section])
+        XCTAssertEqual(reading.fiveHour!, 0.24, accuracy: 0.001)
+        XCTAssertEqual(reading.sevenDay!, 0.24, accuracy: 0.001)
+    }
+
+    func testFiveHourAboveWeeklyReportsBothWindows() {
+        let section = UsageSection(provider: "anthropic", account: nil, subscription: nil, gauges: [
+            GaugeBuilder.allowanceGauge(observation(window: "five_hour", used: 54)),
+            GaugeBuilder.allowanceGauge(observation(window: "weekly", used: 24))
+        ])
+        let reading = GaugeBuilder.overallReading([section])
+        XCTAssertEqual(reading.fiveHour!, 0.54, accuracy: 0.001)
+        XCTAssertEqual(reading.sevenDay!, 0.24, accuracy: 0.001)
+    }
+
+    func testAccountWithNeitherWindowDropsFromBoth() {
+        let weekly = UsageSection(provider: "anthropic", account: "a", subscription: subscription(account: "a"),
+            gauges: [GaugeBuilder.allowanceGauge(observation(window: "weekly", used: 40))])
+        // A daily-only account has neither a 5h nor a weekly reading; it must not dilute either.
+        let daily = UsageSection(provider: "codex", account: "b", subscription: nil,
+            gauges: [GaugeBuilder.allowanceGauge(observation(provider: "codex",
+                entitlement: "codex-pro:b@x.com", window: "daily", used: 90))])
+        let reading = GaugeBuilder.overallReading([weekly, daily])
+        XCTAssertEqual(reading.fiveHour!, 0.40, accuracy: 0.001)
+        XCTAssertEqual(reading.sevenDay!, 0.40, accuracy: 0.001)
+    }
+
+    func testExhaustedWeeklyForcesFiveHourToOne() {
+        let section = UsageSection(provider: "anthropic", account: nil, subscription: nil, gauges: [
+            GaugeBuilder.allowanceGauge(observation(window: "five_hour", used: 20)),
+            GaugeBuilder.allowanceGauge(observation(window: "weekly", used: 100))
+        ])
+        let reading = GaugeBuilder.overallReading([section])
+        XCTAssertEqual(reading.fiveHour!, 1.0)
+        XCTAssertEqual(reading.sevenDay!, 1.0)
     }
 
     func testCreditRowsKeepRateLimitsDropped() {
@@ -309,7 +358,9 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertFalse(displayed.contains { $0.provider == "anthropic" && $0.label == "Fable" })
         XCTAssertEqual(Set(gauges.map(\.id)).count, gauges.count)
         XCTAssertEqual(gauges.filter { $0.label == "Banked reset" && $0.provider == "codex" }.count, 2)
-        XCTAssertNotNil(GaugeBuilder.overallUsedFraction(sections))
+        let reading = GaugeBuilder.overallReading(sections)
+        XCTAssertNotNil(reading.sevenDay)
+        XCTAssertNotNil(reading.fiveHour)
         XCTAssertGreaterThan(GaugeBuilder.panelHeight(for: sections, noteCount: 1), 0)
 
         // Both Claude accounts carry a Fable + non-Fable budget derived from their weekly rows.
@@ -464,11 +515,11 @@ final class GaugeBuilderTests: XCTestCase {
         }
         let personal = try XCTUnwrap(sections.first { $0.accountDisplay == "personal" })
         // Weekly 48% binds, not the 95% Fable scope sitting inside it.
-        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction([personal])), 0.48, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallReading([personal]).sevenDay), 0.48, accuracy: 0.001)
         let auf = try XCTUnwrap(sections.first { $0.accountDisplay == "auf" })
         XCTAssertEqual(auf.budgets[0].usage, .known(usedPct: 85, resetsAt: r, cached: false, binding: .sharedPool))
         XCTAssertEqual(auf.budgets[1].usage, .known(usedPct: 85, resetsAt: r, cached: false, binding: .sharedPool))
-        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallUsedFraction([auf])), 0.85, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallReading([auf]).sevenDay), 0.85, accuracy: 0.001)
     }
 
     func testPanelHeightAccountsForSubscriptionDetailRows() {
