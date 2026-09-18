@@ -82,12 +82,16 @@ test("render includes a subscription-only provider group", () => {
 
 test("verified renewals override configured fallbacks for the exact account", () => {
   const configured = resolveSubscriptions(["codex"], new Date("2026-09-14T12:00:00Z"));
+  // Two Codex accounts are configured; only the named one may be overridden.
   expect(mergeSubscriptionRenewals(configured, [{
     provider: "codex",
     account: "miladmaaan@gmail.com",
     renewsOn: "2026-10-20",
     source: "official_ui",
-  }])).toEqual([{ ...configured[0]!, renewsOn: "2026-10-20", source: "official_ui" }]);
+  }])).toEqual([
+    { ...configured[0]!, renewsOn: "2026-10-20", source: "official_ui" },
+    configured[1]!,
+  ]);
 });
 
 test("provider timestamps become Los Angeles subscription dates", () => {

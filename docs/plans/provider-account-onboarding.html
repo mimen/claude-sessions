@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adding a second ChatGPT account — and the playbook for the next one</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f5f6f9;
+  --panel: #ffffff;
+  --panel-2: #fbfbfd;
+  --ink: #191b21;
+  --ink-soft: #474c59;
+  --ink-faint: #767c8a;
+  --line: #e4e7ec;
+  --line-strong: #cdd2db;
+  --accent: #6b4fbb;
+  --accent-ink: #4a338f;
+  --accent-wash: #efeafb;
+  --accent-wash-2: #f6f3fd;
+  --ok: #1f8a53; --ok-wash: #e6f4ec;
+  --warn: #b26a00; --warn-wash: #fbefdc;
+  --danger: #c0392b; --danger-wash: #fbe9e7;
+  --code-bg: #16181d; --code-ink: #e7e9ee;
+  --radius: 12px; --radius-sm: 8px;
+  --shadow: 0 1px 2px rgba(20,22,34,.05), 0 8px 24px -14px rgba(20,22,34,.16);
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --display: "Space Grotesk", var(--sans);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131419; --panel: #1c1e25; --panel-2: #191b21; --ink: #eaecf1; --ink-soft: #b6bcc9;
+    --ink-faint: #868d9c; --line: #292c34; --line-strong: #3a3e49; --accent: #a894e6;
+    --accent-ink: #cabff3; --accent-wash: #262138; --accent-wash-2: #201d2e;
+    --ok: #5fce93; --ok-wash: #16281f; --warn: #e5a44e; --warn-wash: #2c2312;
+    --danger: #e88b7f; --danger-wash: #2c1815; --code-bg: #0e0f13; --code-ink: #e7e9ee;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px -16px rgba(0,0,0,.7);
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.62; font-size: 16px; -webkit-font-smoothing: antialiased; }
+header.hero { border-bottom: 1px solid var(--line); background: radial-gradient(120% 140% at 0% 0%, var(--accent-wash) 0%, transparent 55%); }
+.hero-inner { max-width: 1240px; margin: 0 auto; padding: 46px 32px 34px; }
+.brandline { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; }
+.glyph { width: 26px; height: 26px; display: block; }
+.kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-ink); margin: 0; }
+h1 { font-family: var(--display); font-weight: 700; font-size: clamp(29px, 4.4vw, 46px); line-height: 1.06; margin: 0 0 14px; letter-spacing: -.022em; max-width: 20ch; }
+.lede { font-size: 18px; color: var(--ink-soft); max-width: 70ch; margin: 0; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; font-family: var(--mono); font-size: 12px; }
+.pill { border: 1px solid var(--line-strong); border-radius: 999px; padding: 5px 12px; color: var(--ink-soft); background: var(--panel); }
+.pill b { color: var(--ink); font-weight: 600; }
+.shell { max-width: 1240px; margin: 0 auto; padding: 0 32px 100px; display: grid; grid-template-columns: 236px 1fr; gap: 48px; align-items: start; }
+nav.rail { position: sticky; top: 24px; align-self: start; padding-top: 34px; }
+nav.rail .rail-h { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 12px 12px; }
+nav.rail a { display: flex; gap: 10px; align-items: baseline; text-decoration: none; color: var(--ink-faint); font-size: 13.5px; padding: 6px 12px; border-left: 2px solid transparent; border-radius: 0 6px 6px 0; transition: .12s; }
+nav.rail a .rn { font-family: var(--mono); font-size: 11px; color: var(--line-strong); }
+nav.rail a:hover { color: var(--ink); background: var(--accent-wash-2); }
+nav.rail a.current { color: var(--accent-ink); border-left-color: var(--accent); background: var(--accent-wash); font-weight: 600; }
+nav.rail a.current .rn { color: var(--accent); }
+.rail-foot { margin: 20px 0 0 12px; font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); line-height: 1.5; }
+main { min-width: 0; padding-top: 8px; }
+.glance { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 26px 0 8px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 14px 16px; box-shadow: var(--shadow); }
+.stat .n { font-family: var(--display); font-size: 22px; font-weight: 700; color: var(--accent-ink); line-height: 1; }
+.stat .l { font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); margin-top: 8px; }
+section { margin-top: 46px; scroll-margin-top: 24px; }
+h2 { font-family: var(--display); font-size: 25px; font-weight: 600; letter-spacing: -.012em; margin: 0 0 6px; display: flex; align-items: center; gap: 13px; }
+h2 .num { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--accent-ink); background: var(--accent-wash); border: 1px solid var(--line); width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; flex: none; }
+h3 { font-family: var(--display); font-size: 17px; font-weight: 600; margin: 26px 0 8px; }
+.sub { color: var(--ink-faint); margin: 0 0 18px; font-size: 15px; }
+p { margin: 0 0 14px; } a { color: var(--accent-ink); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; margin: 16px 0; box-shadow: var(--shadow); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.callout { border-left: 3px solid var(--accent); background: var(--accent-wash); border-radius: 0 var(--radius) var(--radius) 0; padding: 14px 18px; margin: 16px 0; }
+.callout.warn { border-left-color: var(--warn); background: var(--warn-wash); }
+.callout.ok { border-left-color: var(--ok); background: var(--ok-wash); }
+.callout.danger { border-left-color: var(--danger); background: var(--danger-wash); }
+.callout .lbl { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); display: block; margin-bottom: 4px; }
+.sources { margin-top: 24px; padding-top: 11px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; line-height: 1.7; color: var(--ink-faint); }
+.sources .lbl { letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); margin-right: 9px; }
+.sources a { color: var(--ink-soft); }
+.sources a:hover { color: var(--accent-ink); }
+.sources .sep { color: var(--line-strong); margin: 0 7px; }
+ul, ol { margin: 0 0 14px; padding-left: 22px; } li { margin: 5px 0; } li::marker { color: var(--accent); }
+.defs { display: grid; grid-template-columns: 186px 1fr; gap: 10px 16px; margin: 16px 0; }
+.defs dt { font-family: var(--mono); font-size: 12.5px; color: var(--accent-ink); padding-top: 2px; word-break: break-all; }
+.defs dd { margin: 0; font-size: 15px; color: var(--ink-soft); }
+table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+th, td { text-align: left; padding: 9px 11px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); border-bottom: 1px solid var(--line-strong); }
+tbody tr:hover { background: var(--accent-wash-2); }
+table.matrix td { font-size: 13.5px; }
+table.matrix tr.pick td { background: var(--accent-wash); color: var(--ink); font-weight: 600; border-bottom-color: var(--line-strong); }
+table.matrix tr.pick td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+td code, p code, li code, dd code { font-family: var(--mono); font-size: 12.5px; background: var(--line); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.tag { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 5px; white-space: nowrap; display: inline-block; }
+.tag.ok { background: var(--ok-wash); color: var(--ok); }
+.tag.warn { background: var(--warn-wash); color: var(--warn); }
+.tag.accent { background: var(--accent-wash); color: var(--accent-ink); }
+.tag.danger { background: var(--danger-wash); color: var(--danger); font-weight: 600; }
+pre { background: var(--code-bg); color: var(--code-ink); border-radius: var(--radius); padding: 16px 18px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.55; margin: 14px 0; border: 1px solid var(--line-strong); }
+pre .c { color: #8b93a7; } pre .k { color: #c8b6ff; } pre .v { color: #7fd6a3; }
+blockquote { margin: 14px 0; padding: 10px 18px; border-left: 3px solid var(--line-strong); color: var(--ink-soft); }
+.phase { display: grid; grid-template-columns: 116px 1fr; gap: 0; }
+.phase + .phase { border-top: 1px solid var(--line); }
+.phase .p-when { font-family: var(--mono); font-size: 12px; color: var(--accent-ink); padding: 16px 12px 16px 0; font-weight: 500; }
+.phase .p-body { padding: 16px 0; }
+.phase .p-body h4 { margin: 0 0 6px; font-family: var(--display); font-size: 16px; }
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; overflow-x: auto; box-shadow: var(--shadow); }
+svg text { font-family: var(--mono); fill: var(--ink-soft); }
+footer { margin-top: 62px; padding-top: 20px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12px; color: var(--ink-faint); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; gap: 0; }
+  nav.rail { position: static; padding-top: 20px; display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+  nav.rail .rail-h, .rail-foot { display: none; }
+  nav.rail a { border-left: none; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; }
+  nav.rail a.current { border-color: var(--accent); }
+  .glance { grid-template-columns: 1fr 1fr; }
+  .grid2 { grid-template-columns: 1fr; }
+  .phase { grid-template-columns: 1fr; } .phase .p-when { padding-bottom: 0; }
+  .defs { display: block; } .defs dt { margin-top: 12px; } .defs dd { margin: 2px 0 0; }
+}
+@media print {
+  :root { --bg:#fff; --panel:#fff; --accent-wash:#f2eefb; --shadow: none; }
+  body { font-size: 12px; } nav.rail, .meta-row { display: none; }
+  .shell { grid-template-columns: 1fr; } pre { background: #f0f0f0; color: #111; } section { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="hero-inner">
+    <div class="brandline">
+      <svg class="glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="var(--accent)" stroke-width="1.6"/><path d="M7 12.4l3.1 3.1L17 8.5" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <p class="kicker">Fleet · Provider accounts</p>
+    </div>
+    <h1>Adding a second ChatGPT account</h1>
+    <p class="lede">Wiring <code>milad@afternoonumbrellafriends.com</code> into the gateway, usage reporting, and menubar — plus the reusable playbook for every account after it. Far less work than expected, because most of the machinery already exists and is already account-aware.</p>
+    <div class="meta-row">
+      <span class="pill"><b>Status</b> awaiting implementation authorization</span>
+      <span class="pill"><b>Artifact</b> docs/plans/provider-account-onboarding.html</span>
+      <span class="pill"><b>Written</b> 2026-09-17</span>
+      <span class="pill"><b>Decision open</b> routing policy (§04)</span>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="rail" aria-label="Contents">
+    <p class="rail-h">Contents</p>
+    <a href="#s01"><span class="rn">01</span> A correction first</a>
+    <a href="#s02"><span class="rn">02</span> What an account is</a>
+    <a href="#s03"><span class="rn">03</span> The gateway credential</a>
+    <a href="#s04"><span class="rn">04</span> The routing decision</a>
+    <a href="#s05"><span class="rn">05</span> Usage visibility</a>
+    <a href="#s06"><span class="rn">06</span> Menubar and hub</a>
+    <a href="#s07"><span class="rn">07</span> Switching stays Claude-only</a>
+    <a href="#s08"><span class="rn">08</span> Per-machine reality</a>
+    <a href="#s09"><span class="rn">09</span> The playbook</a>
+    <a href="#s10"><span class="rn">10</span> Risks and unknowns</a>
+    <a href="#s11"><span class="rn">11</span> Sequenced work</a>
+    <p class="rail-foot">Milad · draft<br>updated 2026-09-17</p>
+  </nav>
+
+  <main>
+    <div class="glance">
+      <div class="stat"><div class="n">1</div><div class="l">line of code required</div></div>
+      <div class="stat"><div class="n">4</div><div class="l">layers hold account state</div></div>
+      <div class="stat"><div class="n">100%</div><div class="l">Codex weekly, spent now</div></div>
+      <div class="stat"><div class="n">188</div><div class="l">commits reconciled</div></div>
+    </div>
+
+    <div class="callout ok">
+      <span class="lbl">The short version</span>
+      <ol style="margin-bottom:0">
+        <li><b>Most of this is already built.</b> <code>ccs usage</code> shipped weeks ago, is multi-account, and already renders Claude personal beside Claude AUF. The second ChatGPT account slots into the same grammar.</li>
+        <li><b>The mechanical work is one gateway login, one GUI click, one code line, and one registry row.</b> Not a feature build.</li>
+        <li><b>The account is wanted for computer use, and the gateway cannot reserve a credential for a kind of work.</b> Routing selects on priority and strategy only. Plain overflow would therefore defeat the purpose, because routine subagent traffic drains the small $20 allowance before any computer-use work starts. §04 carries the three achievable shapes and is the one open decision.</li>
+        <li><b>Account <em>switching</em> for ChatGPT does not exist and this plan does not build it.</b> Every <code>fleet-*</code> script filters to <code>provider == "claude"</code> by explicit code.</li>
+        <li><b>Timing is good.</b> The Codex weekly allowance is at 100% right now, and the gateway has nothing to fail over to. This account would be the first thing that changes that.</li>
+      </ol>
+    </div>
+
+    <section id="s01">
+      <h2><span class="num">01</span> A correction before anything else</h2>
+      <p class="sub">The planning documents in this directory describe work that already shipped.</p>
+
+      <p>This session began by reading <code>unified-usage-utility.html</code> and <code>claude-sub-budget-pools.html</code>, both of which carry a prominent <em>awaiting implementation authorization</em> banner. An earlier draft of this analysis repeated that status and concluded a large chunk of the work was unbuilt. <b>That was wrong, and the error is worth recording rather than quietly fixing</b>, because anyone reading those two files will make the same mistake.</p>
+
+      <p>The checkout at <code>/Users/mimen/Programming/Repos/claude-sessions</code> is 188 commits behind <code>origin/master</code> and has no <code>src/usage/</code> directory at all. The <code>ccs</code> on <code>PATH</code> resolves elsewhere entirely:</p>
+
+      <pre><span class="c"># which ccs → ~/.bun/bin/ccs → symlink</span>
+/Users/mimen/Programming/Deployments/claude-sessions/bin/ccs
+
+<span class="c"># HEAD comparison</span>
+Repos/claude-sessions        4b77672  2026-08-12   <span class="v">no src/usage/</span>
+Deployments/claude-sessions  4fcb5b8  2026-09-16   <span class="v">17 files in src/usage/</span></pre>
+
+      <p>So the usage atlas and the nested-budget model both landed. The plans were never updated to say so, because they live as untracked files in the stale tree. <code>ccs usage</code> today prints this:</p>
+
+      <pre>Claude · personal
+  Max 20x · renews Oct 10
+  five-hour        ███████░  90%  in 2h 8m
+  weekly           ███████░  89%  in 4d 14h
+  Fable budget     ███████░  89%  in 4d 14h · limited by the weekly pool
+
+Claude · AUF
+  Max 20x · renews Oct 8
+  weekly           ████░░░░  54%  in 4d 13h
+  Fable budget     ██████░░  75%  in 4d 13h
+
+Codex · personal
+  Codex Pro · renews Sep 20
+  weekly           ████████ <span class="v">100%</span>  in 25h 24m
+  banked reset     available · expires Oct 4 at 09:18 PM</pre>
+
+      <p>Two things follow. First, the per-account display grammar this plan needs already exists and is in daily use. Second, <b>the Codex subscription is fully exhausted as this is being written</b> — three subagents dispatched during the research for this document died with <code>429 usage_limit_reached</code>, which is the most direct argument for the account being added that could be asked for.</p>
+
+      <div class="callout ok">
+        <span class="lbl">Resolved 2026-09-18</span>
+        <p>The checkout has been fast-forwarded to <code>origin/master</code> (<code>ee0d166</code>) and now carries <code>src/usage/</code>. The merge revealed something the stale state hid: <code>unified-usage-utility.html</code> <b>is tracked upstream</b>, and the local untracked copy was byte-identical, so it was a redundant duplicate shadowing the committed file and has been discarded. <code>claude-sub-budget-pools.html</code> is tracked nowhere and was genuinely local, so it was restored untracked exactly as found.</p>
+        <p>Two things remain for Milad's call, deliberately not done unilaterally. The committed <code>unified-usage-utility.html</code> still carries an <em>awaiting implementation authorization</em> banner for work that shipped, and <code>claude-sub-budget-pools.html</code> is still uncommitted. Separately, the <b>Active override</b> in <code>ClaudeConfig/references/model-routing.md</code> (Fable <code>-2</code>) expired 2026-09-15 and should be cleared or renewed.</p>
+      </div>
+
+      <aside class="sources"><span class="lbl">Sources</span>Deployments/claude-sessions/src/usage/<span class="sep">·</span>docs/plans/unified-usage-utility.html<span class="sep">·</span>docs/plans/claude-sub-budget-pools.html<span class="sep">·</span>live <code>ccs usage</code> 2026-09-17</aside>
+    </section>
+
+    <section id="s02">
+      <h2><span class="num">02</span> What "an account" actually is here</h2>
+      <p class="sub">There is no account registry. An account is a tuple of state in four independent places.</p>
+
+      <p>Nothing in the vault, in <code>models.toml</code>, or in 1Password knows what accounts exist. Account state is entirely local and per-machine, and the four layers below do not know about each other. This is the single most important thing to understand before adding one, because forgetting a layer produces a partial account that works for traffic but is invisible to reporting, or vice versa.</p>
+
+      <div class="diagram">
+        <svg viewBox="0 0 900 250" width="100%" height="250" role="img" aria-label="Four independent layers of account state: gateway credential serves traffic, Codex CLI auth is separate, CodexBar reads usage, ccs usage renders it.">
+          <defs>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker>
+            <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="currentColor" opacity=".55"/></marker>
+          </defs>
+          <rect x="12" y="20" width="200" height="86" rx="10" fill="var(--panel)" stroke="var(--accent)" stroke-width="2"/>
+          <text x="112" y="50" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Gateway credential</text>
+          <text x="112" y="70" text-anchor="middle" font-size="10">~/.cli-proxy-api/</text>
+          <text x="112" y="88" text-anchor="middle" font-size="10">codex-&lt;hex&gt;-&lt;email&gt;-&lt;plan&gt;.json</text>
+
+          <rect x="12" y="140" width="200" height="80" rx="10" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.5"/>
+          <text x="112" y="170" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Codex CLI auth</text>
+          <text x="112" y="190" text-anchor="middle" font-size="10">~/.codex/auth.json</text>
+          <text x="112" y="207" text-anchor="middle" font-size="10">single slot, mode 600</text>
+
+          <rect x="350" y="140" width="200" height="80" rx="10" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.5"/>
+          <text x="450" y="170" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">CodexBar</text>
+          <text x="450" y="190" text-anchor="middle" font-size="10">managed-codex-accounts.json</text>
+          <text x="450" y="207" text-anchor="middle" font-size="10">+ snapshot store</text>
+
+          <rect x="660" y="140" width="220" height="80" rx="10" fill="var(--panel)" stroke="var(--accent)" stroke-width="2"/>
+          <text x="770" y="170" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">ccs usage</text>
+          <text x="770" y="190" text-anchor="middle" font-size="10">codex-pro:&lt;email&gt;</text>
+          <text x="770" y="207" text-anchor="middle" font-size="10">→ CcsUsage.app menubar</text>
+
+          <rect x="350" y="20" width="530" height="86" rx="10" fill="var(--accent-wash)" stroke="var(--line-strong)" stroke-width="1.5"/>
+          <text x="615" y="50" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Model traffic — every sol / astra / terra / luna call</text>
+          <text x="615" y="72" text-anchor="middle" font-size="10">routing.strategy: fill-first · failover always on · session-affinity off</text>
+          <text x="615" y="92" text-anchor="middle" font-size="10">reads ONLY the gateway credential layer</text>
+
+          <path d="M212 63 L344 63" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+          <path d="M212 180 L344 180" stroke="currentColor" stroke-width="1.5" fill="none" opacity=".55" marker-end="url(#ar2)"/>
+          <path d="M550 180 L654 180" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+          <text x="278" y="196" text-anchor="middle" font-size="9.5">reads live</text>
+        </svg>
+      </div>
+
+      <p>The critical asymmetry the diagram shows: <b>the gateway credential is what serves traffic, CodexBar is what reports usage, and they are separate OAuth grants on the same ChatGPT account.</b> Logging in once does not do both. The existing Claude setup has exactly this same two-logins-per-account property, recorded in the gateway runbook: a dead Claude account needs both <code>cswap add</code> and <code>cliproxyapi -claude-login</code>.</p>
+
+      <dl class="defs">
+        <dt>gateway credential</dt><dd>One JSON file per credential in <code>~/.cli-proxy-api/</code>. The gateway loads every <code>*.json</code> there. Codex files carry <code>access_token</code>, <code>refresh_token</code>, <code>id_token</code>, <code>email</code>, <code>account_id</code>, <code>type: "codex"</code>, <code>disabled</code>. Note they carry <b>no <code>priority</code> key</b> today, unlike the Claude files.</dd>
+        <dt>~/.codex/auth.json</dt><dd>The Codex CLI's own login. Single-slot. Nothing in <code>ClaudeConfig/bin/</code> reads or writes it; the gateway explicitly does not touch it.</dd>
+        <dt>CodexBar</dt><dd>The usage reader <code>ccs usage</code> shells out to. Registers accounts through its GUI into <code>managed-codex-accounts.json</code> — a file that does not exist yet on this machine.</dd>
+        <dt>1Password Sol</dt><dd>Holds nothing account-related. No ChatGPT, OpenAI, Codex, Anthropic, or Claude login item exists among the vault's 103 items, and §09 argues it should stay that way.</dd>
+        <dt>models.toml</dt><dd>Has a <code>provider</code> field per model, but that names a <em>lane</em>, never an account. There is no account concept in the model registry, the slots table, or the launcher registry.</dd>
+      </dl>
+
+      <aside class="sources"><span class="lbl">Sources</span>/opt/homebrew/etc/cliproxyapi.conf<span class="sep">·</span>~/.cli-proxy-api/<span class="sep">·</span>Entities/reference/CLIProxyAPI Gateway.md<span class="sep">·</span><code>op item list --vault Sol</code></aside>
+    </section>
+
+    <section id="s03">
+      <h2><span class="num">03</span> The gateway credential</h2>
+      <p class="sub">One command. The gateway names the file, and the name encodes the plan tier.</p>
+
+      <p>This is the step that actually gives the fleet more capacity. Everything else in this document is reporting and ergonomics.</p>
+
+      <pre><span class="c"># signed in to the browser as milad@afternoonumbrellafriends.com</span>
+cliproxyapi -codex-device-login
+
+<span class="c"># produces, alongside the existing Pro credential:</span>
+~/.cli-proxy-api/codex-&lt;hex&gt;-milad@afternoonumbrellafriends.com-<span class="v">plus</span>.json</pre>
+
+      <p>The filename is derived by the gateway from the <code>https://api.openai.com/auth.chatgpt_plan_type</code> claim in the id_token, which is why the existing credential ends <code>-pro</code>. <b>Do not hand-name these files and do not copy them between machines.</b> Refresh tokens rotate on use, so a copied credential invalidates the origin machine's grant.</p>
+
+      <p>There is direct precedent that the gateway holds two Codex credentials happily: the runbook records a second <code>codex-…-prolite</code> credential coexisting with the Pro one. The gateway's multi-credential handling is entirely provider-agnostic. What is Claude-only is the <em>tooling around it</em>, which is §07.</p>
+
+      <div class="callout warn">
+        <span class="lbl">Set priority explicitly</span>
+        The existing Codex credential carries no <code>priority</code> key at all, so it defaults to <code>0</code>. With <code>routing.strategy: "fill-first"</code>, adding a second credential at the same implicit zero makes the drain order arbitrary. Whichever policy §04 settles on, set both Codex rows' priority explicitly rather than relying on defaults.
+      </div>
+
+      <pre>PATCH http://127.0.0.1:8317/v0/management/auth-files/fields
+{"name": "codex-&lt;hex&gt;-&lt;email&gt;-plus.json", "priority": 50, "disabled": false}</pre>
+
+      <p>A detail worth noticing separately: the credential files in <code>~/.cli-proxy-api/</code> are mode <code>644</code>, world-readable, while <code>~/.codex/auth.json</code> is <code>600</code>. That is the gateway's own default, it predates this work, and it is worth tightening on its own schedule rather than as part of this change.</p>
+
+      <aside class="sources"><span class="lbl">Sources</span>cliproxyapi.conf lines 169–181<span class="sep">·</span><code>GET /v0/management/auth-files</code><span class="sep">·</span>CLIProxyAPI Gateway runbook</aside>
+    </section>
+
+    <section id="s04">
+      <h2><span class="num">04</span> The routing decision</h2>
+      <p class="sub">The only genuinely blocking question, and it is about money rather than code.</p>
+
+      <p>The gateway supports two arrangements, and the existing Claude setup deliberately picks the stricter one. The question is whether Codex should copy it.</p>
+
+      <p>For Claude, the parked account is <b>disabled</b>, not merely de-prioritized. The runbook records why: failover is always on and cannot be turned off, so a dead or throttled target would silently start serving the other account. Disabling the parked credential makes account attribution deterministic. The budget-pools plan states the underlying principle plainly:</p>
+
+      <blockquote>No total. Show both accounts and let the cascade order carry the meaning. Totalling a business entitlement into a personal figure invites spending it by accident.</blockquote>
+
+      <p>That reasoning transfers directly, because <code>milad@afternoonumbrellafriends.com</code> is the AUF business identity. But it cuts against the reason for buying the account in the first place, which was relief when Codex runs dry — and it is dry right now.</p>
+
+      <div class="callout danger">
+        <span class="lbl">Correction — this section's original recommendation was wrong</span>
+        <p>An earlier version of this plan recommended <b>overflow</b>. Milad then stated the account is wanted specifically for <b>computer use</b>, with usage tracked like everything else. Checking the gateway against that intent turned up a constraint that invalidates the recommendation, so it is withdrawn rather than quietly amended.</p>
+        <p><b>The gateway cannot reserve a credential for a kind of work.</b> <code>routing</code> selects credentials by <code>priority</code> and <code>strategy</code> only; <code>model_quotas</code> is observational, not a restriction; and <a href="/Users/mimen/Documents/milad-vault/ClaudeConfig/models.toml" target="_blank" rel="noopener">models.toml</a> carries a single global <code>gateway = "http://127.0.0.1:8317"</code> while launchers.toml sets one <code>ANTHROPIC_BASE_URL</code>, so no model id can be pointed at a specific credential.</p>
+        <p>That makes plain overflow actively counterproductive here: with both credentials live, ordinary subagent traffic drains the $20 allowance first and it is gone before any computer-use session begins. Reserving the account is the requirement, and reservation is exactly what priority cannot express.</p>
+      </div>
+
+      <p>Usage tracking is unaffected by all of this. <code>ccs usage</code> reads Codex through CodexBar, which is keyed to the <em>account</em> rather than the gateway, so every shape below reports identically. That half of the request is already implemented and merged-pending in <a href="https://github.com/mimen/claude-sessions/pull/31" target="_blank" rel="noopener">PR #31</a>.</p>
+
+      <table class="matrix">
+        <thead><tr><th>Option</th><th>Mechanism</th><th>Reserves it for computer use?</th><th>Cost</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr class="pick">
+            <td><b>Dedicated lane</b></td>
+            <td>A second <code>cliproxyapi</code> instance whose <code>auth-dir</code> holds only the Plus credential, fronted in the main gateway as an <code>openai-compatibility</code> provider with its own model alias, plus a <code>models.toml</code> row such as <code>gpt-6-astra-cu</code>.</td>
+            <td><b>Yes, automatically.</b> Dispatching that model id spends the Plus account and nothing else ever does.</td>
+            <td>One extra service, one config block, one model row, one <code>serves</code>-glob edit. Uses existing gateway features rather than new code.</td>
+            <td><span class="tag accent">Recommended</span></td>
+          </tr>
+          <tr>
+            <td>Parked, enabled by hand</td>
+            <td>Plus credential in the main gateway with <code>disabled: true</code>, enabled deliberately for a computer-use session. Mirrors the Claude arrangement.</td>
+            <td>Only by discipline. While enabled, <em>all</em> Codex traffic uses it, not just computer use.</td>
+            <td>Zero new infrastructure, available the same day. Manual toggle every session.</td>
+            <td><span class="tag warn">viable today</span></td>
+          </tr>
+          <tr>
+            <td>Plain overflow</td>
+            <td>Both credentials enabled, Plus at lower priority under <code>fill-first</code>.</td>
+            <td><b>No.</b> Routine subagent traffic drains the allowance first.</td>
+            <td>Simplest to set up, and defeats the stated purpose. Also spends AUF quota on personal work silently.</td>
+            <td><span class="tag danger">withdrawn</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p><b>The recommendation is the dedicated lane</b>, because it is the only shape that makes the reservation automatic rather than a thing to remember, and because computer use is precisely the capability the routing inventory flags as having no fallback during a Codex freeze. The parked option is the honest same-day answer if the extra service is unwelcome; it trades a per-session toggle for zero new moving parts.</p>
+
+      <div class="callout warn">
+        <span class="lbl">A policy consequence worth pricing in</span>
+        <code>fleet-autoswitch</code> decides purely on <code>usedPct</code>. A percentage-based policy treats a $20 Plus account and a $200 Pro account as equally attractive at the same utilization. This does not bite today, because autoswitch is Claude-only (§07), but it is a trap for anyone who later extends it to Codex.
+      </div>
+
+      <aside class="sources"><span class="lbl">Sources</span>docs/plans/claude-sub-budget-pools.html<span class="sep">·</span>CLIProxyAPI Gateway runbook<span class="sep">·</span>ClaudeConfig/bin/fleet-autoswitch</aside>
+    </section>
+
+    <section id="s05">
+      <h2><span class="num">05</span> Usage visibility</h2>
+      <p class="sub">One GUI registration, one argument, one registry row.</p>
+
+      <h3>CodexBar has to learn the account first</h3>
+      <p>CodexBar 0.60.2 supports multiple accounts per provider, through a Codex-specific mechanism distinct from the <code>tokenAccounts</code> array that API-key providers use. Its help text is explicit:</p>
+
+      <pre>Use --all-accounts to fetch every token account, or every visible
+Codex account for Codex.</pre>
+
+      <p>Registration is a GUI action — <b>Add Account…</b> in the Codex section — with no config key to hand-edit. Its config file at <code>~/.config/codexbar/config.json</code> is only an enable list of provider ids and carries no account data at all. Registering writes <code>~/Library/Application Support/CodexBar/managed-codex-accounts.json</code>, which does not exist yet.</p>
+
+      <div class="callout warn">
+        <span class="lbl">Understand this before clicking</span>
+        CodexBar's Codex model is a <b>switcher over one system account</b>, not N concurrent live sessions. Registering the second account rewrites <code>~/.codex/auth.json</code>, the file the <code>codex</code> CLI itself reads. Its own error strings admit the hazard: <em>"CodexBar could not safely preserve the current system account before switching."</em> Expect the inactive account's numbers to come from a cached snapshot with an older <code>updatedAt</code> rather than live. This was not provable read-only and should be confirmed immediately after registering.
+      </div>
+
+      <h3>The one line of code</h3>
+      <p>The adapter already loops over multiple entries and already suffixes entitlements with the account email — it was built for exactly this case, for Anthropic. It simply never asks CodexBar for more than one account:</p>
+
+      <pre><span class="c">// src/usage/adapters.ts:126 — today</span>
+const res = runCodexBar(providerArg);
+
+<span class="c">// the receiving signature already accepts it, codexbar.ts:54</span>
+export function runCodexBar(provider: string, extraArgs: readonly string[] = [])
+
+<span class="c">// the fix, for the codex call site</span>
+const res = runCodexBar(providerArg, <span class="v">["--all-accounts"]</span>);</pre>
+
+      <p>The comment sitting directly above <code>accountEntitlement()</code> in that same file describes the Anthropic precedent that makes this work, and the entitlement grammar is <code>&lt;base&gt;:&lt;email&gt;#&lt;product&gt;</code>. A second Codex account therefore emits <code>codex-pro:milad@afternoonumbrellafriends.com</code> with no further change.</p>
+
+      <h3>One registry row</h3>
+      <p>Without it the group renders live meters but no plan name and no renewal date. <code>src/usage/subscriptions.ts</code> already holds a row per account for Anthropic:</p>
+
+      <pre>{ provider: <span class="k">"codex"</span>, account: <span class="k">"milad@afternoonumbrellafriends.com"</span>,
+  planName: <span class="k">"Codex Plus"</span>, monthlyDollars: <span class="v">20</span>, anchor: <span class="k">"&lt;YYYY-MM-DD&gt;"</span> },</pre>
+
+      <h3>One cosmetic defect to fix or accept</h3>
+      <p><code>adapters.ts:188</code> hardcodes the entitlement base as the literal string <code>"codex-pro"</code>. A Plus account will therefore carry the id <code>codex-pro:milad@afternoonumbrellafriends.com</code> in <code>--json</code>. The <em>displayed</em> plan name comes from the registry row above, so the terminal reads correctly and only the JSON contract lies. Low severity, but it should be recorded before anything downstream is built on that field. The Anthropic path does this better and carries a real <code>tier</code> field.</p>
+
+      <aside class="sources"><span class="lbl">Sources</span>src/usage/adapters.ts<span class="sep">·</span>src/usage/codexbar.ts<span class="sep">·</span>src/usage/subscriptions.ts<span class="sep">·</span><code>codexbar --help</code> 0.60.2<span class="sep">·</span>CodexBar.app Localizable.strings</aside>
+    </section>
+
+    <section id="s06">
+      <h2><span class="num">06</span> Menubar and hub need nothing</h2>
+      <p class="sub">The surfaces downstream of <code>ccs usage</code> are already account-keyed.</p>
+
+      <p>This is the pleasant part. <b>CcsUsage.app</b> (<code>/Applications/CcsUsage.app</code>, running as the resident LaunchAgent <code>com.milad.ccs.usage-menubar</code>, polling every 5 minutes) shells <code>ccs usage --json</code> and renders one gauge group per entitlement. It needs no change and no rebuild — a new entitlement appears on its own. Its binary already carries the string <code>codex|personal</code> alongside <code>anthropic|personal</code> and <code>anthropic|auf</code>.</p>
+
+      <p>Better still, the display name is already correct without configuration. The alias map in <code>src/usage/render.ts</code> is keyed by bare email rather than by provider:</p>
+
+      <pre>const aliases = {
+  <span class="k">"miladmaaan@gmail.com"</span>: <span class="v">"personal"</span>,
+  <span class="k">"milad@afternoonumbrellafriends.com"</span>: <span class="v">"AUF"</span>,
+};</pre>
+
+      <p>So the new account renders as <b>Codex · AUF</b>, sorted into the existing Codex block, with no edit. <code>cswap-fleet-report</code> likewise forwards the usage snapshot verbatim to the hub — it has a self-check asserting <code>body["usage"] == snapshot</code> — so the hub picks the account up for free.</p>
+
+      <p>Three surfaces investigated turned out to be irrelevant and should not absorb any effort. <b>x-sub-watch</b> is an X/Twitter timeline watcher, not a subscription watcher, and has one scaffold commit. <b>provider-marks.ts</b> and <b>brand-icons.ts</b> are unreferenced dead code with zero call sites. <b>SwiftBar</b> is installed but has never been configured. Also worth correcting: <code>claude-swap-menubar-prototype</code> is not a prototype — it is the live source of <code>cswap</code> v0.27.0b1, a fork of <code>realiti4/claude-swap</code>, and its installed version matches its <code>pyproject.toml</code> exactly.</p>
+
+      <aside class="sources"><span class="lbl">Sources</span>src/usage/render.ts:136<span class="sep">·</span>ClaudeConfig/jobs.toml line 730<span class="sep">·</span>ClaudeConfig/bin/cswap-fleet-report</aside>
+    </section>
+
+    <section id="s07">
+      <h2><span class="num">07</span> Account switching stays Claude-only</h2>
+      <p class="sub">Not an oversight to patch in passing. It is enforced by code, with a test pinning it.</p>
+
+      <p>You asked for account switching. It is worth being direct: <b>for ChatGPT it does not exist, and this plan deliberately does not build it.</b> Every layer of the switching stack filters to Anthropic by explicit code.</p>
+
+      <p><code>cswap-cliproxy-sync._classification()</code> keeps only gateway rows whose <code>provider</code> or <code>type</code> casefolds to <code>"claude"</code>. Codex, xai, and OpenAI-compatible rows are dropped before any priority write. <code>cswap-fleet-report.gateway_states()</code> applies the same filter and has a <b>self-check asserting a codex row yields an empty dict</b> — that behaviour is pinned on purpose. Above them, <code>cswap</code> itself is a Claude Code credential manager backed by the macOS keychain, and <code>fleet-switch</code>, <code>fleet-reconcile</code>, and <code>fleet-autoswitch</code> all drive <code>cswap switch</code>, so the entire fleet layer is Claude-only by construction.</p>
+
+      <p>For completeness, the Claude switch is genuinely involved. <code>fleet-switch</code> writes a desired state to the hub — aborting the whole run if that write fails, so a sleeping Mac converges later rather than being stranded — then for each shared-vault host runs <code>cswap switch</code>, which fires a <code>postSwitch</code> hook that reprioritizes gateway credentials through three ordered PATCH calls. It enables the target first, so a mid-flight failure never leaves every credential disabled, then verifies the resulting state and retries up to three times against an 8-second deadline.</p>
+
+      <p>Reproducing that for Codex is a real project, and §04's overflow recommendation is partly an argument that it is unnecessary. <b>Overflow gets the benefit of switching without building switching</b>, because <code>fill-first</code> plus always-on failover already moves traffic between credentials. If §04 instead settles on mirroring Claude, this section becomes required scope and the estimate changes substantially.</p>
+
+      <aside class="sources"><span class="lbl">Sources</span>ClaudeConfig/bin/cswap-cliproxy-sync<span class="sep">·</span>ClaudeConfig/bin/cswap-fleet-report<span class="sep">·</span>ClaudeConfig/bin/fleet-switch</aside>
+    </section>
+
+    <section id="s08">
+      <h2><span class="num">08</span> Per-machine reality</h2>
+      <p class="sub">Account state does not sync. The vault carries none of it.</p>
+
+      <p>The shared vault propagates scripts and the model registry, but every layer in §02 is local to one Mac. The Mini needs its own <code>cliproxyapi -codex-device-login</code> and its own CodexBar registration, and neither can be satisfied by copying files, because refresh tokens rotate on use.</p>
+
+      <p>This matters more than it first appears, because the Mini runs <code>fleet-report</code> and <code>fleet-reconcile</code> on timers and is the leader for <code>fleet-autoswitch</code>. A half-provisioned fleet — the new account on the laptop only — means the laptop overflows to Plus while the Mini still hard-fails at the Pro limit. Either provision both or accept that asymmetry knowingly.</p>
+
+      <aside class="sources"><span class="lbl">Sources</span>ClaudeConfig/modes/infra/data/session-routing/hosts.toml<span class="sep">·</span>ClaudeConfig/jobs.toml</aside>
+    </section>
+
+    <section id="s09">
+      <h2><span class="num">09</span> The playbook</h2>
+      <p class="sub">Where it lives, what shape it takes, and the judgments it has to encode.</p>
+
+      <p>You asked for a reusable playbook for adding accounts. The natural home is <code>ClaudeConfig/modes/infra/playbooks/provider-account-lifecycle.md</code>, beside <code>model-lifecycle.md</code>, which is the closest existing analogue and the right formal model to copy. That playbook opens by naming what the agent owns and what evidence proves it — <em>"You own one registry edit and the proof that every consumer followed it"</em> — then runs numbered steps each ending in a verifiable state, and closes with a required reply shape.</p>
+
+      <p>The account playbook's equivalent framing: <b>you own one credential per layer and the proof that usage reporting sees it.</b> Its completion evidence is <code>ccs usage</code> printing the new account as its own group with a correct plan name, and the gateway's <code>auth-files</code> endpoint showing the intended priority.</p>
+
+      <div class="panel">
+        <h3 style="margin-top:0">Steps the playbook must cover</h3>
+        <ol style="margin-bottom:0">
+          <li><b>Decide the routing posture before touching anything.</b> Overflow, or parked-and-disabled, and why. This is the §04 decision and it recurs for every future account.</li>
+          <li><b>Gateway login.</b> The provider's own device-login command. Never hand-name, never copy between machines.</li>
+          <li><b>Set priority explicitly</b> through the management API. Do not inherit defaults.</li>
+          <li><b>Register with the usage reader</b> — CodexBar GUI for OAuth providers, <code>tokenAccounts</code> config for API-key providers. Note the hazard that registration may rewrite the live system account.</li>
+          <li><b>Add the subscription registry row</b> in <code>src/usage/subscriptions.ts</code>, in the deployment checkout.</li>
+          <li><b>Add a display alias</b> in <code>render.ts</code> if the email is new to the fleet.</li>
+          <li><b>Repeat on every shared-vault host</b> from <code>hosts.toml</code>. State plainly that nothing syncs.</li>
+          <li><b>Verify</b> with <code>ccs usage</code>, <code>ccs usage doctor</code>, and a real dispatch to a model on the new lane.</li>
+          <li><b>Update routing policy separately, if at all</b> — mirroring model-lifecycle's step 7, which insists policy edits happen after availability is proven, never as part of provisioning.</li>
+        </ol>
+      </div>
+
+      <p>Two judgments the playbook should encode as rules rather than leave to each run. First, <b>credentials do not go in 1Password.</b> No provider login item exists in Sol today, and a rotating OAuth pair would go stale on first refresh — the everyday service account is read-only by design, so it could not write the new value back anyway. The house pattern is that a dedicated local tool owns the credential and CCS consumes its JSON: cswap owns the Claude keychain, CodexBar owns the Codex snapshot store. Second, <b>reporting layers and traffic layers are separate logins</b>, and a checklist that does only one produces an account that works but is invisible, or is visible but serves nothing.</p>
+
+      <aside class="sources"><span class="lbl">Sources</span>ClaudeConfig/modes/infra/playbooks/model-lifecycle.md<span class="sep">·</span>ClaudeConfig/references/credentials.md<span class="sep">·</span>ClaudeConfig/skills/1password/SKILL.md</aside>
+    </section>
+
+    <section id="s10">
+      <h2><span class="num">10</span> Risks and open questions</h2>
+
+      <table>
+        <thead><tr><th>Item</th><th>State</th><th>What it means</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Does $20 Plus grant Codex CLI access, and at what limits?</td>
+            <td><span class="tag danger">unverified</span></td>
+            <td>Could not be confirmed in this session — web search and fetch both returned 429 under the same exhausted quota. <b>This premise underpins the whole plan</b> and should be checked before step one. If Plus carries no Codex entitlement, only the ChatGPT app benefits and nothing below §03 applies.</td>
+          </tr>
+          <tr>
+            <td>CodexBar registration rewrites <code>~/.codex/auth.json</code></td>
+            <td><span class="tag warn">likely</span></td>
+            <td>Its Codex model is a switcher, not concurrent sessions. Verify the <code>codex</code> CLI still works as expected immediately after registering.</td>
+          </tr>
+          <tr>
+            <td>Inactive account's usage numbers may be cached</td>
+            <td><span class="tag warn">likely</span></td>
+            <td>The snapshot store persists per-account records with an <code>updatedAt</code>. Plan for staler numbers on whichever account is not live.</td>
+          </tr>
+          <tr>
+            <td>Editing the wrong checkout</td>
+            <td><span class="tag danger">live hazard</span></td>
+            <td>The §05 code changes must land in the deployment tree or in <code>origin/master</code>, not in the stale repo. Reconcile first.</td>
+          </tr>
+          <tr>
+            <td>No per-session account attribution anywhere</td>
+            <td><span class="tag warn">by design</span></td>
+            <td>The catalogue schema has no account column. You can ask "what is each account's allowance now", never "which account paid for this session". Under overflow routing that gap becomes more visible, but closing it is a separate product.</td>
+          </tr>
+          <tr>
+            <td>Stale 1Password gateway management key</td>
+            <td><span class="tag warn">pre-existing</span></td>
+            <td>Recorded in the budget-pools plan: the key in <code>CLIProxyAPI Gateway Config</code> is rejected by the running gateway while the M5 item passes. Unrelated to this work, worth fixing separately.</td>
+          </tr>
+          <tr>
+            <td>Stale vault mirror of cswap settings</td>
+            <td><span class="tag warn">pre-existing</span></td>
+            <td><code>modes/infra/data/providers/cswap/settings.json</code> still names <code>~/.local/bin/cswap-cliproxy-sync</code> directly, diverging from live state.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <aside class="sources"><span class="lbl">Sources</span>this session's failed dispatches (429 <code>usage_limit_reached</code>, <code>plan_type: "pro"</code>)<span class="sep">·</span>CodexBar.app Localizable.strings<span class="sep">·</span>src/index/schema.ts</aside>
+    </section>
+
+    <section id="s11">
+      <h2><span class="num">11</span> Sequenced work</h2>
+      <p class="sub">Each phase ends somewhere verifiable. Nothing below is authorized yet.</p>
+
+      <div class="phase">
+        <div class="p-when">Phase 0<br>blocking</div>
+        <div class="p-body">
+          <h4>Confirm the premise and settle the lane</h4>
+          <p>Verify Plus actually carries Codex CLI entitlement. Settle §04, dedicated lane versus parked. <span class="tag ok">done</span> Reconcile the stale checkout, completed 2026-09-18 at <code>ee0d166</code>.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="p-when">Phase 1<br>capacity</div>
+        <div class="p-body">
+          <h4>Gateway credential on the laptop</h4>
+          <p><code>cliproxyapi -codex-device-login</code>, then set both Codex rows' priority explicitly. <b>Verified by</b> a real <code>sol</code> dispatch succeeding while the Pro credential reads 100%.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="p-when">Phase 2<br>visibility</div>
+        <div class="p-body">
+          <h4>CodexBar registration and the code edits</h4>
+          <p><span class="tag ok">code done</span> <code>--all-accounts</code> and the registry row shipped in <a href="https://github.com/mimen/claude-sessions/pull/31" target="_blank" rel="noopener">PR #31</a>: 50 tests pass, typecheck clean, and <code>ccs usage</code> now prints <em>Codex · AUF</em> with <code>ccs usage doctor</code> green on all five adapters. Still Milad's to do: register the account in the CodexBar GUI and confirm the <code>codex</code> CLI still works afterwards, which is what fills the group's live meters.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="p-when">Phase 3<br>fleet</div>
+        <div class="p-body">
+          <h4>Repeat on the Mini</h4>
+          <p>Its own gateway login and CodexBar registration. <b>Verified by</b> the hub showing both hosts reporting the new entitlement.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="p-when">Phase 4<br>durable</div>
+        <div class="p-body">
+          <h4>Write the playbook</h4>
+          <p><code>provider-account-lifecycle.md</code> per §09, written from what phases 1–3 actually did rather than from this plan's predictions. Add the bucket note to <code>model-routing.md</code> so the GPT bucket's two-account structure is visible to every dispatch.</p>
+        </div>
+      </div>
+
+      <div class="callout">
+        <span class="lbl">Not in scope</span>
+        A Codex equivalent of <code>cswap</code> or <code>fleet-switch</code> (§07). Per-session account attribution (§10). Widening the <code>provider == "claude"</code> filters. Each is separate work with its own justification.
+      </div>
+
+      <aside class="sources"><span class="lbl">Sources</span>all sections above</aside>
+    </section>
+
+    <footer>
+      <span>provider-account-onboarding.html · docs/plans/</span>
+      <span>Last updated 2026-09-17 · draft · awaiting implementation authorization</span>
+    </footer>
+  </main>
+</div>
+
+<script>
+  (function () {
+    var links = {};
+    document.querySelectorAll('nav.rail a').forEach(function (a) { links[a.getAttribute('href').slice(1)] = a; });
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          Object.values(links).forEach(function (a) { a.classList.remove('current'); });
+          var active = links[e.target.id];
+          if (active) active.classList.add('current');
+        }
+      });
+    }, { rootMargin: '-15% 0px -75% 0px' });
+    document.querySelectorAll('section[id]').forEach(function (s) { obs.observe(s); });
+  })();
+</script>
+</body>
+</html>
