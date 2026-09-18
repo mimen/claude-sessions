@@ -123,7 +123,10 @@ function collectCodexBarProvider(
   failureDetail: (entries: RawCodexBarEntry[]) => string,
   renewalForEntry?: (entry: RawCodexBarEntry) => SubscriptionRenewal | null,
 ): AdapterResult {
-  const res = runCodexBar(providerArg);
+  // --all-accounts: CodexBar returns one entry per registered account, and accountEntitlement
+  // below keys each entry by its email. Without it only the live system account is reported,
+  // so a second Codex subscription stays invisible to ccs usage.
+  const res = runCodexBar(providerArg, ["--all-accounts"]);
   if (!res.ok) return { observations: [], health: { ...res.error, provider: providerId } };
   const observations: UsageObservation[] = [];
   const renewals: SubscriptionRenewal[] = [];
