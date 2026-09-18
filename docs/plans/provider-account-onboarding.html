@@ -170,7 +170,7 @@ footer { margin-top: 62px; padding-top: 20px; border-top: 1px solid var(--line);
       <div class="stat"><div class="n">1</div><div class="l">line of code required</div></div>
       <div class="stat"><div class="n">4</div><div class="l">layers hold account state</div></div>
       <div class="stat"><div class="n">100%</div><div class="l">Codex weekly, spent now</div></div>
-      <div class="stat"><div class="n">188</div><div class="l">commits this repo is stale</div></div>
+      <div class="stat"><div class="n">188</div><div class="l">commits reconciled</div></div>
     </div>
 
     <div class="callout ok">
@@ -178,7 +178,7 @@ footer { margin-top: 62px; padding-top: 20px; border-top: 1px solid var(--line);
       <ol style="margin-bottom:0">
         <li><b>Most of this is already built.</b> <code>ccs usage</code> shipped weeks ago, is multi-account, and already renders Claude personal beside Claude AUF. The second ChatGPT account slots into the same grammar.</li>
         <li><b>The mechanical work is one gateway login, one GUI click, one code line, and one registry row.</b> Not a feature build.</li>
-        <li><b>The real decision is a spending policy, not an engineering one.</b> Should personal work be allowed to silently overflow onto the AUF business subscription? That is §04 and it is the only thing genuinely blocking.</li>
+        <li><b>The account is wanted for computer use, and the gateway cannot reserve a credential for a kind of work.</b> Routing selects on priority and strategy only. Plain overflow would therefore defeat the purpose, because routine subagent traffic drains the small $20 allowance before any computer-use work starts. §04 carries the three achievable shapes and is the one open decision.</li>
         <li><b>Account <em>switching</em> for ChatGPT does not exist and this plan does not build it.</b> Every <code>fleet-*</code> script filters to <code>provider == "claude"</code> by explicit code.</li>
         <li><b>Timing is good.</b> The Codex weekly allowance is at 100% right now, and the gateway has nothing to fail over to. This account would be the first thing that changes that.</li>
       </ol>
@@ -219,9 +219,10 @@ Codex · personal
 
       <p>Two things follow. First, the per-account display grammar this plan needs already exists and is in daily use. Second, <b>the Codex subscription is fully exhausted as this is being written</b> — three subagents dispatched during the research for this document died with <code>429 usage_limit_reached</code>, which is the most direct argument for the account being added that could be asked for.</p>
 
-      <div class="callout warn">
-        <span class="lbl">Housekeeping surfaced by this</span>
-        Those two plan files should either be marked shipped or deleted, and the stale checkout reconciled against <code>origin/master</code>. Editing <code>src/usage/</code> in the wrong tree is a live hazard for the work in §05. Separately, the <b>Active override</b> in <code>ClaudeConfig/references/model-routing.md</code> (Fable <code>-2</code>) expired 2026-09-15 and should be cleared or renewed.
+      <div class="callout ok">
+        <span class="lbl">Resolved 2026-09-18</span>
+        <p>The checkout has been fast-forwarded to <code>origin/master</code> (<code>ee0d166</code>) and now carries <code>src/usage/</code>. The merge revealed something the stale state hid: <code>unified-usage-utility.html</code> <b>is tracked upstream</b>, and the local untracked copy was byte-identical, so it was a redundant duplicate shadowing the committed file and has been discarded. <code>claude-sub-budget-pools.html</code> is tracked nowhere and was genuinely local, so it was restored untracked exactly as found.</p>
+        <p>Two things remain for Milad's call, deliberately not done unilaterally. The committed <code>unified-usage-utility.html</code> still carries an <em>awaiting implementation authorization</em> banner for work that shipped, and <code>claude-sub-budget-pools.html</code> is still uncommitted. Separately, the <b>Active override</b> in <code>ClaudeConfig/references/model-routing.md</code> (Fable <code>-2</code>) expired 2026-09-15 and should be cleared or renewed.</p>
       </div>
 
       <aside class="sources"><span class="lbl">Sources</span>Deployments/claude-sessions/src/usage/<span class="sep">·</span>docs/plans/unified-usage-utility.html<span class="sep">·</span>docs/plans/claude-sub-budget-pools.html<span class="sep">·</span>live <code>ccs usage</code> 2026-09-17</aside>
@@ -323,36 +324,45 @@ cliproxyapi -codex-device-login
 
       <blockquote>No total. Show both accounts and let the cascade order carry the meaning. Totalling a business entitlement into a personal figure invites spending it by accident.</blockquote>
 
-      <p>That reasoning transfers directly, because <code>milad@afternoonumbrellafriends.com</code> is the AUF business identity. But it cuts against the reason for buying the account in the first place, which was relief when Codex runs dry — and it is dry right now. Automatic overflow is the feature; silent business spend is the same feature seen from the accounting side.</p>
+      <p>That reasoning transfers directly, because <code>milad@afternoonumbrellafriends.com</code> is the AUF business identity. But it cuts against the reason for buying the account in the first place, which was relief when Codex runs dry — and it is dry right now.</p>
+
+      <div class="callout danger">
+        <span class="lbl">Correction — this section's original recommendation was wrong</span>
+        <p>An earlier version of this plan recommended <b>overflow</b>. Milad then stated the account is wanted specifically for <b>computer use</b>, with usage tracked like everything else. Checking the gateway against that intent turned up a constraint that invalidates the recommendation, so it is withdrawn rather than quietly amended.</p>
+        <p><b>The gateway cannot reserve a credential for a kind of work.</b> <code>routing</code> selects credentials by <code>priority</code> and <code>strategy</code> only; <code>model_quotas</code> is observational, not a restriction; and <a href="/Users/mimen/Documents/milad-vault/ClaudeConfig/models.toml" target="_blank" rel="noopener">models.toml</a> carries a single global <code>gateway = "http://127.0.0.1:8317"</code> while launchers.toml sets one <code>ANTHROPIC_BASE_URL</code>, so no model id can be pointed at a specific credential.</p>
+        <p>That makes plain overflow actively counterproductive here: with both credentials live, ordinary subagent traffic drains the $20 allowance first and it is gone before any computer-use session begins. Reserving the account is the requirement, and reservation is exactly what priority cannot express.</p>
+      </div>
+
+      <p>Usage tracking is unaffected by all of this. <code>ccs usage</code> reads Codex through CodexBar, which is keyed to the <em>account</em> rather than the gateway, so every shape below reports identically. That half of the request is already implemented and merged-pending in <a href="https://github.com/mimen/claude-sessions/pull/31" target="_blank" rel="noopener">PR #31</a>.</p>
 
       <table class="matrix">
-        <thead><tr><th>Option</th><th>Mechanism</th><th>When Pro is exhausted</th><th>Cost</th><th>Verdict</th></tr></thead>
+        <thead><tr><th>Option</th><th>Mechanism</th><th>Reserves it for computer use?</th><th>Cost</th><th>Verdict</th></tr></thead>
         <tbody>
           <tr class="pick">
-            <td><b>Overflow</b></td>
-            <td>Both credentials enabled. Pro at higher priority, Plus below it. <code>fill-first</code> plus always-on failover does the rest.</td>
-            <td>Work continues automatically on the Plus account. No human in the loop.</td>
-            <td>Personal work silently spends AUF quota. No record of which account served a session (§10).</td>
+            <td><b>Dedicated lane</b></td>
+            <td>A second <code>cliproxyapi</code> instance whose <code>auth-dir</code> holds only the Plus credential, fronted in the main gateway as an <code>openai-compatibility</code> provider with its own model alias, plus a <code>models.toml</code> row such as <code>gpt-6-astra-cu</code>.</td>
+            <td><b>Yes, automatically.</b> Dispatching that model id spends the Plus account and nothing else ever does.</td>
+            <td>One extra service, one config block, one model row, one <code>serves</code>-glob edit. Uses existing gateway features rather than new code.</td>
             <td><span class="tag accent">Recommended</span></td>
           </tr>
           <tr>
-            <td>Mirror Claude</td>
-            <td>Plus credential present but <code>disabled: true</code>. A deliberate act enables it and disables Pro.</td>
-            <td>Work stops until switched by hand. No Codex equivalent of <code>fleet-switch</code> exists to automate it (§07).</td>
-            <td>Clean billing separation, at the price of the outage the account was bought to prevent.</td>
-            <td><span class="tag warn">rejected</span></td>
+            <td>Parked, enabled by hand</td>
+            <td>Plus credential in the main gateway with <code>disabled: true</code>, enabled deliberately for a computer-use session. Mirrors the Claude arrangement.</td>
+            <td>Only by discipline. While enabled, <em>all</em> Codex traffic uses it, not just computer use.</td>
+            <td>Zero new infrastructure, available the same day. Manual toggle every session.</td>
+            <td><span class="tag warn">viable today</span></td>
           </tr>
           <tr>
-            <td>Overflow plus alarm</td>
-            <td>Overflow, plus a notification the first time the Plus account serves traffic in a window.</td>
-            <td>Same as overflow, with the spend made visible as it starts.</td>
-            <td>Needs a watcher that does not exist. Real scope, not a config flag.</td>
-            <td><span class="tag warn">later</span></td>
+            <td>Plain overflow</td>
+            <td>Both credentials enabled, Plus at lower priority under <code>fill-first</code>.</td>
+            <td><b>No.</b> Routine subagent traffic drains the allowance first.</td>
+            <td>Simplest to set up, and defeats the stated purpose. Also spends AUF quota on personal work silently.</td>
+            <td><span class="tag danger">withdrawn</span></td>
           </tr>
         </tbody>
       </table>
 
-      <p><b>The recommendation is overflow</b>, on the grounds that a $20 Plus allowance is small enough that accidental spend is bounded by roughly the cost of the plan, while the outage it prevents is unbounded. That argument depends on the premise that the amount at risk is small; if the AUF account is ever upgraded, this decision should be revisited rather than inherited.</p>
+      <p><b>The recommendation is the dedicated lane</b>, because it is the only shape that makes the reservation automatic rather than a thing to remember, and because computer use is precisely the capability the routing inventory flags as having no fallback during a Codex freeze. The parked option is the honest same-day answer if the extra service is unwelcome; it trades a per-session toggle for zero new moving parts.</p>
 
       <div class="callout warn">
         <span class="lbl">A policy consequence worth pricing in</span>
@@ -533,8 +543,8 @@ const res = runCodexBar(providerArg, <span class="v">["--all-accounts"]</span>);
       <div class="phase">
         <div class="p-when">Phase 0<br>blocking</div>
         <div class="p-body">
-          <h4>Confirm the premise and settle the policy</h4>
-          <p>Verify Plus actually carries Codex CLI entitlement. Settle §04, overflow versus parked. Reconcile the stale checkout against <code>origin/master</code> so §05 lands in the right tree.</p>
+          <h4>Confirm the premise and settle the lane</h4>
+          <p>Verify Plus actually carries Codex CLI entitlement. Settle §04, dedicated lane versus parked. <span class="tag ok">done</span> Reconcile the stale checkout, completed 2026-09-18 at <code>ee0d166</code>.</p>
         </div>
       </div>
       <div class="phase">
@@ -548,7 +558,7 @@ const res = runCodexBar(providerArg, <span class="v">["--all-accounts"]</span>);
         <div class="p-when">Phase 2<br>visibility</div>
         <div class="p-body">
           <h4>CodexBar registration and the code edits</h4>
-          <p>Register in the GUI, confirm the <code>codex</code> CLI still works, then <code>--all-accounts</code>, the registry row, and a decision on the <code>codex-pro</code> literal. <b>Verified by</b> <code>ccs usage</code> printing <em>Codex · AUF</em> with a correct plan name, and <code>ccs usage doctor</code> exiting 0.</p>
+          <p><span class="tag ok">code done</span> <code>--all-accounts</code> and the registry row shipped in <a href="https://github.com/mimen/claude-sessions/pull/31" target="_blank" rel="noopener">PR #31</a>: 50 tests pass, typecheck clean, and <code>ccs usage</code> now prints <em>Codex · AUF</em> with <code>ccs usage doctor</code> green on all five adapters. Still Milad's to do: register the account in the CodexBar GUI and confirm the <code>codex</code> CLI still works afterwards, which is what fills the group's live meters.</p>
         </div>
       </div>
       <div class="phase">
