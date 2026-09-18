@@ -135,7 +135,10 @@ function groupTitle(provider: string, account: string | null): string {
   const base = PROVIDER_TITLE[provider] ?? provider;
   const aliases: Readonly<Record<string, string>> = {
     "miladmaaan@gmail.com": "personal",
+    // The AUF subscriptions sit on two different domains: Anthropic on
+    // afternoonumbrellafriends.com, ChatGPT on theafternoonumbrellafriends.com.
     "milad@afternoonumbrellafriends.com": "AUF",
+    "milad@theafternoonumbrellafriends.com": "AUF",
   };
   return account ? `${base} · ${aliases[account.toLowerCase()] ?? account}` : base;
 }
