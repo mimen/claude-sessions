@@ -237,6 +237,53 @@ test("render labels Spark, DIEM, and multi-account groups distinctly", () => {
   expect(out).toContain("Claude · a@b.c"); // account in the group title
 });
 
+test("inactive CodexBar snapshots fill in accounts --all-accounts omits", async () => {
+  const { inactiveCodexSnapshotObservations } = await import("./adapters.ts");
+  const live = new Set(["milad@theafternoonumbrellafriends.com"]);
+  const observations = inactiveCodexSnapshotObservations({
+    records: [{
+      id: "miladmaaan@gmail.com",
+      sourceLabel: "oauth",
+      credits: { remaining: 0, updatedAt: 811119956.169675 },
+      snapshot: {
+        identity: { accountEmail: "miladmaaan@gmail.com", loginMethod: "pro" },
+        primary: null,
+        secondary: { usedPercent: 75, resetsAt: 811498539, windowMinutes: 10080 },
+        extraRateWindows: [{
+          id: "codex-spark",
+          title: "Codex Spark 5-hour",
+          window: { usedPercent: 0, resetsAt: 811137953, windowMinutes: 300 },
+        }],
+        codexResetCredits: {
+          credits: [{ status: "available", expires_at: 812866708.129 }],
+          updatedAt: 811119954.594954,
+        },
+        updatedAt: 811119954.59497,
+      },
+    }],
+  }, live);
+  const weekly = observations.find((o) => o.window === "weekly");
+  expect(weekly?.entitlement).toBe("codex-pro:miladmaaan@gmail.com");
+  expect(weekly?.used).toBe(75);
+  expect(weekly?.stale).toBe(true);
+  expect(weekly?.resetsAt).toBe("2026-09-19T08:15:39.000Z");
+  expect(observations.some((o) => o.entitlement.includes("theafternoon"))).toBe(false);
+  expect(observations.some((o) => o.metric === "reset_credit" && o.remaining === 1)).toBe(true);
+});
+
+test("a live Codex email is not double-counted from the snapshot cache", async () => {
+  const { inactiveCodexSnapshotObservations } = await import("./adapters.ts");
+  const observations = inactiveCodexSnapshotObservations([{
+    id: "milad@theafternoonumbrellafriends.com",
+    snapshot: {
+      identity: { accountEmail: "milad@theafternoonumbrellafriends.com", loginMethod: "plus" },
+      secondary: { usedPercent: 2, resetsAt: 811498539, windowMinutes: 10080 },
+      updatedAt: 811119954,
+    },
+  }], ["milad@theafternoonumbrellafriends.com"]);
+  expect(observations).toEqual([]);
+});
+
 test("a cached cswap window is marked stale so it cannot pass for a live reading", () => {
   const cached = windowFromCswap({ pct: 96, resetsAt: null }, "2026-09-07T04:40:23Z", true) as
     | (ReturnType<typeof windowFromCswap> & { stale?: boolean })

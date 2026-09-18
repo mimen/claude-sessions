@@ -86,7 +86,8 @@ struct UsageGauge: Identifiable, Equatable {
 enum GaugeBuilder {
     static let accountAlias = [
         "miladmaaan@gmail.com": "personal",
-        "milad@afternoonumbrellafriends.com": "auf"
+        "milad@afternoonumbrellafriends.com": "auf",
+        "milad@theafternoonumbrellafriends.com": "auf",
     ]
 
     static let nameLabel = [

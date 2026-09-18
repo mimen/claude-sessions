@@ -44,6 +44,8 @@ export interface UsageObservation {
   observedAt: string;
   source: SourceClass;
   exact: boolean;
+  /** Cached reading (cswap lastGoodUsage, CodexBar snapshot of a parked account). */
+  stale?: boolean;
 }
 
 /** Adapter health, surfaced by `ccs usage doctor` and embedded in every snapshot. */

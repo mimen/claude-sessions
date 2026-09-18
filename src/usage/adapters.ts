@@ -11,6 +11,7 @@
  *  - venice → official billing balance + api_keys/rate_limits APIs
  */
 
+import { readFileSync } from "node:fs";
 import type {
   AdapterHealth,
   ProviderId,
@@ -40,9 +41,20 @@ function now(): string {
 
 interface CodexBarWindow {
   usedPercent?: number | null;
-  resetsAt?: string | null;
+  resetsAt?: string | number | null;
   resetDescription?: string | null;
   windowMinutes?: number | null;
+}
+
+/** CoreFoundation AbsoluteTime (seconds since 2001-01-01 UTC) as used by CodexBar snapshots. */
+const CF_ABSOLUTE_EPOCH = 978_307_200;
+
+function toIsoTimestamp(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date((value + CF_ABSOLUTE_EPOCH) * 1000).toISOString();
+  }
+  return null;
 }
 
 /** Map a window length to the plan's window vocabulary. */
@@ -80,6 +92,69 @@ export function accountEntitlement(base: string, identity: Identity | undefined,
   return `${base}:${email}`;
 }
 
+interface CodexSnapshotRecord {
+  id?: string;
+  sourceLabel?: string;
+  credits?: { remaining?: number; updatedAt?: string | number };
+  snapshot?: CodexUsage & { extraRateWindows?: CodexUsage["extraRateWindows"] };
+}
+
+function snapshotRecords(raw: unknown): CodexSnapshotRecord[] {
+  if (Array.isArray(raw)) return raw as CodexSnapshotRecord[];
+  if (raw && typeof raw === "object" && Array.isArray((raw as { records?: unknown }).records)) {
+    return (raw as { records: CodexSnapshotRecord[] }).records;
+  }
+  return [];
+}
+
+function loadCodexAccountSnapshots(): unknown {
+  const home = Bun.env.HOME;
+  if (!home) return null;
+  try {
+    return JSON.parse(readFileSync(
+      `${home}/Library/Application Support/CodexBar/codex-account-snapshots.json`,
+      "utf8",
+    ));
+  } catch {
+    return null;
+  }
+}
+
+function entryFromSnapshotRecord(record: CodexSnapshotRecord): RawCodexBarEntry | null {
+  if (!record.snapshot) return null;
+  return {
+    provider: "codex",
+    source: record.sourceLabel ?? "oauth",
+    usage: record.snapshot,
+    credits: record.credits
+      ? {
+          remaining: record.credits.remaining,
+          updatedAt: toIsoTimestamp(record.credits.updatedAt) ?? undefined,
+        }
+      : undefined,
+  };
+}
+
+/**
+ * CodexBar `--all-accounts` only returns the live system OAuth account. Parked
+ * ChatGPT logins still have meters in `codex-account-snapshots.json`.
+ */
+export function inactiveCodexSnapshotObservations(
+  records: unknown,
+  liveEmails: Iterable<string>,
+): UsageObservation[] {
+  const live = new Set([...liveEmails].map((email) => email.toLowerCase()));
+  const out: UsageObservation[] = [];
+  for (const record of snapshotRecords(records)) {
+    const entry = entryFromSnapshotRecord(record);
+    const email = (entry?.usage as CodexUsage | undefined)?.identity?.accountEmail
+      ?? record.id;
+    if (!entry || !email || live.has(email.toLowerCase())) continue;
+    out.push(...codexObservationsFromEntry(entry, true));
+  }
+  return out;
+}
+
 function windowObservations(
   provider: ProviderId,
   entitlement: string,
@@ -87,6 +162,7 @@ function windowObservations(
   windows: Array<[string, CodexBarWindow | null]>,
   observedAt: string,
   sourceClass: UsageObservation["source"],
+  stale = false,
 ): UsageObservation[] {
   const out: UsageObservation[] = [];
   for (const [name, w] of windows) {
@@ -101,12 +177,13 @@ function windowObservations(
       limit: typeof w.usedPercent === "number" ? 100 : null,
       remaining:
         typeof w.usedPercent === "number" ? Math.max(0, 100 - w.usedPercent) : null,
-      resetsAt: w.resetsAt ?? null,
+      resetsAt: toIsoTimestamp(w.resetsAt),
       expiresAt: null,
       observedAt,
       source: sourceClass,
       // Percentages from the product surface are rounded by the provider itself.
       exact: false,
+      ...(stale ? { stale: true } : {}),
     });
   }
   return out;
@@ -123,24 +200,29 @@ function collectCodexBarProvider(
   failureDetail: (entries: RawCodexBarEntry[]) => string,
   renewalForEntry?: (entry: RawCodexBarEntry) => SubscriptionRenewal | null,
 ): AdapterResult {
-  // --all-accounts: CodexBar returns one entry per registered account, and accountEntitlement
-  // below keys each entry by its email. Without it only the live system account is reported,
-  // so a second Codex subscription stays invisible to ccs usage.
+  // --all-accounts still only returns the live system OAuth account. Parked ChatGPT
+  // logins are merged from CodexBar's snapshot file after this loop.
   const res = runCodexBar(providerArg, ["--all-accounts"]);
   if (!res.ok) return { observations: [], health: { ...res.error, provider: providerId } };
   const observations: UsageObservation[] = [];
   const renewals: SubscriptionRenewal[] = [];
   let hadError = false;
   let lastError = "";
+  const liveEmails: string[] = [];
   for (const entry of res.value.entries) {
     if (entry.error) {
       hadError = true;
       lastError = entry.error.message ?? "unknown provider error";
       continue;
     }
+    const email = (entry.usage as CodexUsage | undefined)?.identity?.accountEmail;
+    if (email) liveEmails.push(email);
     observations.push(...perEntry(entry));
     const renewal = renewalForEntry?.(entry);
     if (renewal) renewals.push(renewal);
+  }
+  if (providerId === "codex") {
+    observations.push(...inactiveCodexSnapshotObservations(loadCodexAccountSnapshots(), liveEmails));
   }
   const version = codexBarVersion();
   const health: AdapterHealth =
@@ -160,7 +242,7 @@ function collectCodexBarProvider(
 }
 
 interface CodexUsage {
-  updatedAt?: string;
+  updatedAt?: string | number;
   identity?: Identity;
   primary?: CodexBarWindow | null;
   secondary?: CodexBarWindow | null;
@@ -171,82 +253,87 @@ interface CodexUsage {
     credits?: Array<{
       id?: string;
       status?: string;
-      granted_at?: string;
-      expires_at?: string;
-      redeemed_at?: string;
+      granted_at?: string | number;
+      expires_at?: string | number;
+      redeemed_at?: string | number;
       title?: string;
     }>;
-    updatedAt?: string;
+    updatedAt?: string | number;
   };
-  credits?: { remaining?: number; updatedAt?: string };
+  credits?: { remaining?: number; updatedAt?: string | number };
   subscriptionRenewsAt?: string | null;
 }
 
-function codexAdapter(): AdapterResult {
-  return collectCodexBarProvider("codex", "codex", (entry) => {
-    const usage = entry.usage as CodexUsage | undefined;
-    if (!usage) return [];
-    const observedAt = usage.updatedAt ?? now();
-    const srcClass = sourceClassFor(entry.source);
-    const entitlement = accountEntitlement("codex-pro", usage.identity, entry);
-    const out: UsageObservation[] = windowObservations(
-      "codex", entitlement, "account",
-      [
-        ["primary", usage.primary ?? null],
-        ["secondary", usage.secondary ?? null],
-        ["tertiary", usage.tertiary ?? null],
-      ],
-      observedAt,
-      srcClass,
-    );
-    // Spark windows ride in extraRateWindows but consume a distinct Spark allowance —
-    // they keep their own entitlement so the view never mislabels them as Codex Pro.
-    for (const extra of usage.extraRateWindows ?? []) {
-      if (!extra.window) continue;
-      const id = extra.id ?? extra.title ?? "codex-spark";
-      out.push(...windowObservations("codex", id, "account", [[extra.title ?? id, extra.window]], observedAt, srcClass));
-    }
-    // Banked reset credits carry full lifecycle state; "redeeming" is pending, not consumed.
-    const rc = usage.codexResetCredits;
-    if (rc?.credits) {
-      for (const c of rc.credits) {
-        out.push({
-          provider: "codex",
-          entitlement: accountEntitlement("codex-reset-credit", usage.identity, entry),
-          metric: "reset_credit",
-          scope: "account",
-          window: null,
-          used: null,
-          limit: null,
-          remaining: c.status === "available" ? 1 : null,
-          resetsAt: null,
-          expiresAt: c.expires_at ?? null,
-          observedAt: rc.updatedAt ?? observedAt,
-          source: srcClass,
-          exact: true,
-        });
-      }
-    }
-    // Paid dollar credits are a TOP-LEVEL entry sibling of `usage` in CodexBar output.
-    if (typeof entry.credits?.remaining === "number") {
+function codexObservationsFromEntry(entry: RawCodexBarEntry, stale = false): UsageObservation[] {
+  const usage = entry.usage as CodexUsage | undefined;
+  if (!usage) return [];
+  const observedAt = toIsoTimestamp(usage.updatedAt) ?? now();
+  const srcClass = sourceClassFor(entry.source);
+  const entitlement = accountEntitlement("codex-pro", usage.identity, entry);
+  const out: UsageObservation[] = windowObservations(
+    "codex", entitlement, "account",
+    [
+      ["primary", usage.primary ?? null],
+      ["secondary", usage.secondary ?? null],
+      ["tertiary", usage.tertiary ?? null],
+    ],
+    observedAt,
+    srcClass,
+    stale,
+  );
+  // Spark windows ride in extraRateWindows but consume a distinct Spark allowance —
+  // they keep their own entitlement so the view never mislabels them as Codex Pro.
+  for (const extra of usage.extraRateWindows ?? []) {
+    if (!extra.window) continue;
+    const id = extra.id ?? extra.title ?? "codex-spark";
+    out.push(...windowObservations("codex", accountEntitlement(id, usage.identity, entry), "account", [[extra.title ?? id, extra.window]], observedAt, srcClass, stale));
+  }
+  // Banked reset credits carry full lifecycle state; "redeeming" is pending, not consumed.
+  const rc = usage.codexResetCredits;
+  if (rc?.credits) {
+    for (const c of rc.credits) {
       out.push({
         provider: "codex",
-        entitlement: accountEntitlement("codex-dollar-credit", usage.identity, entry),
-        metric: "credit",
+        entitlement: accountEntitlement("codex-reset-credit", usage.identity, entry),
+        metric: "reset_credit",
         scope: "account",
         window: null,
         used: null,
         limit: null,
-        remaining: entry.credits.remaining,
+        remaining: c.status === "available" ? 1 : null,
         resetsAt: null,
-        expiresAt: null,
-        observedAt: entry.credits.updatedAt ?? observedAt,
+        expiresAt: toIsoTimestamp(c.expires_at),
+        observedAt: toIsoTimestamp(rc.updatedAt) ?? observedAt,
         source: srcClass,
         exact: true,
+        ...(stale ? { stale: true } : {}),
       });
     }
-    return out;
-  }, () => "no codex usage entries returned", (entry) => {
+  }
+  // Paid dollar credits are a TOP-LEVEL entry sibling of `usage` in CodexBar output.
+  if (typeof entry.credits?.remaining === "number") {
+    out.push({
+      provider: "codex",
+      entitlement: accountEntitlement("codex-dollar-credit", usage.identity, entry),
+      metric: "credit",
+      scope: "account",
+      window: null,
+      used: null,
+      limit: null,
+      remaining: entry.credits.remaining,
+      resetsAt: null,
+      expiresAt: null,
+      observedAt: toIsoTimestamp(entry.credits.updatedAt) ?? observedAt,
+      source: srcClass,
+      exact: true,
+      ...(stale ? { stale: true } : {}),
+    });
+  }
+  return out;
+}
+
+function codexAdapter(): AdapterResult {
+  return collectCodexBarProvider("codex", "codex", (entry) => codexObservationsFromEntry(entry), () => "no codex usage entries returned", (entry) => {
     const usage = entry.usage as CodexUsage | undefined;
     const renewsOn = renewalDate(usage?.subscriptionRenewsAt);
     if (!renewsOn) return null;

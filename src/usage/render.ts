@@ -371,7 +371,8 @@ function rowFor(o: UsageObservation, name: string, limitPad: number, capSummary:
         }
         const barText = colorFor(pct, label + colorFor(pct, bar(pct)));
         const when = countdown(o.resetsAt) || shortReset(o.resetsAt ?? "");
-        return `${indent}${barText} ${String(pct).padStart(3)}%  ${when}`;
+        const notes = [when, o.stale ? "cached" : ""].filter(Boolean).join(" · ");
+        return `${indent}${barText} ${String(pct).padStart(3)}%  ${notes}`.trimEnd();
       }
       return `${indent}${label}— unknown`;
     }
