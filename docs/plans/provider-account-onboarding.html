@@ -497,8 +497,13 @@ const res = runCodexBar(providerArg, <span class="v">["--all-accounts"]</span>);
         <tbody>
           <tr>
             <td>Does $20 Plus grant Codex CLI access, and at what limits?</td>
-            <td><span class="tag danger">unverified</span></td>
-            <td>Could not be confirmed in this session — web search and fetch both returned 429 under the same exhausted quota. <b>This premise underpins the whole plan</b> and should be checked before step one. If Plus carries no Codex entitlement, only the ChatGPT app benefits and nothing below §03 applies.</td>
+            <td><span class="tag ok">resolved</span></td>
+            <td><b>Yes.</b> Once the account was registered in CodexBar it reported <code>loginMethod: "plus"</code> with live five-hour and weekly windows, both at 0%. The premise holds and the plan stands. Earlier drafts of this row read <em>unverified</em>, because web search and fetch were both returning 429 under the exhausted Codex quota at the time.</td>
+          </tr>
+          <tr>
+            <td>The two AUF subscriptions sit on different domains</td>
+            <td><span class="tag danger">caused a real bug</span></td>
+            <td>Anthropic's AUF account is <code>milad@afternoonumbrellafriends.com</code>. The ChatGPT account is <code>milad@<b>the</b>afternoonumbrellafriends.com</code>. The first registry row was written from the address in the brief, matched no real account, and produced an empty AUF group beside the live one rendering under its raw email. Fixed in <a href="https://github.com/mimen/claude-sessions/pull/32" target="_blank" rel="noopener">PR #32</a>. The general lesson, now in the playbook: take the account email from what the usage reader actually returns, never from what it was called in conversation.</td>
           </tr>
           <tr>
             <td>CodexBar registration rewrites <code>~/.codex/auth.json</code></td>
@@ -558,7 +563,7 @@ const res = runCodexBar(providerArg, <span class="v">["--all-accounts"]</span>);
         <div class="p-when">Phase 2<br>visibility</div>
         <div class="p-body">
           <h4>CodexBar registration and the code edits</h4>
-          <p><span class="tag ok">code done</span> <code>--all-accounts</code> and the registry row shipped in <a href="https://github.com/mimen/claude-sessions/pull/31" target="_blank" rel="noopener">PR #31</a>: 50 tests pass, typecheck clean, and <code>ccs usage</code> now prints <em>Codex · AUF</em> with <code>ccs usage doctor</code> green on all five adapters. Still Milad's to do: register the account in the CodexBar GUI and confirm the <code>codex</code> CLI still works afterwards, which is what fills the group's live meters.</p>
+          <p><span class="tag ok">done</span> <code>--all-accounts</code> and the registry row shipped in <a href="https://github.com/mimen/claude-sessions/pull/31" target="_blank" rel="noopener">PR #31</a>, corrected in <a href="https://github.com/mimen/claude-sessions/pull/32" target="_blank" rel="noopener">PR #32</a>, and deployed. Milad registered the account in CodexBar during this session, so <code>ccs usage</code> now prints <em>Codex · AUF · Codex Plus</em> with live five-hour and weekly meters, and <code>ccs usage doctor</code> is green on all five adapters. The <code>codex-pro</code> entitlement literal in <code>adapters.ts:188</code> is knowingly left alone: a Plus account carries the id <code>codex-pro:…</code> in <code>--json</code> while displaying the right plan name, so only the JSON contract is wrong.</p>
         </div>
       </div>
       <div class="phase">
