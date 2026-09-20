@@ -4,7 +4,7 @@
  * adapter cannot collapse the command (plan commitment).
  *
  * Sources, per plan:
- *  - codex → CodexBar CLI JSON
+ *  - codex → ChatGPT wham usage per cliproxy OAuth file
  *  - anthropic → cswap's per-account Anthropic OAuth usage snapshots
  *  - grok → xAI billing/subscription JSON + reset-grant gRPC-Web surfaces
  *  - opencode-go → official Go usage API
@@ -20,7 +20,8 @@ import type {
   UsageSnapshot,
   UsageWindow,
 } from "./types.ts";
-import { codexBarVersion, entryErrorHealth, runCodexBar, sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
+import { sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
+import { readLiveCodexAccounts } from "./codex-oauth.ts";
 import { runCswap, type CswapWindow } from "./cswap.ts";
 import { fetchOauthProfile, fetchOauthUsage, planFromProfile, readKeychainOauth, windowsFromOauthUsage } from "./anthropic-oauth.ts";
 import { fetchGrokBilling } from "./grok.ts";
@@ -193,54 +194,6 @@ function windowObservations(
 // Codex
 // ---------------------------------------------------------------------------
 
-function collectCodexBarProvider(
-  providerArg: string,
-  providerId: ProviderId,
-  perEntry: (entry: RawCodexBarEntry) => UsageObservation[],
-  failureDetail: (entries: RawCodexBarEntry[]) => string,
-  renewalForEntry?: (entry: RawCodexBarEntry) => SubscriptionRenewal | null,
-): AdapterResult {
-  // --all-accounts still only returns the live system OAuth account. Parked ChatGPT
-  // logins are merged from CodexBar's snapshot file after this loop.
-  const res = runCodexBar(providerArg, ["--all-accounts"]);
-  if (!res.ok) return { observations: [], health: { ...res.error, provider: providerId } };
-  const observations: UsageObservation[] = [];
-  const renewals: SubscriptionRenewal[] = [];
-  let hadError = false;
-  let lastError = "";
-  const liveEmails: string[] = [];
-  for (const entry of res.value.entries) {
-    if (entry.error) {
-      hadError = true;
-      lastError = entry.error.message ?? "unknown provider error";
-      continue;
-    }
-    const email = (entry.usage as CodexUsage | undefined)?.identity?.accountEmail;
-    if (email) liveEmails.push(email);
-    observations.push(...perEntry(entry));
-    const renewal = renewalForEntry?.(entry);
-    if (renewal) renewals.push(renewal);
-  }
-  if (providerId === "codex") {
-    observations.push(...inactiveCodexSnapshotObservations(loadCodexAccountSnapshots(), liveEmails));
-  }
-  const version = codexBarVersion();
-  const health: AdapterHealth =
-    hadError && observations.length === 0
-      ? entryErrorHealth(providerId, lastError)
-      : hadError
-        ? { provider: providerId, status: "degraded", detail: `partial: ${lastError}` }
-        : observations.length === 0
-          ? entryErrorHealth(providerId, failureDetail(res.value.entries))
-          : {
-              provider: providerId,
-              status: "ok",
-              detail: null,
-              ...(version ? { helper: { name: "codexbar", version } } : {}),
-            };
-  return { observations, health, renewals };
-}
-
 interface CodexUsage {
   updatedAt?: string | number;
   identity?: Identity;
@@ -332,18 +285,37 @@ function codexObservationsFromEntry(entry: RawCodexBarEntry, stale = false): Usa
   return out;
 }
 
-function codexAdapter(): AdapterResult {
-  return collectCodexBarProvider("codex", "codex", (entry) => codexObservationsFromEntry(entry), () => "no codex usage entries returned", (entry) => {
-    const usage = entry.usage as CodexUsage | undefined;
-    const renewsOn = renewalDate(usage?.subscriptionRenewsAt);
-    if (!renewsOn) return null;
-    return {
-      provider: "codex",
-      account: usage?.identity?.accountEmail ?? null,
-      renewsOn,
-      source: "official_ui",
-    };
-  });
+function snapshotAccountEmails(observations: UsageObservation[]): string[] {
+  const emails = new Set<string>();
+  for (const observation of observations) {
+    const email = observation.entitlement.split(":")[1];
+    if (email) emails.add(email);
+  }
+  return [...emails];
+}
+
+async function codexAdapter(): Promise<AdapterResult> {
+  const live = await readLiveCodexAccounts();
+  const observations = live.ok.flatMap((entry) => codexObservationsFromEntry(entry));
+  const snapshotObs = inactiveCodexSnapshotObservations(loadCodexAccountSnapshots(), live.emails);
+  observations.push(...snapshotObs);
+  const snapshotEmails = snapshotAccountEmails(snapshotObs);
+  const named = [
+    ...live.failures.map((failure) => `${failure.email} ${failure.detail}`),
+    ...snapshotEmails.map((email) => `${email} on cached usage`),
+  ];
+  const health: AdapterHealth =
+    observations.length === 0
+      ? { provider: "codex", status: "unavailable", detail: named[0] ?? "no live Codex OAuth credentials" }
+      : named.length === 0
+        ? { provider: "codex", status: "ok", detail: null }
+        : {
+            provider: "codex",
+            status: "degraded",
+            detail: named.join("; "),
+            accounts: [...live.failures.map((failure) => failure.email), ...snapshotEmails],
+          };
+  return { observations, health };
 }
 
 // ---------------------------------------------------------------------------
@@ -821,42 +793,21 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
   const wanted = opts.providers ?? PROVIDERS;
   // Final containment boundary: an adapter that throws despite its own error handling
   // degrades to AdapterHealth here — one broken adapter never collapses the command.
-  const run = (p: ProviderId): AdapterResult => {
-    try {
-      switch (p) {
-        case "codex": return codexAdapter();
-        case "opencode-go":
-        case "anthropic":
-        case "grok":
-        case "venice":
-          return { observations: [], health: { provider: p, status: "unavailable", detail: "async adapter" } };
-      }
-    } catch (e) {
-      return {
-        observations: [],
-        health: { provider: p, status: "unavailable", detail: e instanceof Error ? e.message : String(e) },
-      };
-    }
-  };
   const results: AdapterResult[] = [];
   for (const p of wanted) {
-    if (p === "venice" || p === "opencode-go" || p === "grok" || p === "anthropic") {
-      // The direct-API adapters are async; contain their throws like the sync ones.
-      try {
-        results.push(
-          p === "venice" ? await veniceAdapter()
-          : p === "grok" ? await grokAdapter()
-          : p === "anthropic" ? await anthropicAdapterLive()
-          : await opencodeGoAdapter(),
-        );
-      } catch (e) {
-        results.push({
-          observations: [],
-          health: { provider: p, status: "unavailable", detail: e instanceof Error ? e.message : String(e) },
-        });
-      }
-    } else {
-      results.push(run(p));
+    try {
+      results.push(
+        p === "codex" ? await codexAdapter()
+        : p === "venice" ? await veniceAdapter()
+        : p === "grok" ? await grokAdapter()
+        : p === "anthropic" ? await anthropicAdapterLive()
+        : await opencodeGoAdapter(),
+      );
+    } catch (e) {
+      results.push({
+        observations: [],
+        health: { provider: p, status: "unavailable", detail: e instanceof Error ? e.message : String(e) },
+      });
     }
   }
   return {

@@ -17,8 +17,9 @@ const VALID: readonly ProviderId[] = ["codex", "anthropic", "grok", "opencode-go
 
 const SOURCES_HELP = `ccs usage sources — what each adapter reads
 
-  codex        CodexBar CLI (official_cli). Ordinary 5h/weekly windows, Spark windows,
-               banked reset credits (lifecycle + expiry), dollar credits as separate state.
+  codex        ChatGPT OAuth usage API (official_api) per cliproxy account. Ordinary
+               5h/weekly windows, dollar credits as separate state. Parked logins fall
+               back to CodexBar snapshots (cached).
   anthropic    cswap list --json (official_api): each managed Claude account's live
                five-hour and weekly OAuth windows, resets, and last-good fallback.
   grok         xAI billing/subscription JSON plus GetRemainingResets gRPC-Web
