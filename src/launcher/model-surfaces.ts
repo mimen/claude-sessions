@@ -213,11 +213,34 @@ const T3SettingsSchema = z.object({
   }).passthrough()).optional(),
 }).passthrough();
 
+const T3ManifestSchema = z.object({
+  manifest: z.object({
+    currentModels: z.record(z.string(), z.array(z.string())).optional(),
+  }).passthrough().optional(),
+}).passthrough();
+
 /**
- * T3 Code already knows every Anthropic id from its own manifest, so `customModels` carries only
- * the gateway ids it would otherwise never offer.
+ * The Claude ids T3 Code offers on its own, from its cached model manifest. T3 lists a Claude id
+ * only when its manifest names it, and the manifest lags a release by days, so a registry row the
+ * manifest lacks has to travel through `customModels` like a gateway id. An unreadable manifest
+ * yields null, which keeps the older assumption that T3 knows every Claude id.
  */
-export function renderT3Settings(text: string, registry: ModelRegistry): Result<string | null> {
+export function t3KnownClaudeIds(manifestText: string): ReadonlySet<string> | null {
+  try {
+    const parsed = T3ManifestSchema.safeParse(JSON.parse(manifestText));
+    if (!parsed.success) return null;
+    return new Set(parsed.data.manifest?.currentModels?.["claudeAgent"] ?? []);
+  } catch {
+    return null;
+  }
+}
+
+/** `customModels` carries every gateway id plus any Claude id T3's own manifest does not know yet. */
+export function renderT3Settings(
+  text: string,
+  registry: ModelRegistry,
+  knownClaudeIds: ReadonlySet<string> | null = null,
+): Result<string | null> {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -230,7 +253,7 @@ export function renderT3Settings(text: string, registry: ModelRegistry): Result<
   const instance = parsed.data.providerInstances?.["claudeAgent"];
   if (!instance) return ok(null);
   const customModels = registry.model
-    .filter((model) => !model.id.startsWith("claude-"))
+    .filter((model) => !model.id.startsWith("claude-") || (knownClaudeIds !== null && !knownClaudeIds.has(model.id)))
     .map((model) => t3CustomModelEntry(model));
   const next = {
     ...(raw as Record<string, unknown>),
@@ -291,6 +314,8 @@ export interface ClientSurfacePaths {
   readonly opencodeConfig: string;
   readonly t3Settings: string;
   readonly t3ClientSettings: string;
+  /** T3's cached model manifest; missing or unparseable means T3 is assumed to know every Claude id. */
+  readonly t3ModelManifest?: string;
 }
 
 export interface ClientSurfaceResult {
@@ -342,9 +367,12 @@ export function writeClientSurfaces(
   paths: ClientSurfacePaths,
 ): Result<ClientSurfaceResult> {
   const result = { written: [] as string[], warnings: [] as string[] };
+  const known = paths.t3ModelManifest !== undefined && existsSync(paths.t3ModelManifest)
+    ? t3KnownClaudeIds(readFileSync(paths.t3ModelManifest, "utf8"))
+    : null;
   const steps: readonly [string, Transform, string][] = [
     [paths.opencodeConfig, renderOpencodeConfig, "it declares no provider.cliproxyapi"],
-    [paths.t3Settings, renderT3Settings, "it declares no claudeAgent provider instance"],
+    [paths.t3Settings, (text, reg) => renderT3Settings(text, reg, known), "it declares no claudeAgent provider instance"],
     [paths.t3ClientSettings, renderT3ClientSettings, "it declares no claudeAgent model preferences"],
   ];
   for (const [path, transform, warning] of steps) {
