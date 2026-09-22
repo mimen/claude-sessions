@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { planFromProfile, planFromTier, windowsFromOauthUsage } from "./anthropic-oauth.ts";
+import { bankedResetsFromOauthUsage, planFromProfile, planFromTier, windowsFromOauthUsage } from "./anthropic-oauth.ts";
 
 // Trimmed from the live endpoint on 2026-09-05: the legacy nimbus_quill field
 // reads 0 while the scoped Fable limit sits at 33.
@@ -41,4 +41,25 @@ test("plan follows the profile's organization, not the keychain's stamped tier",
   expect(planFromProfile(max, null)).toEqual({ name: "Max 20x", dollars: 200 });
   expect(planFromProfile(null, "default_claude_max_5x")).toEqual({ name: "Max 5x", dollars: 100 });
   expect(planFromTier("default_claude_ai")).toEqual({ name: "Pro", dollars: 20 });
+});
+
+// Trimmed from the live endpoint on 2026-09-22 (`?cedar_ember=1`): the Opus 5.5 launch grant.
+const launchGrant = {
+  id: "opus55-launch-promax-20260921",
+  label: "Claude Opus 5.5 launch: one usage-limit reset for Pro and Max",
+  resets_total: 1,
+  resets_left: 1,
+  starts_at: "2026-09-22T16:00:00+00:00",
+  ends_at: "2026-10-22T16:00:00+00:00",
+  paused: false,
+  usable_now: true,
+};
+
+test("each banked grant with resets left becomes one reset carrying its end date", () => {
+  const spent = { ...launchGrant, id: "older", resets_left: 0, ends_at: "2026-10-01T00:00:00+00:00" };
+  expect(bankedResetsFromOauthUsage({ cedar_ember: { eligible: true, grants: [launchGrant, spent] } })).toEqual([
+    { label: "Claude Opus 5.5 launch: one usage-limit reset for Pro and Max", left: 1, expiresAt: "2026-10-22T16:00:00+00:00" },
+  ]);
+  expect(bankedResetsFromOauthUsage({ cedar_ember: { eligible: false, ineligible_reason: "surface", grants: [] } })).toEqual([]);
+  expect(bankedResetsFromOauthUsage({})).toEqual([]);
 });

@@ -9,6 +9,8 @@
  * endpoint claude.ai's settings page uses.
  */
 
+import { readlinkSync } from "node:fs";
+import { basename } from "node:path";
 import type { UsageWindow } from "./types.ts";
 
 export interface KeychainOauth {
@@ -37,6 +39,20 @@ export interface OauthUsage {
   /** Codename for the scoped Fable weekly window. */
   nimbus_quill?: OauthWindow | null;
   limits?: OauthLimit[] | null;
+  /** Codename for banked usage-limit resets; only present when asked for with `?cedar_ember=1`. */
+  cedar_ember?: { eligible?: boolean | null; ineligible_reason?: string | null; grants?: OauthResetGrant[] | null } | null;
+}
+
+interface OauthResetGrant {
+  label?: string | null;
+  resets_left?: number | null;
+  ends_at?: string | null;
+}
+
+export interface BankedReset {
+  label: string;
+  left: number;
+  expiresAt: string | null;
 }
 
 export interface OauthProfile {
@@ -123,11 +139,26 @@ export function readKeychainOauth(accountNumber: number, email: string): Keychai
   }
 }
 
+/**
+ * The server reports banked resets (`cedar_ember`) only to a current Claude Code
+ * client: any other agent gets `ineligible_reason: "surface"`, an old version gets
+ * "cli_version". The installed version is the name of the file the launcher links to.
+ */
+function claudeCliUserAgent(): string | undefined {
+  try {
+    return `claude-cli/${basename(readlinkSync(`${Bun.env.HOME}/.local/bin/claude`))} (external, cli)`;
+  } catch {
+    return undefined;
+  }
+}
+
 async function oauthGet<T>(path: string, accessToken: string): Promise<T> {
+  const userAgent = claudeCliUserAgent();
   const res = await fetch(`https://api.anthropic.com/api/oauth/${path}`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "anthropic-beta": "oauth-2025-04-20",
+      ...(userAgent ? { "User-Agent": userAgent } : {}),
     },
   });
   if (!res.ok) {
@@ -138,7 +169,13 @@ async function oauthGet<T>(path: string, accessToken: string): Promise<T> {
 }
 
 export function fetchOauthUsage(accessToken: string): Promise<OauthUsage> {
-  return oauthGet<OauthUsage>("usage", accessToken);
+  return oauthGet<OauthUsage>("usage?cedar_ember=1", accessToken);
+}
+
+export function bankedResetsFromOauthUsage(usage: OauthUsage): BankedReset[] {
+  return (usage.cedar_ember?.grants ?? [])
+    .filter((g) => (g.resets_left ?? 0) > 0)
+    .map((g) => ({ label: g.label ?? "usage-limit reset", left: g.resets_left!, expiresAt: g.ends_at ?? null }));
 }
 
 /** Null on failure: the plan label is decoration, the windows are the data. */

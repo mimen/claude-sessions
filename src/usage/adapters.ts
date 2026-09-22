@@ -23,7 +23,7 @@ import type {
 import { sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
 import { readLiveCodexAccounts } from "./codex-oauth.ts";
 import { runCswap, type CswapWindow } from "./cswap.ts";
-import { fetchOauthProfile, fetchOauthUsage, planFromProfile, readKeychainOauth, windowsFromOauthUsage } from "./anthropic-oauth.ts";
+import { bankedResetsFromOauthUsage, fetchOauthProfile, fetchOauthUsage, planFromProfile, readKeychainOauth, windowsFromOauthUsage } from "./anthropic-oauth.ts";
 import { fetchGrokBilling } from "./grok.ts";
 import { fetchGatewayClaudeCredentials, gatewayIssues, type GatewayIssue } from "./gateway-claude-health.ts";
 import { mergeSubscriptionRenewals, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
@@ -392,6 +392,25 @@ async function anthropicAdapterLive(): Promise<AdapterResult> {
             tier: tier?.name ?? null,
           } as UsageObservation & { tier?: string | null });
           okCount++;
+        }
+        for (const r of bankedResetsFromOauthUsage(usage)) {
+          for (let i = 0; i < r.left; i++) {
+            observations.push({
+              provider: "anthropic",
+              entitlement: `claude-reset-credit:${acct.email}`,
+              metric: "reset_credit",
+              scope: "account",
+              window: null,
+              used: null,
+              limit: null,
+              remaining: 1,
+              resetsAt: null,
+              expiresAt: r.expiresAt,
+              observedAt,
+              source: "official_api",
+              exact: true,
+            });
+          }
         }
         continue;
       } catch {
