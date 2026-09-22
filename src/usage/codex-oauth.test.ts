@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
-import { parseWhamUsage, readLiveCodexAccounts } from "./codex-oauth.ts";
+import { parseWhamUsage, readLiveCodexAccounts, RESET_CREDITS_URL } from "./codex-oauth.ts";
 
 function usageOf(entry: { usage?: unknown }) {
   return entry.usage as {
@@ -10,8 +10,24 @@ function usageOf(entry: { usage?: unknown }) {
     identity: { accountEmail: string; loginMethod?: string };
     primary?: { usedPercent: number; resetsAt: string | null; windowMinutes: number | null };
     secondary?: { usedPercent: number; resetsAt: string | null; windowMinutes: number | null };
+    codexResetCredits?: unknown;
   };
 }
+
+const proResetCredits = {
+  credits: [
+    {
+      id: "RateLimitResetCredit_55525556c58c8191b5c994c222244231",
+      reset_type: "codex_rate_limits",
+      status: "available",
+      granted_at: "2026-09-05T04:18:28.129844Z",
+      expires_at: "2026-10-05T04:18:28.129844Z",
+      redeemed_at: null,
+      title: "Full reset",
+    },
+  ],
+  available_count: 1,
+};
 
 const OBSERVED_AT = "2026-09-19T18:00:00.000Z";
 
@@ -121,10 +137,13 @@ test("readLiveCodexAccounts keeps enabled codex files and retries 401 only after
   }));
 
   const calls: Array<{ token: string; account: string }> = [];
-  const fetchMock = async (_url: string | URL | Request, init?: RequestInit) => {
+  const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
     const token = (headers.get("Authorization") ?? "").replace("Bearer ", "");
     const account = headers.get("ChatGPT-Account-Id") ?? "";
+    if (String(url) === RESET_CREDITS_URL) {
+      return Response.json(account === "acct-pro" ? proResetCredits : { credits: [], available_count: 0 });
+    }
     calls.push({ token, account });
     if (account === "acct-pro" && token === "oldtok") {
       writeFileSync(proFile, JSON.stringify({
@@ -161,5 +180,20 @@ test("readLiveCodexAccounts keeps enabled codex files and retries 401 only after
     "miladmaaan@gmail.com",
   ]);
   expect(calls.filter((c) => c.account === "acct-pro").map((c) => c.token)).toEqual(["oldtok", "newtok"]);
-  expect(usageOf(live.ok.find((e) => usageOf(e).identity.loginMethod === "pro")!).secondary).toBeUndefined();
+  const pro = usageOf(live.ok.find((e) => usageOf(e).identity.loginMethod === "pro")!);
+  expect(pro.secondary).toBeUndefined();
+  expect(pro.codexResetCredits).toEqual({
+    availableCount: 1,
+    credits: [{
+      id: "RateLimitResetCredit_55525556c58c8191b5c994c222244231",
+      status: "available",
+      granted_at: "2026-09-05T04:18:28.129844Z",
+      expires_at: "2026-10-05T04:18:28.129844Z",
+      redeemed_at: null,
+      title: "Full reset",
+    }],
+    updatedAt: OBSERVED_AT,
+  });
+  const plus = usageOf(live.ok.find((e) => usageOf(e).identity.loginMethod === "plus")!);
+  expect(plus.codexResetCredits).toEqual({ availableCount: 0, credits: [], updatedAt: OBSERVED_AT });
 });

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import type { RawCodexBarEntry } from "./codexbar.ts";
 
 const WHAM_URL = "https://chatgpt.com/backend-api/wham/usage";
+export const RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
 const WHAM_TIMEOUT_MS = 15_000;
 
 interface CodexCredential {
@@ -32,11 +33,33 @@ interface WhamUsage {
   credits?: { balance?: unknown };
 }
 
+interface ResetCredit {
+  id?: unknown;
+  status?: unknown;
+  granted_at?: unknown;
+  expires_at?: unknown;
+  redeemed_at?: unknown;
+  title?: unknown;
+}
+
+interface ResetCreditsResponse {
+  credits?: ResetCredit[];
+  available_count?: unknown;
+}
+
+/** Same shape CodexBar emits under `usage.codexResetCredits`, which adapters.ts already reads. */
+interface CodexResetCredits {
+  availableCount: number;
+  credits: ResetCredit[];
+  updatedAt: string;
+}
+
 interface CodexUsageShape {
   updatedAt: string;
   identity: { accountEmail: string; loginMethod?: string };
   primary?: { usedPercent: number; resetsAt: string | null; windowMinutes: number | null };
   secondary?: { usedPercent: number; resetsAt: string | null; windowMinutes: number | null };
+  codexResetCredits?: CodexResetCredits;
 }
 
 type WhamFetch = (url: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -139,11 +162,25 @@ function listCredentials(dirs: string[]): CodexCredential[] {
   return out;
 }
 
+export function parseResetCredits(payload: unknown, observedAt: string): CodexResetCredits {
+  const body = payload as ResetCreditsResponse;
+  const credits = Array.isArray(body.credits) ? body.credits : [];
+  return {
+    availableCount: typeof body.available_count === "number"
+      ? body.available_count
+      : credits.filter((c) => c.status === "available").length,
+    credits: credits.map(({ id, status, granted_at, expires_at, redeemed_at, title }) =>
+      ({ id, status, granted_at, expires_at, redeemed_at, title })),
+    updatedAt: observedAt,
+  };
+}
+
 async function fetchWham(
   cred: CodexCredential,
   fetchImpl: WhamFetch,
+  url: string = WHAM_URL,
 ): Promise<{ status: number; body: unknown | null }> {
-  const res = await fetchImpl(WHAM_URL, {
+  const res = await fetchImpl(url, {
     headers: {
       Authorization: `Bearer ${cred.accessToken}`,
       "ChatGPT-Account-Id": cred.accountId,
@@ -181,7 +218,13 @@ export async function readLiveCodexAccounts(opts?: {
         failures.push({ email: cred.email, detail: `HTTP ${result.status}` });
         continue;
       }
-      ok.push(parseWhamUsage(result.body, { email: cred.email }, observedAt));
+      const entry = parseWhamUsage(result.body, { email: cred.email }, observedAt);
+      // wham/usage only carries a count; the expiry lives on this second endpoint.
+      const resets = await fetchWham(cred, fetchImpl, RESET_CREDITS_URL);
+      if (resets.status === 200 && resets.body != null) {
+        (entry.usage as CodexUsageShape).codexResetCredits = parseResetCredits(resets.body, observedAt);
+      }
+      ok.push(entry);
       emails.push(cred.email);
     } catch (e) {
       failures.push({
