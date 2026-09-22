@@ -10,6 +10,7 @@ import {
   renderT3ClientSettings,
   renderT3Settings,
   slotEnvironment,
+  t3KnownClaudeIds,
   writeClientSurfaces,
 } from "./model-surfaces.ts";
 
@@ -164,6 +165,27 @@ test("T3 gets the gateway ids it does not already know, in registry order", () =
   const again = renderT3Settings(rendered.value, registry());
   expect(again.ok).toBe(true);
   if (again.ok) expect(again.value).toBe(rendered.value);
+});
+
+test("T3 gets a Claude id its manifest has not learned yet, and drops it once it has", () => {
+  const slugs = (text: string): string[] => {
+    const parsed = JSON.parse(text) as {
+      providerInstances: Record<string, { config: { customModels: { slug: string }[] } }>;
+    };
+    return parsed.providerInstances["claudeAgent"]!.config.customModels.map((entry) => entry.slug);
+  };
+  const before = renderT3Settings(T3_SETTINGS, registry(), new Set(["claude-fable-5-1", "claude-sonnet-5"]));
+  if (!before.ok || before.value === null) throw new Error("unreachable");
+  expect(slugs(before.value)).toContain("claude-opus-5");
+  expect(slugs(before.value)).not.toContain("claude-fable-5-1");
+
+  const after = renderT3Settings(before.value, registry(), new Set(["claude-fable-5-1", "claude-sonnet-5", "claude-opus-5"]));
+  if (!after.ok || after.value === null) throw new Error("unreachable");
+  expect(slugs(after.value)).not.toContain("claude-opus-5");
+
+  expect(t3KnownClaudeIds("not json")).toBeNull();
+  expect(t3KnownClaudeIds(JSON.stringify({ manifest: { currentModels: { claudeAgent: ["claude-opus-5"] } } })))
+    .toEqual(new Set(["claude-opus-5"]));
 });
 
 test("T3's model order leads with the registry and keeps hand-added ids after it", () => {

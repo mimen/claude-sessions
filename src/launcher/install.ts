@@ -82,6 +82,7 @@ function defaultClientSurfacePaths(root: string): ClientSurfacePaths {
     opencodeConfig: join(home, ".config", "opencode", "opencode.jsonc"),
     t3Settings: join(home, ".t3", "userdata", "settings.json"),
     t3ClientSettings: join(home, ".t3", "userdata", "client-settings.json"),
+    t3ModelManifest: join(home, ".t3", "userdata", "model-manifest.json"),
   };
 }
 
