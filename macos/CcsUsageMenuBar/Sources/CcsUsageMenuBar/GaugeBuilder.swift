@@ -20,7 +20,7 @@ struct UsageSection: Identifiable, Equatable {
 
     var plan: PlanInfo? {
         subscription.map { PlanInfo(name: $0.planName, dollars: $0.monthlyDollars) }
-            ?? GaugeBuilder.legacyPlan(provider: provider, account: account, gauges: gauges)
+            ?? GaugeBuilder.tierPlan(provider: provider, gauges: gauges)
     }
 
     /// Rows reporting a scope inside another row's pool, where that pool is also
@@ -44,9 +44,10 @@ struct UsageSection: Identifiable, Equatable {
 
     var id: String { "\(provider)|\(account ?? "")" }
 
-    var accountDisplay: String? {
-        guard let account else { return nil }
-        return GaugeBuilder.accountAlias[account.lowercased()] ?? account
+    var accountDisplay: String? { account }
+
+    func withGauges(_ gauges: [UsageGauge]) -> UsageSection {
+        UsageSection(provider: provider, account: account, subscription: subscription, gauges: gauges)
     }
 
     var allowanceGauges: [UsageGauge] {
@@ -77,12 +78,6 @@ struct UsageGauge: Identifiable, Equatable {
 }
 
 enum GaugeBuilder {
-    static let accountAlias = [
-        "miladmaaan@gmail.com": "personal",
-        "milad@afternoonumbrellafriends.com": "auf",
-        "milad@theafternoonumbrellafriends.com": "auf",
-    ]
-
     static let nameLabel = [
         "claude-max": "All models",
         "codex-pro": "All models",
@@ -92,22 +87,11 @@ enum GaugeBuilder {
 
     static let fallbackDollars = 50.0
 
-    static let legacyPlanTable: [String: PlanInfo] = [
-        "anthropic|personal": PlanInfo(name: "Max 20x", dollars: 200),
-        "anthropic|auf": PlanInfo(name: "Pro", dollars: 20),
-        "grok|personal": PlanInfo(name: "SuperGrok", dollars: 100),
-        "codex|personal": PlanInfo(name: "Codex Pro", dollars: 200),
-        "opencode-go|": PlanInfo(name: "Go", dollars: 10),
-        "venice|": PlanInfo(name: "Pro", dollars: 68)
-    ]
-
-    static func legacyPlan(provider: String, account: String?, gauges: [UsageGauge]) -> PlanInfo? {
-        if provider == "anthropic", let tier = gauges.compactMap(\.tier).first,
-           let plan = planFromTier(tier) {
-            return plan
-        }
-        let alias = account.flatMap { accountAlias[$0.lowercased()] } ?? ""
-        return legacyPlanTable["\(provider)|\(alias)"]
+    /// Claude reports its tier on every row, so a Claude account without a configured
+    /// subscription still names its plan. Nothing else is inferred.
+    static func tierPlan(provider: String, gauges: [UsageGauge]) -> PlanInfo? {
+        guard provider == "anthropic" else { return nil }
+        return gauges.compactMap(\.tier).first.flatMap(planFromTier)
     }
 
     static func sections(from snapshot: UsageSnapshot) -> [UsageSection] {
@@ -169,13 +153,17 @@ enum GaugeBuilder {
         }
     }
 
-    /// Sections in the user's saved order. Sections the order doesn't name yet keep their
+    /// Items in the user's saved order. Items the order doesn't name yet keep their
     /// natural position relative to each other, after the named ones.
-    static func ordered(_ sections: [UsageSection], by order: [String]) -> [UsageSection] {
+    static func ordered<T>(_ items: [T], by order: [String], id: (T) -> String) -> [T] {
         let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: min)
-        return sections.enumerated()
-            .sorted { (rank[$0.element.id] ?? order.count, $0.offset) < (rank[$1.element.id] ?? order.count, $1.offset) }
+        return items.enumerated()
+            .sorted { (rank[id($0.element)] ?? order.count, $0.offset) < (rank[id($1.element)] ?? order.count, $1.offset) }
             .map(\.element)
+    }
+
+    static func ordered(_ sections: [UsageSection], by order: [String]) -> [UsageSection] {
+        ordered(sections, by: order, id: \.id)
     }
 
     /// Drops `moving` onto `target`: before it when dragged up, after it when dragged down,

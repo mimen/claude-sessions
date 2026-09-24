@@ -17,7 +17,11 @@ Pure SwiftUI (`MenuBarExtra`), no dependencies, macOS 13+. The app shells out to
 
 ### Order and freshness
 
-Drag a section header to reorder sections. The order persists in the app's defaults (`sectionOrder`), and new sections append in their natural position.
+Drag a section header to reorder sections, or drag a row to reorder it within its section. Both orders persist in the app's defaults (`sectionOrder`, `rowOrder`), and anything new appends in its natural position.
+
+Accounts are labelled by their email. There is no alias table; a plan badge comes from the configured subscription, or from Claude's reported tier when none is configured.
+
+`CcsUsage --render out.png` writes a PNG of the panel from a live fetch, for checking layout without opening the menu bar.
 
 A failed refresh never blanks the panel. When ccs reports a provider unavailable, that provider's previous rows stay on screen with a stale badge aged from their real fetch time. The footer shows how old the data is, and reads `outdated` after two missed polls.
 

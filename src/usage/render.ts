@@ -132,11 +132,7 @@ function groupKey(o: UsageObservation): string {
 
 function groupTitle(provider: string, account: string | null): string {
   const base = PROVIDER_TITLE[provider] ?? provider;
-  const aliases: Readonly<Record<string, string>> = {
-    "miladmaaan@gmail.com": "personal",
-    "milad@afternoonumbrellafriends.com": "AUF",
-  };
-  return account ? `${base} · ${aliases[account.toLowerCase()] ?? account}` : base;
+  return account ? `${base} · ${account}` : base;
 }
 
 function subscriptionKey(subscription: SubscriptionInfo): string {

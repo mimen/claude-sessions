@@ -83,6 +83,25 @@ enum AppStore {
 
 // MARK: - entry point
 
+if let i = CommandLine.arguments.firstIndex(of: "--render"), i + 1 < CommandLine.arguments.count {
+    // Headless PNG of the panel from a live fetch: the visual check without clicking the menu bar.
+    MainActor.assumeIsolated {
+        let store = UsageStore()
+        if let snapshot = try? UsageFetcher.runBlocking(ccsPath: CcsLocator.resolve(), timeout: 60) {
+            store.snapshot = snapshot
+            store.lastSuccess = snapshot.generatedAt
+            store.phase = .loaded(snapshot.generatedAt ?? Date())
+        }
+        let renderer = ImageRenderer(content: UsagePanel(store: store, scrolls: false).frame(width: 320))
+        renderer.scale = 2
+        if let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            try? png.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+        }
+    }
+    exit(0)
+}
+
 if CommandLine.arguments.contains("--fetch-once") {
     do {
         let snapshot = try UsageFetcher.runBlocking(ccsPath: CcsLocator.resolve(), timeout: 30)

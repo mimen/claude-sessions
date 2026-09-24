@@ -2,29 +2,37 @@ import SwiftUI
 
 struct UsagePanel: View {
     @ObservedObject var store: UsageStore
+    /// ScrollView rasterizes blank under ImageRenderer, so the headless render lays out flat.
+    var scrolls = true
     @State private var now = Date()
     private let ticker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    content
-                    if !store.adapterNotes.isEmpty {
-                        healthNotes
-                    }
-                    if !store.cswapAccounts.isEmpty {
-                        accountSwitcher
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 4)
+            if scrolls {
+                ScrollView { body_ }
+            } else {
+                body_
             }
             footer
         }
-        .frame(width: 320, height: store.panelHeight)
+        .frame(width: 320, height: scrolls ? store.panelHeight : nil)
         .onReceive(ticker) { now = $0 }
-        .onDisappear { store.draggingSection = nil }
+        .onDisappear { store.dragging = nil }
+    }
+
+    private var body_: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            content
+            if !store.adapterNotes.isEmpty {
+                healthNotes
+            }
+            if !store.cswapAccounts.isEmpty {
+                accountSwitcher
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 4)
     }
 
     /// Adapters that answered with caveats (stale fallbacks) or not at all.
@@ -131,36 +139,29 @@ struct UsagePanel: View {
     private var gaugeList: some View {
         ForEach(sections) { section in
             ProviderSectionHeader(provider: section.provider,
-                                  highlighted: store.draggingSection != nil && store.draggingSection != section.id)
-                .onDrag {
-                    store.draggingSection = section.id
-                    return NSItemProvider(object: section.id as NSString)
-                }
-                .onDrop(of: [.text], delegate: SectionDropDelegate(target: section.id, store: store))
+                                  highlighted: store.dragging == .section(section.id))
+                .reorderable(.section(section.id), store: store, enabled: scrolls)
             if section.accountDisplay != nil || section.plan != nil {
                 HStack(spacing: 5) {
                     if let account = section.accountDisplay {
                         Text(account)
-                            .font(.system(size: 9.5, weight: .medium, design: .rounded))
-                            .textCase(.uppercase)
-                            .kerning(0.5)
-                            .foregroundStyle(.tertiary)
-                    }
-                    if let subscription = section.subscription {
-                        Text(subscription.renewalDisplay.map { "\(subscription.planName) · renews \($0)" }
-                            ?? "\(subscription.planName) · renewal unknown")
-                            .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.secondary.opacity(0.14)))
-                    } else if let plan = section.plan {
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    if let plan = section.plan {
                         Text(plan.name)
                             .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
                             .background(Capsule().fill(Color.secondary.opacity(0.14)))
+                    }
+                    if let subscription = section.subscription {
+                        Text(subscription.renewalDisplay.map { "renews \($0)" } ?? "renewal unknown")
+                            .font(.system(size: 9.5, design: .rounded))
+                            .foregroundStyle(.tertiary)
                     }
                     if section.isStale {
                         Text(section.staleAge(now: now).map { "stale \($0)" } ?? "stale")
@@ -175,7 +176,10 @@ struct UsagePanel: View {
                 .padding(.bottom, 2)
             }
             ForEach(section.gauges) { gauge in
+                let item = DragItem.row(section: section.id, gauge: gauge.id)
                 GaugeRow(gauge: gauge, now: now)
+                    .opacity(store.dragging == item ? 0.4 : 1)
+                    .reorderable(item, store: store, enabled: scrolls)
             }
         }
     }
@@ -195,6 +199,7 @@ struct UsagePanel: View {
                 .font(.system(size: 9.5))
                 .foregroundStyle(.tertiary)
             Spacer()
+            if scrolls {
             Picker("", selection: $store.overallMode) {
                 ForEach(OverallMode.allCases) { mode in
                     Text(mode.rawValue).tag(mode)
@@ -205,6 +210,7 @@ struct UsagePanel: View {
             .font(.system(size: 9.5))
             .foregroundStyle(.secondary)
             .fixedSize()
+            }
         }
         .padding(.horizontal, 14)
         .padding(.top, 8)
@@ -315,20 +321,37 @@ struct MenuBarLabel: View {
     }
 }
 
-/// Reorders live while hovering, so the list shows where the section will land.
-struct SectionDropDelegate: DropDelegate {
-    let target: String
+/// Reorders live while hovering, so the list shows where the item will land. Sections
+/// only land on sections and rows only on rows of their own section.
+struct ReorderDropDelegate: DropDelegate {
+    let target: DragItem
     let store: UsageStore
 
     func dropEntered(info: DropInfo) {
-        guard let moving = store.draggingSection else { return }
-        withAnimation(.easeInOut(duration: 0.15)) { store.moveSection(moving, onto: target) }
+        guard let moving = store.dragging, moving != target else { return }
+        withAnimation(.easeInOut(duration: 0.15)) { store.move(moving, onto: target) }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
 
     func performDrop(info: DropInfo) -> Bool {
-        store.draggingSection = nil
+        store.dragging = nil
         return true
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func reorderable(_ item: DragItem, store: UsageStore, enabled: Bool = true) -> some View {
+        if enabled {
+            contentShape(Rectangle())
+                .onDrag {
+                    store.dragging = item
+                    return NSItemProvider(object: "\(item)" as NSString)
+                }
+                .onDrop(of: [.text], delegate: ReorderDropDelegate(target: item, store: store))
+        } else {
+            self
+        }
     }
 }

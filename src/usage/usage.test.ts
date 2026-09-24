@@ -67,10 +67,10 @@ test("render attaches subscriptions by exact provider and full account", () => {
     ],
     subscriptions: resolveSubscriptions(["anthropic"], new Date("2026-09-13T00:00:00Z")),
   }));
-  const wrongAccount = out.slice(out.indexOf("miladmaaan@other.com"), out.indexOf("Claude · personal"));
+  const wrongAccount = out.slice(out.indexOf("miladmaaan@other.com"), out.indexOf("Claude · miladmaaan@gmail.com\n"));
   expect(wrongAccount).not.toContain("Max 20x · renews");
-  expect(out).toContain("Claude · personal\n  Max 20x · renews Oct 10");
-  expect(out).toContain("Claude · AUF\n  Max 20x · renews Oct 8");
+  expect(out).toContain("Claude · miladmaaan@gmail.com\n  Max 20x · renews Oct 10");
+  expect(out).toContain("Claude · milad@afternoonumbrellafriends.com\n  Max 20x · renews Oct 8");
 });
 
 test("render includes a subscription-only provider group", () => {

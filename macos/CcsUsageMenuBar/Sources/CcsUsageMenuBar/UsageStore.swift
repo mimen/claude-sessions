@@ -3,6 +3,11 @@ import Foundation
 import SwiftUI
 
 /// What the menu bar label shows: 5h only, 7d only, or both as "5h / 7d".
+enum DragItem: Equatable {
+    case section(String)
+    case row(section: String, gauge: String)
+}
+
 enum OverallMode: String, CaseIterable, Identifiable {
     case fiveHour = "5h"
     case sevenDay = "7d"
@@ -41,7 +46,13 @@ final class UsageStore: ObservableObject {
     @Published var sectionOrder: [String] = UserDefaults.standard.stringArray(forKey: "sectionOrder") ?? [] {
         didSet { UserDefaults.standard.set(sectionOrder, forKey: "sectionOrder") }
     }
-    @Published var draggingSection: String?
+    /// Gauge ids in the order the user dragged them into, keyed by section id.
+    @Published var rowOrder: [String: [String]] =
+        UserDefaults.standard.dictionary(forKey: "rowOrder") as? [String: [String]] ?? [:] {
+        didSet { UserDefaults.standard.set(rowOrder, forKey: "rowOrder") }
+    }
+    /// The section header or gauge row being dragged. Rows only reorder within their section.
+    @Published var dragging: DragItem?
     /// When ccs last answered. Kept across failures so the footer can age what is on screen.
     @Published var lastSuccess: Date?
 
@@ -186,12 +197,24 @@ final class UsageStore: ObservableObject {
     }
 
     var sections: [UsageSection] {
-        GaugeBuilder.ordered(GaugeBuilder.sections(from: snapshot), by: sectionOrder)
+        GaugeBuilder.ordered(GaugeBuilder.sections(from: snapshot), by: sectionOrder).map { s in
+            s.withGauges(GaugeBuilder.ordered(s.gauges, by: rowOrder[s.id] ?? [], id: \.id))
+        }
     }
 
-    func moveSection(_ moving: String, onto target: String) {
-        let next = GaugeBuilder.reordered(sections.map(\.id), moving: moving, onto: target)
-        if next != sections.map(\.id) { sectionOrder = next }
+    func move(_ item: DragItem, onto target: DragItem) {
+        switch (item, target) {
+        case (.section(let moving), .section(let onto)):
+            let ids = sections.map(\.id)
+            let next = GaugeBuilder.reordered(ids, moving: moving, onto: onto)
+            if next != ids { sectionOrder = next }
+        case (.row(let section, let moving), .row(let targetSection, let onto)) where section == targetSection:
+            guard let ids = sections.first(where: { $0.id == section })?.gauges.map(\.id) else { return }
+            let next = GaugeBuilder.reordered(ids, moving: moving, onto: onto)
+            if next != ids { rowOrder[section] = next }
+        default:
+            break
+        }
     }
 
     /// Two missed polls: the numbers on screen may no longer match the provider.

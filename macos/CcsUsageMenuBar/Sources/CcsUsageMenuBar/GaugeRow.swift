@@ -184,13 +184,13 @@ struct ProviderSectionHeader: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Image(systemName: "line.3.horizontal")
-                .font(.system(size: 8.5))
-                .foregroundStyle(.quaternary)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .help("Drag to reorder")
         }
-        .contentShape(Rectangle())
         .padding(.top, 10)
         .padding(.bottom, 3)
-        .opacity(highlighted ? 0.6 : 1)
+        .opacity(highlighted ? 0.4 : 1)
     }
 
     var color: Color {

@@ -98,17 +98,6 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertNil(parsed.subscriptions.first?.renewalDisplay)
     }
 
-    func testOldSnapshotWithoutSubscriptionsKeepsLegacyPlansAndBill() throws {
-        let json = """
-        {"generatedAt":"2026-09-13T18:00:00Z","observations":[
-          {"provider":"codex","entitlement":"codex-pro:miladmaaan@gmail.com","metric":"allowance","scope":"account","window":"weekly","used":22,"limit":100,"remaining":78,"resetsAt":null,"expiresAt":null,"observedAt":"2026-09-13T18:00:00Z","source":"official_cli","exact":false}
-        ],"adapters":[]}
-        """.data(using: .utf8)!
-        let sections = GaugeBuilder.sections(from: try SnapshotDecoder.decode(json))
-        XCTAssertEqual(sections.first?.plan, PlanInfo(name: "Codex Pro", dollars: 200))
-        XCTAssertEqual(GaugeBuilder.monthlyBill(sections).total, 200)
-    }
-
     func testSubscriptionMatchingUsesProviderAndFullAccount() throws {
         let sections = GaugeBuilder.sections(from: snapshot([
             observation(entitlement: "claude-max:miladmaaan@other.com"),
@@ -118,7 +107,7 @@ final class GaugeBuilderTests: XCTestCase {
         let other = try XCTUnwrap(sections.first { $0.account == "miladmaaan@other.com" })
         XCTAssertEqual(matching.subscription?.planName, "Max 20x")
         XCTAssertNil(other.subscription)
-        XCTAssertEqual(matching.accountDisplay, "personal")
+        XCTAssertEqual(matching.accountDisplay, "miladmaaan@gmail.com")
         XCTAssertEqual(other.accountDisplay, "miladmaaan@other.com")
     }
 
@@ -130,9 +119,9 @@ final class GaugeBuilderTests: XCTestCase {
         ]))
         XCTAssertEqual(sections.count, 2)
         XCTAssertEqual(sections[0].provider, "anthropic")
-        XCTAssertEqual(sections[0].accountDisplay, "personal")
+        XCTAssertEqual(sections[0].accountDisplay, "miladmaaan@gmail.com")
         XCTAssertEqual(sections[0].gauges.map(\.windowLabel), ["5h", "wk"])
-        XCTAssertEqual(sections[1].accountDisplay, "auf")
+        XCTAssertEqual(sections[1].accountDisplay, "milad@afternoonumbrellafriends.com")
     }
 
     func testLabelsCarrySuffixNotAccount() {
@@ -174,7 +163,7 @@ final class GaugeBuilderTests: XCTestCase {
             observation(provider: "codex", entitlement: "codex-spark")
         ]))
         XCTAssertEqual(sections.count, 1)
-        XCTAssertEqual(sections[0].accountDisplay, "personal")
+        XCTAssertEqual(sections[0].accountDisplay, "miladmaaan@gmail.com")
         XCTAssertEqual(sections[0].gauges.count, 2)
     }
 
@@ -426,6 +415,25 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertEqual(GaugeBuilder.reordered(ids, moving: "d", onto: "a"), ["d", "a", "b", "c"])
         XCTAssertEqual(GaugeBuilder.reordered(ids, moving: "b", onto: "c"), ["a", "c", "b", "d"])
         XCTAssertEqual(GaugeBuilder.reordered(ids, moving: "b", onto: "b"), ids)
+    }
+
+
+    func testRowsFollowTheirSavedOrderWithNewRowsAfter() {
+        let ids = ["a|5h", "a|wk", "a|fable", "a|reset"]
+        let ordered = GaugeBuilder.ordered(ids, by: ["a|fable", "a|5h"], id: { $0 })
+        XCTAssertEqual(ordered, ["a|fable", "a|5h", "a|wk", "a|reset"])
+    }
+
+    func testAnUnconfiguredClaudeAccountNamesItsPlanFromItsTierOnly() {
+        var row = observation(entitlement: "claude-max:someone@example.com")
+        row = UsageObservation(provider: row.provider, entitlement: row.entitlement, metric: row.metric,
+                               scope: row.scope, window: row.window, used: row.used, limit: row.limit,
+                               remaining: row.remaining, resetsAt: row.resetsAt, expiresAt: nil,
+                               exact: true, stale: nil, tier: "default_claude_max_20x")
+        let claude = GaugeBuilder.sections(from: snapshot([row]))
+        XCTAssertEqual(claude.first?.plan, PlanInfo(name: "Max 20x", dollars: 200))
+        let codex = GaugeBuilder.sections(from: snapshot([observation(provider: "codex", entitlement: "codex-pro:miladmaaan@gmail.com")]))
+        XCTAssertNil(codex.first?.plan, "no hardcoded per-account plan table")
     }
 
 }
