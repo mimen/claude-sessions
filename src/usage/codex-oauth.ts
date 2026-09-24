@@ -72,7 +72,7 @@ export interface LiveCodexAccounts {
 
 function defaultDirs(): string[] {
   const home = Bun.env.HOME ?? "";
-  return [`${home}/.cli-proxy-api`, `${home}/.cli-proxy-api-codex-plus`];
+  return [`${home}/.cli-proxy-api`];
 }
 
 function unixToIso(value: unknown): string | null {
