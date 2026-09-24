@@ -24,5 +24,5 @@ EOF
   exit 3
 fi
 
-peekaboo image --app "$APP" --path "$OUT" >/dev/null
+peekaboo see --no-elements --app "$APP" --path "$OUT" >/dev/null
 printf 'wrote %s\n' "$OUT"
