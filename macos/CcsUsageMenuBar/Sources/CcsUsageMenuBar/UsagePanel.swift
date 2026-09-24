@@ -167,17 +167,8 @@ struct UsagePanel: View {
                 }
                 .padding(.bottom, 2)
             }
-            ForEach(section.displayGauges) { gauge in
+            ForEach(section.gauges) { gauge in
                 GaugeRow(gauge: gauge, now: now)
-            }
-            if !section.budgets.isEmpty {
-                ForEach(section.budgets) { budget in
-                    BudgetRow(budget: budget, now: now)
-                }
-                Text("One weekly pool for all models; Fable nests inside it.")
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 1)
             }
         }
     }

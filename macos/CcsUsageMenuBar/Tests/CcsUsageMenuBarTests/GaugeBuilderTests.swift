@@ -166,8 +166,6 @@ final class GaugeBuilderTests: XCTestCase {
         XCTAssertEqual(grok.gauges[0].breakdown?.map(\.name), ["Build"])
         let anthropic = sections.first { $0.provider == "anthropic" }!
         XCTAssertEqual(anthropic.gauges.map(\.label), ["All models", "Fable"])
-        XCTAssertEqual(anthropic.displayGauges.map(\.label), ["All models"])
-        XCTAssertEqual(anthropic.budgets.map(\.name), [.fable, .nonFable])
     }
 
     func testUnnamedAccountMergesIntoSoleNamedAccount() {
@@ -353,173 +351,25 @@ final class GaugeBuilderTests: XCTestCase {
         let sections = GaugeBuilder.sections(from: parsed)
         let gauges = sections.flatMap(\.gauges)
         XCTAssertEqual(gauges.count, 20)
-        let displayed = sections.flatMap(\.displayGauges)
-        XCTAssertEqual(displayed.count, 18)
-        XCTAssertFalse(displayed.contains { $0.provider == "anthropic" && $0.label == "Fable" })
         XCTAssertEqual(Set(gauges.map(\.id)).count, gauges.count)
         XCTAssertEqual(gauges.filter { $0.label == "Banked reset" && $0.provider == "codex" }.count, 2)
         let reading = GaugeBuilder.overallReading(sections)
         XCTAssertNotNil(reading.sevenDay)
         XCTAssertNotNil(reading.fiveHour)
         XCTAssertGreaterThan(GaugeBuilder.panelHeight(for: sections, noteCount: 1), 0)
-
-        // Both Claude accounts carry a Fable + non-Fable budget derived from their weekly rows.
-        let anthropic = sections.filter { $0.provider == "anthropic" }
-        XCTAssertEqual(anthropic.count, 2)
-        for s in anthropic { XCTAssertEqual(s.budgets.map(\.name), [.fable, .nonFable]) }
-        let personal = try XCTUnwrap(anthropic.first { $0.accountDisplay == "personal" })
-        // personal weekly 29%, Fable 48%: the Fable cap is the fuller meter.
-        guard case .known(let pFable, _, _, let pFableBinding) = personal.budgets[0].usage,
-              case .known(let pNonFable, _, _, _) = personal.budgets[1].usage else { return XCTFail("personal budgets known") }
-        XCTAssertEqual(pFable, 48, accuracy: 0.001)
-        XCTAssertEqual(pFableBinding, .ownCap)
-        XCTAssertEqual(pNonFable, 29, accuracy: 0.001)
-        let auf = try XCTUnwrap(anthropic.first { $0.accountDisplay == "auf" })
-        // auf weekly 18%, Fable 0% with no reset: the shared pool binds both budgets.
-        guard case .known(let aFable, _, _, let aFableBinding) = auf.budgets[0].usage,
-              case .known(let aNonFable, _, _, _) = auf.budgets[1].usage else { return XCTFail("auf budgets known") }
-        XCTAssertEqual(aFable, 18, accuracy: 0.001)
-        XCTAssertEqual(aFableBinding, .sharedPool)
-        XCTAssertEqual(aNonFable, 18, accuracy: 0.001)
     }
 
-    // MARK: - Claude Fable / non-Fable budgets
-
-    func testFableCapBindsWhenItIsTheFullerMeter() {
-        let d = Date(timeIntervalSince1970: 1_757_000_000)
-        let r = Date(timeIntervalSince1970: 1_757_500_000)
-        let personal = ClaudeBudgets.compute([
-            claudeWeekly(account: "miladmaaan", fable: false, used: 48, observedAt: d, resetsAt: r),
-            claudeWeekly(account: "miladmaaan", fable: true, used: 95, observedAt: d, resetsAt: r)
-        ])
-        XCTAssertEqual(personal.map(\.name), [.fable, .nonFable])
-        XCTAssertEqual(personal[0].usage, .known(usedPct: 95, resetsAt: r, cached: false, binding: .ownCap))
-        XCTAssertEqual(personal[1].usage, .known(usedPct: 48, resetsAt: r, cached: false, binding: .sharedPool))
-    }
-
-    func testSharedPoolBindsTheFableBudgetOnceItPassesTheFableCap() {
-        let d = Date(timeIntervalSince1970: 1_757_000_000)
-        let r = Date(timeIntervalSince1970: 1_757_500_000)
-        // The old model read this as a 40% Fable budget while every Fable request was failing.
-        let budgets = ClaudeBudgets.compute([
-            claudeWeekly(account: "x", fable: false, used: 93, observedAt: d, resetsAt: r),
-            claudeWeekly(account: "x", fable: true, used: 40, observedAt: d, resetsAt: r)
-        ])
-        XCTAssertEqual(budgets[0].usage, .known(usedPct: 93, resetsAt: r, cached: false, binding: .sharedPool))
-        XCTAssertEqual(budgets[1].usage, .known(usedPct: 93, resetsAt: r, cached: false, binding: .sharedPool))
-    }
-
-    func testNeitherBudgetExceedsAMeterThatWasActuallyPublished() {
-        let d = Date(timeIntervalSince1970: 1_757_000_000)
-        let r = Date(timeIntervalSince1970: 1_757_500_000)
-        // The old model turned these two in-range readings into an impossible 2*90 - 40 = 140%.
-        let budgets = ClaudeBudgets.compute([
-            claudeWeekly(account: "x", fable: false, used: 90, observedAt: d, resetsAt: r),
-            claudeWeekly(account: "x", fable: true, used: 40, observedAt: d, resetsAt: r)
-        ])
-        XCTAssertEqual(budgets[0].usage, .known(usedPct: 90, resetsAt: r, cached: false, binding: .sharedPool))
-        XCTAssertEqual(budgets[1].usage, .known(usedPct: 90, resetsAt: r, cached: false, binding: .sharedPool))
-    }
-
-    func testAnExhaustedFableCapOverAnEmptyPoolIsAnOrdinaryReading() {
-        let d = Date(timeIntervalSince1970: 1_757_000_000)
-        let r = Date(timeIntervalSince1970: 1_757_500_000)
-        let budgets = ClaudeBudgets.compute([
-            claudeWeekly(account: "x", fable: false, used: 10, observedAt: d, resetsAt: r),
-            claudeWeekly(account: "x", fable: true, used: 100, observedAt: d, resetsAt: r)
-        ])
-        XCTAssertEqual(budgets[0].usage, .known(usedPct: 100, resetsAt: r, cached: false, binding: .ownCap))
-        XCTAssertEqual(budgets[1].usage, .known(usedPct: 10, resetsAt: r, cached: false, binding: .sharedPool))
-    }
-
-    func testZeroFableUsageWithNoFableResetStillPermitsABudget() {
-        let d = Date(timeIntervalSince1970: 1_757_000_000)
-        let r = Date(timeIntervalSince1970: 1_757_500_000)
-        let budgets = ClaudeBudgets.compute([
-            claudeWeekly(account: "x", fable: false, used: 18, observedAt: d, resetsAt: r),
-            claudeWeekly(account: "x", fable: true, used: 0, observedAt: d, resetsAt: nil)
-        ])
-        XCTAssertEqual(budgets[0].usage, .known(usedPct: 18, resetsAt: r, cached: false, binding: .sharedPool))
-        XCTAssertEqual(budgets[1].usage, .known(usedPct: 18, resetsAt: r, cached: false, binding: .sharedPool))
-    }
-
-    func testStalenessRidesAlongAsCachedRatherThanBlockingTheBudget() {
-        let d = Date(timeIntervalSince1970: 1_757_000_000)
-        let r = Date(timeIntervalSince1970: 1_757_500_000)
-        let budgets = ClaudeBudgets.compute([
-            claudeWeekly(account: "x", fable: false, used: 40, observedAt: d, resetsAt: r, stale: true),
-            claudeWeekly(account: "x", fable: true, used: 20, observedAt: d, resetsAt: r)
-        ])
-        XCTAssertEqual(budgets[0].usage, .known(usedPct: 40, resetsAt: r, cached: true, binding: .sharedPool))
-        XCTAssertEqual(budgets[1].usage, .known(usedPct: 40, resetsAt: r, cached: true, binding: .sharedPool))
-    }
-
-    func testAMissingFableReadingLeavesTheNonFableBudgetIntact() {
-        let d = Date(timeIntervalSince1970: 1_757_000_000)
-        let r = Date(timeIntervalSince1970: 1_757_500_000)
-        let budgets = ClaudeBudgets.compute([
-            claudeWeekly(account: "x", fable: false, used: 55, observedAt: d, resetsAt: r)
-        ])
-        XCTAssertEqual(budgets[0].usage, .unknown(reason: "Fable reading unavailable"))
-        XCTAssertEqual(budgets[1].usage, .known(usedPct: 55, resetsAt: r, cached: false, binding: .sharedPool))
-    }
-
-    func testAMissingWeeklyReadingLeavesBothBudgetsUnknown() {
-        let d = Date(timeIntervalSince1970: 1_757_000_000)
-        let r = Date(timeIntervalSince1970: 1_757_500_000)
-        let budgets = ClaudeBudgets.compute([
-            claudeWeekly(account: "x", fable: true, used: 95, observedAt: d, resetsAt: r)
-        ])
-        XCTAssertEqual(budgets[0].usage, .unknown(reason: "weekly reading unavailable"))
-        XCTAssertEqual(budgets[1].usage, .unknown(reason: "weekly reading unavailable"))
-    }
-
-    func testUncomparableReadingsLeaveOnlyTheFableBudgetUnknown() {
-        let d = Date(timeIntervalSince1970: 1_757_000_000)
-        let r = Date(timeIntervalSince1970: 1_757_500_000)
-        let mismatchTime = ClaudeBudgets.compute([
-            claudeWeekly(account: "x", fable: false, used: 40, observedAt: d, resetsAt: r),
-            claudeWeekly(account: "x", fable: true, used: 20, observedAt: d.addingTimeInterval(60), resetsAt: r)
-        ])
-        XCTAssertEqual(mismatchTime[0].usage, .unknown(reason: "observation times differ"))
-        XCTAssertEqual(mismatchTime[1].usage, .known(usedPct: 40, resetsAt: r, cached: false, binding: .sharedPool))
-
-        let mismatchReset = ClaudeBudgets.compute([
-            claudeWeekly(account: "x", fable: false, used: 40, observedAt: d, resetsAt: r),
-            claudeWeekly(account: "x", fable: true, used: 20, observedAt: d, resetsAt: r.addingTimeInterval(3600))
-        ])
-        XCTAssertEqual(mismatchReset[0].usage, .unknown(reason: "reset windows differ"))
-        XCTAssertEqual(mismatchReset[1].usage, .known(usedPct: 40, resetsAt: r, cached: false, binding: .sharedPool))
-
-        // Account mismatch inside one bucket yields no budgets at all.
-        XCTAssertTrue(ClaudeBudgets.compute([
-            claudeWeekly(account: "a", fable: false, used: 40, observedAt: d, resetsAt: r),
-            claudeWeekly(account: "b", fable: false, used: 41, observedAt: d, resetsAt: r)
-        ]).isEmpty)
-    }
-
-    func testBudgetsPerAccountPreserveProviderLimitsAndOverall() throws {
+    func testFableScopeStaysOutOfTheOverallReading() throws {
         let d = Date(timeIntervalSince1970: 1_757_000_000)
         let r = Date(timeIntervalSince1970: 1_757_500_000)
         let sections = GaugeBuilder.sections(from: snapshot([
             claudeWeekly(account: "miladmaaan", fable: false, used: 48, observedAt: d, resetsAt: r),
-            claudeWeekly(account: "miladmaaan", fable: true, used: 95, observedAt: d, resetsAt: r),
-            claudeWeekly(account: "milad", fable: false, used: 85, observedAt: d, resetsAt: r),
-            claudeWeekly(account: "milad", fable: true, used: 50, observedAt: d, resetsAt: r)
+            claudeWeekly(account: "miladmaaan", fable: true, used: 95, observedAt: d, resetsAt: r)
         ]))
-        XCTAssertEqual(sections.count, 2)
-        for s in sections {
-            XCTAssertEqual(s.budgets.map(\.name), [.fable, .nonFable])
-            XCTAssertFalse(s.displayGauges.contains { $0.label == "Fable" })
-            XCTAssertTrue(s.gauges.contains { $0.label == "Fable" })
-        }
-        let personal = try XCTUnwrap(sections.first { $0.accountDisplay == "personal" })
+        let personal = try XCTUnwrap(sections.first)
+        XCTAssertEqual(personal.gauges.map(\.label), ["All models", "Fable"])
         // Weekly 48% binds, not the 95% Fable scope sitting inside it.
         XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallReading([personal]).sevenDay), 0.48, accuracy: 0.001)
-        let auf = try XCTUnwrap(sections.first { $0.accountDisplay == "auf" })
-        XCTAssertEqual(auf.budgets[0].usage, .known(usedPct: 85, resetsAt: r, cached: false, binding: .sharedPool))
-        XCTAssertEqual(auf.budgets[1].usage, .known(usedPct: 85, resetsAt: r, cached: false, binding: .sharedPool))
-        XCTAssertEqual(try XCTUnwrap(GaugeBuilder.overallReading([auf]).sevenDay), 0.85, accuracy: 0.001)
     }
 
     func testPanelHeightAccountsForSubscriptionDetailRows() {

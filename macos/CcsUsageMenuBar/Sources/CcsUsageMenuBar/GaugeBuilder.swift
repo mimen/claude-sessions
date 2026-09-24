@@ -17,7 +17,6 @@ struct UsageSection: Identifiable, Equatable {
     let account: String?
     let subscription: SubscriptionInfo?
     let gauges: [UsageGauge]
-    var budgets: [ClaudeBudget] = []
 
     var plan: PlanInfo? {
         subscription.map { PlanInfo(name: $0.planName, dollars: $0.monthlyDollars) }
@@ -32,12 +31,6 @@ struct UsageSection: Identifiable, Equatable {
     var subPoolIds: Set<String> {
         let present = Set(gauges.map(\.id))
         return Set(gauges.filter { $0.parentGaugeId.map(present.contains) == true }.map(\.id))
-    }
-
-    var displayGauges: [UsageGauge] {
-        guard !budgets.isEmpty else { return gauges }
-        let subPools = subPoolIds
-        return gauges.filter { !subPools.contains($0.id) }
     }
 
     /// True when any observation behind this section came from a stale cache.
@@ -118,11 +111,6 @@ enum GaugeBuilder {
     }
 
     static func sections(from snapshot: UsageSnapshot) -> [UsageSection] {
-        // Raw Claude observations per account, keyed the same way gauges resolve their
-        // account, so budget derivation sees the same rows the CLI groups together.
-        let anthropicByAccount = Dictionary(grouping: snapshot.observations.filter { $0.provider == "anthropic" }) {
-            entitlementParts($0.entitlement).account ?? ""
-        }
         var gauges: [UsageGauge] = []
         for o in snapshot.observations {
             switch o.metric {
@@ -178,12 +166,6 @@ enum GaugeBuilder {
                 subscription: subscriptions[key],
                 gauges: rows
             )
-        }.map { s in
-            var s = s
-            if s.provider == "anthropic" {
-                s.budgets = ClaudeBudgets.compute(anthropicByAccount[s.account ?? ""] ?? [])
-            }
-            return s
         }
     }
 
@@ -348,15 +330,13 @@ enum GaugeBuilder {
 
     /// Single source of truth for the panel's height so the popover window can match it.
     static func panelHeight(for sections: [UsageSection], noteCount: Int = 0) -> CGFloat {
-        var rows = CGFloat(sections.reduce(0) { $0 + $1.displayGauges.count })
+        var rows = CGFloat(sections.reduce(0) { $0 + $1.gauges.count })
         rows -= CGFloat(sections.reduce(0) { $0 + ($1.gauges.first?.breakdown?.count ?? 0) })
-        let budgetRows = CGFloat(sections.reduce(0) { $0 + $1.budgets.count })
-        let allocationNotes = CGFloat(sections.filter { !$0.budgets.isEmpty }.count) * 16
         let sectionHeaders = CGFloat(sections.count)
         let detailRows = CGFloat(sections.filter { $0.accountDisplay != nil || $0.plan != nil }.count)
         let legends = CGFloat(sections.reduce(0) { $0 + (($1.gauges.first?.breakdown?.isEmpty == false) ? 1 : 0) })
         let notes = CGFloat(noteCount) * 28
-        return min(680, 56 + rows * 46 + budgetRows * 42 - legends * 12 + sectionHeaders * 28 + detailRows * 18 + allocationNotes + notes + 20)
+        return min(680, 56 + rows * 46 - legends * 12 + sectionHeaders * 28 + detailRows * 18 + notes + 20)
     }
 
     /// Splits "claude-max:milad@x.com#Fable" into friendly label/account.

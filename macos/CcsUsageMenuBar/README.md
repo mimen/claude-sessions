@@ -15,15 +15,9 @@ Pure SwiftUI (`MenuBarExtra`), no dependencies, macOS 13+. The app shells out to
   dollars; Venice per-model minute rate limits are dropped as noise; Grok `#build` /
   `#chat` / `#imagine` sub-pools collapse into their parent row when one exists.
 
-### Claude account budgets
+### Claude Fable row
 
-Each Claude account keeps its own section with a Fable budget row and a non-Fable budget row. One weekly pool covers every model, with a smaller Fable cap nested inside it. A Fable request spends both counters; a non-Fable request spends only the shared pool.
-
-So the Fable budget is `max(Fable-used-percent, weekly-used-percent)` and the non-Fable budget is the weekly reading alone, matching the CLI. Each known row names the meter that bound it, and a row held down by the shared pool reads `limited by the weekly pool`. That tells you to switch accounts rather than to stop using Fable.
-
-The Fable budget compares two readings, so a missing weekly reading, mismatched observation times, or mismatched reset windows leave it unknown. The non-Fable budget reads one meter and survives a missing Fable row. A stale reading is reported as `cached` on a known value, not withheld.
-
-The raw Fable limit remains part of provider accounting but is hidden from the panel when its budget row is shown. Display budgets never change overall usage, plan weighting, raw JSON, or account routing.
+Each Claude account shows its raw weekly Fable cap beside the all-models weekly pool. The Fable cap nests inside that pool, so it never drives the menu bar reading.
 
 ## Build & run
 
