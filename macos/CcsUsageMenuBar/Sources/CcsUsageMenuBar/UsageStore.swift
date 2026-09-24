@@ -50,6 +50,10 @@ final class UsageStore: ObservableObject {
         UserDefaults.standard.dictionary(forKey: "rowOrder") as? [String: [String]] ?? [:] {
         didSet { UserDefaults.standard.set(rowOrder, forKey: "rowOrder"); rebuild() }
     }
+    /// Claude's nested Fable cap, one row per account; off hides those rows everywhere in the panel.
+    @Published var showFable: Bool = UserDefaults.standard.object(forKey: "showFable") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showFable, forKey: "showFable"); rebuild() }
+    }
     /// The carried-forward snapshot the engine last returned: the next refresh's `previous`.
     private(set) var lastSnapshotData: Data?
     /// The section header or gauge row being dragged. Rows only reorder within their section.
@@ -70,7 +74,9 @@ final class UsageStore: ObservableObject {
         phase = .loaded(at)
     }
 
-    private var order: ViewOrder { ViewOrder(sections: sectionOrder, rows: rowOrder) }
+    private var order: ViewOrder {
+        ViewOrder(sections: sectionOrder, rows: rowOrder, hide: showFable ? [] : ["fable"])
+    }
 
     /// Re-applies a changed order to the snapshot on screen without refetching.
     private func rebuild() {

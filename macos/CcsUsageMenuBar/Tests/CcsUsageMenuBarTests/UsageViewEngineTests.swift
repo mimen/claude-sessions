@@ -44,6 +44,14 @@ final class UsageViewEngineTests: XCTestCase {
         XCTAssertEqual(view.sections[1].rows.map(\.id), [fable, fiveHour, "anthropic|claude-max:\(auf)|weekly"])
     }
 
+    func testHidingFableDropsOnlyTheFableRows() throws {
+        let shown = try build().sections.flatMap(\.rows).map(\.label)
+        let hidden = try build(ViewOrder(sections: [], rows: [:], hide: ["fable"])).sections.flatMap(\.rows).map(\.label)
+        XCTAssertTrue(shown.contains("Fable"))
+        XCTAssertFalse(hidden.contains("Fable"))
+        XCTAssertEqual(hidden, shown.filter { $0 != "Fable" })
+    }
+
     func testReordered() {
         XCTAssertEqual(engine.reordered(["a", "b", "c"], moving: "a", onto: "c"), ["b", "c", "a"])
         XCTAssertEqual(engine.reordered(["a", "b", "c"], moving: "c", onto: "a"), ["c", "a", "b"])

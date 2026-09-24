@@ -152,6 +152,8 @@ struct UsagePanel: View {
                     }
                     if let plan = section.plan {
                         Text(plan.name)
+                            .lineLimit(1)
+                            .fixedSize()
                             .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)
@@ -160,8 +162,14 @@ struct UsagePanel: View {
                     }
                     if section.plan != nil {
                         Text(section.renewsOn.map { "renews \(UsageViewEngine.shared.renewalLabel($0))" } ?? "renewal unknown")
+                            .lineLimit(1)
+                            .fixedSize()
                             .font(.system(size: 9.5, design: .rounded))
                             .foregroundStyle(.tertiary)
+                    }
+                    let resets = section.rows.compactMap { if case .reset(let r) = $0 { r } else { nil } }
+                    if !resets.isEmpty {
+                        ResetChip(resets: resets, now: now)
                     }
                     if let staleSince = section.staleSince {
                         Text("stale \(UsageViewEngine.shared.shortAge(Date(epochMs: staleSince), now: now))")
@@ -175,7 +183,7 @@ struct UsagePanel: View {
                 }
                 .padding(.bottom, 2)
             }
-            ForEach(section.rows) { row in
+            ForEach(section.rows.filter { !$0.isReset }) { row in
                 let item = DragItem.row(section: section.id, gauge: row.id)
                 GaugeRow(row: row, now: now)
                     .opacity(store.dragging == item ? 0.4 : 1)
@@ -200,6 +208,11 @@ struct UsagePanel: View {
                 .foregroundStyle(.tertiary)
             Spacer()
             if scrolls {
+            Toggle("Fable", isOn: $store.showFable)
+                .toggleStyle(.checkbox)
+                .font(.system(size: 9.5))
+                .foregroundStyle(.secondary)
+                .help("Show each Claude account's weekly Fable cap")
             Picker("", selection: $store.overallMode) {
                 ForEach(OverallMode.allCases) { mode in
                     Text(mode.rawValue).tag(mode)

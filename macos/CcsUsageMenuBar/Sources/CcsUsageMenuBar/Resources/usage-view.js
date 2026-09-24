@@ -182,8 +182,12 @@
   }
   function buildView(snapshot, order = {}) {
     const groups = new Map;
+    const hidden = new Set((order.hide ?? []).map((p) => p.toLowerCase()));
     for (const o of snapshot.observations) {
       if (toRow(o) === null)
+        continue;
+      const product = entitlementParts(o.entitlement).product;
+      if (product && hidden.has(product.toLowerCase()))
         continue;
       const account = entitlementParts(o.entitlement).account;
       const id = `${o.provider}|${account ?? ""}`;

@@ -215,3 +215,45 @@ struct ProviderSectionHeader: View {
         }
     }
 }
+
+/// An account's banked resets as one chip on the account line: the redeemable count, and the
+/// soonest expiry, with every expiry listed on hover.
+struct ResetChip: View {
+    let resets: [ViewRow.Reset]
+    let now: Date
+
+    private var ready: [ViewRow.Reset] { resets.filter(\.available) }
+
+    var body: some View {
+        let live = !ready.isEmpty
+        HStack(spacing: 3) {
+            Image(systemName: "arrow.counterclockwise")
+                .font(.system(size: 7.5, weight: .bold))
+            Text(label)
+        }
+        .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+        .lineLimit(1)
+        .fixedSize()
+        .foregroundStyle(live ? Color.green : Color.secondary)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .background(Capsule().fill((live ? Color.green : Color.secondary).opacity(0.14)))
+        .help(resets.map { r in
+            "\(r.available ? "Ready" : "Used")\(r.expiresAt.map { " · expires in \(Self.left(Date(epochMs: $0), now: now))" } ?? "")"
+        }.joined(separator: "\n"))
+    }
+
+    private var label: String {
+        let count = ready.count
+        let noun = count > 1 ? "\(count) resets" : count == 1 ? "reset" : "resets used"
+        let soonest = ready.compactMap(\.expiresAt).min()
+        return soonest.map { "\(noun) · \(Self.left(Date(epochMs: $0), now: now))" } ?? noun
+    }
+
+    /// "10d" / "5h": time left before an expiry.
+    static func left(_ date: Date, now: Date) -> String {
+        let seconds = date.timeIntervalSince(now)
+        guard seconds > 0 else { return "expired" }
+        return seconds >= 86_400 ? "\(Int(seconds / 86_400))d" : "\(max(1, Int(seconds / 3_600)))h"
+    }
+}

@@ -248,6 +248,8 @@ export interface Order {
   sections?: readonly string[];
   /** Row ids per section id. */
   rows?: Readonly<Record<string, readonly string[]>>;
+  /** Scoped products to leave out, matched case-insensitively against `#product`, e.g. ["fable"]. */
+  hide?: readonly string[];
 }
 
 function overallReading(sections: Section[]): View["overall"] {
@@ -270,8 +272,11 @@ export function buildView(snapshot: Snapshot, order: Order = {}): View {
   const groups = new Map<string, { provider: string; account: string | null; obs: Observation[] }>();
   // Only drawable metrics form sections, so an unknown metric (Venice's per-model rate
   // limits from an older ccs) cannot mint hundreds of empty sections.
+  const hidden = new Set((order.hide ?? []).map(p => p.toLowerCase()));
   for (const o of snapshot.observations) {
     if (toRow(o) === null) continue;
+    const product = entitlementParts(o.entitlement).product;
+    if (product && hidden.has(product.toLowerCase())) continue;
     const account = entitlementParts(o.entitlement).account;
     const id = `${o.provider}|${account ?? ""}`;
     if (!groups.has(id)) groups.set(id, { provider: o.provider, account, obs: [] });

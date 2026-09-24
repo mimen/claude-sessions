@@ -130,3 +130,17 @@ test("observations the view cannot draw never create a section", () => {
   ]));
   expect(view.sections.map(s => s.id)).toEqual([`codex|${personal}`]);
 });
+
+test("a hidden product drops its rows and nothing else", () => {
+  const view = buildView(snapshot([
+    obs(`claude-max:${personal}`, { window: "five_hour" }),
+    obs(`claude-max:${personal}`),
+    obs(`claude-max:${personal}#Fable`),
+    obs(`grok-super grok plus:${personal}`),
+    obs(`grok-super grok plus:${personal}#build`, { used: 27 }),
+  ]), { hide: ["fable"] });
+  expect(view.sections.map(s => [s.provider, s.rows.map(r => r.label)])).toEqual([
+    ["anthropic", ["All models", "All models"]],
+    ["grok", ["All usage"]],
+  ]);
+});

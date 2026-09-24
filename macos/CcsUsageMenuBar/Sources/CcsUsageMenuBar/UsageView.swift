@@ -95,6 +95,10 @@ enum ViewRow: Decodable, Equatable, Identifiable {
     }
 }
 
+extension ViewRow {
+    var isReset: Bool { if case .reset = self { return true } else { return false } }
+}
+
 extension Date {
     init(epochMs: Double) { self.init(timeIntervalSince1970: epochMs / 1000) }
 }
@@ -103,6 +107,7 @@ extension Date {
 struct ViewOrder: Encodable {
     var sections: [String]
     var rows: [String: [String]]
+    var hide: [String] = []
 }
 
 struct UsageViewError: LocalizedError {
@@ -201,7 +206,7 @@ final class UsageViewEngine: @unchecked Sendable {
 
 /// Single source of truth for the panel's height so the popover window can match it.
 func panelHeight(for view: UsageViewModel, noteCount: Int) -> CGFloat {
-    let rows = CGFloat(view.sections.reduce(0) { $0 + $1.rows.count })
+    let rows = CGFloat(view.sections.reduce(0) { $0 + $1.rows.filter { !$0.isReset }.count })
     let sectionHeaders = CGFloat(view.sections.count)
     let detailRows = CGFloat(view.sections.filter { $0.account != nil || $0.plan != nil }.count)
     let legends = CGFloat(view.sections.flatMap(\.rows).filter {
