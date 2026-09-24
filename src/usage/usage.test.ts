@@ -73,13 +73,6 @@ test("render attaches subscriptions by exact provider and full account", () => {
   expect(out).toContain("Claude · milad@afternoonumbrellafriends.com\n  Max 20x · renews Oct 8");
 });
 
-test("render includes a subscription-only provider group", () => {
-  const out = renderSnapshot(snap({
-    subscriptions: resolveSubscriptions(["venice"], new Date("2026-09-13T00:00:00Z")),
-  }));
-  expect(out).toBe("Venice\n  Pro · renewal unknown");
-});
-
 test("verified renewals override configured fallbacks for the exact account", () => {
   const configured = resolveSubscriptions(["codex"], new Date("2026-09-14T12:00:00Z"));
   // Two Codex accounts are configured; only the named one may be overridden.
@@ -167,10 +160,10 @@ test("render states unknown allowance plainly instead of inventing a percentage"
 test("render lists unavailable adapters after the data sections", () => {
   const out = renderSnapshot(snap({
     observations: [obs({ used: 10 })],
-    adapters: [{ provider: "venice", status: "unavailable", detail: "rate_limits HTTP 401" }],
+    adapters: [{ provider: "grok", status: "unavailable", detail: "billing HTTP 401" }],
   }));
   expect(out.indexOf("unavailable")).toBeGreaterThan(out.indexOf("10%"));
-  expect(out).toContain("rate_limits HTTP 401");
+  expect(out).toContain("Grok: billing HTTP 401");
 });
 
 test("usageCommand rejects an unknown provider id", async () => {
@@ -188,7 +181,7 @@ test("usageCommand sources prints the provenance table and exits 0", () => {
     console.log = orig;
   }
   expect(logs.join("\n")).toContain("official_api");
-  expect(logs.join("\n")).toContain("venice");
+  expect(logs.join("\n")).toContain("grok");
 });
 
 // --- Review-fix regressions ---
@@ -217,22 +210,19 @@ test("product breakdown rows show percentages without duplicate bars or reset co
       obs({ provider: "grok", entitlement: "grok-super-grok-plus:a@b.c#chat", used: 0, resetsAt: reset }),
     ],
   }));
-  expect(out).toContain("Grok Build");
-  expect(out).toContain("Grok Chat");
+  expect(out).toContain("Build 9% · Chat 0%");
   expect(out.split("█").length - 1).toBe(1); // only the shared weekly pool has a bar
   expect(out.split("in ").length - 1).toBe(1); // one shared reset countdown
 });
 
-test("render labels Spark, DIEM, and multi-account groups distinctly", () => {
+test("render labels Spark and multi-account groups distinctly", () => {
   const out = renderSnapshot(snap({
     observations: [
       obs({ entitlement: "codex-spark", used: 0, window: "five_hour" }),
-      obs({ provider: "venice", entitlement: "venice-diem-balance", metric: "credit", used: null, limit: null, remaining: 0 }),
       obs({ provider: "anthropic", entitlement: "claude-max:a@b.c", used: 10 }),
     ],
   }));
   expect(out).toContain("Spark ");
-  expect(out).toContain("0 DIEM"); // DIEM never renders as dollars
   expect(out).toContain("Claude · a@b.c"); // account in the group title
 });
 

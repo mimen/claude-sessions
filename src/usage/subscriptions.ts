@@ -13,8 +13,6 @@ const REGISTRY: readonly ConfiguredSubscription[] = [
   { provider: "anthropic", account: "milad@afternoonumbrellafriends.com", planName: "Max 20x", monthlyDollars: 200, anchor: "2026-09-08" },
   { provider: "codex", account: "miladmaaan@gmail.com", planName: "Codex Pro", monthlyDollars: 200, anchor: "2026-09-20" },
   { provider: "grok", account: "miladmaaan@gmail.com", planName: "SuperGrok", monthlyDollars: 100, anchor: "2026-09-21" },
-  { provider: "opencode-go", account: null, planName: "Go", monthlyDollars: 10, anchor: "2026-09-08" },
-  { provider: "venice", account: null, planName: "Pro", monthlyDollars: 68, anchor: null },
 ];
 
 function daysInUtcMonth(year: number, month: number): number {

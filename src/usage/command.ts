@@ -1,6 +1,6 @@
 /**
  * `ccs usage` — point-in-time availability view across the five scoped providers
- * (Codex, Anthropic, Grok, OpenCode Go, Venice). Snapshot only: no history, no daemon.
+ * (Codex, Anthropic, Grok). Snapshot only: no history, no daemon.
  *
  *   ccs usage                          terminal availability view
  *   ccs usage --json                   stable JSON contract (UsageSnapshot)
@@ -13,7 +13,7 @@ import { collectSnapshot } from "./adapters.ts";
 import { renderSnapshot } from "./render.ts";
 import type { ProviderId, UsageSnapshot } from "./types.ts";
 
-const VALID: readonly ProviderId[] = ["codex", "anthropic", "grok", "opencode-go", "venice"];
+const VALID: readonly ProviderId[] = ["codex", "anthropic", "grok"];
 
 const SOURCES_HELP = `ccs usage sources — what each adapter reads
 
@@ -24,10 +24,6 @@ const SOURCES_HELP = `ccs usage sources — what each adapter reads
                five-hour and weekly OAuth windows, resets, and last-good fallback.
   grok         xAI billing/subscription JSON plus GetRemainingResets gRPC-Web
                (official_api): weekly pool, Build/Chat/Imagine, plan, reset grants, credits.
-  opencode-go  Official GET /zen/go/v1/usage API: five-hour, weekly, monthly percentages
-               with exact reset timestamps.
-  venice       Official APIs (official_api): api_keys/rate_limits for balances, tier,
-               per-model caps, next epoch. USD and DIEM never merged.
 
 Evidence classes, strongest first: official_api, provider_header, official_ui,
 official_cli, observed_private, local_estimate. Unknown beats fake precision.`;
@@ -39,7 +35,7 @@ function parseProviders(args: readonly string[]): ProviderId[] | null {
     if (args[i] !== "--provider") continue;
     sawFlag = true;
     const v = args[i + 1];
-    // A dangling --provider is a caller error, not "all providers" — the Venice path
+    // A dangling --provider is a caller error, not "all providers" — the old single-provider path
     // reads credentials, so silently broadening scope would be worse than failing.
     if (!v || v.startsWith("--")) return null;
     for (const p of v.split(",")) {

@@ -7,8 +7,6 @@
  *  - codex → ChatGPT wham usage per cliproxy OAuth file
  *  - anthropic → cswap's per-account Anthropic OAuth usage snapshots
  *  - grok → xAI billing/subscription JSON + reset-grant gRPC-Web surfaces
- *  - opencode-go → official Go usage API
- *  - venice → official billing balance + api_keys/rate_limits APIs
  */
 
 import { readFileSync } from "node:fs";
@@ -34,7 +32,7 @@ export interface AdapterResult {
   renewals?: SubscriptionRenewal[];
 }
 
-const PROVIDERS: readonly ProviderId[] = ["codex", "anthropic", "grok", "opencode-go", "venice"];
+const PROVIDERS: readonly ProviderId[] = ["codex", "anthropic", "grok"];
 
 function now(): string {
   return new Date().toISOString();
@@ -584,227 +582,6 @@ async function grokAdapter(): Promise<AdapterResult> {
 }
 
 // ---------------------------------------------------------------------------
-// OpenCode Go
-// ---------------------------------------------------------------------------
-
-interface GoUsageResponse {
-  usage?: {
-    rolling?: { status?: string; percent?: number; resetsAt?: string };
-    weekly?: { status?: string; percent?: number; resetsAt?: string };
-    monthly?: { status?: string; percent?: number; resetsAt?: string };
-  };
-}
-
-let cachedGoKey: string | null = null;
-
-/** Read the OpenCode Go API key from 1Password. Never logged or embedded. */
-async function opencodeGoKey(): Promise<string> {
-  if (cachedGoKey) return cachedGoKey;
-  const proc = Bun.spawnSync(["op", "read", "op://Sol/OpenCode Go/credential"], {
-    stdout: "pipe", stderr: "pipe",
-  });
-  if (proc.exitCode !== 0) throw new Error("could not read OpenCode Go credential from 1Password");
-  cachedGoKey = new TextDecoder().decode(proc.stdout).trim();
-  return cachedGoKey;
-}
-
-const GO_TIMEOUT_MS = 15_000;
-
-/**
- * Official Go usage endpoint (GET /zen/go/v1/usage, Bearer key): rolling 5h, weekly,
- * and monthly value-window percentages with exact reset timestamps. Replaces the
- * CodexBar reader, which needed browser cookies this machine does not have.
- */
-async function opencodeGoAdapter(): Promise<AdapterResult> {
-  const observedAt = now();
-  let data: GoUsageResponse;
-  try {
-    const key = await opencodeGoKey();
-    const res = await fetch("https://opencode.ai/zen/go/v1/usage", {
-      headers: { Authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(GO_TIMEOUT_MS),
-    });
-    if (!res.ok) {
-      return {
-        observations: [],
-        health: { provider: "opencode-go", status: "unavailable", detail: `go/v1/usage HTTP ${res.status}` },
-      };
-    }
-    data = (await res.json()) as GoUsageResponse;
-  } catch (e) {
-    return {
-      observations: [],
-      health: { provider: "opencode-go", status: "unavailable", detail: e instanceof Error ? e.message : String(e) },
-    };
-  }
-  const u = data.usage ?? {};
-  const windows: Array<[UsageObservation["window"], typeof u.rolling]> = [
-    ["five_hour", u.rolling],
-    ["weekly", u.weekly],
-    ["monthly", u.monthly],
-  ];
-  const observations: UsageObservation[] = [];
-  for (const [window, w] of windows) {
-    if (!w || typeof w.percent !== "number") continue;
-    observations.push({
-      provider: "opencode-go",
-      entitlement: "opencode-go-zen",
-      metric: "allowance",
-      scope: "account",
-      window,
-      used: w.percent,
-      limit: 100,
-      remaining: Math.max(0, 100 - w.percent),
-      resetsAt: w.resetsAt ?? null,
-      expiresAt: null,
-      observedAt,
-      source: "official_api",
-      exact: true,
-    });
-  }
-  return {
-    observations,
-    health: observations.length === 0
-      ? { provider: "opencode-go", status: "degraded", detail: "endpoint returned no window data" }
-      : { provider: "opencode-go", status: "ok", detail: null },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Venice — official APIs, no helper
-// ---------------------------------------------------------------------------
-
-interface VeniceRateLimits {
-  data?: {
-    accessPermitted?: boolean;
-    apiTier?: { id?: string; isCharged?: boolean };
-    balances?: { USD?: number; DIEM?: number };
-    keyExpiration?: string | null;
-    nextEpochBegins?: string | null;
-    rateLimits?: Array<{ apiModelId?: string; rateLimits?: Array<{ amount?: number; type?: string }> }>;
-  };
-}
-
-const VENICE_TIMEOUT_MS = 15_000;
-
-async function veniceFetch(path: string): Promise<Response> {
-  const key = await veniceApiKey();
-  return fetch(`https://api.venice.ai/api/v1/${path}`, {
-    headers: { Authorization: `Bearer ${key}` },
-    signal: AbortSignal.timeout(VENICE_TIMEOUT_MS),
-  });
-}
-
-let cachedVeniceKey: string | null = null;
-
-/** Read the Venice API key from 1Password via the service account. Never logged or embedded. */
-async function veniceApiKey(): Promise<string> {
-  if (cachedVeniceKey) return cachedVeniceKey;
-  const proc = Bun.spawnSync(
-    ["op", "read", "op://Sol/Venice AI/credential"],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  if (proc.exitCode !== 0) {
-    throw new Error("could not read Venice credential from 1Password");
-  }
-  cachedVeniceKey = new TextDecoder().decode(proc.stdout).trim();
-  return cachedVeniceKey;
-}
-
-async function veniceAdapter(): Promise<AdapterResult> {
-  const observedAt = now();
-  let limits: VeniceRateLimits;
-  try {
-    const res = await veniceFetch("api_keys/rate_limits");
-    if (!res.ok) {
-      return {
-        observations: [],
-        health: { provider: "venice", status: "unavailable", detail: `rate_limits HTTP ${res.status}` },
-      };
-    }
-    limits = (await res.json()) as VeniceRateLimits;
-  } catch (e) {
-    return {
-      observations: [],
-      health: {
-        provider: "venice",
-        status: "unavailable",
-        detail: e instanceof Error ? e.message : String(e),
-      },
-    };
-  }
-  const d = limits.data ?? {};
-  const observations: UsageObservation[] = [];
-
-  // Balances are credit metrics — USD and DIEM stay separate fields, never summed.
-  if (typeof d.balances?.USD === "number") {
-    observations.push({
-      provider: "venice",
-      entitlement: "venice-usd-balance",
-      metric: "credit",
-      scope: "account",
-      window: null,
-      used: null,
-      limit: null,
-      remaining: d.balances.USD,
-      resetsAt: null,
-      expiresAt: d.keyExpiration ?? null,
-      observedAt,
-      source: "official_api",
-      exact: true,
-    });
-  }
-  if (typeof d.balances?.DIEM === "number") {
-    observations.push({
-      provider: "venice",
-      entitlement: "venice-diem-balance",
-      metric: "credit",
-      scope: "account",
-      window: null,
-      used: null,
-      limit: null,
-      remaining: d.balances.DIEM,
-      resetsAt: d.nextEpochBegins ?? null,
-      expiresAt: null,
-      observedAt,
-      source: "official_api",
-      exact: true,
-    });
-  }
-  // Per-model rate limits are capacity, not consumption.
-  for (const m of d.rateLimits ?? []) {
-    if (!m.apiModelId) continue;
-    const rpm = m.rateLimits?.find((r) => r.type === "RPM")?.amount;
-    if (typeof rpm !== "number") continue;
-    observations.push({
-      provider: "venice",
-      entitlement: `venice-model:${m.apiModelId}`,
-      metric: "rate_limit",
-      scope: "model",
-      window: "minute",
-      used: null,
-      limit: rpm,
-      remaining: null,
-      resetsAt: null,
-      expiresAt: null,
-      observedAt,
-      source: "official_api",
-      exact: true,
-    });
-  }
-
-  const tier = d.apiTier?.id ? `tier ${d.apiTier.id}` : "";
-  return {
-    observations,
-    health: {
-      provider: "venice",
-      status: d.accessPermitted === false ? "degraded" : "ok",
-      detail: d.accessPermitted === false ? `access not permitted${tier ? ` (${tier})` : ""}` : null,
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Snapshot assembly
 // ---------------------------------------------------------------------------
 
@@ -817,10 +594,8 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
     try {
       results.push(
         p === "codex" ? await codexAdapter()
-        : p === "venice" ? await veniceAdapter()
         : p === "grok" ? await grokAdapter()
-        : p === "anthropic" ? await anthropicAdapterLive()
-        : await opencodeGoAdapter(),
+        : await anthropicAdapterLive(),
       );
     } catch (e) {
       results.push({

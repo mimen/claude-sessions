@@ -83,7 +83,7 @@ Usage:
   ccs whoami          Print the current session id (CLAUDE_CODE_SESSION_ID)
   ccs launcher install  Install the CCS shim, named wrappers, and shell initialization
   ccs usage [--provider <id>] [--json]     Point-in-time usage across Codex, Anthropic,
-                                           Grok, OpenCode Go, Venice (--json = snapshot contract)
+                                           Grok (--json = snapshot contract)
   ccs usage sources|doctor                 Adapter provenance, or adapter health only
   ccs doctor sessions [--json]  Report post-rollout unclassified or provenance-missing sessions
   ccs doctor launcher [--json]  Report deployed-vs-origin and installed-vs-config launcher drift

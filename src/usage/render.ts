@@ -1,151 +1,12 @@
 /**
- * Terminal rendering for `ccs usage`. The view groups by platform + account, one block
- * per subscription with aligned limit rows beneath it — bars line up across the whole
- * run. Unknowns state themselves plainly; quota kinds never merge into one percentage.
+ * Terminal drawing for `ccs usage`. Every decision about sections, labels, plans, and order
+ * comes from packages/usage-view, which the menu bar and the hub also draw. This file only
+ * turns that view into aligned text.
  */
 
-import type { SubscriptionInfo, UsageObservation, UsageSnapshot } from "./types.ts";
+import type { UsageSnapshot } from "./types.ts";
 import { formatCost } from "../cost.ts";
-
-const PROVIDER_ORDER: Readonly<Record<string, number>> = {
-  anthropic: 0,
-  codex: 1,
-  grok: 2,
-  "opencode-go": 3,
-  venice: 4,
-};
-
-/**
- * Fixed semantic order. Utilization never participates: rows do not jump when usage changes.
- * Account windows → scoped/product breakdowns → reset grants → credits → reference limits.
- */
-function rowOrder(o: UsageObservation): number {
-  const product = productOf(o.entitlement)?.toLowerCase();
-  if (o.metric === "allowance") {
-    if (!product) {
-      const byWindow: Readonly<Record<string, number>> = {
-        five_hour: 10,
-        daily: 20,
-        weekly: 30,
-        monthly: 40,
-        minute: 50,
-      };
-      return o.window ? (byWindow[o.window] ?? 60) : 60;
-    }
-    const productRank: Readonly<Record<string, number>> = {
-      build: 31,
-      chat: 32,
-      imagine: 33,
-      api: 34,
-      fable: 40,
-    };
-    return productRank[product] ?? 45;
-  }
-  if (o.metric === "reset_credit") return 70;
-  if (o.metric === "credit") return 80;
-  if (o.metric === "rate_limit") return 90;
-  return 100;
-}
-
-const WINDOW_LABEL: Record<string, string> = {
-  minute: "per-minute",
-  five_hour: "five-hour",
-  daily: "daily",
-  weekly: "weekly",
-  monthly: "monthly",
-};
-
-const PROVIDER_TITLE: Record<string, string> = {
-  codex: "Codex",
-  anthropic: "Claude",
-  grok: "Grok",
-  "opencode-go": "OpenCode Go",
-  venice: "Venice",
-};
-
-const ENTITLEMENT_LABEL: Record<string, string> = {
-  "codex-spark": "Spark",
-  "codex-spark-weekly": "Spark weekly",
-};
-
-/** Entitlement id without any ":<account>" or "#<product>" suffix. */
-function baseEntitlement(entitlement: string): string {
-  const cut = Math.min(
-    ...["#", ":"].map((c) => { const i = entitlement.indexOf(c); return i === -1 ? entitlement.length : i; })
-  );
-  return entitlement.slice(0, cut);
-}
-
-/** Product sub-row qualifier: the part after "#", when present. */
-function productOf(entitlement: string): string | null {
-  const i = entitlement.indexOf("#");
-  return i === -1 ? null : entitlement.slice(i + 1);
-}
-
-const PRODUCT_LABEL: Record<string, string> = {
-  build: "Grok Build",
-  chat: "Grok Chat",
-  imagine: "Imagine",
-  api: "API",
-  reset: "Usage reset",
-  prepaid: "Extra credits",
-};
-
-/** Short limit name shown under a provider/account group. */
-function limitName(o: UsageObservation): string {
-  const product = productOf(o.entitlement);
-  if (product) {
-    const named = PRODUCT_LABEL[product.toLowerCase()];
-    if (named) return named;
-    // Scoped provider quotas preserve their source name (currently Anthropic's Fable).
-    return product;
-  }
-  const base = baseEntitlement(o.entitlement);
-  const override = ENTITLEMENT_LABEL[base];
-  if (override) return override;
-  switch (o.metric) {
-    case "reset_credit": return "banked reset";
-    case "credit":
-      if (base.includes("diem")) return "DIEM balance";
-      if (base.includes("usd")) return "USD balance";
-      return "dollar credits";
-    case "rate_limit": return "per-model RPM";
-    case "allowance":
-      return o.window ? (WINDOW_LABEL[o.window] ?? "allowance") : "allowance";
-    default: return base;
-  }
-}
-
-/** Account qualifier: the part after ":" (before any "#") in a multi-account entitlement. */
-function accountOf(o: UsageObservation): string | null {
-  const stripped = o.entitlement.split("#")[0] ?? o.entitlement;
-  const i = stripped.indexOf(":");
-  return i === -1 ? null : stripped.slice(i + 1);
-}
-
-/** Group key: platform + account; rate-limit caps fold into the plain provider group. */
-function groupKey(o: UsageObservation): string {
-  if (o.metric === "rate_limit") return o.provider;
-  const acct = accountOf(o);
-  return acct ? `${o.provider}:${acct}` : o.provider;
-}
-
-function groupTitle(provider: string, account: string | null): string {
-  const base = PROVIDER_TITLE[provider] ?? provider;
-  return account ? `${base} · ${account}` : base;
-}
-
-function subscriptionKey(subscription: SubscriptionInfo): string {
-  return subscription.account
-    ? `${subscription.provider}:${subscription.account}`
-    : subscription.provider;
-}
-
-function renewalLabel(renewsOn: string): string {
-  const date = new Date(`${renewsOn}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return renewsOn;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
-}
+import { buildView, renewalLabel, type Row } from "../../packages/usage-view/index.ts";
 
 /**
  * An eight-segment usage bar, e.g. `███████░`. Filled segments scale with use.
@@ -163,12 +24,10 @@ function colorFor(pct: number | null, s: string): string {
   return `${c}${s}\x1b[0m`;
 }
 
-/** "in 4h 12m"-style countdown from now; empty string when unparseable. */
-export function countdown(iso: string | null): string {
-  if (!iso) return "";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return "";
-  const ms = t - Date.now();
+/** "in 4h 12m"-style countdown from now; empty string when absent. */
+export function countdown(at: number | null): string {
+  if (at === null) return "";
+  const ms = at - Date.now();
   if (ms <= 0) return "now";
   const m = Math.round(ms / 60_000);
   if (m < 60) return `in ${m}m`;
@@ -187,159 +46,48 @@ export function shortReset(iso: string): string {
   });
 }
 
-/** Credit rendering is currency-aware: DIEM is not dollars. */
-function creditAmount(entitlement: string, remaining: number | null): string {
-  if (remaining === null) return "?";
-  const base = baseEntitlement(entitlement);
-  if (base.includes("diem")) return `${remaining} DIEM`;
-  return remaining === 0 ? "$0" : formatCost(remaining);
+const WINDOW_NAME: Record<string, string> = { "5h": "five-hour", day: "daily", wk: "weekly", mo: "monthly" };
+
+/** The allowance name within its group: the window for the main pool, else the scope name. */
+function rowName(r: Row): string {
+  if (r.kind !== "allowance") return r.kind === "reset" ? "banked reset" : r.label;
+  if ((r.label === "All models" || r.label === "All usage") && r.window) return WINDOW_NAME[r.window] ?? r.window;
+  return r.label;
 }
 
-interface Group {
-  provider: string;
-  account: string | null;
-  title: string;
-  rows: { obs: UsageObservation; name: string }[];
-  subscription: SubscriptionInfo | null;
-}
-
-/** Column width so limit names align within their group blocks. */
-function layoutWidths(groups: Group[]): { limitPad: number } {
-  let maxLimit = 6;
-  for (const g of groups) for (const r of g.rows) maxLimit = Math.max(maxLimit, r.name.length);
-  return { limitPad: Math.min(maxLimit, 18) };
+function rowText(r: Row, name: string): string {
+  switch (r.kind) {
+    case "allowance": {
+      if (r.fractionUsed === null) return `${name}— unknown`;
+      const pct = Math.round(r.fractionUsed * 100);
+      const segments = r.segments.map(s => `${s.name} ${Math.round((s.fractionUsed ?? 0) * 100)}%`).join(" · ");
+      const notes = [countdown(r.resetsAt), r.stale ? "cached" : "", segments].filter(Boolean).join(" · ");
+      return `${colorFor(pct, name + bar(pct))} ${String(pct).padStart(3)}%  ${notes}`.trimEnd();
+    }
+    case "reset":
+      return `${name}${r.available ? "available" : "consumed"}${r.expiresAt ? ` · expires ${shortReset(new Date(r.expiresAt).toISOString())}` : ""}`;
+    case "credit": {
+      const amount = r.unit === "USD" ? (r.balance === 0 ? "none" : `${formatCost(r.balance)} remaining`) : `${r.balance} credits remaining`;
+      return `${name}${amount}`;
+    }
+  }
 }
 
 export function renderSnapshot(snap: UsageSnapshot): string {
+  const view = buildView(snap);
+  const names = view.sections.flatMap(s => s.rows.map(rowName));
+  const pad = Math.min(Math.max(6, ...names.map(n => n.length)), 18);
   const lines: string[] = [];
 
-  // Per-model rate-limit caps are reference data — collapse to ONE summary observation
-  // before grouping, so the view stays a screen; --json still carries every entry.
-  const caps = snap.observations.filter((o) => o.metric === "rate_limit");
-  const rest = snap.observations.filter((o) => o.metric !== "rate_limit");
-  let observations = rest;
-  let capSummary: string | null = null;
-  if (caps.length) {
-    const lo = Math.min(...caps.map((o) => o.limit ?? Infinity));
-    const hi = Math.max(...caps.map((o) => o.limit ?? 0));
-    capSummary = `${caps.length} models · ${lo}–${hi} req/min (detail in --json)`;
-    observations = [...rest, {
-      provider: "venice" as const,
-      entitlement: "venice-model-caps",
-      metric: "rate_limit" as const,
-      scope: "account" as const,
-      window: "minute" as const,
-      used: null,
-      limit: null,
-      remaining: null,
-      resetsAt: null,
-      expiresAt: null,
-      observedAt: caps[0]!.observedAt,
-      source: "official_api" as const,
-      exact: true,
-    }];
-    void lo; void hi;
-  }
-
-  // Group by platform + account. Within a group, limits sort running-out first.
-  const groups = new Map<string, Group>();
-  for (const o of observations) {
-    const key = groupKey(o);
-    if (!groups.has(key)) {
-      const account = accountOf(o);
-      groups.set(key, {
-        provider: o.provider,
-        account,
-        title: groupTitle(o.provider, account),
-        rows: [],
-        subscription: null,
-      });
-    }
-    groups.get(key)!.rows.push({ obs: o, name: limitName(o) });
-  }
-  for (const subscription of snap.subscriptions) {
-    const key = subscriptionKey(subscription);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.subscription = subscription;
-    } else {
-      groups.set(key, {
-        provider: subscription.provider,
-        account: subscription.account,
-        title: groupTitle(subscription.provider, subscription.account),
-        rows: [],
-        subscription,
-      });
-    }
-  }
-  const sortedGroups = [...groups.values()].map((g) => ({
-    ...g,
-    rows: [...g.rows].sort((a, b) => rowOrder(a.obs) - rowOrder(b.obs)),
-  }));
-  // Fixed platform order; stable sort preserves cswap's account order within Claude.
-  sortedGroups.sort(
-    (a, b) => (PROVIDER_ORDER[a.provider] ?? 99) - (PROVIDER_ORDER[b.provider] ?? 99),
-  );
-
-  const { limitPad } = layoutWidths(sortedGroups);
-
-  for (const g of sortedGroups) {
-    lines.push(g.title);
-    if (g.subscription) {
-      lines.push(g.subscription.renewsOn
-        ? `  ${g.subscription.planName} · renews ${renewalLabel(g.subscription.renewsOn)}`
-        : `  ${g.subscription.planName} · renewal unknown`);
-    }
-    for (const row of g.rows) {
-      lines.push(rowFor(row.obs, row.name, limitPad, capSummary));
-    }
+  for (const s of view.sections) {
+    lines.push(s.account ? `${s.title} · ${s.account}` : s.title);
+    if (s.plan) lines.push(`  ${s.plan.name} · ${s.renewsOn ? `renews ${renewalLabel(s.renewsOn)}` : "renewal unknown"}`);
+    for (const r of s.rows) lines.push(`  ${rowText(r, `${rowName(r).padEnd(pad)} `)}`);
     lines.push("");
   }
 
-  // Adapter failures close the view — after the data, where they read as footnotes.
-  const unhealthy = snap.adapters.filter((a) => a.status !== "ok");
-  if (unhealthy.length) {
-    lines.push("unavailable");
-    for (const a of unhealthy) {
-      lines.push(`  ${PROVIDER_TITLE[a.provider] ?? a.provider} — ${a.detail ?? a.status}`);
-    }
-    lines.push("");
-  }
+  // Adapter failures close the view, after the data, where they read as footnotes.
+  if (view.notes.length) lines.push("unavailable", ...view.notes.map(n => `  ${n}`), "");
   while (lines.length && lines[lines.length - 1] === "") lines.pop();
   return lines.join("\n");
-}
-
-/** One aligned row inside a group: limit name, bar, percent, countdown. */
-function rowFor(o: UsageObservation, name: string, limitPad: number, capSummary: string | null): string {
-  const indent = "  ";
-  const label = `${name.padEnd(limitPad)} `;
-  switch (o.metric) {
-    case "allowance": {
-      if (o.used !== null && o.limit !== null && o.limit > 0) {
-        const pct = Math.round(o.used);
-        // Product rows are a breakdown of their parent's shared allowance — a second
-        // full bar and duplicate reset countdown imply separate quotas. Show percentages only.
-        const product = productOf(o.entitlement);
-        if (product && ["build", "chat", "imagine", "api"].includes(product.toLowerCase())) {
-          return `${indent}  ${label}${String(pct).padStart(3)}%`;
-        }
-        const barText = colorFor(pct, label + colorFor(pct, bar(pct)));
-        const when = countdown(o.resetsAt) || shortReset(o.resetsAt ?? "");
-        const notes = [when, o.stale ? "cached" : ""].filter(Boolean).join(" · ");
-        return `${indent}${barText} ${String(pct).padStart(3)}%  ${notes}`.trimEnd();
-      }
-      return `${indent}${label}— unknown`;
-    }
-    case "reset_credit":
-      return `${indent}${label}${o.remaining === 1 ? "available" : "consumed"}${o.expiresAt ? ` · expires ${shortReset(o.expiresAt)}` : ""}`;
-    case "credit": {
-      const epoch = o.resetsAt ? ` · epoch ${shortReset(o.resetsAt)}` : "";
-      const amount = creditAmount(o.entitlement, o.remaining);
-      return `${indent}${label}${amount === "$0" ? "none" : `${amount} remaining`}${epoch}`;
-    }
-    case "rate_limit":
-      return `${indent}${label}${capSummary ?? `${o.limit ?? "?"} req/min cap`}`;
-    default:
-      return `${indent}${label}${o.entitlement}`;
-  }
 }
