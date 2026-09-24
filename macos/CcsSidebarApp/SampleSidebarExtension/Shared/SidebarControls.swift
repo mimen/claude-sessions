@@ -103,7 +103,6 @@ public struct SidebarHeader: View {
                 }
                 .labelsHidden()
                 .controlSize(.small)
-                .fixedSize()
 
                 Picker("", selection: $grouping) {
                     ForEach(GroupingMode.allCases, id: \.self) { value in
@@ -112,12 +111,16 @@ public struct SidebarHeader: View {
                 }
                 .labelsHidden()
                 .controlSize(.small)
-                .fixedSize()
 
-                Toggle(isOn: $clusterFirst) { Text("Clusters") }
+                // The word gives way to an icon before the pickers are squeezed to an ellipsis.
+                Toggle(isOn: $clusterFirst) {
+                    ViewThatFits(in: .horizontal) {
+                        Text("Clusters")
+                        Image(systemName: "square.stack.3d.up")
+                    }
+                }
                     .toggleStyle(.button)
                     .controlSize(.small)
-                    .fixedSize()
                     .help("Lift cluster sessions into their own groups at the top")
 
                 Spacer(minLength: 0)
