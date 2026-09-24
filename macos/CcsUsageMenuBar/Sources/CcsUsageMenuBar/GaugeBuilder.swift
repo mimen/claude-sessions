@@ -169,6 +169,26 @@ enum GaugeBuilder {
         }
     }
 
+    /// Sections in the user's saved order. Sections the order doesn't name yet keep their
+    /// natural position relative to each other, after the named ones.
+    static func ordered(_ sections: [UsageSection], by order: [String]) -> [UsageSection] {
+        let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: min)
+        return sections.enumerated()
+            .sorted { (rank[$0.element.id] ?? order.count, $0.offset) < (rank[$1.element.id] ?? order.count, $1.offset) }
+            .map(\.element)
+    }
+
+    /// Drops `moving` onto `target`: before it when dragged up, after it when dragged down,
+    /// so every slot, including the last, is reachable.
+    static func reordered(_ ids: [String], moving: String, onto target: String) -> [String] {
+        guard moving != target, let from = ids.firstIndex(of: moving),
+              let to = ids.firstIndex(of: target) else { return ids }
+        var ids = ids
+        ids.remove(at: from)
+        ids.insert(moving, at: to)
+        return ids
+    }
+
     /// Grok-style #sub-pool rows become colored segments on their parent gauge.
     static func foldBreakdowns(_ gauges: [UsageGauge]) -> [UsageGauge] {
         let parents = Dictionary(gauges.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

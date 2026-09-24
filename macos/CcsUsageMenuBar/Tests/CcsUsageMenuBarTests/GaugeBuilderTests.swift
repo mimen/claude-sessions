@@ -380,4 +380,52 @@ final class GaugeBuilderTests: XCTestCase {
         ]))
         XCTAssertEqual(GaugeBuilder.panelHeight(for: with) - GaugeBuilder.panelHeight(for: without), 18)
     }
+
+    // MARK: - Reliability and order
+
+    func testUnreachableProviderKeepsItsLastRowsMarkedStale() {
+        let old = Date(timeIntervalSince1970: 1_757_000_000)
+        let previous = snapshot([
+            observation(provider: "grok", entitlement: "grok-super grok plus:m@x.com", used: 40, observedAt: old),
+            observation(provider: "codex", entitlement: "codex-pro:m@x.com", used: 10, observedAt: old)
+        ])
+        let fresh = UsageSnapshot(
+            generatedAt: old.addingTimeInterval(300),
+            observations: [observation(provider: "codex", entitlement: "codex-pro:m@x.com", used: 12)],
+            adapters: [AdapterHealth(provider: "grok", status: "unavailable", detail: "HTTP 500"),
+                       AdapterHealth(provider: "codex", status: "ok", detail: nil)]
+        )
+        let merged = fresh.carryingForward(previous)
+        XCTAssertEqual(merged.observations.map(\.provider), ["codex", "grok"])
+        XCTAssertEqual(merged.observations[0].used, 12, "a reporting provider is never overwritten")
+        XCTAssertEqual(merged.observations[1].used, 40)
+        XCTAssertEqual(merged.observations[1].stale, true)
+        XCTAssertEqual(merged.observations[1].observedAt, old, "the stale badge ages from the real fetch")
+    }
+
+    func testAProviderThatWasSimplyRemovedIsNotResurrected() {
+        let previous = snapshot([observation(provider: "grok", entitlement: "grok-super grok plus:m@x.com")])
+        let fresh = snapshot([observation(provider: "codex", entitlement: "codex-pro:m@x.com")])
+        XCTAssertEqual(fresh.carryingForward(previous).observations.map(\.provider), ["codex"])
+    }
+
+    func testSavedOrderWinsAndUnknownSectionsKeepNaturalOrderAtTheEnd() {
+        let sections = GaugeBuilder.sections(from: snapshot([
+            observation(provider: "anthropic", entitlement: "claude-max:a@x.com"),
+            observation(provider: "codex", entitlement: "codex-pro:a@x.com"),
+            observation(provider: "grok", entitlement: "grok-super grok plus:a@x.com"),
+            observation(provider: "venice", entitlement: "venice-pro")
+        ]))
+        let ordered = GaugeBuilder.ordered(sections, by: ["grok|a@x.com", "stale|gone", "anthropic|a@x.com"])
+        XCTAssertEqual(ordered.map(\.provider), ["grok", "anthropic", "codex", "venice"])
+    }
+
+    func testDraggingReachesEverySlot() {
+        let ids = ["a", "b", "c", "d"]
+        XCTAssertEqual(GaugeBuilder.reordered(ids, moving: "a", onto: "d"), ["b", "c", "d", "a"])
+        XCTAssertEqual(GaugeBuilder.reordered(ids, moving: "d", onto: "a"), ["d", "a", "b", "c"])
+        XCTAssertEqual(GaugeBuilder.reordered(ids, moving: "b", onto: "c"), ["a", "c", "b", "d"])
+        XCTAssertEqual(GaugeBuilder.reordered(ids, moving: "b", onto: "b"), ids)
+    }
+
 }

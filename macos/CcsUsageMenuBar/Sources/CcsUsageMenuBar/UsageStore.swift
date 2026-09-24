@@ -17,6 +17,11 @@ final class UsageStore: ObservableObject {
         case loading
         case loaded(Date)
         case failed(String)
+
+        var failureMessage: String? {
+            if case .failed(let message) = self { return message }
+            return nil
+        }
     }
 
     @Published var phase: Phase = .idle
@@ -31,6 +36,14 @@ final class UsageStore: ObservableObject {
         UserDefaults.standard.string(forKey: "overallMode").flatMap(OverallMode.init) ?? .both {
         didSet { UserDefaults.standard.set(overallMode.rawValue, forKey: "overallMode") }
     }
+
+    /// Section ids ("provider|account") in the order the user dragged them into.
+    @Published var sectionOrder: [String] = UserDefaults.standard.stringArray(forKey: "sectionOrder") ?? [] {
+        didSet { UserDefaults.standard.set(sectionOrder, forKey: "sectionOrder") }
+    }
+    @Published var draggingSection: String?
+    /// When ccs last answered. Kept across failures so the footer can age what is on screen.
+    @Published var lastSuccess: Date?
 
     private var hasLoadedCswap = false
     private var basePanelHeight: CGFloat = 420
@@ -129,7 +142,8 @@ final class UsageStore: ObservableObject {
         Task { [ccsPath] in
             do {
                 let t0 = Date()
-                let snapshot = try await UsageFetcher.fetch(ccsPath: ccsPath)
+                let fetched = try await UsageFetcher.fetch(ccsPath: ccsPath)
+                let snapshot = await MainActor.run { fetched.carryingForward(self.snapshot) }
                 let built = GaugeBuilder.sections(from: snapshot).flatMap(\.gauges)
                 await MainActor.run {
                     self.gauges = built
@@ -137,6 +151,7 @@ final class UsageStore: ObservableObject {
                     self.adapterNotes = GaugeBuilder.healthNotes(snapshot.adapters)
                     self.updateHeight(from: snapshot)
                     self.phase = .loaded(snapshot.generatedAt ?? Date())
+                    self.lastSuccess = snapshot.generatedAt ?? Date()
                 }
                 Self.log("refresh ok in \(Int(-t0.timeIntervalSinceNow))s, \(snapshot.observations.count) obs")
             } catch {
@@ -171,7 +186,17 @@ final class UsageStore: ObservableObject {
     }
 
     var sections: [UsageSection] {
-        GaugeBuilder.sections(from: snapshot)
+        GaugeBuilder.ordered(GaugeBuilder.sections(from: snapshot), by: sectionOrder)
+    }
+
+    func moveSection(_ moving: String, onto target: String) {
+        let next = GaugeBuilder.reordered(sections.map(\.id), moving: moving, onto: target)
+        if next != sections.map(\.id) { sectionOrder = next }
+    }
+
+    /// Two missed polls: the numbers on screen may no longer match the provider.
+    func isOutdated(now: Date) -> Bool {
+        lastSuccess.map { now.timeIntervalSince($0) > 2 * pollInterval + 60 } ?? false
     }
 
     var overallReading: OverallReading {

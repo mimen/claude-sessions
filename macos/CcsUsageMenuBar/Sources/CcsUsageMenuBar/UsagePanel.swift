@@ -24,6 +24,7 @@ struct UsagePanel: View {
         }
         .frame(width: 320, height: store.panelHeight)
         .onReceive(ticker) { now = $0 }
+        .onDisappear { store.draggingSection = nil }
     }
 
     /// Adapters that answered with caveats (stale fallbacks) or not at all.
@@ -129,7 +130,13 @@ struct UsagePanel: View {
     @ViewBuilder
     private var gaugeList: some View {
         ForEach(sections) { section in
-            ProviderSectionHeader(provider: section.provider)
+            ProviderSectionHeader(provider: section.provider,
+                                  highlighted: store.draggingSection != nil && store.draggingSection != section.id)
+                .onDrag {
+                    store.draggingSection = section.id
+                    return NSItemProvider(object: section.id as NSString)
+                }
+                .onDrop(of: [.text], delegate: SectionDropDelegate(target: section.id, store: store))
             if section.accountDisplay != nil || section.plan != nil {
                 HStack(spacing: 5) {
                     if let account = section.accountDisplay {
@@ -203,26 +210,39 @@ struct UsagePanel: View {
         .padding(.top, 8)
     }
 
+    @ViewBuilder
+    private var footerStatus: some View {
+        let age = store.lastSuccess.map { GaugeBuilder.shortAge($0, now: now) }
+        let outdated = store.isOutdated(now: now)
+        HStack(spacing: 4) {
+            switch store.phase {
+            case .loading:
+                Text("refreshing…")
+            case .failed:
+                Text(age.map { "refresh failed · data \($0) old" } ?? "refresh failed")
+                    .foregroundStyle(.orange)
+            default:
+                if let age { Text("updated \(age) ago") }
+            }
+            if outdated, store.phase != .loading {
+                Text("outdated")
+                    .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.orange.opacity(0.14)))
+            }
+        }
+        .font(.system(size: 9.5))
+        .foregroundStyle(.tertiary)
+        .help(store.phase.failureMessage ?? "")
+    }
+
     private var footer: some View {
         VStack(spacing: 0) {
             billFooter
             HStack(spacing: 10) {
-            switch store.phase {
-            case .loaded:
-                Text("updated \(now.formatted(.relative(presentation: .named)))")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
-            case .loading:
-                Text("refreshing…")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
-            case .failed:
-                Text(store.phase == .failed("") ? "" : "last refresh failed")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.orange)
-            default:
-                EmptyView()
-            }
+            footerStatus
             Spacer()
             Button {
                 store.refresh()
@@ -292,5 +312,23 @@ struct MenuBarLabel: View {
         case 0.15..<0.4: .orange
         default: .red
         }
+    }
+}
+
+/// Reorders live while hovering, so the list shows where the section will land.
+struct SectionDropDelegate: DropDelegate {
+    let target: String
+    let store: UsageStore
+
+    func dropEntered(info: DropInfo) {
+        guard let moving = store.draggingSection else { return }
+        withAnimation(.easeInOut(duration: 0.15)) { store.moveSection(moving, onto: target) }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+    func performDrop(info: DropInfo) -> Bool {
+        store.draggingSection = nil
+        return true
     }
 }

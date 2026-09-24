@@ -172,6 +172,7 @@ struct GaugeRow: View {
 
 struct ProviderSectionHeader: View {
     let provider: String
+    var highlighted = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -182,9 +183,14 @@ struct ProviderSectionHeader: View {
                 .kerning(0.8)
                 .foregroundStyle(.secondary)
             Spacer()
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 8.5))
+                .foregroundStyle(.quaternary)
         }
+        .contentShape(Rectangle())
         .padding(.top, 10)
         .padding(.bottom, 3)
+        .opacity(highlighted ? 0.6 : 1)
     }
 
     var color: Color {

@@ -15,6 +15,12 @@ Pure SwiftUI (`MenuBarExtra`), no dependencies, macOS 13+. The app shells out to
   dollars; Venice per-model minute rate limits are dropped as noise; Grok `#build` /
   `#chat` / `#imagine` sub-pools collapse into their parent row when one exists.
 
+### Order and freshness
+
+Drag a section header to reorder sections. The order persists in the app's defaults (`sectionOrder`), and new sections append in their natural position.
+
+A failed refresh never blanks the panel. When ccs reports a provider unavailable, that provider's previous rows stay on screen with a stale badge aged from their real fetch time. The footer shows how old the data is, and reads `outdated` after two missed polls.
+
 ### Claude Fable row
 
 Each Claude account shows its raw weekly Fable cap beside the all-models weekly pool. The Fable cap nests inside that pool, so it never drives the menu bar reading.

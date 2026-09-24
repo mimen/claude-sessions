@@ -67,7 +67,7 @@ struct UsageObservation: Decodable, Equatable {
     let resetsAt: Date?
     let expiresAt: Date?
     let exact: Bool?
-    let stale: Bool?
+    var stale: Bool?
     let tier: String?
     /// When the number was actually fetched — for stale fallbacks this is the
     /// last successful fetch, not the current run.
@@ -129,5 +129,21 @@ struct SnapshotDecoder {
             throw DecodingError.dataCorrupted(.init(codingPath: d.codingPath, debugDescription: "Unparseable date \(s)"))
         }
         return try decoder.decode(UsageSnapshot.self, from: data)
+    }
+}
+
+extension UsageSnapshot {
+    /// A provider ccs could not reach this run keeps its previous rows, marked stale, so
+    /// one failed adapter never blanks its section. observedAt stays the original fetch
+    /// time, which is what the stale badge ages from.
+    func carryingForward(_ previous: UsageSnapshot) -> UsageSnapshot {
+        let reporting = Set(observations.map(\.provider))
+        let unreachable = Set((adapters ?? []).filter { $0.status == "unavailable" }.map(\.provider))
+        let carried = previous.observations
+            .filter { unreachable.contains($0.provider) && !reporting.contains($0.provider) }
+            .map { o -> UsageObservation in var o = o; o.stale = true; return o }
+        guard !carried.isEmpty else { return self }
+        return UsageSnapshot(generatedAt: generatedAt, observations: observations + carried,
+                             adapters: adapters, subscriptions: subscriptions)
     }
 }
