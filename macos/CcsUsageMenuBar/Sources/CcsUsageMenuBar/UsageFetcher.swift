@@ -45,9 +45,11 @@ enum CcsLocator {
 enum UsageFetchError: LocalizedError {
     case launchFailed(String)
     case nonZeroExit(Int32, String)
+    case malformed(String)
 
     var errorDescription: String? {
         switch self {
+        case .malformed(let head): return "ccs printed no usage snapshot: \(head)"
         case .launchFailed(let detail): return "Could not run ccs: \(detail)"
         case .nonZeroExit(let code, let stderr): return "ccs exited \(code): \(stderr)"
         }
@@ -55,12 +57,12 @@ enum UsageFetchError: LocalizedError {
 }
 
 enum UsageFetcher {
-    static func fetch(ccsPath: String, timeout: TimeInterval = 60) async throws -> UsageSnapshot {
+    static func fetch(ccsPath: String, timeout: TimeInterval = 60) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
-                    let snapshot = try runBlocking(ccsPath: ccsPath, timeout: timeout)
-                    continuation.resume(returning: snapshot)
+                    let data = try runBlocking(ccsPath: ccsPath, timeout: timeout)
+                    continuation.resume(returning: data)
                 } catch {
                     continuation.resume(throwing: error)
                 }
@@ -68,7 +70,7 @@ enum UsageFetcher {
         }
     }
 
-    static func runBlocking(ccsPath: String, timeout: TimeInterval) throws -> UsageSnapshot {
+    static func runBlocking(ccsPath: String, timeout: TimeInterval) throws -> Data {
         let expanded = (ccsPath as NSString).expandingTildeInPath
         let environment = ProcessInfo.processInfo.environment
         var env = environment
@@ -91,7 +93,11 @@ enum UsageFetcher {
         guard !result.stdout.isEmpty else {
             throw UsageFetchError.nonZeroExit(result.status, String(data: result.stderr, encoding: .utf8) ?? "")
         }
-        return try SnapshotDecoder.decode(result.stdout)
+        guard let object = try? JSONSerialization.jsonObject(with: result.stdout) as? [String: Any],
+              object["observations"] is [Any] else {
+            throw UsageFetchError.malformed(String(decoding: result.stdout.prefix(200), as: UTF8.self))
+        }
+        return result.stdout
     }
 }
 

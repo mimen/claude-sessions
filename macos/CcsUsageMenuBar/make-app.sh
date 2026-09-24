@@ -9,11 +9,19 @@ APP_NAME="CcsUsage"
 APP_DIR=".build/${APP_NAME}.app"
 CONTENTS="$APP_DIR/Contents"
 
+# The usage view is packages/usage-view, bundled for JavaScriptCore. The output is checked
+# in so `swift test` runs without bun; this keeps it current with the TypeScript.
+(cd ../.. && bun build packages/usage-view/jsc-entry.ts --target browser --format iife \
+  --outfile macos/CcsUsageMenuBar/Sources/CcsUsageMenuBar/Resources/usage-view.js)
+
 swift build -c release
 
 rm -rf "$APP_DIR"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 cp Sources/CcsUsageMenuBar/Resources/AppIcon2.icns "$CONTENTS/Resources/AppIcon2.icns"
+# SwiftPM's Bundle.module looks for its resource bundle at the .app root, where a file
+# would break the signature, so the script goes to Contents/Resources for Bundle.main.
+cp Sources/CcsUsageMenuBar/Resources/usage-view.js "$CONTENTS/Resources/usage-view.js"
 
 cp .build/release/CcsUsageMenuBar "$CONTENTS/MacOS/$APP_NAME"
 

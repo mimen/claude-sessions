@@ -7,7 +7,9 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "CcsUsageMenuBar",
-            path: "Sources/CcsUsageMenuBar"
+            path: "Sources/CcsUsageMenuBar",
+            exclude: ["Resources/AppIcon.icns", "Resources/AppIcon2.icns"],
+            resources: [.copy("Resources/usage-view.js")]
         ),
         .testTarget(
             name: "CcsUsageMenuBarTests",

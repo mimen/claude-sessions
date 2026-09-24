@@ -268,7 +268,10 @@ function overallReading(sections: Section[]): View["overall"] {
 
 export function buildView(snapshot: Snapshot, order: Order = {}): View {
   const groups = new Map<string, { provider: string; account: string | null; obs: Observation[] }>();
+  // Only drawable metrics form sections, so an unknown metric (Venice's per-model rate
+  // limits from an older ccs) cannot mint hundreds of empty sections.
   for (const o of snapshot.observations) {
+    if (toRow(o) === null) continue;
     const account = entitlementParts(o.entitlement).account;
     const id = `${o.provider}|${account ?? ""}`;
     if (!groups.has(id)) groups.set(id, { provider: o.provider, account, obs: [] });

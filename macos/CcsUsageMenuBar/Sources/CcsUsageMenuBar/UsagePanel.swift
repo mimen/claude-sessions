@@ -24,7 +24,7 @@ struct UsagePanel: View {
     private var body_: some View {
         VStack(alignment: .leading, spacing: 2) {
             content
-            if !store.adapterNotes.isEmpty {
+            if !store.notes.isEmpty {
                 healthNotes
             }
             if !store.cswapAccounts.isEmpty {
@@ -38,7 +38,7 @@ struct UsagePanel: View {
     /// Adapters that answered with caveats (stale fallbacks) or not at all.
     private var healthNotes: some View {
         VStack(alignment: .leading, spacing: 3) {
-            ForEach(store.adapterNotes, id: \.self) { note in
+            ForEach(store.notes, id: \.self) { note in
                 HStack(alignment: .top, spacing: 5) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 8.5))
@@ -138,12 +138,12 @@ struct UsagePanel: View {
     @ViewBuilder
     private var gaugeList: some View {
         ForEach(sections) { section in
-            ProviderSectionHeader(provider: section.provider,
+            ProviderSectionHeader(provider: section.provider, title: section.title,
                                   highlighted: store.dragging == .section(section.id))
                 .reorderable(.section(section.id), store: store, enabled: scrolls)
-            if section.accountDisplay != nil || section.plan != nil {
+            if section.account != nil || section.plan != nil {
                 HStack(spacing: 5) {
-                    if let account = section.accountDisplay {
+                    if let account = section.account {
                         Text(account)
                             .font(.system(size: 10, weight: .medium, design: .rounded))
                             .foregroundStyle(.secondary)
@@ -158,13 +158,13 @@ struct UsagePanel: View {
                             .padding(.vertical, 1)
                             .background(Capsule().fill(Color.secondary.opacity(0.14)))
                     }
-                    if let subscription = section.subscription {
-                        Text(subscription.renewalDisplay.map { "renews \($0)" } ?? "renewal unknown")
+                    if section.plan != nil {
+                        Text(section.renewsOn.map { "renews \(UsageViewEngine.shared.renewalLabel($0))" } ?? "renewal unknown")
                             .font(.system(size: 9.5, design: .rounded))
                             .foregroundStyle(.tertiary)
                     }
-                    if section.isStale {
-                        Text(section.staleAge(now: now).map { "stale \($0)" } ?? "stale")
+                    if let staleSince = section.staleSince {
+                        Text("stale \(UsageViewEngine.shared.shortAge(Date(epochMs: staleSince), now: now))")
                             .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                             .foregroundStyle(.orange)
                             .padding(.horizontal, 4)
@@ -175,23 +175,23 @@ struct UsagePanel: View {
                 }
                 .padding(.bottom, 2)
             }
-            ForEach(section.gauges) { gauge in
-                let item = DragItem.row(section: section.id, gauge: gauge.id)
-                GaugeRow(gauge: gauge, now: now)
+            ForEach(section.rows) { row in
+                let item = DragItem.row(section: section.id, gauge: row.id)
+                GaugeRow(row: row, now: now)
                     .opacity(store.dragging == item ? 0.4 : 1)
                     .reorderable(item, store: store, enabled: scrolls)
             }
         }
     }
 
-    private var sections: [UsageSection] {
+    private var sections: [ViewSection] {
         store.sections
     }
 
     /// Monthly subscription total, pinned above the footer controls.
     private var billFooter: some View {
         HStack(spacing: 4) {
-            let bill = GaugeBuilder.monthlyBill(store.sections)
+            let bill = store.view?.bill ?? .init(total: 0, planCount: 0)
             Text("≈ \(Int(bill.total.rounded())) USD / mo")
                 .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle(.primary)
@@ -218,7 +218,7 @@ struct UsagePanel: View {
 
     @ViewBuilder
     private var footerStatus: some View {
-        let age = store.lastSuccess.map { GaugeBuilder.shortAge($0, now: now) }
+        let age = store.lastSuccess.map { UsageViewEngine.shared.shortAge($0, now: now) }
         let outdated = store.isOutdated(now: now)
         HStack(spacing: 4) {
             switch store.phase {
@@ -277,7 +277,7 @@ struct UsagePanel: View {
 }
 
 struct MenuBarLabel: View {
-    let reading: OverallReading
+    let reading: UsageViewModel.Overall?
     let mode: OverallMode
 
     var body: some View {
@@ -305,9 +305,9 @@ struct MenuBarLabel: View {
     private var remainings: [Double] {
         let used: [Double?]
         switch mode {
-        case .fiveHour: used = [reading.fiveHour]
-        case .sevenDay: used = [reading.sevenDay]
-        case .both: used = [reading.fiveHour, reading.sevenDay]
+        case .fiveHour: used = [reading?.fiveHour]
+        case .sevenDay: used = [reading?.sevenDay]
+        case .both: used = [reading?.fiveHour, reading?.sevenDay]
         }
         return used.compactMap { $0.map { 1 - $0 } }
     }

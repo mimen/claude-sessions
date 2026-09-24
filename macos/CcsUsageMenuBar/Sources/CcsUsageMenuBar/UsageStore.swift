@@ -2,12 +2,12 @@ import AppKit
 import Foundation
 import SwiftUI
 
-/// What the menu bar label shows: 5h only, 7d only, or both as "5h / 7d".
 enum DragItem: Equatable {
     case section(String)
     case row(section: String, gauge: String)
 }
 
+/// What the menu bar label shows: 5h only, 7d only, or both as "5h / 7d".
 enum OverallMode: String, CaseIterable, Identifiable {
     case fiveHour = "5h"
     case sevenDay = "7d"
@@ -30,13 +30,12 @@ final class UsageStore: ObservableObject {
     }
 
     @Published var phase: Phase = .idle
-    @Published var gauges: [UsageGauge] = []
-    @Published var snapshot = UsageSnapshot(generatedAt: nil, observations: [])
+    /// The engine's view of the last snapshot, in the user's saved order.
+    @Published var view: UsageViewModel?
     @Published var panelHeight: CGFloat = 420
     @Published var cswapAccounts: [CswapAccount] = []
     @Published var switchingTo: CswapAccount?
     @Published var switchError: String?
-    @Published var adapterNotes: [String] = []
     @Published var overallMode: OverallMode =
         UserDefaults.standard.string(forKey: "overallMode").flatMap(OverallMode.init) ?? .both {
         didSet { UserDefaults.standard.set(overallMode.rawValue, forKey: "overallMode") }
@@ -44,13 +43,15 @@ final class UsageStore: ObservableObject {
 
     /// Section ids ("provider|account") in the order the user dragged them into.
     @Published var sectionOrder: [String] = UserDefaults.standard.stringArray(forKey: "sectionOrder") ?? [] {
-        didSet { UserDefaults.standard.set(sectionOrder, forKey: "sectionOrder") }
+        didSet { UserDefaults.standard.set(sectionOrder, forKey: "sectionOrder"); rebuild() }
     }
-    /// Gauge ids in the order the user dragged them into, keyed by section id.
+    /// Row ids in the order the user dragged them into, keyed by section id.
     @Published var rowOrder: [String: [String]] =
         UserDefaults.standard.dictionary(forKey: "rowOrder") as? [String: [String]] ?? [:] {
-        didSet { UserDefaults.standard.set(rowOrder, forKey: "rowOrder") }
+        didSet { UserDefaults.standard.set(rowOrder, forKey: "rowOrder"); rebuild() }
     }
+    /// The carried-forward snapshot the engine last returned: the next refresh's `previous`.
+    private(set) var lastSnapshotData: Data?
     /// The section header or gauge row being dragged. Rows only reorder within their section.
     @Published var dragging: DragItem?
     /// When ccs last answered. Kept across failures so the footer can age what is on screen.
@@ -59,11 +60,31 @@ final class UsageStore: ObservableObject {
     private var hasLoadedCswap = false
     private var basePanelHeight: CGFloat = 420
 
-    func updateHeight(from snapshot: UsageSnapshot) {
-        basePanelHeight = GaugeBuilder.panelHeight(
-            for: GaugeBuilder.sections(from: snapshot),
-            noteCount: GaugeBuilder.healthNotes(snapshot.adapters).count
-        )
+    /// Builds the view from fresh ccs output, carrying unreachable providers forward.
+    func apply(_ fetched: Data) throws {
+        let built = try UsageViewEngine.shared.build(snapshotData: fetched, previous: lastSnapshotData, order: order)
+        lastSnapshotData = built.snapshot
+        show(built.view)
+        let at = built.generatedAt ?? Date()
+        lastSuccess = at
+        phase = .loaded(at)
+    }
+
+    private var order: ViewOrder { ViewOrder(sections: sectionOrder, rows: rowOrder) }
+
+    /// Re-applies a changed order to the snapshot on screen without refetching.
+    private func rebuild() {
+        guard let lastSnapshotData else { return }
+        do {
+            show(try UsageViewEngine.shared.build(snapshotData: lastSnapshotData, previous: nil, order: order).view)
+        } catch {
+            Self.log("rebuild FAILED: \(error)")
+        }
+    }
+
+    private func show(_ view: UsageViewModel) {
+        self.view = view
+        basePanelHeight = CcsUsageMenuBar.panelHeight(for: view, noteCount: view.notes.count)
         syncPanelHeight()
     }
 
@@ -154,17 +175,8 @@ final class UsageStore: ObservableObject {
             do {
                 let t0 = Date()
                 let fetched = try await UsageFetcher.fetch(ccsPath: ccsPath)
-                let snapshot = await MainActor.run { fetched.carryingForward(self.snapshot) }
-                let built = GaugeBuilder.sections(from: snapshot).flatMap(\.gauges)
-                await MainActor.run {
-                    self.gauges = built
-                    self.snapshot = snapshot
-                    self.adapterNotes = GaugeBuilder.healthNotes(snapshot.adapters)
-                    self.updateHeight(from: snapshot)
-                    self.phase = .loaded(snapshot.generatedAt ?? Date())
-                    self.lastSuccess = snapshot.generatedAt ?? Date()
-                }
-                Self.log("refresh ok in \(Int(-t0.timeIntervalSinceNow))s, \(snapshot.observations.count) obs")
+                try await MainActor.run { try self.apply(fetched) }
+                Self.log("refresh ok in \(Int(-t0.timeIntervalSinceNow))s, \(fetched.count) bytes")
             } catch {
                 Self.log("refresh FAILED: \(error)")
                 await MainActor.run {
@@ -196,21 +208,18 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    var sections: [UsageSection] {
-        GaugeBuilder.ordered(GaugeBuilder.sections(from: snapshot), by: sectionOrder).map { s in
-            s.withGauges(GaugeBuilder.ordered(s.gauges, by: rowOrder[s.id] ?? [], id: \.id))
-        }
-    }
+    var sections: [ViewSection] { view?.sections ?? [] }
+    var notes: [String] { view?.notes ?? [] }
 
     func move(_ item: DragItem, onto target: DragItem) {
         switch (item, target) {
         case (.section(let moving), .section(let onto)):
             let ids = sections.map(\.id)
-            let next = GaugeBuilder.reordered(ids, moving: moving, onto: onto)
+            let next = UsageViewEngine.shared.reordered(ids, moving: moving, onto: onto)
             if next != ids { sectionOrder = next }
         case (.row(let section, let moving), .row(let targetSection, let onto)) where section == targetSection:
-            guard let ids = sections.first(where: { $0.id == section })?.gauges.map(\.id) else { return }
-            let next = GaugeBuilder.reordered(ids, moving: moving, onto: onto)
+            guard let ids = sections.first(where: { $0.id == section })?.rows.map(\.id) else { return }
+            let next = UsageViewEngine.shared.reordered(ids, moving: moving, onto: onto)
             if next != ids { rowOrder[section] = next }
         default:
             break
@@ -220,9 +229,5 @@ final class UsageStore: ObservableObject {
     /// Two missed polls: the numbers on screen may no longer match the provider.
     func isOutdated(now: Date) -> Bool {
         lastSuccess.map { now.timeIntervalSince($0) > 2 * pollInterval + 60 } ?? false
-    }
-
-    var overallReading: OverallReading {
-        GaugeBuilder.overallReading(sections)
     }
 }

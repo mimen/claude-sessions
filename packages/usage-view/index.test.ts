@@ -121,3 +121,12 @@ test("repeated entitlements keep unique row ids", () => {
   const ids = view.sections[0]!.rows.map(r => r.id);
   expect(new Set(ids).size).toBe(2);
 });
+
+test("observations the view cannot draw never create a section", () => {
+  const view = buildView(snapshot([
+    obs(`codex-pro:${personal}`),
+    obs("venice-model:qwen", { provider: "venice", metric: "rate_limit", window: "minute" }),
+    obs("venice-model:kimi", { provider: "venice", metric: "rate_limit", window: "minute" }),
+  ]));
+  expect(view.sections.map(s => s.id)).toEqual([`codex|${personal}`]);
+});

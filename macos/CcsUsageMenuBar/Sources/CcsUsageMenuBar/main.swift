@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = item.button else { return }
-        let labelView = NSHostingView(rootView: MenuBarLabel(reading: store.overallReading, mode: store.overallMode))
+        let labelView = NSHostingView(rootView: MenuBarLabel(reading: store.view?.overall, mode: store.overallMode))
         let ideal = labelView.fittingSize
         let barHeight = NSStatusBar.system.thickness
         labelView.frame = NSRect(x: 0, y: (barHeight - ideal.height) / 2,
@@ -32,12 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = false
 
-        store.$gauges.map { _ in () }
+        store.$view.map { _ in () }
             .merge(with: store.$overallMode.map { _ in () })
             .receive(on: RunLoop.main)
             .sink { [weak self] in
                 guard let self, let button = self.statusItem?.button else { return }
-                labelView.rootView = MenuBarLabel(reading: AppStore.shared.overallReading,
+                labelView.rootView = MenuBarLabel(reading: AppStore.shared.view?.overall,
                                                   mode: AppStore.shared.overallMode)
                 let width = labelView.fittingSize.width
                 labelView.frame.size.width = max(width, 20)
@@ -87,10 +87,10 @@ if let i = CommandLine.arguments.firstIndex(of: "--render"), i + 1 < CommandLine
     // Headless PNG of the panel from a live fetch: the visual check without clicking the menu bar.
     MainActor.assumeIsolated {
         let store = UsageStore()
-        if let snapshot = try? UsageFetcher.runBlocking(ccsPath: CcsLocator.resolve(), timeout: 60) {
-            store.snapshot = snapshot
-            store.lastSuccess = snapshot.generatedAt
-            store.phase = .loaded(snapshot.generatedAt ?? Date())
+        do {
+            try store.apply(UsageFetcher.runBlocking(ccsPath: CcsLocator.resolve(), timeout: 60))
+        } catch {
+            store.phase = .failed(error.localizedDescription)
         }
         let renderer = ImageRenderer(content: UsagePanel(store: store, scrolls: false).frame(width: 320))
         renderer.scale = 2
@@ -104,18 +104,25 @@ if let i = CommandLine.arguments.firstIndex(of: "--render"), i + 1 < CommandLine
 
 if CommandLine.arguments.contains("--fetch-once") {
     do {
-        let snapshot = try UsageFetcher.runBlocking(ccsPath: CcsLocator.resolve(), timeout: 30)
-        let gauges = GaugeBuilder.sections(from: snapshot)
-        print("decoded \(snapshot.observations.count) observations -> \(gauges.reduce(0) { $0 + $1.gauges.count }) gauges in \(gauges.count) sections")
-        for s in gauges {
-            print("  [\(s.provider)\(s.accountDisplay.map { " · \($0)" } ?? "")]")
-            for g in s.gauges {
-                print("    \(g.label) | \(g.windowLabel ?? "-") | \(g.fractionUsed.map { "\(Int($0 * 100))%" } ?? g.remaining.map { "$\($0)" } ?? "?")")
+        let data = try UsageFetcher.runBlocking(ccsPath: CcsLocator.resolve(), timeout: 30)
+        let view = try UsageViewEngine.shared.build(snapshotData: data, previous: nil,
+                                                    order: ViewOrder(sections: [], rows: [:])).view
+        func pct(_ v: Double?) -> String { v.map { "\(Int($0 * 100))%" } ?? "nil" }
+        print("\(view.sections.reduce(0) { $0 + $1.rows.count }) rows in \(view.sections.count) sections")
+        for s in view.sections {
+            print("  [\(s.title)\(s.account.map { " · \($0)" } ?? "")\(s.plan.map { " · \($0.name)" } ?? "")]")
+            for row in s.rows {
+                switch row {
+                case .allowance(let r):
+                    let segments = r.segments.map { "\($0.name) \(pct($0.fractionUsed))" }.joined(separator: ", ")
+                    print("    \(r.label) | \(r.window ?? "-") | \(pct(r.fractionUsed))\(segments.isEmpty ? "" : " [\(segments)]")")
+                case .credit(let r): print("    \(r.label) | \(r.balance) \(r.unit)")
+                case .reset(let r): print("    \(r.label) | \(r.available ? "ready" : "none")")
+                }
             }
         }
-        let reading = GaugeBuilder.overallReading(gauges)
-        func pct(_ v: Double?) -> String { v.map { "\(Int($0 * 100))%" } ?? "nil" }
-        print("overall used 5h: \(pct(reading.fiveHour)), 7d: \(pct(reading.sevenDay))")
+        print("overall used 5h: \(pct(view.overall.fiveHour)), 7d: \(pct(view.overall.sevenDay)); bill \(view.bill.total) across \(view.bill.planCount)")
+        for note in view.notes { print("note: \(note)") }
     } catch {
         print("FETCH FAILED: \(error)")
     }
