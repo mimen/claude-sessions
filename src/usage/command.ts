@@ -17,11 +17,16 @@ const VALID: readonly ProviderId[] = ["codex", "anthropic", "grok"];
 
 const SOURCES_HELP = `ccs usage sources — what each adapter reads
 
-  codex        ChatGPT OAuth usage API (official_api) per cliproxy account. Ordinary
-               5h/weekly windows, dollar credits as separate state. Parked logins fall
-               back to CodexBar snapshots (cached).
-  anthropic    cswap list --json (official_api): each managed Claude account's live
-               five-hour and weekly OAuth windows, resets, and last-good fallback.
+  codex        ChatGPT OAuth usage API (official_api) per gateway Codex credential,
+               through the gateway management api-call. Ordinary 5h/weekly windows,
+               dollar credits as separate state. Logins the gateway lacks fall back to
+               CodexBar snapshots (cached).
+  anthropic    Anthropic OAuth usage API (official_api) per gateway Claude credential,
+               through the gateway management api-call: five-hour, weekly, and scoped
+               windows plus banked resets.
+
+  The gateway is CLI_PROXY_MGMT_URL (default the Mac Mini's tailnet door), then the
+  local standby on 127.0.0.1:8318, then 127.0.0.1:8317.
   grok         xAI billing/subscription JSON plus GetRemainingResets gRPC-Web
                (official_api): weekly pool, Build/Chat/Imagine, plan, reset grants, credits.
 

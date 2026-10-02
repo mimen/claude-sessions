@@ -44,7 +44,7 @@ export interface UsageObservation {
   observedAt: string;
   source: SourceClass;
   exact: boolean;
-  /** Cached reading (cswap lastGoodUsage, CodexBar snapshot of a parked account). */
+  /** Cached reading (CodexBar snapshot of a parked account). */
   stale?: boolean;
 }
 
@@ -76,9 +76,22 @@ export interface SubscriptionRenewal {
   source: "official_api" | "official_ui";
 }
 
+/** One gateway credential as the gateway routes it: read-only, never switched from here. */
+export interface GatewayAccount {
+  provider: string;
+  email: string;
+  /** Higher is preferred; the gateway treats unset as 0. */
+  priority: number;
+  disabled: boolean;
+  /** The credential fill-first would pick for this provider right now. */
+  firstInLine: boolean;
+}
+
 export interface UsageSnapshot {
   generatedAt: string;
   observations: UsageObservation[];
   adapters: AdapterHealth[];
   subscriptions: SubscriptionInfo[];
+  /** Absent when the gateway was unreachable. */
+  gateway?: { base: string; accounts: GatewayAccount[] };
 }

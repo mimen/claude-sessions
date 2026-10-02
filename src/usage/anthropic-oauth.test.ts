@@ -33,13 +33,13 @@ test("payloads without limits fall back to the legacy top-level fields", () => {
   expect(windows.map((w) => [w.suffix, w.utilization])).toEqual([["", 5], ["", 40], ["#Fable", 12]]);
 });
 
-test("plan follows the profile's organization, not the keychain's stamped tier", () => {
+test("plan follows the profile's organization tier", () => {
   const pro = { account: { has_claude_max: false, has_claude_pro: true },
                 organization: { organization_type: "claude_pro", rate_limit_tier: "default_claude_ai" } };
-  expect(planFromProfile(pro, "default_claude_max_20x")).toEqual({ name: "Pro", dollars: 20 });
+  expect(planFromProfile(pro)).toEqual({ name: "Pro", dollars: 20 });
   const max = { organization: { organization_type: "claude_max", rate_limit_tier: "default_claude_max_20x" } };
-  expect(planFromProfile(max, null)).toEqual({ name: "Max 20x", dollars: 200 });
-  expect(planFromProfile(null, "default_claude_max_5x")).toEqual({ name: "Max 5x", dollars: 100 });
+  expect(planFromProfile(max)).toEqual({ name: "Max 20x", dollars: 200 });
+  expect(planFromProfile(null)).toBeNull();
   expect(planFromTier("default_claude_ai")).toEqual({ name: "Pro", dollars: 20 });
 });
 

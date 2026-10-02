@@ -3,7 +3,6 @@ import { accountLabel } from "./adapters.ts";
 import { renderSnapshot, shortReset } from "./render.ts";
 import { usageCommand } from "./command.ts";
 import type { AdapterHealth, SubscriptionInfo, UsageObservation, UsageSnapshot } from "./types.ts";
-import { windowFromCswap } from "./adapters.ts";
 import { mergeSubscriptionRenewals, nextMonthlyRenewal, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
 
 function obs(over: Partial<UsageObservation> = {}): UsageObservation {
@@ -271,19 +270,4 @@ test("a live Codex email is not double-counted from the snapshot cache", async (
     },
   }], ["milad@theafternoonumbrellafriends.com"]);
   expect(observations).toEqual([]);
-});
-
-test("a cached cswap window is marked stale so it cannot pass for a live reading", () => {
-  const cached = windowFromCswap({ pct: 96, resetsAt: null }, "2026-09-07T04:40:23Z", true) as
-    | (ReturnType<typeof windowFromCswap> & { stale?: boolean })
-    | null;
-  // The dead account's 96% rendered identically to the live account's numbers because this
-  // flag was accepted as a parameter and then dropped on the floor.
-  expect(cached?.stale).toBe(true);
-  expect(cached?.observedAt).toBe("2026-09-07T04:40:23Z");
-
-  const liveRow = windowFromCswap({ pct: 5, resetsAt: null }, "2026-09-09T01:00:00Z", false) as
-    | (ReturnType<typeof windowFromCswap> & { stale?: boolean })
-    | null;
-  expect(liveRow?.stale).toBe(false);
 });

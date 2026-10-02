@@ -1,22 +1,12 @@
 /**
- * Live Anthropic usage straight from the OAuth endpoint, per cswap-managed account.
- *
- * cswap's own usage cache goes stale whenever a stored token is revoked (its
- * usageStatus flips to no_credentials and it serves lastGoodUsage silently).
- * cswap keeps each account's real OAuth payload in the login keychain under
- * service "claude-swap", account "account-<n>-<email>"; we read the token there
- * and call api.anthropic.com/api/oauth/usage (oauth-2025-04-20 beta) — the same
- * endpoint claude.ai's settings page uses.
+ * Live Anthropic usage from the OAuth endpoint claude.ai's settings page uses
+ * (api.anthropic.com/api/oauth/usage, oauth-2025-04-20 beta), per gateway Claude credential.
  */
 
 import { readlinkSync } from "node:fs";
 import { basename } from "node:path";
+import type { Gateway } from "./gateway.ts";
 import type { UsageWindow } from "./types.ts";
-
-export interface KeychainOauth {
-  accessToken: string;
-  rateLimitTier: string | null;
-}
 
 interface OauthWindow {
   utilization?: number | null;
@@ -98,45 +88,14 @@ export function windowsFromOauthUsage(usage: OauthUsage): OauthWindowReading[] {
   return out;
 }
 
-/**
- * Plan from the profile endpoint, which the subscription actually governs. The
- * keychain's rateLimitTier is whatever Claude Code stamped at login and has been
- * seen carrying a Max tier on a Pro account.
- */
-export function planFromProfile(
-  profile: OauthProfile | null,
-  keychainTier: string | null | undefined,
-): { name: string; dollars: number } | null {
+/** Plan from the profile endpoint, which the subscription actually governs. */
+export function planFromProfile(profile: OauthProfile | null): { name: string; dollars: number } | null {
   const org = profile?.organization;
   const fromTier = planFromTier(org?.rate_limit_tier);
   if (fromTier) return fromTier;
   if (org?.organization_type === "claude_pro" || profile?.account?.has_claude_pro) return { name: "Pro", dollars: 20 };
   if (org?.organization_type === "claude_max" || profile?.account?.has_claude_max) return { name: "Max", dollars: 100 };
-  return planFromTier(keychainTier);
-}
-
-export function readKeychainOauth(accountNumber: number, email: string): KeychainOauth | null {
-  const proc = Bun.spawnSync({
-    cmd: [
-      "/usr/bin/security", "find-generic-password",
-      "-s", "claude-swap",
-      "-a", `account-${accountNumber}-${email}`,
-      "-w",
-    ],
-    stdout: "pipe",
-    stderr: "ignore",
-  });
-  if (proc.exitCode !== 0) return null;
-  try {
-    const parsed = JSON.parse(new TextDecoder().decode(proc.stdout)) as {
-      claudeAiOauth?: { accessToken?: string; rateLimitTier?: string };
-    };
-    const token = parsed.claudeAiOauth?.accessToken;
-    if (!token) return null;
-    return { accessToken: token, rateLimitTier: parsed.claudeAiOauth?.rateLimitTier ?? null };
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 /**
@@ -152,24 +111,24 @@ function claudeCliUserAgent(): string | undefined {
   }
 }
 
-async function oauthGet<T>(path: string, accessToken: string): Promise<T> {
+async function oauthGet<T>(gateway: Gateway, authIndex: string, path: string): Promise<T> {
   const userAgent = claudeCliUserAgent();
-  const res = await fetch(`https://api.anthropic.com/api/oauth/${path}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "anthropic-beta": "oauth-2025-04-20",
-      ...(userAgent ? { "User-Agent": userAgent } : {}),
-    },
+  const res = await gateway.call(authIndex, `https://api.anthropic.com/api/oauth/${path}`, {
+    Authorization: "Bearer $TOKEN$",
+    "anthropic-beta": "oauth-2025-04-20",
+    ...(userAgent ? { "User-Agent": userAgent } : {}),
   });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`oauth ${path} HTTP ${res.status}: ${body.slice(0, 160)}`);
-  }
-  return (await res.json()) as T;
+  if (res.status !== 200 || res.body == null) throw new Error(`oauth ${path} HTTP ${res.status}`);
+  return res.body as T;
 }
 
-export function fetchOauthUsage(accessToken: string): Promise<OauthUsage> {
-  return oauthGet<OauthUsage>("usage?cedar_ember=1", accessToken);
+export function fetchOauthUsage(gateway: Gateway, authIndex: string): Promise<OauthUsage> {
+  return oauthGet<OauthUsage>(gateway, authIndex, "usage?cedar_ember=1");
+}
+
+/** Null on failure: the plan label is decoration, the windows are the data. */
+export function fetchOauthProfile(gateway: Gateway, authIndex: string): Promise<OauthProfile | null> {
+  return oauthGet<OauthProfile>(gateway, authIndex, "profile").catch(() => null);
 }
 
 export function bankedResetsFromOauthUsage(usage: OauthUsage): BankedReset[] {
@@ -178,12 +137,7 @@ export function bankedResetsFromOauthUsage(usage: OauthUsage): BankedReset[] {
     .map((g) => ({ label: g.label ?? "usage-limit reset", left: g.resets_left!, expiresAt: g.ends_at ?? null }));
 }
 
-/** Null on failure: the plan label is decoration, the windows are the data. */
-export function fetchOauthProfile(accessToken: string): Promise<OauthProfile | null> {
-  return oauthGet<OauthProfile>("profile", accessToken).catch(() => null);
-}
-
-/** Plan display info decoded from the keychain rateLimitTier. */
+/** Plan display info decoded from a rate_limit_tier string. */
 export function planFromTier(tier: string | null | undefined): { name: string; dollars: number } | null {
   const t = (tier ?? "").toLowerCase();
   if (t.includes("max_20")) return { name: "Max 20x", dollars: 200 };

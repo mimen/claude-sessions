@@ -1,22 +1,13 @@
 /**
- * Live Codex usage from ChatGPT's wham endpoint, one request per cliproxy OAuth file.
- * Tokens stay in this module. 401 re-reads the same file once; we never refresh.
+ * Live Codex usage from ChatGPT's wham endpoint, one gateway api-call per Codex credential.
+ * The gateway owns the tokens and their refresh.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { RawCodexBarEntry } from "./codexbar.ts";
+import type { Gateway } from "./gateway.ts";
 
-const WHAM_URL = "https://chatgpt.com/backend-api/wham/usage";
+export const WHAM_URL = "https://chatgpt.com/backend-api/wham/usage";
 export const RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
-const WHAM_TIMEOUT_MS = 15_000;
-
-interface CodexCredential {
-  path: string;
-  email: string;
-  accountId: string;
-  accessToken: string;
-}
 
 interface WhamWindow {
   used_percent?: unknown;
@@ -62,17 +53,10 @@ interface CodexUsageShape {
   codexResetCredits?: CodexResetCredits;
 }
 
-type WhamFetch = (url: string | URL | Request, init?: RequestInit) => Promise<Response>;
-
 export interface LiveCodexAccounts {
   ok: RawCodexBarEntry[];
   emails: string[];
   failures: { email: string; detail: string }[];
-}
-
-function defaultDirs(): string[] {
-  const home = Bun.env.HOME ?? "";
-  return [`${home}/.cli-proxy-api`];
 }
 
 function unixToIso(value: unknown): string | null {
@@ -121,47 +105,6 @@ export function parseWhamUsage(
   return entry;
 }
 
-function readCredential(path: string): CodexCredential | null {
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as {
-      type?: unknown;
-      disabled?: unknown;
-      email?: unknown;
-      account_id?: unknown;
-      access_token?: unknown;
-    };
-    if (parsed.type !== "codex" || parsed.disabled === true) return null;
-    if (typeof parsed.email !== "string" || typeof parsed.account_id !== "string") return null;
-    if (typeof parsed.access_token !== "string" || parsed.access_token.length === 0) return null;
-    return { path, email: parsed.email, accountId: parsed.account_id, accessToken: parsed.access_token };
-  } catch {
-    return null;
-  }
-}
-
-function listCredentials(dirs: string[]): CodexCredential[] {
-  const out: CodexCredential[] = [];
-  const seen = new Set<string>();
-  for (const dir of dirs) {
-    let names: string[];
-    try {
-      names = readdirSync(dir);
-    } catch {
-      continue;
-    }
-    for (const name of names) {
-      if (!name.endsWith(".json")) continue;
-      const cred = readCredential(join(dir, name));
-      if (!cred) continue;
-      const key = cred.email.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(cred);
-    }
-  }
-  return out;
-}
-
 export function parseResetCredits(payload: unknown, observedAt: string): CodexResetCredits {
   const body = payload as ResetCreditsResponse;
   const credits = Array.isArray(body.credits) ? body.credits : [];
@@ -175,62 +118,34 @@ export function parseResetCredits(payload: unknown, observedAt: string): CodexRe
   };
 }
 
-async function fetchWham(
-  cred: CodexCredential,
-  fetchImpl: WhamFetch,
-  url: string = WHAM_URL,
-): Promise<{ status: number; body: unknown | null }> {
-  const res = await fetchImpl(url, {
-    headers: {
-      Authorization: `Bearer ${cred.accessToken}`,
-      "ChatGPT-Account-Id": cred.accountId,
-      Accept: "application/json",
-    },
-    signal: AbortSignal.timeout(WHAM_TIMEOUT_MS),
-  });
-  if (!res.ok) return { status: res.status, body: null };
-  return { status: res.status, body: await res.json() };
-}
-
-export async function readLiveCodexAccounts(opts?: {
-  dirs?: string[];
-  fetch?: WhamFetch;
-  now?: () => string;
-}): Promise<LiveCodexAccounts> {
-  const fetchImpl = opts?.fetch ?? fetch;
+export async function readLiveCodexAccounts(gateway: Gateway, opts?: { now?: () => string }): Promise<LiveCodexAccounts> {
   const observedAt = (opts?.now ?? (() => new Date().toISOString()))();
   const ok: RawCodexBarEntry[] = [];
   const emails: string[] = [];
   const failures: LiveCodexAccounts["failures"] = [];
+  const seen = new Set<string>();
 
-  for (const initial of listCredentials(opts?.dirs ?? defaultDirs())) {
+  for (const cred of gateway.credentials) {
+    if (cred.provider !== "codex" || seen.has(cred.email.toLowerCase())) continue;
+    seen.add(cred.email.toLowerCase());
+    const header: Record<string, string> = { Authorization: "Bearer $TOKEN$", Accept: "application/json" };
+    if (cred.chatgptAccountId) header["ChatGPT-Account-Id"] = cred.chatgptAccountId;
     try {
-      let cred = initial;
-      let result = await fetchWham(cred, fetchImpl);
-      if (result.status === 401) {
-        const reread = readCredential(cred.path);
-        if (reread && reread.accessToken !== cred.accessToken) {
-          cred = reread;
-          result = await fetchWham(cred, fetchImpl);
-        }
-      }
-      if (result.status !== 200 || result.body == null) {
-        failures.push({ email: cred.email, detail: `HTTP ${result.status}` });
+      const usage = await gateway.call(cred.authIndex, WHAM_URL, header);
+      if (usage.status !== 200 || usage.body == null) {
+        failures.push({ email: cred.email, detail: `HTTP ${usage.status}` });
         continue;
       }
-      const entry = parseWhamUsage(result.body, { email: cred.email }, observedAt);
+      const entry = parseWhamUsage(usage.body, { email: cred.email }, observedAt);
       // wham/usage only carries a count; the expiry lives on this second endpoint.
-      const resets = await fetchWham(cred, fetchImpl, RESET_CREDITS_URL);
+      const resets = await gateway.call(cred.authIndex, RESET_CREDITS_URL, header);
       if (resets.status === 200 && resets.body != null) {
         (entry.usage as CodexUsageShape).codexResetCredits = parseResetCredits(resets.body, observedAt);
       }
       ok.push(entry);
       emails.push(cred.email);
     } catch (e) {
-      failures.push({
-        email: initial.email,
-        detail: e instanceof Error ? e.message : "fetch failed",
-      });
+      failures.push({ email: cred.email, detail: e instanceof Error ? e.message : "fetch failed" });
     }
   }
   return { ok, emails, failures };

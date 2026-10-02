@@ -1,8 +1,6 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { parseWhamUsage, readLiveCodexAccounts, RESET_CREDITS_URL } from "./codex-oauth.ts";
+import { parseAuthFiles, type Gateway } from "./gateway.ts";
 
 function usageOf(entry: { usage?: unknown }) {
   return entry.usage as {
@@ -101,85 +99,35 @@ test("Plus maps nested primary and secondary unix reset_at to ISO", () => {
   expect(JSON.stringify(entry)).not.toMatch(/"resetsAt":\d/);
 });
 
-test("readLiveCodexAccounts keeps enabled codex files and retries 401 only after the token changes", async () => {
-  const root = mkdtempSync(join(tmpdir(), "ccs-codex-oauth-"));
-  const proDir = join(root, "pro");
-  const plusDir = join(root, "plus");
-  mkdirSync(proDir);
-  mkdirSync(plusDir);
-  const proFile = join(proDir, "codex-pro.json");
-  writeFileSync(proFile, JSON.stringify({
-    type: "codex",
-    disabled: false,
-    email: "miladmaaan@gmail.com",
-    account_id: "acct-pro",
-    access_token: "oldtok",
-  }));
-  writeFileSync(join(plusDir, "codex-plus.json"), JSON.stringify({
-    type: "codex",
-    disabled: false,
-    email: "milad@theafternoonumbrellafriends.com",
-    account_id: "acct-plus",
-    access_token: "plustok",
-  }));
-  writeFileSync(join(proDir, "claude.json"), JSON.stringify({
-    type: "claude",
-    disabled: false,
-    email: "skip@example.com",
-    access_token: "not-codex",
-  }));
-  writeFileSync(join(plusDir, "disabled.json"), JSON.stringify({
-    type: "codex",
-    disabled: true,
-    email: "disabled@example.com",
-    account_id: "acct-off",
-    access_token: "offtok",
-  }));
-
-  const calls: Array<{ token: string; account: string }> = [];
-  const fetchMock = async (url: string | URL | Request, init?: RequestInit) => {
-    const headers = new Headers(init?.headers);
-    const token = (headers.get("Authorization") ?? "").replace("Bearer ", "");
-    const account = headers.get("ChatGPT-Account-Id") ?? "";
-    if (String(url) === RESET_CREDITS_URL) {
-      return Response.json(account === "acct-pro" ? proResetCredits : { credits: [], available_count: 0 });
-    }
-    calls.push({ token, account });
-    if (account === "acct-pro" && token === "oldtok") {
-      writeFileSync(proFile, JSON.stringify({
-        type: "codex",
-        disabled: false,
-        email: "miladmaaan@gmail.com",
-        account_id: "acct-pro",
-        access_token: "newtok",
-      }));
-      return new Response("unauthorized", { status: 401 });
-    }
-    if (account === "acct-pro" && token === "newtok") {
-      return Response.json(proWham);
-    }
-    if (account === "acct-plus") {
-      return Response.json(plusWham);
-    }
-    return new Response("nope", { status: 500 });
+test("readLiveCodexAccounts reads every gateway Codex credential through api-call", async () => {
+  const calls: Array<{ authIndex: string; url: string; header: Record<string, string> }> = [];
+  const gateway: Gateway = {
+    base: "http://gw.test",
+    credentials: parseAuthFiles({ files: [
+      { auth_index: "pro", provider: "codex", email: "miladmaaan@gmail.com", id_token: { chatgpt_account_id: "acct-pro" } },
+      { auth_index: "plus", provider: "codex", email: "milad@theafternoonumbrellafriends.com", id_token: { chatgpt_account_id: "acct-plus" } },
+      { auth_index: "claude", provider: "claude", email: "skip@example.com" },
+      { auth_index: "dead", provider: "codex", email: "dead@example.com" },
+    ] }),
+    async call(authIndex, url, header) {
+      calls.push({ authIndex, url, header });
+      if (authIndex === "dead") return { status: 401, body: null };
+      if (url === RESET_CREDITS_URL) {
+        return { status: 200, body: authIndex === "pro" ? proResetCredits : { credits: [], available_count: 0 } };
+      }
+      return { status: 200, body: authIndex === "pro" ? proWham : plusWham };
+    },
   };
 
-  const live = await readLiveCodexAccounts({
-    dirs: [proDir, plusDir],
-    fetch: fetchMock,
-    now: () => OBSERVED_AT,
-  });
+  const live = await readLiveCodexAccounts(gateway, { now: () => OBSERVED_AT });
 
-  expect(live.emails.sort()).toEqual([
-    "milad@theafternoonumbrellafriends.com",
-    "miladmaaan@gmail.com",
-  ]);
-  expect(live.failures).toEqual([]);
-  expect(live.ok.map((entry) => usageOf(entry).identity.accountEmail).sort()).toEqual([
-    "milad@theafternoonumbrellafriends.com",
-    "miladmaaan@gmail.com",
-  ]);
-  expect(calls.filter((c) => c.account === "acct-pro").map((c) => c.token)).toEqual(["oldtok", "newtok"]);
+  expect(live.emails).toEqual(["miladmaaan@gmail.com", "milad@theafternoonumbrellafriends.com"]);
+  expect(live.failures).toEqual([{ email: "dead@example.com", detail: "HTTP 401" }]);
+  expect(calls[0]).toEqual({
+    authIndex: "pro",
+    url: "https://chatgpt.com/backend-api/wham/usage",
+    header: { Authorization: "Bearer $TOKEN$", Accept: "application/json", "ChatGPT-Account-Id": "acct-pro" },
+  });
   const pro = usageOf(live.ok.find((e) => usageOf(e).identity.loginMethod === "pro")!);
   expect(pro.secondary).toBeUndefined();
   expect(pro.codexResetCredits).toEqual({

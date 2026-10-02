@@ -4,8 +4,8 @@
  * adapter cannot collapse the command (plan commitment).
  *
  * Sources, per plan:
- *  - codex → ChatGPT wham usage per cliproxy OAuth file
- *  - anthropic → cswap's per-account Anthropic OAuth usage snapshots
+ *  - codex → ChatGPT wham usage per gateway Codex credential
+ *  - anthropic → Anthropic OAuth usage per gateway Claude credential
  *  - grok → xAI billing/subscription JSON + reset-grant gRPC-Web surfaces
  */
 
@@ -20,10 +20,9 @@ import type {
 } from "./types.ts";
 import { sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
 import { readLiveCodexAccounts } from "./codex-oauth.ts";
-import { runCswap, type CswapWindow } from "./cswap.ts";
-import { bankedResetsFromOauthUsage, fetchOauthProfile, fetchOauthUsage, planFromProfile, readKeychainOauth, windowsFromOauthUsage } from "./anthropic-oauth.ts";
+import { bankedResetsFromOauthUsage, fetchOauthProfile, fetchOauthUsage, planFromProfile, windowsFromOauthUsage } from "./anthropic-oauth.ts";
 import { fetchGrokBilling } from "./grok.ts";
-import { fetchGatewayClaudeCredentials, gatewayIssues, type GatewayIssue } from "./gateway-claude-health.ts";
+import { connectGateway, credentialIssue, gatewayAccounts, type Gateway } from "./gateway.ts";
 import { mergeSubscriptionRenewals, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
 
 export interface AdapterResult {
@@ -292,8 +291,10 @@ function snapshotAccountEmails(observations: UsageObservation[]): string[] {
   return [...emails];
 }
 
-async function codexAdapter(): Promise<AdapterResult> {
-  const live = await readLiveCodexAccounts();
+type GatewayConnection = Awaited<ReturnType<typeof connectGateway>>;
+
+async function codexAdapter(conn: GatewayConnection): Promise<AdapterResult> {
+  const live = conn.ok ? await readLiveCodexAccounts(conn.gateway) : { ok: [], emails: [], failures: [] };
   const observations = live.ok.flatMap((entry) => codexObservationsFromEntry(entry));
   const snapshotObs = inactiveCodexSnapshotObservations(loadCodexAccountSnapshots(), live.emails);
   observations.push(...snapshotObs);
@@ -304,7 +305,7 @@ async function codexAdapter(): Promise<AdapterResult> {
   ];
   const health: AdapterHealth =
     observations.length === 0
-      ? { provider: "codex", status: "unavailable", detail: named[0] ?? "no live Codex OAuth credentials" }
+      ? { provider: "codex", status: "unavailable", detail: named[0] ?? (conn.ok ? "no Codex credentials on the gateway" : conn.detail) }
       : named.length === 0
         ? { provider: "codex", status: "ok", detail: null }
         : {
@@ -317,160 +318,79 @@ async function codexAdapter(): Promise<AdapterResult> {
 }
 
 // ---------------------------------------------------------------------------
-// Anthropic (CodexBar's Claude reader)
+// Anthropic
 // ---------------------------------------------------------------------------
 
-export function windowFromCswap(
-  w: CswapWindow | null | undefined,
-  observedAt: string,
-  stale: boolean,
-): UsageObservation | null {
-  if (!w || typeof w.pct !== "number") return null;
-  return {
+export async function anthropicAdapter(conn: GatewayConnection): Promise<AdapterResult> {
+  if (!conn.ok) return { observations: [], health: { provider: "anthropic", status: "unavailable", detail: conn.detail } };
+  const observations: UsageObservation[] = [];
+  const issues: { email: string; reason: string }[] = [];
+  for (const cred of conn.gateway.credentials) {
+    if (cred.provider !== "claude") continue;
+    const issue = credentialIssue(cred);
+    if (issue) issues.push({ email: cred.email, reason: issue });
+    try {
+      observations.push(...await anthropicObservations(conn.gateway, cred.authIndex, cred.email, now()));
+    } catch (e) {
+      issues.push({ email: cred.email, reason: e instanceof Error ? e.message : "usage fetch failed" });
+    }
+  }
+  return { observations, health: anthropicHealth(observations.length, issues) };
+}
+
+async function anthropicObservations(gateway: Gateway, authIndex: string, email: string, observedAt: string): Promise<UsageObservation[]> {
+  const [usage, profile] = await Promise.all([fetchOauthUsage(gateway, authIndex), fetchOauthProfile(gateway, authIndex)]);
+  const tier = planFromProfile(profile)?.name ?? null;
+  const out: UsageObservation[] = windowsFromOauthUsage(usage).map((w) => ({
     provider: "anthropic",
-    entitlement: "", // set by caller
+    entitlement: `claude-max:${email}${w.suffix}`,
     metric: "allowance",
     scope: "account",
-    window: null,
-    used: w.pct,
+    window: w.window,
+    used: w.utilization,
     limit: 100,
-    remaining: Math.max(0, 100 - w.pct),
-    resetsAt: w.resetsAt ?? null,
+    remaining: Math.max(0, 100 - w.utilization),
+    resetsAt: w.resetsAt,
     expiresAt: null,
     observedAt,
     source: "official_api",
-    exact: false,
-    // stale marks lastGoodUsage fallbacks (cswap could not refresh this account). Without it
-    // a cached row renders as a live one, which is how a dead account showed a confident
-    // percentage next to a healthy one.
-    stale,
-  } as UsageObservation & { stale?: boolean };
-}
-
-function anthropicAdapter(): AdapterResult {
-  throw new Error("sync anthropicAdapter removed; use anthropicAdapterLive");
-}
-
-async function anthropicAdapterLive(): Promise<AdapterResult> {
-  const res = runCswap();
-  if (!res.ok) return { observations: [], health: res.error };
-  const observations: UsageObservation[] = [];
-  let okCount = 0;
-  const staleAccounts: { email: string; status: string }[] = [];
-  for (const acct of res.value.report.accounts ?? []) {
-    if (!acct.email) continue;
-    const base = `claude-max:${acct.email}`;
-    const observedAt = now();
-
-    // Preferred path: live OAuth fetch using the account's keychain token.
-    // Falls back to cswap's (often stale) usage cache on any failure.
-    const oauth = acct.number != null ? readKeychainOauth(acct.number, acct.email) : null;
-    if (oauth) {
-      try {
-        const [usage, profile] = await Promise.all([
-          fetchOauthUsage(oauth.accessToken),
-          fetchOauthProfile(oauth.accessToken),
-        ]);
-        const tier = planFromProfile(profile, oauth.rateLimitTier);
-        for (const w of windowsFromOauthUsage(usage)) {
-          observations.push({
-            provider: "anthropic",
-            entitlement: `${base}${w.suffix}`,
-            metric: "allowance",
-            scope: "account",
-            window: w.window,
-            used: w.utilization,
-            limit: 100,
-            remaining: Math.max(0, 100 - w.utilization),
-            resetsAt: w.resetsAt,
-            expiresAt: null,
-            observedAt,
-            source: "official_api",
-            exact: true,
-            tier: tier?.name ?? null,
-          } as UsageObservation & { tier?: string | null });
-          okCount++;
-        }
-        for (const r of bankedResetsFromOauthUsage(usage)) {
-          for (let i = 0; i < r.left; i++) {
-            observations.push({
-              provider: "anthropic",
-              entitlement: `claude-reset-credit:${acct.email}`,
-              metric: "reset_credit",
-              scope: "account",
-              window: null,
-              used: null,
-              limit: null,
-              remaining: 1,
-              resetsAt: null,
-              expiresAt: r.expiresAt,
-              observedAt,
-              source: "official_api",
-              exact: true,
-            });
-          }
-        }
-        continue;
-      } catch {
-        // token revoked/expired or endpoint down — fall through to cswap cache
-      }
-    }
-
-    const live = acct.usageStatus === "ok";
-    if (!live) staleAccounts.push({ email: acct.email, status: acct.usageStatus ?? "unknown" });
-    const usage = (live ? acct.usage : acct.lastGoodUsage) ?? {};
-    // A fallback row is as old as cswap's last live answer, not as old as this process. Dating
-    // it `now()` told the menu bar every cached number was fresh.
-    const rowObservedAt = live ? observedAt : (acct.lastGoodFetchedAt ?? observedAt);
-    for (const [w, win] of [
-      ["five_hour", usage.fiveHour],
-      ["weekly", usage.sevenDay],
-    ] as const) {
-      const o = windowFromCswap(win, rowObservedAt, !live);
-      if (!o) continue;
-      o.entitlement = base;
-      o.window = w;
-      observations.push(o);
-      okCount++;
-    }
-    // Anthropic may add model-family limits alongside the account windows. cswap
-    // currently exposes Fable here; keep each named scope as its own full quota row.
-    for (const scoped of usage.scoped ?? []) {
-      if (!scoped.name) continue;
-      const o = windowFromCswap(scoped, rowObservedAt, !live);
-      if (!o) continue;
-      o.entitlement = `${base}#${scoped.name}`;
-      o.window = "weekly";
-      observations.push(o);
-      okCount++;
+    exact: true,
+    tier,
+  }) as UsageObservation & { tier: string | null });
+  for (const r of bankedResetsFromOauthUsage(usage)) {
+    for (let i = 0; i < r.left; i++) {
+      out.push({
+        provider: "anthropic",
+        entitlement: `claude-reset-credit:${email}`,
+        metric: "reset_credit",
+        scope: "account",
+        window: null,
+        used: null,
+        limit: null,
+        remaining: 1,
+        resetsAt: null,
+        expiresAt: r.expiresAt,
+        observedAt,
+        source: "official_api",
+        exact: true,
+      });
     }
   }
-  // The gateway holds its own login per account; a dead one is invisible to cswap.
-  const gateway = gatewayIssues(await fetchGatewayClaudeCredentials());
-  return { observations, health: anthropicHealth(okCount, staleAccounts, gateway) };
+  return out;
 }
 
-/**
- * Name the accounts. Counting them ("1 account(s) on cached usage") forced the reader to go
- * find out which, which defeats the point of surfacing it at all. Both logins per account are
- * reported: cswap's slot status and the gateway credential's, each with its own re-auth path.
- */
-export function anthropicHealth(
-  okCount: number,
-  staleAccounts: { email: string; status: string }[],
-  gateway: GatewayIssue[],
-): AdapterHealth {
-  if (okCount === 0) {
-    return { provider: "anthropic", status: "unavailable", detail: "no usable anthropic windows" };
+/** Name each broken account and why, so the reader never has to go find out which. */
+function anthropicHealth(windowCount: number, issues: { email: string; reason: string }[]): AdapterHealth {
+  if (windowCount === 0) {
+    return { provider: "anthropic", status: "unavailable", detail: issues.map((i) => `${i.email} ${i.reason}`).join("; ") || "no Claude credentials on the gateway" };
   }
-  const parts: string[] = [];
-  if (staleAccounts.length > 0) {
-    parts.push(`${staleAccounts.map((a) => `${a.email} (${a.status})`).join(", ")} on cached usage — re-auth via cswap`);
-  }
-  for (const issue of gateway) parts.push(`${issue.email} ${issue.reason}`);
-  if (parts.length === 0) return { provider: "anthropic", status: "ok", detail: null };
-  const accounts = [...new Set([...staleAccounts.map((a) => a.email), ...gateway.map((g) => g.email)])];
-  return { provider: "anthropic", status: "degraded", detail: parts.join("; "), accounts };
+  if (issues.length === 0) return { provider: "anthropic", status: "ok", detail: null };
+  return {
+    provider: "anthropic",
+    status: "degraded",
+    detail: issues.map((i) => `${i.email} ${i.reason}`).join("; "),
+    accounts: [...new Set(issues.map((i) => i.email))],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -587,15 +507,17 @@ async function grokAdapter(): Promise<AdapterResult> {
 
 export async function collectSnapshot(opts: { providers?: readonly ProviderId[] }): Promise<UsageSnapshot> {
   const wanted = opts.providers ?? PROVIDERS;
+  const usesGateway = wanted.some((p) => p !== "grok");
+  const conn: GatewayConnection = usesGateway ? await connectGateway() : { ok: false, detail: "not asked" };
   // Final containment boundary: an adapter that throws despite its own error handling
   // degrades to AdapterHealth here — one broken adapter never collapses the command.
   const results: AdapterResult[] = [];
   for (const p of wanted) {
     try {
       results.push(
-        p === "codex" ? await codexAdapter()
+        p === "codex" ? await codexAdapter(conn)
         : p === "grok" ? await grokAdapter()
-        : await anthropicAdapterLive(),
+        : await anthropicAdapter(conn),
       );
     } catch (e) {
       results.push({
@@ -612,5 +534,6 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
       resolveSubscriptions(wanted),
       results.flatMap((result) => result.renewals ?? []),
     ),
+    ...(conn.ok ? { gateway: { base: conn.gateway.base, accounts: gatewayAccounts(conn.gateway.credentials, wanted) } } : {}),
   };
 }
