@@ -75,6 +75,15 @@ describe("requestEnrichment", () => {
     });
   });
 
+  test("refuses a Claude model before any gateway call", async () => {
+    await withKey(async (keyPath) => {
+      const { calls, fetchImpl } = capturingFetch(() => toolUseResponse(ANSWER));
+      await expect(requestEnrichment(REQUEST, LOCATIONS, { keyPath, fetchImpl, model: "claude-opus-5-5" }))
+        .rejects.toThrow("refusing claude-opus-5-5: Claude models are Claude Code only");
+      expect(calls).toEqual([]);
+    });
+  });
+
   test("refuses a location key that was never offered", async () => {
     await withKey(async (keyPath) => {
       const result = await requestEnrichment(REQUEST, LOCATIONS, {

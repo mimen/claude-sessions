@@ -235,6 +235,10 @@ export async function requestEnrichment(
   if (!model) {
     return err(new Error("no enrichment model: pass one, or declare [defaults] enrich_model in the model registry"));
   }
+  // The Claude subscription serves Claude Code only, and a raw /v1/messages call is not Claude
+  // Code. Thrown, not returned: a misconfigured model must stop the sweep, not spend every
+  // session's attempt budget.
+  if (model.startsWith("claude-")) throw new Error(`refusing ${model}: Claude models are Claude Code only`);
 
   const body = {
     model,
