@@ -1,6 +1,6 @@
 /**
- * Grok consumer subscription billing, read directly from xAI's own surfaces using the
- * OIDC token in ~/.grok/auth.json (written by `grok login`).
+ * Grok consumer subscription billing, read from xAI's own surfaces through the gateway's
+ * xAI credential, or with the OIDC token in ~/.grok/auth.json when the gateway has none.
  *
  * Endpoints (verified live 2026-08-22):
  *  - GET https://cli-chat-proxy.grok.com/v1/billing?format=credits — weekly usage
@@ -10,10 +10,12 @@
  *    (e.g. SUBSCRIPTION_TIER_SUPER_GROK_PLUS). JSON.
  *  - POST https://grok.com/prod_mc_billing.ConsumerUiSvc/GetRemainingResets —
  *    redeemable usage-reset grants: token, available-since, expiry. gRPC-Web protobuf.
+ * All three answer through the gateway's api-call (verified 2026-10-02).
  */
 
 import { readFileSync } from "node:fs";
 import { err, ok, type Result } from "../result.ts";
+import type { Gateway } from "./gateway.ts";
 import type { AdapterHealth } from "./types.ts";
 
 export interface GrokCreditsConfig {
@@ -71,37 +73,68 @@ export function activeGrokSubscription(subscriptions: GrokSubscriptions | null):
   };
 }
 
-/** Read identity + token from ~/.grok/auth.json. Values never leave this module raw. */
-function grokIdentity(): Result<{ key: string; userId: string; email: string }, AdapterHealth> {
+/** One upstream request; the transport adds the credential. Body is JSON when parseable, else text. */
+export type GrokCall = (url: string, opts?: { method?: "POST"; data?: string; contentType?: string }) =>
+  Promise<{ status: number; body: unknown }>;
+
+/** What the Grok CLI sends; the billing proxy rejects unknown clients. */
+const CLIENT_HEADERS = { "x-grok-client-version": "1.0.44", "User-Agent": "xai-grok-workspace/1.0.44" };
+
+/** Through the gateway's xAI credential: the token stays on the gateway and the gateway refreshes it. */
+export function gatewayGrokCall(gateway: Gateway, authIndex: string): GrokCall {
+  return async (url, opts = {}) => {
+    const res = await gateway.call(authIndex, url, {
+      Authorization: "Bearer $TOKEN$",
+      ...CLIENT_HEADERS,
+      ...(opts.contentType ? { "content-type": opts.contentType, accept: opts.contentType } : {}),
+    }, { method: opts.method, data: opts.data });
+    return { status: res.status, body: res.body };
+  };
+}
+
+/** Last resort: the OIDC token `grok login` wrote to ~/.grok/auth.json on this Mac. */
+export function localGrokCall(): Result<{ call: GrokCall; email: string }, AdapterHealth> {
   let auth: Record<string, { email?: string; key?: string; user_id?: string; expires_at?: string }>;
   try {
     auth = JSON.parse(readFileSync(`${process.env.HOME}/.grok/auth.json`, "utf8"));
   } catch {
-    return err({ provider: "grok", status: "unavailable", detail: "~/.grok/auth.json unreadable — run `grok login`" });
+    return err({ provider: "grok", status: "unavailable", detail: "no xAI credential on the gateway and ~/.grok/auth.json unreadable" });
   }
   const entry = Object.entries(auth)
     .filter(([k]) => k.startsWith("https://auth.x.ai::"))
     .map(([, v]) => v)
     .find((v) => v.key && (!v.expires_at || Date.parse(v.expires_at) > Date.now()));
   if (!entry?.key || !entry.user_id) {
-    return err({ provider: "grok", status: "unavailable", detail: "no unexpired grok OIDC token — run `grok login`" });
+    return err({ provider: "grok", status: "unavailable", detail: "no xAI credential on the gateway and no unexpired local grok token" });
   }
-  return ok({ key: entry.key, userId: entry.user_id, email: entry.email ?? "unknown" });
+  const { key, user_id: userId } = entry;
+  const call: GrokCall = async (url, opts = {}) => {
+    const res = await fetch(url, {
+      method: opts.method ?? "GET",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "x-userid": userId,
+        ...CLIENT_HEADERS,
+        ...(opts.contentType ? { "content-type": opts.contentType, accept: opts.contentType } : {}),
+      },
+      body: opts.data,
+      signal: AbortSignal.timeout(GROK_TIMEOUT_MS),
+    });
+    const text = await res.text();
+    if (!res.ok) return { status: res.status, body: null };
+    try {
+      return { status: res.status, body: JSON.parse(text) };
+    } catch {
+      return { status: res.status, body: text };
+    }
+  };
+  return ok({ call, email: entry.email ?? "unknown" });
 }
 
-async function getJson(url: string, key: string, userId: string): Promise<unknown> {
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "x-userid": userId,
-      Accept: "application/json",
-      "x-grok-client-mode": "cli",
-      "x-grok-client-version": "1.0.5",
-    },
-    signal: AbortSignal.timeout(GROK_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`${url.split("grok.com")[1]} HTTP ${res.status}`);
-  return res.json();
+async function getJson(call: GrokCall, url: string): Promise<unknown> {
+  const res = await call(url);
+  if (res.status !== 200 || res.body == null) throw new Error(`${url.split("grok.com")[1]} HTTP ${res.status}`);
+  return res.body;
 }
 
 function readVarint(buf: Uint8Array, start: number): { value: number; next: number } {
@@ -171,38 +204,31 @@ export function parseGrokResetGrants(frame: Uint8Array): GrokResetGrant[] {
   }
 }
 
-async function getRemainingResets(key: string, userId: string): Promise<GrokResetGrant[]> {
-  const requestFrame = new Uint8Array(5); // gRPC-Web frame containing an empty protobuf message
-  const res = await fetch("https://grok.com/prod_mc_billing.ConsumerUiSvc/GetRemainingResets", {
+/**
+ * gRPC-Web text mode: base64 frames both ways, so the call survives the gateway's string body.
+ * The response is the data frame and the trailer frame, each base64-encoded on its own.
+ */
+async function getRemainingResets(call: GrokCall): Promise<GrokResetGrant[]> {
+  const res = await call("https://grok.com/prod_mc_billing.ConsumerUiSvc/GetRemainingResets", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "x-userid": userId,
-      "content-type": "application/grpc-web+proto",
-      "x-grok-client-mode": "cli",
-      "x-grok-client-version": "1.0.5",
-    },
-    body: requestFrame,
-    signal: AbortSignal.timeout(GROK_TIMEOUT_MS),
+    data: "AAAAAAA=", // an empty protobuf message in one gRPC-Web frame
+    contentType: "application/grpc-web-text",
   });
-  if (!res.ok) throw new Error(`GetRemainingResets HTTP ${res.status}`);
-  const frame = new Uint8Array(await res.arrayBuffer());
-  const trailerText = new TextDecoder().decode(frame.subarray(Math.max(0, frame.length - 64)));
-  if (!trailerText.includes("grpc-status:0")) {
+  if (res.status !== 200 || typeof res.body !== "string") throw new Error(`GetRemainingResets HTTP ${res.status}`);
+  const frames = (res.body.match(/[A-Za-z0-9+/]+=*/g) ?? []).map((chunk) => Uint8Array.from(Buffer.from(chunk, "base64")));
+  const trailer = frames.find((f) => f[0] === 0x80);
+  if (!trailer || !new TextDecoder().decode(trailer).includes("grpc-status:0")) {
     throw new Error("GetRemainingResets returned a nonzero or missing gRPC status");
   }
-  return parseGrokResetGrants(frame);
+  return frames.filter((f) => f[0] === 0).flatMap(parseGrokResetGrants);
 }
 
-export async function fetchGrokBilling(): Promise<Result<GrokBilling, AdapterHealth>> {
-  const id = grokIdentity();
-  if (!id.ok) return err(id.error);
-  const { key, userId, email } = id.value;
+export async function fetchGrokBilling(call: GrokCall, email: string): Promise<Result<GrokBilling, AdapterHealth>> {
   try {
     const [credits, subs, resetResult] = await Promise.all([
-      getJson("https://cli-chat-proxy.grok.com/v1/billing?format=credits", key, userId) as Promise<GrokCreditsConfig>,
-      getJson("https://grok.com/rest/subscriptions", key, userId).catch(() => null) as Promise<GrokSubscriptions | null>,
-      getRemainingResets(key, userId)
+      getJson(call, "https://cli-chat-proxy.grok.com/v1/billing?format=credits") as Promise<GrokCreditsConfig>,
+      getJson(call, "https://grok.com/rest/subscriptions").catch(() => null) as Promise<GrokSubscriptions | null>,
+      getRemainingResets(call)
         .then((value) => ({ ok: true as const, value }))
         .catch((error: Error) => ({ ok: false as const, error })),
     ]);

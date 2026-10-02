@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { anthropicAdapter } from "./adapters.ts";
+import { anthropicAdapter, grokAdapter } from "./adapters.ts";
 import { connectGateway, gatewayAccounts, gatewayBases, parseAuthFiles } from "./gateway.ts";
 
 // Trimmed from the Mini's /v0/management/auth-files on 2026-10-02.
@@ -185,4 +185,47 @@ test("Retry-After holds the account off the endpoint until it passes", async () 
   const back = await anthropicAdapter(conn, { dir, now: () => t0 + 14 * 60_000 });
   expect(usageCalls()).toBe(3);
   expect(back.health.status).toBe("ok");
+});
+
+// Bodies as the gateway's api-call returned them on 2026-10-02, trimmed.
+const grokBilling = {
+  config: {
+    currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", start: "2026-10-02T04:02:36Z", end: "2026-10-09T04:02:36Z" },
+    creditUsagePercent: 1.0,
+    productUsage: [{ product: "GrokBuild", usagePercent: 1.0 }],
+    prepaidBalance: { val: 0 },
+  },
+};
+const grokSubscriptions = {
+  subscriptions: [{ tier: "SUBSCRIPTION_TIER_SUPER_GROK_PRO", status: "SUBSCRIPTION_STATUS_ACTIVE", billingPeriodEnd: "2026-10-21T18:10:21Z" }],
+};
+/** grpc-web-text: the data frame (one grant, the parser fixture in grok.test.ts) then the trailer, each base64 on its own. */
+const grokResets =
+  Buffer.from("00000000235221520d72657365745f66697874757265a20106089c80f3d306f20106089cbd96d506", "hex").toString("base64")
+  + Buffer.from("800000000f677270632d7374617475733a300d0a", "hex").toString("base64");
+
+test("Grok reads billing, plan, and reset grants through the gateway's xAI credential", async () => {
+  const calls: { auth_index: string; method: string; url: string; header: Record<string, string>; data?: string }[] = [];
+  const fetch = async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith("/auth-files")) return Response.json(authFiles);
+    const body = JSON.parse(init!.body as string);
+    calls.push(body);
+    const upstream = body.url.includes("/billing") ? JSON.stringify(grokBilling)
+      : body.url.includes("/subscriptions") ? JSON.stringify(grokSubscriptions)
+      : grokResets;
+    return Response.json({ status_code: 200, header: {}, body: upstream });
+  };
+  const conn = await connectGateway({ bases: ["http://gw"], key: "k", fetch });
+  const result = await grokAdapter(conn);
+
+  expect(result.health).toEqual({ provider: "grok", status: "ok", detail: null });
+  expect(result.observations.map((o) => [o.entitlement, o.metric, o.used ?? o.remaining, o.expiresAt])).toEqual([
+    ["grok-super grok pro:personal@example.com", "allowance", 1, null],
+    ["grok-super grok pro:personal@example.com#build", "allowance", 1, null],
+    ["grok-super grok pro:personal@example.com#reset", "reset_credit", 1, "2026-09-12T18:49:00.000Z"],
+    ["grok-super grok pro:personal@example.com#prepaid", "credit", 0, null],
+  ]);
+  expect(result.renewals).toEqual([{ provider: "grok", account: "personal@example.com", renewsOn: "2026-10-21", source: "official_api" }]);
+  expect(calls.every((c) => c.auth_index === "7710e62af63e6967" && c.header.Authorization === "Bearer $TOKEN$")).toBe(true);
+  expect(calls.find((c) => c.url.includes("GetRemainingResets"))).toMatchObject({ method: "POST", data: "AAAAAAA=" });
 });

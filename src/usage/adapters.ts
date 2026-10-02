@@ -6,7 +6,7 @@
  * Sources, per plan:
  *  - codex → ChatGPT wham usage per gateway Codex credential
  *  - anthropic → Anthropic OAuth usage per gateway Claude credential
- *  - grok → xAI billing/subscription JSON + reset-grant gRPC-Web surfaces
+ *  - grok → xAI billing/subscription JSON + reset-grant gRPC-Web per gateway xAI credential
  */
 
 import { readFileSync } from "node:fs";
@@ -21,7 +21,7 @@ import type {
 import { sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
 import { readLiveCodexAccounts } from "./codex-oauth.ts";
 import { bankedResetsFromOauthUsage, fetchOauthProfile, fetchOauthUsage, planFromProfile, windowsFromOauthUsage } from "./anthropic-oauth.ts";
-import { fetchGrokBilling } from "./grok.ts";
+import { fetchGrokBilling, gatewayGrokCall, localGrokCall } from "./grok.ts";
 import { readThroughCache } from "./account-cache.ts";
 import { connectGateway, credentialIssue, gatewayAccounts, type Gateway } from "./gateway.ts";
 import { mergeSubscriptionRenewals, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
@@ -398,8 +398,14 @@ function anthropicHealth(windowCount: number, issues: { email: string; reason: s
 // Grok
 // ---------------------------------------------------------------------------
 
-async function grokAdapter(): Promise<AdapterResult> {
-  const res = await fetchGrokBilling();
+/** The gateway's xAI credential first, the same order as the other adapters; this Mac's login last. */
+export async function grokAdapter(conn: GatewayConnection): Promise<AdapterResult> {
+  const cred = conn.ok ? conn.gateway.credentials.find((c) => c.provider === "xai" && !c.disabled) : undefined;
+  const source = cred && conn.ok
+    ? { ok: true as const, value: { call: gatewayGrokCall(conn.gateway, cred.authIndex), email: cred.email } }
+    : localGrokCall();
+  if (!source.ok) return { observations: [], health: source.error };
+  const res = await fetchGrokBilling(source.value.call, source.value.email);
   if (!res.ok) return { observations: [], health: res.error };
   const { credits, resets, resetError, tier, email, renewsAt } = res.value;
   const c = credits.config;
@@ -508,8 +514,7 @@ async function grokAdapter(): Promise<AdapterResult> {
 
 export async function collectSnapshot(opts: { providers?: readonly ProviderId[] }): Promise<UsageSnapshot> {
   const wanted = opts.providers ?? PROVIDERS;
-  const usesGateway = wanted.some((p) => p !== "grok");
-  const conn: GatewayConnection = usesGateway ? await connectGateway() : { ok: false, detail: "not asked" };
+  const conn = await connectGateway();
   // Final containment boundary: an adapter that throws despite its own error handling
   // degrades to AdapterHealth here — one broken adapter never collapses the command.
   const results: AdapterResult[] = [];
@@ -517,7 +522,7 @@ export async function collectSnapshot(opts: { providers?: readonly ProviderId[] 
     try {
       results.push(
         p === "codex" ? await codexAdapter(conn)
-        : p === "grok" ? await grokAdapter()
+        : p === "grok" ? await grokAdapter(conn)
         : await anthropicAdapter(conn),
       );
     } catch (e) {

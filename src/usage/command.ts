@@ -23,12 +23,15 @@ const SOURCES_HELP = `ccs usage sources — what each adapter reads
                CodexBar snapshots (cached).
   anthropic    Anthropic OAuth usage API (official_api) per gateway Claude credential,
                through the gateway management api-call: five-hour, weekly, and scoped
-               windows plus banked resets.
+               windows plus banked resets. One read per account per two minutes (longer
+               when Anthropic sends Retry-After); a failed read keeps the last good
+               numbers, marked stale, from ~/.ccs/cache/usage.
+  grok         xAI billing/subscription JSON plus GetRemainingResets gRPC-Web
+               (official_api) through the gateway's xAI credential, else ~/.grok/auth.json:
+               weekly pool, Build/Chat/Imagine, plan, reset grants, credits.
 
   The gateway is CLI_PROXY_MGMT_URL (default the Mac Mini's tailnet door), then the
   local standby on 127.0.0.1:8318, then 127.0.0.1:8317.
-  grok         xAI billing/subscription JSON plus GetRemainingResets gRPC-Web
-               (official_api): weekly pool, Build/Chat/Imagine, plan, reset grants, credits.
 
 Evidence classes, strongest first: official_api, provider_header, official_ui,
 official_cli, observed_private, local_estimate. Unknown beats fake precision.`;
