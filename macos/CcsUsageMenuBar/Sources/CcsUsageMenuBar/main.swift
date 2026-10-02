@@ -63,9 +63,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             host.sizingOptions = [.preferredContentSize]
             popover.contentViewController = host
         }
-        Task { @MainActor in
-            AppStore.shared.loadCswapAccountsIfNeeded()
-        }
         // The popover only auto-dismisses (.transient) when our app is active;
         // an accessory app stays inactive otherwise and the panel sticks.
         NSApp.activate(ignoringOtherApps: true)

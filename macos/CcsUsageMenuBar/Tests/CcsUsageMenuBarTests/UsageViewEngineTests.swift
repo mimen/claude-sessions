@@ -71,4 +71,18 @@ final class UsageViewEngineTests: XCTestCase {
         // The context survives an exception.
         XCTAssertEqual(engine.renewalLabel("2026-10-08"), "Oct 8")
     }
+
+    func testDecodesGatewayAccountsAndToleratesTheirAbsence() throws {
+        let snapshot = Data("""
+        {"observations": [], "gateway": {"base": "http://gw", "accounts": [
+          {"provider": "anthropic", "email": "a@example.com", "priority": 100, "disabled": false, "firstInLine": true},
+          {"provider": "anthropic", "email": "b@example.com", "priority": 0, "disabled": true, "firstInLine": false}
+        ]}}
+        """.utf8)
+        XCTAssertEqual(GatewayAccount.decode(snapshot: snapshot), [
+            GatewayAccount(provider: "anthropic", email: "a@example.com", priority: 100, disabled: false, firstInLine: true),
+            GatewayAccount(provider: "anthropic", email: "b@example.com", priority: 0, disabled: true, firstInLine: false),
+        ])
+        XCTAssertEqual(GatewayAccount.decode(snapshot: try fixture()), [])
+    }
 }

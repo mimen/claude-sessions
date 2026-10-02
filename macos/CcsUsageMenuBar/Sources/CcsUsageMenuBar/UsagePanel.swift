@@ -27,8 +27,8 @@ struct UsagePanel: View {
             if !store.notes.isEmpty {
                 healthNotes
             }
-            if !store.cswapAccounts.isEmpty {
-                accountSwitcher
+            if !store.gatewayAccounts.isEmpty {
+                gatewayAccountList
             }
         }
         .padding(.horizontal, 14)
@@ -55,38 +55,29 @@ struct UsagePanel: View {
         .padding(.top, 10)
     }
 
-    private var accountSwitcher: some View {
+    /// Read-only: the gateway routes between accounts itself, so there is nothing to switch.
+    private var gatewayAccountList: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("CLAUDE ACCOUNT")
+            Text("CLAUDE ON THE GATEWAY")
                 .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                .textCase(.uppercase)
                 .kerning(0.8)
                 .foregroundStyle(.secondary)
                 .padding(.top, 12)
-            ForEach(store.cswapAccounts) { account in
-                Button {
-                    guard !account.isActive else { return }
-                    store.switchClaudeAccount(account)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: account.isActive ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(account.isActive ? Color.accentColor : Color.secondary.opacity(0.5))
-                        Text(account.displayName)
-                            .font(.system(size: 11.5, weight: .medium, design: .rounded))
-                        if store.switchingTo == account {
-                            ProgressView().controlSize(.mini)
-                        }
-                        Spacer()
-                    }
-                    .contentShape(Rectangle())
+            ForEach(store.gatewayAccounts) { account in
+                HStack(spacing: 6) {
+                    Image(systemName: account.firstInLine ? "arrowtriangle.right.circle.fill" : "circle")
+                        .foregroundStyle(account.firstInLine ? Color.accentColor : Color.secondary.opacity(0.5))
+                        .help(account.firstInLine ? "Next request goes here" : "")
+                    Text(account.email)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(account.disabled ? .tertiary : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Text(account.disabled ? "disabled" : "priority \(account.priority)")
+                        .font(.system(size: 9.5, design: .rounded).monospacedDigit())
+                        .foregroundStyle(account.disabled ? .orange : .secondary)
                 }
-                .buttonStyle(.plain)
-                .disabled(account.isActive || store.switchingTo != nil)
-            }
-            if let error = store.switchError {
-                Text(error)
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.orange)
             }
         }
     }

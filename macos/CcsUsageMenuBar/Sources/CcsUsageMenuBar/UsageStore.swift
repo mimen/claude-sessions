@@ -7,6 +7,22 @@ enum DragItem: Equatable {
     case row(section: String, gauge: String)
 }
 
+/// One gateway credential as `ccs usage --json` reports it under `gateway.accounts`.
+struct GatewayAccount: Decodable, Equatable, Identifiable {
+    let provider: String
+    let email: String
+    let priority: Int
+    let disabled: Bool
+    let firstInLine: Bool
+
+    var id: String { "\(provider)|\(email)" }
+
+    static func decode(snapshot: Data) -> [GatewayAccount] {
+        struct Snapshot: Decodable { struct Gateway: Decodable { let accounts: [GatewayAccount] }; let gateway: Gateway? }
+        return (try? JSONDecoder().decode(Snapshot.self, from: snapshot))?.gateway?.accounts ?? []
+    }
+}
+
 /// What the menu bar label shows: 5h only, 7d only, or both as "5h / 7d".
 enum OverallMode: String, CaseIterable, Identifiable {
     case fiveHour = "5h"
@@ -33,9 +49,8 @@ final class UsageStore: ObservableObject {
     /// The engine's view of the last snapshot, in the user's saved order.
     @Published var view: UsageViewModel?
     @Published var panelHeight: CGFloat = 420
-    @Published var cswapAccounts: [CswapAccount] = []
-    @Published var switchingTo: CswapAccount?
-    @Published var switchError: String?
+    /// Claude credentials on the gateway; empty when the last refresh could not reach it.
+    @Published var gatewayAccounts: [GatewayAccount] = []
     @Published var overallMode: OverallMode =
         UserDefaults.standard.string(forKey: "overallMode").flatMap(OverallMode.init) ?? .both {
         didSet { UserDefaults.standard.set(overallMode.rawValue, forKey: "overallMode") }
@@ -61,13 +76,13 @@ final class UsageStore: ObservableObject {
     /// When ccs last answered. Kept across failures so the footer can age what is on screen.
     @Published var lastSuccess: Date?
 
-    private var hasLoadedCswap = false
     private var basePanelHeight: CGFloat = 420
 
     /// Builds the view from fresh ccs output, carrying unreachable providers forward.
     func apply(_ fetched: Data) throws {
         let built = try UsageViewEngine.shared.build(snapshotData: fetched, previous: lastSnapshotData, order: order)
         lastSnapshotData = built.snapshot
+        gatewayAccounts = GatewayAccount.decode(snapshot: fetched).filter { $0.provider == "anthropic" }
         show(built.view)
         let at = built.generatedAt ?? Date()
         lastSuccess = at
@@ -95,42 +110,8 @@ final class UsageStore: ObservableObject {
     }
 
     func syncPanelHeight() {
-        let switcher = cswapAccounts.isEmpty ? 0 : CGFloat(cswapAccounts.count) * 26 + 30
-        panelHeight = min(basePanelHeight + switcher, 680)
-    }
-
-    func loadCswapAccountsIfNeeded() {
-        guard !hasLoadedCswap, Cswap.isAvailable() else { return }
-        hasLoadedCswap = true
-        Task {
-            if let accounts = try? Cswap.accounts() {
-                await MainActor.run {
-                    self.cswapAccounts = accounts
-                    self.syncPanelHeight()
-                }
-            }
-        }
-    }
-
-    func switchClaudeAccount(_ account: CswapAccount) {
-        guard switchingTo == nil else { return }
-        switchingTo = account
-        switchError = nil
-        Task.detached(priority: .userInitiated) { [weak self] in
-            do {
-                try Cswap.switchTo(account)
-                let accounts = try? Cswap.accounts()
-                await MainActor.run {
-                    self?.switchingTo = nil
-                    if let accounts { self?.cswapAccounts = accounts }
-                }
-            } catch {
-                await MainActor.run {
-                    self?.switchingTo = nil
-                    self?.switchError = error.localizedDescription
-                }
-            }
-        }
+        let accounts = gatewayAccounts.isEmpty ? 0 : CGFloat(gatewayAccounts.count) * 22 + 30
+        panelHeight = min(basePanelHeight + accounts, 680)
     }
 
     private let ccsPath: String
