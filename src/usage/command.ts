@@ -30,6 +30,12 @@ const SOURCES_HELP = `ccs usage sources — what each adapter reads
                (official_api) through the gateway's xAI credential, else ~/.grok/auth.json:
                weekly pool, Build/Chat/Imagine, plan, reset grants, credits.
 
+  Codex and Anthropic read the hub's GET /gateway first: the Mini collector's snapshot,
+  the only thing that calls those usage endpoints. ccs calls upstream itself only when
+  the hub is unreachable or its snapshot is over ten minutes old. Stale numbers carry
+  a stale chip; a warning line appears once they are over 30 minutes old.
+  Token: HUB_READ_TOKEN, else op read "op://Sol/Hub Read/credential".
+
   The gateway is CLI_PROXY_MGMT_URL (default the Mac Mini's tailnet door), then the
   local standby on 127.0.0.1:8318, then 127.0.0.1:8317.
 

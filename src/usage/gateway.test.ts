@@ -151,6 +151,17 @@ test("a 429 after a good read keeps the last windows and banked reset, marked st
     ["reset_credit", null, null, "2026-10-22T16:00:00+00:00", true],
   ]);
   expect(limited.observations.map((o) => o.observedAt)).toEqual(good.observations.map((o) => o.observedAt));
+  // Numbers minutes old show only their stale chip; the 429 is not worth a warning line yet.
+  expect(limited.health).toEqual({ provider: "anthropic", status: "ok", detail: null });
+});
+
+test("a 429 on numbers over 30 minutes old names the account again", async () => {
+  const dir = freshCache();
+  const { fetch } = scriptedClaude([{ status: 200 }, { status: 429 }]);
+  const conn = await connectGateway({ bases: ["http://gw"], key: "k", fetch });
+  const start = Date.now();
+  await anthropicAdapter(conn, { dir, now: () => start });
+  const limited = await anthropicAdapter(conn, { dir, now: () => start + 31 * 60_000 });
   expect(limited.health).toEqual({
     provider: "anthropic",
     status: "degraded",
@@ -180,7 +191,7 @@ test("Retry-After holds the account off the endpoint until it passes", async () 
   await anthropicAdapter(conn, { dir, now: () => t0 + 3 * 60_000 });
   const held = await anthropicAdapter(conn, { dir, now: () => t0 + 8 * 60_000 });
   expect(usageCalls()).toBe(2);
-  expect(held.health.detail).toBe("personal@example.com oauth usage?cedar_ember=1 HTTP 429, retry after 2026-10-02T18:13:00.000Z");
+  expect(held.health.status).toBe("ok");
   expect(rows(held)[0]).toEqual(["allowance", "five_hour", 12, null, true]);
   const back = await anthropicAdapter(conn, { dir, now: () => t0 + 14 * 60_000 });
   expect(usageCalls()).toBe(3);

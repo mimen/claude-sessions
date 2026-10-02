@@ -137,6 +137,7 @@ export async function connectGateway(opts: {
           base,
           credentials,
           async call(authIndex, url, header, opts = {}) {
+            if (Bun.env.CCS_USAGE_DEBUG) console.error(`ccs usage: api-call ${url}`);
             const r = await fetchImpl(`${mgmt}/api-call`, {
               method: "POST",
               headers: { ...auth, "content-type": "application/json" },

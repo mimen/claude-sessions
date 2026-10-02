@@ -24,6 +24,7 @@ import { bankedResetsFromOauthUsage, fetchOauthProfile, fetchOauthUsage, planFro
 import { fetchGrokBilling, gatewayGrokCall, localGrokCall } from "./grok.ts";
 import { readThroughCache } from "./account-cache.ts";
 import { connectGateway, credentialIssue, gatewayAccounts, type Gateway } from "./gateway.ts";
+import { hubFresh, readHubSnapshot, type HubCredential, type HubRead, type HubWindow } from "./hub.ts";
 import { mergeSubscriptionRenewals, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
 
 export interface AdapterResult {
@@ -334,7 +335,8 @@ export async function anthropicAdapter(conn: GatewayConnection, cache?: CacheOpt
     const read = await readThroughCache(`anthropic-${cred.email}`, () =>
       anthropicObservations(conn.gateway, cred.authIndex, cred.email, now()), cache);
     observations.push(...read.observations);
-    if (read.issue) issues.push({ email: cred.email, reason: read.issue });
+    const newest = Math.max(...read.observations.map((o) => Date.parse(o.observedAt)));
+    if (read.issue && !recentEnough(newest, (cache?.now ?? Date.now)())) issues.push({ email: cred.email, reason: read.issue });
   }
   return { observations, health: anthropicHealth(observations.length, issues) };
 }
@@ -392,6 +394,90 @@ function anthropicHealth(windowCount: number, issues: { email: string; reason: s
     detail: issues.map((i) => `${i.email} ${i.reason}`).join("; "),
     accounts: [...new Set(issues.map((i) => i.email))],
   };
+}
+
+// ---------------------------------------------------------------------------
+// The hub's snapshot
+// ---------------------------------------------------------------------------
+
+/** Numbers carried forward for less than this show only their stale chip, not a warning note. */
+export const QUIET_STALE_MS = 30 * 60_000;
+
+function recentEnough(observedAt: number, nowMs: number): boolean {
+  return Number.isFinite(observedAt) && nowMs - observedAt < QUIET_STALE_MS;
+}
+
+const HUB_PROVIDER: Partial<Record<ProviderId, string>> = { anthropic: "claude", codex: "codex" };
+
+/**
+ * Anthropic or Codex rows from the collector's snapshot, with no upstream call. Rows are dated
+ * by when the collector last read them, so a carried-forward account is stale from that time.
+ */
+export function hubAdapter(provider: "anthropic" | "codex", credentials: HubCredential[], nowMs: number): AdapterResult {
+  const observations: UsageObservation[] = [];
+  const issues: { email: string; reason: string }[] = [];
+  for (const c of credentials) {
+    if (c.provider !== HUB_PROVIDER[provider] || !c.email) continue;
+    const observedMs = c.usageObservedAt ?? null;
+    if (c.usageError && (observedMs === null || !recentEnough(observedMs, nowMs))) {
+      issues.push({ email: c.email, reason: observedMs === null ? c.usageError : `${c.usageError}, numbers from ${new Date(observedMs).toISOString()}` });
+    }
+    if (observedMs === null) continue;
+    const observedAt = new Date(observedMs).toISOString();
+    const stale = c.usageError !== null;
+    const base = provider === "anthropic" ? `claude-max:${c.email}` : `codex-pro:${c.email}`;
+    const windows: [HubWindow | null, UsageWindow, string][] = [
+      [c.windows.fiveHour, "five_hour", ""],
+      [c.windows.weekly, "weekly", ""],
+      [c.windows.fable, "weekly", "#Fable"],
+    ];
+    for (const [w, window, suffix] of windows) {
+      if (!w) continue;
+      observations.push({
+        provider,
+        entitlement: `${base}${suffix}`,
+        metric: "allowance",
+        scope: "account",
+        window,
+        used: w.usedPct,
+        limit: 100,
+        remaining: Math.max(0, 100 - w.usedPct),
+        resetsAt: w.resetsAt,
+        expiresAt: null,
+        observedAt,
+        source: "official_api",
+        exact: provider === "anthropic",
+        ...(stale ? { stale: true } : {}),
+        ...(provider === "anthropic" ? { tier: c.plan } : {}),
+      } as UsageObservation);
+    }
+    // ponytail: the snapshot keeps only the soonest expiry, so every banked reset shows it.
+    for (let i = 0; i < (c.bankedResets?.count ?? 0); i++) {
+      observations.push({
+        provider,
+        entitlement: `${provider === "anthropic" ? "claude" : "codex"}-reset-credit:${c.email}`,
+        metric: "reset_credit",
+        scope: "account",
+        window: null,
+        used: null,
+        limit: null,
+        remaining: 1,
+        resetsAt: null,
+        expiresAt: c.bankedResets!.nextExpiresAt,
+        observedAt,
+        source: "official_api",
+        exact: true,
+        ...(stale ? { stale: true } : {}),
+      });
+    }
+  }
+  const title = provider === "anthropic" ? "Claude" : "Codex";
+  const health: AdapterHealth = observations.length === 0
+    ? { provider, status: "unavailable", detail: issues.map((i) => `${i.email} ${i.reason}`).join("; ") || `no ${title} credentials in the hub snapshot` }
+    : issues.length === 0
+      ? { provider, status: "ok", detail: null }
+      : { provider, status: "degraded", detail: issues.map((i) => `${i.email} ${i.reason}`).join("; "), accounts: issues.map((i) => i.email) };
+  return { observations, health };
 }
 
 // ---------------------------------------------------------------------------
@@ -512,18 +598,28 @@ export async function grokAdapter(conn: GatewayConnection): Promise<AdapterResul
 // Snapshot assembly
 // ---------------------------------------------------------------------------
 
-export async function collectSnapshot(opts: { providers?: readonly ProviderId[] }): Promise<UsageSnapshot> {
+export async function collectSnapshot(opts: {
+  providers?: readonly ProviderId[];
+  hub?: () => Promise<HubRead>;
+  gateway?: () => ReturnType<typeof connectGateway>;
+  now?: () => number;
+  cache?: CacheOptions;
+}): Promise<UsageSnapshot> {
   const wanted = opts.providers ?? PROVIDERS;
-  const conn = await connectGateway();
+  const [hub, conn] = await Promise.all([(opts.hub ?? readHubSnapshot)(), (opts.gateway ?? connectGateway)()]);
+  const nowMs = (opts.now ?? Date.now)();
+  const fresh = hubFresh(hub, nowMs) ? hub.snapshot : null;
+  if (Bun.env.CCS_USAGE_DEBUG) console.error(`ccs usage: hub ${fresh ? `fresh, collected ${new Date(fresh.collectedAt).toISOString()}` : hub.ok ? "stale, falling back" : hub.detail}`);
   // Final containment boundary: an adapter that throws despite its own error handling
   // degrades to AdapterHealth here — one broken adapter never collapses the command.
   const results: AdapterResult[] = [];
   for (const p of wanted) {
     try {
       results.push(
-        p === "codex" ? await codexAdapter(conn)
-        : p === "grok" ? await grokAdapter(conn)
-        : await anthropicAdapter(conn),
+        p === "grok" ? await grokAdapter(conn)
+        : fresh ? hubAdapter(p, fresh.credentials, nowMs)
+        : p === "codex" ? await codexAdapter(conn)
+        : await anthropicAdapter(conn, opts.cache),
       );
     } catch (e) {
       results.push({
