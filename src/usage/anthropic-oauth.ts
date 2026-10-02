@@ -5,6 +5,7 @@
 
 import { readlinkSync } from "node:fs";
 import { basename } from "node:path";
+import { UpstreamError } from "./account-cache.ts";
 import type { Gateway } from "./gateway.ts";
 import type { UsageWindow } from "./types.ts";
 
@@ -118,7 +119,7 @@ async function oauthGet<T>(gateway: Gateway, authIndex: string, path: string): P
     "anthropic-beta": "oauth-2025-04-20",
     ...(userAgent ? { "User-Agent": userAgent } : {}),
   });
-  if (res.status !== 200 || res.body == null) throw new Error(`oauth ${path} HTTP ${res.status}`);
+  if (res.status !== 200 || res.body == null) throw new UpstreamError(`oauth ${path} HTTP ${res.status}`, res.retryAfter ?? null);
   return res.body as T;
 }
 

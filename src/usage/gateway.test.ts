@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { anthropicAdapter } from "./adapters.ts";
 import { connectGateway, gatewayAccounts, gatewayBases, parseAuthFiles } from "./gateway.ts";
 
@@ -22,6 +25,8 @@ const usage = {
     { kind: "weekly_all", percent: 40, resets_at: "2026-10-06T21:00:00+00:00", scope: null },
   ],
 };
+
+const freshCache = () => mkdtempSync(join(tmpdir(), "ccs-usage-cache-"));
 
 /** A management API that answers auth-files and api-call the way the gateway does. */
 function fakeManagement(opts: { down?: string[]; usageStatus?: Record<string, number> } = {}) {
@@ -82,7 +87,7 @@ test("the account list shows priority, disabled, and who fill-first picks", () =
 test("every Claude credential's usage is read through api-call with the token left to the gateway", async () => {
   const { fetch, apiCalls } = fakeManagement();
   const conn = await connectGateway({ bases: ["http://gw"], key: "k", fetch });
-  const result = await anthropicAdapter(conn);
+  const result = await anthropicAdapter(conn, { dir: freshCache() });
   expect(result.health).toEqual({ provider: "anthropic", status: "ok", detail: null });
   expect(result.observations.map((o) => [o.entitlement, o.window, o.used, (o as { tier?: string }).tier])).toEqual([
     ["claude-max:work@example.com", "five_hour", 12, "Max 20x"],
@@ -101,7 +106,7 @@ test("every Claude credential's usage is read through api-call with the token le
 test("one dead Claude credential degrades the adapter and is named", async () => {
   const { fetch } = fakeManagement({ usageStatus: { "058001bd8bc0d923": 401 } });
   const conn = await connectGateway({ bases: ["http://gw"], key: "k", fetch });
-  const result = await anthropicAdapter(conn);
+  const result = await anthropicAdapter(conn, { dir: freshCache() });
   expect(result.health).toEqual({
     provider: "anthropic",
     status: "degraded",
@@ -109,4 +114,75 @@ test("one dead Claude credential degrades the adapter and is named", async () =>
     accounts: ["work@example.com"],
   });
   expect(result.observations).toHaveLength(2);
+});
+
+/** One Claude credential whose usage endpoint answers from a script, one response per call. */
+function scriptedClaude(responses: { status: number; retryAfter?: string }[]) {
+  const urls: string[] = [];
+  const fetch = async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).endsWith("/auth-files")) return Response.json({ files: [authFiles.files[1]] });
+    const body = JSON.parse(init!.body as string) as { url: string };
+    urls.push(body.url);
+    if (body.url.includes("/profile")) return Response.json({ status_code: 200, header: {}, body: "{}" });
+    const next = responses.shift()!;
+    const header = next.retryAfter ? { "Retry-After": [next.retryAfter] } : {};
+    const upstream = next.status === 200
+      ? { limits: usage.limits, cedar_ember: { eligible: true, grants: [{ label: "launch", resets_left: 1, ends_at: "2026-10-22T16:00:00+00:00" }] } }
+      : { error: { type: "rate_limit_error" } };
+    return Response.json({ status_code: next.status, header, body: JSON.stringify(upstream) });
+  };
+  return { fetch, usageCalls: () => urls.filter((u) => u.includes("/usage")).length };
+}
+
+const t0 = Date.parse("2026-10-02T18:00:00Z");
+const rows = (r: Awaited<ReturnType<typeof anthropicAdapter>>) =>
+  r.observations.map((o) => [o.metric, o.window, o.used, o.expiresAt, o.stale ?? false]);
+
+test("a 429 after a good read keeps the last windows and banked reset, marked stale", async () => {
+  const dir = freshCache();
+  const { fetch } = scriptedClaude([{ status: 200 }, { status: 429 }]);
+  const conn = await connectGateway({ bases: ["http://gw"], key: "k", fetch });
+  const good = await anthropicAdapter(conn, { dir, now: () => t0 });
+  const limited = await anthropicAdapter(conn, { dir, now: () => t0 + 3 * 60_000 });
+
+  expect(rows(limited)).toEqual([
+    ["allowance", "five_hour", 12, null, true],
+    ["allowance", "weekly", 40, null, true],
+    ["reset_credit", null, null, "2026-10-22T16:00:00+00:00", true],
+  ]);
+  expect(limited.observations.map((o) => o.observedAt)).toEqual(good.observations.map((o) => o.observedAt));
+  expect(limited.health).toEqual({
+    provider: "anthropic",
+    status: "degraded",
+    detail: "personal@example.com oauth usage?cedar_ember=1 HTTP 429",
+    accounts: ["personal@example.com"],
+  });
+});
+
+test("a read within two minutes of the last one is served from the cache without a call", async () => {
+  const dir = freshCache();
+  const { fetch, usageCalls } = scriptedClaude([{ status: 200 }, { status: 200 }]);
+  const conn = await connectGateway({ bases: ["http://gw"], key: "k", fetch });
+  await anthropicAdapter(conn, { dir, now: () => t0 });
+  const again = await anthropicAdapter(conn, { dir, now: () => t0 + 60_000 });
+  expect(usageCalls()).toBe(1);
+  expect(again.health.status).toBe("ok");
+  expect(rows(again)[1]).toEqual(["allowance", "weekly", 40, null, false]);
+  await anthropicAdapter(conn, { dir, now: () => t0 + 2 * 60_000 });
+  expect(usageCalls()).toBe(2);
+});
+
+test("Retry-After holds the account off the endpoint until it passes", async () => {
+  const dir = freshCache();
+  const { fetch, usageCalls } = scriptedClaude([{ status: 200 }, { status: 429, retryAfter: "600" }, { status: 200 }]);
+  const conn = await connectGateway({ bases: ["http://gw"], key: "k", fetch });
+  await anthropicAdapter(conn, { dir, now: () => t0 });
+  await anthropicAdapter(conn, { dir, now: () => t0 + 3 * 60_000 });
+  const held = await anthropicAdapter(conn, { dir, now: () => t0 + 8 * 60_000 });
+  expect(usageCalls()).toBe(2);
+  expect(held.health.detail).toBe("personal@example.com oauth usage?cedar_ember=1 HTTP 429, retry after 2026-10-02T18:13:00.000Z");
+  expect(rows(held)[0]).toEqual(["allowance", "five_hour", 12, null, true]);
+  const back = await anthropicAdapter(conn, { dir, now: () => t0 + 14 * 60_000 });
+  expect(usageCalls()).toBe(3);
+  expect(back.health.status).toBe("ok");
 });

@@ -22,6 +22,7 @@ import { sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
 import { readLiveCodexAccounts } from "./codex-oauth.ts";
 import { bankedResetsFromOauthUsage, fetchOauthProfile, fetchOauthUsage, planFromProfile, windowsFromOauthUsage } from "./anthropic-oauth.ts";
 import { fetchGrokBilling } from "./grok.ts";
+import { readThroughCache } from "./account-cache.ts";
 import { connectGateway, credentialIssue, gatewayAccounts, type Gateway } from "./gateway.ts";
 import { mergeSubscriptionRenewals, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
 
@@ -292,6 +293,7 @@ function snapshotAccountEmails(observations: UsageObservation[]): string[] {
 }
 
 type GatewayConnection = Awaited<ReturnType<typeof connectGateway>>;
+type CacheOptions = Parameters<typeof readThroughCache>[2];
 
 async function codexAdapter(conn: GatewayConnection): Promise<AdapterResult> {
   const live = conn.ok ? await readLiveCodexAccounts(conn.gateway) : { ok: [], emails: [], failures: [] };
@@ -321,7 +323,7 @@ async function codexAdapter(conn: GatewayConnection): Promise<AdapterResult> {
 // Anthropic
 // ---------------------------------------------------------------------------
 
-export async function anthropicAdapter(conn: GatewayConnection): Promise<AdapterResult> {
+export async function anthropicAdapter(conn: GatewayConnection, cache?: CacheOptions): Promise<AdapterResult> {
   if (!conn.ok) return { observations: [], health: { provider: "anthropic", status: "unavailable", detail: conn.detail } };
   const observations: UsageObservation[] = [];
   const issues: { email: string; reason: string }[] = [];
@@ -329,11 +331,10 @@ export async function anthropicAdapter(conn: GatewayConnection): Promise<Adapter
     if (cred.provider !== "claude") continue;
     const issue = credentialIssue(cred);
     if (issue) issues.push({ email: cred.email, reason: issue });
-    try {
-      observations.push(...await anthropicObservations(conn.gateway, cred.authIndex, cred.email, now()));
-    } catch (e) {
-      issues.push({ email: cred.email, reason: e instanceof Error ? e.message : "usage fetch failed" });
-    }
+    const read = await readThroughCache(`anthropic-${cred.email}`, () =>
+      anthropicObservations(conn.gateway, cred.authIndex, cred.email, now()), cache);
+    observations.push(...read.observations);
+    if (read.issue) issues.push({ email: cred.email, reason: read.issue });
   }
   return { observations, health: anthropicHealth(observations.length, issues) };
 }

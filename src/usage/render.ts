@@ -6,7 +6,7 @@
 
 import type { UsageSnapshot } from "./types.ts";
 import { formatCost } from "../cost.ts";
-import { buildView, renewalLabel, type Row } from "../../packages/usage-view/index.ts";
+import { buildView, renewalLabel, shortAge, type Row } from "../../packages/usage-view/index.ts";
 
 /**
  * An eight-segment usage bar, e.g. `███████░`. Filled segments scale with use.
@@ -61,7 +61,7 @@ function rowText(r: Row, name: string): string {
       if (r.fractionUsed === null) return `${name}— unknown`;
       const pct = Math.round(r.fractionUsed * 100);
       const segments = r.segments.map(s => `${s.name} ${Math.round((s.fractionUsed ?? 0) * 100)}%`).join(" · ");
-      const notes = [countdown(r.resetsAt), r.stale ? "cached" : "", segments].filter(Boolean).join(" · ");
+      const notes = [countdown(r.resetsAt), r.stale && r.observedAt != null ? `stale ${shortAge(r.observedAt, Date.now())}` : "", segments].filter(Boolean).join(" · ");
       return `${colorFor(pct, name + bar(pct))} ${String(pct).padStart(3)}%  ${notes}`.trimEnd();
     }
     case "reset":

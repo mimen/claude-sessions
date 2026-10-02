@@ -32,10 +32,23 @@ export interface GatewayCredential {
   chatgptAccountId: string | null;
 }
 
+export interface CallOptions {
+  method?: "GET" | "POST";
+  /** Request body as a string; the gateway sends it verbatim. */
+  data?: string;
+}
+
+/** `body` is parsed JSON when the upstream sent JSON, else the raw text, and null on a non-200. */
+export interface CallResult {
+  status: number;
+  body: unknown;
+  retryAfter?: string | null;
+}
+
 export interface Gateway {
   base: string;
   credentials: GatewayCredential[];
-  call(authIndex: string, url: string, header: Record<string, string>): Promise<{ status: number; body: unknown }>;
+  call(authIndex: string, url: string, header: Record<string, string>, opts?: CallOptions): Promise<CallResult>;
 }
 
 export function gatewayBases(env: Record<string, string | undefined> = Bun.env): string[] {
@@ -123,18 +136,19 @@ export async function connectGateway(opts: {
         gateway: {
           base,
           credentials,
-          async call(authIndex, url, header) {
+          async call(authIndex, url, header, opts = {}) {
             const r = await fetchImpl(`${mgmt}/api-call`, {
               method: "POST",
               headers: { ...auth, "content-type": "application/json" },
-              body: JSON.stringify({ auth_index: authIndex, method: "GET", url, header }),
+              body: JSON.stringify({ auth_index: authIndex, method: opts.method ?? "GET", url, header, data: opts.data }),
               signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
             });
-            if (!r.ok) return { status: r.status, body: null };
-            const envelope = (await r.json()) as { status_code?: number; body?: string };
+            if (!r.ok) return { status: r.status, body: null, retryAfter: null };
+            const envelope = (await r.json()) as { status_code?: number; header?: Record<string, string[]>; body?: string };
             const status = envelope.status_code ?? 0;
-            if (status !== 200) return { status, body: null };
-            return { status, body: JSON.parse(envelope.body ?? "null") };
+            const retryAfter = headerValue(envelope.header, "retry-after");
+            if (status !== 200) return { status, body: null, retryAfter };
+            return { status, body: parseBody(envelope.body ?? ""), retryAfter };
           },
         },
       };
@@ -143,6 +157,19 @@ export async function connectGateway(opts: {
     }
   }
   return { ok: false, detail: `gateway unreachable: ${tried.join("; ")}` };
+}
+
+function headerValue(header: Record<string, string[]> | undefined, name: string): string | null {
+  const key = Object.keys(header ?? {}).find((k) => k.toLowerCase() === name);
+  return key ? header![key]?.[0] ?? null : null;
+}
+
+function parseBody(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 function readManagementKey(): string | null {
