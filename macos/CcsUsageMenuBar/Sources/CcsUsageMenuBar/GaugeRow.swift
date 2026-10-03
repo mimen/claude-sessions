@@ -221,6 +221,8 @@ struct ProviderSectionHeader: View {
 struct ResetChip: View {
     let resets: [ViewRow.Reset]
     let now: Date
+    /// Count only; the expiries stay in the hover text.
+    var compact = false
 
     private var ready: [ViewRow.Reset] { resets.filter(\.available) }
 
@@ -247,7 +249,7 @@ struct ResetChip: View {
         let count = ready.count
         let noun = count > 1 ? "\(count) resets" : count == 1 ? "reset" : "resets used"
         let expiries = ready.compactMap(\.expiresAt).sorted().map { Self.left(Date(epochMs: $0), now: now) }
-        return expiries.isEmpty ? noun : "\(noun) · \(expiries.joined(separator: ", "))"
+        return expiries.isEmpty || compact ? noun : "\(noun) · \(expiries.joined(separator: ", "))"
     }
 
     /// "10d" / "5h": time left before an expiry.

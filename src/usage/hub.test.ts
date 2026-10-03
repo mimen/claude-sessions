@@ -156,7 +156,7 @@ test("an estimated renewal renders as estimated", async () => {
   // The renewal attaches to the configured Codex Pro subscription for this account.
   const codex = { ...codexCred, email: "miladmaaan@gmail.com" };
   const snap = await collectSnapshot({ providers: ["codex"], hub: hubWith(NOW - 60_000, [codex]), now: () => NOW });
-  expect(renderSnapshot(snap)).toContain("Codex Pro · renews ~Oct 20, estimated");
+  expect(renderSnapshot(snap)).toContain("Codex Pro · renews ~Oct 20");
   const exact = await collectSnapshot({ providers: ["codex"], hub: hubWith(NOW - 60_000, [{ ...codex, renewsAtEstimated: undefined }]), now: () => NOW });
   expect(renderSnapshot(exact)).toContain("Codex Pro · renews Oct 20\n");
 });

@@ -133,45 +133,10 @@ struct UsagePanel: View {
                                   highlighted: store.dragging == .section(section.id))
                 .reorderable(.section(section.id), store: store, enabled: scrolls)
             if section.account != nil || section.plan != nil {
-                HStack(spacing: 5) {
-                    if let account = section.account {
-                        Text(account)
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    if let plan = section.plan {
-                        Text(plan.name)
-                            .lineLimit(1)
-                            .fixedSize()
-                            .font(.system(size: 8.5, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.secondary.opacity(0.14)))
-                    }
-                    if let renewal = section.renewal {
-                        // Truncates rather than fixedSize: a wide account line would
-                        // overflow the panel and push every row past its side inset.
-                        Text(renewal)
-                            .lineLimit(1)
-                            .font(.system(size: 9.5, design: .rounded))
-                            .foregroundStyle(.tertiary)
-                    }
-                    let resets = section.rows.compactMap { if case .reset(let r) = $0 { r } else { nil } }
-                    if !resets.isEmpty {
-                        ResetChip(resets: resets, now: now)
-                    }
-                    if let staleSince = section.staleSince {
-                        Text("stale \(UsageViewEngine.shared.shortAge(Date(epochMs: staleSince), now: now))")
-                            .font(.system(size: 8.5, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(Color.orange.opacity(0.14)))
-                    }
-                    Spacer()
+                // A tight line drops the reset expiries before it truncates the account.
+                ViewThatFits(in: .horizontal) {
+                    accountLine(section, compactResets: false)
+                    accountLine(section, compactResets: true)
                 }
                 .padding(.bottom, 2)
             }
@@ -181,6 +146,54 @@ struct UsagePanel: View {
                     .opacity(store.dragging == item ? 0.4 : 1)
                     .reorderable(item, store: store, enabled: scrolls)
             }
+        }
+    }
+
+    private func accountLine(_ section: ViewSection, compactResets: Bool) -> some View {
+        HStack(spacing: 5) {
+            if let account = section.account {
+                Text(account)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    // ViewThatFits measures ideal widths; without this the full email
+                    // never "fits" and every line would drop its reset expiries.
+                    .frame(idealWidth: 60, alignment: .leading)
+            }
+            if let plan = section.plan {
+                Text(plan.name)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.secondary.opacity(0.14)))
+            }
+            if let renewal = section.renewal {
+                // Truncates rather than fixedSize: a wide account line would
+                // overflow the panel and push every row past its side inset.
+                // The priority shortens the account email before the date.
+                Text(renewal)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                    .font(.system(size: 9.5, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+            let resets = section.rows.compactMap { if case .reset(let r) = $0 { r } else { nil } }
+            if !resets.isEmpty {
+                ResetChip(resets: resets, now: now, compact: compactResets)
+            }
+            if let staleSince = section.staleSince {
+                Text("stale \(UsageViewEngine.shared.shortAge(Date(epochMs: staleSince), now: now))")
+                    .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.orange.opacity(0.14)))
+            }
+            Spacer()
         }
     }
 

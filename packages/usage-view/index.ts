@@ -71,7 +71,7 @@ export interface Section {
   account: string | null;
   plan: Plan | null;
   renewsOn: string | null;
-  /** "renews Oct 20", "renews ~Oct 20, estimated", or "renewal unknown"; null without a plan. */
+  /** "renews Oct 20", "renews ~Oct 20" (estimated), or "renewal unknown"; null without a plan. */
   renewal: string | null;
   rows: Row[];
   /** Epoch ms of the oldest stale reading in the section, when any. */
@@ -340,7 +340,7 @@ export function shortAge(at: number, now: number): string {
 
 export function renewalText(renewsOn: string | null | undefined, estimated?: boolean | null): string {
   if (!renewsOn) return "renewal unknown";
-  return estimated ? `renews ~${renewalLabel(renewsOn)}, estimated` : `renews ${renewalLabel(renewsOn)}`;
+  return estimated ? `renews ~${renewalLabel(renewsOn)}` : `renews ${renewalLabel(renewsOn)}`;
 }
 
 /** "Oct 8" from a `YYYY-MM-DD` renewal date, read in UTC so it never shifts a day. */

@@ -245,7 +245,7 @@
   function renewalText(renewsOn, estimated) {
     if (!renewsOn)
       return "renewal unknown";
-    return estimated ? `renews ~${renewalLabel(renewsOn)}, estimated` : `renews ${renewalLabel(renewsOn)}`;
+    return estimated ? `renews ~${renewalLabel(renewsOn)}` : `renews ${renewalLabel(renewsOn)}`;
   }
   function renewalLabel(renewsOn) {
     const t = Date.parse(`${renewsOn}T00:00:00Z`);
