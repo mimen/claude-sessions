@@ -35,7 +35,7 @@ test("the build report posts host, component, and sha with the ingest bearer", a
   expect(sent).toEqual([{
     url: "https://usable-gopher-567.convex.site/ingest/build",
     auth: "Bearer ingest",
-    body: { host: "laptop", component: "ccs", sha: SHA, reportedAt: expect.any(Number) },
+    body: { host: "laptop", component: "ccs", sha: SHA, reportedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/) },
   }]);
 });
 

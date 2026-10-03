@@ -21,7 +21,7 @@ enum BuildReport {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "host": host, "component": "ccs", "sha": sha,
-            "reportedAt": Int(Date().timeIntervalSince1970 * 1000),
+            "reportedAt": ISO8601DateFormatter().string(from: Date()),
         ])
         return request
     }

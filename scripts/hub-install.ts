@@ -55,7 +55,7 @@ export async function reportBuild(sha: string, opts: { host?: string | null; tok
     const res = await (opts.fetch ?? fetch)(`${process.env.HUB_SITE || HUB_SITE}/ingest/build`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ host, component: "ccs", sha, reportedAt: Date.now() }),
+      body: JSON.stringify({ host, component: "ccs", sha, reportedAt: new Date().toISOString() }),
       signal: AbortSignal.timeout(2_000),
     });
     return res.ok;

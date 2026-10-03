@@ -114,6 +114,7 @@ final class BuildReportTests: XCTestCase {
         XCTAssertEqual(body["host"] as? String, "m3")
         XCTAssertEqual(body["component"] as? String, "ccs")
         XCTAssertEqual(body["sha"] as? String, sha)
+        XCTAssertNotNil(ISO8601DateFormatter().date(from: try XCTUnwrap(body["reportedAt"] as? String)))
     }
 
     func testSkipsWithoutATokenHostOrSha() throws {
