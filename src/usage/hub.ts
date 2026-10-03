@@ -74,7 +74,13 @@ export function hubFresh(read: HubRead, now: number): read is Extract<HubRead, {
 async function readToken(): Promise<string | null> {
   if (Bun.env.HUB_READ_TOKEN) return Bun.env.HUB_READ_TOKEN;
   try {
-    const proc = Bun.spawn(["op", "read", READ_TOKEN_REF], { stdout: "pipe", stderr: "ignore" });
+    // Under launchd (the menu bar) op hangs probing the desktop app unless told not to.
+    const proc = Bun.spawn(["op", "read", READ_TOKEN_REF], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+      env: { ...Bun.env, OP_LOAD_DESKTOP_APP_SETTINGS: "false" },
+    });
     const timer = setTimeout(() => proc.kill(), TIMEOUT_MS);
     const out = (await new Response(proc.stdout).text()).trim();
     clearTimeout(timer);
