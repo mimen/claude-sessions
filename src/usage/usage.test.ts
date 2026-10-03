@@ -1,5 +1,4 @@
 import { test, expect } from "bun:test";
-import { accountLabel } from "./adapters.ts";
 import { renderSnapshot, shortReset } from "./render.ts";
 import { usageCommand } from "./command.ts";
 import type { AdapterHealth, SubscriptionInfo, UsageObservation, UsageSnapshot } from "./types.ts";
@@ -91,12 +90,6 @@ test("provider timestamps become Los Angeles subscription dates", () => {
   expect(renewalDate("not-a-date")).toBeNull();
 });
 
-test("accountLabel prefers email, then login method, then unknown", () => {
-  expect(accountLabel({ accountEmail: "a@b.c", loginMethod: "pro" })).toBe("a@b.c");
-  expect(accountLabel({ loginMethod: "SuperGrok" })).toBe("SuperGrok");
-  expect(accountLabel(undefined)).toBe("unknown");
-});
-
 test("shortReset renders a human date and falls back to the raw string", () => {
   expect(shortReset("2026-08-27T04:05:01Z")).not.toMatch(/Z$/);
   expect(shortReset("not-a-date")).toBe("not-a-date");
@@ -183,23 +176,6 @@ test("usageCommand sources prints the provenance table and exits 0", () => {
   expect(logs.join("\n")).toContain("grok");
 });
 
-// --- Review-fix regressions ---
-
-test("accountEntitlement suffixes multi-account entries with their email", async () => {
-  const { accountEntitlement } = await import("./adapters.ts");
-  const entry = {} as Parameters<typeof accountEntitlement>[2];
-  expect(accountEntitlement("claude-max", { accountEmail: "a@b.c" }, entry)).toBe("claude-max:a@b.c");
-  expect(accountEntitlement("claude-max", undefined, entry)).toBe("claude-max");
-});
-
-test("sourceClassFor maps codexbar entry sources to evidence classes", async () => {
-  const { sourceClassFor } = await import("./codexbar.ts");
-  expect(sourceClassFor("oauth")).toBe("official_api");
-  expect(sourceClassFor("web")).toBe("official_ui");
-  expect(sourceClassFor("cli")).toBe("official_cli");
-  expect(sourceClassFor(undefined)).toBe("official_cli");
-});
-
 test("product breakdown rows show percentages without duplicate bars or reset countdowns", () => {
   const reset = new Date(Date.now() + 3_600_000).toISOString();
   const out = renderSnapshot(snap({
@@ -223,51 +199,4 @@ test("render labels Spark and multi-account groups distinctly", () => {
   }));
   expect(out).toContain("Spark ");
   expect(out).toContain("Claude · a@b.c"); // account in the group title
-});
-
-test("inactive CodexBar snapshots fill in accounts --all-accounts omits", async () => {
-  const { inactiveCodexSnapshotObservations } = await import("./adapters.ts");
-  const live = new Set(["milad@theafternoonumbrellafriends.com"]);
-  const observations = inactiveCodexSnapshotObservations({
-    records: [{
-      id: "miladmaaan@gmail.com",
-      sourceLabel: "oauth",
-      credits: { remaining: 0, updatedAt: 811119956.169675 },
-      snapshot: {
-        identity: { accountEmail: "miladmaaan@gmail.com", loginMethod: "pro" },
-        primary: null,
-        secondary: { usedPercent: 75, resetsAt: 811498539, windowMinutes: 10080 },
-        extraRateWindows: [{
-          id: "codex-spark",
-          title: "Codex Spark 5-hour",
-          window: { usedPercent: 0, resetsAt: 811137953, windowMinutes: 300 },
-        }],
-        codexResetCredits: {
-          credits: [{ status: "available", expires_at: 812866708.129 }],
-          updatedAt: 811119954.594954,
-        },
-        updatedAt: 811119954.59497,
-      },
-    }],
-  }, live);
-  const weekly = observations.find((o) => o.window === "weekly");
-  expect(weekly?.entitlement).toBe("codex-pro:miladmaaan@gmail.com");
-  expect(weekly?.used).toBe(75);
-  expect(weekly?.stale).toBe(true);
-  expect(weekly?.resetsAt).toBe("2026-09-19T08:15:39.000Z");
-  expect(observations.some((o) => o.entitlement.includes("theafternoon"))).toBe(false);
-  expect(observations.some((o) => o.metric === "reset_credit" && o.remaining === 1)).toBe(true);
-});
-
-test("a live Codex email is not double-counted from the snapshot cache", async () => {
-  const { inactiveCodexSnapshotObservations } = await import("./adapters.ts");
-  const observations = inactiveCodexSnapshotObservations([{
-    id: "milad@theafternoonumbrellafriends.com",
-    snapshot: {
-      identity: { accountEmail: "milad@theafternoonumbrellafriends.com", loginMethod: "plus" },
-      secondary: { usedPercent: 2, resetsAt: 811498539, windowMinutes: 10080 },
-      updatedAt: 811119954,
-    },
-  }], ["milad@theafternoonumbrellafriends.com"]);
-  expect(observations).toEqual([]);
 });

@@ -86,3 +86,40 @@ final class UsageViewEngineTests: XCTestCase {
         XCTAssertEqual(GatewayAccount.decode(snapshot: try fixture()), [])
     }
 }
+
+final class BuildReportTests: XCTestCase {
+    private func home(token: String?, host: String?) throws -> String {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        if let token {
+            try FileManager.default.createDirectory(atPath: dir + "/.config/ccs", withIntermediateDirectories: true)
+            try token.write(toFile: dir + "/.config/ccs/hub-ingest-token", atomically: true, encoding: .utf8)
+        }
+        if let host {
+            try FileManager.default.createDirectory(atPath: dir + "/Library/LaunchAgents", withIntermediateDirectories: true)
+            let plist = try PropertyListSerialization.data(fromPropertyList: ["EnvironmentVariables": ["HUB_HOST": host]],
+                                                           format: .xml, options: 0)
+            try plist.write(to: URL(fileURLWithPath: dir + "/Library/LaunchAgents/com.milad.fleet-check.plist"))
+        }
+        return dir
+    }
+
+    func testPostsHostComponentAndShaWithTheIngestBearer() throws {
+        let sha = String(repeating: "a", count: 40)
+        let request = try XCTUnwrap(BuildReport.request(home: home(token: "secret\n", host: "m3"), environment: [:], sha: sha))
+        XCTAssertEqual(request.url?.absoluteString, "https://usable-gopher-567.convex.site/ingest/build")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
+        XCTAssertEqual(request.timeoutInterval, 3)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual(body["host"] as? String, "m3")
+        XCTAssertEqual(body["component"] as? String, "ccs")
+        XCTAssertEqual(body["sha"] as? String, sha)
+    }
+
+    func testSkipsWithoutATokenHostOrSha() throws {
+        let sha = String(repeating: "a", count: 40)
+        XCTAssertNil(BuildReport.request(home: try home(token: nil, host: "m3"), environment: [:], sha: sha))
+        XCTAssertNil(BuildReport.request(home: try home(token: "t", host: nil), environment: [:], sha: sha))
+        XCTAssertNil(BuildReport.request(home: try home(token: "t", host: "m3"), environment: [:], sha: nil))
+    }
+}

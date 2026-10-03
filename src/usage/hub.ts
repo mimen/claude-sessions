@@ -1,10 +1,14 @@
 /**
- * The hub's copy of the gateway's usage reads. The Mini's collector is the only reader of the
- * providers' usage endpoints; every Mac reads its snapshot here, so `ccs usage` and the menu bars
- * add no calls against Anthropic's per-account rate limit.
+ * The hub's copy of every provider usage read. The Mini's collector is the only caller of the
+ * providers' usage endpoints; every Mac reads its snapshot here and never calls a provider itself.
+ * When the hub cannot answer, the last snapshot this Mac saw is read from disk instead.
  */
-const DEFAULT_SITE = "https://usable-gopher-567.convex.site";
-const READ_TOKEN_REF = "op://Sol/Hub Read/credential";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { runtimeRoot } from "../paths.ts";
+
+export const HUB_SITE = "https://usable-gopher-567.convex.site";
 const TIMEOUT_MS = 5_000;
 /** The collector posts every five minutes, so a snapshot older than two runs means it has stopped. */
 export const HUB_FRESH_MS = 10 * 60_000;
@@ -16,7 +20,7 @@ export interface HubWindow {
   resetsAt: string | null;
 }
 
-/** One credential as convex/modules/gateway.ts in the hub repo defines it. */
+/** One credential as convex/modules/gateway.ts in the hub repo defines it. Newer fields are optional. */
 export interface HubCredential {
   name: string;
   authIndex: string;
@@ -29,10 +33,17 @@ export interface HubCredential {
   unavailable: boolean;
   plan: string | null;
   renewsAt: string | null;
+  /** Codex: renewsAt was rolled forward from an old token date, not read from billing. */
+  renewsAtEstimated?: boolean;
   usageError: string | null;
   locked: boolean;
   windows: { fiveHour: HubWindow | null; weekly: HubWindow | null; fable: HubWindow | null };
-  bankedResets: { count: number; nextExpiresAt: string | null } | null;
+  /** `expiries` lists one ISO time per available reset, ascending. */
+  bankedResets: { count: number; nextExpiresAt: string | null; expiries?: string[] } | null;
+  /** xai: shares of the weekly pool by product, e.g. "GrokBuild". */
+  productUsage?: { product: string; usedPct: number }[];
+  /** xai: prepaid extra-usage credit in dollars. */
+  prepaidUsd?: number;
   /** When these numbers were read upstream. Older than collectedAt when the collector carried them forward. */
   usageObservedAt?: number | null;
 }
@@ -42,40 +53,79 @@ export interface HubSnapshot {
   credentials: HubCredential[];
 }
 
-export type HubRead = { ok: true; site: string; snapshot: HubSnapshot } | { ok: false; detail: string };
+/** `unreachable` is set when the snapshot came from this Mac's cache because the hub did not answer. */
+export type HubRead =
+  | { ok: true; site: string; snapshot: HubSnapshot; unreachable?: string }
+  | { ok: false; detail: string };
+
+export const hubCachePath = () => join(runtimeRoot(), "cache", "hub-gateway.json");
 
 export async function readHubSnapshot(opts: {
   site?: string;
   token?: string | null;
   fetch?: Fetch;
+  cachePath?: string;
 } = {}): Promise<HubRead> {
-  const site = opts.site ?? (Bun.env.HUB_SITE || DEFAULT_SITE);
-  const token = opts.token !== undefined ? opts.token : await readToken();
-  if (!token) return { ok: false, detail: `no hub read token (HUB_READ_TOKEN or ${READ_TOKEN_REF})` };
+  const site = opts.site ?? (Bun.env.HUB_SITE || HUB_SITE);
+  const cachePath = opts.cachePath ?? hubCachePath();
+  const live = await fetchSnapshot(site, opts.token !== undefined ? opts.token : await readHubToken("read"), opts.fetch ?? fetch);
+  if ("snapshot" in live) {
+    writeCache(cachePath, live.snapshot);
+    return { ok: true, site, snapshot: live.snapshot };
+  }
+  const cached = readCache(cachePath);
+  return cached ? { ok: true, site, snapshot: cached, unreachable: live.detail } : { ok: false, detail: live.detail };
+}
+
+async function fetchSnapshot(site: string, token: string | null, fetchImpl: Fetch): Promise<{ snapshot: HubSnapshot } | { detail: string }> {
+  if (!token) return { detail: `no hub read token (${tokenFile("read")}, HUB_READ_TOKEN, or op)` };
   try {
-    const res = await (opts.fetch ?? fetch)(`${site}/gateway`, {
+    const res = await fetchImpl(`${site}/gateway`, {
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!res.ok) return { ok: false, detail: `hub /gateway HTTP ${res.status}` };
+    if (!res.ok) return { detail: `hub /gateway HTTP ${res.status}` };
     const snapshot = (await res.json()) as HubSnapshot | null;
-    if (!snapshot || !Array.isArray(snapshot.credentials)) return { ok: false, detail: "hub has no gateway snapshot" };
-    return { ok: true, site, snapshot };
+    if (!snapshot || !Array.isArray(snapshot.credentials)) return { detail: "hub has no gateway snapshot" };
+    return { snapshot };
   } catch (e) {
-    return { ok: false, detail: `hub unreachable: ${e instanceof Error ? e.message : String(e)}` };
+    return { detail: `hub unreachable: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 
-/** Fresh enough to stand in for an upstream read. */
-export function hubFresh(read: HubRead, now: number): read is Extract<HubRead, { ok: true }> {
-  return read.ok && now - read.snapshot.collectedAt < HUB_FRESH_MS;
+function readCache(path: string): HubSnapshot | null {
+  try {
+    const snapshot = JSON.parse(readFileSync(path, "utf8")) as HubSnapshot;
+    return Array.isArray(snapshot.credentials) ? snapshot : null;
+  } catch {
+    return null;
+  }
 }
 
-async function readToken(): Promise<string | null> {
-  if (Bun.env.HUB_READ_TOKEN) return Bun.env.HUB_READ_TOKEN;
+function writeCache(path: string, snapshot: HubSnapshot): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(`${path}.tmp`, JSON.stringify(snapshot));
+    renameSync(`${path}.tmp`, path);
+  } catch {}
+}
+
+export type HubTokenKind = "read" | "ingest";
+
+export const tokenFile = (kind: HubTokenKind, home = homedir()) => join(home, ".config/ccs", `hub-${kind}-token`);
+export const tokenRef = (kind: HubTokenKind) => `op://Sol/${kind === "read" ? "Hub Read" : "Hub Ingest"}/credential`;
+
+/** The token file the install writes, then the environment, then a bounded `op read`. */
+export async function readHubToken(kind: HubTokenKind, home = homedir()): Promise<string | null> {
+  try {
+    const token = readFileSync(tokenFile(kind, home), "utf8").trim();
+    if (token) return token;
+  } catch {}
+  const env = kind === "read" ? Bun.env.HUB_READ_TOKEN : Bun.env.HUB_INGEST_TOKEN;
+  if (env) return env;
   try {
     // Under launchd (the menu bar) op hangs probing the desktop app unless told not to.
-    const proc = Bun.spawn(["op", "read", READ_TOKEN_REF], {
+    const proc = Bun.spawn(["op", "read", tokenRef(kind)], {
       stdin: "ignore",
       stdout: "pipe",
       stderr: "ignore",

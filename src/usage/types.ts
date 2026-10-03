@@ -66,6 +66,8 @@ export interface SubscriptionInfo {
   planName: string;
   monthlyDollars: number;
   renewsOn: string | null;
+  /** The renewal date was inferred, not read from the provider's billing. */
+  renewsEstimated?: boolean;
   source: "official_api" | "official_ui" | "configured" | "unknown";
 }
 
@@ -73,6 +75,7 @@ export interface SubscriptionRenewal {
   provider: ProviderId;
   account: string | null;
   renewsOn: string;
+  estimated?: boolean;
   source: "official_api" | "official_ui";
 }
 
@@ -92,6 +95,6 @@ export interface UsageSnapshot {
   observations: UsageObservation[];
   adapters: AdapterHealth[];
   subscriptions: SubscriptionInfo[];
-  /** Absent when the gateway was unreachable. */
+  /** The gateway's accounts as the hub last saw them. Absent when no hub snapshot was available. */
   gateway?: { base: string; accounts: GatewayAccount[] };
 }

@@ -1,6 +1,6 @@
 /**
- * `ccs usage` — point-in-time availability view across the five scoped providers
- * (Codex, Anthropic, Grok). Snapshot only: no history, no daemon.
+ * `ccs usage` — point-in-time availability view across Codex, Anthropic, and Grok, read from
+ * the hub's snapshot. Snapshot only: no history, no daemon.
  *
  *   ccs usage                          terminal availability view
  *   ccs usage --json                   stable JSON contract (UsageSnapshot)
@@ -15,29 +15,23 @@ import type { ProviderId, UsageSnapshot } from "./types.ts";
 
 const VALID: readonly ProviderId[] = ["codex", "anthropic", "grok"];
 
-const SOURCES_HELP = `ccs usage sources — what each adapter reads
+const SOURCES_HELP = `ccs usage sources — where the numbers come from
 
-  codex        ChatGPT OAuth usage API (official_api) per gateway Codex credential,
-               through the gateway management api-call. Ordinary 5h/weekly windows,
-               dollar credits as separate state. Logins the gateway lacks fall back to
-               CodexBar snapshots (cached).
-  anthropic    Anthropic OAuth usage API (official_api) per gateway Claude credential,
-               through the gateway management api-call: five-hour, weekly, and scoped
-               windows plus banked resets. One read per account per two minutes (longer
-               when Anthropic sends Retry-After); a failed read keeps the last good
-               numbers, marked stale, from ~/.ccs/cache/usage.
-  grok         xAI billing/subscription JSON plus GetRemainingResets gRPC-Web
-               (official_api) through the gateway's xAI credential, else ~/.grok/auth.json:
-               weekly pool, Build/Chat/Imagine, plan, reset grants, credits.
+  Every provider reads the hub's GET /gateway snapshot. The Mac Mini's collector is the
+  only caller of the providers' usage endpoints; ccs never calls Anthropic, ChatGPT, or xAI.
 
-  Codex and Anthropic read the hub's GET /gateway first: the Mini collector's snapshot,
-  the only thing that calls those usage endpoints. ccs calls upstream itself only when
-  the hub is unreachable or its snapshot is over ten minutes old. Stale numbers carry
-  a stale chip; a warning line appears once they are over 30 minutes old.
-  Token: HUB_READ_TOKEN, else op read "op://Sol/Hub Read/credential".
+  codex        ChatGPT usage (official_api): weekly window, banked reset credits, renewal
+               (marked estimated when the collector inferred it).
+  anthropic    Anthropic OAuth usage (official_api): five-hour, weekly, and Fable windows,
+               banked resets, plan tier.
+  grok         xAI billing (official_api): weekly pool with Build/Chat/Imagine shares, plan,
+               reset grants, prepaid credit.
 
-  The gateway is CLI_PROXY_MGMT_URL (default the Mac Mini's tailnet door), then the
-  local standby on 127.0.0.1:8318, then 127.0.0.1:8317.
+  A snapshot over ten minutes old, or one read from ~/.ccs/cache/hub-gateway.json because
+  the hub did not answer, renders with a stale chip on every row; a note appears once it is
+  over 30 minutes old.
+  Token: ~/.config/ccs/hub-read-token, else HUB_READ_TOKEN, else op read
+  "op://Sol/Hub Read/credential". \`bun run setup\` writes the token files.
 
 Evidence classes, strongest first: official_api, provider_header, official_ui,
 official_cli, observed_private, local_estimate. Unknown beats fake precision.`;

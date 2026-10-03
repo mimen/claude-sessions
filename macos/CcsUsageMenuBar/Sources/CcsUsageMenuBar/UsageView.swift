@@ -29,6 +29,8 @@ struct ViewSection: Decodable, Equatable, Identifiable {
     let account: String?
     let plan: Plan?
     let renewsOn: String?
+    /// "renews Oct 20", "renews ~Oct 20, estimated", or "renewal unknown"; nil without a plan.
+    let renewal: String?
     let rows: [ViewRow]
     let staleSince: Double?
 }

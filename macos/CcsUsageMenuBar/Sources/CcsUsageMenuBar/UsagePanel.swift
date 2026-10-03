@@ -151,8 +151,8 @@ struct UsagePanel: View {
                             .padding(.vertical, 1)
                             .background(Capsule().fill(Color.secondary.opacity(0.14)))
                     }
-                    if section.plan != nil {
-                        Text(section.renewsOn.map { "renews \(UsageViewEngine.shared.renewalLabel($0))" } ?? "renewal unknown")
+                    if let renewal = section.renewal {
+                        Text(renewal)
                             .lineLimit(1)
                             .fixedSize()
                             .font(.system(size: 9.5, design: .rounded))

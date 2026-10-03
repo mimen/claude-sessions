@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { $ } from "bun";
 import { installClaudeShim } from "../src/launcher/install.ts";
+import { hubInstall } from "./hub-install.ts";
 
 /** One-shot onboarding: link `ccs` onto PATH and report on optional dependencies. */
 
@@ -28,6 +29,8 @@ if (shim.ok) {
 } else {
   console.log(`✗ Claude shim install failed: ${shim.error.message}`);
 }
+
+if (!(await hubInstall())) process.exitCode = 1;
 
 console.log("\nDependency check:");
 const deps: Array<[string, string]> = [

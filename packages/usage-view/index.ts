@@ -36,6 +36,8 @@ export interface Subscription {
   planName: string;
   monthlyDollars: number;
   renewsOn?: string | null;
+  /** The renewal date was inferred, not read from billing. */
+  renewsEstimated?: boolean | null;
 }
 
 export interface Snapshot {
@@ -69,6 +71,8 @@ export interface Section {
   account: string | null;
   plan: Plan | null;
   renewsOn: string | null;
+  /** "renews Oct 20", "renews ~Oct 20, estimated", or "renewal unknown"; null without a plan. */
+  renewal: string | null;
   rows: Row[];
   /** Epoch ms of the oldest stale reading in the section, when any. */
   staleSince: number | null;
@@ -300,15 +304,17 @@ export function buildView(snapshot: Snapshot, order: Order = {}): View {
       .sort((a, b) => rowRank(a.r) - rowRank(b.r) || a.i - b.i)
       .map(x => x.r);
     const sub = subscriptions.get(id);
+    const plan = sub ? { name: sub.planName, dollars: sub.monthlyDollars }
+      : g.provider === "anthropic" ? planFromTier(g.obs.find(o => o.tier)?.tier) : null;
     const staleTimes = natural.flatMap(r => r.kind === "allowance" && r.stale && r.observedAt != null ? [r.observedAt] : []);
     return {
       id,
       provider: g.provider,
       title: providerTitle[g.provider] ?? g.provider,
       account: g.account,
-      plan: sub ? { name: sub.planName, dollars: sub.monthlyDollars }
-        : g.provider === "anthropic" ? planFromTier(g.obs.find(o => o.tier)?.tier) : null,
+      plan,
       renewsOn: sub?.renewsOn ?? null,
+      renewal: plan ? renewalText(sub?.renewsOn, sub?.renewsEstimated) : null,
       rows: ordered(natural, order.rows?.[id], r => r.id),
       staleSince: staleTimes.length ? Math.min(...staleTimes) : null,
     };
@@ -330,6 +336,11 @@ export function shortAge(at: number, now: number): string {
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
   return hours < 48 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+export function renewalText(renewsOn: string | null | undefined, estimated?: boolean | null): string {
+  if (!renewsOn) return "renewal unknown";
+  return estimated ? `renews ~${renewalLabel(renewsOn)}, estimated` : `renews ${renewalLabel(renewsOn)}`;
 }
 
 /** "Oct 8" from a `YYYY-MM-DD` renewal date, read in UTC so it never shifts a day. */

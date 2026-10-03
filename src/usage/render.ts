@@ -6,7 +6,7 @@
 
 import type { UsageSnapshot } from "./types.ts";
 import { formatCost } from "../cost.ts";
-import { buildView, renewalLabel, shortAge, type Row } from "../../packages/usage-view/index.ts";
+import { buildView, shortAge, type Row } from "../../packages/usage-view/index.ts";
 
 /**
  * An eight-segment usage bar, e.g. `███████░`. Filled segments scale with use.
@@ -81,7 +81,7 @@ export function renderSnapshot(snap: UsageSnapshot): string {
 
   for (const s of view.sections) {
     lines.push(s.account ? `${s.title} · ${s.account}` : s.title);
-    if (s.plan) lines.push(`  ${s.plan.name} · ${s.renewsOn ? `renews ${renewalLabel(s.renewsOn)}` : "renewal unknown"}`);
+    if (s.plan) lines.push(`  ${s.plan.name} · ${s.renewal}`);
     for (const r of s.rows) lines.push(`  ${rowText(r, `${rowName(r).padEnd(pad)} `)}`);
     lines.push("");
   }

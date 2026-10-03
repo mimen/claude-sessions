@@ -1,30 +1,20 @@
 /**
- * Provider adapters for `ccs usage`. Each adapter returns { observations, health } and
- * never throws: a provider that cannot answer degrades to AdapterHealth so one broken
- * adapter cannot collapse the command (plan commitment).
- *
- * Sources, per plan:
- *  - codex → ChatGPT wham usage per gateway Codex credential
- *  - anthropic → Anthropic OAuth usage per gateway Claude credential
- *  - grok → xAI billing/subscription JSON + reset-grant gRPC-Web per gateway xAI credential
+ * `ccs usage` from the hub's snapshot alone. The Mini's collector reads Anthropic, ChatGPT, and
+ * xAI; this file only turns its credentials into observations, so no Mac ever calls a provider.
+ * A snapshot older than HUB_FRESH_MS, or one served from this Mac's cache because the hub did not
+ * answer, still renders, with every row marked stale.
  */
 
-import { readFileSync } from "node:fs";
 import type {
   AdapterHealth,
+  GatewayAccount,
   ProviderId,
   SubscriptionRenewal,
   UsageObservation,
   UsageSnapshot,
   UsageWindow,
 } from "./types.ts";
-import { sourceClassFor, type RawCodexBarEntry } from "./codexbar.ts";
-import { readLiveCodexAccounts } from "./codex-oauth.ts";
-import { bankedResetsFromOauthUsage, fetchOauthProfile, fetchOauthUsage, planFromProfile, windowsFromOauthUsage } from "./anthropic-oauth.ts";
-import { fetchGrokBilling, gatewayGrokCall, localGrokCall } from "./grok.ts";
-import { readThroughCache } from "./account-cache.ts";
-import { connectGateway, credentialIssue, gatewayAccounts, type Gateway } from "./gateway.ts";
-import { hubFresh, readHubSnapshot, type HubCredential, type HubRead, type HubWindow } from "./hub.ts";
+import { HUB_FRESH_MS, readHubSnapshot, type HubCredential, type HubRead, type HubSnapshot, type HubWindow } from "./hub.ts";
 import { mergeSubscriptionRenewals, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
 
 export interface AdapterResult {
@@ -35,607 +25,151 @@ export interface AdapterResult {
 
 const PROVIDERS: readonly ProviderId[] = ["codex", "anthropic", "grok"];
 
-function now(): string {
-  return new Date().toISOString();
-}
-
-interface CodexBarWindow {
-  usedPercent?: number | null;
-  resetsAt?: string | number | null;
-  resetDescription?: string | null;
-  windowMinutes?: number | null;
-}
-
-/** CoreFoundation AbsoluteTime (seconds since 2001-01-01 UTC) as used by CodexBar snapshots. */
-const CF_ABSOLUTE_EPOCH = 978_307_200;
-
-function toIsoTimestamp(value: unknown): string | null {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return new Date((value + CF_ABSOLUTE_EPOCH) * 1000).toISOString();
-  }
-  return null;
-}
-
-/** Map a window length to the plan's window vocabulary. */
-function windowFor(minutes: number | null | undefined): UsageObservation["window"] {
-  if (minutes == null) return null;
-  if (minutes <= 5) return "minute";
-  if (minutes <= 300) return "five_hour";
-  if (minutes <= 1440) return "daily";
-  if (minutes <= 10080) return "weekly";
-  return "monthly";
-}
-
-// ---------------------------------------------------------------------------
-// CodexBar-backed providers
-// ---------------------------------------------------------------------------
-
-interface Identity {
-  accountEmail?: string;
-  loginMethod?: string;
-}
-
-/** Label an account the way snapshots reference it — email when present, else login method. */
-export function accountLabel(identity: Identity | undefined): string {
-  return identity?.accountEmail ?? identity?.loginMethod ?? "unknown";
-}
-
-/**
- * Entitlement id per CodexBar ENTRY, not per adapter: Anthropic runs two separate
- * subscriptions (personal + AUF), and CodexBar returns one entry per account. The email
- * distinguishes them; without it every entry collapses into the base entitlement.
- */
-export function accountEntitlement(base: string, identity: Identity | undefined, entry: RawCodexBarEntry): string {
-  const email = identity?.accountEmail;
-  if (!email || entry.error) return base;
-  return `${base}:${email}`;
-}
-
-interface CodexSnapshotRecord {
-  id?: string;
-  sourceLabel?: string;
-  credits?: { remaining?: number; updatedAt?: string | number };
-  snapshot?: CodexUsage & { extraRateWindows?: CodexUsage["extraRateWindows"] };
-}
-
-function snapshotRecords(raw: unknown): CodexSnapshotRecord[] {
-  if (Array.isArray(raw)) return raw as CodexSnapshotRecord[];
-  if (raw && typeof raw === "object" && Array.isArray((raw as { records?: unknown }).records)) {
-    return (raw as { records: CodexSnapshotRecord[] }).records;
-  }
-  return [];
-}
-
-function loadCodexAccountSnapshots(): unknown {
-  const home = Bun.env.HOME;
-  if (!home) return null;
-  try {
-    return JSON.parse(readFileSync(
-      `${home}/Library/Application Support/CodexBar/codex-account-snapshots.json`,
-      "utf8",
-    ));
-  } catch {
-    return null;
-  }
-}
-
-function entryFromSnapshotRecord(record: CodexSnapshotRecord): RawCodexBarEntry | null {
-  if (!record.snapshot) return null;
-  return {
-    provider: "codex",
-    source: record.sourceLabel ?? "oauth",
-    usage: record.snapshot,
-    credits: record.credits
-      ? {
-          remaining: record.credits.remaining,
-          updatedAt: toIsoTimestamp(record.credits.updatedAt) ?? undefined,
-        }
-      : undefined,
-  };
-}
-
-/**
- * CodexBar `--all-accounts` only returns the live system OAuth account. Parked
- * ChatGPT logins still have meters in `codex-account-snapshots.json`.
- */
-export function inactiveCodexSnapshotObservations(
-  records: unknown,
-  liveEmails: Iterable<string>,
-): UsageObservation[] {
-  const live = new Set([...liveEmails].map((email) => email.toLowerCase()));
-  const out: UsageObservation[] = [];
-  for (const record of snapshotRecords(records)) {
-    const entry = entryFromSnapshotRecord(record);
-    const email = (entry?.usage as CodexUsage | undefined)?.identity?.accountEmail
-      ?? record.id;
-    if (!entry || !email || live.has(email.toLowerCase())) continue;
-    out.push(...codexObservationsFromEntry(entry, true));
-  }
-  return out;
-}
-
-function windowObservations(
-  provider: ProviderId,
-  entitlement: string,
-  scope: UsageObservation["scope"],
-  windows: Array<[string, CodexBarWindow | null]>,
-  observedAt: string,
-  sourceClass: UsageObservation["source"],
-  stale = false,
-): UsageObservation[] {
-  const out: UsageObservation[] = [];
-  for (const [name, w] of windows) {
-    if (!w) continue;
-    out.push({
-      provider,
-      entitlement,
-      metric: "allowance",
-      scope,
-      window: windowFor(w.windowMinutes),
-      used: typeof w.usedPercent === "number" ? w.usedPercent : null,
-      limit: typeof w.usedPercent === "number" ? 100 : null,
-      remaining:
-        typeof w.usedPercent === "number" ? Math.max(0, 100 - w.usedPercent) : null,
-      resetsAt: toIsoTimestamp(w.resetsAt),
-      expiresAt: null,
-      observedAt,
-      source: sourceClass,
-      // Percentages from the product surface are rounded by the provider itself.
-      exact: false,
-      ...(stale ? { stale: true } : {}),
-    });
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// Codex
-// ---------------------------------------------------------------------------
-
-interface CodexUsage {
-  updatedAt?: string | number;
-  identity?: Identity;
-  primary?: CodexBarWindow | null;
-  secondary?: CodexBarWindow | null;
-  tertiary?: CodexBarWindow | null;
-  extraRateWindows?: Array<{ id?: string; title?: string; window?: CodexBarWindow }>;
-  codexResetCredits?: {
-    availableCount?: number;
-    credits?: Array<{
-      id?: string;
-      status?: string;
-      granted_at?: string | number;
-      expires_at?: string | number;
-      redeemed_at?: string | number;
-      title?: string;
-    }>;
-    updatedAt?: string | number;
-  };
-  credits?: { remaining?: number; updatedAt?: string | number };
-  subscriptionRenewsAt?: string | null;
-}
-
-function codexObservationsFromEntry(entry: RawCodexBarEntry, stale = false): UsageObservation[] {
-  const usage = entry.usage as CodexUsage | undefined;
-  if (!usage) return [];
-  const observedAt = toIsoTimestamp(usage.updatedAt) ?? now();
-  const srcClass = sourceClassFor(entry.source);
-  const entitlement = accountEntitlement("codex-pro", usage.identity, entry);
-  const out: UsageObservation[] = windowObservations(
-    "codex", entitlement, "account",
-    [
-      ["primary", usage.primary ?? null],
-      ["secondary", usage.secondary ?? null],
-      ["tertiary", usage.tertiary ?? null],
-    ],
-    observedAt,
-    srcClass,
-    stale,
-  );
-  // Spark windows ride in extraRateWindows but consume a distinct Spark allowance —
-  // they keep their own entitlement so the view never mislabels them as Codex Pro.
-  for (const extra of usage.extraRateWindows ?? []) {
-    if (!extra.window) continue;
-    const id = extra.id ?? extra.title ?? "codex-spark";
-    out.push(...windowObservations("codex", accountEntitlement(id, usage.identity, entry), "account", [[extra.title ?? id, extra.window]], observedAt, srcClass, stale));
-  }
-  // Banked reset credits carry full lifecycle state; "redeeming" is pending, not consumed.
-  const rc = usage.codexResetCredits;
-  if (rc?.credits) {
-    for (const c of rc.credits) {
-      out.push({
-        provider: "codex",
-        entitlement: accountEntitlement("codex-reset-credit", usage.identity, entry),
-        metric: "reset_credit",
-        scope: "account",
-        window: null,
-        used: null,
-        limit: null,
-        remaining: c.status === "available" ? 1 : null,
-        resetsAt: null,
-        expiresAt: toIsoTimestamp(c.expires_at),
-        observedAt: toIsoTimestamp(rc.updatedAt) ?? observedAt,
-        source: srcClass,
-        exact: true,
-        ...(stale ? { stale: true } : {}),
-      });
-    }
-  }
-  // Paid dollar credits are a TOP-LEVEL entry sibling of `usage` in CodexBar output.
-  if (typeof entry.credits?.remaining === "number") {
-    out.push({
-      provider: "codex",
-      entitlement: accountEntitlement("codex-dollar-credit", usage.identity, entry),
-      metric: "credit",
-      scope: "account",
-      window: null,
-      used: null,
-      limit: null,
-      remaining: entry.credits.remaining,
-      resetsAt: null,
-      expiresAt: null,
-      observedAt: toIsoTimestamp(entry.credits.updatedAt) ?? observedAt,
-      source: srcClass,
-      exact: true,
-      ...(stale ? { stale: true } : {}),
-    });
-  }
-  return out;
-}
-
-function snapshotAccountEmails(observations: UsageObservation[]): string[] {
-  const emails = new Set<string>();
-  for (const observation of observations) {
-    const email = observation.entitlement.split(":")[1];
-    if (email) emails.add(email);
-  }
-  return [...emails];
-}
-
-type GatewayConnection = Awaited<ReturnType<typeof connectGateway>>;
-type CacheOptions = Parameters<typeof readThroughCache>[2];
-
-async function codexAdapter(conn: GatewayConnection): Promise<AdapterResult> {
-  const live = conn.ok ? await readLiveCodexAccounts(conn.gateway) : { ok: [], emails: [], failures: [] };
-  const observations = live.ok.flatMap((entry) => codexObservationsFromEntry(entry));
-  const snapshotObs = inactiveCodexSnapshotObservations(loadCodexAccountSnapshots(), live.emails);
-  observations.push(...snapshotObs);
-  const snapshotEmails = snapshotAccountEmails(snapshotObs);
-  const named = [
-    ...live.failures.map((failure) => `${failure.email} ${failure.detail}`),
-    ...snapshotEmails.map((email) => `${email} on cached usage`),
-  ];
-  const health: AdapterHealth =
-    observations.length === 0
-      ? { provider: "codex", status: "unavailable", detail: named[0] ?? (conn.ok ? "no Codex credentials on the gateway" : conn.detail) }
-      : named.length === 0
-        ? { provider: "codex", status: "ok", detail: null }
-        : {
-            provider: "codex",
-            status: "degraded",
-            detail: named.join("; "),
-            accounts: [...live.failures.map((failure) => failure.email), ...snapshotEmails],
-          };
-  return { observations, health };
-}
-
-// ---------------------------------------------------------------------------
-// Anthropic
-// ---------------------------------------------------------------------------
-
-export async function anthropicAdapter(conn: GatewayConnection, cache?: CacheOptions): Promise<AdapterResult> {
-  if (!conn.ok) return { observations: [], health: { provider: "anthropic", status: "unavailable", detail: conn.detail } };
-  const observations: UsageObservation[] = [];
-  const issues: { email: string; reason: string }[] = [];
-  for (const cred of conn.gateway.credentials) {
-    if (cred.provider !== "claude") continue;
-    const issue = credentialIssue(cred);
-    if (issue) issues.push({ email: cred.email, reason: issue });
-    const read = await readThroughCache(`anthropic-${cred.email}`, () =>
-      anthropicObservations(conn.gateway, cred.authIndex, cred.email, now()), cache);
-    observations.push(...read.observations);
-    const newest = Math.max(...read.observations.map((o) => Date.parse(o.observedAt)));
-    if (read.issue && !recentEnough(newest, (cache?.now ?? Date.now)())) issues.push({ email: cred.email, reason: read.issue });
-  }
-  return { observations, health: anthropicHealth(observations.length, issues) };
-}
-
-async function anthropicObservations(gateway: Gateway, authIndex: string, email: string, observedAt: string): Promise<UsageObservation[]> {
-  const [usage, profile] = await Promise.all([fetchOauthUsage(gateway, authIndex), fetchOauthProfile(gateway, authIndex)]);
-  const tier = planFromProfile(profile)?.name ?? null;
-  const out: UsageObservation[] = windowsFromOauthUsage(usage).map((w) => ({
-    provider: "anthropic",
-    entitlement: `claude-max:${email}${w.suffix}`,
-    metric: "allowance",
-    scope: "account",
-    window: w.window,
-    used: w.utilization,
-    limit: 100,
-    remaining: Math.max(0, 100 - w.utilization),
-    resetsAt: w.resetsAt,
-    expiresAt: null,
-    observedAt,
-    source: "official_api",
-    exact: true,
-    tier,
-  }) as UsageObservation & { tier: string | null });
-  for (const r of bankedResetsFromOauthUsage(usage)) {
-    for (let i = 0; i < r.left; i++) {
-      out.push({
-        provider: "anthropic",
-        entitlement: `claude-reset-credit:${email}`,
-        metric: "reset_credit",
-        scope: "account",
-        window: null,
-        used: null,
-        limit: null,
-        remaining: 1,
-        resetsAt: null,
-        expiresAt: r.expiresAt,
-        observedAt,
-        source: "official_api",
-        exact: true,
-      });
-    }
-  }
-  return out;
-}
-
-/** Name each broken account and why, so the reader never has to go find out which. */
-function anthropicHealth(windowCount: number, issues: { email: string; reason: string }[]): AdapterHealth {
-  if (windowCount === 0) {
-    return { provider: "anthropic", status: "unavailable", detail: issues.map((i) => `${i.email} ${i.reason}`).join("; ") || "no Claude credentials on the gateway" };
-  }
-  if (issues.length === 0) return { provider: "anthropic", status: "ok", detail: null };
-  return {
-    provider: "anthropic",
-    status: "degraded",
-    detail: issues.map((i) => `${i.email} ${i.reason}`).join("; "),
-    accounts: [...new Set(issues.map((i) => i.email))],
-  };
-}
-
-// ---------------------------------------------------------------------------
-// The hub's snapshot
-// ---------------------------------------------------------------------------
-
-/** Numbers carried forward for less than this show only their stale chip, not a warning note. */
+/** Numbers stale for less than this show only their stale chip, not a warning note. */
 export const QUIET_STALE_MS = 30 * 60_000;
 
-function recentEnough(observedAt: number, nowMs: number): boolean {
-  return Number.isFinite(observedAt) && nowMs - observedAt < QUIET_STALE_MS;
+/** What the hub calls each provider. */
+const HUB_PROVIDER: Record<ProviderId, string> = { anthropic: "claude", codex: "codex", grok: "xai" };
+const TITLE: Record<ProviderId, string> = { anthropic: "Claude", codex: "Codex", grok: "Grok" };
+
+/** One ISO time per available reset: the full list when the hub sends it, else the soonest repeated. */
+function resetExpiries(banked: HubCredential["bankedResets"]): (string | null)[] {
+  if (!banked) return [];
+  if (banked.expiries) return banked.expiries;
+  return Array.from({ length: banked.count }, () => banked.nextExpiresAt);
 }
 
-const HUB_PROVIDER: Partial<Record<ProviderId, string>> = { anthropic: "claude", codex: "codex" };
+/** Entitlement ids the usage view already knows how to label and group. */
+function entitlements(provider: ProviderId, c: HubCredential & { email: string }) {
+  if (provider === "grok") {
+    const pool = `grok-${(c.plan ?? "consumer").toLowerCase()}:${c.email}`;
+    return { pool, reset: `${pool}#reset`, product: (p: string) => `${pool}#${p.replace(/^Grok/, "").toLowerCase()}`, prepaid: `${pool}#prepaid` };
+  }
+  const pool = provider === "anthropic" ? `claude-max:${c.email}` : `codex-pro:${c.email}`;
+  return { pool, reset: `${provider === "anthropic" ? "claude" : "codex"}-reset-credit:${c.email}`, product: (p: string) => `${pool}#${p}`, prepaid: null };
+}
 
 /**
- * Anthropic or Codex rows from the collector's snapshot, with no upstream call. Rows are dated
- * by when the collector last read them, so a carried-forward account is stale from that time.
+ * One provider's rows from the snapshot. A credential is stale when the collector carried its
+ * numbers forward (usageError) or when the whole snapshot is stale (`snapshotStale`).
  */
-export function hubAdapter(provider: "anthropic" | "codex", credentials: HubCredential[], nowMs: number): AdapterResult {
+export function hubAdapter(provider: ProviderId, snapshot: HubSnapshot, nowMs: number, unreachable?: string): AdapterResult {
+  const snapshotStale = unreachable !== undefined || nowMs - snapshot.collectedAt >= HUB_FRESH_MS;
   const observations: UsageObservation[] = [];
+  const renewals: SubscriptionRenewal[] = [];
   const issues: { email: string; reason: string }[] = [];
-  for (const c of credentials) {
-    if (c.provider !== HUB_PROVIDER[provider] || !c.email) continue;
-    const observedMs = c.usageObservedAt ?? null;
-    if (c.usageError && (observedMs === null || !recentEnough(observedMs, nowMs))) {
+  for (const raw of snapshot.credentials) {
+    if (raw.provider !== HUB_PROVIDER[provider] || !raw.email || (provider === "grok" && raw.disabled)) continue;
+    const c = raw as HubCredential & { email: string };
+    const observedMs = c.usageObservedAt ?? (c.usageError ? null : snapshot.collectedAt);
+    if (c.usageError && (observedMs === null || nowMs - observedMs >= QUIET_STALE_MS)) {
       issues.push({ email: c.email, reason: observedMs === null ? c.usageError : `${c.usageError}, numbers from ${new Date(observedMs).toISOString()}` });
     }
+    const renewsOn = renewalDate(c.renewsAt);
+    if (renewsOn) renewals.push({ provider, account: c.email, renewsOn, source: "official_api", ...(c.renewsAtEstimated ? { estimated: true } : {}) });
     if (observedMs === null) continue;
-    const observedAt = new Date(observedMs).toISOString();
-    const stale = c.usageError !== null;
-    const base = provider === "anthropic" ? `claude-max:${c.email}` : `codex-pro:${c.email}`;
-    const windows: [HubWindow | null, UsageWindow, string][] = [
-      [c.windows.fiveHour, "five_hour", ""],
-      [c.windows.weekly, "weekly", ""],
-      [c.windows.fable, "weekly", "#Fable"],
-    ];
-    for (const [w, window, suffix] of windows) {
-      if (!w) continue;
-      observations.push({
-        provider,
-        entitlement: `${base}${suffix}`,
-        metric: "allowance",
-        scope: "account",
-        window,
-        used: w.usedPct,
-        limit: 100,
-        remaining: Math.max(0, 100 - w.usedPct),
-        resetsAt: w.resetsAt,
-        expiresAt: null,
-        observedAt,
-        source: "official_api",
-        exact: provider === "anthropic",
-        ...(stale ? { stale: true } : {}),
-        ...(provider === "anthropic" ? { tier: c.plan } : {}),
-      } as UsageObservation);
-    }
-    // ponytail: the snapshot keeps only the soonest expiry, so every banked reset shows it.
-    for (let i = 0; i < (c.bankedResets?.count ?? 0); i++) {
-      observations.push({
-        provider,
-        entitlement: `${provider === "anthropic" ? "claude" : "codex"}-reset-credit:${c.email}`,
-        metric: "reset_credit",
-        scope: "account",
-        window: null,
-        used: null,
-        limit: null,
-        remaining: 1,
-        resetsAt: null,
-        expiresAt: c.bankedResets!.nextExpiresAt,
-        observedAt,
-        source: "official_api",
-        exact: true,
-        ...(stale ? { stale: true } : {}),
-      });
-    }
-  }
-  const title = provider === "anthropic" ? "Claude" : "Codex";
-  const health: AdapterHealth = observations.length === 0
-    ? { provider, status: "unavailable", detail: issues.map((i) => `${i.email} ${i.reason}`).join("; ") || `no ${title} credentials in the hub snapshot` }
-    : issues.length === 0
-      ? { provider, status: "ok", detail: null }
-      : { provider, status: "degraded", detail: issues.map((i) => `${i.email} ${i.reason}`).join("; "), accounts: issues.map((i) => i.email) };
-  return { observations, health };
-}
 
-// ---------------------------------------------------------------------------
-// Grok
-// ---------------------------------------------------------------------------
-
-/** The gateway's xAI credential first, the same order as the other adapters; this Mac's login last. */
-export async function grokAdapter(conn: GatewayConnection): Promise<AdapterResult> {
-  const cred = conn.ok ? conn.gateway.credentials.find((c) => c.provider === "xai" && !c.disabled) : undefined;
-  const source = cred && conn.ok
-    ? { ok: true as const, value: { call: gatewayGrokCall(conn.gateway, cred.authIndex), email: cred.email } }
-    : localGrokCall();
-  if (!source.ok) return { observations: [], health: source.error };
-  const res = await fetchGrokBilling(source.value.call, source.value.email);
-  if (!res.ok) return { observations: [], health: res.error };
-  const { credits, resets, resetError, tier, email, renewsAt } = res.value;
-  const c = credits.config;
-  const observedAt = now();
-  const entitlement =
-    accountEntitlement(tier ? `grok-${tier}` : "grok-consumer-oidc", { accountEmail: email }, { provider: "grok" });
-  const out: UsageObservation[] = [];
-
-  // The shared weekly pool — one allowance across Build, Chat, and Imagine.
-  if (typeof c?.creditUsagePercent === "number") {
-    out.push({
-      provider: "grok",
+    const ids = entitlements(provider, c);
+    const common = {
+      provider,
+      scope: provider === "grok" ? "organization" : "account",
+      observedAt: new Date(observedMs).toISOString(),
+      source: "official_api",
+      ...(snapshotStale || c.usageError !== null ? { stale: true } : {}),
+    } as const;
+    const allowance = (entitlement: string, window: UsageWindow, w: HubWindow): UsageObservation => ({
+      ...common,
       entitlement,
       metric: "allowance",
-      scope: "organization",
-      window: "weekly",
-      used: c.creditUsagePercent,
+      window,
+      used: w.usedPct,
       limit: 100,
-      remaining: Math.max(0, 100 - c.creditUsagePercent),
-      resetsAt: c.currentPeriod?.end ?? null,
+      remaining: Math.max(0, 100 - w.usedPct),
+      resetsAt: w.resetsAt,
       expiresAt: null,
-      observedAt,
-      source: "official_api",
-      exact: true,
-    });
-    // Product breakdown rows under the same pool.
+      // Codex rounds its percentages; Anthropic and xAI report them as read.
+      exact: provider !== "codex",
+      ...(provider === "anthropic" ? { tier: c.plan } : {}),
+    } as UsageObservation);
+
+    const { fiveHour, weekly, fable } = c.windows;
+    if (fiveHour) observations.push(allowance(ids.pool, "five_hour", fiveHour));
+    if (weekly) observations.push(allowance(ids.pool, "weekly", weekly));
+    if (fable) observations.push(allowance(ids.product("Fable"), "weekly", fable));
     for (const p of c.productUsage ?? []) {
-      if (!p.product) continue;
-      // proto3 omits zero-valued usagePercent, but the product is still an explicit 0% row.
-      const productPercent = p.usagePercent ?? 0;
-      out.push({
-        provider: "grok",
-        // "#" suffix = product sub-row of the same pool; renderer names it, grouping ignores it.
-        entitlement: `${entitlement}#${p.product.replace("Grok", "").toLowerCase()}`,
-        metric: "allowance",
-        scope: "organization",
-        window: "weekly",
-        used: productPercent,
-        limit: 100,
-        remaining: Math.max(0, 100 - productPercent),
-        resetsAt: c.currentPeriod?.end ?? null,
-        expiresAt: null,
-        observedAt,
-        source: "official_api",
-        exact: true,
+      observations.push(allowance(ids.product(p.product), "weekly", { usedPct: p.usedPct, resetsAt: weekly?.resetsAt ?? null }));
+    }
+    for (const expiresAt of resetExpiries(c.bankedResets)) {
+      observations.push({
+        ...common, entitlement: ids.reset, metric: "reset_credit", window: null,
+        used: null, limit: null, remaining: 1, resetsAt: null, expiresAt, exact: true,
+      });
+    }
+    if (ids.prepaid && typeof c.prepaidUsd === "number") {
+      observations.push({
+        ...common, entitlement: ids.prepaid, metric: "credit", window: null,
+        used: null, limit: null, remaining: c.prepaidUsd, resetsAt: null, expiresAt: null, exact: true,
       });
     }
   }
-  // Redeemable full-reset grants — distinct from the automatic weekly reset.
-  for (const grant of resets) {
-    out.push({
-      provider: "grok",
-      entitlement: `${entitlement}#reset`,
-      metric: "reset_credit",
-      scope: "organization",
-      window: null,
-      used: null,
-      limit: null,
-      remaining: 1,
-      resetsAt: null,
-      expiresAt: grant.expiresAt,
-      observedAt,
-      source: "official_api",
-      exact: true,
-    });
+  const age = `hub snapshot from ${new Date(snapshot.collectedAt).toISOString()}`;
+  if (observations.length > 0 && snapshotStale && nowMs - snapshot.collectedAt >= QUIET_STALE_MS) {
+    issues.unshift({ email: "", reason: unreachable ? `${unreachable}; ${age}` : age });
   }
-  // Prepaid Extra Usage Credits in cents. Emit zero too: explicit "none" is useful detail.
-  const prepaid = c?.prepaidBalance?.val;
-  if (typeof prepaid === "number") {
-    out.push({
-      provider: "grok",
-      entitlement: `${entitlement}#prepaid`,
-      metric: "credit",
-      scope: "organization",
-      window: null,
-      used: null,
-      limit: null,
-      remaining: prepaid / 100,
-      resetsAt: null,
-      expiresAt: null,
-      observedAt,
-      source: "official_api",
-      exact: true,
-    });
-  }
-  const renewsOn = renewalDate(renewsAt);
-  return {
-    observations: out,
-    renewals: renewsOn ? [{
-      provider: "grok",
-      account: email,
-      renewsOn,
-      source: "official_api",
-    }] : [],
-    health: out.length === 0
-      ? { provider: "grok", status: "unavailable", detail: "billing returned no usable fields" }
-      : resetError
-        ? { provider: "grok", status: "degraded", detail: `usage available; reset grants unavailable: ${resetError}` }
-        : { provider: "grok", status: "ok", detail: null },
-  };
+  const detail = issues.map((i) => (i.email ? `${i.email} ${i.reason}` : i.reason)).join("; ");
+  const health: AdapterHealth = observations.length === 0
+    ? { provider, status: "unavailable", detail: detail || `no ${TITLE[provider]} credentials in the hub snapshot` }
+    : issues.length === 0
+      ? { provider, status: "ok", detail: null }
+      : { provider, status: "degraded", detail, ...(issues.some((i) => i.email) ? { accounts: issues.flatMap((i) => (i.email ? [i.email] : [])) } : {}) };
+  return { observations, health, renewals };
 }
 
-// ---------------------------------------------------------------------------
-// Snapshot assembly
-// ---------------------------------------------------------------------------
+/**
+ * The gateway's routing view per provider, from the collector's copy of auth-files. Fill-first
+ * picks from the highest-priority serving credential; ties go to listing order.
+ */
+export function gatewayAccounts(credentials: HubCredential[], providers: readonly ProviderId[]): GatewayAccount[] {
+  const ccsProvider = (c: HubCredential) => (c.provider === "claude" ? "anthropic" : c.provider === "xai" ? "grok" : c.provider);
+  const wanted = credentials.filter((c): c is HubCredential & { email: string } =>
+    !!c.email && (providers as readonly string[]).includes(ccsProvider(c)));
+  const first = new Map<string, HubCredential>();
+  for (const c of wanted) {
+    if (c.disabled || c.unavailable || c.status === "error") continue;
+    const best = first.get(c.provider);
+    if (!best || (c.priority ?? 0) > (best.priority ?? 0)) first.set(c.provider, c);
+  }
+  return wanted.map((c) => ({
+    provider: ccsProvider(c),
+    email: c.email,
+    priority: c.priority ?? 0,
+    disabled: c.disabled,
+    firstInLine: first.get(c.provider) === c,
+  }));
+}
 
 export async function collectSnapshot(opts: {
   providers?: readonly ProviderId[];
   hub?: () => Promise<HubRead>;
-  gateway?: () => ReturnType<typeof connectGateway>;
   now?: () => number;
-  cache?: CacheOptions;
 }): Promise<UsageSnapshot> {
   const wanted = opts.providers ?? PROVIDERS;
-  const [hub, conn] = await Promise.all([(opts.hub ?? readHubSnapshot)(), (opts.gateway ?? connectGateway)()]);
+  const hub = await (opts.hub ?? readHubSnapshot)();
   const nowMs = (opts.now ?? Date.now)();
-  const fresh = hubFresh(hub, nowMs) ? hub.snapshot : null;
-  if (Bun.env.CCS_USAGE_DEBUG) console.error(`ccs usage: hub ${fresh ? `fresh, collected ${new Date(fresh.collectedAt).toISOString()}` : hub.ok ? "stale, falling back" : hub.detail}`);
-  // Final containment boundary: an adapter that throws despite its own error handling
-  // degrades to AdapterHealth here — one broken adapter never collapses the command.
-  const results: AdapterResult[] = [];
-  for (const p of wanted) {
-    try {
-      results.push(
-        p === "grok" ? await grokAdapter(conn)
-        : fresh ? hubAdapter(p, fresh.credentials, nowMs)
-        : p === "codex" ? await codexAdapter(conn)
-        : await anthropicAdapter(conn, opts.cache),
-      );
-    } catch (e) {
-      results.push({
-        observations: [],
-        health: { provider: p, status: "unavailable", detail: e instanceof Error ? e.message : String(e) },
-      });
-    }
+  if (Bun.env.CCS_USAGE_DEBUG) {
+    console.error(`ccs usage: ${hub.ok ? `hub snapshot collected ${new Date(hub.snapshot.collectedAt).toISOString()}${hub.unreachable ? ` from cache (${hub.unreachable})` : ""}` : hub.detail}`);
   }
+  const results: AdapterResult[] = wanted.map((p) => hub.ok
+    ? hubAdapter(p, hub.snapshot, nowMs, hub.unreachable)
+    : { observations: [], health: { provider: p, status: "unavailable", detail: hub.detail } });
   return {
-    generatedAt: now(),
+    generatedAt: new Date(nowMs).toISOString(),
     observations: results.flatMap((r) => r.observations),
     adapters: results.map((r) => r.health),
     subscriptions: mergeSubscriptionRenewals(
-      resolveSubscriptions(wanted),
-      results.flatMap((result) => result.renewals ?? []),
+      resolveSubscriptions(wanted, new Date(nowMs)),
+      results.flatMap((r) => r.renewals ?? []),
     ),
-    ...(conn.ok ? { gateway: { base: conn.gateway.base, accounts: gatewayAccounts(conn.gateway.credentials, wanted) } } : {}),
+    ...(hub.ok ? { gateway: { base: hub.site, accounts: gatewayAccounts(hub.snapshot.credentials, wanted) } } : {}),
   };
 }

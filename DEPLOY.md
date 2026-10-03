@@ -36,7 +36,15 @@ cd /Users/mimen/Programming/Deployments/claude-sessions && bun run setup
 ccs launcher install
 ```
 
-`bun run setup` updates the Bun link for `ccs`. `ccs launcher install` writes the shim, named wrappers, launcher environments, per-launcher Claude Code settings, the opencode model map, and T3 Code's model list from the current shared configuration.
+`bun run setup` updates the Bun link for `ccs`, writes `~/.config/ccs/hub-read-token` and `~/.config/ccs/hub-ingest-token` (mode 0600) from `op://Sol/Hub Read/credential` and `op://Sol/Hub Ingest/credential`, and reports the checkout's commit to the hub with `POST /ingest/build`. Rerunning it rewrites nothing that already matches. A failed `op read` keeps existing token files. `ccs launcher install` writes the shim, named wrappers, launcher environments, per-launcher Claude Code settings, the opencode model map, and T3 Code's model list from the current shared configuration.
+
+After a change under `macos/CcsUsageMenuBar` or `packages/usage-view`, rebuild and restart the menu bar from the deployment checkout:
+
+```sh
+cd /Users/mimen/Programming/Deployments/claude-sessions/macos/CcsUsageMenuBar && ./make-app.sh --install
+```
+
+The app embeds the checkout's commit and reports it to the hub at launch.
 
 ## Verify production
 

@@ -213,14 +213,16 @@
       const rows = uniqueIds(g.obs.map(toRow).filter((r) => r !== null));
       const natural = foldSegments(rows, g.provider).map((r, i) => ({ r, i })).sort((a, b) => rowRank(a.r) - rowRank(b.r) || a.i - b.i).map((x) => x.r);
       const sub = subscriptions.get(id);
+      const plan = sub ? { name: sub.planName, dollars: sub.monthlyDollars } : g.provider === "anthropic" ? planFromTier(g.obs.find((o) => o.tier)?.tier) : null;
       const staleTimes = natural.flatMap((r) => r.kind === "allowance" && r.stale && r.observedAt != null ? [r.observedAt] : []);
       return {
         id,
         provider: g.provider,
         title: providerTitle[g.provider] ?? g.provider,
         account: g.account,
-        plan: sub ? { name: sub.planName, dollars: sub.monthlyDollars } : g.provider === "anthropic" ? planFromTier(g.obs.find((o) => o.tier)?.tier) : null,
+        plan,
         renewsOn: sub?.renewsOn ?? null,
+        renewal: plan ? renewalText(sub?.renewsOn, sub?.renewsEstimated) : null,
         rows: ordered(natural, order.rows?.[id], (r) => r.id),
         staleSince: staleTimes.length ? Math.min(...staleTimes) : null
       };
@@ -239,6 +241,11 @@
       return `${minutes}m`;
     const hours = Math.floor(minutes / 60);
     return hours < 48 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+  }
+  function renewalText(renewsOn, estimated) {
+    if (!renewsOn)
+      return "renewal unknown";
+    return estimated ? `renews ~${renewalLabel(renewsOn)}, estimated` : `renews ${renewalLabel(renewsOn)}`;
   }
   function renewalLabel(renewsOn) {
     const t = Date.parse(`${renewsOn}T00:00:00Z`);

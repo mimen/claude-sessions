@@ -46,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         store.startPolling()
+        BuildReport.send()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

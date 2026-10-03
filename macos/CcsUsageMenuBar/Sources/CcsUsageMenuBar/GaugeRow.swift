@@ -216,8 +216,8 @@ struct ProviderSectionHeader: View {
     }
 }
 
-/// An account's banked resets as one chip on the account line: the redeemable count, and the
-/// soonest expiry, with every expiry listed on hover.
+/// An account's banked resets as one chip on the account line: the redeemable count and every
+/// expiry, soonest first ("3 resets · 2d, 9d, 17d"), each also listed on hover.
 struct ResetChip: View {
     let resets: [ViewRow.Reset]
     let now: Date
@@ -246,8 +246,8 @@ struct ResetChip: View {
     private var label: String {
         let count = ready.count
         let noun = count > 1 ? "\(count) resets" : count == 1 ? "reset" : "resets used"
-        let soonest = ready.compactMap(\.expiresAt).min()
-        return soonest.map { "\(noun) · \(Self.left(Date(epochMs: $0), now: now))" } ?? noun
+        let expiries = ready.compactMap(\.expiresAt).sorted().map { Self.left(Date(epochMs: $0), now: now) }
+        return expiries.isEmpty ? noun : "\(noun) · \(expiries.joined(separator: ", "))"
     }
 
     /// "10d" / "5h": time left before an expiry.

@@ -25,6 +25,9 @@ cp Sources/CcsUsageMenuBar/Resources/usage-view.js "$CONTENTS/Resources/usage-vi
 
 cp .build/release/CcsUsageMenuBar "$CONTENTS/MacOS/$APP_NAME"
 
+# The build the hub's drift check compares against origin/master; BuildReport posts it at launch.
+GIT_SHA=$(git -C ../.. rev-parse HEAD)
+
 cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,6 +41,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
     <key>CFBundleIconFile</key><string>AppIcon2</string>
+    <key>CcsGitSHA</key><string>$GIT_SHA</string>
 </dict>
 </plist>
 PLIST

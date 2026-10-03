@@ -34,6 +34,8 @@ Accounts are labelled by their email. There is no alias table; a plan badge come
 
 `CcsUsage --render out.png` writes a PNG of the panel from a live fetch, for checking layout without opening the menu bar.
 
+Every number comes from the hub's snapshot through `ccs usage --json`; neither ccs nor the app calls a provider. A stale snapshot, or the cached one ccs reads when the hub is down, shows the stale badge. At launch the app posts its embedded commit to the hub's `/ingest/build` using `~/.config/ccs/hub-ingest-token`, on a background request that never delays startup.
+
 A failed refresh never blanks the panel. When ccs reports a provider unavailable, that provider's previous rows stay on screen with a stale badge aged from their real fetch time. The footer shows how old the data is, and reads `outdated` after two missed polls.
 
 ### Claude Fable row

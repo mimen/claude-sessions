@@ -100,6 +100,8 @@ export function mergeSubscriptionRenewals(
   ]));
   return subscriptions.map((subscription) => {
     const renewal = live.get(`${subscription.provider}:${subscription.account ?? ""}`);
-    return renewal ? { ...subscription, renewsOn: renewal.renewsOn, source: renewal.source } : subscription;
+    return renewal
+      ? { ...subscription, renewsOn: renewal.renewsOn, source: renewal.source, ...(renewal.estimated ? { renewsEstimated: true } : {}) }
+      : subscription;
   });
 }
