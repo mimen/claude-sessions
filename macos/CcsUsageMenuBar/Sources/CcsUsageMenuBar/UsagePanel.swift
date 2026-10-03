@@ -5,6 +5,8 @@ struct UsagePanel: View {
     /// ScrollView rasterizes blank under ImageRenderer, so the headless render lays out flat.
     var scrolls = true
     @State private var now = Date()
+    /// Sections whose reset chip is open to its per-reset expiry list.
+    @State private var expandedResets: Set<String> = []
     private let ticker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -16,7 +18,7 @@ struct UsagePanel: View {
             }
             footer
         }
-        .frame(width: 320, height: scrolls ? store.panelHeight : nil)
+        .frame(width: 320, height: scrolls ? min(680, store.panelHeight + openListHeight) : nil)
         .onReceive(ticker) { now = $0 }
         .onDisappear { store.dragging = nil }
     }
@@ -140,6 +142,11 @@ struct UsagePanel: View {
                 }
                 .padding(.bottom, 2)
             }
+            if expandedResets.contains(section.id) {
+                ResetList(resets: resetRows(section), now: now)
+                    .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .top)),
+                                            removal: .opacity))
+            }
             ForEach(section.rows.filter { !$0.isReset }) { row in
                 let item = DragItem.row(section: section.id, gauge: row.id)
                 GaugeRow(row: row, now: now)
@@ -181,9 +188,17 @@ struct UsagePanel: View {
                     .font(.system(size: 9.5, design: .rounded))
                     .foregroundStyle(.tertiary)
             }
-            let resets = section.rows.compactMap { if case .reset(let r) = $0 { r } else { nil } }
+            let resets = resetRows(section)
             if !resets.isEmpty {
-                ResetChip(resets: resets, now: now, compact: compactResets)
+                let expanded = expandedResets.contains(section.id)
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                        if expanded { expandedResets.remove(section.id) } else { expandedResets.insert(section.id) }
+                    }
+                } label: {
+                    ResetChip(resets: resets, now: now, compact: compactResets || expanded, expanded: expanded)
+                }
+                .buttonStyle(.plain)
             }
             if let staleSince = section.staleSince {
                 Text("stale \(UsageViewEngine.shared.shortAge(Date(epochMs: staleSince), now: now))")
@@ -195,6 +210,16 @@ struct UsagePanel: View {
             }
             Spacer()
         }
+    }
+
+    /// Grows the panel by the open reset lists so opening one does not push rows out of view.
+    private var openListHeight: CGFloat {
+        sections.filter { expandedResets.contains($0.id) }
+            .reduce(0) { $0 + CGFloat(resetRows($1).count) * 16 + 18 }
+    }
+
+    private func resetRows(_ section: ViewSection) -> [ViewRow.Reset] {
+        section.rows.compactMap { if case .reset(let r) = $0 { r } else { nil } }
     }
 
     private var sections: [ViewSection] {

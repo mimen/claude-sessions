@@ -217,12 +217,13 @@ struct ProviderSectionHeader: View {
 }
 
 /// An account's banked resets as one chip on the account line: the redeemable count and every
-/// expiry, soonest first ("3 resets · 2d, 9d, 17d"), each also listed on hover.
+/// expiry, soonest first ("3 resets · 2d, 9d, 17d"). Clicking it opens a ResetList.
 struct ResetChip: View {
     let resets: [ViewRow.Reset]
     let now: Date
     /// Count only; the expiries stay in the hover text.
     var compact = false
+    var expanded = false
 
     private var ready: [ViewRow.Reset] { resets.filter(\.available) }
 
@@ -232,6 +233,9 @@ struct ResetChip: View {
             Image(systemName: "arrow.counterclockwise")
                 .font(.system(size: 7.5, weight: .bold))
             Text(label)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 6.5, weight: .bold))
+                .rotationEffect(.degrees(expanded ? 180 : 0))
         }
         .font(.system(size: 8.5, weight: .semibold, design: .rounded))
         .lineLimit(1)
@@ -240,9 +244,8 @@ struct ResetChip: View {
         .padding(.horizontal, 5)
         .padding(.vertical, 1)
         .background(Capsule().fill((live ? Color.green : Color.secondary).opacity(0.14)))
-        .help(resets.map { r in
-            "\(r.available ? "Ready" : "Used")\(r.expiresAt.map { " · expires in \(Self.left(Date(epochMs: $0), now: now))" } ?? "")"
-        }.joined(separator: "\n"))
+        .contentShape(Capsule())
+        .help(expanded ? "Hide expiries" : "Show when each reset expires")
     }
 
     private var label: String {
@@ -257,5 +260,60 @@ struct ResetChip: View {
         let seconds = date.timeIntervalSince(now)
         guard seconds > 0 else { return "expired" }
         return seconds >= 86_400 ? "\(Int(seconds / 86_400))d" : "\(max(1, Int(seconds / 3_600)))h"
+    }
+}
+
+/// The open state of a ResetChip: one line per reset, soonest expiry first, with the exact
+/// expiry time and the time left to the minute.
+struct ResetList: View {
+    let resets: [ViewRow.Reset]
+    let now: Date
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(sorted.enumerated()), id: \.offset) { _, reset in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(reset.available ? Color.green : Color.secondary.opacity(0.4))
+                        .frame(width: 5, height: 5)
+                    Text(reset.available ? "Ready" : "Used")
+                        .foregroundStyle(reset.available ? .primary : .tertiary)
+                    if let expires = reset.expiresAt.map({ Date(epochMs: $0) }) {
+                        Text("expires \(expires.formatted(.dateTime.month(.abbreviated).day().hour().minute()))")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(Self.exact(expires, now: now))
+                            .monospacedDigit()
+                            .foregroundStyle(reset.available ? Color.green : Color.secondary)
+                    } else {
+                        Text("no expiry").foregroundStyle(.tertiary)
+                        Spacer()
+                    }
+                }
+            }
+        }
+        .font(.system(size: 9.5, weight: .medium, design: .rounded))
+        .lineLimit(1)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.green.opacity(0.07)))
+        .padding(.bottom, 4)
+    }
+
+    /// Ready resets first, then by soonest expiry.
+    private var sorted: [ViewRow.Reset] {
+        resets.sorted { a, b in
+            if a.available != b.available { return a.available }
+            return (a.expiresAt ?? .infinity) < (b.expiresAt ?? .infinity)
+        }
+    }
+
+    /// "18d 4h 12m" / "3h 5m" / "42m": time left, to the minute.
+    static func exact(_ date: Date, now: Date) -> String {
+        let minutes = Int(date.timeIntervalSince(now) / 60)
+        guard minutes > 0 else { return "expired" }
+        let d = minutes / 1_440, h = minutes % 1_440 / 60, m = minutes % 60
+        return [d > 0 ? "\(d)d" : nil, d > 0 || h > 0 ? "\(h)h" : nil, "\(m)m"]
+            .compactMap { $0 }.joined(separator: " ")
     }
 }
