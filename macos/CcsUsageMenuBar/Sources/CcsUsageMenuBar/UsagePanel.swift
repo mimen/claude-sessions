@@ -152,9 +152,10 @@ struct UsagePanel: View {
                             .background(Capsule().fill(Color.secondary.opacity(0.14)))
                     }
                     if let renewal = section.renewal {
+                        // Truncates rather than fixedSize: a wide account line would
+                        // overflow the panel and push every row past its side inset.
                         Text(renewal)
                             .lineLimit(1)
-                            .fixedSize()
                             .font(.system(size: 9.5, design: .rounded))
                             .foregroundStyle(.tertiary)
                     }
