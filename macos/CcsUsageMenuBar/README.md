@@ -49,6 +49,7 @@ cd macos/CcsUsageMenuBar
 swift test          # JavaScriptCore bridge tests (view logic: bun test packages/usage-view)
 ./make-app.sh       # build CcsUsage.app
 ./make-app.sh --install   # install to /Applications and launch
+./make-app.sh --fleet milads-m3   # build once here, install here and on each ssh host
 ```
 
 The app is LSUIElement (no Dock icon). `--install` also writes and loads the

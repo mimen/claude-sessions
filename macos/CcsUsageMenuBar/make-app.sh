@@ -1,6 +1,8 @@
 #!/bin/zsh -f
 # Build CcsUsageMenuBar.app into macos/CcsUsageMenuBar/.build/ and install (optional).
-# Usage: ./make-app.sh [--install]   (--install copies to /Applications and launches)
+# Usage: ./make-app.sh [--install]            copy to /Applications and launch
+#        ./make-app.sh --fleet <ssh-host>...  build once, install here and on each host
+#        ./make-app.sh --install-only         install an existing .build/CcsUsage.app (what --fleet runs remotely)
 
 set -e
 cd "$(dirname "$0")"
@@ -8,6 +10,8 @@ cd "$(dirname "$0")"
 APP_NAME="CcsUsage"
 APP_DIR=".build/${APP_NAME}.app"
 CONTENTS="$APP_DIR/Contents"
+
+if [[ "$1" != "--install-only" ]]; then
 
 # The usage view is packages/usage-view, bundled for JavaScriptCore. The output is checked
 # in so `swift test` runs without bun; this keeps it current with the TypeScript.
@@ -50,6 +54,7 @@ PLIST
 # signatures change every build and re-trigger the permission prompt.
 codesign --force --sign "Apple Development" "$APP_DIR" 2>/dev/null \
   || echo "warn: no signing identity found; keychain will re-prompt"
+fi
 
 # The LaunchAgent supervises the app: RunAtLoad starts it at login, KeepAlive restarts
 # it after a crash, ThrottleInterval keeps a crash loop from spinning. A login item
@@ -87,13 +92,22 @@ EOP
   launchctl bootstrap "$DOMAIN" "$PLIST"
 }
 
-if [[ "$1" == "--install" ]]; then
+if [[ "$1" == "--install" || "$1" == "--install-only" || "$1" == "--fleet" ]]; then
   launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
   pkill -f "CcsUsage.app/Contents/MacOS/CcsUsage" 2>/dev/null || true
   rm -rf "/Applications/$APP_NAME.app"
   cp -R "$APP_DIR" /Applications/
   install_agent
   echo "Installed /Applications/$APP_NAME.app; supervised by $LABEL (launchctl print $DOMAIN/$LABEL)"
+  if [[ "$1" == "--fleet" ]]; then
+    shift
+    # The one signed build goes everywhere, so a host without Xcode never has to compile it.
+    for host in "$@"; do
+      rsync -a --delete make-app.sh "$APP_DIR" "$host:/tmp/ccs-menubar/" \
+        && ssh "$host" 'mkdir -p /tmp/ccs-menubar/.build && rm -rf /tmp/ccs-menubar/.build/CcsUsage.app && mv /tmp/ccs-menubar/CcsUsage.app /tmp/ccs-menubar/.build/ && zsh -f /tmp/ccs-menubar/make-app.sh --install-only' \
+        | sed "s/^/$host: /"
+    done
+  fi
 else
   echo "Built $PWD/$APP_DIR — run with --install to install to /Applications and launch."
 fi
