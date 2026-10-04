@@ -3,6 +3,43 @@ deployment_status: verified
 deployment_production_trigger: merge to master
 deployment_verify_command: ccs doctor launcher && ccs doctor models
 deployment_last_assessed: 2026-09-03
+deployment_targets:
+  - component: ccs CLI and engine
+    where: local-install
+    detail: Bun-linked ccs and generated launcher files from the deployment checkout on M5, M3, and Mini
+  - component: Go TUI
+    where: local-install
+    detail: Local Go terminal client launched by ccs
+  - component: Productivity sidebar server
+    where: m5-laptop
+    detail: launchd com.milad.ccs.sidebar on 8787 and com.milad.ccs.sidebar-fork on 8788
+  - component: Productivity sidebar server
+    where: m3-laptop
+    detail: launchd com.milad.ccs.sidebar on 8787
+  - component: Sidebar web fallback
+    where: m5-laptop
+    detail: Bundled web client served by the local productivity sidebar server
+  - component: Sidebar web fallback
+    where: m3-laptop
+    detail: Bundled web client served by the local productivity sidebar server
+  - component: CCS native sidebar
+    where: local-install
+    detail: macos/install.sh builds ~/Applications/CCS Sessions.app; M3 receives the build from M5
+  - component: Usage menu-bar app
+    where: local-install
+    detail: CcsUsage.app installed on M5, M3, and Mini; supervised by com.milad.ccs.usage-menubar
+  - component: ccs plugin and marketplace
+    where: local-install
+    detail: Claude Code installs ccs@claude-sessions from the in-repo GitHub marketplace
+  - component: Scheduled LaunchAgents
+    where: mac-mini
+    detail: launchd com.milad.ccs.catalogue-refresh
+  - component: Scheduled LaunchAgents
+    where: m5-laptop
+    detail: launchd com.milad.ccs.catalogue-refresh and com.milad.ccs.enrich
+  - component: Scheduled LaunchAgents
+    where: m3-laptop
+    detail: launchd com.milad.ccs.catalogue-refresh and com.milad.ccs.enrich
 ---
 
 # Claude Sessions deployment
