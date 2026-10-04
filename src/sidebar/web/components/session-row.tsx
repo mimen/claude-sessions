@@ -319,6 +319,9 @@ export function SessionRow({
         // data cannot turn the list into a mixture of heights and move targets under the pointer.
         "group relative mb-1.5 block w-full cursor-pointer overflow-hidden rounded-md px-2.5 text-left",
         threeLine ? "h-[62px]" : "h-[46px]",
+        // The list holds up to 2,000 rows; off-screen ones skip layout and paint. Menus portal out.
+        "[content-visibility:auto]",
+        threeLine ? "[contain-intrinsic-size:auto_62px]" : "[contain-intrinsic-size:auto_46px]",
         "transition-colors duration-75",
         ghost ? "bg-transparent" : "bg-card",
         "before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-transparent",
