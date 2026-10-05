@@ -41,7 +41,7 @@ A server run from a worktree reports `serverVersion: "dev"` rather than a SHA â€
 
 ```sh
 swift build -c release      # ~16s cold, seconds warm
-swift test                  # 27 tests today, all in Tests/CcsSidebarUITests
+swift test                  # 28 XCTest cases today, all in Tests/CcsSidebarUITests
 ```
 
 `swift build` needs nothing outside the repo. Building the *extension* does: `install.sh`
