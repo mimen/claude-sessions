@@ -156,7 +156,7 @@ func (m Model) renderCatalogueNotice() string {
 	switch status.SourceIndex.State {
 	case "stale":
 		if status.SourceIndex.LagMs > 0 {
-			details = append(details, formatCatalogueLag(status.SourceIndex.LagMs)+" lag")
+			details = append(details, formatCatalogueLag(int64(status.SourceIndex.LagMs))+" lag")
 		}
 	case "unavailable", "":
 		headline = "catalogue unavailable"

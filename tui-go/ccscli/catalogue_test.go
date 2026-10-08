@@ -143,3 +143,16 @@ func TestCataloguePreflightKeepsWarningWhenRecheckIsUnhealthy(t *testing.T) {
 		t.Fatalf("status = %+v", status)
 	}
 }
+
+func TestDecodeCatalogueCheckAcceptsFractionalMilliseconds(t *testing.T) {
+	// ccs derives these from fs mtimeMs, which carries sub-millisecond precision.
+	payload := strings.Replace(healthyCatalogueCheck, `"lagMs": 0`, `"lagMs": 16623.178`, 1)
+	payload = strings.Replace(payload, `"sourceLatestMtimeMs": 1722168000123`, `"sourceLatestMtimeMs": 1722168000123.7576`, 1)
+	status, err := decodeCatalogueCheck(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Healthy || status.SourceIndex.LagMs < 16623 {
+		t.Fatalf("status = %+v", status)
+	}
+}

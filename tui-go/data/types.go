@@ -205,19 +205,19 @@ type CatalogueServiceStatus struct {
 
 // CatalogueSourceIndexStatus is the source/index freshness reported by the catalogue service.
 type CatalogueSourceIndexStatus struct {
-	State                string `json:"state"`
-	SourceLatestMtimeMs  int64  `json:"sourceLatestMtimeMs"`
-	IndexedLatestMtimeMs int64  `json:"indexedLatestMtimeMs"`
-	LagMs                int64  `json:"lagMs"`
-	StaleAfterMs         int64  `json:"staleAfterMs"`
-	SourceFiles          int    `json:"sourceFiles"`
-	IndexedSessions      int    `json:"indexedSessions"`
-	OutOfSyncSessions    int    `json:"outOfSyncSessions"`
-	Generation           int64  `json:"generation"`
-	IndexedAt            string `json:"indexedAt"`
-	RefreshedAt          string `json:"refreshedAt"`
-	LastErrorAt          string `json:"lastErrorAt"`
-	LastError            string `json:"lastError"`
+	State                string  `json:"state"`
+	SourceLatestMtimeMs  float64 `json:"sourceLatestMtimeMs"`
+	IndexedLatestMtimeMs float64 `json:"indexedLatestMtimeMs"`
+	LagMs                float64 `json:"lagMs"`
+	StaleAfterMs         float64 `json:"staleAfterMs"`
+	SourceFiles          int     `json:"sourceFiles"`
+	IndexedSessions      int     `json:"indexedSessions"`
+	OutOfSyncSessions    int     `json:"outOfSyncSessions"`
+	Generation           int64   `json:"generation"`
+	IndexedAt            string  `json:"indexedAt"`
+	RefreshedAt          string  `json:"refreshedAt"`
+	LastErrorAt          string  `json:"lastErrorAt"`
+	LastError            string  `json:"lastError"`
 }
 
 // CatalogueRefreshStats is the existing index refresh count returned by ccs.
