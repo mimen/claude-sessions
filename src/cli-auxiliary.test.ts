@@ -35,8 +35,8 @@ function seed(): void {
   roots.push(root);
   process.env.CCS_ROOT = root;
   mkdirSync(join(root, "cache"), { recursive: true });
-  const registryPath = join(root, "ClaudeConfig", "categories", "registry.json");
-  mkdirSync(join(root, "ClaudeConfig", "categories"), { recursive: true });
+  const registryPath = join(root, "categories", "registry.json");
+  mkdirSync(join(root, "categories"), { recursive: true });
   writeFileSync(registryPath, JSON.stringify({
     $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
     categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,

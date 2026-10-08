@@ -18,8 +18,8 @@ afterEach(() => {
 test("strategic analytics groups explicit metrics without double-counting displayed roots", () => {
   const root = mkdtempSync(join(tmpdir(), "ccs-category-analytics-"));
   roots.push(root);
-  const registryPath = join(root, "ClaudeConfig", "categories", "registry.json");
-  mkdirSync(join(root, "ClaudeConfig", "categories"), { recursive: true });
+  const registryPath = join(root, "categories", "registry.json");
+  mkdirSync(join(root, "categories"), { recursive: true });
   writeFileSync(registryPath, JSON.stringify({
     $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
     categories: [{ slug: "events", name: "Events", compactLabel: "Events", order: 1,

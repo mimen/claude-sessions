@@ -154,8 +154,8 @@ describe("enrichCandidates", () => {
   test("category staleness is ORed with fresh prose and deterministic repair skips the gateway", async () => {
     const f = await fixture([{ id: "a", messages: 4 }], "Workspaces/Assistant/project");
     const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
-    const registryPath = join(f.dir, "ClaudeConfig", "categories", "registry.json");
-    mkdirSync(join(f.dir, "ClaudeConfig", "categories"), { recursive: true });
+    const registryPath = join(f.dir, "categories", "registry.json");
+    mkdirSync(join(f.dir, "categories"), { recursive: true });
     writeFileSync(registryPath, JSON.stringify({
       $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
       categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,
@@ -189,8 +189,8 @@ describe("enrichCandidates", () => {
   test("exhausted category retries remain reportable and do not starve stale prose", async () => {
     const f = await fixture([{ id: "locked", messages: 4 }]);
     const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
-    const registryPath = join(f.dir, "ClaudeConfig", "categories", "registry.json");
-    mkdirSync(join(f.dir, "ClaudeConfig", "categories"), { recursive: true });
+    const registryPath = join(f.dir, "categories", "registry.json");
+    mkdirSync(join(f.dir, "categories"), { recursive: true });
     writeFileSync(registryPath, JSON.stringify({
       $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
       categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,
@@ -226,8 +226,8 @@ describe("enrichCandidates", () => {
   test("rowless indexed sessions create a retained catalogue row before category mutation", async () => {
     const f = await fixture([{ id: "external", messages: 4 }], "Workspaces/Assistant/project");
     const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
-    const registryPath = join(f.dir, "ClaudeConfig", "categories", "registry.json");
-    mkdirSync(join(f.dir, "ClaudeConfig", "categories"), { recursive: true });
+    const registryPath = join(f.dir, "categories", "registry.json");
+    mkdirSync(join(f.dir, "categories"), { recursive: true });
     writeFileSync(registryPath, JSON.stringify({
       $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
       categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,
@@ -252,8 +252,8 @@ describe("enrichCandidates", () => {
   test("a removed locked slug fails only its candidate and does not abort the sweep", async () => {
     const f = await fixture([{ id: "locked", messages: 4 }, { id: "healthy", messages: 4 }], "Workspaces/Assistant/project");
     const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
-    const registryPath = join(f.dir, "ClaudeConfig", "categories", "registry.json");
-    mkdirSync(join(f.dir, "ClaudeConfig", "categories"), { recursive: true });
+    const registryPath = join(f.dir, "categories", "registry.json");
+    mkdirSync(join(f.dir, "categories"), { recursive: true });
     writeFileSync(registryPath, JSON.stringify({
       $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
       categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,
@@ -284,8 +284,8 @@ describe("enrichCandidates", () => {
   test("unresolved category fallback uses the closed registry and preserves fresh prose", async () => {
     const f = await fixture([{ id: "a", messages: 4 }]);
     const previous = process.env.CCS_CATEGORY_REGISTRY_PATH;
-    const registryPath = join(f.dir, "ClaudeConfig", "categories", "registry.json");
-    mkdirSync(join(f.dir, "ClaudeConfig", "categories"), { recursive: true });
+    const registryPath = join(f.dir, "categories", "registry.json");
+    mkdirSync(join(f.dir, "categories"), { recursive: true });
     writeFileSync(registryPath, JSON.stringify({
       $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
       categories: [{ slug: "ai-systems", name: "AI Systems", compactLabel: "AI", order: 1,

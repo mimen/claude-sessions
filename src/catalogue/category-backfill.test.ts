@@ -37,9 +37,9 @@ test("category backfill is dry-run by default, normalizes auxiliary tags, is ide
   const root = mkdtempSync(join(tmpdir(), "ccs-category-backfill-"));
   roots.push(root);
   const cataloguePath = join(root, "catalogue.db");
-  const registryPath = join(root, "ClaudeConfig", "categories", "registry.json");
+  const registryPath = join(root, "categories", "registry.json");
   const manifestPath = join(root, "manifest.json");
-  mkdirSync(join(root, "ClaudeConfig", "categories"), { recursive: true });
+  mkdirSync(join(root, "categories"), { recursive: true });
   writeFileSync(registryPath, JSON.stringify({
     $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
     categories: [{ slug: "events", name: "Events", compactLabel: "Events", order: 1,
@@ -106,9 +106,9 @@ test("category backfill preserves matching manual-lock metadata while cleaning c
   const root = mkdtempSync(join(tmpdir(), "ccs-category-backfill-lock-"));
   roots.push(root);
   const cataloguePath = join(root, "catalogue.db");
-  const registryPath = join(root, "ClaudeConfig", "categories", "registry.json");
+  const registryPath = join(root, "categories", "registry.json");
   const manifestPath = join(root, "manifest.json");
-  mkdirSync(join(root, "ClaudeConfig", "categories"), { recursive: true });
+  mkdirSync(join(root, "categories"), { recursive: true });
   writeFileSync(registryPath, JSON.stringify({
     $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
     categories: [{ slug: "events", name: "Events", compactLabel: "Events", order: 1,
@@ -150,9 +150,9 @@ test("category backfill applies sanitized classification manifests and skips unc
   const root = mkdtempSync(join(tmpdir(), "ccs-category-assignment-backfill-"));
   roots.push(root);
   const cataloguePath = join(root, "catalogue.db");
-  const registryPath = join(root, "ClaudeConfig", "categories", "registry.json");
+  const registryPath = join(root, "categories", "registry.json");
   const manifestPath = join(root, "session-category-manifest.json");
-  mkdirSync(join(root, "ClaudeConfig", "categories"), { recursive: true });
+  mkdirSync(join(root, "categories"), { recursive: true });
   const registryBytes = Buffer.from(JSON.stringify({
     $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
     categories: [

@@ -95,7 +95,7 @@ export function loadCategoryRegistry(path: string): Result<CategoryRegistry> {
     if (!actualOrders.every((order, index) => order === expectedOrders[index])) {
       return err(new Error(`category order must be canonical and contiguous: ${expectedOrders.join(", ")}`));
     }
-    const vaultRoot = resolve(dirname(path), "../..");
+    const vaultRoot = resolve(dirname(path), "..");
     return ok({
       version: parsed.data.version,
       classifierVersion: parsed.data.version,

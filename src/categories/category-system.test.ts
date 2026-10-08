@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { openCatalogue } from "../catalogue/db-schema.ts";
@@ -46,7 +46,7 @@ function ensure(db: ReturnType<typeof openCatalogue>, ...ids: string[]): void {
   for (const id of ids) ensureRow(db, id, "2026-08-07T00:00:00Z");
 }
 
-const VAULT_REGISTRY = "/Users/mimen/Documents/milad-vault/ClaudeConfig/categories/registry.json";
+const VAULT_REGISTRY = "/Users/mimen/Documents/milad-vault/categories/registry.json";
 
 describe("category registry", () => {
   test("loads the canonical merged registry shape and canonical order", () => {
@@ -88,6 +88,27 @@ describe("category registry", () => {
         "music", "health", "finance", "home", "social", "personal-apps", "knowledge", "ai-systems", "auf-platform", "events", "marketing",
       ]);
       expect(loaded.value.categories[0]).toMatchObject({ compactName: "Music", color: "#DC4C3E", workspaceRoot: "Workspaces/Music" });
+      expect(loaded.value.vaultRoot).toBe("/Users/mimen/Documents/milad-vault");
+      expect(loaded.value.categories[0]!.workspacePath).toBe("/Users/mimen/Documents/milad-vault/Workspaces/Music");
+    }
+  });
+
+  test("a registry at <vault>/categories/registry.json resolves workspaces inside that vault", () => {
+    const root = mkdtempSync(join(tmpdir(), "ccs-category-vault-"));
+    roots.push(root);
+    const dir = join(root, "categories");
+    mkdirSync(dir);
+    writeFileSync(join(dir, "registry.json"), JSON.stringify({
+      $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
+      categories: [{ slug: "music", name: "Music", compactLabel: "Music", order: 1,
+        todoistColorName: "Red", todoistColor: "red", hex: "#DC4C3E", scope: "Music",
+        googleLabelName: "Music", workspaceRoot: "Workspaces/Music" }],
+    }));
+    const loaded = loadCategoryRegistry(join(dir, "registry.json"));
+    expect(loaded.ok).toBeTrue();
+    if (loaded.ok) {
+      expect(loaded.value.vaultRoot).toBe(root);
+      expect(loaded.value.categories[0]!.workspacePath).toBe(join(root, "Workspaces/Music"));
     }
   });
 

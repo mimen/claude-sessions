@@ -518,8 +518,8 @@ test("managed launch environments force the shim and consume one-birth creator d
 test("writeSessionMetadata: a managed root is categorized at birth when the optional registry is installed", () => {
   const root = mkdtempSync(join(tmpdir(), "ccs-birth-category-"));
   roots.push(root);
-  const registryPath = join(root, "ClaudeConfig", "categories", "registry.json");
-  mkdirSync(join(root, "ClaudeConfig", "categories"), { recursive: true });
+  const registryPath = join(root, "categories", "registry.json");
+  mkdirSync(join(root, "categories"), { recursive: true });
   writeFileSync(registryPath, JSON.stringify({
     $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
     categories: [{ slug: "events", name: "Events", compactLabel: "Events", order: 1,
@@ -541,8 +541,8 @@ test("writeSessionMetadata: a managed root is categorized at birth when the opti
 test("writeSessionMetadata: explicit category override is locked and invalid overrides roll back birth", () => {
   const root = mkdtempSync(join(tmpdir(), "ccs-birth-category-override-"));
   roots.push(root);
-  const registryPath = join(root, "ClaudeConfig", "categories", "registry.json");
-  mkdirSync(join(root, "ClaudeConfig", "categories"), { recursive: true });
+  const registryPath = join(root, "categories", "registry.json");
+  mkdirSync(join(root, "categories"), { recursive: true });
   writeFileSync(registryPath, JSON.stringify({
     $schema: "./registry.schema.json", version: "1.0.0", source: "Life Domains.md",
     categories: [{ slug: "events", name: "Events", compactLabel: "Events", order: 1,
