@@ -503,7 +503,7 @@ async function doFinishLifecycle(
   if (outcome.enrichmentWarning) console.error(`ccs session: warning: ${outcome.enrichmentWarning}`);
   if (outcome.close.status === "refused") {
     if (outcome.close.reason !== "session-not-live" || outcome.close.phase !== "preflight") {
-      console.error("ccs session: lifecycle recorded, but workspace close refused");
+      console.error(`ccs session: lifecycle recorded, but workspace close refused (${outcome.close.reason})`);
       return 1;
     }
   } else if (outcome.close.status === "close-failed") {
