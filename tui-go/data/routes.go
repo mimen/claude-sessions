@@ -12,6 +12,9 @@ import (
 )
 
 type launcherConfig struct {
+	Routing struct {
+		Launchers string `toml:"launchers"`
+	} `toml:"routing"`
 	Launchers []launcherEntry `toml:"launcher"`
 }
 
@@ -145,6 +148,9 @@ func replayTargets(models []string, lastModel string) []string {
 	return normalizeModels(models)
 }
 
+// loadLauncherEntries mirrors mergeLauncherFleet in src/launcher/registry.ts:
+// the shared fleet ([routing].launchers, default launchers.toml) comes first,
+// and config.toml [[launcher]] entries override it by name or add host-only ones.
 func loadLauncherEntries() ([]launcherEntry, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -154,19 +160,55 @@ func loadLauncherEntries() ([]launcherEntry, error) {
 	if root == "" {
 		root = filepath.Join(home, ".ccs")
 	}
-	path := filepath.Join(root, "config.toml")
+	machine, err := readLauncherConfig(filepath.Join(root, "config.toml"))
+	if err != nil {
+		return nil, err
+	}
+	sharedPath := filepath.Join(root, "launchers.toml")
+	if configured := strings.TrimSpace(machine.Routing.Launchers); configured != "" {
+		sharedPath = configured
+		if rest, ok := strings.CutPrefix(configured, "~/"); ok {
+			sharedPath = filepath.Join(home, rest)
+		}
+	}
+	shared, err := readLauncherConfig(sharedPath)
+	if err != nil {
+		return nil, err
+	}
+	overrides := make(map[string]launcherEntry, len(machine.Launchers))
+	for _, entry := range machine.Launchers {
+		overrides[entry.Name] = entry
+	}
+	merged := make([]launcherEntry, 0, len(shared.Launchers)+len(machine.Launchers))
+	sharedNames := make(map[string]bool, len(shared.Launchers))
+	for _, entry := range shared.Launchers {
+		sharedNames[entry.Name] = true
+		if override, ok := overrides[entry.Name]; ok {
+			entry = override
+		}
+		merged = append(merged, entry)
+	}
+	for _, entry := range machine.Launchers {
+		if !sharedNames[entry.Name] {
+			merged = append(merged, entry)
+		}
+	}
+	return merged, nil
+}
+
+func readLauncherConfig(path string) (launcherConfig, error) {
+	var config launcherConfig
 	contents, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return config, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return config, fmt.Errorf("read %s: %w", path, err)
 	}
-	var config launcherConfig
 	if err := toml.Unmarshal(contents, &config); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return config, fmt.Errorf("parse %s: %w", path, err)
 	}
-	return config.Launchers, nil
+	return config, nil
 }
 
 func unmatchedModels(patterns []string, models []string) []string {

@@ -147,3 +147,46 @@ func TestMatchesModel(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadRoutesMergesSharedFleetWithMachineOverrides(t *testing.T) {
+	root := t.TempDir()
+	shared := `
+[[launcher]]
+name = "claudex"
+binary = "claudex"
+serves = ["claude-*"]
+
+[[launcher]]
+name = "claude-native"
+binary = "claude-native"
+`
+	machine := `
+[[launcher]]
+name = "claude-native"
+binary = "claude-native-local"
+
+[[launcher]]
+name = "host-only"
+binary = "host-only"
+`
+	if err := os.WriteFile(filepath.Join(root, "launchers.toml"), []byte(shared), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config.toml"), []byte(machine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCS_ROOT", root)
+	routes, err := LoadRoutes([]string{"claude-opus-5-5"}, "claude-opus-5-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inline []string
+	for _, route := range routes {
+		if route.Target == "inline" {
+			inline = append(inline, route.Name+"="+route.Backend)
+		}
+	}
+	if got := strings.Join(inline, ","); got != "claudex=claudex,claude-native=claude-native-local,host-only=host-only" {
+		t.Fatalf("inline routes = %s", got)
+	}
+}
