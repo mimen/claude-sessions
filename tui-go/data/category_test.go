@@ -2,7 +2,6 @@ package data
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -53,13 +52,9 @@ func TestCategoryRegistryRejectsCompactLabelsBeyondTUIBudget(t *testing.T) {
 }
 
 func TestLoadActualMergedCanonicalRegistry(t *testing.T) {
-	body, err := exec.Command("git", "-C", "/Users/mimen/Documents/milad-vault", "show", "origin/main:ClaudeConfig/categories/registry.json").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "registry.json")
-	if err := os.WriteFile(path, body, 0o600); err != nil {
-		t.Fatal(err)
+	path := categoryRegistryPath("")
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("canonical registry not on this machine: %v", err)
 	}
 	registry, err := loadCategoryRegistry(path)
 	if err != nil {

@@ -86,9 +86,9 @@ func categoryRegistryPath(_ string) string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join("Documents", "milad-vault", "ClaudeConfig", "categories", "registry.json")
+		return filepath.Join("Documents", "milad-vault", "categories", "registry.json")
 	}
-	return filepath.Join(home, "Documents", "milad-vault", "ClaudeConfig", "categories", "registry.json")
+	return filepath.Join(home, "Documents", "milad-vault", "categories", "registry.json")
 }
 
 type effectiveCategory struct {
