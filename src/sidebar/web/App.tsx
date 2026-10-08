@@ -21,7 +21,7 @@ import type {
   SidebarSessionRow,
   SidebarSnapshot,
 } from "../projection.ts";
-import { lifecycleForView } from "../projection.ts";
+import { lifecycleForView } from "../views.ts";
 import {
   canFilterLive,
   emptyStateMessage,
