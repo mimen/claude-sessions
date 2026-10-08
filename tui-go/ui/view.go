@@ -941,7 +941,7 @@ func (m Model) renderHelp() string {
 		{"Tab", "toggle session manager / Skills registry"},
 		{"?", "this help · q quit"},
 	}
-	panelWidth := min(62, max(8, m.w-2))
+	panelWidth := min(72, max(8, m.w-2))
 	contentWidth := max(1, panelWidth-8)
 	lines := []string{fit(fg(theme.Keyword).Bold(true).Render("Sessions — keys"), contentWidth), ""}
 	for _, group := range groups {

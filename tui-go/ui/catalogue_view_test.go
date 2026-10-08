@@ -121,3 +121,13 @@ func TestNarrowHeaderKeepsCatalogueWarningWithinWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestHelpShowsEveryDescriptionInFullOnAWideTerminal(t *testing.T) {
+	m := Model{w: 200, h: 50}
+	help := ansi.Strip(m.renderHelp())
+	for _, want := range []string{"view options, filters, sort, autorefresh", "retitle / done / reopen / save / unsave via ccs"} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("help clipped %q:\n%s", want, help)
+		}
+	}
+}
