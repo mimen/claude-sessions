@@ -19,7 +19,9 @@
  * Exit code is always 0 — the directive is the payload, not the exit status.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { openIndex } from "../index/schema.ts";
 import { DB_PATH } from "../paths.ts";
 
@@ -36,10 +38,12 @@ interface Assessment {
 }
 
 function findTranscriptPath(sessionId: string): string | null {
+  return indexedTranscriptPath(sessionId) ?? scannedTranscriptPath(sessionId);
+}
+
+function indexedTranscriptPath(sessionId: string): string | null {
   // A fresh CCS_ROOT has no ~/.ccs/cache/index.db yet; opening it would crash
-  // with SQLITE_CANTOPEN. context-check runs from within loop hooks that
-  // always have prior DB state, so this is defensive — but still: no crash
-  // on cold-run.
+  // with SQLITE_CANTOPEN.
   if (!existsSync(DB_PATH())) return null;
   const db = openIndex(DB_PATH());
   try {
@@ -50,6 +54,17 @@ function findTranscriptPath(sessionId: string): string | null {
   } finally {
     db.close();
   }
+}
+
+/** A live session is usually newer than the last reindex, so the index alone misses it. */
+function scannedTranscriptPath(sessionId: string): string | null {
+  const projects = join(homedir(), ".claude", "projects");
+  if (!existsSync(projects)) return null;
+  for (const folder of readdirSync(projects)) {
+    const candidate = join(projects, folder, `${sessionId}.jsonl`);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 /**
