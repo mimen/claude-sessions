@@ -183,3 +183,16 @@ test("epic selector resolves a shortname to its grouping's sessions", () => {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("short session id prefix: resolves a unique match, refuses an ambiguous one", () => {
+  const { cat, idx } = seed();
+  idx.query("INSERT INTO sessions (session_id) VALUES (?), (?), (?)").run(
+    "dda10a85-1d25-41b6-973d-b62e12b6e158",
+    "abcdef12-0000-0000-0000-000000000001",
+    "abcdef12-0000-0000-0000-000000000002",
+  );
+  expect(resolveSelector(cat, idx, "dda10a85")?.sessionIds).toEqual(["dda10a85-1d25-41b6-973d-b62e12b6e158"]);
+  expect(resolveSelector(cat, idx, "abcdef12")).toBeNull();
+  expect(resolveSelector(cat, idx, "abcdef12-0000-0000-0000-00000000000")).toBeNull();
+  expect(resolveSelector(cat, idx, "dda1")).toBeNull();
+});
