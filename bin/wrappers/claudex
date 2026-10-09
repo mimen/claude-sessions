@@ -30,12 +30,17 @@ validate_model() {
   return 2
 }
 
+# The generated settings file spells a 1M-family Claude id with its `[1m]` marker, so the
+# registry's family decides the marker here too; a bare spelling there is a 200K Claude id
+# (Haiku 4.5) or a non-Claude id, and passes through unchanged.
 declare_claude_window() {
   local canonical="${1//\[1m\]/}" base="$(model_base "$1")"
-  case "$base" in
-    claude-fable-*|claude-opus-*|claude-sonnet-*) print -r -- "${canonical}[1m]" ;;
-    *) print -r -- "$canonical" ;;
-  esac
+  local settings="${CCS_LAUNCHER_ENV_DIR:-$HOME/.ccs/launcher-env}/claudex.settings.json"
+  if [[ "$base" == claude-* && -r "$settings" ]] && grep -Fq -- "\"${base}[1m]\"" "$settings"; then
+    print -r -- "${canonical}[1m]"
+  else
+    print -r -- "$canonical"
+  fi
 }
 
 MODEL='opus'
