@@ -4,6 +4,7 @@ import {
   activeDeclarationReplacements,
   familyOf,
   modelBase,
+  modelWindows,
   requireModelRegistry,
   slots,
   SLOT_ENVIRONMENT_KEYS,
@@ -131,21 +132,22 @@ function knownModelId(registry: ModelRegistry, value: string): boolean {
 }
 
 /**
- * The window Claude Code actually accounts a model at, given how its family declares itself. A
- * `behaves_as` row gets the donor's window, and a bare Claude 5 id is 200K by Claude Code's own
- * catalogue; an `envelope` row gets whatever the launcher's `max_context` slot says.
+ * The window Claude Code actually accounts a model at, given how its family declares itself.
+ *
+ * A marker family is known to Claude Code by id. Every other family starts from the launcher's
+ * `max_context` envelope (a `behaves_as` donor lends its prompt profile and effort slider, not its
+ * window: since Claude Code 2.1.287 a bare Claude 5 id is 1M, so the donor no longer undercounts
+ * anything) and is then capped by the `modelSettings.<id>.autoCompactWindow` the launcher settings
+ * carry for every model whose real window is below the envelope. So a sub-envelope model is
+ * accounted at its real window, and only a model whose window exceeds the envelope reads short.
  */
 function accountedWindow(registry: ModelRegistry, modelId: string, launcher: string): number | null {
   const family = familyOf(registry, modelId);
   if (!family) return null;
   if (family.accounting === "marker") return family.window;
-  if (family.accounting === "behaves_as") {
-    const donor = family.behaves_as ? familyOf(registry, family.behaves_as) : null;
-    // A bare Claude 5 id is the 200K spelling; the donor's own 1M marker is not applied through
-    // a behavesAs mapping.
-    return donor && donor.accounting === "marker" && (donor.marker ?? "") !== "" ? 200_000 : donor?.window ?? null;
-  }
-  return slots(registry, launcher)?.max_context ?? null;
+  const envelope = slots(registry, launcher)?.max_context;
+  if (envelope === undefined) return null;
+  return modelWindows(registry, launcher)[modelId] ?? envelope;
 }
 
 function finding(

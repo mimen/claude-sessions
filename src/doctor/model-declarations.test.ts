@@ -231,9 +231,11 @@ describe("model declaration policy", () => {
       memberships: [],
       behaviorMappings: [],
     });
-    // Grok is 500K upstream, accounted at the donor's 200K, and GPT-5.6 at the claudex envelope.
-    expect(report.notes.some((note) => note.startsWith("grok-4.6 on claudex:"))).toBe(true);
-    expect(report.notes.some((note) => note.includes("921000"))).toBe(true);
+    // Grok is 500K upstream and its launcher settings pin it there, so it is accounted exactly and
+    // earns no note. GPT-5.6 is 1,050,000 upstream, above the 921,000 claudex envelope, so it reads
+    // short and is the one that does.
+    expect(report.notes.some((note) => note.startsWith("grok-4.6 on claudex:"))).toBe(false);
+    expect(report.notes.some((note) => note.startsWith("gpt-5.6-sol on claudex:") && note.includes("921000"))).toBe(true);
   });
 
   test("a coherent declaration set is clean", () => {

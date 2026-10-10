@@ -77,6 +77,20 @@ test("a launcher's settings carry only the models it hosts", () => {
   expect(launcherSettingsContents(registry(), "no-such-launcher")).toBeNull();
 });
 
+test("a launcher's settings pin each sub-envelope model to its real window, and nothing else", () => {
+  const contents = launcherSettingsContents(registry(), "claudex");
+  const parsed = JSON.parse(contents!) as { modelSettings?: Record<string, { autoCompactWindow: number }> };
+  // The fixture envelope is 921,000. Grok's family window is 500,000, so it needs a ceiling;
+  // GPT (1,050,000) and GLM (1,000,000) are at or above the envelope, and a Claude id is a marker
+  // family Claude Code already knows, so none of those get a row.
+  expect(parsed.modelSettings).toEqual({
+    "grok-4.6": { autoCompactWindow: 500_000 },
+    "grok-4.5": { autoCompactWindow: 500_000 },
+  });
+  const native = JSON.parse(launcherSettingsContents(registry(), "claude-native")!) as Record<string, unknown>;
+  expect(native).not.toHaveProperty("modelSettings");
+});
+
 test("a gateway launcher denies Artifact in its settings; a direct one keeps the tool", () => {
   const denyOf = (launcher: string, viaGateway: boolean): string[] | undefined => {
     const contents = launcherSettingsContents(registry(), launcher, viaGateway);

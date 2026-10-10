@@ -380,6 +380,31 @@ export function pickerRows(registry: ModelRegistry, launcher: string): readonly 
   return rows;
 }
 
+/**
+ * The per-model auto-compact window each non-Claude model needs so Claude Code compacts at the
+ * model's REAL window instead of the launcher's envelope.
+ *
+ * Claude Code 2.1.288+ reads `modelSettings.<id>.autoCompactWindow` per model and caps it at the
+ * context window it assumes, so the setting can only lower a window, never raise one. That makes
+ * the envelope (`CLAUDE_CODE_MAX_CONTEXT_TOKENS`) the largest real window on the launcher and this
+ * table the exact ceiling for every smaller one: Grok at 500K under a 1,050,000 GPT envelope.
+ * Marker families are skipped because Claude Code knows a Claude id's window on its own, and a
+ * `behaves_as` row keeps its donor for the effort slider while this entry corrects the window the
+ * donor would otherwise lend. A model whose window already equals the envelope needs no entry.
+ */
+export function modelWindows(registry: ModelRegistry, launcher: string): Readonly<Record<string, number>> {
+  const envelope = slots(registry, launcher)?.max_context;
+  if (envelope === undefined) return {};
+  const windows: Record<string, number> = {};
+  for (const model of registry.model) {
+    if (!hostedBy(model, launcher)) continue;
+    const family = familyOf(registry, model.id);
+    if (!family || family.accounting === "marker" || family.window >= envelope) continue;
+    windows[model.id] = family.window;
+  }
+  return windows;
+}
+
 /** Every active model a launcher hosts, picker row or not, in the spelling Claude Code accepts. */
 export function allowlist(registry: ModelRegistry, launcher: string): readonly string[] {
   return registry.model

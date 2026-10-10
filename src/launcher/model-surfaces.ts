@@ -20,6 +20,7 @@ import {
   claudeCodeDeclaration,
   familyOf,
   labelOf,
+  modelWindows,
   pickerRows,
   slots,
   SLOT_ENVIRONMENT_KEYS,
@@ -54,7 +55,8 @@ export function launcherSettingsFilename(launcher: string): string {
 const GATEWAY_DENIED_TOOL = "Artifact";
 
 /**
- * One launcher's Claude Code settings: the models it hosts, and the `/model` rows it offers.
+ * One launcher's Claude Code settings: the models it hosts, the `/model` rows it offers, and the
+ * auto-compact window of every model whose real window is below the launcher's envelope.
  *
  * Null when the registry gives the launcher no rows at all: an empty `availableModels` would
  * leave Claude Code unable to resolve any model, which is worse than letting the shared
@@ -67,12 +69,17 @@ export function launcherSettingsContents(
 ): string | null {
   const models = allowlist(registry, launcher);
   if (models.length === 0) return null;
+  const windows = modelWindows(registry, launcher);
+  const modelSettings = Object.fromEntries(
+    Object.entries(windows).map(([id, window]) => [id, { autoCompactWindow: window }]),
+  );
   const settings = {
     availableModels: models,
     modelPicker: {
       replaceBuiltInOptions: true,
       options: pickerRows(registry, launcher),
     },
+    ...(Object.keys(modelSettings).length > 0 ? { modelSettings } : {}),
     ...(viaGateway ? { permissions: { deny: [GATEWAY_DENIED_TOOL] } } : {}),
   };
   return `${JSON.stringify(settings, null, 2)}\n`;
