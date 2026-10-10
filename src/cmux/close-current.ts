@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import type { Bridge, SurfaceLocation } from "./bridge.ts";
+import { buildBridge, type Bridge, type SurfaceLocation } from "./bridge.ts";
 import { liveBridge } from "./live.ts";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -271,7 +271,9 @@ export function closeWorkspaceByStableIdWithCmux(
 function productionSessionDependencies(): CloseSessionWorkspaceDependencies {
   const cmuxBin = process.env.CMUX_BIN ?? "cmux";
   return {
-    bridge: () => liveBridge(cmuxBin),
+    // A host without cmux (the Mini) has no workspace to close: an empty, readable bridge makes
+    // that the ordinary session-not-live no-op instead of a refusal that fails complete/save.
+    bridge: () => Bun.which(cmuxBin) === null ? buildBridge({ windows: [] }, {}) : liveBridge(cmuxBin),
     close: (workspaceId) => closeWorkspaceByStableIdWithCmux(cmuxBin, workspaceId),
   };
 }

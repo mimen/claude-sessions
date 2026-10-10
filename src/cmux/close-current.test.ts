@@ -370,6 +370,20 @@ describe("closeSessionWorkspace", () => {
     });
     expect(state.closed).toHaveLength(1);
   });
+
+  test("a host without cmux reports the session not live instead of an unreadable bridge", async () => {
+    const prior = process.env.CMUX_BIN;
+    process.env.CMUX_BIN = join(tmpdir(), "ccs-no-such-cmux");
+    try {
+      await expect(closeSessionWorkspace(SESSION_ID, true)).resolves.toEqual({
+        status: "refused",
+        phase: "preflight",
+        reason: "session-not-live",
+      });
+    } finally {
+      prior === undefined ? delete process.env.CMUX_BIN : (process.env.CMUX_BIN = prior);
+    }
+  });
 });
 
 describe("closeWorkspaceByStableId", () => {
