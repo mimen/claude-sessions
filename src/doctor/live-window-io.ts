@@ -9,7 +9,7 @@
  * make every model read as the envelope and the check would pass for the wrong reason.
  */
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { requireModelRegistry, type ModelRegistry } from "../models/registry.ts";
 import { runtimeRoot } from "../paths.ts";
@@ -17,6 +17,7 @@ import { err, ok, type Result } from "../result.ts";
 import {
   liveWindowExpectations,
   parseEffectiveWindow,
+  userWindowCeilings,
   type LiveWindowExpectation,
   type LiveWindowResult,
 } from "./live-window.ts";
@@ -76,7 +77,15 @@ export function collectLiveWindows(options: LiveWindowOptions = {}): Result<{
   const launcher = options.launcher ?? "claudex";
   const wrapper = join(runtimeRoot(), "bin", launcher);
   const environment = options.environment ?? process.env;
-  let expectations = liveWindowExpectations(registry, launcher);
+  const home = environment.HOME ?? homedir();
+  const settingsPath = join(environment.CLAUDE_CONFIG_DIR ?? join(home, ".claude"), "settings.json");
+  let ceilings: Readonly<Record<string, number>> = {};
+  try {
+    ceilings = userWindowCeilings(readFileSync(settingsPath, "utf8"));
+  } catch {
+    ceilings = {};
+  }
+  let expectations = liveWindowExpectations(registry, launcher, ceilings);
   if (options.only && options.only.length > 0) {
     const wanted = new Set(options.only);
     expectations = expectations.filter((expectation) => wanted.has(expectation.model));

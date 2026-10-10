@@ -34,8 +34,17 @@ export interface LiveWindowResult extends LiveWindowExpectation {
  * Every picker model on the launcher and the effectiveWindow its run must log: the real window
  * where the launcher pins one, the envelope where the model is at or above it, and the family
  * window for a marker family, each minus the output reserve.
+ *
+ * `userCeilings` is the `modelSettings.<id>.autoCompactWindow` map from the user's own
+ * settings.json. Claude Code applies the lowest ceiling it finds, and a user may pin a model
+ * below its real window on purpose (Haiku 5.5 at 100,000 for its price tier), so a user ceiling
+ * below the registry's window is the expectation, not a finding.
  */
-export function liveWindowExpectations(registry: ModelRegistry, launcher: string): readonly LiveWindowExpectation[] {
+export function liveWindowExpectations(
+  registry: ModelRegistry,
+  launcher: string,
+  userCeilings: Readonly<Record<string, number>> = {},
+): readonly LiveWindowExpectation[] {
   const envelope = slots(registry, launcher)?.max_context;
   const pinned = modelWindows(registry, launcher);
   const expectations: LiveWindowExpectation[] = [];
@@ -43,11 +52,31 @@ export function liveWindowExpectations(registry: ModelRegistry, launcher: string
     const id = row.model.replace(/\[1m\]$/, "");
     const family = familyOf(registry, id);
     if (!family) continue;
-    const window = family.accounting === "marker" ? family.window : pinned[id] ?? envelope;
-    if (window === undefined) continue;
+    const registryWindow = family.accounting === "marker" ? family.window : pinned[id] ?? envelope;
+    if (registryWindow === undefined) continue;
+    const ceiling = userCeilings[id];
+    const window = ceiling !== undefined ? Math.min(registryWindow, ceiling) : registryWindow;
     expectations.push({ model: id, declaration: row.model, expected: window - OUTPUT_RESERVE });
   }
   return expectations;
+}
+
+/** The per-model ceilings a Claude Code settings.json carries, keyed by canonical id. */
+export function userWindowCeilings(settingsText: string): Readonly<Record<string, number>> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(settingsText);
+  } catch {
+    return {};
+  }
+  const modelSettings = (parsed as { modelSettings?: unknown })?.modelSettings;
+  if (typeof modelSettings !== "object" || modelSettings === null) return {};
+  const ceilings: Record<string, number> = {};
+  for (const [id, entry] of Object.entries(modelSettings as Record<string, unknown>)) {
+    const window = (entry as { autoCompactWindow?: unknown })?.autoCompactWindow;
+    if (typeof window === "number" && Number.isFinite(window)) ceilings[id.replace(/\[1m\]$/, "")] = window;
+  }
+  return ceilings;
 }
 
 /** The last effectiveWindow a debug file reports, or null when the run never reached the check. */

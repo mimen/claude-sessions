@@ -6,6 +6,7 @@ import {
   liveWindowFindings,
   OUTPUT_RESERVE,
   parseEffectiveWindow,
+  userWindowCeilings,
 } from "./live-window.ts";
 
 function registry(): ModelRegistry {
@@ -26,6 +27,17 @@ test("each picker model expects its real window minus the output reserve", () =>
   expect(expectations.get("grok-4.6")?.expected).toBe(500_000 - OUTPUT_RESERVE);
   // An envelope family at or above the envelope reads the envelope.
   expect(expectations.get("gpt-5.6-sol")?.expected).toBe(921_000 - OUTPUT_RESERVE);
+});
+
+test("a user ceiling below the registry window is the expectation, and never raises one", () => {
+  const ceilings = userWindowCeilings(JSON.stringify({
+    modelSettings: { "claude-opus-5": { autoCompactWindow: 100_000 }, "grok-4.6": { autoCompactWindow: 900_000 } },
+  }));
+  const expectations = new Map(liveWindowExpectations(registry(), "claudex", ceilings).map((e) => [e.model, e]));
+  expect(expectations.get("claude-opus-5")?.expected).toBe(100_000 - OUTPUT_RESERVE);
+  // Claude Code caps a ceiling at the window it assumes, so 900K on a 500K Grok stays 500K.
+  expect(expectations.get("grok-4.6")?.expected).toBe(500_000 - OUTPUT_RESERVE);
+  expect(userWindowCeilings("not json")).toEqual({});
 });
 
 test("the last effectiveWindow in a debug log wins, and a silent log is null", () => {
