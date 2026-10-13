@@ -257,6 +257,8 @@ export interface ProjectionInput {
   readonly categories?: ReadonlyMap<string, SidebarCategoryProjection>;
   /** Null when projection succeeded, otherwise the fail-closed registry/read diagnostic. */
   readonly categoryProjectionError?: string | null;
+  /** Category for a session missing from `categories`; absent when projection failed. */
+  readonly uncataloguedCategory?: SidebarCategoryProjection;
   /**
    * Titles the catalogue owns, already resolved by `displayTitle`: a human's title first, then
    * enrichment's. Absent means nothing outranks the index title. Without this an enriched
@@ -780,7 +782,8 @@ function buildProjectionContext(input: ProjectionInput): ProjectionContext {
       membershipFor: (sessionId: string, resumeId?: string): SidebarMembership | null =>
         memberships.get(sessionId) ?? (resumeId ? memberships.get(resumeId) ?? null : null),
       categoryFor: (sessionId: string, resumeId?: string): SidebarCategoryProjection | null =>
-        categories.get(sessionId) ?? (resumeId ? categories.get(resumeId) ?? null : null),
+        categories.get(sessionId) ?? (resumeId ? categories.get(resumeId) : undefined)
+          ?? input.uncataloguedCategory ?? null,
       summaryFor,
       faviconUrlFor: (cwd: string | null): string | null =>
         cwd && faviconDirectories.has(cwd) ? `/api/favicon?dir=${encodeURIComponent(cwd)}` : null,

@@ -1025,3 +1025,15 @@ describe("incognito sections", () => {
     expect(rows.map((row) => row.section)).toEqual(["incognito"]);
   });
 });
+
+describe("category", () => {
+  test("a session the catalogue has not recorded is uncategorized, not unavailable", () => {
+    const uncataloguedCategory = {
+      schema: 1, effectiveSlug: null, storedSlug: null, compactLabel: null, fullLabel: null, hex: null,
+      order: null, source: null, manualLock: false, finding: "uncategorized", registryVersion: "1.0.0",
+    } as const;
+    const rows = sessionRows(projectSidebar(input({ indexed: [indexed()], uncataloguedCategory })).rows);
+    expect(rows[0]?.category).toEqual(uncataloguedCategory);
+    expect(sessionRows(projectSidebar(input({ indexed: [indexed()] })).rows)[0]?.category).toBeNull();
+  });
+});

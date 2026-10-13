@@ -26,7 +26,12 @@ export interface SidebarCategoryProjection {
 }
 
 export type SidebarCategoryProjectionOutcome =
-  | { readonly status: "ok"; readonly categories: ReadonlyMap<string, SidebarCategoryProjection> }
+  | {
+    readonly status: "ok";
+    readonly categories: ReadonlyMap<string, SidebarCategoryProjection>;
+    /** For a session the catalogue has not recorded yet: it has no assignment, not an unreadable one. */
+    readonly uncatalogued: SidebarCategoryProjection;
+  }
   | { readonly status: "unavailable"; readonly error: string };
 
 function tableExists(db: Database, name: string): boolean {
@@ -102,7 +107,20 @@ export function readSidebarCategoryProjection(
       projected.set(row.session_id, value);
       if (row.resume_id) projected.set(row.resume_id, value);
     }
-    return { status: "ok", categories: projected };
+    const uncatalogued: SidebarCategoryProjection = {
+      schema: SIDEBAR_CATEGORY_PROJECTION_VERSION,
+      effectiveSlug: null,
+      storedSlug: null,
+      compactLabel: null,
+      fullLabel: null,
+      hex: null,
+      order: null,
+      source: null,
+      manualLock: false,
+      finding: "uncategorized",
+      registryVersion: registry.value.version,
+    };
+    return { status: "ok", categories: projected, uncatalogued };
   } catch (cause) {
     return { status: "unavailable", error: cause instanceof Error ? cause.message : String(cause) };
   } finally {

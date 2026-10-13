@@ -1158,6 +1158,7 @@ export function createSidebarSource(options: SidebarSourceOptions = {}): Sidebar
         incognitoSessionIds: catalogue.incognito,
         categories: categoryProjection.status === "ok" ? categoryProjection.categories : new Map(),
         categoryProjectionError: categoryProjection.status === "unavailable" ? categoryProjection.error : null,
+        uncataloguedCategory: categoryProjection.status === "ok" ? categoryProjection.uncatalogued : undefined,
         triageOnly,
         incognitoOnly,
         t3Only: effectiveT3Only,
