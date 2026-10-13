@@ -133,4 +133,9 @@ describe("emptyStateMessage", () => {
     expect(emptyStateMessage("", true)).toBe("Nothing running.");
     expect(emptyStateMessage("sidebar", true)).toBe("No sessions match.");
   });
+
+  test("a filtered view does not claim nothing is running", () => {
+    expect(emptyStateMessage("", true, "incognito")).toBe("No incognito sessions.");
+    expect(emptyStateMessage("", true, "t3")).toBe("No T3 Code sessions.");
+  });
 });

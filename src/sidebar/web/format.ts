@@ -79,6 +79,8 @@ export function emptyStateMessage(
   }
   if (view === "completed") return "Nothing finished yet.";
   if (view === "triage") return "No verdicts waiting.";
+  if (view === "incognito") return "No incognito sessions.";
+  if (view === "t3") return "No T3 Code sessions.";
   return "Nothing running.";
 }
 
