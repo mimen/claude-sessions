@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/mimen/claude-sessions/tui-go/data"
 )
 
 // Preferences are ccs-go's OWN config — not CCS catalogue state — so unlike every
@@ -104,6 +106,14 @@ func loadPrefs() (persistedPrefs, bool) {
 		return persistedPrefs{}, false
 	}
 	return stored, true
+}
+
+// InitialLoadOptions is the load filter the restored view options ask for, so the
+// first snapshot already matches the first paint.
+func InitialLoadOptions() data.LoadOptions {
+	model := Model{options: defaultViewOptions()}
+	model.applyPrefs()
+	return model.options.loadOptions()
 }
 
 // applyPrefs seeds a freshly constructed model from stored preferences.

@@ -40,3 +40,14 @@ func TestSortPrefsRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestInitialLoadOptionsFollowStoredPrefs(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	model := New(testSnapshot(1))
+	model.options.showSubagents = true
+	model.savePrefs()
+
+	if !InitialLoadOptions().IncludeSubagents {
+		t.Fatal("first load ignored the stored Show subagents preference")
+	}
+}
