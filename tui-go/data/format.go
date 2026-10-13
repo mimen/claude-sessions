@@ -66,7 +66,7 @@ func FormatCostList(usd float64) string {
 	if !(usd > 0) || math.IsNaN(usd) || math.IsInf(usd, 0) {
 		return ""
 	}
-	if usd < 1 {
+	if usd < 0.995 {
 		return fmt.Sprintf("%d¢", maxInt(1, int(math.Round(usd*100))))
 	}
 	return fmt.Sprintf("$%.0f", usd)

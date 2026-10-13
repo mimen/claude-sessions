@@ -45,6 +45,9 @@ func TestCostFormats(t *testing.T) {
 	if got := FormatCostList(54.671); got != "$55" {
 		t.Fatalf("FormatCostList() = %q", got)
 	}
+	if got := FormatCostList(0.997); got != "$1" {
+		t.Fatalf("FormatCostList(0.997) = %q", got)
+	}
 	if got := FormatCompactUSD(2900); got != "$2.9k" {
 		t.Fatalf("FormatCompactUSD() = %q", got)
 	}
