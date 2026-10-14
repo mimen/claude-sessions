@@ -212,6 +212,7 @@ export async function main(argv: string[]): Promise<number> {
   reporter.invocation(invocation);
   reporter.breadcrumb("cli.start", invocation);
 
+  if (args[0] === "session" && args[1] === "list") args.splice(0, 2, "ls");
   const command = args[0];
   // `ccs start` treats trailing dash-leading argv as composer text. Dispatch it before global
   // help/version scanning so only its own explicit parser decides what those tokens mean.

@@ -73,14 +73,14 @@ function seed(): void {
   catalogue.close();
 }
 
-async function outputFor(args: readonly string[]): Promise<string> {
+async function outputFor(args: readonly string[], expectedCode = 0): Promise<string> {
   const lines: string[] = [];
   const log = spyOn(console, "log").mockImplementation((...values: object[]) => {
     lines.push(values.map(String).join(" "));
   });
   const error = spyOn(console, "error").mockImplementation(() => {});
   try {
-    expect(await main(["bun", "ccs", ...args])).toBe(0);
+    expect(await main(["bun", "ccs", ...args])).toBe(expectedCode);
     return lines.join("\n");
   } finally {
     error.mockRestore();
@@ -89,6 +89,19 @@ async function outputFor(args: readonly string[]): Promise<string> {
 }
 
 describe("CLI auxiliary visibility", () => {
+  test("session list aliases ls and forwards visibility and category flags", async () => {
+    seed();
+    for (const flags of [[], ["--auxiliary"], ["--category", "events"], ["--all", "--auxiliary", "--category", "ai-systems"]]) {
+      expect(await outputFor(["session", "list", ...flags])).toBe(await outputFor(["ls", ...flags]));
+    }
+  });
+
+  test("meta rejects an unknown session without reporting an empty success", async () => {
+    seed();
+    expect(await outputFor(["meta", "00000000-0000-4000-8000-000000000000"], 1)).toBe("");
+    expect(await outputFor(["meta", "parent"])).toContain("$5.00 total");
+  });
+
   test("ls hides auxiliary rows but includes their recursive cost", async () => {
     seed();
     const hidden = await outputFor(["ls"]);

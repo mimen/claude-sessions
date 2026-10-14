@@ -844,8 +844,8 @@ export function meta(sessionArg: string | undefined): number {
     const tags = getTags(db, id);
     const children = childrenOf(db, id);
     if (!row && tags.length === 0 && children.length === 0 && !cost) {
-      console.log(`${id}\n  (no catalogue metadata yet)`);
-      return 0;
+      console.error(`ccs meta: no session '${id}' (not catalogued or indexed)`);
+      return 1;
     }
     console.log(id);
     if (row?.customTitle) console.log(`  title: ${row.customTitle}`);
