@@ -1,5 +1,5 @@
 /**
- * `ccs usage` — point-in-time availability view across Codex, Anthropic, and Grok, read from
+ * `ccs usage` — point-in-time availability view across Codex, Anthropic, Grok, and Meta, read from
  * the hub's snapshot. Snapshot only: no history, no daemon.
  *
  *   ccs usage                          terminal availability view
@@ -9,16 +9,15 @@
  *   ccs usage doctor                   adapter health without rendering observations
  */
 
-import { collectSnapshot } from "./adapters.ts";
+import { collectSnapshot, PROVIDERS as VALID } from "./adapters.ts";
 import { renderSnapshot } from "./render.ts";
 import type { ProviderId, UsageSnapshot } from "./types.ts";
-
-const VALID: readonly ProviderId[] = ["codex", "anthropic", "grok"];
 
 const SOURCES_HELP = `ccs usage sources — where the numbers come from
 
   Every provider reads the hub's GET /gateway snapshot. The Mac Mini's collector is the
-  only caller of the providers' usage endpoints; ccs never calls Anthropic, ChatGPT, or xAI.
+  only caller of the providers' usage endpoints; ccs never calls Anthropic, ChatGPT, xAI, or
+  Meta.
 
   codex        ChatGPT usage (official_api): weekly window, banked reset credits, renewal
                (marked estimated when the collector inferred it).
@@ -26,6 +25,9 @@ const SOURCES_HELP = `ccs usage sources — where the numbers come from
                banked resets, plan tier.
   grok         xAI billing (official_api): weekly pool with Build/Chat/Imagine shares, plan,
                reset grants, prepaid credit.
+  meta         Muse Code subscription (provider_header): five-hour and weekly windows from the
+               response.subscription_usage event on a minimal streamed reply. Meta has no
+               usage endpoint, so each read spends a sliver of the allowance.
 
   A snapshot over ten minutes old, or one read from ~/.ccs/cache/hub-gateway.json because
   the hub did not answer, renders with a stale chip on every row; a note appears once it is

@@ -209,6 +209,7 @@ struct ProviderSectionHeader: View {
         case "anthropic": .orange
         case "codex": .teal
         case "grok": Color(nsColor: NSColor.systemGray)
+        case "meta": .blue
         case "opencode-go": .blue
         case "venice": .purple
         default: .accentColor

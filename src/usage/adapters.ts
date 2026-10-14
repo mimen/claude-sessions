@@ -1,6 +1,6 @@
 /**
- * `ccs usage` from the hub's snapshot alone. The Mini's collector reads Anthropic, ChatGPT, and
- * xAI; this file only turns its credentials into observations, so no Mac ever calls a provider.
+ * `ccs usage` from the hub's snapshot alone. The Mini's collector reads Anthropic, ChatGPT, xAI,
+ * and Meta; this file only turns its credentials into observations, so no Mac ever calls a provider.
  * A snapshot older than HUB_FRESH_MS, or one served from this Mac's cache because the hub did not
  * answer, still renders, with every row marked stale.
  */
@@ -23,14 +23,14 @@ export interface AdapterResult {
   renewals?: SubscriptionRenewal[];
 }
 
-const PROVIDERS: readonly ProviderId[] = ["codex", "anthropic", "grok"];
+export const PROVIDERS: readonly ProviderId[] = ["codex", "anthropic", "grok", "meta"];
 
 /** Numbers stale for less than this show only their stale chip, not a warning note. */
 export const QUIET_STALE_MS = 30 * 60_000;
 
 /** What the hub calls each provider. */
-const HUB_PROVIDER: Record<ProviderId, string> = { anthropic: "claude", codex: "codex", grok: "xai" };
-const TITLE: Record<ProviderId, string> = { anthropic: "Claude", codex: "Codex", grok: "Grok" };
+const HUB_PROVIDER: Record<ProviderId, string> = { anthropic: "claude", codex: "codex", grok: "xai", meta: "meta" };
+const TITLE: Record<ProviderId, string> = { anthropic: "Claude", codex: "Codex", grok: "Grok", meta: "Muse Code" };
 
 /** One ISO time per available reset: the full list when the hub sends it, else the soonest repeated. */
 function resetExpiries(banked: HubCredential["bankedResets"]): (string | null)[] {
@@ -45,6 +45,10 @@ function entitlements(provider: ProviderId, c: HubCredential & { email: string }
     const pool = `grok-${(c.plan ?? "consumer").toLowerCase()}:${c.email}`;
     return { pool, reset: `${pool}#reset`, product: (p: string) => `${pool}#${p.replace(/^Grok/, "").toLowerCase()}`, prepaid: `${pool}#prepaid` };
   }
+  if (provider === "meta") {
+    const pool = `muse-code:${c.email}`;
+    return { pool, reset: `${pool}#reset`, product: (p: string) => `${pool}#${p}`, prepaid: null };
+  }
   const pool = provider === "anthropic" ? `claude-max:${c.email}` : `codex-pro:${c.email}`;
   return { pool, reset: `${provider === "anthropic" ? "claude" : "codex"}-reset-credit:${c.email}`, product: (p: string) => `${pool}#${p}`, prepaid: null };
 }
@@ -58,8 +62,10 @@ export function hubAdapter(provider: ProviderId, snapshot: HubSnapshot, nowMs: n
   const observations: UsageObservation[] = [];
   const renewals: SubscriptionRenewal[] = [];
   const issues: { email: string; reason: string }[] = [];
+  let seen = 0;
   for (const raw of snapshot.credentials) {
     if (raw.provider !== HUB_PROVIDER[provider] || !raw.email || (provider === "grok" && raw.disabled)) continue;
+    seen++;
     const c = raw as HubCredential & { email: string };
     const observedMs = c.usageObservedAt ?? (c.usageError ? null : snapshot.collectedAt);
     if (c.usageError && (observedMs === null || nowMs - observedMs >= QUIET_STALE_MS)) {
@@ -74,7 +80,8 @@ export function hubAdapter(provider: ProviderId, snapshot: HubSnapshot, nowMs: n
       provider,
       scope: provider === "grok" ? "organization" : "account",
       observedAt: new Date(observedMs).toISOString(),
-      source: "official_api",
+      // Meta has no usage endpoint; the collector reads the quota event on a streamed reply.
+      source: provider === "meta" ? "provider_header" : "official_api",
       ...(snapshotStale || c.usageError !== null ? { stale: true } : {}),
     } as const;
     const allowance = (entitlement: string, window: UsageWindow, w: HubWindow): UsageObservation => ({
@@ -118,7 +125,7 @@ export function hubAdapter(provider: ProviderId, snapshot: HubSnapshot, nowMs: n
   }
   const detail = issues.map((i) => (i.email ? `${i.email} ${i.reason}` : i.reason)).join("; ");
   const health: AdapterHealth = observations.length === 0
-    ? { provider, status: "unavailable", detail: detail || `no ${TITLE[provider]} credentials in the hub snapshot` }
+    ? { provider, status: "unavailable", detail: detail || (seen ? `the hub has no ${TITLE[provider]} usage reading yet` : `no ${TITLE[provider]} credentials in the hub snapshot`) }
     : issues.length === 0
       ? { provider, status: "ok", detail: null }
       : { provider, status: "degraded", detail, ...(issues.some((i) => i.email) ? { accounts: issues.flatMap((i) => (i.email ? [i.email] : [])) } : {}) };

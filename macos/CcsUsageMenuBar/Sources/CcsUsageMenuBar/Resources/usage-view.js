@@ -1,6 +1,6 @@
 (() => {
   // packages/usage-view/index.ts
-  var providerTitle = { anthropic: "Claude", codex: "Codex", grok: "Grok" };
+  var providerTitle = { anthropic: "Claude", codex: "Codex", grok: "Grok", meta: "Muse Code" };
   var windowShort = { five_hour: "5h", daily: "day", weekly: "wk", monthly: "mo", minute: "min" };
   var windowRank = { "5h": 0, day: 1, wk: 2, mo: 3 };
   var baseLabel = {
@@ -8,7 +8,8 @@
     "codex-pro": "All models",
     "codex-spark": "Spark",
     "codex-spark-weekly": "Spark weekly",
-    "grok-super grok plus": "All usage"
+    "grok-super grok plus": "All usage",
+    "muse-code": "All usage"
   };
   var productLabel = {
     build: "Build",

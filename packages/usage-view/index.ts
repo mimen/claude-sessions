@@ -86,7 +86,7 @@ export interface View {
   notes: string[];
 }
 
-export const providerTitle: Record<string, string> = { anthropic: "Claude", codex: "Codex", grok: "Grok" };
+export const providerTitle: Record<string, string> = { anthropic: "Claude", codex: "Codex", grok: "Grok", meta: "Muse Code" };
 
 const windowShort: Record<string, string> = { five_hour: "5h", daily: "day", weekly: "wk", monthly: "mo", minute: "min" };
 const windowRank: Record<string, number> = { "5h": 0, day: 1, wk: 2, mo: 3 };
@@ -96,6 +96,7 @@ const baseLabel: Record<string, string> = {
   "codex-spark": "Spark",
   "codex-spark-weekly": "Spark weekly",
   "grok-super grok plus": "All usage",
+  "muse-code": "All usage",
 };
 const productLabel: Record<string, string> = {
   build: "Build", chat: "Chat", imagine: "Imagine", api: "API", prepaid: "Extra credits", reset: "Usage reset",

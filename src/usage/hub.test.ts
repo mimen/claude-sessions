@@ -55,6 +55,20 @@ const xai: HubCredential = {
   prepaidUsd: 0,
 };
 
+// The collector reads Meta from the response.subscription_usage event, which can report past 100%.
+const meta: HubCredential = {
+  ...base,
+  provider: "meta",
+  email: "personal@example.com",
+  plan: null,
+  windows: {
+    fiveHour: { usedPct: 108, resetsAt: "2026-10-02T23:30:00.000Z" },
+    weekly: { usedPct: 2, resetsAt: "2026-10-08T00:00:00.000Z" },
+    fable: null,
+  },
+  bankedResets: null,
+};
+
 const hubWith = (collectedAt: number, credentials: HubCredential[], unreachable?: string) => async (): Promise<HubRead> =>
   ({ ok: true, site: "http://hub", snapshot: { collectedAt, credentials }, ...(unreachable ? { unreachable } : {}) });
 
@@ -91,7 +105,7 @@ test("a fresh hub snapshot renders every provider from its credentials", async (
     ["grok-super grok plus:personal@example.com#reset", "reset_credit", null, 1, false],
     ["grok-super grok plus:personal@example.com#prepaid", "credit", null, 0, false],
   ]);
-  expect(snap.adapters.map((a) => a.status)).toEqual(["ok", "ok", "ok"]);
+  expect(snap.adapters.map((a) => a.status)).toEqual(["ok", "ok", "ok", "unavailable"]);
 });
 
 test("a stale hub snapshot means no provider fetch and the stale marker shows", async () => {
@@ -205,4 +219,32 @@ test("the token file wins over the environment", async () => {
   } finally {
     if (prev === undefined) delete Bun.env.HUB_READ_TOKEN; else Bun.env.HUB_READ_TOKEN = prev;
   }
+});
+
+test("Muse Code renders its five-hour and weekly windows, keeping a reading past 100%", async () => {
+  const snap = await collectSnapshot({ providers: ["meta"], hub: hubWith(NOW - 60_000, [meta]), now: () => NOW });
+  expect(calls).toEqual([]);
+  expect(rows(snap)).toEqual([
+    ["muse-code:personal@example.com", "allowance", "five_hour", 108, false],
+    ["muse-code:personal@example.com", "allowance", "weekly", 2, false],
+  ]);
+  expect(snap.observations[0]!.source).toBe("provider_header");
+  expect(snap.adapters).toEqual([{ provider: "meta", status: "ok", detail: null }]);
+  const text = renderSnapshot(snap);
+  expect(text).toStartWith("Muse Code · personal@example.com\n");
+  expect(text).toMatch(/five-hour .* 100% /);
+  expect(text).toMatch(/weekly .*   2% /);
+});
+
+test("a Muse Code probe that never succeeded reports the error and draws no windows", async () => {
+  const failed = { ...meta, usageError: "no subscription_usage event", usageObservedAt: null, windows: { fiveHour: null, weekly: null, fable: null } };
+  const snap = await collectSnapshot({ providers: ["meta"], hub: hubWith(NOW - 60_000, [failed]), now: () => NOW });
+  expect(snap.observations).toEqual([]);
+  expect(snap.adapters).toEqual([{ provider: "meta", status: "unavailable", detail: "personal@example.com no subscription_usage event" }]);
+});
+
+test("a Muse Code credential the collector has not read yet says so instead of claiming it is missing", async () => {
+  const unread = { ...meta, windows: { fiveHour: null, weekly: null, fable: null } };
+  const snap = await collectSnapshot({ providers: ["meta"], hub: hubWith(NOW - 60_000, [unread]), now: () => NOW });
+  expect(snap.adapters[0]!.detail).toBe("the hub has no Muse Code usage reading yet");
 });
