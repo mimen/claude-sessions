@@ -14,6 +14,7 @@ import {
   resolveSubtree,
   type DestroyEnvironment,
 } from "./destroy.ts";
+import { destroySessionTree } from "./destroy-command.ts";
 
 const AT = "2026-08-09T00:00:00Z";
 const roots: string[] = [];
@@ -164,6 +165,24 @@ test("destroy erases the whole subtree from disk, catalogue, index, and FTS", as
   } finally {
     index.close();
     catalogue.close();
+  }
+});
+
+// The id becomes a path segment under tasks/ and claude-home/, so "." named the whole tasks
+// directory and ".." the store root above it, and destroy removed them recursively.
+test("destroy refuses ids that are not a single path segment", async () => {
+  const fixture = seed();
+  const options = {
+    cataloguePath: CATALOGUE_PATH(),
+    indexPath: DB_PATH(),
+    ensureDataDir: () => {},
+    environment: fixture.env,
+  };
+  for (const id of [".", "..", "../claude-home", "parent/.."]) {
+    expect((await destroySessionTree(id, options)).status).toBe("not-found");
+  }
+  for (const key of Object.keys(fixture.paths)) {
+    expect(existsSync(fixture.paths[key]!)).toBe(true);
   }
 });
 

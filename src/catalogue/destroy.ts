@@ -134,6 +134,10 @@ export function footprintOf(
   env: DestroyEnvironment,
   live: ReadonlySet<string>,
 ): SessionFootprint {
+  // The id is joined into the paths below, so "." or ".." would name tasks/ or the root above it.
+  if (sessionId === "" || sessionId === "." || sessionId === ".." || /[/\\\0]/.test(sessionId)) {
+    return { sessionId, transcripts: [], directories: [], files: [], live: false, identityKey: null };
+  }
   const indexed = index ? sessionById(index, sessionId) : null;
   const transcripts = existingPaths([
     ...(indexed ? [indexed.path] : []),
