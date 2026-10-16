@@ -9,7 +9,6 @@ interface ConfiguredSubscription {
 }
 
 const REGISTRY: readonly ConfiguredSubscription[] = [
-  { provider: "anthropic", account: "miladmaaan@gmail.com", planName: "Max 20x", monthlyDollars: 200, anchor: "2026-09-10" },
   { provider: "anthropic", account: "milad@afternoonumbrellafriends.com", planName: "Max 20x", monthlyDollars: 200, anchor: "2026-09-08" },
   { provider: "codex", account: "miladmaaan@gmail.com", planName: "Codex Pro", monthlyDollars: 200, anchor: "2026-09-20" },
   { provider: "grok", account: "miladmaaan@gmail.com", planName: "SuperGrok", monthlyDollars: 100, anchor: "2026-09-21" },

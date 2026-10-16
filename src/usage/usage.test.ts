@@ -47,10 +47,6 @@ test("renewal uses the Los Angeles calendar date at the evening boundary", () =>
 test("subscription resolver filters providers and keeps full account identities", () => {
   expect(resolveSubscriptions(["anthropic"], new Date("2026-09-13T00:00:00Z"))).toEqual([
     {
-      provider: "anthropic", account: "miladmaaan@gmail.com", planName: "Max 20x",
-      monthlyDollars: 200, renewsOn: "2026-10-10", source: "configured",
-    },
-    {
       provider: "anthropic", account: "milad@afternoonumbrellafriends.com", planName: "Max 20x",
       monthlyDollars: 200, renewsOn: "2026-10-08", source: "configured",
     },
@@ -60,14 +56,16 @@ test("subscription resolver filters providers and keeps full account identities"
 test("render attaches subscriptions by exact provider and full account", () => {
   const out = renderSnapshot(snap({
     observations: [
-      obs({ provider: "anthropic", entitlement: "claude-max:miladmaaan@other.com" }),
-      obs({ provider: "anthropic", entitlement: "claude-max:miladmaaan@gmail.com" }),
+      obs({ provider: "anthropic", entitlement: "claude-max:milad@afternoonumbrellafriends.org" }),
+      obs({ provider: "anthropic", entitlement: "claude-max:milad@afternoonumbrellafriends.com" }),
     ],
     subscriptions: resolveSubscriptions(["anthropic"], new Date("2026-09-13T00:00:00Z")),
   }));
-  const wrongAccount = out.slice(out.indexOf("miladmaaan@other.com"), out.indexOf("Claude · miladmaaan@gmail.com\n"));
+  const wrongAccount = out.slice(
+    out.indexOf("milad@afternoonumbrellafriends.org"),
+    out.indexOf("Claude · milad@afternoonumbrellafriends.com\n"),
+  );
   expect(wrongAccount).not.toContain("Max 20x · renews");
-  expect(out).toContain("Claude · miladmaaan@gmail.com\n  Max 20x · renews Oct 10");
   expect(out).toContain("Claude · milad@afternoonumbrellafriends.com\n  Max 20x · renews Oct 8");
 });
 
