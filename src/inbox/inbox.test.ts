@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, readdirSync, writeFileSync } from "node:fs";
+import { describe, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeMessage, pendingMessages, drain } from "./inbox.ts";
@@ -106,6 +107,29 @@ describe("drain (move-on-drain, ADR-0033)", () => {
       writeMessage(dir, "b", "y", "20260709T000001Z");
       drain(dir);
       expect(readdirSync(join(dir, "inbox", "processed")).length).toBe(2); // both kept
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a message a concurrent drainer claims mid-drain is skipped, not fatal", () => {
+    const dir = fresh();
+    try {
+      writeMessage(dir, "control", "mine", "20260709T000001Z");
+      const theirs = writeMessage(dir, "control", "theirs", "20260709T000002Z");
+      // The other embodiment drains "theirs" right after this drain has listed the inbox.
+      const listing = spyOn(fs, "readdirSync").mockImplementationOnce(((path: fs.PathLike) => {
+        const names = readdirSync(path);
+        fs.mkdirSync(join(dir, "inbox", "processed"), { recursive: true });
+        renameSync(theirs, join(dir, "inbox", "processed", "claimed-elsewhere.md"));
+        return names;
+      }) as typeof fs.readdirSync);
+      try {
+        expect(drain(dir).map((m) => m.body.trim())).toEqual(["mine"]);
+      } finally {
+        listing.mockRestore();
+      }
+      expect(pendingMessages(dir)).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

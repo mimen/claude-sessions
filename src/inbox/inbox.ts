@@ -100,14 +100,8 @@ export function drain(identityDir: string): InboxMessage[] {
   const processed = join(root, "processed");
   const out: InboxMessage[] = [];
   for (const path of pendingMessages(identityDir)) {
-    const raw = readFileSync(path, "utf8");
     const name = path.split("/").pop()!;
-    // Sender: the sentinel header is authoritative; fall back to the legacy filename parse for
-    // messages written before the header existed (stamp-tail leak notwithstanding — best effort).
-    const m = raw.match(FROM_HEADER);
-    const body = m ? raw.slice(m[0].length) : raw;
     const stem = name.replace(/\.md$/, "");
-    const sender = m ? m[1]! : stem.includes("-") ? stem.split("-").slice(1).join("-") : "unknown";
     mkdirSync(processed, { recursive: true });
     let dest = join(processed, name);
     let n = 2;
@@ -115,7 +109,19 @@ export function drain(identityDir: string): InboxMessage[] {
       dest = join(processed, `${stem}-${n}.md`);
       n++;
     }
-    renameSync(path, dest); // atomically claims + archives the message
+    // The move is the claim: ENOENT means a concurrent drainer already took this message.
+    try {
+      renameSync(path, dest);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    const raw = readFileSync(dest, "utf8");
+    // Sender: the sentinel header is authoritative; fall back to the legacy filename parse for
+    // messages written before the header existed (stamp-tail leak notwithstanding — best effort).
+    const m = raw.match(FROM_HEADER);
+    const body = m ? raw.slice(m[0].length) : raw;
+    const sender = m ? m[1]! : stem.includes("-") ? stem.split("-").slice(1).join("-") : "unknown";
     out.push({ path: dest, sender, body });
   }
   return out;
