@@ -77,6 +77,27 @@ func TestFuzzySearchIncludesTaskSubjects(t *testing.T) {
 	}
 }
 
+func TestTextInputsKeepTypedSpaces(t *testing.T) {
+	typeKeys := func(model Model, keys ...tea.KeyMsg) Model {
+		for _, key := range keys {
+			updated, _ := model.Update(key)
+			model = updated.(Model)
+		}
+		return model
+	}
+	runes := func(text string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)} }
+	space := tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
+
+	model := typeKeys(New(testSnapshot(2)), runes("/"), runes("comma"), space, runes("justin"))
+	if model.query != "comma justin" {
+		t.Fatalf("search query = %q, want %q", model.query, "comma justin")
+	}
+	model = typeKeys(model, tea.KeyMsg{Type: tea.KeyEsc}, runes("t"), runes("new"), space, runes("title"))
+	if model.input == nil || model.input.buffer != "new title" {
+		t.Fatalf("retitle input = %+v, want buffer %q", model.input, "new title")
+	}
+}
+
 func TestCostAndMessageSortOrderRowsDescending(t *testing.T) {
 	snapshot := testSnapshot(3)
 	snapshot.Sessions[0].TotalCost = 3

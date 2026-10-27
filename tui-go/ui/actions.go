@@ -89,8 +89,8 @@ func (m Model) handleInputKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.buffer = string(runes[:len(runes)-1])
 		}
 	default:
-		if message.Type == tea.KeyRunes && !message.Alt {
-			m.input.buffer += string(message.Runes)
+		if text, ok := typedText(message); ok {
+			m.input.buffer += text
 		}
 	}
 	return m, nil

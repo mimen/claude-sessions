@@ -113,8 +113,8 @@ func (m Model) handleSkillKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.rebuildSkillRows()
 			}
 		default:
-			if message.Type == tea.KeyRunes && !message.Alt {
-				m.skillQuery += string(message.Runes)
+			if text, ok := typedText(message); ok {
+				m.skillQuery += text
 				m.rebuildSkillRows()
 			}
 		}

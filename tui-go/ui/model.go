@@ -213,6 +213,21 @@ func (m Model) Handoff() (resume.Command, bool) {
 	return *m.handoff, true
 }
 
+// typedText returns what a key adds to a text input. Bubble Tea reports the
+// space bar as KeySpace, not KeyRunes.
+func typedText(msg tea.KeyMsg) (string, bool) {
+	if msg.Alt {
+		return "", false
+	}
+	switch msg.Type {
+	case tea.KeyRunes:
+		return string(msg.Runes), true
+	case tea.KeySpace:
+		return " ", true
+	}
+	return "", false
+}
+
 func firstSessionRow(rows []row) int {
 	for i, candidate := range rows {
 		if !candidate.header {
@@ -581,8 +596,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.rebuildRows()
 			}
 		default:
-			if msg.Type == tea.KeyRunes && !msg.Alt {
-				m.query += string(msg.Runes)
+			if text, ok := typedText(msg); ok {
+				m.query += text
 				m.rebuildRows()
 			}
 		}
