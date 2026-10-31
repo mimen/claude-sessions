@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import type { Database } from "bun:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openCatalogue } from "../catalogue/db-schema.ts";
@@ -31,8 +32,7 @@ describe("inbox CRUD", () => {
   test("drainForIdentity on an unknown identity with 0 messages → [] (no error)", () => {
     // Punch-list guarantee: `ccs inbox drain <key>` when the key has never
     // received a message must exit cleanly with count=0, not throw or
-    // insert a phantom row. The library layer returns [] via the early
-    // exit at pending.length === 0 in drainForIdentity.
+    // insert a phantom row. An UPDATE of no pending rows returns [].
     const db = openCatalogue(":memory:");
     const drained = drainForIdentity(db, "pr-watch:pr-agent:no/repo#never", LATER);
     expect(drained).toEqual([]);
@@ -49,6 +49,49 @@ describe("inbox CRUD", () => {
     expect(drained.every((r) => r.status === "drained")).toBe(true);
     expect(drainForIdentity(db, "k1", LATER)).toEqual([]);
     expect(pendingForIdentity(db, "k1")).toEqual([]);
+  });
+
+  test("a row another connection claims before the update is not returned again", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ccs-inbox-db-"));
+    const path = join(dir, "catalogue.db");
+    const db = openCatalogue(path);
+    const other = openCatalogue(path);
+    try {
+      sendMessage(db, "k1", "once", "sender", NOW);
+      let stolen: string[] = [];
+      const raced = new Proxy(db, {
+        get(target, prop, receiver) {
+          if (prop !== "query") {
+            const value: unknown = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          }
+          return (sql: string) => {
+            const stmt = target.query(sql);
+            if (!sql.startsWith("SELECT") || !sql.includes("pending")) return stmt;
+            return new Proxy(stmt, {
+              get(statement, statementProp, statementReceiver) {
+                if (statementProp === "all") {
+                  return (...args: Parameters<typeof stmt.all>) => {
+                    const rows = stmt.all(...args);
+                    stolen = drainForIdentity(other, "k1", LATER).map((row) => row.message);
+                    return rows;
+                  };
+                }
+                const value: unknown = Reflect.get(statement, statementProp, statementReceiver);
+                return typeof value === "function" ? value.bind(statement) : value;
+              },
+            });
+          };
+        },
+      });
+      const got = drainForIdentity(raced as Database, "k1", LATER).map((row) => row.message);
+      expect([...stolen, ...got]).toEqual(["once"]);
+      expect(pendingForIdentity(db, "k1")).toEqual([]);
+    } finally {
+      db.close();
+      other.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("history returns both pending and drained, oldest first", () => {

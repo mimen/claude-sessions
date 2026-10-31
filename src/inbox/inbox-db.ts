@@ -64,21 +64,17 @@ export function pendingForIdentity(db: Database, identityKey: string): InboxRow[
 }
 
 /**
- * Atomically drain pending messages: mark them drained (with stamp) and return them. If
- * multiple drains race, sqlite's default serializable transaction ensures each row is
- * claimed by exactly one caller (though in practice ccs is single-threaded per-invocation).
+ * Atomically drain pending messages: one UPDATE claims them and returns only the rows
+ * this statement changed. A select-then-update returned the same snapshot to two
+ * connections that both read before either wrote.
  */
 export function drainForIdentity(db: Database, identityKey: string, now: string): InboxRow[] {
-  const pending = pendingForIdentity(db, identityKey);
-  if (pending.length === 0) return [];
-  const ids = pending.map((r) => r.inboxId);
-  // sqlite doesn't support parameterized IN(), so build placeholders inline. Safe because ids
-  // are integers we just produced ourselves.
-  const placeholders = ids.map(() => "?").join(",");
-  db.query(
-    `UPDATE inboxes SET status = 'drained', drained_at = ? WHERE inbox_id IN (${placeholders})`,
-  ).run(now, ...ids);
-  return pending.map((r) => ({ ...r, status: "drained" as const, drainedAt: now }));
+  const rows = db.query(
+    `UPDATE inboxes SET status = 'drained', drained_at = $now
+     WHERE identity_key = $k AND status = 'pending'
+     RETURNING *`,
+  ).all({ $k: identityKey, $now: now }) as Record<string, unknown>[];
+  return rows.map(fromRow);
 }
 
 /** All messages (pending + drained) for an identity, oldest first. */
