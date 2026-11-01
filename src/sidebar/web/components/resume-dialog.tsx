@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 
 export function ResumeDialog({ phase, name, onCancel, onConfirm }: {
@@ -8,6 +8,15 @@ export function ResumeDialog({ phase, name, onCancel, onConfirm }: {
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
 }): React.ReactElement {
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  // Opened from a row or with Enter, the dialog takes focus so the keyboard reaches its buttons
+  // instead of the list behind it, and gives focus back to where it came from when it closes.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    confirmRef.current?.focus();
+    return () => opener?.focus();
+  }, []);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === "Escape") onCancel();
@@ -40,7 +49,7 @@ export function ResumeDialog({ phase, name, onCancel, onConfirm }: {
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button onClick={onCancel} size="sm" variant="outline">Cancel</Button>
-          <Button onClick={onConfirm} size="sm">
+          <Button onClick={onConfirm} ref={confirmRef} size="sm">
             {completed ? "Resume" : "Resume anyway"}
           </Button>
         </div>

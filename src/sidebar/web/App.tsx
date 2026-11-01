@@ -703,6 +703,8 @@ export function App(): React.ReactElement {
   }, [load]);
 
   const onKeyDown = useCallback((event: React.KeyboardEvent) => {
+    // A dialog's own buttons own Enter; the list must not swallow it and reopen the selected row.
+    if ((event.target as Element).closest("[role=dialog]")) return;
     if (event.key === "Enter") {
       const row = flatRows[selected];
       if (!row) return;
