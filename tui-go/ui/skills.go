@@ -63,11 +63,7 @@ func scanSkillsCmd() tea.Cmd {
 
 func (m Model) handleSkillKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.overlay == OverlayHelp {
-		switch message.String() {
-		case "esc", "q", "?":
-			m.overlay = OverlayNone
-		}
-		return m, nil
+		return m.handleHelpKey(message)
 	}
 	if m.skillReader != nil {
 		page := max(1, m.h-6)

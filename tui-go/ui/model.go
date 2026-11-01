@@ -107,6 +107,7 @@ type Model struct {
 	mode               AppMode
 	view               View
 	overlay            Overlay
+	helpScroll         int
 	options            viewOptions
 	viewOptionCursor   int
 	tickerGeneration   uint64
@@ -513,6 +514,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	page := m.helpPageSize()
+	maxScroll := max(0, len(helpKeys)-page)
+	m.helpScroll = clamp(m.helpScroll, 0, maxScroll)
+	switch msg.String() {
+	case "esc", "q", "?":
+		m.overlay = OverlayNone
+		m.helpScroll = 0
+	case "up", "k":
+		m.helpScroll = max(0, m.helpScroll-1)
+	case "down", "j":
+		m.helpScroll = min(maxScroll, m.helpScroll+1)
+	case "pgup":
+		m.helpScroll = max(0, m.helpScroll-page)
+	case "pgdown", " ":
+		m.helpScroll = min(maxScroll, m.helpScroll+page)
+	case "g":
+		m.helpScroll = 0
+	case "G":
+		m.helpScroll = maxScroll
+	}
+	return m, nil
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.mode == ModeSkills {
 		return m.handleSkillKey(msg)
@@ -551,11 +576,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleViewOptionsKey(msg)
 	}
 	if m.overlay == OverlayHelp {
-		switch msg.String() {
-		case "esc", "q", "?":
-			m.overlay = OverlayNone
-		}
-		return m, nil
+		return m.handleHelpKey(msg)
 	}
 	if m.overlay == OverlayRoute {
 		switch msg.String() {

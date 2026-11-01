@@ -919,35 +919,43 @@ func (m Model) renderRoutePicker() string {
 		Background(theme.BgBase).Padding(1, 3).Width(panelWidth).Render(strings.Join(lines, "\n"))
 }
 
+var helpKeys = [][2]string{
+	{"↑↓ / j k", "move selection"},
+	{"enter", "resume inline on the origin backend"},
+	{"r", "choose any harness × inline / cmux"},
+	{"v", "read the full transcript"},
+	{"J / K", "scroll the dossier transcript peek"},
+	{"p", "show / hide preview pane"},
+	{"g", "cycle default / tree / flat"},
+	{"→ / l", "expand section (on a header)"},
+	{"← / h", "collapse section"},
+	{"space", "fold ⇄ unfold the section"},
+	{"o", "view options, filters, sort, autorefresh"},
+	{"/", "fuzzy title / project / task search"},
+	{"t / C / e / X", "retitle / done / reopen / save / unsave via ccs"},
+	{"E", "AI edit one session; review mutations"},
+	{"S", "summarize selected transcript"},
+	{"A", "ask across transcript excerpts"},
+	{"D", "AI cleanup proposal; approve checked set"},
+	{"Tab", "toggle session manager / Skills registry"},
+	{"?", "this help · q quit"},
+}
+
+func (m Model) helpPageSize() int {
+	return max(1, m.h-7)
+}
+
 func (m Model) renderHelp() string {
-	groups := [][2]string{
-		{"↑↓ / j k", "move selection"},
-		{"enter", "resume inline on the origin backend"},
-		{"r", "choose any harness × inline / cmux"},
-		{"v", "read the full transcript"},
-		{"J / K", "scroll the dossier transcript peek"},
-		{"p", "show / hide preview pane"},
-		{"g", "cycle default / tree / flat"},
-		{"→ / l", "expand section (on a header)"},
-		{"← / h", "collapse section"},
-		{"space", "fold ⇄ unfold the section"},
-		{"o", "view options, filters, sort, autorefresh"},
-		{"/", "fuzzy title / project / task search"},
-		{"t / C / e / X", "retitle / done / reopen / save / unsave via ccs"},
-		{"E", "AI edit one session; review mutations"},
-		{"S", "summarize selected transcript"},
-		{"A", "ask across transcript excerpts"},
-		{"D", "AI cleanup proposal; approve checked set"},
-		{"Tab", "toggle session manager / Skills registry"},
-		{"?", "this help · q quit"},
-	}
 	panelWidth := min(72, max(8, m.w-2))
 	contentWidth := max(1, panelWidth-8)
 	lines := []string{fit(fg(theme.Keyword).Bold(true).Render("Sessions — keys"), contentWidth), ""}
-	for _, group := range groups {
+	page := m.helpPageSize()
+	start := clamp(m.helpScroll, 0, max(0, len(helpKeys)-page))
+	for _, group := range helpKeys[start:min(len(helpKeys), start+page)] {
 		line := fg(theme.Accent).Bold(true).Render(pad(group[0], 16)) + fg(theme.FgSubtle).Render(group[1])
 		lines = append(lines, fit(line, contentWidth))
 	}
+	lines = append(lines, fit(fg(theme.FgMostSubtle).Render("↑↓ / PgUp / PgDn scroll · esc close"), contentWidth))
 	lines = clipPanelLines(lines, max(1, m.h-4))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).BorderForeground(theme.Accent).
