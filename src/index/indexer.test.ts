@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openCatalogue } from "../catalogue/db-schema.ts";
 import { reindexStore, sessionById } from "./index.ts";
 import { openIndex } from "./schema.ts";
+import { exactMessageCount } from "../sidebar/tail-count.ts";
 import type { StoredSessionFile } from "../store.ts";
 
 function transcript(path: string, cwd: string): void {
@@ -68,6 +69,32 @@ test("reindex switches canonical transcript and clears stale diagnostics without
   } finally {
     index.close();
     catalogue.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The store scan stats every file before any is parsed, so a live session can append between the
+// two. The stored count must describe the stored size, or the sidebar's tail count adds the
+// appended messages a second time.
+test("reindex counts only the bytes it records as file_size", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ccs-grown-"));
+  const path = join(dir, "grown.jsonl");
+  transcript(path, "/grown");
+  const scanned = statSync(path);
+  appendFileSync(path, `${JSON.stringify({ type: "assistant", message: { content: "late" } })}\n`);
+  const db = openIndex(":memory:");
+  try {
+    await reindexStore(db, [file(path, "grown", scanned.size, scanned.mtimeMs)], "host");
+    const row = sessionById(db, "grown");
+    expect(row?.fileSize).toBe(scanned.size);
+    expect(row?.msgCount).toBe(1);
+    expect(await exactMessageCount({
+      transcriptPath: path,
+      messageCount: row?.msgCount,
+      indexedBytes: row?.fileSize,
+    })).toBe(2);
+  } finally {
+    db.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
+import { Readable } from "node:stream";
 import { createUsageAccumulator, type CostLine, type UsageTotals } from "./cost.ts";
 
 /** Metadata extracted from a Session transcript by a single streaming pass. */
@@ -98,9 +99,13 @@ function skeletonLine(role: string, content: unknown): string {
 export async function parseSessionFile(
   path: string,
   sessionId: string,
+  /** Stop at this many bytes, so the result describes the size a caller already recorded. */
+  maxBytes?: number,
 ): Promise<ParsedSession> {
   const rl = createInterface({
-    input: createReadStream(path, { encoding: "utf8" }),
+    input: maxBytes === 0
+      ? Readable.from([])
+      : createReadStream(path, { encoding: "utf8", ...(maxBytes ? { end: maxBytes - 1 } : {}) }),
     crlfDelay: Infinity,
   });
 

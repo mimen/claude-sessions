@@ -1,5 +1,5 @@
 import { expect, test, describe, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
@@ -78,7 +78,7 @@ async function fixture(
       message: { role: i % 2 === 0 ? "user" : "assistant", content: [{ type: "text", text: `turn ${i}` }] },
     }));
     writeFileSync(path, lines.join("\n") + "\n");
-    return { path, sessionId: session.id, sizeBytes: 100, mtimeMs: 1 };
+    return { path, sessionId: session.id, sizeBytes: statSync(path).size, mtimeMs: 1 };
   });
 
   const index = openIndex(":memory:");

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reindexStore, sessionById } from "./index.ts";
@@ -19,7 +19,7 @@ test("models round-trip through the session index", async () => {
   try {
     await reindexStore(
       db,
-      [{ path, sessionId: "session", sizeBytes: 123, mtimeMs: 456 }],
+      [{ path, sessionId: "session", sizeBytes: statSync(path).size, mtimeMs: 456 }],
       "test-host",
     );
 

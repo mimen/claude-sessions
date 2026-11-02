@@ -189,7 +189,7 @@ export async function reindexStore(
     }
 
     try {
-      const parsed = await parseSessionFile(file.path, sessionId);
+      const parsed = await parseSessionFile(file.path, sessionId, file.sizeBytes);
       parsedCandidates.push({ file, shadowPathsJson, parsed });
       stats.parsed++;
     } catch {
