@@ -163,8 +163,8 @@ func (m Model) handleConfirmationKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.confirmation = nil
-			m.status = fmt.Sprintf("saving %d approved sessions via ccs…", len(ids))
-			return m, saveBatchCmd(ids, preferredID, fmt.Sprintf("saved %d sessions", len(ids)), m.options.loadOptions())
+			m.status = fmt.Sprintf("marking %d approved sessions done via ccs…", len(ids))
+			return m, completeBatchCmd(ids, preferredID, fmt.Sprintf("marked %d sessions done", len(ids)), m.options.loadOptions())
 		}
 	}
 	return m, nil

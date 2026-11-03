@@ -51,7 +51,7 @@ SHOT=skill-reader go run .
 | `E` | Describe a single-session metadata edit in natural language; review validated mutations before applying them through `ccs` |
 | `S` | Generate a 2–3 line transcript summary in the dossier |
 | `A` | Ask the fleet a semantic question across bounded transcript excerpts; `enter` jumps to a result |
-| `D` | Generate a conservative cleanup proposal; `space` toggles entries and `y` archives the approved set through `ccs` |
+| `D` | Generate a conservative cleanup proposal; `space` toggles entries and `y` marks the approved set Done through `ccs` |
 | `Tab` | Toggle Skills mode |
 | `?` | Help |
 | `q` | Quit |

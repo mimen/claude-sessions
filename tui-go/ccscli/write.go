@@ -150,7 +150,17 @@ func ApplyMutations(ctx context.Context, mutations []inference.MetadataMutation)
 	return nil
 }
 
-// SaveBatch applies an approved cleanup set one canonical save command at a time.
+// CompleteBatch marks an approved cleanup set Done one canonical complete command at a time.
+func CompleteBatch(ctx context.Context, sessionIDs []string) error {
+	for index, sessionID := range sessionIDs {
+		if err := MarkCompleted(ctx, sessionID, true); err != nil {
+			return fmt.Errorf("complete %d/%d: %w", index+1, len(sessionIDs), err)
+		}
+	}
+	return nil
+}
+
+// SaveBatch saves sessions one canonical save command at a time.
 func SaveBatch(ctx context.Context, sessionIDs []string) error {
 	for index, sessionID := range sessionIDs {
 		if err := MarkSaved(ctx, sessionID, true); err != nil {

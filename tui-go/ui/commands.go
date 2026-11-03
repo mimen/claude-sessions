@@ -91,6 +91,17 @@ func saveBatchCmd(sessionIDs []string, preferredID string, status string, option
 	}
 }
 
+func completeBatchCmd(sessionIDs []string, preferredID string, status string, options data.LoadOptions) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(max(30, len(sessionIDs)*10))*time.Second)
+		defer cancel()
+		if err := ccscli.CompleteBatch(ctx, sessionIDs); err != nil {
+			return reloadAfterFailure(options, preferredID, err)
+		}
+		return reloadAfterWrite(options, preferredID, status)
+	}
+}
+
 func markSavedCmd(sessionID string, enabled bool, preferredID string, status string, options data.LoadOptions) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

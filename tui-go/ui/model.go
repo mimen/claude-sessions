@@ -498,7 +498,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.status = "AI cleanup failed: " + msg.err.Error()
 		} else if len(msg.proposals) == 0 {
-			m.status = string(msg.engine) + " proposed no safe saves"
+			m.status = string(msg.engine) + " proposed nothing to mark done"
 		} else {
 			items := make([]confirmationItem, 0, len(msg.proposals))
 			for _, proposal := range msg.proposals {

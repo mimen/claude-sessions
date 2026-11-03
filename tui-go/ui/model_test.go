@@ -674,3 +674,27 @@ func TestViewStripsTerminalControlsFromSnapshot(t *testing.T) {
 		t.Fatalf("view retained terminal control input")
 	}
 }
+
+func TestApprovedCleanupMarksSessionsDone(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("CCS_ROOT", filepath.Join(dir, ".ccs"))
+	logPath := filepath.Join(dir, "calls")
+	binary := filepath.Join(dir, "ccs")
+	script := "#!/bin/sh\nif [ \"$1\" = session ] && [ \"$3\" = --json ]; then printf '{\"state\":\"catalogued\"}'; exit 0; fi\nprintf '%s\\n' \"$*\" >> '" + logPath + "'\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCS_BINARY", binary)
+	model := New(testSnapshot(2))
+	model.confirmation = &confirmation{kind: confirmCleanup, items: []confirmationItem{{sessionID: "one", enabled: true}, {sessionID: "two", enabled: false}}}
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("approval returned no command")
+	}
+	cmd()
+	contents, _ := os.ReadFile(logPath)
+	if got := string(contents); got != "session complete one\n" {
+		t.Fatalf("calls = %q", got)
+	}
+}
