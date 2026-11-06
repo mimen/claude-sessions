@@ -28,6 +28,7 @@ const fgDim = (text: string): string => `\x1b[2m${text}\x1b[0m`;
 export interface ParsedEnrichArgs {
   readonly mode: "one" | "sweep" | "list";
   readonly asJson: boolean;
+  readonly includeAutomation: boolean;
   readonly limitRaw?: string;
   readonly concurrencyRaw?: string;
   readonly sessionArg?: string;
@@ -37,6 +38,7 @@ export interface ParsedEnrichArgs {
 export function parseEnrichArgs(args: readonly string[]): Result<ParsedEnrichArgs> {
   let mode: ParsedEnrichArgs["mode"] = "one";
   let asJson = false;
+  let includeAutomation = false;
   let limitRaw: string | undefined;
   let concurrencyRaw: string | undefined;
   let sessionArg: string | undefined;
@@ -45,6 +47,10 @@ export function parseEnrichArgs(args: readonly string[]): Result<ParsedEnrichArg
     const arg = args[i]!;
     if (arg === "--json") {
       asJson = true;
+      continue;
+    }
+    if (arg === "--include-automation") {
+      includeAutomation = true;
       continue;
     }
     if (arg === "--sweep" || arg === "--list") {
@@ -79,10 +85,13 @@ export function parseEnrichArgs(args: readonly string[]): Result<ParsedEnrichArg
   if (mode === "one" && (limitRaw !== undefined || concurrencyRaw !== undefined)) {
     return err(new Error("--limit and --concurrency require --sweep or --list"));
   }
+  if (mode === "one" && includeAutomation) {
+    return err(new Error("--include-automation requires --sweep or --list"));
+  }
   if (mode === "list" && concurrencyRaw !== undefined) {
     return err(new Error("--concurrency applies only to --sweep"));
   }
-  return ok({ mode, asJson, limitRaw, concurrencyRaw, sessionArg });
+  return ok({ mode, asJson, includeAutomation, limitRaw, concurrencyRaw, sessionArg });
 }
 
 function positiveInt(raw: string | undefined, label: string): number | undefined | null {
@@ -125,9 +134,10 @@ export async function enrichCommand(args: string[]): Promise<number> {
   const index = openIndex(DB_PATH());
   const catalogue = openCatalogue(CATALOGUE_PATH());
   try {
-    if (parsed.value.mode === "list") return listStale(index, catalogue, limit, parsed.value.asJson);
+    const { includeAutomation } = parsed.value;
+    if (parsed.value.mode === "list") return listStale(index, catalogue, limit, includeAutomation, parsed.value.asJson);
     if (parsed.value.mode === "sweep") {
-      return await runSweep(index, catalogue, limit, concurrency, parsed.value.asJson);
+      return await runSweep(index, catalogue, limit, concurrency, includeAutomation, parsed.value.asJson);
     }
     return await runOne(index, catalogue, parsed.value.sessionArg, parsed.value.asJson);
   } finally {
@@ -140,9 +150,10 @@ function listStale(
   index: ReturnType<typeof openIndex>,
   catalogue: ReturnType<typeof openCatalogue>,
   limit: number | undefined,
+  includeAutomation: boolean,
   asJson: boolean,
 ): number {
-  const all = enrichCandidates(index, catalogue);
+  const all = enrichCandidates(index, catalogue, new Date(), { includeAutomation });
   const shown = limit ? all.slice(0, limit) : all;
   if (asJson) {
     console.log(JSON.stringify(
@@ -181,10 +192,11 @@ async function runSweep(
   catalogue: ReturnType<typeof openCatalogue>,
   limit: number | undefined,
   concurrency: number | undefined,
+  includeAutomation: boolean,
   asJson: boolean,
 ): Promise<number> {
   warnIfNoRegistry();
-  const total = enrichCandidates(index, catalogue)
+  const total = enrichCandidates(index, catalogue, new Date(), { includeAutomation })
     .filter((candidate) => candidate.proseStale || candidate.categoryEligible).length;
   if (total === 0) {
     if (asJson) console.log(JSON.stringify({ enriched: 0, failed: 0, remaining: 0 }));
@@ -195,6 +207,7 @@ async function runSweep(
   const stats = await sweep(index, catalogue, {
     limit,
     concurrency,
+    includeAutomation,
     // Always to stderr, in both modes: this is the only record a scheduled run leaves behind.
     onFailure: (sessionId, error) => {
       // Truncated: a malformed generation can echo an entire garbled tool call into the message,

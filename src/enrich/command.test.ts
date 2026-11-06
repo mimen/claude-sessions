@@ -8,6 +8,7 @@ describe("parseEnrichArgs", () => {
       value: {
         mode: "one",
         asJson: true,
+        includeAutomation: false,
         limitRaw: undefined,
         concurrencyRaw: undefined,
         sessionArg: "session-prefix",
@@ -18,11 +19,17 @@ describe("parseEnrichArgs", () => {
       value: {
         mode: "sweep",
         asJson: false,
+        includeAutomation: false,
         limitRaw: "40",
         concurrencyRaw: "3",
         sessionArg: undefined,
       },
     });
+  });
+
+  test("--include-automation is a sweep and list flag", () => {
+    const parsed = parseEnrichArgs(["--sweep", "--include-automation"]);
+    expect(parsed.ok && parsed.value.includeAutomation).toBe(true);
   });
 
   test("refuses mode-only flag values instead of treating them as session prefixes", () => {
@@ -35,5 +42,6 @@ describe("parseEnrichArgs", () => {
     expect(parseEnrichArgs(["--typo"]).ok).toBe(false);
     expect(parseEnrichArgs(["session-id", "--sweep"]).ok).toBe(false);
     expect(parseEnrichArgs(["--list", "--concurrency", "2"]).ok).toBe(false);
+    expect(parseEnrichArgs(["session-id", "--include-automation"]).ok).toBe(false);
   });
 });

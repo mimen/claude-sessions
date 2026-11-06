@@ -70,7 +70,7 @@ Usage:
   ccs reindex [--titles]   Refresh through the host-local catalogue authority
   ccs catalogue-service start|status|check|stop|refresh   Manage and verify the on-demand local authority
   ccs enrich [<id>|.] [--json]                    Summarise one session (what it was, what's open, what to do)
-  ccs enrich --sweep [--limit N] [--concurrency N]  Enrich every stale session
+  ccs enrich --sweep [--limit N] [--concurrency N]  Enrich every stale session (skips automation; --include-automation)
   ccs enrich --list [--limit N] [--json]          Show what the sweep would do, without calling the model
   ccs triage [--list] [--json]                    Close out sessions whose verdict contradicts their lifecycle
   ccs next [--json]                               What you're mid-flight on, and the next action for each

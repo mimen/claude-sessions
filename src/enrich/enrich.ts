@@ -43,6 +43,7 @@ export interface SweepOptions extends EnrichOptions {
   readonly concurrency?: number;
   /** Stop after this many sessions. The first run over a cold store is the case this exists for. */
   readonly limit?: number;
+  readonly includeAutomation?: boolean;
   readonly onProgress?: (done: number, total: number, sessionId: string) => void;
   /**
    * Called once per failed session. The sweep's own counters say only "failed 12", which is
@@ -108,11 +109,15 @@ function storedCategoryOnlyResult(
  * every message is a sidechain (a subagent run, not a work body), and `auxiliary` excludes
  * declared delegated children. Neither is something you "catch up on" — you catch up on the
  * session that spawned them, whose transcript already covers the delegation.
+ *
+ * `creator_kind = 'automation'` is skipped unless `includeAutomation` is set: scheduled runs are
+ * most of the Mini's store, and nobody catches up on them, so they would eat every sweep's limit.
  */
 export function enrichCandidates(
   index: Database,
   catalogue: Database,
   now: Date = new Date(),
+  { includeAutomation = false }: { readonly includeAutomation?: boolean } = {},
 ): EnrichCandidate[] {
   const catalogueRows = getAll(catalogue);
   const registry = loadCategoryRegistry(CATEGORY_REGISTRY_PATH());
@@ -134,6 +139,7 @@ export function enrichCandidates(
     // and it meaning nothing at all.
     if (isIncognito(catalogueRow)) continue;
     if (catalogueRow?.sessionClass === "auxiliary") continue;
+    if (!includeAutomation && catalogueRow?.creatorKind === "automation") continue;
     if (catalogueRow?.meta.workflowJournal === true || catalogueRow?.meta.workflow_journal === true || catalogueRow?.meta.journal === true) continue;
     const verdict = enrichmentStaleness({
       messageCount: row.msgCount,
@@ -343,7 +349,7 @@ export async function sweep(
 ): Promise<SweepStats> {
   const now = options.now ?? (() => new Date());
   const locations = options.locations ?? loadEnrichmentLocations();
-  const all = enrichCandidates(index, catalogue, now())
+  const all = enrichCandidates(index, catalogue, now(), options)
     .filter((candidate) => candidate.proseStale || candidate.categoryEligible);
   const limit = options.limit ?? all.length;
   const candidates = all.slice(0, limit);

@@ -7,7 +7,7 @@ import { openIndex } from "../index/schema.ts";
 import { reindexStore } from "../index/index.ts";
 import { openCatalogue } from "../catalogue/db-schema.ts";
 import { getRow } from "../catalogue/db-queries.ts";
-import { setEnrichment, recordEnrichmentFailure } from "../catalogue/db-mutations.ts";
+import { setCreatorKind, setEnrichment, recordEnrichmentFailure } from "../catalogue/db-mutations.ts";
 import { enrichCandidates, sweep } from "./enrich.ts";
 import { MAX_ENRICHMENT_ATTEMPTS } from "./staleness.ts";
 import { getCategoryAssignment } from "../categories/assignment.ts";
@@ -136,6 +136,18 @@ describe("enrichCandidates", () => {
         "INSERT INTO catalogue (session_id, session_class, updated_at) VALUES ('aux', 'auxiliary', $now)",
       ).run({ $now: NOW });
       expect(enrichCandidates(f.index, f.catalogue).map((c) => c.row.sessionId)).toEqual(["a"]);
+    } finally {
+      teardown(f);
+    }
+  });
+
+  test("excludes automation-created sessions unless asked to include them", async () => {
+    const f = await fixture([{ id: "human", messages: 4 }, { id: "cron", messages: 4 }]);
+    try {
+      setCreatorKind(f.catalogue, "cron", "automation", NOW);
+      expect(enrichCandidates(f.index, f.catalogue).map((c) => c.row.sessionId)).toEqual(["human"]);
+      expect(enrichCandidates(f.index, f.catalogue, new Date(), { includeAutomation: true })
+        .map((c) => c.row.sessionId).sort()).toEqual(["cron", "human"]);
     } finally {
       teardown(f);
     }
@@ -337,6 +349,21 @@ describe("sweep", () => {
       expect(stored?.state).toBe("A session about enrichment.");
       // The stamp must be the count the state was made against, not a later one.
       expect(stored?.atMessages).toBe(4);
+    } finally {
+      teardown(f);
+    }
+  });
+
+  test("leaves automation sessions unenriched by default and enriches them on request", async () => {
+    const f = await fixture([{ id: "human", messages: 4 }, { id: "cron", messages: 4 }]);
+    try {
+      setCreatorKind(f.catalogue, "cron", "automation", NOW);
+      const options = { locations: LOCATIONS, keyPath: f.keyPath, fetchImpl: okFetch };
+      expect(await sweep(f.index, f.catalogue, options)).toEqual({ enriched: 1, failed: 0, remaining: 0 });
+      expect(getRow(f.catalogue, "cron")?.enrichment).toBeNull();
+      expect(await sweep(f.index, f.catalogue, { ...options, includeAutomation: true }))
+        .toEqual({ enriched: 1, failed: 0, remaining: 0 });
+      expect(getRow(f.catalogue, "cron")?.enrichment?.state).toBe(ANSWER.state);
     } finally {
       teardown(f);
     }
