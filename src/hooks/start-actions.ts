@@ -1,4 +1,6 @@
+import type { Database } from "bun:sqlite";
 import type { CatalogueRow } from "../catalogue/db-schema.ts";
+import { drainForIdentity } from "../inbox/inbox-db.ts";
 import { drain } from "../inbox/inbox.ts";
 import { identityDir, ccsRuntimeRoot, type Responsibility } from "../inbox/identity-path.ts";
 import { resolveConfig } from "./resolve-config.ts";
@@ -20,6 +22,7 @@ import { catchUp } from "../cluster/changelog.ts";
  */
 
 export interface StartActionCtx {
+  db: Database;
   row: CatalogueRow;
   /** The SessionStart source (startup/resume/clear/compact) — arm only acts on resume. */
   source: string;
@@ -70,7 +73,11 @@ export const BUILTIN_ACTIONS: Record<string, ActionHandler> = {
   // Draining is a real side-effect; returning the bodies as context guarantees nothing is lost.
   "drain-inbox": (_action, ctx) => {
     const dir = identityDir(ccsRuntimeRoot(), responsibilityOf(ctx.row));
-    const msgs = drain(dir);
+    const msgs = drain(dir).map(({ sender, body }) => ({ sender, body }));
+    if (ctx.row.identityKey) {
+      msgs.push(...drainForIdentity(ctx.db, ctx.row.identityKey, new Date().toISOString())
+        .map((message) => ({ sender: message.fromRole ?? "unknown", body: message.message })));
+    }
     if (msgs.length === 0) return { context: null };
     const body = msgs.map((m) => `— from ${m.sender}:\n${m.body}`).join("\n\n");
     return { context: `You have ${msgs.length} inbox message(s) (drained just now):\n\n${body}` };

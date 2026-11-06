@@ -47,7 +47,7 @@ export async function registerSessionCommand(): Promise<number> {
           // merged order. If a `start.json` ran an `arm` action, it OWNS arming — suppress
           // handleSessionStart's built-in re-arm note to avoid a duplicate. With no start.json,
           // the built-in re-arm note is the safety net.
-          const started = runStartActions({ row, source: payload.source });
+          const started = runStartActions({ db, row, source: payload.source });
           const armedByConfig = started.ran.includes("arm");
           if (res.additionalContext && !armedByConfig) parts.push(res.additionalContext);
           if (started.context) parts.push(started.context);

@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,10 @@ import type { CatalogueRow } from "../catalogue/db-schema.ts";
 import { runStartActions, BUILTIN_ACTIONS, type ActionHandler, type StartActionCtx } from "./start-actions.ts";
 import { writeMessage } from "../inbox/inbox.ts";
 import { readIdentityDoc } from "../state/cluster-state.ts";
+import { inboxCommand } from "../inbox/inbox-command.ts";
+import { openCatalogue } from "../catalogue/db-schema.ts";
+import { CATALOGUE_PATH } from "../paths.ts";
+import { pendingForIdentity, historyForIdentity } from "../inbox/inbox-db.ts";
 
 const NOW = "2026-07-10T00:00:00Z";
 
@@ -41,8 +46,12 @@ function row(over: Partial<CatalogueRow>): CatalogueRow {
     prBranch: null, prState: null, prHeadSha: null, identityKey: null, ...over,
   };
 }
-const ctx = (over: Partial<CatalogueRow>, source = "startup"): StartActionCtx =>
-  ({ row: row({ role: "control", ...over }), source });
+const databases: Database[] = [];
+afterEach(() => { for (const db of databases.splice(0)) db.close(); });
+const ctx = (over: Partial<CatalogueRow>, source = "startup", db = new Database(":memory:")): StartActionCtx => {
+  databases.push(db);
+  return { db, row: row({ role: "control", ...over }), source };
+};
 
 test("runs actions in merged order via injected handlers", () => {
   withTree((cfg) => {
@@ -100,6 +109,26 @@ test("built-in drain-inbox: executes the drain and returns the content", () => {
     expect(out.context).toContain("1 inbox message");
     expect(out.context).toContain("PR #12080 got a review comment");
     expect(out.context).toContain("from scout:"); // sender from the sentinel header, clean
+  });
+});
+
+test("start actions deliver CLI inbox messages only to their identity and only once", () => {
+  withTree((cfg) => {
+    writeStart(cfg, "pr-watch", "pr-agent", [{ name: "drain-inbox" }]);
+    const key = "pr-watch:pr-agent:owner/repo#12080";
+    const otherKey = "pr-watch:pr-agent:owner/repo#12081";
+    expect(inboxCommand(["send", `--to=${key}`, "--from=scout", "--message=review landed"])).toBe(0);
+    expect(inboxCommand(["send", `--to=${otherKey}`, "--message=other task"])).toBe(0);
+    const db = openCatalogue(CATALOGUE_PATH());
+    const context = ctx({ role: "pr-agent", identityKey: key, prRepo: "owner/repo", prNumber: 12080 }, "startup", db);
+    const result = runStartActions(context);
+    expect(result.errors).toEqual([]);
+    expect(result.context).toBe("You have 1 inbox message(s) (drained just now):\n\n— from scout:\nreview landed");
+    expect(result.context).not.toContain("other task");
+    expect(runStartActions(context).context).toBeNull();
+    expect(pendingForIdentity(db, key)).toEqual([]);
+    expect(historyForIdentity(db, key).map((message) => message.status)).toEqual(["drained"]);
+    expect(pendingForIdentity(db, otherKey).map((message) => message.message)).toEqual(["other task"]);
   });
 });
 
