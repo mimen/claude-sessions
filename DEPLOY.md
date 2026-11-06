@@ -2,7 +2,7 @@
 deployment_status: verified
 deployment_production_trigger: merge to master
 deployment_verify_command: ccs doctor launcher && ccs doctor models
-deployment_last_assessed: 2026-09-03
+deployment_last_assessed: 2026-11-06
 deployment_targets:
   - component: ccs CLI and engine
     where: local-install
@@ -33,7 +33,7 @@ deployment_targets:
     detail: Claude Code installs ccs@claude-sessions from the in-repo GitHub marketplace
   - component: Scheduled LaunchAgents
     where: mac-mini
-    detail: launchd com.milad.ccs.catalogue-refresh
+    detail: launchd com.milad.ccs.catalogue-refresh and com.milad.ccs.enrich
   - component: Scheduled LaunchAgents
     where: m5-laptop
     detail: launchd com.milad.ccs.catalogue-refresh and com.milad.ccs.enrich

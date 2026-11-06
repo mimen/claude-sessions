@@ -8,18 +8,17 @@
      the model for sessions that actually advanced (see src/enrich/staleness.ts), so a steady
      state run usually does nothing at all.
 
-     LAPTOP ONLY, deliberately:
-       - the model gateway (homebrew.mxcl.cliproxyapi) runs here;
-       - the catalogue and index are machine-local (~/.ccs/cache), so a Mini-side sweep would
-         enrich a different store.
+     EVERY HOST (M5, M3, Mini): the catalogue and index are machine-local (~/.ccs/cache), so each
+     host enriches only its own sessions and needs its own copy of this job. The sweep skips
+     creator_kind='automation' sessions, which are most of the Mini's store.
 
      Absolute paths throughout because launchd does NOT source a shell profile: its PATH is
      /usr/gnu/bin:/usr/local/bin:/bin:/usr/bin, which contains neither bun nor ccs. The
      `#!/usr/bin/env bun` shebang on bin/ccs would fail here, so bun is invoked directly.
 
-     --limit bounds each run. A cold store has ~340 sessions to backfill; at 40 per run on a
-     15-minute interval it drains in roughly two hours without ever presenting the gateway
-     with a burst. Steady state is a handful of sessions or none.
+     --limit bounds each run. At 40 per run on a 15-minute interval a cold store of a few
+     hundred sessions drains in a couple of hours without presenting the gateway with a burst.
+     Steady state is a handful of sessions or none.
 
      CHECKOUT: the deployment, never a worktree — a scheduled job aimed at a worktree dies the
      moment that worktree is removed. The installer proves `ccs enrich` exists in whatever
