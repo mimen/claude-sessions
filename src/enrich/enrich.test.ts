@@ -23,16 +23,23 @@ const LOCATIONS: readonly EnrichmentLocation[] = [
 // Without an explicit override these tests would read whatever registry the developer's machine
 // happens to have, so a file appearing in the vault silently changes what they assert. Point the
 // whole file at a path that cannot exist; the cases that need a registry set their own.
+// CCS_ROOT moves for the same reason: every sweep records its health under the runtime root, and a
+// suite run on a real host otherwise stamps that host's enrich-health.json with fixture counts.
 let registryOverrideRoot = "";
 let priorRegistryPath: string | undefined;
+let priorRuntimeRoot: string | undefined;
 beforeAll(() => {
   registryOverrideRoot = mkdtempSync(join(tmpdir(), "ccs-enrich-noregistry-"));
   priorRegistryPath = process.env.CCS_CATEGORY_REGISTRY_PATH;
   process.env.CCS_CATEGORY_REGISTRY_PATH = join(registryOverrideRoot, "absent-registry.json");
+  priorRuntimeRoot = process.env.CCS_ROOT;
+  process.env.CCS_ROOT = join(registryOverrideRoot, "ccs");
 });
 afterAll(() => {
   if (priorRegistryPath === undefined) delete process.env.CCS_CATEGORY_REGISTRY_PATH;
   else process.env.CCS_CATEGORY_REGISTRY_PATH = priorRegistryPath;
+  if (priorRuntimeRoot === undefined) delete process.env.CCS_ROOT;
+  else process.env.CCS_ROOT = priorRuntimeRoot;
   rmSync(registryOverrideRoot, { recursive: true, force: true });
 });
 
