@@ -214,7 +214,16 @@ export function t3CustomModelEntry(model: ModelRow): T3CustomModelEntry {
   };
 }
 
-const T3SettingsSchema = z.object({
+const T3FavoriteSchema = z.object({ provider: z.string(), model: z.string() }).passthrough();
+
+const T3ModelPreferencesSchema = z.object({
+  providerModelPreferences: z.record(z.string(), z.object({
+    modelOrder: z.array(z.string()).optional(),
+  }).passthrough()).nullish(),
+  favorites: z.array(T3FavoriteSchema).nullish(),
+}).passthrough();
+
+const T3SettingsSchema = T3ModelPreferencesSchema.extend({
   providerInstances: z.record(z.string(), z.object({
     config: z.record(z.string(), z.unknown()).optional(),
   }).passthrough()).optional(),
@@ -269,17 +278,8 @@ export function renderT3Settings(
       claudeAgent: { ...instance, config: { ...(instance.config ?? {}), customModels } },
     },
   };
-  return ok(`${JSON.stringify(next, null, 2)}\n`);
+  return ok(`${JSON.stringify(withModelPreferences(next, parsed.data, registry) ?? next, null, 2)}\n`);
 }
-
-const T3FavoriteSchema = z.object({ provider: z.string(), model: z.string() }).passthrough();
-
-const T3ClientSchema = z.object({
-  providerModelPreferences: z.record(z.string(), z.object({
-    modelOrder: z.array(z.string()).optional(),
-  }).passthrough()).optional(),
-  favorites: z.array(T3FavoriteSchema).optional(),
-}).passthrough();
 
 /**
  * Registry order leads T3's picker; ids a human added by hand keep their place after it.
@@ -287,7 +287,33 @@ const T3ClientSchema = z.object({
  * T3's starred list is the same configuration as Claude Code's `/model` rows: every registry
  * model with `picker = true` on the Claude Agent provider, in registry order. Stars on other
  * providers are the user's own and survive untouched.
+ *
+ * T3 reads these from the server settings once it has migrated them there, and from the client
+ * settings only before that, so both files get the same rows. Null means T3 has not migrated.
  */
+function withModelPreferences(
+  raw: Record<string, unknown>,
+  data: z.infer<typeof T3ModelPreferencesSchema>,
+  registry: ModelRegistry,
+): Record<string, unknown> | null {
+  const preferences = data.providerModelPreferences?.["claudeAgent"];
+  if (!preferences) return null;
+  const registryOrder = registry.model.map((model) => model.id);
+  const extras = (preferences.modelOrder ?? []).filter((id) => !registryOrder.includes(id));
+  const otherFavorites = (data.favorites ?? []).filter((favorite) => favorite.provider !== "claudeAgent");
+  const pickerFavorites = registry.model
+    .filter((model) => model.picker && model.replaced_by === undefined)
+    .map((model) => ({ provider: "claudeAgent", model: model.id }));
+  return {
+    ...raw,
+    providerModelPreferences: {
+      ...data.providerModelPreferences,
+      claudeAgent: { ...preferences, modelOrder: [...registryOrder, ...extras] },
+    },
+    favorites: [...otherFavorites, ...pickerFavorites],
+  };
+}
+
 export function renderT3ClientSettings(text: string, registry: ModelRegistry): Result<string | null> {
   let raw: unknown;
   try {
@@ -296,25 +322,10 @@ export function renderT3ClientSettings(text: string, registry: ModelRegistry): R
     const detail = cause instanceof Error ? cause.message : String(cause);
     return err(new Error(`T3 client settings is not parseable JSON: ${detail}`));
   }
-  const parsed = T3ClientSchema.safeParse(raw);
+  const parsed = T3ModelPreferencesSchema.safeParse(raw);
   if (!parsed.success) return err(new Error(`unexpected T3 client settings shape: ${z.prettifyError(parsed.error)}`));
-  const preferences = parsed.data.providerModelPreferences?.["claudeAgent"];
-  if (!preferences) return ok(null);
-  const registryOrder = registry.model.map((model) => model.id);
-  const extras = (preferences.modelOrder ?? []).filter((id) => !registryOrder.includes(id));
-  const otherFavorites = (parsed.data.favorites ?? []).filter((favorite) => favorite.provider !== "claudeAgent");
-  const pickerFavorites = registry.model
-    .filter((model) => model.picker && model.replaced_by === undefined)
-    .map((model) => ({ provider: "claudeAgent", model: model.id }));
-  const next = {
-    ...(raw as Record<string, unknown>),
-    providerModelPreferences: {
-      ...parsed.data.providerModelPreferences,
-      claudeAgent: { ...preferences, modelOrder: [...registryOrder, ...extras] },
-    },
-    favorites: [...otherFavorites, ...pickerFavorites],
-  };
-  return ok(`${JSON.stringify(next, null, 2)}\n`);
+  const next = withModelPreferences(raw as Record<string, unknown>, parsed.data, registry);
+  return ok(next && `${JSON.stringify(next, null, 2)}\n`);
 }
 
 export interface ClientSurfacePaths {

@@ -251,3 +251,33 @@ test("writing the client surfaces is idempotent and skips what this machine lack
   expect(second.value.written).toEqual([]);
   expect(readFileSync(paths.opencodeConfig, "utf8")).toBe(before);
 });
+
+test("T3's migrated server settings get the registry's stars, and unmigrated ones are left to the client file", () => {
+  const server = JSON.stringify({
+    favorites: [{ provider: "claudeAgent", model: "stale-pick" }, { provider: "opencode", model: "mine" }],
+    providerModelPreferences: { claudeAgent: { modelOrder: ["hand-added"] } },
+    providerInstances: { claudeAgent: { driver: "claudeAgent", config: {} } },
+  });
+  const rendered = renderT3Settings(server, registry());
+  if (!rendered.ok || rendered.value === null) throw new Error("unreachable");
+  const parsed = JSON.parse(rendered.value) as {
+    favorites: { provider: string; model: string }[];
+    providerModelPreferences: { claudeAgent: { modelOrder: string[] } };
+  };
+  const pickers = registry().model.filter((m) => m.picker && m.replaced_by === undefined).map((m) => m.id);
+  expect(parsed.favorites).toEqual([
+    { provider: "opencode", model: "mine" },
+    ...pickers.map((model) => ({ provider: "claudeAgent", model })),
+  ]);
+  expect(parsed.providerModelPreferences.claudeAgent.modelOrder.at(-1)).toBe("hand-added");
+
+  const unmigrated = renderT3Settings(JSON.stringify({
+    favorites: null,
+    providerModelPreferences: null,
+    providerInstances: { claudeAgent: { driver: "claudeAgent", config: {} } },
+  }), registry());
+  if (!unmigrated.ok || unmigrated.value === null) throw new Error("unreachable");
+  const raw = JSON.parse(unmigrated.value) as { favorites: unknown; providerModelPreferences: unknown };
+  expect(raw.favorites).toBeNull();
+  expect(raw.providerModelPreferences).toBeNull();
+});
