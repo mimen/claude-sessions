@@ -21,6 +21,7 @@ import {
   familyOf,
   labelOf,
   modelWindows,
+  pickerFavoriteIds,
   pickerRows,
   slots,
   SLOT_ENVIRONMENT_KEYS,
@@ -301,9 +302,7 @@ function withModelPreferences(
   const registryOrder = registry.model.map((model) => model.id);
   const extras = (preferences.modelOrder ?? []).filter((id) => !registryOrder.includes(id));
   const otherFavorites = (data.favorites ?? []).filter((favorite) => favorite.provider !== "claudeAgent");
-  const pickerFavorites = registry.model
-    .filter((model) => model.picker && model.replaced_by === undefined)
-    .map((model) => ({ provider: "claudeAgent", model: model.id }));
+  const pickerFavorites = pickerFavoriteIds(registry).map((model) => ({ provider: "claudeAgent", model }));
   return {
     ...raw,
     providerModelPreferences: {

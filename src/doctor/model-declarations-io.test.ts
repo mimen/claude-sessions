@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { collectModelDeclarations } from "./model-declarations-io.ts";
 import type { ModelDeclarationFinding, ModelDeclarationsReport } from "./model-declarations.ts";
-import type { ModelRegistry } from "../models/registry.ts";
+import { loadModelRegistry, pickerFavoriteIds, type ModelRegistry } from "../models/registry.ts";
 
 const roots: string[] = [];
 
@@ -106,6 +106,7 @@ const ISOLATION = {
   modelRegistryPath: MODEL_REGISTRY,
   hermesConfigPath: join(tmpdir(), "ccs-doctor-absent-hermes.yaml"),
   pstackModelsPath: join(tmpdir(), "ccs-doctor-absent-pstack.json"),
+  t3UserDataDir: join(tmpdir(), "ccs-doctor-absent-t3"),
   fetchGatewayModels: async (registry: ModelRegistry) => registry.model.map((model) => model.id),
 } as const;
 
@@ -242,4 +243,35 @@ test("a host with no agent definitions directory collects without error", async 
     configPath: join(root, "config.toml"),
   });
   expect(collected.ok).toBe(true);
+});
+
+describe("T3 favorites", () => {
+  const registry = loadModelRegistry(MODEL_REGISTRY);
+  if (!registry.ok) throw registry.error;
+  const starred = pickerFavoriteIds(registry.value).map((model) => ({ provider: "claudeAgent", model }));
+
+  async function t3Findings(files: Record<string, unknown>) {
+    const dir = mkdtempSync(join(tmpdir(), "ccs-doctor-t3-"));
+    for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), JSON.stringify(body));
+    const paths = fixture();
+    const result = await collectModelDeclarations({ ...ISOLATION, ...paths, t3UserDataDir: dir });
+    if (!result.ok) throw result.error;
+    return errorsOf(result.value).filter((entry) => entry.check === "t3.favorites");
+  }
+
+  test("checks the server settings once T3 has migrated stars there, whatever the client file says", async () => {
+    const stale = [{ provider: "claudeAgent", model: "claude-fable-5-1" }];
+    expect(await t3Findings({ "settings.json": { favorites: stale }, "client-settings.json": { favorites: starred } }))
+      .toHaveLength(1);
+    expect(await t3Findings({ "settings.json": { favorites: starred }, "client-settings.json": { favorites: stale } }))
+      .toEqual([]);
+  });
+
+  test("falls back to the client settings before migration, and ignores other providers' stars", async () => {
+    const mine = [{ provider: "opencode", model: "mine" }];
+    expect(await t3Findings({ "settings.json": { favorites: null }, "client-settings.json": { favorites: [...mine, ...starred] } }))
+      .toEqual([]);
+    expect(await t3Findings({ "settings.json": { favorites: null }, "client-settings.json": { favorites: starred.slice(1) } }))
+      .toHaveLength(1);
+  });
 });

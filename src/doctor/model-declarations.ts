@@ -5,6 +5,7 @@ import {
   familyOf,
   modelBase,
   modelWindows,
+  pickerFavoriteIds,
   requireModelRegistry,
   slots,
   SLOT_ENVIRONMENT_KEYS,
@@ -72,6 +73,12 @@ export interface PolicyModelReference {
   readonly value: string;
 }
 
+/** The Claude Agent stars in the settings file T3 actually reads. */
+export interface T3Favorites {
+  readonly path: string;
+  readonly models: readonly string[];
+}
+
 export interface ModelDeclarationsInput {
   readonly declarations: readonly ModelDeclaration[];
   readonly memberships: readonly ModelMembershipRequirement[];
@@ -86,6 +93,8 @@ export interface ModelDeclarationsInput {
   /** Model ids the live gateway advertises; null when it could not be reached. */
   readonly gatewayModels?: readonly string[] | null;
   readonly gatewayUrl?: string;
+  /** Null when T3 is not installed on this machine. */
+  readonly t3Favorites?: T3Favorites | null;
 }
 
 export type ModelFindingSeverity = "error" | "warning";
@@ -303,6 +312,19 @@ export function buildModelDeclarationsReport(input: ModelDeclarationsInput): Mod
         "/v1/models",
         `missing ${model.id}`,
         "every active registry model is routable at the gateway",
+      ));
+    }
+  }
+
+  if (input.t3Favorites) {
+    const expected = pickerFavoriteIds(registry);
+    if (JSON.stringify(input.t3Favorites.models) !== JSON.stringify(expected)) {
+      findings.push(finding(
+        "t3.favorites",
+        input.t3Favorites.path,
+        "favorites[claudeAgent]",
+        JSON.stringify(input.t3Favorites.models),
+        `${JSON.stringify(expected)} (registry picker rows, in order; run ccs launcher install)`,
       ));
     }
   }

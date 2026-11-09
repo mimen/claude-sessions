@@ -499,3 +499,8 @@ export function slots(registry: ModelRegistry, launcher: string): LauncherSlots 
 export function enrichModel(registry: ModelRegistry): string | null {
   return registry.defaults.enrich_model ?? null;
 }
+
+/** The rows every picker stars, in registry order: `picker = true` and not superseded. */
+export function pickerFavoriteIds(registry: ModelRegistry): readonly string[] {
+  return registry.model.filter((model) => model.picker && model.replaced_by === undefined).map((model) => model.id);
+}

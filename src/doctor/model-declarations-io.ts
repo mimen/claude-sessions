@@ -17,6 +17,7 @@ import {
   type ModelMembershipRequirement,
   type ModelPickerRow,
   type PolicyModelReference,
+  type T3Favorites,
 } from "./model-declarations.ts";
 import { loadModelRegistry, type ModelRegistry } from "../models/registry.ts";
 
@@ -59,9 +60,40 @@ export interface ModelDeclarationsOptions {
   readonly hermesConfigPath?: string;
   readonly pstackModelsPath?: string;
   readonly gatewayKeyPath?: string;
+  /** T3's user data directory, holding `settings.json` and `client-settings.json`. */
+  readonly t3UserDataDir?: string;
   readonly environment?: NodeJS.ProcessEnv;
   /** Injected by tests; production probes the live gateway catalogue. */
   readonly fetchGatewayModels?: (registry: ModelRegistry) => Promise<readonly string[] | null>;
+}
+
+const T3FavoritesSchema = z.object({
+  favorites: z.array(z.object({ provider: z.string(), model: z.string() }).passthrough()).nullish(),
+}).passthrough();
+
+function readT3FavoritesFile(path: string): readonly string[] | null {
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = T3FavoritesSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+    const favorites = parsed.success ? parsed.data.favorites : null;
+    return favorites ? favorites.filter((entry) => entry.provider === "claudeAgent").map((entry) => entry.model) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * T3 reads stars from its server settings once it has migrated them there (non-null favorites),
+ * and from the client settings before that. Check whichever one T3 is reading.
+ */
+function readT3Favorites(dir: string): T3Favorites | null {
+  const server = join(dir, "settings.json");
+  if (!existsSync(server)) return null;
+  const serverModels = readT3FavoritesFile(server);
+  if (serverModels) return { path: server, models: serverModels };
+  const client = join(dir, "client-settings.json");
+  const clientModels = readT3FavoritesFile(client);
+  return clientModels ? { path: client, models: clientModels } : null;
 }
 
 const HermesSchema = z.object({
@@ -367,5 +399,6 @@ export async function collectModelDeclarations(
     hermes: readHermes(hermesPath),
     pstack: readPstackModels(pstackPath),
     gatewayModels: await probe(registry.value),
+    t3Favorites: readT3Favorites(options.t3UserDataDir ?? join(home, ".t3", "userdata")),
   }));
 }
