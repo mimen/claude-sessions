@@ -61,4 +61,30 @@ describe("session-fields lifecycle compatibility", () => {
       check.close();
     }
   });
+
+  test("a later invalid field rolls the whole batch back", () => {
+    expect(sessionFieldsCommand(["s1", "--json", JSON.stringify({ saved: true })])).toBe(0);
+    expect(sessionFieldsCommand(["s1", "--json", JSON.stringify({ completed: true, saved: "bad" })])).toBe(1);
+    expect(lifecycle()).toEqual({ completed: 0, archived: 0, saved: 1 });
+    expect(sessionFieldsCommand(["s1", "--json", JSON.stringify({ saved: "bad", completed: true })])).toBe(1);
+    expect(lifecycle()).toEqual({ completed: 0, archived: 0, saved: 1 });
+  });
+
+  test("a setter failure rolls back earlier fields in the same batch", () => {
+    expect(sessionFieldsCommand(["s1", "--json", JSON.stringify({ saved: true, customTitle: "kept" })])).toBe(0);
+    const db = openCatalogue(CATALOGUE_PATH());
+    db.exec(`CREATE TRIGGER repo_patrol_abort_title BEFORE UPDATE OF custom_title ON catalogue
+      WHEN NEW.custom_title = 'boom' BEGIN SELECT RAISE(ABORT, 'forced setter failure'); END`);
+    db.close();
+
+    expect(sessionFieldsCommand(["s1", "--json", JSON.stringify({ saved: false, customTitle: "boom" })])).toBe(1);
+    const check = openCatalogue(CATALOGUE_PATH());
+    try {
+      expect(check.query(
+        "SELECT saved, custom_title AS customTitle FROM catalogue WHERE session_id = 's1'",
+      ).get()).toEqual({ saved: 1, customTitle: "kept" });
+    } finally {
+      check.close();
+    }
+  });
 });

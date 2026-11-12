@@ -87,6 +87,12 @@ function flagValue(args: string[], flag: string): string | undefined {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
 }
 
+function reject(message: string, code = 1): never {
+  const error = new Error(message) as Error & { code: number };
+  error.code = code;
+  throw error;
+}
+
 export function sessionFieldsCommand(args: string[]): number {
   const sid = args.find((a) => !a.startsWith("--"));
   if (!sid) {
@@ -116,24 +122,22 @@ export function sessionFieldsCommand(args: string[]): number {
   const db = openCatalogue(CATALOGUE_PATH());
   const applied: string[] = [];
   try {
+    db.transaction(() => {
     // Validate stage first (needs schema lookup + sensor check) so we fail loud before any write.
     if ("stage" in payload) {
       if (!sensor) {
-        console.error("ccs session-fields: writing 'stage' requires --sensor <name> (ADR-0079: stage is engine-computed).");
-        return 2;
+        reject("ccs session-fields: writing 'stage' requires --sensor <name> (ADR-0079: stage is engine-computed).", 2);
       }
       const stageVal = payload.stage;
       if (stageVal !== null && typeof stageVal !== "string") {
-        console.error("ccs session-fields: stage must be a string or null");
-        return 1;
+        reject("ccs session-fields: stage must be a string or null");
       }
       if (stageVal !== null) {
         const row = getRow(db, sid);
         const schema = row?.role ? resolveRole(row.role, row.cluster)?.stageSchema ?? null : null;
         const err = validateStageTransition(schema, row?.stage ?? null, stageVal);
         if (err) {
-          console.error(`ccs session-fields: stage: ${err}`);
-          return 1;
+          reject(`ccs session-fields: stage: ${err}`);
         }
       }
     }
@@ -149,20 +153,17 @@ export function sessionFieldsCommand(args: string[]): number {
         // (ADR-0079): a worker must not be able to write its own flattering summary and
         // recommendation into the catalogue through the bulk primitive.
         if (!sensor) {
-          console.error("ccs session-fields: writing 'enrichment' requires --sensor <name> (observed state, not self-reported).");
-          return 2;
+          reject("ccs session-fields: writing 'enrichment' requires --sensor <name> (observed state, not self-reported).", 2);
         }
         const parsed = EnrichmentWriteSchema.safeParse(value);
         if (!parsed.success) {
-          console.error(`ccs session-fields: enrichment: ${z.prettifyError(parsed.error)}`);
-          return 1;
+          reject(`ccs session-fields: enrichment: ${z.prettifyError(parsed.error)}`);
         }
         // The same coherence check the enrich command applies, against this machine's registry —
         // otherwise an external writer could store a location key that resolves to nothing here.
         const problem = validateEnrichment(parsed.data, locationKeySet(loadEnrichmentLocations()));
         if (problem) {
-          console.error(`ccs session-fields: enrichment: ${problem}`);
-          return 1;
+          reject(`ccs session-fields: enrichment: ${problem}`);
         }
         setEnrichment(db, sid, { ...parsed.data, at: parsed.data.at ?? now }, now);
         applied.push(`enrichment=${parsed.data.recommendation} (sensor=${sensor})`);
@@ -170,8 +171,7 @@ export function sessionFieldsCommand(args: string[]): number {
       }
       if (field === "meta") {
         if (typeof value !== "object" || value === null || Array.isArray(value)) {
-          console.error("ccs session-fields: 'meta' must be an object");
-          return 1;
+          reject("ccs session-fields: 'meta' must be an object");
         }
         for (const [mk, mv] of Object.entries(value as Record<string, unknown>)) {
           setMeta(db, sid, mk, mv, now);
@@ -182,8 +182,7 @@ export function sessionFieldsCommand(args: string[]): number {
       const strSetter = STRING_OR_NULL_FIELDS[field];
       if (strSetter) {
         if (value !== null && typeof value !== "string") {
-          console.error(`ccs session-fields: ${field} must be a string or null`);
-          return 1;
+          reject(`ccs session-fields: ${field} must be a string or null`);
         }
         strSetter(db, sid, value as string | null, now);
         applied.push(`${field}=${value ?? "null"}`);
@@ -191,8 +190,7 @@ export function sessionFieldsCommand(args: string[]): number {
       }
       if (field === "completed") {
         if (typeof value !== "boolean") {
-          console.error("ccs session-fields: completed must be a boolean");
-          return 1;
+          reject("ccs session-fields: completed must be a boolean");
         }
         setCompleted(db, sid, value, now);
         if (value) {
@@ -205,8 +203,7 @@ export function sessionFieldsCommand(args: string[]): number {
       }
       if (field === "saved") {
         if (typeof value !== "boolean") {
-          console.error("ccs session-fields: saved must be a boolean");
-          return 1;
+          reject("ccs session-fields: saved must be a boolean");
         }
         setSaved(db, sid, value, now);
         if (value) {
@@ -218,8 +215,7 @@ export function sessionFieldsCommand(args: string[]): number {
       }
       if (field === "archived") {
         if (typeof value !== "boolean") {
-          console.error("ccs session-fields: archived must be a boolean");
-          return 1;
+          reject("ccs session-fields: archived must be a boolean");
         }
         setCompleted(db, sid, value, now);
         setArchived(db, sid, false, now);
@@ -230,16 +226,19 @@ export function sessionFieldsCommand(args: string[]): number {
       const boolSetter = BOOL_FIELDS[field];
       if (boolSetter) {
         if (typeof value !== "boolean") {
-          console.error(`ccs session-fields: ${field} must be a boolean`);
-          return 1;
+          reject(`ccs session-fields: ${field} must be a boolean`);
         }
         boolSetter(db, sid, value, now);
         applied.push(`${field}=${value}`);
         continue;
       }
-      console.error(`ccs session-fields: unknown field '${field}'`);
-      return 1;
+      reject(`ccs session-fields: unknown field '${field}'`);
     }
+    })();
+  } catch (error) {
+    const coded = error as Error & { code?: number };
+    console.error(typeof coded.code === "number" ? coded.message : `ccs session-fields: ${(error as Error).message}`);
+    return typeof coded.code === "number" ? coded.code : 1;
   } finally {
     db.close();
   }
