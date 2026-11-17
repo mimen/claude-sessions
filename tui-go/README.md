@@ -45,9 +45,9 @@ SHOT=skill-reader go run .
 | `J` / `K` | Scroll the selected session’s normalized transcript peek |
 | `v` | Open the full transcript pager |
 | `t` | Retitle through `ccs session title` |
-| `C` | Confirm and mark done through `ccs mark --completed` |
-| `e` | Fast archive, or unarchive an archived row, through `ccs mark --archived [--off]` |
-| `X` | Confirm archive/unarchive through the same `ccs mark` path |
+| `C` | Confirm and mark done through `ccs session complete`, or reopen a Done row through `ccs session uncomplete` |
+| `e` | Fast save for later, or move a Saved row back to Active, through `ccs session save` / `unsave` |
+| `X` | Confirm save/unsave through the same `ccs session` path |
 | `E` | Describe a single-session metadata edit in natural language; review validated mutations before applying them through `ccs` |
 | `S` | Generate a 2–3 line transcript summary in the dossier |
 | `A` | Ask the fleet a semantic question across bounded transcript excerpts; `enter` jumps to a result |
@@ -63,7 +63,7 @@ Transcript pager keys: `j` / `k`, `PgUp` / `PgDn`, `g` / `G`, and `v` / `esc` to
 `o` opens the single settings pane for list presentation. Move with `j` / `k`, change the focused value with `space`, `enter`, or `←` / `→`, and close with `esc`. Changes apply without leaving the pane.
 
 - Sort: recency (default), recursive total cost, or indexed message count.
-- Show archived: off by default; archived rows use a dim `·` state and can be restored with `e` or confirmed `X`.
+- Show saved: off by default; Saved rows use a dim `·` state and can be moved back to Active with `e` or confirmed `X`.
 - Show native subagents: off by default.
 - Show auxiliary managed sessions: off by default.
 - Task filter: all, unfinished, or interrupted-mid-task. Interrupted means an `in_progress` Claude task exists while the session is not live.
@@ -82,7 +82,7 @@ Named systems lead the page. Each cluster is split by role (coordinator/control,
 3. `parked`
 4. `done`
 
-Archived, auxiliary, and native subagent runs are hidden initially and can be included independently from View Options.
+Saved, auxiliary, and native subagent runs are hidden initially and can be included independently from View Options.
 
 ### Tree
 
@@ -133,14 +133,14 @@ SQLite is never opened for writing by this program. There is no Go mutation sche
 | UI operation | Existing owner command |
 | --- | --- |
 | Retitle | `ccs session title <id> <title>` |
-| Done / undoable AI lifecycle change | `ccs mark <id> --completed [--off]` |
-| Archive / unarchive / cleanup | `ccs mark <id> --archived [--off]` |
+| Done / reopen / cleanup | `ccs session complete <id>` / `ccs session uncomplete <id>` |
+| Save / unsave | `ccs session save <id>` / `ccs session unsave <id>` |
 | Parent, parked task, identity attachment | `ccs session set` / `ccs session unset` |
 | Durable identity field | `ccs identity set <key> --field=value` or `--unset=field` |
 
 Before a session mutation, Go asks `ccs session <id> --json` for its ownership state. An indexed-but-uncatalogued session is materialized through `ccs session-fields <id> --json '{"customTitle":null}'`; Go still never writes SQLite. This makes organize actions work for every indexed session visible on the landing page.
 
-The AI editor returns schema-forced mutations against a numbered session list. Go validates the focus session, operation, duplicate/conflicting changes, parent references, identity keys, booleans, title bounds, and identity-field allowlist. Each approved mutation is then executed as a separate `ccs` subprocess. Cleanup similarly applies one `ccs mark --archived` call per approved session. A snapshot reload runs after both success and failure so a partially completed batch is never left invisible in the TUI.
+The AI editor returns schema-forced mutations against a numbered session list. Go validates the focus session, operation, duplicate/conflicting changes, parent references, identity keys, booleans, title bounds, and identity-field allowlist. Each approved mutation is then executed as a separate `ccs` subprocess. Cleanup similarly applies one `ccs session complete` call per approved session; Done sessions are never offered. A snapshot reload runs after both success and failure so a partially completed batch is never left invisible in the TUI.
 
 ## Inference seam
 

@@ -326,9 +326,9 @@ var cleanupSchema = []byte(`{
   }
 }`)
 
-// ProposeCleanup chooses stale/done candidates; callers still require user approval.
+// ProposeCleanup chooses stale candidates to mark Done; callers still require user approval.
 func ProposeCleanup(ctx context.Context, engine Engine, excerpts []SessionExcerpt) ([]CleanupProposal, error) {
-	prompt := "Review these already-filtered stale or completed CCS sessions. Propose only sessions that are safe to archive: clearly finished, superseded, abandoned, or administrative residue. Be conservative around ongoing work, loops, and reusable cluster roles. Give a one-line evidence-based reason. Return an empty array if unsure. Respond using the provided JSON schema."
+	prompt := "Review these already-filtered stale CCS sessions. Propose only sessions that are safe to mark Done: clearly finished, superseded, abandoned, or administrative residue. Be conservative around ongoing work, loops, and reusable cluster roles. Give a one-line evidence-based reason. Return an empty array if unsure. Respond using the provided JSON schema."
 	var payload strings.Builder
 	payload.WriteString("ARCHIVE CANDIDATES:\n")
 	for index, excerpt := range excerpts {

@@ -226,32 +226,36 @@ func askFleetCmd(snapshot data.Snapshot, query string) tea.Cmd {
 	}
 }
 
+// cleanupCandidates lists stale open sessions, oldest first, for the cleanup proposal.
+func cleanupCandidates(snapshot data.Snapshot) []data.Session {
+	cutoff := snapshot.LoadedAt.Add(-14 * 24 * time.Hour)
+	candidates := make([]data.Session, 0, 80)
+	for _, session := range snapshot.Sessions {
+		// Approval marks sessions Done, so Done sessions are never candidates.
+		if session.IsLoop || session.Cluster != "" || session.State == "active" || session.State == "parked" || session.State == "completed" {
+			continue
+		}
+		if session.LastAt.IsZero() || !session.LastAt.Before(cutoff) {
+			continue
+		}
+		candidates = append(candidates, session)
+	}
+	sort.SliceStable(candidates, func(i int, j int) bool {
+		return candidates[i].LastAt.Before(candidates[j].LastAt)
+	})
+	if len(candidates) > 80 {
+		candidates = candidates[:80]
+	}
+	return candidates
+}
+
 func cleanupCmd(snapshot data.Snapshot) tea.Cmd {
 	return func() tea.Msg {
 		engine, err := inference.Resolve()
 		if err != nil {
 			return cleanupProposedMsg{err: err}
 		}
-		cutoff := snapshot.LoadedAt.Add(-14 * 24 * time.Hour)
-		candidates := make([]data.Session, 0, 80)
-		for _, session := range snapshot.Sessions {
-			if session.IsLoop || session.Cluster != "" || session.State == "active" || session.State == "parked" {
-				continue
-			}
-			if session.State != "completed" && (session.LastAt.IsZero() || !session.LastAt.Before(cutoff)) {
-				continue
-			}
-			candidates = append(candidates, session)
-		}
-		sort.SliceStable(candidates, func(i int, j int) bool {
-			if (candidates[i].State == "completed") != (candidates[j].State == "completed") {
-				return candidates[i].State == "completed"
-			}
-			return candidates[i].LastAt.Before(candidates[j].LastAt)
-		})
-		if len(candidates) > 80 {
-			candidates = candidates[:80]
-		}
+		candidates := cleanupCandidates(snapshot)
 		excerpts := make([]inference.SessionExcerpt, 0, len(candidates))
 		for _, session := range candidates {
 			recent, readErr := transcript.RecentText(session.Path, 60, 5_000)

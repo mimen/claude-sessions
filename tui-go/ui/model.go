@@ -699,7 +699,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if session, ok := m.selectedSession(); ok {
 			if session.State == "saved" {
 				m.confirmation = &confirmation{kind: confirmUnsave, title: "Move session to Active?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs session unsave", enabled: true}}}
-			} else if session.State != "completed" {
+			} else if session.State == "completed" {
+				m.status = "reopen before saving"
+			} else {
 				m.confirmation = &confirmation{kind: confirmSave, title: "Save session for later?", items: []confirmationItem{{sessionID: session.ID, title: session.Title, detail: "ccs session save", enabled: true}}}
 			}
 		}

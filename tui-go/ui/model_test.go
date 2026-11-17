@@ -698,3 +698,22 @@ func TestApprovedCleanupMarksSessionsDone(t *testing.T) {
 		t.Fatalf("calls = %q", got)
 	}
 }
+
+func TestCleanupCandidatesSkipDoneSessions(t *testing.T) {
+	snapshot := testSnapshot(90)
+	for i := range snapshot.Sessions {
+		snapshot.Sessions[i].LastAt = snapshot.LoadedAt.Add(-30 * 24 * time.Hour)
+		if i < 85 {
+			snapshot.Sessions[i].State = "completed"
+		}
+	}
+	candidates := cleanupCandidates(snapshot)
+	if len(candidates) != 5 {
+		t.Fatalf("candidates = %d, want the 5 stale open sessions", len(candidates))
+	}
+	for _, session := range candidates {
+		if session.State == "completed" {
+			t.Fatalf("Done session %s offered for cleanup", session.ID)
+		}
+	}
+}
