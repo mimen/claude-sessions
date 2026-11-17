@@ -70,6 +70,20 @@ describe("session-fields lifecycle compatibility", () => {
     expect(lifecycle()).toEqual({ completed: 0, archived: 0, saved: 1 });
   });
 
+  test("a flag value is not the session id, wherever the id sits", () => {
+    expect(sessionFieldsCommand(["s1", "--json", JSON.stringify({ saved: true })])).toBe(0);
+    const json = JSON.stringify({ completed: true });
+    expect(sessionFieldsCommand(["--json", json, "s1"])).toBe(0);
+    expect(sessionFieldsCommand(["--sensor", "catalogue-sync", "s1", "--json", JSON.stringify({ saved: true })])).toBe(0);
+    expect(lifecycle()).toEqual({ completed: 0, archived: 0, saved: 1 });
+    const db = openCatalogue(CATALOGUE_PATH());
+    try {
+      expect(db.query("SELECT session_id FROM catalogue").all()).toEqual([{ session_id: "s1" }]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("a setter failure rolls back earlier fields in the same batch", () => {
     expect(sessionFieldsCommand(["s1", "--json", JSON.stringify({ saved: true, customTitle: "kept" })])).toBe(0);
     const db = openCatalogue(CATALOGUE_PATH());

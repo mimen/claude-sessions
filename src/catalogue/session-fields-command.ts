@@ -82,9 +82,44 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function flagValue(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
+/** A flag's value, from `--flag=value` or the next argv token. The next index to visit is `next`. */
+function takeFlag(args: string[], index: number): { value: string; next: number } | undefined {
+  const arg = args[index]!;
+  const eq = arg.indexOf("=");
+  if (eq !== -1) return { value: arg.slice(eq + 1), next: index };
+  const value = args[index + 1];
+  if (value === undefined || value.startsWith("--")) return undefined;
+  return { value, next: index + 1 };
+}
+
+function parseSessionFieldsArgs(args: string[]): { sid: string; jsonStr: string; sensor: string | null } | string {
+  let jsonStr: string | undefined;
+  let sensor: string | null = null;
+  const positionals: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--json" || arg.startsWith("--json=")) {
+      if (jsonStr !== undefined) return "pass --json only once";
+      const taken = takeFlag(args, i);
+      if (!taken) return "--json requires a value";
+      jsonStr = taken.value;
+      i = taken.next;
+      continue;
+    }
+    if (arg === "--sensor" || arg.startsWith("--sensor=")) {
+      if (sensor !== null) return "pass --sensor only once";
+      const taken = takeFlag(args, i);
+      if (!taken) return "--sensor requires a value";
+      sensor = taken.value;
+      i = taken.next;
+      continue;
+    }
+    if (arg.startsWith("--")) return `unknown flag: ${arg}`;
+    positionals.push(arg);
+  }
+  if (!jsonStr) return "--json '{...}' is required";
+  if (positionals.length !== 1) return "usage: ccs session-fields <sid> --json '{...}' [--sensor <name>]";
+  return { sid: positionals[0]!, jsonStr, sensor };
 }
 
 function reject(message: string, code = 1): never {
@@ -94,16 +129,12 @@ function reject(message: string, code = 1): never {
 }
 
 export function sessionFieldsCommand(args: string[]): number {
-  const sid = args.find((a) => !a.startsWith("--"));
-  if (!sid) {
-    console.error("usage: ccs session-fields <sid> --json '{...}' [--sensor <name>]");
+  const parsedArgs = parseSessionFieldsArgs(args);
+  if (typeof parsedArgs === "string") {
+    console.error(parsedArgs.startsWith("usage:") ? parsedArgs : `ccs session-fields: ${parsedArgs}`);
     return 1;
   }
-  const jsonStr = flagValue(args, "--json");
-  if (!jsonStr) {
-    console.error("--json '{...}' is required");
-    return 1;
-  }
+  const { sid, jsonStr, sensor } = parsedArgs;
   let payload: Record<string, unknown>;
   try {
     payload = JSON.parse(jsonStr);
@@ -115,7 +146,6 @@ export function sessionFieldsCommand(args: string[]): number {
     console.error("ccs session-fields: --json must be a JSON object");
     return 1;
   }
-  const sensor = flagValue(args, "--sensor") ?? null;
   const now = nowIso();
 
   ensureDataDir();
