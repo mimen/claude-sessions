@@ -1,6 +1,7 @@
 import type React from "react";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { useModalKeys } from "./use-modal-keys.ts";
 
 export function ResumeDialog({ phase, name, onCancel, onConfirm }: {
   readonly phase: "completed" | "t3";
@@ -9,6 +10,7 @@ export function ResumeDialog({ phase, name, onCancel, onConfirm }: {
   readonly onConfirm: () => void;
 }): React.ReactElement {
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   // Opened from a row or with Enter, the dialog takes focus so the keyboard reaches its buttons
   // instead of the list behind it, and gives focus back to where it came from when it closes.
   useEffect(() => {
@@ -17,13 +19,7 @@ export function ResumeDialog({ phase, name, onCancel, onConfirm }: {
     return () => opener?.focus();
   }, []);
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  useModalKeys(dialogRef, onCancel);
 
   const completed = phase === "completed";
   return (
@@ -36,6 +32,7 @@ export function ResumeDialog({ phase, name, onCancel, onConfirm }: {
         aria-labelledby="resume-dialog-title"
         aria-modal="true"
         className="w-full max-w-sm rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-lg"
+        ref={dialogRef}
         role="dialog"
       >
         <h2 className="text-sm font-medium" id="resume-dialog-title">

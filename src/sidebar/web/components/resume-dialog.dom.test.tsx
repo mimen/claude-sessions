@@ -24,3 +24,22 @@ mounted("the dialog takes focus on open and returns it to the opener on close", 
   opener.remove();
   host.remove();
 });
+
+mounted("Tab and Shift+Tab stay inside the dialog", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => {
+    root.render(<ResumeDialog name="A done session" onCancel={() => {}} onConfirm={() => {}} phase="completed" />);
+  });
+  const tab = (shiftKey: boolean): void => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true }));
+  };
+  tab(false);
+  expect(document.activeElement?.textContent).toBe("Cancel");
+  tab(true);
+  expect(document.activeElement?.textContent).toBe("Resume");
+
+  await act(async () => root.unmount());
+  host.remove();
+});

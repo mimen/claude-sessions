@@ -10,9 +10,10 @@
  * it, because a client-supplied list of paths to delete is a list of paths to delete arriving over
  * HTTP, and a session can go live in the seconds a dialog sits open.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import { Button } from "@/components/ui/button";
+import { useModalKeys } from "./use-modal-keys.ts";
 import {
   actionErrorMessage,
   postDestroyPreflight,
@@ -53,6 +54,7 @@ export function DestroyDialog({ sessionId, name, onCancel, onDestroyed }: {
   readonly onDestroyed: (message: string) => void;
 }): React.ReactElement {
   const [state, setState] = useState<DialogState>({ phase: "loading" });
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,13 +72,7 @@ export function DestroyDialog({ sessionId, name, onCancel, onDestroyed }: {
 
   // Escape cancels, matching every other dismissible surface. Enter deliberately does not confirm:
   // the whole point of this dialog is that agreeing to it takes a deliberate act.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  useModalKeys(dialogRef, onCancel);
 
   const confirm = (): void => {
     setState({ phase: "working" });
@@ -116,6 +112,7 @@ export function DestroyDialog({ sessionId, name, onCancel, onDestroyed }: {
         aria-labelledby="destroy-dialog-title"
         aria-modal="true"
         className="w-full max-w-sm rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-lg"
+        ref={dialogRef}
         role="dialog"
       >
         <h2 className="text-sm font-medium" id="destroy-dialog-title">Destroy this session?</h2>
