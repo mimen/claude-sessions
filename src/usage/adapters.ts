@@ -23,14 +23,14 @@ export interface AdapterResult {
   renewals?: SubscriptionRenewal[];
 }
 
-export const PROVIDERS: readonly ProviderId[] = ["codex", "anthropic", "grok", "meta"];
+export const PROVIDERS: readonly ProviderId[] = ["codex", "anthropic", "grok", "meta", "antigravity"];
 
 /** Numbers stale for less than this show only their stale chip, not a warning note. */
 export const QUIET_STALE_MS = 30 * 60_000;
 
 /** What the hub calls each provider. */
-const HUB_PROVIDER: Record<ProviderId, string> = { anthropic: "claude", codex: "codex", grok: "xai", meta: "meta" };
-const TITLE: Record<ProviderId, string> = { anthropic: "Claude", codex: "Codex", grok: "Grok", meta: "Muse Code" };
+const HUB_PROVIDER: Record<ProviderId, string> = { anthropic: "claude", codex: "codex", grok: "xai", meta: "meta", antigravity: "antigravity" };
+const TITLE: Record<ProviderId, string> = { anthropic: "Claude", codex: "Codex", grok: "Grok", meta: "Muse Code", antigravity: "Antigravity" };
 
 /** One ISO time per available reset: the full list when the hub sends it, else the soonest repeated. */
 function resetExpiries(banked: HubCredential["bankedResets"]): (string | null)[] {
@@ -44,6 +44,11 @@ function entitlements(provider: ProviderId, c: HubCredential & { email: string }
   if (provider === "grok") {
     const pool = `grok-${(c.plan ?? "consumer").toLowerCase()}:${c.email}`;
     return { pool, reset: `${pool}#reset`, product: (p: string) => `${pool}#${p.replace(/^Grok/, "").toLowerCase()}`, prepaid: `${pool}#prepaid` };
+  }
+  if (provider === "antigravity") {
+    // The collector posts one credential per quota group, so each group is its own pool.
+    const pool = `google-ai-pro:${c.email}#${c.authIndex.replace(/^antigravity:/, "")}`;
+    return { pool, reset: `${pool}#reset`, product: (p: string) => `${pool}-${p}`, prepaid: null };
   }
   if (provider === "meta") {
     const pool = `muse-code:${c.email}`;
@@ -81,7 +86,8 @@ export function hubAdapter(provider: ProviderId, snapshot: HubSnapshot, nowMs: n
       scope: provider === "grok" ? "organization" : "account",
       observedAt: new Date(observedMs).toISOString(),
       // Meta has no usage endpoint; the collector reads the quota event on a streamed reply.
-      source: provider === "meta" ? "provider_header" : "official_api",
+      // Antigravity is read through the agy CLI's /usage command.
+      source: provider === "meta" ? "provider_header" : provider === "antigravity" ? "official_cli" : "official_api",
       ...(snapshotStale || c.usageError !== null ? { stale: true } : {}),
     } as const;
     const allowance = (entitlement: string, window: UsageWindow, w: HubWindow): UsageObservation => ({

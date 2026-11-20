@@ -86,7 +86,7 @@ export interface View {
   notes: string[];
 }
 
-export const providerTitle: Record<string, string> = { anthropic: "Claude", codex: "Codex", grok: "Grok", meta: "Muse Code" };
+export const providerTitle: Record<string, string> = { anthropic: "Claude", codex: "Codex", grok: "Grok", meta: "Muse Code", antigravity: "Antigravity" };
 
 const windowShort: Record<string, string> = { five_hour: "5h", daily: "day", weekly: "wk", monthly: "mo", minute: "min" };
 const windowRank: Record<string, number> = { "5h": 0, day: 1, wk: 2, mo: 3 };
@@ -100,6 +100,7 @@ const baseLabel: Record<string, string> = {
 };
 const productLabel: Record<string, string> = {
   build: "Build", chat: "Chat", imagine: "Imagine", api: "API", prepaid: "Extra credits", reset: "Usage reset",
+  gemini: "Gemini", "claude-gpt": "Claude and GPT", argon: "Argon",
 };
 
 /** Dollars that weight an account whose plan is unknown in the overall reading. */

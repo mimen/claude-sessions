@@ -28,6 +28,9 @@ const SOURCES_HELP = `ccs usage sources — where the numbers come from
   meta         Muse Code subscription (provider_header): five-hour and weekly windows from the
                response.subscription_usage event on a minimal streamed reply. Meta has no
                usage endpoint, so each read spends a sliver of the allowance.
+  antigravity  Google AI Pro (official_cli): five-hour and weekly windows per quota group
+               (Gemini, Claude and GPT, Argon) from \`agy -p /usage\` on the Mini. The read
+               spends no quota.
 
   A snapshot over ten minutes old, or one read from ~/.ccs/cache/hub-gateway.json because
   the hub did not answer, renders with a stale chip on every row; a note appears once it is

@@ -105,7 +105,40 @@ test("a fresh hub snapshot renders every provider from its credentials", async (
     ["grok-super grok plus:personal@example.com#reset", "reset_credit", null, 1, false],
     ["grok-super grok plus:personal@example.com#prepaid", "credit", null, 0, false],
   ]);
-  expect(snap.adapters.map((a) => a.status)).toEqual(["ok", "ok", "ok", "unavailable"]);
+  expect(snap.adapters.map((a) => a.status)).toEqual(["ok", "ok", "ok", "unavailable", "unavailable"]);
+});
+
+// The collector posts one Antigravity credential per quota group, read with `agy -p /usage`.
+const antigravity = (group: string, fiveHour: number | null, weekly: number): HubCredential => ({
+  ...base,
+  name: `antigravity-${group}-personal@example.com`,
+  authIndex: `antigravity:${group}`,
+  provider: "antigravity",
+  email: "personal@example.com",
+  plan: "Google AI Pro",
+  windows: {
+    fiveHour: fiveHour === null ? null : { usedPct: fiveHour, resetsAt: "2026-10-03T02:00:00Z" },
+    weekly: { usedPct: weekly, resetsAt: "2026-10-09T02:00:00Z" },
+    fable: null,
+  },
+  bankedResets: null,
+});
+
+test("each Antigravity quota group renders as its own labeled row pair", async () => {
+  const creds = [antigravity("gemini", 1, 0.2), antigravity("claude-gpt", 0, 0), antigravity("argon", null, 5)];
+  const snap = await collectSnapshot({ providers: ["antigravity"], hub: hubWith(NOW - 60_000, creds), now: () => NOW });
+  expect(rows(snap)).toEqual([
+    ["google-ai-pro:personal@example.com#gemini", "allowance", "five_hour", 1, false],
+    ["google-ai-pro:personal@example.com#gemini", "allowance", "weekly", 0.2, false],
+    ["google-ai-pro:personal@example.com#claude-gpt", "allowance", "five_hour", 0, false],
+    ["google-ai-pro:personal@example.com#claude-gpt", "allowance", "weekly", 0, false],
+    ["google-ai-pro:personal@example.com#argon", "allowance", "weekly", 5, false],
+  ]);
+  expect(new Set(snap.observations.map((o) => o.source))).toEqual(new Set(["official_cli"]));
+  const section = buildView(snap).sections.find((s) => s.provider === "antigravity");
+  expect(section?.title).toBe("Antigravity");
+  expect(snap.subscriptions.find((s) => s.provider === "antigravity")?.planName).toBe("Google AI Pro");
+  expect(JSON.stringify(section?.rows)).toContain("Claude and GPT");
 });
 
 test("a stale hub snapshot means no provider fetch and the stale marker shows", async () => {

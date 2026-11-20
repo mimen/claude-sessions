@@ -6,6 +6,8 @@ interface ConfiguredSubscription {
   planName: string;
   monthlyDollars: number;
   anchor: string | null;
+  /** Billed once a year on the anchor date; monthlyDollars is the yearly price over twelve. */
+  annual?: true;
 }
 
 const REGISTRY: readonly ConfiguredSubscription[] = [
@@ -13,6 +15,7 @@ const REGISTRY: readonly ConfiguredSubscription[] = [
   { provider: "codex", account: "miladmaaan@gmail.com", planName: "Codex Pro", monthlyDollars: 200, anchor: "2026-09-20" },
   { provider: "grok", account: "miladmaaan@gmail.com", planName: "SuperGrok", monthlyDollars: 100, anchor: "2026-09-21" },
   { provider: "meta", account: "miladmaaan@gmail.com", planName: "Muse Code Power Usage", monthlyDollars: 50, anchor: "2026-11-13" },
+  { provider: "antigravity", account: "miladmaaan@gmail.com", planName: "Google AI Pro", monthlyDollars: 16.67, anchor: "2026-11-19", annual: true },
 ];
 
 function daysInUtcMonth(year: number, month: number): number {
@@ -43,6 +46,15 @@ function losAngelesDate(date: Date): { year: number; month: number; value: strin
     month,
     value: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
   };
+}
+
+/** The anchor itself until it passes, then its month and day in the current or next year (Los Angeles). */
+export function nextAnnualRenewal(anchor: string, asOf: Date): string {
+  const today = losAngelesDate(asOf).value;
+  if (today < anchor) return anchor;
+  const year = Number(today.slice(0, 4));
+  const thisYear = `${year}${anchor.slice(4)}`;
+  return thisYear >= today ? thisYear : `${year + 1}${anchor.slice(4)}`;
 }
 
 export function nextMonthlyRenewal(anchor: string, asOf: Date): string {
@@ -78,8 +90,8 @@ export function resolveSubscriptions(
   const wanted = providers ? new Set(providers) : null;
   return REGISTRY
     .filter((entry) => !wanted || wanted.has(entry.provider))
-    .map(({ anchor, ...entry }) => anchor
-      ? { ...entry, renewsOn: nextMonthlyRenewal(anchor, asOf), source: "configured" as const }
+    .map(({ anchor, annual, ...entry }) => anchor
+      ? { ...entry, renewsOn: annual ? nextAnnualRenewal(anchor, asOf) : nextMonthlyRenewal(anchor, asOf), source: "configured" as const }
       : { ...entry, renewsOn: null, source: "unknown" as const });
 }
 

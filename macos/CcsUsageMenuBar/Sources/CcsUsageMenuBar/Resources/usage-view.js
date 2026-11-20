@@ -1,6 +1,6 @@
 (() => {
   // packages/usage-view/index.ts
-  var providerTitle = { anthropic: "Claude", codex: "Codex", grok: "Grok", meta: "Muse Code" };
+  var providerTitle = { anthropic: "Claude", codex: "Codex", grok: "Grok", meta: "Muse Code", antigravity: "Antigravity" };
   var windowShort = { five_hour: "5h", daily: "day", weekly: "wk", monthly: "mo", minute: "min" };
   var windowRank = { "5h": 0, day: 1, wk: 2, mo: 3 };
   var baseLabel = {
@@ -17,7 +17,10 @@
     imagine: "Imagine",
     api: "API",
     prepaid: "Extra credits",
-    reset: "Usage reset"
+    reset: "Usage reset",
+    gemini: "Gemini",
+    "claude-gpt": "Claude and GPT",
+    argon: "Argon"
   };
   var FALLBACK_DOLLARS = 50;
   function ms(iso) {

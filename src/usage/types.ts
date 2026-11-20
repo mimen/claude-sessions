@@ -6,7 +6,7 @@
  * may be null while the observation still ships.
  */
 
-export type ProviderId = "codex" | "anthropic" | "grok" | "meta";
+export type ProviderId = "codex" | "anthropic" | "grok" | "meta" | "antigravity";
 
 export type MetricKind = "allowance" | "rate_limit" | "credit" | "reset_credit" | "cost" | "capacity";
 

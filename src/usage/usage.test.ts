@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { renderSnapshot, shortReset } from "./render.ts";
 import { usageCommand } from "./command.ts";
 import type { AdapterHealth, SubscriptionInfo, UsageObservation, UsageSnapshot } from "./types.ts";
-import { mergeSubscriptionRenewals, nextMonthlyRenewal, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
+import { mergeSubscriptionRenewals, nextAnnualRenewal, nextMonthlyRenewal, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
 
 function obs(over: Partial<UsageObservation> = {}): UsageObservation {
   return {
@@ -37,6 +37,13 @@ test("next monthly renewal uses the current anchor day or the next month", () =>
   expect(nextMonthlyRenewal("2026-02-05", new Date("2026-09-05T23:59:59Z"))).toBe("2026-09-05");
   expect(nextMonthlyRenewal("2026-02-05", new Date("2026-09-06T08:00:00Z"))).toBe("2026-10-05");
   expect(nextMonthlyRenewal("2024-01-31", new Date("2026-02-28T12:00:00Z"))).toBe("2026-02-28");
+});
+
+test("next annual renewal is the anchor until it passes, then the same day a year on", () => {
+  expect(nextAnnualRenewal("2026-11-19", new Date("2026-11-01T12:00:00Z"))).toBe("2026-11-19");
+  expect(nextAnnualRenewal("2026-11-19", new Date("2026-11-19T20:00:00Z"))).toBe("2026-11-19");
+  expect(nextAnnualRenewal("2026-11-19", new Date("2026-11-21T12:00:00Z"))).toBe("2027-11-19");
+  expect(nextAnnualRenewal("2026-11-19", new Date("2027-11-19T12:00:00Z"))).toBe("2027-11-19");
 });
 
 test("renewal uses the Los Angeles calendar date at the evening boundary", () => {
