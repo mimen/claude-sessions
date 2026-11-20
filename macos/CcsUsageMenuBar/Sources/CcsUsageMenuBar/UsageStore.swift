@@ -69,6 +69,14 @@ final class UsageStore: ObservableObject {
     @Published var showFable: Bool = UserDefaults.standard.object(forKey: "showFable") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showFable, forKey: "showFable"); rebuild() }
     }
+    /// Antigravity's Claude/GPT quota group; hidden until switched on.
+    @Published var showAntigravityClaudeGPT: Bool = UserDefaults.standard.bool(forKey: "showAntigravityClaudeGPT") {
+        didSet { UserDefaults.standard.set(showAntigravityClaudeGPT, forKey: "showAntigravityClaudeGPT"); rebuild() }
+    }
+    /// Antigravity's separate Argon quota; hidden until switched on.
+    @Published var showAntigravityArgon: Bool = UserDefaults.standard.bool(forKey: "showAntigravityArgon") {
+        didSet { UserDefaults.standard.set(showAntigravityArgon, forKey: "showAntigravityArgon"); rebuild() }
+    }
     /// The carried-forward snapshot the engine last returned: the next refresh's `previous`.
     private(set) var lastSnapshotData: Data?
     /// The section header or gauge row being dragged. Rows only reorder within their section.
@@ -90,7 +98,9 @@ final class UsageStore: ObservableObject {
     }
 
     private var order: ViewOrder {
-        ViewOrder(sections: sectionOrder, rows: rowOrder, hide: showFable ? [] : ["fable"])
+        let hide = [(showFable, "fable"), (showAntigravityClaudeGPT, "claude-gpt"), (showAntigravityArgon, "argon")]
+            .filter { !$0.0 }.map(\.1)
+        return ViewOrder(sections: sectionOrder, rows: rowOrder, hide: hide)
     }
 
     /// Re-applies a changed order to the snapshot on screen without refetching.

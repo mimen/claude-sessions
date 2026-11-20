@@ -238,11 +238,16 @@ struct UsagePanel: View {
                 .foregroundStyle(.tertiary)
             Spacer()
             if scrolls {
-            Toggle("Fable", isOn: $store.showFable)
-                .toggleStyle(.checkbox)
-                .font(.system(size: 9.5))
-                .foregroundStyle(.secondary)
-                .help("Show each Claude account's weekly Fable cap")
+            Menu("Rows") {
+                Toggle("Claude Fable", isOn: $store.showFable)
+                Toggle("Antigravity Claude/GPT", isOn: $store.showAntigravityClaudeGPT)
+                Toggle("Antigravity Argon", isOn: $store.showAntigravityArgon)
+            }
+            .menuStyle(.borderlessButton)
+            .font(.system(size: 9.5))
+            .foregroundStyle(.secondary)
+            .fixedSize()
+            .help("Choose which optional quota rows the panel shows")
             Picker("", selection: $store.overallMode) {
                 ForEach(OverallMode.allCases) { mode in
                     Text(mode.rawValue).tag(mode)

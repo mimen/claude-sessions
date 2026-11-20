@@ -144,3 +144,15 @@ test("a hidden product drops its rows and nothing else", () => {
     ["grok", ["All usage"]],
   ]);
 });
+
+test("hiding Antigravity's Claude/GPT and Argon groups leaves its Gemini rows", () => {
+  const ag = (group: string, over: Partial<Observation> = {}) =>
+    obs(`google-ai-pro:${personal}#${group}`, { provider: "antigravity", ...over });
+  const view = buildView(snapshot([
+    ag("gemini", { window: "five_hour" }), ag("gemini"),
+    ag("claude-gpt", { window: "five_hour" }), ag("claude-gpt"), ag("argon"),
+  ]), { hide: ["claude-gpt", "argon"] });
+  expect(view.sections.map(s => [s.provider, s.rows.map(r => r.kind === "allowance" ? `${r.label} ${r.window}` : r.label)])).toEqual([
+    ["antigravity", ["Gemini 5h", "Gemini wk"]],
+  ]);
+});
