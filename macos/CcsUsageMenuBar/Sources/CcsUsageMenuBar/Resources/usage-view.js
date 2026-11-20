@@ -19,7 +19,7 @@
     prepaid: "Extra credits",
     reset: "Usage reset",
     gemini: "Gemini",
-    "claude-gpt": "Claude and GPT",
+    "claude-gpt": "Claude/GPT",
     argon: "Argon"
   };
   var FALLBACK_DOLLARS = 50;

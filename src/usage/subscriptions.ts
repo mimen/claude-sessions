@@ -15,7 +15,7 @@ const REGISTRY: readonly ConfiguredSubscription[] = [
   { provider: "codex", account: "miladmaaan@gmail.com", planName: "Codex Pro", monthlyDollars: 200, anchor: "2026-09-20" },
   { provider: "grok", account: "miladmaaan@gmail.com", planName: "SuperGrok", monthlyDollars: 100, anchor: "2026-09-21" },
   { provider: "meta", account: "miladmaaan@gmail.com", planName: "Muse Code Power Usage", monthlyDollars: 50, anchor: "2026-11-13" },
-  { provider: "antigravity", account: "miladmaaan@gmail.com", planName: "Google AI Pro", monthlyDollars: 16.67, anchor: "2026-11-19", annual: true },
+  { provider: "antigravity", account: "miladmaaan@gmail.com", planName: "Google AI Pro", monthlyDollars: 16.67, anchor: "2027-11-19", annual: true },
 ];
 
 function daysInUtcMonth(year: number, month: number): number {

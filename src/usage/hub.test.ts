@@ -138,7 +138,9 @@ test("each Antigravity quota group renders as its own labeled row pair", async (
   const section = buildView(snap).sections.find((s) => s.provider === "antigravity");
   expect(section?.title).toBe("Antigravity");
   expect(snap.subscriptions.find((s) => s.provider === "antigravity")?.planName).toBe("Google AI Pro");
-  expect(JSON.stringify(section?.rows)).toContain("Claude and GPT");
+  expect(JSON.stringify(section?.rows)).toContain("Claude/GPT");
+  expect(renderSnapshot(snap)).toContain("Claude/GPT weekly");
+  expect(renderSnapshot(snap)).toContain("Gemini 5h");
 });
 
 test("a stale hub snapshot means no provider fetch and the stale marker shows", async () => {

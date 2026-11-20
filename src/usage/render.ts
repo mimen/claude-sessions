@@ -48,11 +48,15 @@ export function shortReset(iso: string): string {
 
 const WINDOW_NAME: Record<string, string> = { "5h": "five-hour", day: "daily", wk: "weekly", mo: "monthly" };
 
-/** The allowance name within its group: the window for the main pool, else the scope name. */
-function rowName(r: Row): string {
+/**
+ * The allowance name within its group: the window for the main pool, else the scope name, with
+ * the window added when the section shows that scope over more than one window (Antigravity).
+ */
+function rowName(r: Row, section: readonly Row[] = []): string {
   if (r.kind !== "allowance") return r.kind === "reset" ? "banked reset" : r.label;
   if ((r.label === "All models" || r.label === "All usage") && r.window) return WINDOW_NAME[r.window] ?? r.window;
-  return r.label;
+  const repeated = section.filter((o) => o.kind === "allowance" && o.label === r.label).length > 1;
+  return repeated && r.window ? `${r.label} ${r.window === "5h" ? "5h" : WINDOW_NAME[r.window] ?? r.window}` : r.label;
 }
 
 function rowText(r: Row, name: string): string {
@@ -75,14 +79,14 @@ function rowText(r: Row, name: string): string {
 
 export function renderSnapshot(snap: UsageSnapshot): string {
   const view = buildView(snap);
-  const names = view.sections.flatMap(s => s.rows.map(rowName));
+  const names = view.sections.flatMap(s => s.rows.map(r => rowName(r, s.rows)));
   const pad = Math.min(Math.max(6, ...names.map(n => n.length)), 18);
   const lines: string[] = [];
 
   for (const s of view.sections) {
     lines.push(s.account ? `${s.title} · ${s.account}` : s.title);
     if (s.plan) lines.push(`  ${s.plan.name} · ${s.renewal}`);
-    for (const r of s.rows) lines.push(`  ${rowText(r, `${rowName(r).padEnd(pad)} `)}`);
+    for (const r of s.rows) lines.push(`  ${rowText(r, `${rowName(r, s.rows).padEnd(pad)} `)}`);
     lines.push("");
   }
 

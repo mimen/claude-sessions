@@ -100,7 +100,7 @@ const baseLabel: Record<string, string> = {
 };
 const productLabel: Record<string, string> = {
   build: "Build", chat: "Chat", imagine: "Imagine", api: "API", prepaid: "Extra credits", reset: "Usage reset",
-  gemini: "Gemini", "claude-gpt": "Claude and GPT", argon: "Argon",
+  gemini: "Gemini", "claude-gpt": "Claude/GPT", argon: "Argon",
 };
 
 /** Dollars that weight an account whose plan is unknown in the overall reading. */
