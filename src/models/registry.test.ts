@@ -10,6 +10,8 @@ import {
   enrichModel,
   familyOf,
   isMarkerLauncher,
+  liveModel,
+  offUsageProviders,
   launcherNames,
   loadModelRegistry,
   pickerRows,
@@ -166,4 +168,85 @@ test("a missing registry is an error, not an empty fleet", () => {
   const missing = loadModelRegistry(join(tmpdir(), "ccs-no-such-models.toml"));
   expect(missing.ok).toBe(false);
   if (!missing.ok) expect(missing.error.message).toContain("failed to read model registry");
+});
+
+const SWITCHED = `
+version = 1
+
+[defaults]
+enrich_model = "gpt-5.6-sol(low)"
+
+[[family]]
+name = "gpt-5.6"
+window = 921000
+accounting = "envelope"
+prefixes = ["gpt-5.6-"]
+
+[[family]]
+name = "grok"
+window = 500000
+accounting = "envelope"
+prefixes = ["grok-"]
+
+[[model]]
+id = "gpt-5.6-sol"
+family = "gpt-5.6"
+provider = "codex"
+launchers = ["claudex"]
+label = "Sol 5.6"
+short = "Sol"
+color = "#4fb3a9"
+price = { input = 5, output = 30 }
+birth = true
+picker = true
+
+[[model]]
+id = "grok-4.7"
+family = "grok"
+provider = "xai"
+launchers = ["claudex"]
+label = "Grok 4.7"
+short = "Grok"
+color = "#d08770"
+birth = true
+picker = true
+
+[slots.claudex]
+sonnet = "gpt-5.6-sol(high)"
+max_context = 921000
+
+[subscription.chatgpt]
+label = "ChatGPT"
+enabled = ENABLED
+models = ["gpt-"]
+usage = "codex"
+substitutes = { "gpt-5.6-sol" = "grok-4.7" }
+`;
+
+test("a switched-off subscription leaves every active surface but still prices its transcripts", () => {
+  const loaded = loadInline(SWITCHED.replace("ENABLED", "false"));
+  if (!loaded.ok) throw loaded.error;
+  const registry = loaded.value;
+  expect(allowlist(registry, "claudex")).toEqual(["grok-4.7"]);
+  expect(pickerRows(registry, "claudex").map((row) => row.model)).toEqual(["grok-4.7"]);
+  expect(birthModelIds(registry)).toEqual(["grok-4.7"]);
+  expect(slots(registry, "claudex")?.sonnet).toBe("grok-4.7(high)");
+  expect(enrichModel(registry)).toBe("grok-4.7(low)");
+  expect(liveModel(registry, "gpt-5.6-sol(medium)")).toBe("grok-4.7(medium)");
+  expect(priceFor(registry, "gpt-5.6-sol")).toEqual({ input: 5, output: 30 });
+  expect([...offUsageProviders(registry)]).toEqual(["codex"]);
+});
+
+test("switching the subscription back on restores it unchanged", () => {
+  const loaded = loadInline(SWITCHED.replace("ENABLED", "true"));
+  if (!loaded.ok) throw loaded.error;
+  expect(allowlist(loaded.value, "claudex")).toEqual(["gpt-5.6-sol", "grok-4.7"]);
+  expect(slots(loaded.value, "claudex")?.sonnet).toBe("gpt-5.6-sol(high)");
+  expect(offUsageProviders(loaded.value).size).toBe(0);
+});
+
+test("a slot on a switched-off model with no substitute refuses to load", () => {
+  const loaded = loadInline(SWITCHED.replace("ENABLED", "false").replace(/^substitutes = .*$/m, ""));
+  expect(loaded.ok).toBe(false);
+  if (!loaded.ok) expect(loaded.error.message).toContain("lists no substitute");
 });

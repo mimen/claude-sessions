@@ -137,6 +137,7 @@ function knownModelId(registry: ModelRegistry, value: string): boolean {
   const base = modelBase(value);
   if (TIER_ALIASES.has(base)) return true;
   return registry.model.some((model) => model.id === base)
+    || (registry.off ?? []).some((model) => model.id === base)
     || registry.historical.some((row) => row.id === base);
 }
 

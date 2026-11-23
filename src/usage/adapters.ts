@@ -16,6 +16,7 @@ import type {
 } from "./types.ts";
 import { HUB_FRESH_MS, readHubSnapshot, type HubCredential, type HubRead, type HubSnapshot, type HubWindow } from "./hub.ts";
 import { mergeSubscriptionRenewals, renewalDate, resolveSubscriptions } from "./subscriptions.ts";
+import { displayModelRegistry, offUsageProviders } from "../models/registry.ts";
 
 export interface AdapterResult {
   observations: UsageObservation[];
@@ -27,6 +28,12 @@ export const PROVIDERS: readonly ProviderId[] = ["codex", "anthropic", "grok", "
 
 /** Numbers stale for less than this show only their stale chip, not a warning note. */
 export const QUIET_STALE_MS = 30 * 60_000;
+
+/** Providers whose subscription models.toml switches off; an explicit --provider still reads them. */
+function defaultOffProviders(): ReadonlySet<string> {
+  const registry = displayModelRegistry();
+  return registry ? offUsageProviders(registry) : new Set();
+}
 
 /** What the hub calls each provider. */
 const HUB_PROVIDER: Record<ProviderId, string> = { anthropic: "claude", codex: "codex", grok: "xai", meta: "meta", antigravity: "antigravity" };
@@ -165,8 +172,10 @@ export async function collectSnapshot(opts: {
   providers?: readonly ProviderId[];
   hub?: () => Promise<HubRead>;
   now?: () => number;
+  offProviders?: ReadonlySet<string>;
 }): Promise<UsageSnapshot> {
-  const wanted = opts.providers ?? PROVIDERS;
+  const off = opts.offProviders ?? defaultOffProviders();
+  const wanted = opts.providers ?? PROVIDERS.filter((p) => !off.has(p));
   const hub = await (opts.hub ?? readHubSnapshot)();
   const nowMs = (opts.now ?? Date.now)();
   if (Bun.env.CCS_USAGE_DEBUG) {

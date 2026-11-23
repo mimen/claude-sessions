@@ -92,6 +92,21 @@ const DefaultsSchema = z.object({
   enrich_model: z.string().min(1).optional(),
 });
 
+/**
+ * One paid plan. Off means every model whose id starts with one of `models` leaves every active
+ * surface (pickers, allowlists, births, harness lists) while still pricing old transcripts, a slot
+ * or default naming one runs on its `substitutes` entry instead, and `ccs usage` stops showing the
+ * `usage` provider. `ClaudeConfig/bin/sub` flips `enabled`.
+ */
+const SubscriptionSchema = z.object({
+  label: z.string().min(1),
+  enabled: z.boolean().default(true),
+  models: z.array(z.string().min(1)).default([]),
+  usage: z.string().min(1).optional(),
+  bucket: z.string().min(1).optional(),
+  substitutes: z.record(z.string(), z.string().min(1)).default({}),
+});
+
 const ModelRegistrySchema = z.object({
   version: z.number().int().positive(),
   gateway: z.string().min(1).optional(),
@@ -100,9 +115,12 @@ const ModelRegistrySchema = z.object({
   model: z.array(ModelSchema).default([]),
   historical: z.array(HistoricalSchema).default([]),
   slots: z.record(z.string(), SlotsSchema).default({}),
+  subscription: z.record(z.string(), SubscriptionSchema).default({}),
 });
 
-export type ModelRegistry = z.infer<typeof ModelRegistrySchema>;
+/** `off` holds the rows of switched-off subscriptions: priced and coloured, never offered. */
+export type ModelRegistry = z.infer<typeof ModelRegistrySchema> & { readonly off?: readonly ModelRow[] };
+export type Subscription = z.infer<typeof SubscriptionSchema>;
 export type ModelFamilyRow = z.infer<typeof FamilySchema>;
 export type ModelRow = z.infer<typeof ModelSchema>;
 export type HistoricalModelRow = z.infer<typeof HistoricalSchema>;
@@ -200,6 +218,79 @@ function validate(registry: ModelRegistry, path: string): Result<ModelRegistry> 
   return ok(registry);
 }
 
+function offSubscriptionOf(registry: ModelRegistry, id: string): Subscription | null {
+  for (const subscription of Object.values(registry.subscription)) {
+    if (!subscription.enabled && subscription.models.some((prefix) => id.startsWith(prefix))) return subscription;
+  }
+  return null;
+}
+
+/**
+ * Take switched-off subscriptions out of the active fleet, once, at load, so every surface that
+ * reads `registry.model` follows without knowing subscriptions exist. A slot or default that names
+ * an off model is rewritten to the subscription's substitute, effort suffix kept; one with no
+ * substitute is an error, because a silently dead slot is the failure this switch exists to stop.
+ */
+function applySubscriptions(registry: ModelRegistry, path: string): Result<ModelRegistry> {
+  const off = registry.model.filter((model) => offSubscriptionOf(registry, model.id));
+  if (off.length === 0) return ok(registry);
+  const active = registry.model.filter((model) => !off.includes(model));
+  const swap = (value: string, where: string): Result<string> => {
+    const base = modelBase(value);
+    const subscription = offSubscriptionOf(registry, base);
+    if (!subscription) return ok(value);
+    const target = subscription.substitutes[base];
+    if (!target) return err(new Error(`${where} in ${path} names "${base}", whose subscription "${subscription.label}" is off and lists no substitute for it`));
+    if (!active.some((model) => model.id === target)) {
+      return err(new Error(`${where} in ${path}: substitute "${target}" for "${base}" is not an active model`));
+    }
+    return ok(target + value.slice(base.length));
+  };
+  const nextSlots: Record<string, LauncherSlots> = {};
+  for (const [launcher, table] of Object.entries(registry.slots)) {
+    const next: Record<string, string | number> = {};
+    for (const [slot, value] of Object.entries(table)) {
+      if (typeof value !== "string") {
+        if (value !== undefined) next[slot] = value;
+        continue;
+      }
+      const swapped = swap(value, `slots.${launcher}.${slot}`);
+      if (!swapped.ok) return swapped;
+      next[slot] = swapped.value;
+    }
+    nextSlots[launcher] = next as LauncherSlots;
+  }
+  let enrich = registry.defaults.enrich_model;
+  if (enrich !== undefined) {
+    const swapped = swap(enrich, "defaults.enrich_model");
+    if (!swapped.ok) return swapped;
+    enrich = swapped.value;
+  }
+  return ok({
+    ...registry,
+    model: active,
+    off,
+    slots: nextSlots,
+    defaults: { ...registry.defaults, ...(enrich !== undefined ? { enrich_model: enrich } : {}) },
+  });
+}
+
+/**
+ * The model to run in place of `model`: itself, or its substitute when its subscription is off.
+ * For ids authored outside the registry (a location's default_model); slots are swapped at load.
+ */
+export function liveModel(registry: ModelRegistry, model: string): string {
+  const base = modelBase(model);
+  if (!(registry.off ?? []).some((row) => row.id === base)) return model;
+  const target = offSubscriptionOf(registry, base)?.substitutes[base];
+  return target ? target + model.slice(base.length) : model;
+}
+
+/** Usage providers (`ccs usage` ids) whose subscription is switched off. */
+export function offUsageProviders(registry: ModelRegistry): ReadonlySet<string> {
+  return new Set(Object.values(registry.subscription).flatMap((s) => (!s.enabled && s.usage ? [s.usage] : [])));
+}
+
 /**
  * Load the registry. Unlike the launcher fleet, a MISSING file is an error: every birth, price and
  * badge reads this file, and a silent empty fleet would refuse every model rather than degrade.
@@ -225,7 +316,8 @@ export function loadModelRegistry(path: string): Result<ModelRegistry> {
   if (!parsed.success) {
     return err(new Error(`invalid model registry at ${path}:\n${z.prettifyError(parsed.error)}`));
   }
-  return validate(parsed.data, path);
+  const validated = validate(parsed.data, path);
+  return validated.ok ? applySubscriptions(validated.value, path) : validated;
 }
 
 /** The configured registry path: an explicit override, else the CCS runtime default. */
@@ -421,7 +513,7 @@ interface PrefixRow {
 }
 
 function prefixRows(registry: ModelRegistry): readonly PrefixRow[] {
-  return [...registry.model, ...registry.historical];
+  return [...registry.model, ...(registry.off ?? []), ...registry.historical];
 }
 
 /** Exact id first, then the longest id-prefix among rows that carry the attribute at all. */

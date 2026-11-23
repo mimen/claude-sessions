@@ -300,7 +300,8 @@ function withModelPreferences(
   const preferences = data.providerModelPreferences?.["claudeAgent"];
   if (!preferences) return null;
   const registryOrder = registry.model.map((model) => model.id);
-  const extras = (preferences.modelOrder ?? []).filter((id) => !registryOrder.includes(id));
+  const offIds = (registry.off ?? []).map((model) => model.id);
+  const extras = (preferences.modelOrder ?? []).filter((id) => !registryOrder.includes(id) && !offIds.includes(id));
   const otherFavorites = (data.favorites ?? []).filter((favorite) => favorite.provider !== "claudeAgent");
   const pickerFavorites = pickerFavoriteIds(registry).map((model) => ({ provider: "claudeAgent", model }));
   return {

@@ -283,3 +283,13 @@ test("a Muse Code credential the collector has not read yet says so instead of c
   const snap = await collectSnapshot({ providers: ["meta"], hub: hubWith(NOW - 60_000, [unread]), now: () => NOW });
   expect(snap.adapters[0]!.detail).toBe("the hub has no Muse Code usage reading yet");
 });
+
+test("a switched-off subscription's provider drops out unless asked for by name", async () => {
+  const hub = hubWith(NOW - 60_000, [claude, codexCred, xai]);
+  const off = new Set(["codex"]);
+  const all = await collectSnapshot({ hub, now: () => NOW, offProviders: off });
+  expect(all.adapters.map((a) => a.provider)).not.toContain("codex");
+  expect(all.observations.some((o) => o.provider === "codex")).toBe(false);
+  const named = await collectSnapshot({ providers: ["codex"], hub, now: () => NOW, offProviders: off });
+  expect(named.adapters.map((a) => a.provider)).toEqual(["codex"]);
+});

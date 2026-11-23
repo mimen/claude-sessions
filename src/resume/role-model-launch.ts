@@ -24,6 +24,7 @@ import {
   modelById,
   requireModelRegistry,
   type ModelRegistry,
+  liveModel,
 } from "../models/registry.ts";
 
 export { canonicalModelId };
@@ -250,7 +251,7 @@ export function compileLocationModelLaunch(
   model: string,
   registry: ModelRegistry = requireModelRegistry(),
 ): Result<ModelLaunch> {
-  const parsed = parseBirthModel(model, registry);
+  const parsed = parseBirthModel(liveModel(registry, model), registry);
   if (!parsed) {
     return err(new Error(
       `location default_model "${model}" is unsupported; expected one of: ${birthModelIds(registry).join(", ")}`,
