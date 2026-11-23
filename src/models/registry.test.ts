@@ -20,6 +20,7 @@ import {
   slots,
   type ModelRegistry,
 } from "./registry.ts";
+import { unregisteredRoleModelIds } from "../resume/role-model-launch.ts";
 
 const FIXTURE = join(import.meta.dir, "fixtures", "models.toml");
 
@@ -249,4 +250,11 @@ test("a slot on a switched-off model with no substitute refuses to load", () => 
   const loaded = loadInline(SWITCHED.replace("ENABLED", "false").replace(/^substitutes = .*$/m, ""));
   expect(loaded.ok).toBe(false);
   if (!loaded.ok) expect(loaded.error.message).toContain("lists no substitute");
+});
+
+test("a role model on a switched-off subscription is registered, not drift", () => {
+  const loaded = loadInline(SWITCHED.replace("ENABLED", "false").replace('prefixes = ["gpt-5.6-"]', 'prefixes = ["gpt-5.6-"]\n').replace('[[model]]\nid = "gpt-5.6-sol"', '[[model]]\nid = "gpt-5.6-terra"\nfamily = "gpt-5.6"\nprovider = "codex"\nlabel = "Terra"\nshort = "Terra"\ncolor = "#000"\nbirth = true\n\n[[model]]\nid = "gpt-5.6-sol"'));
+  if (!loaded.ok) throw loaded.error;
+  expect(unregisteredRoleModelIds(loaded.value)).not.toContain("gpt-5.6-sol");
+  expect(unregisteredRoleModelIds(loaded.value)).not.toContain("gpt-5.6-terra");
 });

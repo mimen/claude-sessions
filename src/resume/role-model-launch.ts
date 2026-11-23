@@ -184,7 +184,8 @@ export function parseRoleModel(
 export function unregisteredRoleModelIds(
   registry: ModelRegistry = requireModelRegistry(),
 ): readonly string[] {
-  return ROLE_MODEL_IDS.filter((model) => parseBirthModel(model, registry) === null);
+  const off = new Set((registry.off ?? []).map((row) => row.id));
+  return ROLE_MODEL_IDS.filter((model) => !off.has(model) && parseBirthModel(model, registry) === null);
 }
 
 /**
