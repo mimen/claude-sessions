@@ -221,19 +221,20 @@ export async function requestEnrichment(
   locations: readonly EnrichmentLocation[],
   options: EnrichOptions = {},
 ): Promise<Result<EnrichmentPayload>> {
+  // A missing key or model is this host's fault, not the session's, so it must not spend budget.
   const keyPath = options.keyPath ?? join(homedir(), ".cli-proxy-api-key");
   let key: string;
   try {
     key = readFileSync(keyPath, "utf8").trim();
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    return err(new Error(`gateway key missing at ${keyPath}: ${detail}`));
+    return err(new TransientGatewayError(`gateway key missing at ${keyPath}: ${detail}`));
   }
-  if (!key) return err(new Error(`gateway key is empty at ${keyPath}`));
+  if (!key) return err(new TransientGatewayError(`gateway key is empty at ${keyPath}`));
 
   const model = options.model ?? defaultGatewayModel();
   if (!model) {
-    return err(new Error("no enrichment model: pass one, or declare [defaults] enrich_model in the model registry"));
+    return err(new TransientGatewayError("no enrichment model: pass one, or declare [defaults] enrich_model in the model registry"));
   }
   // The Claude subscription serves Claude Code only, and a raw /v1/messages call is not Claude
   // Code. Thrown, not returned: a misconfigured model must stop the sweep, not spend every

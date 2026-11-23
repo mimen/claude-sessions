@@ -437,6 +437,24 @@ describe("sweep", () => {
     }
   });
 
+  test("a missing gateway key or model never spends a session's attempt budget", async () => {
+    // The M5's ~/Documents went unreadable (EINTR), so the registry and its enrich_model vanished
+    // and three sweeps burnt every stale session's whole budget for a host fault.
+    const f = await fixture([{ id: "a", messages: 4 }]);
+    try {
+      for (const setup of [{ keyPath: join(f.dir, "absent-key") }, { keyPath: f.keyPath, model: "" }]) {
+        for (let i = 0; i < MAX_ENRICHMENT_ATTEMPTS; i++) {
+          await sweep(f.index, f.catalogue, { locations: LOCATIONS, fetchImpl: okFetch, ...setup });
+        }
+      }
+      expect(getRow(f.catalogue, "a")?.enrichmentAttempts ?? 0).toBe(0);
+      const stats = await sweep(f.index, f.catalogue, { locations: LOCATIONS, keyPath: f.keyPath, fetchImpl: okFetch });
+      expect(stats.enriched).toBe(1);
+    } finally {
+      teardown(f);
+    }
+  });
+
   test("stops early instead of grinding through a dead gateway", async () => {
     const f = await fixture(Array.from({ length: 20 }, (_, i) => ({ id: `s${i}`, messages: 4 })));
     try {
