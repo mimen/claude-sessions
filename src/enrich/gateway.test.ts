@@ -148,6 +148,17 @@ describe("requestEnrichment", () => {
     });
   });
 
+  test("retries with auto when the provider rejects a forced tool choice", async () => {
+    await withKey(async (keyPath) => {
+      const rejection = JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: 'only `"auto"` is supported for `tool_choice`. `"none"`, `"required"`, and named function choices are not currently supported' } });
+      let n = 0;
+      const { calls, fetchImpl } = capturingFetch(() => (n++ === 0 ? new Response(rejection, { status: 400 }) : toolUseResponse(ANSWER)));
+      const result = await requestEnrichment(REQUEST, LOCATIONS, { keyPath, fetchImpl });
+      expect(result.ok).toBe(true);
+      expect(calls.map((call) => call.tool_choice)).toEqual([{ type: "tool", name: "answer" }, { type: "auto" }]);
+    });
+  });
+
   test("offers the registry to the model so it can pick a key", async () => {
     await withKey(async (keyPath) => {
       const { calls, fetchImpl } = capturingFetch(() => toolUseResponse(ANSWER));
