@@ -74,6 +74,54 @@ function writeDefault(h: Harness, name: string): void {
   writeFileSync(join(h.envDir, "default"), `${name}\n`);
 }
 
+describe("OAuth token handed over on a file descriptor", () => {
+  function withTokenFile(h: Harness): void {
+    mkdirSync(join(h.root, ".config/claude"), { recursive: true });
+    writeFileSync(join(h.root, ".config/claude/oauth-token"), "fake-oauth-token\n");
+  }
+
+  test("a token file and no credential in the environment passes the file on fd 9", () => {
+    const h = harness();
+    withTokenFile(h);
+    const result = run(h, {});
+    expect(result.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR).toBe("9");
+    expect(result.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  test("an inherited descriptor variable is replaced by a freshly opened one", () => {
+    const h = harness();
+    withTokenFile(h);
+    expect(run(h, { CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR: "4" }).env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR).toBe("9");
+  });
+
+  test("a credential already in the environment wins and no descriptor is added", () => {
+    for (const extra of [{ CLAUDE_CODE_OAUTH_TOKEN: "env-token" }, { ANTHROPIC_AUTH_TOKEN: "gw" }, { ANTHROPIC_API_KEY: "k" }]) {
+      const h = harness();
+      withTokenFile(h);
+      expect(run(h, extra).env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR).toBeUndefined();
+    }
+  });
+
+  test("a launcher that sets a gateway credential suppresses the descriptor", () => {
+    const h = harness();
+    withTokenFile(h);
+    writeSpec(h, "claudex", "set ANTHROPIC_AUTH_TOKEN=gw-token\n");
+    writeDefault(h, "claudex");
+    expect(run(h, {}).env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR).toBeUndefined();
+  });
+
+  test("a T3 team session never receives the owner's token", () => {
+    const h = harness();
+    withTokenFile(h);
+    expect(run(h, { T3_TEAM: "1" }).env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR).toBeUndefined();
+  });
+
+  test("no token file leaves the environment untouched", () => {
+    const h = harness();
+    expect(run(h, {}).env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR).toBeUndefined();
+  });
+});
+
 describe("shim launcher environment", () => {
   test("applies the default launcher's environment", () => {
     const h = harness();

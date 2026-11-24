@@ -255,12 +255,25 @@ const already=Object.keys(overlay).some(k=>k in base);
 process.stdout.write(JSON.stringify(already?base:merge(base,overlay)));' 2>/dev/null
 }
 
+# A machine that keeps the Claude OAuth token in a file, not the environment, hands it to Claude
+# on a file descriptor. Claude Code reads CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR at start-up, so the
+# token never reaches the environment its tool subprocesses inherit. The file is reopened on every
+# launch: a nested launch must not reuse a descriptor its parent already read to the end.
+pass_oauth_token_on_fd() {
+  local file="${CCS_OAUTH_TOKEN_FILE:-${HOME:-}/.config/claude/oauth-token}"
+  [[ -r "$file" ]] || return 0
+  [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" && -z "${ANTHROPIC_AUTH_TOKEN:-}" ]] || return 0
+  [[ -z "${T3_TEAM:-}" ]] || return 0
+  exec 9<"$file" && export CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR=9
+}
+
 exec_raw() {
   # Resolved while CCS_FORCE_HARNESS still names the launcher; the unset below would otherwise
   # make a wrapper launch pick up the default launcher's settings file.
   local generated_settings="" after_cmux="${CCS_CLAUDE_SHIM_AFTER_CMUX:-}"
   generated_settings="$(generated_settings_for_launcher)" || generated_settings=""
   apply_launcher_env
+  pass_oauth_token_on_fd
   unset CCS_CLAUDE_SHIM_AFTER_CMUX CCS_LAUNCH_PARENT_SESSION_ID
   unset CCS_LAUNCH_CREATOR_KIND CCS_LAUNCH_CREATOR_REF
   unset CCS_CREATOR_KIND CCS_CREATOR_REF
