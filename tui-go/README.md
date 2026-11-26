@@ -38,7 +38,7 @@ SHOT=skill-reader go run .
 | `enter` | Focus an already-live cmux session, otherwise exit the TUI and resume inline on its origin backend |
 | `r` | Choose the harness and target for this resume: every configured launcher (`claude-native`, `claude-gpt`, …) × inline or a focused cmux workspace |
 | `g` | Cycle `default` → `tree` → `flat` |
-| `/` | Fuzzy filter title, project, and Claude task subjects |
+| `/` | Fuzzy filter title, project, and Claude task subjects; `enter` keeps the filter (shown in the footer), `esc` clears it |
 | `p` | Show or hide the dossier |
 | `o` | Open View Options: sort, visibility, task filter, and autorefresh settings |
 | `R` | Manually reload the read-only store snapshot while preserving selection |

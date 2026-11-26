@@ -120,6 +120,11 @@ func (m Model) handleSkillKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch message.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
+	case "esc":
+		if m.skillQuery != "" {
+			m.skillQuery = ""
+			m.rebuildSkillRows()
+		}
 	case "tab":
 		m.mode = ModeSessions
 		m.status = ""

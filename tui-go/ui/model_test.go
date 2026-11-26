@@ -717,3 +717,37 @@ func TestCleanupCandidatesSkipDoneSessions(t *testing.T) {
 		}
 	}
 }
+
+func TestAppliedSearchStaysVisibleAndEscClearsIt(t *testing.T) {
+	runes := func(text string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)} }
+	model := Model(New(testSnapshot(2)))
+	for _, key := range []tea.KeyMsg{runes("/"), runes("qqq"), {Type: tea.KeyEnter}} {
+		updated, _ := model.Update(key)
+		model = updated.(Model)
+	}
+	if list := ansi.Strip(model.renderList(100, 20)); !strings.Contains(list, `"qqq"`) {
+		t.Fatalf("empty list hides the applied search: %q", list)
+	}
+	if bar := ansi.Strip(model.renderKeybar(200)); !strings.Contains(bar, "qqq") {
+		t.Fatalf("keybar hides the applied search: %q", bar)
+	}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model = updated.(Model)
+	if model.query != "" || len(model.rows) == 0 {
+		t.Fatalf("esc left query %q with %d rows", model.query, len(model.rows))
+	}
+
+	model.mode = ModeSkills
+	model.skillQuery = "zzz"
+	model.rebuildSkillRows()
+	if list := ansi.Strip(model.renderSkillList(100, 20)); !strings.Contains(list, `"zzz"`) {
+		t.Fatalf("empty skills list hides the applied search: %q", list)
+	}
+	if bar := ansi.Strip(model.renderSkillFooter(200)); !strings.Contains(bar, "zzz") {
+		t.Fatalf("skills footer hides the applied search: %q", bar)
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if updated.(Model).skillQuery != "" {
+		t.Fatalf("esc left skill query %q", updated.(Model).skillQuery)
+	}
+}

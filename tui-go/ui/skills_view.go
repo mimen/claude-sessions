@@ -62,6 +62,9 @@ func (m Model) renderSkillList(width int, height int) string {
 		return fg(theme.Warning).Render(truncate(m.skillError, width))
 	}
 	if len(m.skillRows) == 0 {
+		if m.skillQuery != "" {
+			return fg(theme.FgMoreSubtle).Render(fmt.Sprintf("No skills match %q · esc clears the search.", m.skillQuery))
+		}
 		return fg(theme.FgMoreSubtle).Render("No skills found.")
 	}
 	start, end := m.skillWindow(height)
@@ -217,7 +220,11 @@ func (m Model) renderSkillFooter(width int) string {
 	if m.skillWarning != "" {
 		return fit(fg(theme.Warning).Render(m.skillWarning)+fg(theme.FgMoreSubtle).Render(" · R rescan"), width)
 	}
-	return fit(fg(theme.Accent).Bold(true).Render("Tab")+fg(theme.FgMoreSubtle).Render(" sessions · ")+fg(theme.Accent).Bold(true).Render("↑↓")+fg(theme.FgMoreSubtle).Render(" move · ")+fg(theme.Accent).Bold(true).Render("v/enter")+fg(theme.FgMoreSubtle).Render(" read · ")+fg(theme.Accent).Bold(true).Render("/")+fg(theme.FgMoreSubtle).Render(" search · ")+fg(theme.Accent).Bold(true).Render("g")+fg(theme.FgMoreSubtle).Render(" view · ")+fg(theme.Accent).Bold(true).Render("p")+fg(theme.FgMoreSubtle).Render(" preview · ")+fg(theme.Accent).Bold(true).Render("R")+fg(theme.FgMoreSubtle).Render(" rescan · q quit"), width)
+	active := ""
+	if m.skillQuery != "" {
+		active = fg(theme.Accent).Bold(true).Render("/ "+m.skillQuery) + fg(theme.FgMoreSubtle).Render(" · ") + fg(theme.Accent).Bold(true).Render("esc") + fg(theme.FgMoreSubtle).Render(" clear · ")
+	}
+	return fit(active+fg(theme.Accent).Bold(true).Render("Tab")+fg(theme.FgMoreSubtle).Render(" sessions · ")+fg(theme.Accent).Bold(true).Render("↑↓")+fg(theme.FgMoreSubtle).Render(" move · ")+fg(theme.Accent).Bold(true).Render("v/enter")+fg(theme.FgMoreSubtle).Render(" read · ")+fg(theme.Accent).Bold(true).Render("/")+fg(theme.FgMoreSubtle).Render(" search · ")+fg(theme.Accent).Bold(true).Render("g")+fg(theme.FgMoreSubtle).Render(" view · ")+fg(theme.Accent).Bold(true).Render("p")+fg(theme.FgMoreSubtle).Render(" preview · ")+fg(theme.Accent).Bold(true).Render("R")+fg(theme.FgMoreSubtle).Render(" rescan · q quit"), width)
 }
 
 // skillSourceOwner renders the SOURCE cell: the owner segment of the <owner>/<repo>

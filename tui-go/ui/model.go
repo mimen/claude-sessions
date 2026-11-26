@@ -628,6 +628,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
+	case "esc":
+		if m.query != "" {
+			m.query = ""
+			m.rebuildRows()
+			return m, m.loadSelectedTranscriptCmd()
+		}
 	case "tab":
 		m.mode = ModeSkills
 		m.status = ""

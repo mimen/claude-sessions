@@ -229,6 +229,9 @@ const categoryColumnWidth = categoryTextWidth + 2
 
 func (m Model) renderList(width int, height int) string {
 	if len(m.rows) == 0 {
+		if m.query != "" {
+			return fg(theme.FgMoreSubtle).Render(fmt.Sprintf("No sessions match %q · esc clears the search.", m.query))
+		}
 		return fg(theme.FgMoreSubtle).Render("No sessions match the current view options.")
 	}
 	header := m.renderListHeader(width)
@@ -985,6 +988,9 @@ func (m Model) renderKeybar(width int) string {
 		{"/", "search"}, {"g", "view:" + viewLabel}, {"←→", "fold"}, {"o", "options"}, {"R", "refresh"},
 		{"e", "save/unsave"}, {"t", "retitle"}, {"C", "done/reopen"}, {"E", "edit"},
 		{"S/A/D", "AI"}, {"?", "help"}, {"q", "quit"},
+	}
+	if m.query != "" {
+		items = append([][2]string{{"/", m.query}, {"esc", "clear"}}, items...)
 	}
 	parts := make([]string, 0, len(items))
 	for _, item := range items {
