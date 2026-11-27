@@ -57,10 +57,10 @@ function parseFlags(args: string[]): { flags: Record<string, string>; bools: Set
   return { flags, bools, positional };
 }
 
-/** Resolve `.` (current session env var) or a bare id. */
+/** Resolve `.` (current session env var) or a bare id (a unique short id expands). */
 function resolveSessionId(sIdOrDot: string | undefined): string | null {
   if (!sIdOrDot) return null;
-  if (sIdOrDot !== ".") return sIdOrDot;
+  if (sIdOrDot !== ".") return expandSessionId(sIdOrDot);
   const env = process.env.CLAUDE_CODE_SESSION_ID;
   return env ?? null;
 }
@@ -130,12 +130,11 @@ function usage(rc = 1): number {
 
 function doRead(idArg: string, rest: string[]): number {
   const { bools } = parseFlags(rest);
-  const arg = resolveSessionId(idArg);
-  if (!arg) {
+  const sid = resolveSessionId(idArg);
+  if (!sid) {
     console.error("ccs session: no session id (bare id, '.', or $CLAUDE_CODE_SESSION_ID)");
     return 1;
   }
-  const sid = expandSessionId(arg);
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {

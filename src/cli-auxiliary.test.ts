@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openCatalogue } from "./catalogue/db-schema.ts";
+import { getRow } from "./catalogue/db-queries.ts";
 import { setParent, setSessionClass } from "./catalogue/db-mutations.ts";
 import { main } from "./cli.ts";
 import { openIndex } from "./index/schema.ts";
@@ -119,6 +120,22 @@ describe("CLI auxiliary visibility", () => {
     expect(await outputFor(["meta", "11111111"])).toStartWith(full);
     await outputFor(["session", "abcdef12", "--json"], 1);
     await outputFor(["meta", "abcdef12"], 1);
+  });
+
+  test("meta set writes to the session a unique short id names", async () => {
+    seed();
+    const full = "11111111-1111-4111-8111-111111111111";
+    const index = openIndex(DB_PATH());
+    indexSession(index, full, "Short", 0, "{}");
+    index.close();
+    await outputFor(["meta", "11111111", "milad_review", "approved"]);
+    const catalogue = openCatalogue(CATALOGUE_PATH());
+    try {
+      expect(getRow(catalogue, full)?.meta.milad_review).toBe("approved");
+      expect(getRow(catalogue, "11111111")).toBeNull();
+    } finally {
+      catalogue.close();
+    }
   });
 
   test("ls hides auxiliary rows but includes their recursive cost", async () => {

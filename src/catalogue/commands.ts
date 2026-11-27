@@ -274,10 +274,10 @@ function mirrorToIdentity(
   }
 }
 
-/** Resolve the target session id: explicit arg, or "." / "self" / omitted → current session. */
+/** Resolve the target session id: explicit arg (a unique short id expands), or "." / "self" / omitted → current session. */
 function resolveSessionId(arg: string | undefined): string | null {
   if (!arg || arg === "." || arg === "self") return process.env.CLAUDE_CODE_SESSION_ID ?? null;
-  return arg;
+  return expandSessionId(arg);
 }
 
 function isIndexed(id: string): boolean {
@@ -845,9 +845,8 @@ export function lifecycleDisplayLabel(row: ReturnType<typeof getRow>): "Active" 
 
 /** Print the current session's catalogue row (self-awareness). */
 export function meta(sessionArg: string | undefined): number {
-  const arg = resolveSessionId(sessionArg);
-  if (!arg) return notInSession();
-  const id = expandSessionId(arg);
+  const id = resolveSessionId(sessionArg);
+  if (!id) return notInSession();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
     const cost = usageFor(id, parentEdges(db));

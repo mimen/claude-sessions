@@ -95,7 +95,7 @@ describe("OAuth token handed over on a file descriptor", () => {
   });
 
   test("a credential already in the environment wins and no descriptor is added", () => {
-    for (const extra of [{ CLAUDE_CODE_OAUTH_TOKEN: "env-token" }, { ANTHROPIC_AUTH_TOKEN: "gw" }, { ANTHROPIC_API_KEY: "k" }]) {
+    for (const extra of [{ CLAUDE_CODE_OAUTH_TOKEN: "env-token" }, { ANTHROPIC_AUTH_TOKEN: "gw" }, { ANTHROPIC_API_KEY: "k" }] as Record<string, string>[]) {
       const h = harness();
       withTokenFile(h);
       expect(run(h, extra).env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR).toBeUndefined();
