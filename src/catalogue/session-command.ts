@@ -4,7 +4,7 @@
  * operations that legitimately live per-session:
  *
  *   ccs session <id|.>                              read one session's row + linked identity
- *   ccs session list                                (defers to `ccs ls`; kept as noun-shape alias)
+ *   ccs session list                                (alias for `ccs ls`, rewritten in cli.ts)
  *   ccs session set <id> --identity=<key> [--title="…"] [--parent=<id>] [--parked=<task>]
  *   ccs session unset <id> --identity | --title | --parent | --parked
  *   ccs session title <id> "text"                   same as --title but also cmux tab sync
@@ -23,7 +23,7 @@ import { getAll, getRow, lifecycleOf } from "./db-queries.ts";
 import { CATALOGUE_PATH, DB_PATH, ensureDataDir } from "../paths.ts";
 import { existsSync } from "node:fs";
 import { openIndex } from "../index/schema.ts";
-import { sessionById } from "../index/index.ts";
+import { expandSessionId, sessionById } from "../index/index.ts";
 import type { Database } from "bun:sqlite";
 import { getIdentity } from "./identities.ts";
 import { registerShimBirth, rename, setExistingSessionLifecycle, type SessionLifecycleAction } from "./commands.ts";
@@ -81,7 +81,6 @@ export async function sessionCommand(
   const sub = args[0];
   if (!sub) return usage();
   switch (sub) {
-    case "list":     return doList(args.slice(1));
     case "set":      return doSet(args.slice(1));
     case "adopt":    return doAdopt(args.slice(1));
     case "unset":    return doUnset(args.slice(1));
@@ -131,11 +130,12 @@ function usage(rc = 1): number {
 
 function doRead(idArg: string, rest: string[]): number {
   const { bools } = parseFlags(rest);
-  const sid = resolveSessionId(idArg);
-  if (!sid) {
+  const arg = resolveSessionId(idArg);
+  if (!arg) {
     console.error("ccs session: no session id (bare id, '.', or $CLAUDE_CODE_SESSION_ID)");
     return 1;
   }
+  const sid = expandSessionId(arg);
   ensureDataDir();
   const db = openCatalogue(CATALOGUE_PATH());
   try {
@@ -269,11 +269,6 @@ function doShimRegister(rest: string[]): number {
   }
   console.log(sessionId);
   return 0;
-}
-
-function doList(_rest: string[]): number {
-  console.error("ccs session list: run `ccs ls` for the full session browser.");
-  return 1;
 }
 
 function doAdopt(rest: string[]): number {

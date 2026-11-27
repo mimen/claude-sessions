@@ -1,3 +1,4 @@
+import type { Database } from "bun:sqlite";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,6 +31,19 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+function indexSession(index: Database, id: string, title: string, cost: number, models: string): void {
+  index.query(
+    `INSERT INTO sessions (
+      session_id, host, path, cwd, project_root, project_name, branch, version,
+      first_ts, last_ts, msg_count, file_mtime, file_size,
+      native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id,
+      cost_usd, cost_by_model
+    ) VALUES ($id,'h',$path,'/repo','/repo','repo',NULL,'1',
+      '2026-07-20T00:00:00Z','2026-07-20T00:01:00Z',1,1,1,
+      $title,$title,'',0,NULL,$id,$cost,$models)`,
+  ).run({ $id: id, $path: `/${id}`, $title: title, $cost: cost, $models: models });
+}
+
 function seed(): void {
   const root = mkdtempSync(join(tmpdir(), "ccs-cli-aux-"));
   roots.push(root);
@@ -44,18 +58,8 @@ function seed(): void {
   }));
   process.env.CCS_CATEGORY_REGISTRY_PATH = registryPath;
   const index = openIndex(DB_PATH());
-  const insert = index.query(
-    `INSERT INTO sessions (
-      session_id, host, path, cwd, project_root, project_name, branch, version,
-      first_ts, last_ts, msg_count, file_mtime, file_size,
-      native_title, fallback_label, skeleton, is_subagent, parent_session_id, resume_id,
-      cost_usd, cost_by_model
-    ) VALUES ($id,'h',$path,'/repo','/repo','repo',NULL,'1',
-      '2026-07-20T00:00:00Z','2026-07-20T00:01:00Z',1,1,1,
-      $title,$title,'',0,NULL,$id,$cost,$models)`,
-  );
-  insert.run({ $id: "parent", $path: "/parent", $title: "Parent Session", $cost: 2, $models: '{"claude-fable-5":2}' });
-  insert.run({ $id: "child", $path: "/child", $title: "Auxiliary Child", $cost: 3, $models: '{"gpt-5.6-sol":3}' });
+  indexSession(index, "parent", "Parent Session", 2, '{"claude-fable-5":2}');
+  indexSession(index, "child", "Auxiliary Child", 3, '{"gpt-5.6-sol":3}');
   index.close();
 
   const catalogue = openCatalogue(CATALOGUE_PATH());
@@ -73,14 +77,14 @@ function seed(): void {
   catalogue.close();
 }
 
-async function outputFor(args: readonly string[]): Promise<string> {
+async function outputFor(args: readonly string[], expectedCode = 0): Promise<string> {
   const lines: string[] = [];
   const log = spyOn(console, "log").mockImplementation((...values: object[]) => {
     lines.push(values.map(String).join(" "));
   });
   const error = spyOn(console, "error").mockImplementation(() => {});
   try {
-    expect(await main(["bun", "ccs", ...args])).toBe(0);
+    expect(await main(["bun", "ccs", ...args])).toBe(expectedCode);
     return lines.join("\n");
   } finally {
     error.mockRestore();
@@ -89,6 +93,34 @@ async function outputFor(args: readonly string[]): Promise<string> {
 }
 
 describe("CLI auxiliary visibility", () => {
+  test("session list aliases ls and forwards its flags", async () => {
+    seed();
+    for (const flags of [[], ["--auxiliary"], ["--all", "--auxiliary", "--category", "ai-systems"]]) {
+      expect(await outputFor(["session", "list", ...flags])).toBe(await outputFor(["ls", ...flags]));
+    }
+  });
+
+  test("meta reports an unknown session as not found", async () => {
+    seed();
+    expect(await outputFor(["meta", "99999999-9999-4999-8999-999999999999"], 1)).toBe("");
+    expect(await outputFor(["meta", "parent"])).toContain("$5.00 total");
+  });
+
+  test("session and meta resolve the unique short id routes resolves", async () => {
+    seed();
+    const full = "11111111-1111-4111-8111-111111111111";
+    const index = openIndex(DB_PATH());
+    indexSession(index, full, "Short", 0, "{}");
+    indexSession(index, "abcdef12-0000-4000-8000-000000000001", "Twin A", 0, "{}");
+    indexSession(index, "abcdef12-0000-4000-8000-000000000002", "Twin B", 0, "{}");
+    index.close();
+    expect(await outputFor(["session", "11111111", "--json"])).toBe(await outputFor(["session", full, "--json"]));
+    expect(await outputFor(["meta", "11111111"])).toBe(await outputFor(["meta", full]));
+    expect(await outputFor(["meta", "11111111"])).toStartWith(full);
+    await outputFor(["session", "abcdef12", "--json"], 1);
+    await outputFor(["meta", "abcdef12"], 1);
+  });
+
   test("ls hides auxiliary rows but includes their recursive cost", async () => {
     seed();
     const hidden = await outputFor(["ls"]);

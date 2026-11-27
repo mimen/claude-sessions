@@ -1,4 +1,7 @@
 import type { Database } from "bun:sqlite";
+import { existsSync } from "node:fs";
+import { DB_PATH } from "../paths.ts";
+import { openIndex } from "./schema.ts";
 import type { StoredSessionFile } from "../store.ts";
 import { parseSessionFile } from "../parse.ts";
 import { deriveProject } from "../project.ts";
@@ -422,6 +425,28 @@ export function childrenOf(db: Database, parentSessionId: string): SessionRow[] 
       .query(`SELECT ${SELECT_COLS} FROM sessions WHERE parent_session_id = $pid ORDER BY last_ts DESC NULLS LAST`)
       .all({ $pid: parentSessionId }),
   );
+}
+
+const SESSION_ID_PREFIX_RE = /^[0-9a-f]{8}[0-9a-f-]*$/i;
+
+/** The one indexed session whose id starts with `token` (the `dda10a85…` short id listings print), or null when none or several do. */
+export function sessionIdForPrefix(db: Database, token: string): string | null {
+  if (!SESSION_ID_PREFIX_RE.test(token)) return null;
+  const hits = db
+    .query("SELECT session_id FROM sessions WHERE session_id LIKE $p LIMIT 2")
+    .all({ $p: `${token.toLowerCase()}%` }) as { session_id: string }[];
+  return hits.length === 1 ? hits[0]!.session_id : null;
+}
+
+/** For a read command: expand a unique short id to the full session id; anything else is returned unchanged. */
+export function expandSessionId(token: string): string {
+  if (!SESSION_ID_PREFIX_RE.test(token) || !existsSync(DB_PATH())) return token;
+  const db = openIndex(DB_PATH());
+  try {
+    return sessionIdForPrefix(db, token) ?? token;
+  } finally {
+    db.close();
+  }
 }
 
 /** Load a single indexed Session by its (filename) session id, or null if not indexed. */

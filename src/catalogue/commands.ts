@@ -6,7 +6,7 @@ import { openCatalogue } from "./db-schema.ts";
 import { childrenOf, getRow, getTags, lifecycleOf, identityKeyOf, parentEdges } from "./db-queries.ts";
 import { ensureRow, setCustomTitle, setCompleted, setArchived, setSaved, setParked, setKey, setParent, setResumeId, setSessionClass, setCreatorKind, setLaunchChannel, setLauncherIdentity, setRole, setGusWork, setSessionEpic, setStage, setStatusLine, setMeta, setProject, setCluster, addTag, removeTag } from "./db-mutations.ts";
 import { openIndex } from "../index/schema.ts";
-import { titleOf, usageOf, listByRecency, type SessionUsage } from "../index/index.ts";
+import { expandSessionId, sessionById, titleOf, usageOf, listByRecency, type SessionUsage } from "../index/index.ts";
 import { buildCostRollup, type SessionCostRollup } from "../index/cost-rollup.ts";
 import { formatCost, formatTokens } from "../cost.ts";
 import { pushCmuxRename } from "../cmux/liveness.ts";
@@ -278,6 +278,16 @@ function mirrorToIdentity(
 function resolveSessionId(arg: string | undefined): string | null {
   if (!arg || arg === "." || arg === "self") return process.env.CLAUDE_CODE_SESSION_ID ?? null;
   return arg;
+}
+
+function isIndexed(id: string): boolean {
+  if (!existsSync(DB_PATH())) return false;
+  const db = openIndex(DB_PATH());
+  try {
+    return sessionById(db, id) !== null;
+  } finally {
+    db.close();
+  }
 }
 
 /**
@@ -835,8 +845,9 @@ export function lifecycleDisplayLabel(row: ReturnType<typeof getRow>): "Active" 
 
 /** Print the current session's catalogue row (self-awareness). */
 export function meta(sessionArg: string | undefined): number {
-  const id = resolveSessionId(sessionArg);
-  if (!id) return notInSession();
+  const arg = resolveSessionId(sessionArg);
+  if (!arg) return notInSession();
+  const id = expandSessionId(arg);
   const db = openCatalogue(CATALOGUE_PATH());
   try {
     const cost = usageFor(id, parentEdges(db));
@@ -844,6 +855,10 @@ export function meta(sessionArg: string | undefined): number {
     const tags = getTags(db, id);
     const children = childrenOf(db, id);
     if (!row && tags.length === 0 && children.length === 0 && !cost) {
+      if (!isIndexed(id)) {
+        console.error(`ccs meta: no session '${id}' (not catalogued or indexed; run \`ccs reindex\` if a transcript is expected)`);
+        return 1;
+      }
       console.log(`${id}\n  (no catalogue metadata yet)`);
       return 0;
     }

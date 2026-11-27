@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { sessionsForCluster, sessionsForRole, sessionsForPr, sessionsForGusWork, sessionsForEpic, sessionsForKey, getRow } from "../catalogue/db-queries.ts";
-import { sessionById } from "../index/index.ts";
+import { sessionById, sessionIdForPrefix } from "../index/index.ts";
 import { allGroupings } from "../state/groupings.ts";
 
 /**
@@ -38,8 +38,6 @@ const GUS_RE = /^W-\d+$/i;
 const PR_RE = /^(?:([\w.-]+\/[\w.-]+))?#(\d+)$/;
 /** A UUID (session id / resume id). */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** A leading slice of a session id, at least the eight characters listings show. */
-const ID_PREFIX_RE = /^[0-9a-f]{8}[0-9a-f-]*$/i;
 
 /**
  * Resolve an epic shortname (or exact grouping id) to its grouping id, within a cluster if given
@@ -148,14 +146,8 @@ export function resolveSelector(
   if (groupingId) return { kind: "epic", label: `epic "${token}"`, sessionIds: sessionsForEpic(catalogueDb, groupingId) };
 
   // The short id every listing prints (`dda10a85…`): resolve it only when exactly one session matches.
-  if (ID_PREFIX_RE.test(token)) {
-    const hits = indexDb
-      .query("SELECT session_id FROM sessions WHERE session_id LIKE $p LIMIT 2")
-      .all({ $p: `${token.toLowerCase()}%` }) as { session_id: string }[];
-    if (hits.length === 1) {
-      return { kind: "session-id", label: `session ${token.slice(0, 8)}…`, sessionIds: [hits[0]!.session_id] };
-    }
-  }
+  const fullId = sessionIdForPrefix(indexDb, token);
+  if (fullId) return { kind: "session-id", label: `session ${token.slice(0, 8)}…`, sessionIds: [fullId] };
 
   return null; // nothing matched any axis
 }
